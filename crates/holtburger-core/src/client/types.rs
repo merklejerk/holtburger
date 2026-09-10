@@ -843,7 +843,12 @@ pub enum ClientCommand {
         page_index: u32,
     },
     QueryHealth(Guid),
-    Use(Guid),
+    Use {
+        /// Entity receiving the direct use request.
+        guid: Guid,
+        /// Explicit diagnostic override of authored useability; server and busy checks still apply.
+        unrestricted: bool,
+    },
     Drop(Guid),
     Get(Guid),
     Stack {

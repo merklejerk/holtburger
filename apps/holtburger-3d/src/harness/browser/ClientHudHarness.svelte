@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
+	import { mapBlipFillStyle } from "../../lib/game/map/map-appearance";
 	import { probeClientAudio } from "./client-audio-probe";
 	import ClientMessageDialog from "../../client/ClientMessageDialog.svelte";
 	import {
@@ -110,8 +112,84 @@
 		}[];
 	}
 
+	/** Exercise selection replacement and clearing through the mounted diagnostic panel. */
+	async function probeSelectedDiagnostics(): Promise<void> {
+		const debug = document.querySelector<HTMLButtonElement>(
+			'button[aria-label="Debug"]',
+		);
+		if (debug === null) throw new Error("Debug shortcut is absent.");
+		const wasOpen = debug.getAttribute("aria-pressed") === "true";
+		const previousGuid = selection.selectedGuid();
+		if (!wasOpen) debug.click();
+		const sample = () =>
+			new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+		try {
+			selection.select(7);
+			await sample();
+			const panel = document.querySelector(
+				'section[aria-label="Selected entity details"]',
+			);
+			const snapshot = panel?.querySelector<HTMLTextAreaElement>("textarea");
+			if (
+				!panel?.textContent?.includes("Selection Fixture") ||
+				!panel.textContent.includes("42 (0x0000002a)") ||
+				snapshot === null ||
+				snapshot === undefined ||
+				!snapshot.value.includes('"wcid": 42')
+			) {
+				throw new Error(
+					"Selected entity diagnostics did not display identity and JSON.",
+				);
+			}
+			const toggle = Array.from(document.querySelectorAll("label.toggle-field"))
+				.find((label) => label.textContent?.includes("Unrestricted use"))
+				?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+			const useButton = document.querySelector<HTMLButtonElement>(
+				'button[aria-label="Interact"]',
+			);
+			if (!toggle || !useButton || toggle.checked)
+				throw new Error("Unrestricted use must start disabled.");
+			for (const expected of [true, false]) {
+				toggle.click();
+				await tick();
+				useButton.click();
+				await tick();
+				const command = interactionCommands.at(-1);
+				if (
+					command?.command !== "use_client_entity" ||
+					command.args?.unrestricted !== expected
+				) {
+					throw new Error("Debug use policy did not reach the use request.");
+				}
+			}
+			selection.select(8);
+			await sample();
+			if (
+				!panel.textContent?.includes("0x00000008") ||
+				!panel.textContent.includes("Selected entity data is unavailable.") ||
+				panel.querySelector("textarea") !== null
+			) {
+				throw new Error(
+					"Unavailable selection retained stale diagnostic details.",
+				);
+			}
+			selection.select(null);
+			await sample();
+			if (
+				!panel.textContent?.includes("Select an entity in the world or minimap")
+			) {
+				throw new Error("Cleared selection retained diagnostic details.");
+			}
+		} finally {
+			selection.select(previousGuid);
+			if (!wasOpen) debug.click();
+		}
+	}
+
 	/** Cold character-selection fixture exercises production controls without a live server. */
 	let previewCharacters = $state(false);
+	/** Session-local diagnostic use policy exercised through the production panel. */
+	let unrestrictedUse = $state(false);
 	let entryPending = $state(false);
 	let characterState = $state<
 		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
@@ -165,6 +243,10 @@
 	interface ClientHudHarnessApi {
 		/** Verify style updates without replacing world presentation or HUD placement. */
 		readonly probeThemeApplication: typeof probeThemeApplication;
+		/** Verify sampled selected-entity identity and snapshot disclosure. */
+		readonly probeSelectedDiagnostics: typeof probeSelectedDiagnostics;
+		readonly probeInteractableMarker: typeof probeInteractableMarker;
+		readonly measureDoorBar: typeof measureDoorBar;
 		/** Exercise health presentation and use dispatch through production session owners. */
 		readonly probeSelectedInteractions: typeof probeSelectedInteractions;
 		/** Show production character selection for the theme probe. */
@@ -407,6 +489,7 @@
 		const notices = [
 			"You're too busy!",
 			"Use timed out waiting for the server.",
+			"You can't open or close this Door that way",
 		];
 		try {
 			for (const message of notices) {
@@ -536,6 +619,137 @@
 		zoom(): void {},
 	};
 	/** Imperative fixture position, matching the production map frame's presentation-rate source. */
+	let minimapCategory: DynamicEntityMapBlipCategory = "mob";
+	let doorAngle = 0;
+	let doorHalfWidth = 2;
+	let minimapHidden = false;
+	let minimapNoDraw = false;
+	/** Read the actual drawn door segment for browser pointer and zoom probes. */
+	async function measureDoorBar(angle: number): Promise<{
+		start: { x: number; y: number };
+		end: { x: number; y: number };
+	}> {
+		doorAngle = angle;
+		doorHalfWidth = 20;
+		minimapCategory = "door";
+		minimapHidden = false;
+		minimapNoDraw = false;
+		minimapSubjectIndoor = false;
+		const canvas = document.querySelector<HTMLCanvasElement>(
+			".minimap-overlay-canvas",
+		);
+		const context = canvas?.getContext("2d");
+		if (!canvas || !context) throw new Error("Minimap unavailable");
+		const move = context.moveTo,
+			line = context.lineTo,
+			stroke = context.stroke;
+		let start = { x: 0, y: 0 },
+			end = { x: 0, y: 0 };
+		let segment: {
+			start: { x: number; y: number };
+			end: { x: number; y: number };
+		} | null = null;
+		context.strokeStyle = mapBlipFillStyle(
+			"door",
+			-minimapSubjectWorldY,
+			"outdoor",
+		);
+		const color = context.strokeStyle;
+		context.moveTo = (x, y) => {
+			start = { x, y };
+			move.call(context, x, y);
+		};
+		context.lineTo = (x, y) => {
+			end = { x, y };
+			line.call(context, x, y);
+		};
+		context.stroke = () => {
+			if (context.strokeStyle === color) segment = { start, end };
+			stroke.bind(context)();
+		};
+		try {
+			await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+			if (segment === null) throw new Error("Door stroke absent");
+			const bounds = canvas.getBoundingClientRect();
+			const screen = (point: { x: number; y: number }) => ({
+				x: bounds.left + (point.x * bounds.width) / canvas.width,
+				y: bounds.top + (point.y * bounds.height) / canvas.height,
+			});
+			// Callback writes occur while the explicit sampling promise is pending.
+			const measured: {
+				start: { x: number; y: number };
+				end: { x: number; y: number };
+			} = segment;
+			return { start: screen(measured.start), end: screen(measured.end) };
+		} finally {
+			context.moveTo = move;
+			context.lineTo = line;
+			context.stroke = stroke;
+		}
+	}
+
+	/** Change only producer facts, without moving the marker or rebuilding the map. */
+	async function probeInteractableMarker(
+		category: DynamicEntityMapBlipCategory,
+		indoor: boolean,
+		hidden: boolean,
+		noDraw: boolean,
+	): Promise<void> {
+		minimapCategory = category;
+		minimapSubjectIndoor = indoor;
+		minimapHidden = hidden;
+		minimapNoDraw = noDraw;
+		const canvas = document.querySelector<HTMLCanvasElement>(
+			".minimap-overlay-canvas",
+		);
+		const context = canvas?.getContext("2d");
+		if (!context) throw new Error("Minimap canvas missing");
+		const originalRect = context.rect;
+		const originalLine = context.lineTo;
+		const originalFill = context.fill;
+		const originalStroke = context.stroke;
+		let rectangles = 0;
+		let lines = 0;
+		const fills: string[] = [];
+		context.rect = (...args: Parameters<typeof originalRect>) => {
+			rectangles++;
+			originalRect.apply(context, args);
+		};
+		context.lineTo = (...args: Parameters<typeof originalLine>) => {
+			lines++;
+			originalLine.apply(context, args);
+		};
+		context.stroke = () => {
+			fills.push(String(context.strokeStyle));
+			originalStroke.bind(context)();
+		};
+		context.fill = () => {
+			fills.push(String(context.fillStyle));
+			originalFill.bind(context)();
+		};
+		try {
+			await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+			const expected = mapBlipFillStyle(
+				category,
+				-minimapSubjectWorldY,
+				indoor ? "indoor" : "outdoor",
+			);
+			// Canvas normalizes CSS values, so compare its canonical representation.
+			context.fillStyle = expected;
+			const hasFill = fills.includes(String(context.fillStyle));
+			if (hasFill !== !(hidden || noDraw))
+				throw new Error(`${category}: incorrect marker visibility/color`);
+			if (!hidden && !noDraw && category !== "mob") {
+				if (lines === 0 || rectangles !== 0)
+					throw new Error(`${category}: incorrect marker shape`);
+			}
+		} finally {
+			context.rect = originalRect;
+			context.lineTo = originalLine;
+			context.fill = originalFill;
+			context.stroke = originalStroke;
+		}
+	}
 	let minimapSubjectWorldX = 100;
 	const minimapSubjectWorldY = 20;
 	const minimapSubjectWorldZ = -200;
@@ -627,7 +841,12 @@
 		// Landblock (0, 1) begins at world (0, -192), placing this at (100, -200).
 		transform.m41 = 100;
 		transform.m43 = -8;
+		transform.m11 = Math.cos(doorAngle);
+		transform.m13 = Math.sin(doorAngle);
+		transform.m31 = -Math.sin(doorAngle);
+		transform.m33 = Math.cos(doorAngle);
 		return {
+			sidewaysSpan: { minX: -doorHalfWidth, maxX: doorHalfWidth, z: 0 },
 			placement: {
 				envCellId: null,
 				landblockId: "0x0001ffff",
@@ -638,18 +857,27 @@
 				display: { name: "Selection Fixture", level: null },
 				presentation: {
 					entityClass: "mob",
+					content: { setupDid: 0x0200025a, motionTableDid: null },
 					radar: {
-						behavior: "ShowAlways",
-						category: "mob",
+						behavior: minimapCategory === "mob" ? "ShowAlways" : null,
+						category: minimapCategory,
 					},
 				},
-				physics: { hidden: false },
+				physics: { hidden: minimapHidden, noDraw: minimapNoDraw },
 			} as unknown as DynamicEntityView,
 		};
 	}
 
 	function readDiagnostics(): ClientPresentationDiagnostics | null {
+		const selectedGuid = selection.selectedGuid();
 		return {
+			selectedEntity:
+				selectedGuid === null
+					? null
+					: {
+							guid: selectedGuid,
+							view: selectedGuid === 7 ? minimapEntity().view : null,
+						},
 			renderer: null,
 			residentResources: null,
 			tickProfile: null,
@@ -1089,6 +1317,9 @@
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
 			probeThemeApplication,
+			probeSelectedDiagnostics,
+			probeInteractableMarker,
+			measureDoorBar,
 			probeSelectedInteractions,
 			previewCharacterSelection: () => {
 				previewCharacters = true;
@@ -1132,6 +1363,7 @@
 {/if}
 
 <ClientWorldView
+	entityMetadata={{ status: "available", path: "fixture.hwc", recordCount: 1 }}
 	entityCollisionDisabled={false}
 	onEntityCollisionDisabledChange={() => {}}
 	cameraController={cameraEnabled ? cameraController : null}
@@ -1156,6 +1388,8 @@
 	}}
 	onSelectEntity={selectEntity}
 	debugEnabled={true}
+	{unrestrictedUse}
+	onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
 	{readMinimapFrame}
 	{readDiagnostics}
 	{readFrameRates}
@@ -1164,7 +1398,7 @@
 		name: selectedGuid === null ? null : "Drudge",
 		healthFraction: interactions.healthFraction(),
 	})}
-	onInteractEntity={() => interactions.interact()}
+	onInteractEntity={() => interactions.interact(unrestrictedUse)}
 	selectedEntityGuid={selectedGuid}
 	hoveredEntityGuid={hoveredGuid}
 	showRetailHiddenGeometry={false}

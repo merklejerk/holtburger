@@ -95,6 +95,8 @@
 	let theme = $state("standard");
 	let opaque = $state(false);
 	let showHidden = $state(false);
+	/** App-local diagnostic control preview. */
+	let unrestrictedUse = $state(false);
 	let toggle = $state(true);
 	let jumpExtent = $state(0.65);
 	let toastMessage = $state("Your allegiance is online.");
@@ -411,9 +413,17 @@
 							/>
 						{:else if tab === "diagnostics"}
 							<ClientDebugPanel
+								entityMetadata={{
+									status: "available",
+									path: "fixture.hwc",
+									recordCount: 1,
+								}}
 								readDiagnostics={() => null}
 								entityCollisionDisabled={false}
 								onEntityCollisionDisabledChange={() => {}}
+								{unrestrictedUse}
+								onUnrestrictedUseChange={(enabled) =>
+									(unrestrictedUse = enabled)}
 								showRetailHiddenGeometry={showHidden}
 								onShowRetailHiddenGeometryChange={(value) =>
 									(showHidden = value)}

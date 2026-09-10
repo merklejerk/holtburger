@@ -135,6 +135,7 @@ pub(crate) fn encode_template(template: &WeenieTemplate) -> Result<Vec<u8>, Code
     encoder.optional_f64(template.rotation_speed, "rotation_speed")?;
     encoder.optional_i32(template.radar_blip_color);
     encoder.optional_i32(template.radar_behavior);
+    encoder.optional_i32(template.item_useable);
     encoder.optional_f64(template.obvious_radar_range, "obvious_radar_range")?;
     encoder.optional_bool(template.attackable);
     encoder.optional_u32(template.physics.base_mask);
@@ -185,6 +186,7 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
     let rotation_speed = decoder.optional_f64("rotation_speed")?;
     let radar_blip_color = decoder.optional_i32("radar_blip_color")?;
     let radar_behavior = decoder.optional_i32("radar_behavior")?;
+    let item_useable = decoder.optional_i32("item_useable")?;
     let obvious_radar_range = decoder.optional_f64("obvious_radar_range")?;
     let attackable = decoder.optional_bool("attackable")?;
     let base_mask = decoder.optional_u32("physics.base_mask")?;
@@ -248,6 +250,7 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
         rotation_speed,
         radar_blip_color,
         radar_behavior,
+        item_useable,
         obvious_radar_range,
         attackable,
         physics: TemplatePhysics {

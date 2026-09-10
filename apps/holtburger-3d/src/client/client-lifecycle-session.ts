@@ -349,8 +349,8 @@ export class ClientLifecycleSession {
 	}
 
 	/** Use one selected entity through core's existing interaction command. */
-	async useEntity(guid: number): Promise<void> {
-		await this.#transport.invoke("use_client_entity", { guid });
+	async useEntity(guid: number, unrestricted: boolean): Promise<void> {
+		await this.#transport.invoke("use_client_entity", { guid, unrestricted });
 	}
 
 	/** Send one ordinary local-speech message. */

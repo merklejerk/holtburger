@@ -641,9 +641,12 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
         holtburger_3d_host::explorer_possession_control::ExplorerPossessionControlProfile::standard()
             .expect("failed to construct standard Explorer possession control profile"),
     ));
-    let catalog = Arc::new(ExplorerWeenieCatalog::discover_from_environment(
-        repository.source_description().map(Path::new),
-    ));
+    let catalog = Arc::new(ExplorerWeenieCatalog::new(Arc::new(
+        holtburger_content::WeenieCatalogContent::discover(
+            repository.source_description().map(Path::new),
+            std::env::var_os("HOLTBURGER_WEENIE_CATALOG").map(std::path::PathBuf::from),
+        ),
+    )));
     let entities = Arc::new(ExplorerEntityDriver::new(
         catalog,
         Arc::new(DatExplorerEntityContentPreparer::new(repository)),

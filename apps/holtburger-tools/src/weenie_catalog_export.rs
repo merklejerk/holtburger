@@ -39,6 +39,7 @@ const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
 const PROPERTY_FLOAT_OBVIOUS_RADAR_RANGE: u16 = 104;
 
 const PROPERTY_INT_ITEM_TYPE: u16 = 1;
+const PROPERTY_INT_ITEM_USEABLE: u16 = 16;
 const PROPERTY_INT_LEVEL: u16 = 25;
 const PROPERTY_INT_DEFAULT_COMBAT_STYLE: u16 = 46;
 const PROPERTY_INT_PHYSICS_STATE: u16 = 93;
@@ -204,7 +205,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 25, 46, 93, 95, 113, 133, 188) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 16, 25, 46, 93, 95, 113, 133, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
@@ -276,6 +277,7 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             rotation_speed: None,
             radar_blip_color: None,
             radar_behavior: None,
+            item_useable: None,
             obvious_radar_range: None,
             attackable: None,
             physics: TemplatePhysics::default(),
@@ -471,6 +473,13 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
                 row.wcid,
                 "weenie_properties_int",
                 "radar_blip_color",
+            )?,
+            PROPERTY_INT_ITEM_USEABLE => set_once(
+                &mut template.item_useable,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "item_useable",
             )?,
             PROPERTY_INT_SHOWABLE_ON_RADAR => set_once(
                 &mut template.radar_behavior,
@@ -823,6 +832,20 @@ mod tests {
             }],
             ..AceWorldRows::default()
         }
+    }
+
+    #[test]
+    fn item_useable_projection_preserves_absence_and_explicit_no() {
+        let mut rows = base_rows();
+        let missing = project_rows(base_rows()).expect("absent property");
+        assert_eq!(missing[0].item_useable, None);
+        rows.ints.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_INT_ITEM_USEABLE,
+            value: 1,
+        });
+        let present = project_rows(rows).expect("explicit NO");
+        assert_eq!(present[0].item_useable, Some(1));
     }
 
     #[test]

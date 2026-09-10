@@ -48,6 +48,7 @@
 	import {
 		MAP_BLIP_FILL_COLORS,
 		MAP_BLIP_RADIUS_PIXELS,
+		MAP_DOOR_THICKNESS_PIXELS,
 		mapBlipFillStyle,
 	} from "../lib/game/map/map-appearance";
 	import {
@@ -82,22 +83,20 @@
 		type MinimapBreadcrumbTrail,
 	} from "./minimap-breadcrumb-trail";
 	import { drawMinimapBreadcrumbTrail } from "./minimap-breadcrumb-renderer";
-	import { closestMinimapSelectionGuid } from "./minimap-selection";
+	import {
+		closestMinimapSelectionGuid,
+		minimapTargetDistance,
+		type MinimapSelectionHitTarget,
+	} from "./minimap-selection";
 	import {
 		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 		MINIMAP_BREADCRUMB_POLICY,
 	} from "./minimap-tuning";
 
 	/** One rendered marker's canvas-space interaction geometry. */
-	interface BlipHitTarget {
-		/** Source entity selected when this marker wins deterministic hit testing. */
-		readonly guid: number;
+	interface BlipHitTarget extends MinimapSelectionHitTarget {
 		/** Display label shown while this marker is hovered. */
 		readonly name: string;
-		/** Horizontal coordinate in canvas backing-store pixels. */
-		readonly x: number;
-		/** Vertical coordinate in canvas backing-store pixels. */
-		readonly y: number;
 	}
 
 	/** Last pointer position in viewport space, retained while presentation targets move. */
@@ -343,6 +342,42 @@
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
+			if (blip.span !== null && blip.appearance.category !== "controlled") {
+				const startX = ((blip.span.startX + 1) * size) / 2;
+				const startY = ((1 - blip.span.startY) * size) / 2;
+				const endX = ((blip.span.endX + 1) * size) / 2;
+				const endY = ((1 - blip.span.endY) * size) / 2;
+				hitTargets.push({
+					guid: blip.guid,
+					name: blip.name,
+					x: startX,
+					y: startY,
+					end: { x: endX, y: endY },
+				});
+				context.save();
+				context.lineCap = "round";
+				context.beginPath();
+				context.moveTo(startX, startY);
+				context.lineTo(endX, endY);
+				if (frame.selectedGuid === blip.guid) {
+					context.lineWidth =
+						MAP_DOOR_THICKNESS_PIXELS + SELECTED_BLIP_RING_GAP * 2 + 2;
+					context.strokeStyle = "rgba(255, 244, 128, 0.95)";
+					context.stroke();
+				}
+				context.lineWidth = MAP_DOOR_THICKNESS_PIXELS + 2;
+				context.strokeStyle = "rgba(0, 0, 0, 0.65)";
+				context.stroke();
+				context.lineWidth = MAP_DOOR_THICKNESS_PIXELS;
+				context.strokeStyle = mapBlipFillStyle(
+					blip.appearance.category,
+					blip.appearance.heightOffsetMeters,
+					environment,
+				);
+				context.stroke();
+				context.restore();
+				continue;
+			}
 			hitTargets.push({ guid: blip.guid, name: blip.name, x, y });
 			if (blip.appearance.category === "controlled") {
 				drawControlledArrow(context, x, y, blip.appearance.headingRadians);
@@ -350,7 +385,16 @@
 				continue;
 			}
 			context.beginPath();
-			context.arc(x, y, MAP_BLIP_RADIUS_PIXELS, 0, Math.PI * 2);
+			const radius = MAP_BLIP_RADIUS_PIXELS;
+			if (blip.appearance.category === "switch") {
+				context.moveTo(x, y - radius);
+				context.lineTo(x + radius, y);
+				context.lineTo(x, y + radius);
+				context.lineTo(x - radius, y);
+				context.closePath();
+			} else {
+				context.arc(x, y, radius, 0, Math.PI * 2);
+			}
 			context.fillStyle = mapBlipFillStyle(
 				blip.appearance.category,
 				blip.appearance.heightOffsetMeters,
@@ -453,7 +497,7 @@
 				blipHitTargets
 					.filter(
 						(target) =>
-							Math.hypot(target.x - canvasX, target.y - canvasY) <=
+							minimapTargetDistance(target, canvasX, canvasY) <=
 							BLIP_HIT_RADIUS,
 					)
 					.map((target) => target.name),

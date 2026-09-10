@@ -322,6 +322,12 @@ export const SHARED_FRONTEND_TUNING = {
 				portal: hexRgba("#9b6dd6ff"),
 				/** Lifestones and allegiance bindstones. */
 				lifestone: hexRgba("#4fc4ccff"),
+				/** Door accepting direct use; this is not a claim that it is unlocked. */
+				door: hexRgba("#72cce8ff"),
+				/** Door that must not receive ordinary direct-use requests. */
+				"door-no-direct-use": hexRgba("#ed9949ff"),
+				/** Native switches, including buttons and levers. */
+				switch: hexRgba("#e5cc78ff"),
 				/** Uncategorized dynamic presentations. */
 				other: hexRgba("#d8d8e0ff"),
 				/** The locally driven entity's directional marker. */
@@ -336,6 +342,8 @@ export const SHARED_FRONTEND_TUNING = {
 			maximumElevationBrightnessAdjustment: 0.5,
 			/** Marker radius in canvas pixels, sized to stay legible without hiding the ground. */
 			radiusPixels: 3.5,
+			/** Door width is world-sized; thickness stays legible at distant zooms. */
+			doorThicknessPixels: 3,
 		},
 		zoom: {
 			/**

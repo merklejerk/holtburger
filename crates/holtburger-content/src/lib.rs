@@ -73,3 +73,8 @@ pub use terrain_collision::{
 };
 pub use terrain_topology::{TERRAIN_GRID_CELLS, TerrainCellDiagonals};
 pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};
+
+pub mod weenie_catalog;
+pub use weenie_catalog::{
+    WeenieCatalogCapability, WeenieCatalogContent, WeenieCatalogUnavailableKind, WeenieTypeIndex,
+};

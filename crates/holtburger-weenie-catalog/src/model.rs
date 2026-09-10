@@ -52,6 +52,8 @@ pub struct WeenieTemplate {
     pub radar_blip_color: Option<i32>,
     /// Optional raw `PropertyInt::ShowableOnRadar` (133) `RadarBehavior` value.
     pub radar_behavior: Option<i32>,
+    /// Optional authored PropertyInt::ItemUseable (16), preserving the wire bit pattern.
+    pub item_useable: Option<i32>,
     /// Optional `PropertyFloat::ObviousRadarRange` (104) in metres.
     pub obvious_radar_range: Option<f64>,
     /// Optional authored `PropertyBool::Attackable` (19); ACE defaults absence to `true`.

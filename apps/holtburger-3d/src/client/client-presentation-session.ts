@@ -163,6 +163,13 @@ export interface ClientDiagnosticResidency {
 
 /** Cold, curated client diagnostics sampled only while the debug panel is open. */
 export interface ClientPresentationDiagnostics {
+	/** Current selection and its latest received view, sampled only for diagnostic display. */
+	readonly selectedEntity: {
+		/** Retained selection identity even while its received view is unavailable. */
+		readonly guid: number;
+		/** Authority-backed entity facts; null after removal or before delivery. */
+		readonly view: DynamicEntityView | null;
+	} | null;
 	readonly playerGuid: number | null;
 	readonly playerResidency: ClientDiagnosticResidency | null;
 	readonly cameraResidency: ClientDiagnosticResidency | null;
@@ -541,6 +548,19 @@ export class ClientPresentationSession {
 		const frame = owner?.runtime.getRendererFrameDiagnostics?.() ?? null;
 		const selection = frame?.selectionMetrics;
 		return {
+			selectedEntity:
+				this.#selectedEntityGuid === null
+					? null
+					: {
+							guid: this.#selectedEntityGuid,
+							view:
+								this.#session.mirror
+									.entities()
+									.find(
+										(entity) =>
+											entity.identity.guid === this.#selectedEntityGuid,
+									) ?? null,
+						},
 			playerGuid: this.#playerGuid,
 			playerResidency:
 				playerPlacement === null

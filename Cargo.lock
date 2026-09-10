@@ -1641,7 +1641,9 @@ dependencies = [
  "directories",
  "holtburger-common",
  "holtburger-dat",
+ "holtburger-weenie-catalog",
  "log",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
 ]

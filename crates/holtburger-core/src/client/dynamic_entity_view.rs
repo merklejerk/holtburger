@@ -113,7 +113,15 @@ pub fn project_client_dynamic_entity(
         physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
             format_args!("client entity 0x{:08X}", guid.0),
-            crate::semantic_dynamic_entity_map_blip_category(entity.flags, entity.item_type()),
+            crate::semantic_dynamic_entity_map_blip_category(
+                entity.flags,
+                entity.item_type(),
+                world
+                    .weenie_types
+                    .as_ref()
+                    .and_then(|types| types.get(wcid)),
+                entity.usable_flags(),
+            ),
             entity.radar_enum().map(|value| value as i32),
             entity.get_float_prop(PropertyFloat::ObviousRadarRange),
         ),
@@ -355,6 +363,58 @@ mod tests {
     }
 
     #[test]
+    fn stationary_door_useability_update_republishes_category_in_same_generation() {
+        let guid = Guid(0x7000_0019);
+        let mut entity = projectable_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
+        entity.flags = ObjectDescriptionFlag::DOOR;
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.add_entity(entity);
+        let before = project_client_dynamic_entity(&client.world, guid).unwrap();
+        assert_eq!(
+            before.presentation.radar.category,
+            crate::DynamicEntityMapBlipCategory::Door
+        );
+        let mut events = client.subscribe_client_view_events();
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .properties
+            .ints
+            .insert(
+                PropertyInt::ItemUseable,
+                holtburger_common::properties::Usable::NO.bits() as i32,
+            );
+        client.handle_world_event(&holtburger_world::WorldEvent::PropertiesUpdated {
+            guid,
+            updates: vec![PropertyUpdate::Int(
+                PropertyInt::ItemUseable,
+                holtburger_common::properties::Usable::NO.bits() as i32,
+            )],
+        });
+        let after = std::iter::from_fn(|| events.try_recv().ok())
+            .find_map(|event| match event {
+                ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity }) => {
+                    Some(entity)
+                }
+                _ => None,
+            })
+            .expect("stationary door update");
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(
+            after.presentation.radar.category,
+            crate::DynamicEntityMapBlipCategory::DoorNoDirectUse
+        );
+    }
+
+    #[test]
     fn client_projection_uses_the_world_resolved_setup_motion_table() {
         let guid = Guid(0x7000_0010);
         let setup_did = 0x0200_0010;
@@ -444,7 +504,9 @@ mod tests {
         assert_eq!(
             crate::semantic_dynamic_entity_map_blip_category(
                 ObjectDescriptionFlag::LIFE_STONE,
-                None
+                None,
+                None,
+                holtburger_common::properties::Usable::UNDEF
             ),
             crate::DynamicEntityMapBlipCategory::Lifestone
         );
@@ -452,6 +514,8 @@ mod tests {
             crate::semantic_dynamic_entity_map_blip_category(
                 ObjectDescriptionFlag::empty(),
                 Some(ItemType::LIFE_STONE),
+                None,
+                holtburger_common::properties::Usable::UNDEF
             ),
             crate::DynamicEntityMapBlipCategory::Lifestone
         );
@@ -604,6 +668,7 @@ mod tests {
                         WeenieType::Creature,
                         Some(ItemType::CREATURE),
                         Some(false),
+                        holtburger_common::properties::Usable::UNDEF,
                     ),
                     None,
                     None,

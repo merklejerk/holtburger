@@ -44,6 +44,8 @@ export const INPUT_DEFAULTS = {
 	},
 	/** Contextual client and chat commands. */
 	client: {
+		/** Use the currently selected entity. */
+		interact: [{ key: "r" }],
 		/** Enter the aimed jump interaction. */
 		preciseJump: [{ key: "j", shift: true }],
 		/** Cancel precise jump or return from chat to the viewport. */

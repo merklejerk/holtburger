@@ -1,14 +1,16 @@
 import {
+	decodeWeenieCatalogCapability,
+	type WeenieCatalogCapability,
+} from "../lib/host/weenie-catalog-capability";
+import {
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { DynamicEntitySession } from "../lib/game/runtime/dynamic-entity-session";
 import {
-	decodeExplorerCatalogCapability,
 	decodeExplorerEntityMutationReceipt,
 	decodeExplorerWeenieSearchRequest,
 	decodeExplorerWeenieSearchResults,
-	type ExplorerCatalogCapability,
 	type ExplorerEntityMutationReceipt,
 	type ExplorerEntityRelocationRequest,
 	type ExplorerEntitySpawnRequest,
@@ -164,8 +166,8 @@ export class ExplorerDynamicEntitySession {
 	}
 
 	/** Read the immutable optional catalog capability selected by the host at composition. */
-	async catalogCapability(): Promise<ExplorerCatalogCapability> {
-		return decodeExplorerCatalogCapability(
+	async catalogCapability(): Promise<WeenieCatalogCapability> {
+		return decodeWeenieCatalogCapability(
 			await this.#transport.invoke("explorer_catalog_capability"),
 		);
 	}

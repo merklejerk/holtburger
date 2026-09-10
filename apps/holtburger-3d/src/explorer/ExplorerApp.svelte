@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
+
 	import { provideViewportInputGate } from "../lib/input/viewport-input-context";
 	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
 	import { APP_INPUT } from "../lib/input/app-input";
@@ -102,7 +104,6 @@
 	} from "./explorer-dynamic-entity-session";
 	import {
 		createExplorerSpawnRequest,
-		type ExplorerCatalogCapability,
 		type ExplorerWeenieSearchRequest,
 		type ExplorerWeenieSearchResult,
 	} from "./explorer-entity-commands";
@@ -186,7 +187,7 @@
 		readonly completion: Promise<void>;
 		ready: boolean;
 	} | null = null;
-	let entityCatalog = $state<ExplorerCatalogCapability | null>(null);
+	let entityCatalog = $state<WeenieCatalogCapability | null>(null);
 	/** Cold replace-only panel snapshot; raw keeps host DTOs cloneable across later IPC boundaries. */
 	let spawnedEntities = $state.raw<readonly DynamicEntityView[]>([]);
 	let spawnedEntityPresentationError = $state<string | null>(null);
@@ -310,7 +311,7 @@
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
-			selectedGuid: null,
+			selectedGuid: selectedExplorerEntity?.guid ?? null,
 			source: runtime,
 			subject:
 				controlledGuid !== null && controlledAnchor !== null
@@ -1027,6 +1028,12 @@
 		if (session === undefined) return [];
 		const entities = session.mirror.entities();
 		spawnedEntities = entities;
+		if (
+			selectedExplorerEntity !== null &&
+			findSelectedExplorerEntity(entities, selectedExplorerEntity) === null
+		) {
+			selectExplorerEntity(null);
+		}
 		const held = explorerPossession;
 		if (
 			held !== null &&
@@ -1295,6 +1302,28 @@
 	/** Pull-only diagnostic read; callers choose an explicit low-frequency sampling policy. */
 	function readBoomCameraStatus(): HostKinematicBoomStatus | null {
 		return boomCameraSession?.status() ?? null;
+	}
+
+	/** Selection is frontend-owned and survives switching inspector tabs. */
+	let selectedExplorerEntity = $state<ExplorerEntitySelection | null>(null);
+
+	function selectExplorerEntity(
+		selection: ExplorerEntitySelection | null,
+	): void {
+		selectedExplorerEntity = selection;
+		gameRuntime?.setSelectedEntityGuid(selection?.guid ?? null);
+	}
+
+	function selectMinimapEntity(guid: number | null): void {
+		const entity =
+			guid === null
+				? null
+				: spawnedEntities.find((entity) => entity.identity.guid === guid);
+		selectExplorerEntity(
+			entity
+				? { guid: entity.identity.guid, generation: entity.generation }
+				: null,
+		);
 	}
 
 	/** Pull one exact current generation for disclosure-scoped volatile diagnostics. */
@@ -1786,6 +1815,7 @@
 			dynamicEntityPresentationCompletion = Promise.resolve();
 			entityCatalog = null;
 			spawnedEntities = [];
+			selectExplorerEntity(null);
 			spawnedEntityPresentationError = null;
 			simulationInterestController = undefined;
 			physicalSimulationAnchor = null;
@@ -2061,10 +2091,12 @@
 				onStateChange={(next) => {
 					minimap = next;
 				}}
-				onSelectEntity={() => undefined}
+				onSelectEntity={selectMinimapEntity}
 			/>
 		{/if}
 		<ExplorerTools
+			entitySelection={selectedExplorerEntity}
+			selectEntity={selectExplorerEntity}
 			{runtimeReady}
 			{requestSceneInterest}
 			{cameraFocusStatus}

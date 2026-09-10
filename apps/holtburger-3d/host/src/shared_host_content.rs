@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use holtburger_content::{ContentDecodeCache, ContentRepository};
+use holtburger_content::{ContentDecodeCache, ContentRepository, WeenieCatalogContent};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use holtburger_world::WorldBootstrap;
@@ -28,6 +28,8 @@ pub struct SharedHostContent {
     pub service: Arc<ContentAssetService>,
     /// Motion-table projection shared by Explorer and client authorities.
     pub motion_catalog: Arc<holtburger_content::MotionSequenceCatalog>,
+    /// Optional static entity catalog shared by both host modes.
+    pub weenie_catalog: Arc<WeenieCatalogContent>,
     /// Lazily parsed client bootstrap, cached at the content owner rather than in either mode.
     client_bootstrap: Arc<Mutex<Option<Arc<WorldBootstrap>>>>,
 }
@@ -36,11 +38,25 @@ impl SharedHostContent {
     /// Discovers the configured DAT repository and builds the shared services.
     pub fn discover() -> Result<Self> {
         let repository = Arc::new(ContentRepository::discover(None)?);
-        Self::from_repository(repository)
+        Self::from_repository_with_catalog(
+            repository,
+            std::env::var_os("HOLTBURGER_WEENIE_CATALOG").map(std::path::PathBuf::from),
+        )
     }
 
     /// Builds a shared content owner from an injected repository for tests and diagnostics.
     pub fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
+        Self::from_repository_with_catalog(repository, None)
+    }
+
+    fn from_repository_with_catalog(
+        repository: Arc<ContentRepository>,
+        override_path: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
+        let weenie_catalog = Arc::new(WeenieCatalogContent::discover(
+            repository.source_description().map(std::path::Path::new),
+            override_path,
+        ));
         let service =
             ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
         let motion_catalog = repository
@@ -49,6 +65,7 @@ impl SharedHostContent {
         Ok(Self {
             runtime: ContentAssetRuntime::new(service.clone()),
             repository,
+            weenie_catalog,
             service: Arc::new(service),
             motion_catalog: Arc::new(motion_catalog),
             client_bootstrap: Arc::new(Mutex::new(None)),
@@ -82,13 +99,15 @@ impl SharedHostContent {
             .repository
             .read_soul_emote_catalog()
             .context("failed to load soul emote catalog for client bootstrap")?;
-        let bootstrap = Arc::new(WorldBootstrap::new(
+        let mut bootstrap = WorldBootstrap::new(
             skill_table,
             spell_table,
             xp_table,
             motion_catalog,
             soul_emote_catalog,
-        ));
+        );
+        bootstrap.weenie_types = self.weenie_catalog.types();
+        let bootstrap = Arc::new(bootstrap);
         *cached = Some(Arc::clone(&bootstrap));
         Ok(bootstrap)
     }

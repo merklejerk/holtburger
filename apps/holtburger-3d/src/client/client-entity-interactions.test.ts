@@ -84,18 +84,37 @@ describe("ClientEntityInteractions", () => {
 
 	it("uses the target at the button edge and reports command failures", async () => {
 		const f = await fixture();
-		f.interactions.interact();
+		f.interactions.interact(false);
 		expect(f.invoke).not.toHaveBeenCalled();
 		f.selection.select(7);
-		f.interactions.interact();
-		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", { guid: 7 });
+		f.interactions.interact(false);
+		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", {
+			guid: 7,
+			unrestricted: false,
+		});
 		const failure = new Error("transport closed");
 		f.invoke.mockRejectedValueOnce(failure);
 		f.selection.select(8);
 		await vi.waitFor(() => expect(f.onFailure).toHaveBeenCalledWith(failure));
 		f.invoke.mockRejectedValueOnce(failure);
-		f.interactions.interact();
+		f.interactions.interact(false);
 		await vi.waitFor(() => expect(f.onFailure).toHaveBeenCalledTimes(2));
+		f.destroy();
+	});
+
+	it("captures the explicit unrestricted policy independently for each use", async () => {
+		const f = await fixture();
+		f.selection.select(7);
+		f.interactions.interact(true);
+		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", {
+			guid: 7,
+			unrestricted: true,
+		});
+		f.interactions.interact(false);
+		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", {
+			guid: 7,
+			unrestricted: false,
+		});
 		f.destroy();
 	});
 
@@ -113,7 +132,7 @@ describe("ClientEntityInteractions", () => {
 		});
 		f.invoke.mockClear();
 		f.emit("client-lifecycle-changed", { kind: "in-world" });
-		f.interactions.interact();
+		f.interactions.interact(false);
 		expect(f.invoke).not.toHaveBeenCalled();
 		f.destroy();
 	});
@@ -127,7 +146,7 @@ describe("ClientEntityInteractions", () => {
 			cause: "server-disconnect",
 		});
 		expect(f.selection.selectedGuid()).toBeNull();
-		f.interactions.interact();
+		f.interactions.interact(false);
 		f.destroy();
 		expect(f.invoke).not.toHaveBeenCalled();
 	});
@@ -140,7 +159,7 @@ describe("ClientEntityInteractions", () => {
 		f.interactions.destroy();
 		f.selection.select(8);
 		f.emit("client-entity-health-updated", { guid: 8, healthFraction: 0.9 });
-		f.interactions.interact();
+		f.interactions.interact(false);
 		expect(f.interactions.healthFraction()).toBeNull();
 		expect(f.invoke.mock.calls).toEqual([
 			["query_client_entity_health", { guid: 0 }],

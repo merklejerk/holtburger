@@ -14,7 +14,7 @@ fn read_action_uses_generic_use_command_for_books() {
         result
             .commands
             .iter()
-            .any(|command| matches!(command, ClientCommand::Use(guid) if *guid == book_guid))
+            .any(|command| matches!(command, ClientCommand::Use { guid, unrestricted: false } if *guid == book_guid))
     );
     assert_eq!(state.view.context_view, ContextView::Book(book_guid));
 }

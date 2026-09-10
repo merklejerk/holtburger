@@ -43,6 +43,7 @@ export type FlyAction =
 
 /** Client commands whose bindings are resolved by their active UI owner. */
 type ClientShortcut =
+	| "interact"
 	| "preciseJump"
 	| "cancel"
 	| "enterWorld"

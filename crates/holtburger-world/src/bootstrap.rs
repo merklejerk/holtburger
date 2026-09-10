@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct WorldBootstrap {
+    /// Optional parsed static template classifications; never a source of live useability.
+    pub weenie_types: Option<Arc<holtburger_content::WeenieTypeIndex>>,
     pub skill_table: Arc<SkillTable>,
     pub spell_table: Arc<SpellTable>,
     pub xp_table: Arc<XpTable>,
@@ -21,6 +23,7 @@ impl WorldBootstrap {
         soul_emote_catalog: SoulEmoteCatalog,
     ) -> Self {
         Self {
+            weenie_types: None,
             skill_table: Arc::new(skill_table),
             spell_table: Arc::new(spell_table),
             xp_table: Arc::new(xp_table),

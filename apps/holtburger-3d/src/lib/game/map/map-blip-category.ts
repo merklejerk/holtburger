@@ -5,6 +5,9 @@ export const DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES = [
 	"mob",
 	"portal",
 	"lifestone",
+	"door",
+	"door-no-direct-use",
+	"switch",
 	"other",
 ] as const;
 
@@ -14,3 +17,14 @@ export type DynamicEntityMapBlipCategory =
 
 /** Complete frontend marker vocabulary, including the locally controlled directional marker. */
 export type MapBlipCategory = DynamicEntityMapBlipCategory | "controlled";
+
+/** Interactable symbols override retail radar visibility but still respect hidden physics. */
+export function isInteractableMapCategory(
+	category: DynamicEntityMapBlipCategory,
+): boolean {
+	return (
+		category === "door" ||
+		category === "door-no-direct-use" ||
+		category === "switch"
+	);
+}

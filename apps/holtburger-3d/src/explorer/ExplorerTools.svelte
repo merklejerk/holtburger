@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
+
 	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
@@ -31,7 +33,6 @@
 	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
 	import type {
-		ExplorerCatalogCapability,
 		ExplorerWeenieSearchRequest,
 		ExplorerWeenieSearchResult,
 	} from "./explorer-entity-commands";
@@ -57,6 +58,9 @@
 	}
 
 	interface Props {
+		/** Shared cold identity selected from either the entity list or minimap. */
+		readonly entitySelection: ExplorerEntitySelection | null;
+		readonly selectEntity: (selection: ExplorerEntitySelection | null) => void;
 		readonly runtimeReady: boolean;
 		readonly requestSceneInterest: (
 			target: SceneInterestTarget,
@@ -144,7 +148,7 @@
 		readonly readStaticObjectRuntimeDiagnostics: () => StaticObjectRuntimeDiagnostics | null;
 		/** Explicit diagnostic readback of one active packed atlas page. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
-		readonly entityCatalog: ExplorerCatalogCapability | null;
+		readonly entityCatalog: WeenieCatalogCapability | null;
 		readonly spawnedEntities: readonly DynamicEntityView[];
 		readonly spawnedEntityPresentationError: string | null;
 		readonly spawnExplorerEntity: (
@@ -175,6 +179,8 @@
 	}
 
 	let {
+		entitySelection,
+		selectEntity,
 		runtimeReady,
 		requestSceneInterest,
 		cameraFocusStatus,
@@ -281,6 +287,12 @@
 
 	let expanded = $state(true);
 	let activeTabId = $state<ExplorerTabId>("world");
+	$effect(() => {
+		if (entitySelection !== null) {
+			activeTabId = "entities";
+			expanded = true;
+		}
+	});
 
 	const activeTab = $derived(
 		tabs.find((tab) => tab.id === activeTabId) ?? tabs[0],
@@ -405,6 +417,8 @@
 							/>
 						{:else if activeTab.id === "entities"}
 							<ExplorerEntitiesPanel
+								selection={entitySelection}
+								select={selectEntity}
 								{runtimeReady}
 								catalog={entityCatalog}
 								entities={spawnedEntities}

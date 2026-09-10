@@ -4030,6 +4030,11 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		};
 
 		await delay(100);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSelectedDiagnostics",
+			[],
+		);
 		const runtime = await capture();
 		await evaluate(
 			client,
@@ -4406,6 +4411,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		await dispatchPrimaryGesture(minimapCleared.minimapOverlayCanvas, []);
 		await delay(50);
 		const minimapSelected = await capture();
+
 		await dispatchPrimaryGesture(minimapSelected.minimapOverlayCanvas, [
 			{ x: 32, y: 18 },
 		]);
@@ -4430,6 +4436,119 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		);
 		await delay(50);
 		const targetIndicatorCleared = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetMinimap",
+			[],
+		);
+		for (const indoor of [false, true]) {
+			for (const category of ["door", "door-no-direct-use", "switch"]) {
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInteractableMarker",
+					[category, indoor, false, false],
+				);
+				await dispatchPrimaryGesture(minimapSelected.minimapOverlayCanvas, []);
+				const selected = await capture();
+				if (options.screenshotPath && !indoor) {
+					const shot = await client.send("Page.captureScreenshot", {
+						captureBeyondViewport: false,
+						format: "png",
+					});
+					await writeFile(
+						`${options.screenshotPath}.${category}.png`,
+						Buffer.from(shot.data, "base64"),
+					);
+				}
+				if (selected.selectedGuid !== 7)
+					throw new Error(`${category}: minimap selection failed`);
+				for (const [hidden, noDraw] of [
+					[true, false],
+					[false, true],
+				]) {
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInteractableMarker",
+						[category, indoor, hidden, noDraw],
+					);
+					await dispatchPrimaryGesture(
+						minimapSelected.minimapOverlayCanvas,
+						[],
+					);
+					const cleared = await capture();
+					if (cleared.selectedGuid !== null)
+						throw new Error(
+							`${category}: invisible marker remained selectable`,
+						);
+				}
+			}
+		}
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInteractableMarker",
+			["mob", false, false, false],
+		);
+
+		const measureDoor = (angle) =>
+			evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.measureDoorBar",
+				[angle],
+			);
+		const horizontalDoor = await measureDoor(0);
+		const angledDoor = await measureDoor(Math.PI / 4);
+		const length = (segment) =>
+			Math.hypot(
+				segment.end.x - segment.start.x,
+				segment.end.y - segment.start.y,
+			);
+		if (
+			Math.abs(horizontalDoor.end.y - horizontalDoor.start.y) > 0.1 ||
+			Math.abs(angledDoor.end.y - angledDoor.start.y) < 1
+		)
+			throw new Error("Door did not follow entity orientation");
+		for (const point of [angledDoor.start, angledDoor.end]) {
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				...point,
+			});
+			await delay(100);
+			const hover = await client.send("Runtime.evaluate", {
+				expression: "document.querySelector('.minimap-tooltip')?.textContent",
+				returnByValue: true,
+			});
+			if (!hover.result.value?.includes("Selection Fixture"))
+				throw new Error("Door endpoint hover missing");
+			for (const type of ["mousePressed", "mouseReleased"])
+				await client.send("Input.dispatchMouseEvent", {
+					type,
+					...point,
+					button: "left",
+					clickCount: 1,
+				});
+			if ((await capture()).selectedGuid !== 7)
+				throw new Error("Door endpoint click did not select");
+		}
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseWheel",
+			x: (angledDoor.start.x + angledDoor.end.x) / 2,
+			y: (angledDoor.start.y + angledDoor.end.y) / 2,
+			deltaX: 0,
+			deltaY: -100,
+		});
+		const zoomedDoor = await measureDoor(Math.PI / 4);
+		if (length(zoomedDoor) <= length(angledDoor))
+			throw new Error("Door width did not grow with map zoom");
+		if (options.screenshotPath) {
+			const shot = await client.send("Page.captureScreenshot", {
+				format: "png",
+				captureBeyondViewport: false,
+			});
+			await writeFile(
+				`${options.screenshotPath}.door-span.png`,
+				Buffer.from(shot.data, "base64"),
+			);
+		}
 
 		const theme = await probeClientTheme(
 			client,

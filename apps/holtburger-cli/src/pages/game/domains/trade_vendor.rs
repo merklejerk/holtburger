@@ -45,7 +45,10 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 });
             } else {
                 state.runtime.last_trade_initiation = Some((Instant::now(), vendor));
-                result.commands.push(ClientCommand::Use(vendor));
+                result.commands.push(ClientCommand::Use {
+                    guid: vendor,
+                    unrestricted: false,
+                });
             }
         }
         AppAction::SellToVendor {

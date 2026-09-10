@@ -34,8 +34,8 @@ export const CLIENT_UI_DEFAULTS = {
 		resizable: false,
 	},
 	jumpPower: {
-		anchor: "bottom-center",
-		offset: { x: 0, y: 72 },
+		anchor: "center",
+		offset: { x: 96, y: 0 },
 		size: { width: 38, height: 132 },
 		minSize: { width: 38, height: 132 },
 		resizable: false,

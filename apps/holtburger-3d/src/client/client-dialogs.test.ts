@@ -34,6 +34,7 @@ async function fixture() {
 	const snapshot = (requestId: string | null) =>
 		emit("client-current-state", {
 			lifecycle: { kind: "in-world" },
+			entityCollisionDisabled: false,
 			localPlayerGuid: 7,
 			serverTime: 1,
 			worldGeneration: 1,

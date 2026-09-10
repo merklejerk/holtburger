@@ -284,6 +284,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
+            entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,
             local_player_guid: None,
             server_time: None,
@@ -644,6 +645,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,
             local_player_guid: Some(Guid(0x5000_0008)),
             server_time: Some(22.0),

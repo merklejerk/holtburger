@@ -1132,6 +1132,8 @@
 {/if}
 
 <ClientWorldView
+	entityCollisionDisabled={false}
+	onEntityCollisionDisabledChange={() => {}}
 	cameraController={cameraEnabled ? cameraController : null}
 	{preciseJumpActive}
 	onPreciseJumpAim={() => undefined}

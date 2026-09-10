@@ -346,6 +346,8 @@ pub enum ClientPresentationDiscontinuityKind {
 pub struct ClientApplicationSnapshot {
     /// Complete shell-facing lifecycle level.
     pub lifecycle: ClientLifecycleState,
+    /// Accepted local-player debug override; never changes server physics flags.
+    pub entity_collision_disabled: bool,
     /// Exact local-player identity established by the server's `PlayerCreate` message.
     pub local_player_guid: Option<Guid>,
     /// Synchronized server time, absent before the first time-sync event.
@@ -546,6 +548,8 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Acknowledges the accepted local-player entity response policy.
+    EntityCollisionDisabled(bool),
     /// Complete application-level replacement state for a shell remount or receiver recovery.
     ApplicationSnapshot(ClientApplicationSnapshot),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
@@ -789,6 +793,8 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Changes only the local player's response to peer entities.
+    SetEntityCollisionDisabled(bool),
     Login(String),
     SelectCharacter(Guid),
     CreateCharacter(Box<CharacterCreateRequestData>),

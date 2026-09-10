@@ -142,6 +142,8 @@ bitflags::bitflags! {
     pub struct PhysicalCollisionExclusions: u8 {
         /// Retail's whole-water-landblock barrier does not obstruct this body.
         const ENTIRELY_WATER_BARRIER = 1 << 0;
+        /// Peer entities cannot obstruct or support this mover; reports remain independent.
+        const ENTITY_RESPONSE = 1 << 1;
     }
 }
 
@@ -160,6 +162,16 @@ impl PhysicalCollisionFilter {
     /// Constructs a filter from explicit collision-domain exclusions.
     pub const fn excluding(exclusions: PhysicalCollisionExclusions) -> Self {
         Self { exclusions }
+    }
+
+    /// Changes selected domains without replacing independently owned exclusions.
+    pub fn with_exclusion(
+        mut self,
+        exclusion: PhysicalCollisionExclusions,
+        excluded: bool,
+    ) -> Self {
+        self.exclusions.set(exclusion, excluded);
+        self
     }
 
     /// Whether this body ignores one optional collision domain.

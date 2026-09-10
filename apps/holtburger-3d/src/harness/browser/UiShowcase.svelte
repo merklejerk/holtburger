@@ -412,6 +412,8 @@
 						{:else if tab === "diagnostics"}
 							<ClientDebugPanel
 								readDiagnostics={() => null}
+								entityCollisionDisabled={false}
+								onEntityCollisionDisabledChange={() => {}}
 								showRetailHiddenGeometry={showHidden}
 								onShowRetailHiddenGeometryChange={(value) =>
 									(showHidden = value)}

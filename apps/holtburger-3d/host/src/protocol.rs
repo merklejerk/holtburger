@@ -85,6 +85,7 @@ impl<'de> Deserialize<'de> for HostCommand {
 pub enum HostEvent {
     ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
     ClientCurrentState(crate::client_projection::ClientCurrentState),
+    ClientEntityCollisionDisabled(bool),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
     ClientCharacterMotionCapabilitiesUpdated(
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
@@ -357,6 +358,9 @@ impl ClientEventSink for StdioEventSink {
         event: crate::client_projection::ClientHostEvent,
     ) -> anyhow::Result<()> {
         let event = match event {
+            crate::client_projection::ClientHostEvent::EntityCollisionDisabled(disabled) => {
+                HostEvent::ClientEntityCollisionDisabled(disabled)
+            }
             crate::client_projection::ClientHostEvent::CurrentState(state) => {
                 HostEvent::ClientCurrentState(state)
             }

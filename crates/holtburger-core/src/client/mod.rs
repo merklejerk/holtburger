@@ -208,6 +208,10 @@ impl ClientRuntime {
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
             lifecycle: self.lifecycle(),
+            entity_collision_disabled: self
+                .collision_coordinator
+                .as_ref()
+                .is_some_and(|owner| owner.entity_collision_disabled()),
             local_player_guid: (self.world.player.guid != Guid::NULL)
                 .then_some(self.world.player.guid),
             server_time: self
@@ -638,6 +642,12 @@ impl ClientRuntime {
             ClientState::Disconnected | ClientState::CharacterSelection(_)
         ) {
             self.entity_cue_inbox.clear();
+            if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                coordinator.reset_entity_collision_override(&mut self.world);
+            }
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::EntityCollisionDisabled(false));
             if self.active_confirmation.take().is_some() {
                 self.emit_active_character_confirmation_updated();
             }
@@ -1450,7 +1460,7 @@ mod tests {
         );
     }
 
-    fn dynamic_definition(
+    pub(super) fn dynamic_definition(
         movement: PhysicalBodyDefinition,
         response_policy: PhysicalBodyResponsePolicy,
     ) -> DynamicPhysicalBodyConfiguration {

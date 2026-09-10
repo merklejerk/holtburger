@@ -8,12 +8,17 @@
 
 	interface Props {
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
+		/** Runtime-confirmed local player response override. */
+		readonly entityCollisionDisabled: boolean;
+		readonly onEntityCollisionDisabledChange: (disabled: boolean) => void;
 		readonly showRetailHiddenGeometry: boolean;
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 	}
 
 	const {
 		readDiagnostics,
+		entityCollisionDisabled,
+		onEntityCollisionDisabledChange,
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 	}: Props = $props();
@@ -50,6 +55,13 @@
 {/snippet}
 
 <div class="debug-panel-body ui-body">
+	<ToggleField
+		checked={entityCollisionDisabled}
+		label="Disable entity collision"
+		checkedLabel="On"
+		uncheckedLabel="Off"
+		onCheckedChange={onEntityCollisionDisabledChange}
+	/>
 	<ToggleField
 		checked={showRetailHiddenGeometry}
 		label="Retail-hidden geometry"

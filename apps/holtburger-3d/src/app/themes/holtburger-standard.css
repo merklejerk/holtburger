@@ -36,7 +36,7 @@
 		--ui-radius-surface: 3px;
 		--ui-radius-control: 2px;
 		--holtburger-header-grain-opacity: 0.16;
-		--ui-backdrop-filter: blur(12px);
+		--ui-backdrop-filter: blur(0px);
 		--ui-input-background: #362e2a;
 		/* Full CSS shadow value, shared by panels and the default tooltip recipe. */
 		--ui-surface-shadow: 0 2px 6px #0d080629;

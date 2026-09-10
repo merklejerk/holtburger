@@ -72,8 +72,6 @@ interface PortalScopeAtlasPlanTrace {
 	readonly tilePlacementAttemptCount: number;
 	/** Sum of committed conservative tile areas without packing gaps. */
 	readonly tilePixelCount: number;
-	/** NDC vertices inspected while deriving bounds across every packing attempt. */
-	readonly windowVertexReadCount: number;
 }
 
 interface MutablePortalScopeAtlasCommandLedger extends PortalScopeAtlasCommandLedger {
@@ -103,7 +101,6 @@ interface MutablePortalScopeAtlasPlanTrace extends PortalScopeAtlasPlanTrace {
 	tileSortComparisonCount: number;
 	tilePlacementAttemptCount: number;
 	tilePixelCount: number;
-	windowVertexReadCount: number;
 }
 
 /** Reused, non-retained scalar view over planner-owned tile storage. */
@@ -211,7 +208,6 @@ class MutablePortalScopeAtlasFrameView implements PortalScopeAtlasFrameView {
 		tilePixelCount: 0,
 		tilePlacementAttemptCount: 0,
 		tileSortComparisonCount: 0,
-		windowVertexReadCount: 0,
 	};
 	constructor(readonly arena: PortalScopeAtlasArena) {}
 
@@ -305,9 +301,19 @@ export class PortalScopeAtlasPlanner {
 	readonly #maximumPathDepth: number;
 	readonly #maximumTileCount: number;
 
-	constructor(capacity: PortalScopeWindowCullerCapacity) {
+	constructor(
+		capacity: PortalScopeWindowCullerCapacity,
+		maximumPropagationDepth: number,
+	) {
+		if (
+			!Number.isSafeInteger(maximumPropagationDepth) ||
+			maximumPropagationDepth < 0
+		)
+			throw new Error(
+				"Portal GPU propagation depth must be a nonnegative safe integer.",
+			);
 		this.#culler = new PortalScopeWindowCuller(capacity);
-		this.#maximumPathDepth = capacity.maximumDepth;
+		this.#maximumPathDepth = maximumPropagationDepth;
 		this.#maximumTileCount = capacity.maximumWorkItemCount;
 		this.#arena = new PortalScopeAtlasArena(capacity.maximumWorkItemCount);
 		this.#frame = new MutablePortalScopeAtlasFrameView(this.#arena);
@@ -398,7 +404,6 @@ export class PortalScopeAtlasPlanner {
 		this.#frame.trace.tilePixelCount = 0;
 		this.#frame.trace.tilePlacementAttemptCount = 0;
 		this.#frame.trace.tileSortComparisonCount = 0;
-		this.#frame.trace.windowVertexReadCount = 0;
 	}
 
 	#countCrossingTriangleVertices(
@@ -444,31 +449,10 @@ export class PortalScopeAtlasPlanner {
 			scopeOrdinal < visibility.selectedScopeCount;
 			scopeOrdinal += 1
 		) {
-			let minimumNdcX = Number.POSITIVE_INFINITY;
-			let minimumNdcY = Number.POSITIVE_INFINITY;
-			let maximumNdcX = Number.NEGATIVE_INFINITY;
-			let maximumNdcY = Number.NEGATIVE_INFINITY;
-			const fragmentCount = visibility.selectedFragmentCount(scopeOrdinal);
-			for (let fragment = 0; fragment < fragmentCount; fragment += 1) {
-				const vertexCount = visibility.selectedFragmentVertexCount(
-					scopeOrdinal,
-					fragment,
-				);
-				for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-					const x = visibility.selectedVertexX(scopeOrdinal, fragment, vertex);
-					const y = visibility.selectedVertexY(scopeOrdinal, fragment, vertex);
-					minimumNdcX = Math.min(minimumNdcX, x);
-					minimumNdcY = Math.min(minimumNdcY, y);
-					maximumNdcX = Math.max(maximumNdcX, x);
-					maximumNdcY = Math.max(maximumNdcY, y);
-					this.#frame.trace.windowVertexReadCount += 1;
-				}
-			}
-			if (!Number.isFinite(minimumNdcX) || !Number.isFinite(minimumNdcY)) {
-				throw new Error(
-					`Portal selected scope ${scopeOrdinal} has an empty window.`,
-				);
-			}
+			const minimumNdcX = visibility.selectedMinimumNdcX(scopeOrdinal);
+			const minimumNdcY = visibility.selectedMinimumNdcY(scopeOrdinal);
+			const maximumNdcX = visibility.selectedMaximumNdcX(scopeOrdinal);
+			const maximumNdcY = visibility.selectedMaximumNdcY(scopeOrdinal);
 			const minimumX = clampPixel(
 				Math.floor(((minimumNdcX + 1) * drawingWidth) / 2),
 				drawingWidth,
@@ -635,7 +619,7 @@ export class PortalScopeAtlasPlanner {
 		const retainedDepthLimit =
 			visibility.status === "complete"
 				? this.#maximumPathDepth
-				: visibility.completedDepth;
+				: Math.min(this.#maximumPathDepth, visibility.completedDepth);
 		// Per-pixel entry depth must strictly increase along a path, so no directed crossing can
 		// recur and crossing count is a universal propagation bound without a convergence readback
 		// or topology walk. The one exemption — an equal-depth advance across a host-proven

@@ -129,6 +129,10 @@ try {
 			nameplateWorkload: result.nameplateWorkload,
 			nameplateLifecycle: result.nameplateLifecycle,
 			appearanceReplacement: result.appearanceReplacement,
+
+			measuredFrameThroughput: result.measuredFrameThroughput,
+			portalTraversalSurvey: result.portalTraversalSurvey,
+			portalTraversalInvestigation: result.portalTraversalInvestigation,
 			materialTableProbe: result.materialTableProbe,
 			nameplateBenchmark: result.nameplateBenchmark,
 			ambientOcclusionCoverageCensus:
@@ -1794,6 +1798,9 @@ function briefHarnessReport(result) {
 	const staticObjects = result.state.staticObjects;
 	const authoredDynamics = result.state.authoredDynamics;
 	return {
+		measuredFrameThroughput: result.measuredFrameThroughput,
+		portalTraversalSurvey: result.portalTraversalSurvey,
+		portalTraversalInvestigation: result.portalTraversalInvestigation,
 		materialTableProbe: result.materialTableProbe,
 		authoredDynamics:
 			authoredDynamics === null
@@ -5039,6 +5046,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForHarnessApi(client);
+
+		if (process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL === "1") {
+			await evaluateExpression(
+				client,
+				`import('/src/harness/browser/portal-traversal-investigation.ts').then(module => module.installPortalTraversalInvestigation())`,
+			);
+		}
 		await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
@@ -6051,15 +6065,90 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[],
 			);
 		}
+		let portalTraversalSurvey = null;
+		if (process.env.HOLTBURGER_PROBE_PORTAL_SURVEY === "1") {
+			if (
+				process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL !== "1" ||
+				options.envCellCameraId === null
+			)
+				throw new Error(
+					"Portal survey requires the traversal probe and an EnvCell camera.",
+				);
+			const surveyCamera = await evaluateExpression(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state().camera",
+			);
+			const surveyInput = {
+				cell: options.envCellCameraId,
+				position: surveyCamera.position,
+				yaw: options.cameraYawDegrees,
+				pitch: options.cameraPitchDegrees,
+			};
+			portalTraversalSurvey = await evaluateExpression(
+				client,
+				`(async () => {
+				const input = ${JSON.stringify(surveyInput)};
+				const api = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__;
+				const module = await import('/src/harness/browser/portal-traversal-investigation.ts');
+				const segments = module.portalTransitionProbeSegments();
+				const poses = [];
+				for (const pitch of [-30, 0, 30])
+					for (let angle = 0; angle < 360; angle += pitch === 0 ? 5 : 15)
+						poses.push({position: input.position, yaw: input.yaw + angle, pitch});
+				for (const dx of [-0.15, 0, 0.15])
+					for (const dz of [-0.15, 0, 0.15]) {
+						if (dx === 0 && dz === 0) continue;
+						for (const yaw of [input.yaw, input.yaw + 90])
+							poses.push({position: [input.position[0] + dx, input.position[1], input.position[2] + dz], yaw, pitch: 0});
+					}
+				const skippedTransitions = [];
+				for (const segment of segments) {
+					const steps = Array.from({length: 9}, (_,i) => {
+						const distance = (4-i)*0.025;
+						return {cell: i <= 4 ? segment.source : segment.target, position: segment.center.map((value,axis)=>value+segment.normal[axis]*distance), yaw: input.yaw, pitch: 0};
+					});
+					if (steps.every(pose=>api.portalProbeContainsPoint(pose.cell,pose.position) === true)) poses.push(...steps);
+					else skippedTransitions.push(segment);
+				}
+				const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				const reports = [];
+				try {
+					for (const pose of poses) {
+						api.setEnvCellCamera(pose.cell ?? input.cell, pose.position, pose.yaw, pose.pitch);
+						await settle();
+						const report = module.runPortalTraversalInvestigation();
+						const metrics = api.state().metrics;
+						if (metrics === null) throw new Error('Portal survey has no renderer metrics.');
+						reports.push({pose, ...report, gpuFrontierRetreatCount: metrics.portalFrontierRetreatCount, renderedTruncatedViewCount: metrics.portalTruncatedViewCount});
+					}
+				} finally {
+					api.setEnvCellCamera(input.cell, input.position, input.yaw, input.pitch);
+					await settle();
+				}
+				return {reports, skippedTransitions};
+			})()`,
+			);
+		}
 		let cpuProfile = null;
+		let measuredFrameThroughput = null;
 		await startCpuProfile();
 		if (options.measureMs > 0) {
-			await evaluate(
+			const measurementStart = await evaluateExpression(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
-				[],
+				`(() => {
+				globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming();
+				return performance.now();
+			})()`,
 			);
 			await delay(options.measureMs);
+			measuredFrameThroughput = await evaluateExpression(
+				client,
+				`(() => {
+				const elapsedMs = performance.now() - ${measurementStart};
+				const frames = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state().timing.sampleCount;
+				return {elapsedMs, frames, framesPerSecond: frames * 1000 / elapsedMs};
+			})()`,
+			);
 		} else if (
 			options.profileRenderer ||
 			options.cpuProfilePath ||
@@ -6073,6 +6162,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.captureFrame !== undefined) {
 			await waitForCaptureFrame(client, options.captureFrame);
 		}
+
+		const portalTraversalInvestigation =
+			process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL === "1"
+				? await evaluateExpression(
+						client,
+						`import('/src/harness/browser/portal-traversal-investigation.ts').then(module => module.runPortalTraversalInvestigation())`,
+					)
+				: null;
 		// Recorded so any timing carries proof of which adapter produced it. SwiftShader numbers
 		// are not performance evidence.
 		const glRenderer = await evaluateExpression(
@@ -6206,6 +6303,10 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			dynamicViews,
 			dynamicBlendFlags,
 			dynamicDomains,
+
+			measuredFrameThroughput,
+			portalTraversalSurvey,
+			portalTraversalInvestigation,
 			materialTableProbe:
 				process.env.HOLTBURGER_PROBE_MATERIAL_TABLES === "1"
 					? await evaluate(

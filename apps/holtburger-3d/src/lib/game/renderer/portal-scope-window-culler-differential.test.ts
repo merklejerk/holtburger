@@ -89,7 +89,7 @@ interface DifferentialOutput {
 }
 
 describe("portal scope-window culler differential", () => {
-	it("matches the immutable planner over the retained seeded geometry corpus", () => {
+	it("conservatively encloses the exact reference over the retained seeded geometry corpus", () => {
 		const pairs = seededPortalTrianglePairs(
 			PORTAL_WINDOW_GEOMETRY_SEED,
 			RETAINED_GEOMETRY_CASE_COUNT,
@@ -102,7 +102,7 @@ describe("portal scope-window culler differential", () => {
 		}
 	});
 
-	it("matches and remains invariant over seeded topology and camera families", () => {
+	it("preserves coverage and remains invariant over seeded topology and camera families", () => {
 		const random = seededRandom(EXPANDED_TOPOLOGY_SEED);
 		for (const family of EXPANDED_FAMILIES) {
 			for (let ordinal = 0; ordinal < CASES_PER_EXPANDED_FAMILY; ordinal += 1) {
@@ -188,7 +188,7 @@ describe("portal scope-window culler differential", () => {
 		).toEqual(["portal-crossing:sparse-unselected-0"]);
 	});
 
-	it("reuses an ordinary projected aperture after three independent routes", () => {
+	it("reuses an aperture projection across independent routes", () => {
 		const first = envCellScope("cache-first");
 		const second = envCellScope("cache-second");
 		const third = envCellScope("cache-third");
@@ -657,7 +657,7 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 		}))
 		.sort(compareScopeWindows);
 	const actual = arenaWindowSnapshot(arenaFrame);
-	assertEquivalentWindows(actual, expected, fixture.label);
+	assertConservativeWindows(actual, expected, fixture.label);
 	for (let ordinal = 0; ordinal < arenaFrame.selectedScopeCount; ordinal += 1) {
 		expect(
 			arenaFrame.selectedScopeOrdinal(
@@ -666,7 +666,7 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 			`${fixture.label} selected-scope ordinal`,
 		).toBe(ordinal);
 	}
-	const selectedScopeIdentities = new Set(expected.map(({ scope }) => scope));
+	const selectedScopeIdentities = new Set(actual.map(({ scope }) => scope));
 	const expectedCrossingIds = fixture.topology.crossings
 		.filter(
 			({ source, target }) =>
@@ -774,6 +774,37 @@ function assertFamilyEvidence(
 	}
 }
 
+function assertConservativeWindows(
+	actual: readonly ScopeWindowSnapshot[],
+	expected: readonly ScopeWindowSnapshot[],
+	label: string,
+): void {
+	for (const reference of expected) {
+		const candidate = actual.find((s) => s.scope === reference.scope);
+		if (candidate === undefined)
+			throw new Error(`${label} omitted ${reference.scope}`);
+		expect(candidate.window, label).toHaveLength(1);
+		const vertices = candidate.window[0]!;
+		const xs = vertices.map((v) => v[0]);
+		const ys = vertices.map((v) => v[1]);
+		for (const fragment of reference.window)
+			for (const [x, y] of fragment) {
+				expect(x, label).toBeGreaterThanOrEqual(
+					Math.min(...xs) - PORTAL_WINDOW_NDC_EPSILON,
+				);
+				expect(x, label).toBeLessThanOrEqual(
+					Math.max(...xs) + PORTAL_WINDOW_NDC_EPSILON,
+				);
+				expect(y, label).toBeGreaterThanOrEqual(
+					Math.min(...ys) - PORTAL_WINDOW_NDC_EPSILON,
+				);
+				expect(y, label).toBeLessThanOrEqual(
+					Math.max(...ys) + PORTAL_WINDOW_NDC_EPSILON,
+				);
+			}
+	}
+}
+
 function assertEquivalentWindows(
 	actual: readonly ScopeWindowSnapshot[],
 	expected: readonly ScopeWindowSnapshot[],
@@ -790,10 +821,7 @@ function cullerCapacity(): PortalScopeWindowCullerCapacity {
 		maximumWorkItemCount: 64,
 		windowArena: {
 			maximumApertureVertexCount: 32,
-			maximumFragmentCount: 512,
-			maximumTemporaryFragmentCount: 64,
-			maximumTemporaryVertexCount: 8_192,
-			maximumVertexCount: 4_096,
+
 			maximumVerticesPerFragment: 64,
 			maximumWindowCount: 128,
 		},
@@ -803,23 +831,32 @@ function cullerCapacity(): PortalScopeWindowCullerCapacity {
 function arenaWindowSnapshot(
 	frame: ReturnType<PortalScopeWindowCuller["cull"]>,
 ): readonly ScopeWindowSnapshot[] {
-	return Array.from({ length: frame.selectedScopeCount }, (_, ordinal) => ({
-		scope: scopeIdentity(frame.selectedScope(ordinal)),
-		window: Array.from(
-			{ length: frame.selectedFragmentCount(ordinal) },
-			(_, fragment) =>
-				Array.from(
-					{
-						length: frame.selectedFragmentVertexCount(ordinal, fragment),
-					},
-					(_, vertex) =>
-						[
-							frame.selectedVertexX(ordinal, fragment, vertex),
-							frame.selectedVertexY(ordinal, fragment, vertex),
-						] as const,
-				),
-		),
-	})).sort(compareScopeWindows);
+	return Array.from(
+		{ length: frame.selectedScopeCount },
+		(_, ordinal): ScopeWindowSnapshot => ({
+			scope: scopeIdentity(frame.selectedScope(ordinal)),
+			window: [
+				[
+					[
+						frame.selectedMinimumNdcX(ordinal),
+						frame.selectedMinimumNdcY(ordinal),
+					],
+					[
+						frame.selectedMaximumNdcX(ordinal),
+						frame.selectedMinimumNdcY(ordinal),
+					],
+					[
+						frame.selectedMaximumNdcX(ordinal),
+						frame.selectedMaximumNdcY(ordinal),
+					],
+					[
+						frame.selectedMinimumNdcX(ordinal),
+						frame.selectedMaximumNdcY(ordinal),
+					],
+				],
+			],
+		}),
+	).sort(compareScopeWindows);
 }
 
 function immutableWindowSnapshot(

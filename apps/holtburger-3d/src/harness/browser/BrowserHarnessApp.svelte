@@ -444,6 +444,11 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => BrowserHarnessCameraEvidence;
+		/** Check the collision geometry before a diagnostic camera crosses a portal. */
+		readonly portalProbeContainsPoint: (
+			cell: string,
+			position: readonly [number, number, number],
+		) => boolean | null;
 		/** Place the continuous camera at one authoritative EnvCell pose. */
 		readonly setEnvCellCamera: (
 			envCellId: string,
@@ -3909,6 +3914,16 @@
 					requestSceneInterest,
 					runFollowFlight,
 					setCameraLandblock,
+					portalProbeContainsPoint: (rawCell, position) => {
+						if (!runtime) throw new Error("Portal probe runtime unavailable.");
+						const envCellId = parseEnvCellId(rawCell, "portal probe");
+						const landblockId =
+							`${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
+						return runtime.queryEnvCellPointContainment(
+							{ envCellId, landblockId },
+							new Vec3(...position),
+						);
+					},
 					setEnvCellCamera,
 					setEnvCellRenderMode,
 					setLayerVisibility,

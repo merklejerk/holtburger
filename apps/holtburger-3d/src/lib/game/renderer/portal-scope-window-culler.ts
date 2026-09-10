@@ -9,25 +9,18 @@ import type {
 	SceneTopologyView,
 } from "../scene";
 import { sameScope, scopeKey } from "../scene/scope";
-import {
-	type CameraNearClipPrimitiveKind,
-	type CameraNearClipPrimitiveMeter,
-	type CameraNearClipVolume,
-} from "./portal-near-plane";
+import { type CameraNearClipVolume } from "./portal-near-plane";
 import {
 	preparePortalApertureProjectionInput,
 	validatePreparedPortalProjection,
-	type PortalWindowPrimitiveKind,
 	type PreparedPortalApertureProjectionInput,
 	type PreparedPortalProjection,
 } from "./portal-view-window";
 import {
 	NO_PORTAL_ARENA_WINDOW,
-	PORTAL_PROJECTED_APERTURE_CACHE_STORAGE_CAPACITY,
 	PortalWindowArena,
 	PortalWindowArenaCapacityExceeded,
-	type PortalProjectionCacheMeter,
-	type PortalProjectedApertureCacheCapacity,
+	type PortalTraversalMeter,
 	type PortalWindowArenaCapacity,
 } from "./portal-window-arena";
 
@@ -40,15 +33,15 @@ const CROSSING_MARKER_WORD_BIT_MASK = CROSSING_MARKER_BITS_PER_WORD - 1;
 export interface PortalScopeWindowCullerCapacity {
 	/** Deepest complete crossing frontier retained by the CPU plan. */
 	readonly maximumDepth: number;
-	/** Atomic immutable-oracle primitive budget for one camera plan. */
+	/** Atomic executed-work budget for one camera plan. */
 	readonly maximumProjectionPrimitiveCount: number;
-	/** Root plus every admitted scope-window delta retained in the work queue. */
+	/** Root plus every admitted scope-window version retained in the work queue. */
 	readonly maximumWorkItemCount: number;
-	/** Fixed polygon/window backing stores reused across camera updates. */
+	/** Fixed rectangle and aperture-scratch backing stores reused across camera updates. */
 	readonly windowArena: PortalWindowArenaCapacity;
 }
 
-/** Camera-dependent policy shared with the proved immutable scope-window traversal. */
+/** Camera-dependent policy shared with the independent exact reference traversal. */
 export interface PortalScopeWindowCullInput extends PreparedPortalProjection {
 	readonly nearClipVolume: CameraNearClipVolume;
 	readonly portalFootprint: {
@@ -68,28 +61,16 @@ interface PortalScopeWindowArenaTrace {
 	readonly exceptionalDiagnosticHeapRecordCreationCount: 0 | 1;
 	/** Largest admitted queue population reached by this camera plan. */
 	readonly queueHighWaterCount: number;
-	/** Immutable projection primitives charged before execution. */
+	/** Executed geometry, cache, and rectangle primitives charged before execution. */
 	readonly projectionPrimitiveCount: number;
-	/** Projection and cache-write primitives actually executed by this camera plan. */
-	readonly executedProjectionPrimitiveCount: number;
-	/** Compatibility projection budget minus executed projection and cache-write primitives. */
-	readonly projectionPrimitiveExecutionDelta: number;
-	/** Fixed topology-event bytes reserved for reusable ordinary projected apertures. */
+	/** Topology-event bytes for per-view aperture bounds and near classifications. */
 	readonly projectionCacheCapacityBytes: number;
-	/** First two ordinary crossing-form attempts intentionally projected without a cache write. */
-	readonly projectionCacheColdBypassCount: number;
-	/** Attempts projected normally after fixed cache storage declined their crossing form. */
-	readonly projectionCacheCapacityBypassCount: number;
-	/** Third-use promotions declined because fixed performance-only storage was full. */
-	readonly projectionCacheDeclinedPromotionCount: number;
-	/** Ordinary crossing-form attempts served from cached NDC fragments. */
+	/** Aperture projections reused within the current view. */
 	readonly projectionCacheHitCount: number;
-	/** Third ordinary attempts projected and promoted for any later route. */
-	readonly projectionCachePromotionCount: number;
-	/** Largest cached projected-fragment tail reached by this camera plan. */
-	readonly projectionCacheFragmentHighWaterCount: number;
-	/** Largest cached projected-vertex tail reached by this camera plan. */
-	readonly projectionCacheVertexHighWaterCount: number;
+	/** Near classifications reused within the current view. */
+	readonly nearClipCacheHitCount: number;
+	/** Aperture projections performed on first use in the current view. */
+	readonly projectedApertureCount: number;
 	/** Outgoing adjacency records inspected before immediate-return rejection. */
 	readonly outgoingCrossingInputCount: number;
 	/** Apertures classified against the finite near-clip volume. */
@@ -110,37 +91,23 @@ interface PortalScopeWindowArenaTrace {
 	readonly topologyBuildCount: number;
 	/** Normal-path portal-owned records created by one camera update. */
 	readonly portalOwnedFrameHeapRecordCreationCount: 0;
-	/** Largest committed polygon-fragment tail reached, including declined work. */
-	readonly windowFragmentHighWaterCount: number;
 	/** Largest committed numeric-window tail reached, including declined work. */
 	readonly windowHighWaterCount: number;
-	/** Largest reusable builder fragment tail reached by either builder. */
-	readonly windowTemporaryFragmentHighWaterCount: number;
-	/** Largest reusable builder vertex tail reached by either builder. */
-	readonly windowTemporaryVertexHighWaterCount: number;
-	/** Largest committed NDC-vertex tail reached, including declined work. */
-	readonly windowVertexHighWaterCount: number;
 }
 
 interface MutablePortalScopeWindowArenaTrace {
 	arenaGrowthCount: 0;
 	arenaCapacityBytes: number;
 	exceptionalDiagnosticHeapRecordCreationCount: 0 | 1;
-	executedProjectionPrimitiveCount: number;
 	facingTestCount: number;
 	nearClipClassificationCount: number;
 	nearPlaneRouteProjectionCount: number;
-	projectionPrimitiveExecutionDelta: number;
 	ordinaryRouteProjectionCount: number;
 	outgoingCrossingInputCount: number;
 	projectionCacheCapacityBytes: number;
-	projectionCacheColdBypassCount: number;
-	projectionCacheCapacityBypassCount: number;
-	projectionCacheDeclinedPromotionCount: number;
-	projectionCacheFragmentHighWaterCount: number;
 	projectionCacheHitCount: number;
-	projectionCachePromotionCount: number;
-	projectionCacheVertexHighWaterCount: number;
+	nearClipCacheHitCount: number;
+	projectedApertureCount: number;
 	projectionPrimitiveCount: number;
 	queueHighWaterCount: number;
 	routeProjectionCount: number;
@@ -148,11 +115,7 @@ interface MutablePortalScopeWindowArenaTrace {
 	selectedCrossingMarkerWordInputCount: number;
 	topologyBuildCount: number;
 	portalOwnedFrameHeapRecordCreationCount: 0;
-	windowFragmentHighWaterCount: number;
 	windowHighWaterCount: number;
-	windowTemporaryFragmentHighWaterCount: number;
-	windowTemporaryVertexHighWaterCount: number;
-	windowVertexHighWaterCount: number;
 }
 
 /** Reused, non-retained view over culler-owned storage. */
@@ -194,14 +157,14 @@ export interface PortalScopeWindowFrameView {
 	selectedCrossingSourceLandblockX(ordinal: number): number;
 	/** Return the source aperture's topology-owned landblock y coordinate. */
 	selectedCrossingSourceLandblockY(ordinal: number): number;
-	/** Read one selected arena window without constructing an immutable window record. */
-	selectedFragmentCount(ordinal: number): number;
-	/** Read one selected fragment's vertex count through the non-retained frame view. */
-	selectedFragmentVertexCount(ordinal: number, fragment: number): number;
-	/** Read one selected fragment vertex's NDC x component. */
-	selectedVertexX(ordinal: number, fragment: number, vertex: number): number;
-	/** Read one selected fragment vertex's NDC y component. */
-	selectedVertexY(ordinal: number, fragment: number, vertex: number): number;
+	/** Read the selected rectangle's minimumNdcX bound directly from the arena. */
+	selectedMinimumNdcX(ordinal: number): number;
+	/** Read the selected rectangle's minimumNdcY bound directly from the arena. */
+	selectedMinimumNdcY(ordinal: number): number;
+	/** Read the selected rectangle's maximumNdcX bound directly from the arena. */
+	selectedMaximumNdcX(ordinal: number): number;
+	/** Read the selected rectangle's maximumNdcY bound directly from the arena. */
+	selectedMaximumNdcY(ordinal: number): number;
 }
 
 interface IndexedCrossing {
@@ -412,7 +375,6 @@ class PortalScopeWindowArena {
 		workItemCount: number,
 		maximumDepth: number,
 		windowCapacity: PortalWindowArenaCapacity,
-		projectedApertureCacheCapacity: PortalProjectedApertureCacheCapacity,
 	) {
 		this.coverageByScopeId = new Uint32Array(scopeCount);
 		this.coverageByScopeId.fill(NO_PORTAL_ARENA_WINDOW);
@@ -442,10 +404,7 @@ class PortalScopeWindowArena {
 		this.selectedOrdinalByRenderDomainId = new Uint32Array(renderDomainCount);
 		this.selectedRenderDomainIds = new Uint32Array(renderDomainCount);
 		this.selectedScopeIds = new Uint32Array(scopeCount);
-		this.windows = new PortalWindowArena(
-			windowCapacity,
-			projectedApertureCacheCapacity,
-		);
+		this.windows = new PortalWindowArena(windowCapacity, crossingCount);
 		this.typedCapacityBytes =
 			this.coverageByScopeId.byteLength +
 			this.frontierMutationCheckpoints.byteLength +
@@ -513,21 +472,15 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		arenaGrowthCount: 0,
 		arenaCapacityBytes: 0,
 		exceptionalDiagnosticHeapRecordCreationCount: 0,
-		executedProjectionPrimitiveCount: 0,
 		facingTestCount: 0,
 		nearClipClassificationCount: 0,
 		nearPlaneRouteProjectionCount: 0,
-		projectionPrimitiveExecutionDelta: 0,
 		ordinaryRouteProjectionCount: 0,
 		outgoingCrossingInputCount: 0,
 		projectionCacheCapacityBytes: 0,
-		projectionCacheColdBypassCount: 0,
-		projectionCacheCapacityBypassCount: 0,
-		projectionCacheDeclinedPromotionCount: 0,
-		projectionCacheFragmentHighWaterCount: 0,
 		projectionCacheHitCount: 0,
-		projectionCachePromotionCount: 0,
-		projectionCacheVertexHighWaterCount: 0,
+		nearClipCacheHitCount: 0,
+		projectedApertureCount: 0,
 		projectionPrimitiveCount: 0,
 		queueHighWaterCount: 0,
 		routeProjectionCount: 0,
@@ -535,11 +488,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		selectedCrossingMarkerWordInputCount: 0,
 		topologyBuildCount: 0,
 		portalOwnedFrameHeapRecordCreationCount: 0,
-		windowFragmentHighWaterCount: 0,
 		windowHighWaterCount: 0,
-		windowTemporaryFragmentHighWaterCount: 0,
-		windowTemporaryVertexHighWaterCount: 0,
-		windowVertexHighWaterCount: 0,
 	};
 
 	constructor(readonly arenaOf: () => PortalScopeWindowArena | null) {}
@@ -679,37 +628,22 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		return this.#requireArena().selectedCrossingIds[ordinal]!;
 	}
 
-	selectedFragmentCount(ordinal: number): number {
+	selectedMinimumNdcX(ordinal: number): number {
 		const arena = this.#requireArena();
-		return arena.windows.fragmentCount(this.#selectedWindow(arena, ordinal));
+		return arena.windows.minimumNdcX(this.#selectedWindow(arena, ordinal));
 	}
-
-	selectedFragmentVertexCount(ordinal: number, fragment: number): number {
+	selectedMinimumNdcY(ordinal: number): number {
 		const arena = this.#requireArena();
-		return arena.windows.fragmentVertexCount(
-			this.#selectedWindow(arena, ordinal),
-			fragment,
-		);
+		return arena.windows.minimumNdcY(this.#selectedWindow(arena, ordinal));
 	}
-
-	selectedVertexX(ordinal: number, fragment: number, vertex: number): number {
+	selectedMaximumNdcX(ordinal: number): number {
 		const arena = this.#requireArena();
-		return arena.windows.vertexX(
-			this.#selectedWindow(arena, ordinal),
-			fragment,
-			vertex,
-		);
+		return arena.windows.maximumNdcX(this.#selectedWindow(arena, ordinal));
 	}
-
-	selectedVertexY(ordinal: number, fragment: number, vertex: number): number {
+	selectedMaximumNdcY(ordinal: number): number {
 		const arena = this.#requireArena();
-		return arena.windows.vertexY(
-			this.#selectedWindow(arena, ordinal),
-			fragment,
-			vertex,
-		);
+		return arena.windows.maximumNdcY(this.#selectedWindow(arena, ordinal));
 	}
-
 	#requireArena(): PortalScopeWindowArena {
 		const arena = this.arenaOf();
 		if (!arena || !this.index)
@@ -770,10 +704,8 @@ class WorkItemCapacityExceeded extends Error {
 export class PortalScopeWindowCuller {
 	readonly #capacity: PortalScopeWindowCullerCapacity;
 	readonly #frame: MutablePortalScopeWindowFrameView;
-	readonly #projectionMeter: PortalProjectionCacheMeter &
-		CameraNearClipPrimitiveMeter;
+	readonly #projectionMeter: PortalTraversalMeter;
 	#arena: PortalScopeWindowArena | null = null;
-	#executedProjectionPrimitiveCount = 0;
 	#facingTestCount = 0;
 	#index: PortalScopeWindowTopologyIndex | null = null;
 	#mutationCount = 0;
@@ -796,22 +728,9 @@ export class PortalScopeWindowCuller {
 		this.#capacity = capacity;
 		this.#frame = new MutablePortalScopeWindowFrameView(() => this.#arena);
 		this.#projectionMeter = {
-			consumeCachedProjectionBudget: (count: number): void => {
+			consume: (_kind, count): void => {
 				this.#consumeProjectionBudget(count);
 			},
-			consume: (
-				kind: PortalWindowPrimitiveKind | CameraNearClipPrimitiveKind,
-				count: number,
-			): void => {
-				this.#executedProjectionPrimitiveCount += count;
-				if (
-					kind !== "projectionCacheFragmentWriteCount" &&
-					kind !== "projectionCacheVertexWriteCount"
-				) {
-					this.#consumeProjectionBudget(count);
-				}
-			},
-			executedPrimitiveCount: () => this.#executedProjectionPrimitiveCount,
 		};
 	}
 
@@ -885,26 +804,14 @@ export class PortalScopeWindowCuller {
 			index.reciprocalCrossingIds.byteLength +
 			index.renderDomainIdByScopeId.byteLength;
 		this.#frame.trace.projectionPrimitiveCount = this.#projectionPrimitiveCount;
-		this.#frame.trace.executedProjectionPrimitiveCount =
-			this.#executedProjectionPrimitiveCount;
-		this.#frame.trace.projectionPrimitiveExecutionDelta =
-			this.#projectionPrimitiveCount - this.#executedProjectionPrimitiveCount;
 		this.#frame.trace.projectionCacheCapacityBytes =
 			arena.windows.trace.projectionCacheCapacityBytes;
-		this.#frame.trace.projectionCacheColdBypassCount =
-			arena.windows.trace.projectionCacheColdBypassCount;
-		this.#frame.trace.projectionCacheCapacityBypassCount =
-			arena.windows.trace.projectionCacheCapacityBypassCount;
-		this.#frame.trace.projectionCacheDeclinedPromotionCount =
-			arena.windows.trace.projectionCacheDeclinedPromotionCount;
-		this.#frame.trace.projectionCacheFragmentHighWaterCount =
-			arena.windows.trace.projectionCacheFragmentHighWaterCount;
 		this.#frame.trace.projectionCacheHitCount =
 			arena.windows.trace.projectionCacheHitCount;
-		this.#frame.trace.projectionCachePromotionCount =
-			arena.windows.trace.projectionCachePromotionCount;
-		this.#frame.trace.projectionCacheVertexHighWaterCount =
-			arena.windows.trace.projectionCacheVertexHighWaterCount;
+		this.#frame.trace.nearClipCacheHitCount =
+			arena.windows.trace.nearClipCacheHitCount;
+		this.#frame.trace.projectedApertureCount =
+			arena.windows.trace.projectedApertureCount;
 		this.#frame.trace.facingTestCount = this.#facingTestCount;
 		this.#frame.trace.nearClipClassificationCount =
 			this.#nearClipClassificationCount;
@@ -921,16 +828,8 @@ export class PortalScopeWindowCuller {
 		this.#frame.trace.selectedCrossingMarkerWordInputCount =
 			this.#selectedCrossingMarkerWordInputCount;
 		this.#frame.trace.topologyBuildCount = this.#topologyBuildCount;
-		this.#frame.trace.windowFragmentHighWaterCount =
-			arena.windows.trace.fragmentHighWaterCount;
 		this.#frame.trace.windowHighWaterCount =
 			arena.windows.trace.windowHighWaterCount;
-		this.#frame.trace.windowTemporaryFragmentHighWaterCount =
-			arena.windows.trace.temporaryFragmentHighWaterCount;
-		this.#frame.trace.windowTemporaryVertexHighWaterCount =
-			arena.windows.trace.temporaryVertexHighWaterCount;
-		this.#frame.trace.windowVertexHighWaterCount =
-			arena.windows.trace.vertexHighWaterCount;
 		return this.#frame;
 	}
 
@@ -986,7 +885,6 @@ export class PortalScopeWindowCuller {
 			arena.selectedByRenderDomainId[renderDomainId] = 0;
 		}
 		this.#mutationCount = 0;
-		this.#executedProjectionPrimitiveCount = 0;
 		this.#facingTestCount = 0;
 		this.#nearClipClassificationCount = 0;
 		this.#nearPlaneRouteProjectionCount = 0;
@@ -1020,14 +918,6 @@ export class PortalScopeWindowCuller {
 			this.#capacity.maximumWorkItemCount,
 			this.#capacity.maximumDepth,
 			this.#capacity.windowArena,
-			{
-				crossingCount: index.crossings.length,
-				...PORTAL_PROJECTED_APERTURE_CACHE_STORAGE_CAPACITY,
-				maximumEntryCount: Math.min(
-					index.crossings.length,
-					PORTAL_PROJECTED_APERTURE_CACHE_STORAGE_CAPACITY.maximumEntryCount,
-				),
-			},
 		);
 		this.#topologyBuildCount += 1;
 	}
@@ -1167,6 +1057,7 @@ export class PortalScopeWindowCuller {
 				indexed.visibilityAperture,
 				input,
 				this.#projectionMeter,
+				crossingId,
 			);
 			if (!nearPlaneStraddle) {
 				this.#facingTestCount += 1;
@@ -1190,7 +1081,7 @@ export class PortalScopeWindowCuller {
 					input,
 					indexed.visibilityAperture,
 					nearPlaneStraddle,
-					nearPlaneStraddle ? null : crossingId,
+					crossingId,
 					minimumNdcArea,
 					this.#projectionMeter,
 				);
@@ -1220,7 +1111,7 @@ export class PortalScopeWindowCuller {
 				indexed.targetScopeId,
 				crossingId,
 				arena.queueDepths[queueIndex]! + 1,
-				arena.windows.admittedDelta,
+				arena.windows.admittedCoverage,
 				nearPlaneStraddle,
 			);
 		}
@@ -1429,10 +1320,7 @@ function validateCapacity(capacity: PortalScopeWindowCullerCapacity): void {
 	if (capacity.maximumDepth > 0xffff) {
 		throw new Error("Portal culler maximumDepth exceeds Uint16 storage.");
 	}
-	const requiredWindowCount = Math.max(
-		1,
-		capacity.maximumWorkItemCount * 2 - 2,
-	);
+	const requiredWindowCount = capacity.maximumWorkItemCount + 1;
 	if (capacity.windowArena.maximumWindowCount < requiredWindowCount) {
 		throw new Error(
 			`Portal window arena requires at least ${requiredWindowCount} windows for the work-item budget.`,

@@ -8,559 +8,289 @@ import {
 } from "./portal-near-plane";
 import {
 	PORTAL_WINDOW_NDC_EPSILON,
-	PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON,
 	type PortalWindowPrimitiveKind,
 	type PortalWindowPrimitiveMeter,
 	type PreparedPortalApertureProjectionInput,
 	type PreparedPortalProjection,
 } from "./portal-view-window";
 
-/** Sentinel stored in integer queues when no committed arena window exists. */
+/** Sentinel for absent rectangle handles in fixed traversal storage. */
 export const NO_PORTAL_ARENA_WINDOW = 0xffff_ffff;
-/** Full WebGL homogeneous clip volume: left, right, bottom, top, near, and far. */
+/** Full homogeneous frustum; near-ray projection substitutes an eye-side plane. */
 export const PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT = 6;
-/** Four corners in the initial full-screen NDC window. */
-export const PORTAL_ROOT_WINDOW_VERTEX_COUNT = 4;
 
-/** Fixed backing-store dimensions selected at a topology/capacity event. */
+/** Fixed topology-event storage; route depth no longer grows polygon scratch requirements. */
 export interface PortalWindowArenaCapacity {
-	/** Largest authored aperture vertex table classified against the near-clip volume. */
+	/** Maximum authored/reciprocal aperture vertices. */
 	readonly maximumApertureVertexCount: number;
-	/** Committed fragments retained across every live coverage/delta window. */
-	readonly maximumFragmentCount: number;
-	/** Temporary fragments retained by each of the two operation builders. */
-	readonly maximumTemporaryFragmentCount: number;
-	/** Committed NDC vertices retained across every live window. */
-	readonly maximumVertexCount: number;
-	/** Temporary NDC vertices retained independently by each operation builder. */
-	readonly maximumTemporaryVertexCount: number;
-	/** Largest intermediate convex polygon accepted by homogeneous or NDC clipping. */
+	/** One convex aperture loop plus homogeneous clipping planes. */
 	readonly maximumVerticesPerFragment: number;
-	/** Root plus every delta and replacement coverage window committed in one frame. */
+	/** Root plus append-only coverage versions, bounded by the work queue. */
 	readonly maximumWindowCount: number;
 }
 
-/** Fixed storage for ordinary per-camera projected aperture forms. */
-export interface PortalProjectedApertureCacheCapacity {
-	/** Stable directed crossings addressable by the cache. */
-	readonly crossingCount: number;
-	/** Maximum crossing forms retained by the performance-only cache. */
-	readonly maximumEntryCount: number;
-	/** Maximum normalized fragments retained by the performance-only cache. */
-	readonly maximumFragmentCount: number;
-	/** Maximum normalized vertices retained by the performance-only cache. */
-	readonly maximumVertexCount: number;
+/** Actual executed work, including constant-time rectangle and cache operations. */
+export interface PortalTraversalMeter {
+	consume(
+		kind:
+			| PortalWindowPrimitiveKind
+			| CameraNearClipPrimitiveKind
+			| "rectangleIntersectionCount"
+			| "rectangleCoverageTestCount"
+			| "rectangleUnionCount"
+			| "rectangleWriteCount"
+			| "apertureCacheLookupCount"
+			| "apertureCacheWriteCount",
+		count: number,
+	): void;
 }
 
-/**
- * Trace-selected cache storage; exhaustion only resumes ordinary projection.
- *
- * The retained risk corpus reached 149 fragments and 483 vertices in one pose. Binary-rounded
- * headroom keeps this optimization independent from correctness capacity and topology size.
- */
-export const PORTAL_PROJECTED_APERTURE_CACHE_STORAGE_CAPACITY = Object.freeze({
-	maximumEntryCount: 256,
-	maximumFragmentCount: 256,
-	maximumVertexCount: 1_024,
-});
-
-/** Arena exhaustion is handled only at the culler's complete-frontier transaction boundary. */
+/** A declined frontier can safely restore rectangle handles after any capacity cutoff. */
 export class PortalWindowArenaCapacityExceeded extends Error {
-	/** Capacity dimension whose fixed backing store could not accept the operation. */
 	constructor(readonly dimension: keyof PortalWindowArenaCapacity) {
 		super(`Portal window arena exhausted ${dimension}.`);
 	}
 }
-
 function capacityExceeded(
 	dimension: keyof PortalWindowArenaCapacity,
 ): PortalWindowArenaCapacityExceeded {
-	// Capacity rejection is exceptional; a fresh error preserves the actual failing stack.
 	return new PortalWindowArenaCapacityExceeded(dimension);
 }
 
-/** Allocation-free view over one committed arena window. */
-export interface PortalArenaWindowReader {
-	fragmentCount(window: number): number;
-	fragmentVertexCount(window: number, fragment: number): number;
-	vertexX(window: number, fragment: number, vertex: number): number;
-	vertexY(window: number, fragment: number, vertex: number): number;
-}
-
-/** Convex NDC fragments accepted by inherited-window intersection. */
-interface PortalProjectedApertureReader {
-	readonly fragmentCount: number;
-	fragmentVertexCount(fragment: number): number;
-	vertexX(fragment: number, vertex: number): number;
-	vertexY(fragment: number, vertex: number): number;
-	writeBounds(
-		fragment: number,
-		target: Float64Array,
-		offset: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void;
-}
-
-/** Projection meter that preserves the pre-cache cutoff while counting executed work separately. */
-export interface PortalProjectionCacheMeter extends PortalWindowPrimitiveMeter {
-	/** Primitive operations actually executed by the current camera plan. */
-	executedPrimitiveCount(): number;
-	/** Charge skipped projection work only to the compatibility cutoff budget. */
-	consumeCachedProjectionBudget(count: number): void;
-}
-
-/** High-water and backing-store facts updated without producing frame records. */
-export interface PortalWindowArenaTrace {
-	readonly capacityBytes: number;
-	readonly fragmentHighWaterCount: number;
-	readonly projectionCacheCapacityBytes: number;
-	readonly projectionCacheColdBypassCount: number;
-	readonly projectionCacheCapacityBypassCount: number;
-	readonly projectionCacheDeclinedPromotionCount: number;
-	readonly projectionCacheFragmentHighWaterCount: number;
-	readonly projectionCacheHitCount: number;
-	readonly projectionCachePromotionCount: number;
-	readonly projectionCacheVertexHighWaterCount: number;
-	readonly temporaryFragmentHighWaterCount: number;
-	readonly temporaryVertexHighWaterCount: number;
-	readonly vertexHighWaterCount: number;
-	readonly windowHighWaterCount: number;
-}
-
-interface MutablePortalWindowArenaTrace {
-	capacityBytes: number;
-	fragmentHighWaterCount: number;
-	projectionCacheCapacityBytes: number;
-	projectionCacheColdBypassCount: number;
-	projectionCacheCapacityBypassCount: number;
-	projectionCacheDeclinedPromotionCount: number;
-	projectionCacheFragmentHighWaterCount: number;
-	projectionCacheHitCount: number;
-	projectionCachePromotionCount: number;
-	projectionCacheVertexHighWaterCount: number;
-	temporaryFragmentHighWaterCount: number;
-	temporaryVertexHighWaterCount: number;
-	vertexHighWaterCount: number;
-	windowHighWaterCount: number;
-}
-
-const PROJECTION_CACHE_COLD = 0;
-const PROJECTION_CACHE_HIT = 1;
-const PROJECTION_CACHE_PROMOTE = 2;
-
-const PROJECTION_CACHE_OBSERVED_ONCE = 1;
-const PROJECTION_CACHE_OBSERVED_TWICE = 2;
-const PROJECTION_CACHE_RETAINED = 3;
-const PROJECTION_CACHE_DECLINED = 4;
-
-/** Generation-stamped ordinary projection cache with lazy third-use promotion. */
-class PortalProjectedApertureCache implements PortalProjectedApertureReader {
-	readonly #entryByCrossing: Uint16Array;
-	readonly #entryFirstFragment: Uint32Array;
-	readonly #entryFragmentCount: Uint32Array;
-	readonly #entryProjectionPrimitiveCount: Uint32Array;
-	readonly #fragmentFirstVertex: Uint32Array;
-	readonly #fragmentVertexCount: Uint32Array;
-	readonly #generationByCrossing: Uint32Array;
-	readonly #stateByCrossing: Uint8Array;
-	readonly #trace: MutablePortalWindowArenaTrace;
-	readonly #vertexX: Float64Array;
-	readonly #vertexY: Float64Array;
-	#activeFirstFragment = 0;
-	#entryTail = 0;
-	fragmentCount = 0;
-	#fragmentTail = 0;
-	#generation = 0;
-	projectedPrimitiveCount = 0;
-	#vertexTail = 0;
-
-	constructor(
-		capacity: PortalProjectedApertureCacheCapacity,
-		trace: MutablePortalWindowArenaTrace,
-	) {
-		validateProjectionCacheCapacity(capacity);
-		this.#entryByCrossing = new Uint16Array(capacity.crossingCount);
-		this.#entryFirstFragment = new Uint32Array(capacity.maximumEntryCount);
-		this.#entryFragmentCount = new Uint32Array(capacity.maximumEntryCount);
-		this.#entryProjectionPrimitiveCount = new Uint32Array(
-			capacity.maximumEntryCount,
-		);
-		this.#fragmentFirstVertex = new Uint32Array(capacity.maximumFragmentCount);
-		this.#fragmentVertexCount = new Uint32Array(capacity.maximumFragmentCount);
-		this.#generationByCrossing = new Uint32Array(capacity.crossingCount);
-		this.#stateByCrossing = new Uint8Array(capacity.crossingCount);
-		this.#vertexX = new Float64Array(capacity.maximumVertexCount);
-		this.#vertexY = new Float64Array(capacity.maximumVertexCount);
-		this.#trace = trace;
-		trace.projectionCacheCapacityBytes = typedArrayBytes([
-			this.#entryByCrossing,
-			this.#entryFirstFragment,
-			this.#entryFragmentCount,
-			this.#entryProjectionPrimitiveCount,
-			this.#fragmentFirstVertex,
-			this.#fragmentVertexCount,
-			this.#generationByCrossing,
-			this.#stateByCrossing,
-			this.#vertexX,
-			this.#vertexY,
-		]);
-	}
-
-	beginFrame(): void {
-		this.#generation = (this.#generation + 1) >>> 0;
-		if (this.#generation === 0) {
-			this.#generationByCrossing.fill(0);
-			this.#generation = 1;
-		}
-		this.#entryTail = 0;
-		this.#fragmentTail = 0;
-		this.#vertexTail = 0;
-		this.#activeFirstFragment = 0;
-		this.fragmentCount = 0;
-		this.projectedPrimitiveCount = 0;
-		this.#trace.projectionCacheColdBypassCount = 0;
-		this.#trace.projectionCacheCapacityBypassCount = 0;
-		this.#trace.projectionCacheDeclinedPromotionCount = 0;
-		this.#trace.projectionCacheFragmentHighWaterCount = 0;
-		this.#trace.projectionCacheHitCount = 0;
-		this.#trace.projectionCachePromotionCount = 0;
-		this.#trace.projectionCacheVertexHighWaterCount = 0;
-	}
-
-	prepare(crossingId: number): 0 | 1 | 2 {
-		if (this.#generationByCrossing[crossingId] !== this.#generation) {
-			this.#generationByCrossing[crossingId] = this.#generation;
-			this.#stateByCrossing[crossingId] = PROJECTION_CACHE_OBSERVED_ONCE;
-			this.#trace.projectionCacheColdBypassCount += 1;
-			return PROJECTION_CACHE_COLD;
-		}
-		const state = this.#stateByCrossing[crossingId]!;
-		if (state === PROJECTION_CACHE_RETAINED) {
-			this.#activate(crossingId);
-			this.#trace.projectionCacheHitCount += 1;
-			return PROJECTION_CACHE_HIT;
-		}
-		if (state === PROJECTION_CACHE_DECLINED) {
-			this.#trace.projectionCacheCapacityBypassCount += 1;
-			return PROJECTION_CACHE_COLD;
-		}
-		if (state === PROJECTION_CACHE_OBSERVED_ONCE) {
-			this.#stateByCrossing[crossingId] = PROJECTION_CACHE_OBSERVED_TWICE;
-			this.#trace.projectionCacheColdBypassCount += 1;
-			return PROJECTION_CACHE_COLD;
-		}
-		if (state === PROJECTION_CACHE_OBSERVED_TWICE) {
-			this.#trace.projectionCachePromotionCount += 1;
-			return PROJECTION_CACHE_PROMOTE;
-		}
-		throw new Error(
-			`Portal projection cache crossing ${crossingId} has invalid state ${state}.`,
-		);
-	}
-
-	store(
-		crossingId: number,
-		source: PortalProjectedApertureReader,
-		projectedPrimitiveCount: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		if (this.#stateByCrossing[crossingId] !== PROJECTION_CACHE_OBSERVED_TWICE) {
-			throw new Error(
-				`Portal projection cache crossing ${crossingId} was stored from an invalid state.`,
-			);
-		}
-		if (
-			!Number.isSafeInteger(projectedPrimitiveCount) ||
-			projectedPrimitiveCount < 0 ||
-			projectedPrimitiveCount > 0xffff_ffff
-		) {
-			throw new Error(
-				`Portal projection cache received invalid primitive count ${projectedPrimitiveCount}.`,
-			);
-		}
-		let requiredVertexCount = 0;
-		for (let fragment = 0; fragment < source.fragmentCount; fragment += 1) {
-			requiredVertexCount += source.fragmentVertexCount(fragment);
-		}
-		if (
-			this.#entryTail >= this.#entryFirstFragment.length ||
-			this.#fragmentTail + source.fragmentCount >
-				this.#fragmentFirstVertex.length ||
-			this.#vertexTail + requiredVertexCount > this.#vertexX.length
-		) {
-			this.#stateByCrossing[crossingId] = PROJECTION_CACHE_DECLINED;
-			this.#trace.projectionCacheDeclinedPromotionCount += 1;
-			return;
-		}
-		const entry = this.#entryTail;
-		const firstFragment = this.#fragmentTail;
-		this.#entryByCrossing[crossingId] = entry;
-		this.#entryFirstFragment[entry] = firstFragment;
-		this.#entryFragmentCount[entry] = source.fragmentCount;
-		this.#entryProjectionPrimitiveCount[entry] = projectedPrimitiveCount;
-		for (let fragment = 0; fragment < source.fragmentCount; fragment += 1) {
-			const vertexCount = source.fragmentVertexCount(fragment);
-			charge(meter, "projectionCacheFragmentWriteCount", 1);
-			charge(meter, "projectionCacheVertexWriteCount", vertexCount);
-			this.#fragmentFirstVertex[this.#fragmentTail] = this.#vertexTail;
-			this.#fragmentVertexCount[this.#fragmentTail] = vertexCount;
-			for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-				this.#vertexX[this.#vertexTail] = source.vertexX(fragment, vertex);
-				this.#vertexY[this.#vertexTail] = source.vertexY(fragment, vertex);
-				this.#vertexTail += 1;
-			}
-			this.#fragmentTail += 1;
-		}
-		this.#entryTail += 1;
-		this.#stateByCrossing[crossingId] = PROJECTION_CACHE_RETAINED;
-		this.#trace.projectionCacheFragmentHighWaterCount = this.#fragmentTail;
-		this.#trace.projectionCacheVertexHighWaterCount = this.#vertexTail;
-		this.#activeFirstFragment = firstFragment;
-		this.fragmentCount = source.fragmentCount;
-		this.projectedPrimitiveCount = projectedPrimitiveCount;
-	}
-
-	fragmentVertexCount(fragment: number): number {
-		return this.#fragmentVertexCount[this.#activeFirstFragment + fragment]!;
-	}
-
-	vertexX(fragment: number, vertex: number): number {
-		const cachedFragment = this.#activeFirstFragment + fragment;
-		return this.#vertexX[this.#fragmentFirstVertex[cachedFragment]! + vertex]!;
-	}
-
-	vertexY(fragment: number, vertex: number): number {
-		const cachedFragment = this.#activeFirstFragment + fragment;
-		return this.#vertexY[this.#fragmentFirstVertex[cachedFragment]! + vertex]!;
-	}
-
-	writeBounds(
-		fragment: number,
-		target: Float64Array,
-		offset: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		const count = this.fragmentVertexCount(fragment);
-		charge(meter, "polygonBoundsVertexVisitCount", 1);
-		let minX = this.vertexX(fragment, 0);
-		let minY = this.vertexY(fragment, 0);
-		let maxX = minX;
-		let maxY = minY;
-		for (let vertex = 1; vertex < count; vertex += 1) {
-			charge(meter, "polygonBoundsVertexVisitCount", 1);
-			const x = this.vertexX(fragment, vertex);
-			const y = this.vertexY(fragment, vertex);
-			minX = Math.min(minX, x);
-			minY = Math.min(minY, y);
-			maxX = Math.max(maxX, x);
-			maxY = Math.max(maxY, y);
-		}
-		target[offset] = minX;
-		target[offset + 1] = minY;
-		target[offset + 2] = maxX;
-		target[offset + 3] = maxY;
-	}
-
-	#activate(crossingId: number): void {
-		const entry = this.#entryByCrossing[crossingId]!;
-		this.#activeFirstFragment = this.#entryFirstFragment[entry]!;
-		this.fragmentCount = this.#entryFragmentCount[entry]!;
-		this.projectedPrimitiveCount = this.#entryProjectionPrimitiveCount[entry]!;
-	}
-}
-
-/**
- * Append-only normalized window storage plus reusable output-to-target projection builders.
- *
- * Handles are valid only until `reset` or a rollback crossing their commit point. Callers retain
- * integers, never arrays or fragment objects.
- */
-export class PortalWindowArena implements PortalArenaWindowReader {
-	readonly #builderA: PolygonBuilder;
-	readonly #builderB: PolygonBuilder;
+/** Allocation-free rectangular propagation with per-view, per-crossing geometry reuse. */
+export class PortalWindowArena {
+	readonly #capacity: PortalWindowArenaCapacity;
+	readonly #rectangles: Float64Array;
+	readonly #nearStates: Uint8Array;
+	readonly #projectionStates: Uint8Array;
+	readonly #projectedBounds: Float64Array;
+	readonly #bounds = new Float64Array(4);
 	readonly #apertureX: Float64Array;
 	readonly #apertureY: Float64Array;
 	readonly #apertureZ: Float64Array;
-	readonly #boundsScratch: Float64Array;
-	readonly #capacity: PortalWindowArenaCapacity;
-	readonly #clipAw: Float64Array;
 	readonly #clipAx: Float64Array;
 	readonly #clipAy: Float64Array;
 	readonly #clipAz: Float64Array;
-	readonly #clipBw: Float64Array;
+	readonly #clipAw: Float64Array;
 	readonly #clipBx: Float64Array;
 	readonly #clipBy: Float64Array;
 	readonly #clipBz: Float64Array;
-	readonly #fragmentFirstVertex: Uint32Array;
-	readonly #fragmentVertexCount: Uint32Array;
-	readonly #ndcAx: Float64Array;
-	readonly #ndcAy: Float64Array;
-	readonly #ndcBx: Float64Array;
-	readonly #ndcBy: Float64Array;
-	readonly #projectionCache: PortalProjectedApertureCache;
-	readonly #trace: MutablePortalWindowArenaTrace;
-	readonly #vertexX: Float64Array;
-	readonly #vertexY: Float64Array;
-	readonly #windowFirstFragment: Uint32Array;
-	readonly #windowFragmentCount: Uint32Array;
-	#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
-	#admittedDelta = NO_PORTAL_ARENA_WINDOW;
-	#fragmentCount = 0;
-	#vertexCount = 0;
+	readonly #clipBw: Float64Array;
 	#windowCount = 0;
+	#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
+	/** Topology storage and frame work counters, sampled by the culler. */
+	readonly trace: {
+		capacityBytes: number;
+		projectionCacheCapacityBytes: number;
+		projectionCacheHitCount: number;
+		nearClipCacheHitCount: number;
+		projectedApertureCount: number;
+		windowHighWaterCount: number;
+	};
 
-	constructor(
-		capacity: PortalWindowArenaCapacity,
-		projectionCacheCapacity: PortalProjectedApertureCacheCapacity,
-	) {
-		validateCapacity(capacity);
+	constructor(capacity: PortalWindowArenaCapacity, crossingCount: number) {
+		for (const [dimension, value] of Object.entries(capacity))
+			if (!Number.isSafeInteger(value) || value < 1)
+				throw new Error(`Invalid portal rectangle capacity ${dimension}.`);
+		if (!Number.isSafeInteger(crossingCount) || crossingCount < 0)
+			throw new Error("Invalid portal crossing cache size.");
 		this.#capacity = capacity;
+		this.#rectangles = new Float64Array(capacity.maximumWindowCount * 4);
+		this.#nearStates = new Uint8Array(crossingCount);
+		this.#projectionStates = new Uint8Array(crossingCount * 2);
+		this.#projectedBounds = new Float64Array(crossingCount * 8);
 		this.#apertureX = new Float64Array(capacity.maximumApertureVertexCount);
 		this.#apertureY = new Float64Array(capacity.maximumApertureVertexCount);
 		this.#apertureZ = new Float64Array(capacity.maximumApertureVertexCount);
-		this.#windowFirstFragment = new Uint32Array(capacity.maximumWindowCount);
-		this.#windowFragmentCount = new Uint32Array(capacity.maximumWindowCount);
-		this.#fragmentFirstVertex = new Uint32Array(capacity.maximumFragmentCount);
-		this.#fragmentVertexCount = new Uint32Array(capacity.maximumFragmentCount);
-		this.#vertexX = new Float64Array(capacity.maximumVertexCount);
-		this.#vertexY = new Float64Array(capacity.maximumVertexCount);
-		this.#builderA = new PolygonBuilder(capacity);
-		this.#builderB = new PolygonBuilder(capacity);
-		this.#boundsScratch = new Float64Array(8);
-		this.#clipAw = new Float64Array(capacity.maximumVerticesPerFragment);
 		this.#clipAx = new Float64Array(capacity.maximumVerticesPerFragment);
 		this.#clipAy = new Float64Array(capacity.maximumVerticesPerFragment);
 		this.#clipAz = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#clipBw = new Float64Array(capacity.maximumVerticesPerFragment);
+		this.#clipAw = new Float64Array(capacity.maximumVerticesPerFragment);
 		this.#clipBx = new Float64Array(capacity.maximumVerticesPerFragment);
 		this.#clipBy = new Float64Array(capacity.maximumVerticesPerFragment);
 		this.#clipBz = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#ndcAx = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#ndcAy = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#ndcBx = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#ndcBy = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#trace = {
+		this.#clipBw = new Float64Array(capacity.maximumVerticesPerFragment);
+		const projectionCacheCapacityBytes =
+			this.#nearStates.byteLength +
+			this.#projectionStates.byteLength +
+			this.#projectedBounds.byteLength;
+		this.trace = {
 			capacityBytes:
-				typedArrayBytes([
-					this.#apertureX,
-					this.#apertureY,
-					this.#apertureZ,
-					this.#boundsScratch,
-					this.#windowFirstFragment,
-					this.#windowFragmentCount,
-					this.#fragmentFirstVertex,
-					this.#fragmentVertexCount,
-					this.#vertexX,
-					this.#vertexY,
-					this.#clipAw,
-					this.#clipAx,
-					this.#clipAy,
-					this.#clipAz,
-					this.#clipBw,
-					this.#clipBx,
-					this.#clipBy,
-					this.#clipBz,
-					this.#ndcAx,
-					this.#ndcAy,
-					this.#ndcBx,
-					this.#ndcBy,
-				]) +
-				this.#builderA.capacityBytes +
-				this.#builderB.capacityBytes,
-			fragmentHighWaterCount: 0,
-			projectionCacheCapacityBytes: 0,
-			projectionCacheColdBypassCount: 0,
-			projectionCacheCapacityBypassCount: 0,
-			projectionCacheDeclinedPromotionCount: 0,
-			projectionCacheFragmentHighWaterCount: 0,
+				projectionCacheCapacityBytes +
+				this.#rectangles.byteLength +
+				this.#bounds.byteLength +
+				(3 * capacity.maximumApertureVertexCount +
+					8 * capacity.maximumVerticesPerFragment) *
+					Float64Array.BYTES_PER_ELEMENT,
+			projectionCacheCapacityBytes,
 			projectionCacheHitCount: 0,
-			projectionCachePromotionCount: 0,
-			projectionCacheVertexHighWaterCount: 0,
-			temporaryFragmentHighWaterCount: 0,
-			temporaryVertexHighWaterCount: 0,
-			vertexHighWaterCount: 0,
+			nearClipCacheHitCount: 0,
+			projectedApertureCount: 0,
 			windowHighWaterCount: 0,
 		};
-		this.#projectionCache = new PortalProjectedApertureCache(
-			projectionCacheCapacity,
-			this.#trace,
-		);
-		this.#trace.capacityBytes += this.#trace.projectionCacheCapacityBytes;
 	}
 
+	/** Propagate the entire enlarged rectangle, including gaps introduced by enclosing unions. */
 	get admittedCoverage(): number {
 		return this.#admittedCoverage;
 	}
-
-	get admittedDelta(): number {
-		return this.#admittedDelta;
-	}
-
-	get trace(): PortalWindowArenaTrace {
-		return this.#trace;
-	}
-
-	/** Current append tail; sufficient to restore every subordinate tail deterministically. */
 	checkpoint(): number {
 		return this.#windowCount;
 	}
-
-	/** Reset logical lengths while retaining every backing store. */
 	reset(): number {
-		this.#windowCount = 0;
-		this.#fragmentCount = 0;
-		this.#vertexCount = 0;
+		this.#windowCount = 1;
+		this.#rectangles[0] = this.#rectangles[1] = -1;
+		this.#rectangles[2] = this.#rectangles[3] = 1;
+		this.#nearStates.fill(0);
+		this.#projectionStates.fill(0);
 		this.#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
-		this.#admittedDelta = NO_PORTAL_ARENA_WINDOW;
-		this.#projectionCache.beginFrame();
-		this.#builderA.reset();
-		this.#builderB.reset();
-		this.#trace.fragmentHighWaterCount = 0;
-		this.#trace.temporaryFragmentHighWaterCount = 0;
-		this.#trace.temporaryVertexHighWaterCount = 0;
-		this.#trace.vertexHighWaterCount = 0;
-		this.#trace.windowHighWaterCount = 0;
-		this.#builderA.addRawPolygon(
-			FULL_WINDOW_X,
-			FULL_WINDOW_Y,
-			FULL_WINDOW_X.length,
-			null,
-		);
-		this.#builderA.finish(null, this.#ndcAx, this.#ndcAy);
-		return this.#commit(this.#builderA);
+		this.trace.projectionCacheHitCount = 0;
+		this.trace.nearClipCacheHitCount = 0;
+		this.trace.projectedApertureCount = 0;
+		this.trace.windowHighWaterCount = 1;
+		return 0;
 	}
-
-	/** Restore the append tail after a declined frontier. */
-	rollback(windowCount: number): void {
+	rollback(checkpoint: number): void {
 		if (
-			!Number.isInteger(windowCount) ||
-			windowCount < 0 ||
-			windowCount > this.#windowCount
-		) {
-			throw new Error(`Portal window rollback ${windowCount} is unavailable.`);
-		}
-		this.#windowCount = windowCount;
-		if (windowCount === 0) {
-			this.#fragmentCount = 0;
-			this.#vertexCount = 0;
-			return;
-		}
-		const lastWindow = windowCount - 1;
-		this.#fragmentCount =
-			this.#windowFirstFragment[lastWindow]! +
-			this.#windowFragmentCount[lastWindow]!;
-		if (this.#fragmentCount === 0) {
-			this.#vertexCount = 0;
-			return;
-		}
-		const lastFragment = this.#fragmentCount - 1;
-		this.#vertexCount =
-			this.#fragmentFirstVertex[lastFragment]! +
-			this.#fragmentVertexCount[lastFragment]!;
+			!Number.isInteger(checkpoint) ||
+			checkpoint < 1 ||
+			checkpoint > this.#windowCount
+		)
+			throw new Error("Invalid portal rectangle checkpoint.");
+		this.#windowCount = checkpoint;
+		this.#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
 	}
-
-	/** Classify one prepared authored aperture without camera-time point or polygon objects. */
 	apertureIntersectsNearClip(
+		volume: CameraNearClipVolume,
+		aperture: PreparedPortalApertureProjectionInput,
+		projection: PreparedPortalProjection,
+		meter: PortalTraversalMeter,
+		crossingId: number,
+	): boolean {
+		this.#requireCrossing(crossingId);
+		meter.consume("apertureCacheLookupCount", 1);
+		const state = this.#nearStates[crossingId]!;
+		if (state !== 0) {
+			this.trace.nearClipCacheHitCount += 1;
+			return state === 2;
+		}
+		const result = this.#classifyNearClip(volume, aperture, projection, meter);
+		meter.consume("apertureCacheWriteCount", 1);
+		this.#nearStates[crossingId] = result ? 2 : 1;
+		return result;
+	}
+	projectAndAdmit(
+		inherited: number,
+		coverage: number,
+		projection: PreparedPortalProjection,
+		aperture: PreparedPortalApertureProjectionInput,
+		nearClipRays: boolean,
+		crossingId: number,
+		minimumNdcArea: number,
+		meter: PortalTraversalMeter,
+	): boolean {
+		this.#requireWindow(inherited);
+		this.#requireCrossing(crossingId);
+		if (coverage !== NO_PORTAL_ARENA_WINDOW) this.#requireWindow(coverage);
+		this.#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
+		const slot = crossingId * 2 + (nearClipRays ? 1 : 0);
+		const offset = slot * 4;
+		meter.consume("apertureCacheLookupCount", 1);
+		if (this.#projectionStates[slot] === 0) {
+			this.#projectAperture(projection, aperture, nearClipRays, meter);
+			meter.consume("apertureCacheWriteCount", 5);
+			this.#projectedBounds.set(this.#bounds, offset);
+			this.#projectionStates[slot] = 1;
+			this.trace.projectedApertureCount += 1;
+		} else this.trace.projectionCacheHitCount += 1;
+		meter.consume("rectangleIntersectionCount", 4);
+		const parent = inherited * 4;
+		let left = Math.max(
+			this.#rectangles[parent]!,
+			this.#projectedBounds[offset]!,
+		);
+		let bottom = Math.max(
+			this.#rectangles[parent + 1]!,
+			this.#projectedBounds[offset + 1]!,
+		);
+		let right = Math.min(
+			this.#rectangles[parent + 2]!,
+			this.#projectedBounds[offset + 2]!,
+		);
+		let top = Math.min(
+			this.#rectangles[parent + 3]!,
+			this.#projectedBounds[offset + 3]!,
+		);
+		if (
+			left >= right ||
+			bottom >= top ||
+			(right - left) * (top - bottom) < minimumNdcArea
+		)
+			return false;
+		if (coverage !== NO_PORTAL_ARENA_WINDOW) {
+			const previous = coverage * 4;
+			meter.consume("rectangleCoverageTestCount", 4);
+			if (
+				left >= this.#rectangles[previous]! &&
+				bottom >= this.#rectangles[previous + 1]! &&
+				right <= this.#rectangles[previous + 2]! &&
+				top <= this.#rectangles[previous + 3]!
+			)
+				return false;
+			meter.consume("rectangleUnionCount", 4);
+			left = Math.min(left, this.#rectangles[previous]!);
+			bottom = Math.min(bottom, this.#rectangles[previous + 1]!);
+			right = Math.max(right, this.#rectangles[previous + 2]!);
+			top = Math.max(top, this.#rectangles[previous + 3]!);
+		}
+		if (this.#windowCount >= this.#capacity.maximumWindowCount)
+			throw capacityExceeded("maximumWindowCount");
+		meter.consume("rectangleWriteCount", 4);
+		const target = this.#windowCount * 4;
+		this.#rectangles[target] = left;
+		this.#rectangles[target + 1] = bottom;
+		this.#rectangles[target + 2] = right;
+		this.#rectangles[target + 3] = top;
+		this.#admittedCoverage = this.#windowCount++;
+		this.trace.windowHighWaterCount = Math.max(
+			this.trace.windowHighWaterCount,
+			this.#windowCount,
+		);
+		return true;
+	}
+	/** Read the stored rectangle bound without constructing a frame record. */
+	minimumNdcX(window: number): number {
+		this.#requireWindow(window);
+		return this.#rectangles[window * 4 + 0]!;
+	}
+	/** Read the stored rectangle bound without constructing a frame record. */
+	minimumNdcY(window: number): number {
+		this.#requireWindow(window);
+		return this.#rectangles[window * 4 + 1]!;
+	}
+	/** Read the stored rectangle bound without constructing a frame record. */
+	maximumNdcX(window: number): number {
+		this.#requireWindow(window);
+		return this.#rectangles[window * 4 + 2]!;
+	}
+	/** Read the stored rectangle bound without constructing a frame record. */
+	maximumNdcY(window: number): number {
+		this.#requireWindow(window);
+		return this.#rectangles[window * 4 + 3]!;
+	}
+	#requireWindow(window: number): void {
+		if (!Number.isInteger(window) || window < 0 || window >= this.#windowCount)
+			throw new Error(`Unavailable portal rectangle ${window}.`);
+	}
+	#requireCrossing(crossing: number): void {
+		if (
+			!Number.isInteger(crossing) ||
+			crossing < 0 ||
+			crossing >= this.#nearStates.length
+		)
+			throw new Error(`Unavailable portal aperture cache ${crossing}.`);
+	}
+	#classifyNearClip(
 		volume: CameraNearClipVolume,
 		aperture: PreparedPortalApertureProjectionInput,
 		projection: PreparedPortalProjection,
@@ -634,285 +364,14 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 		}
 		return false;
 	}
-
-	/**
-	 * Project, intersect, footprint-test, and admit one aperture without materializing a window.
-	 */
-	projectAndAdmit(
-		inherited: number,
-		coverage: number,
-		projection: PreparedPortalProjection,
-		aperture: PreparedPortalApertureProjectionInput,
-		nearClipRays: boolean,
-		ordinaryProjectionCacheCrossingId: number | null,
-		minimumNdcArea: number,
-		meter: PortalProjectionCacheMeter | null,
-	): boolean {
-		this.#requireWindow(inherited);
-		if (coverage !== NO_PORTAL_ARENA_WINDOW) this.#requireWindow(coverage);
-		this.#admittedCoverage = NO_PORTAL_ARENA_WINDOW;
-		this.#admittedDelta = NO_PORTAL_ARENA_WINDOW;
-		this.#builderA.reset();
-		this.#builderB.reset();
-		let projected: PortalProjectedApertureReader = this.#builderA;
-		let cacheState = PROJECTION_CACHE_COLD;
-		if (ordinaryProjectionCacheCrossingId !== null) {
-			cacheState = this.#projectionCache.prepare(
-				ordinaryProjectionCacheCrossingId,
-			);
-			if (cacheState === PROJECTION_CACHE_HIT) {
-				projected = this.#projectionCache;
-				meter?.consumeCachedProjectionBudget(
-					this.#projectionCache.projectedPrimitiveCount,
-				);
-			}
-		}
-		if (cacheState !== PROJECTION_CACHE_HIT) {
-			const executedBeforeProjection = meter?.executedPrimitiveCount() ?? 0;
-			this.#projectAperture(projection, aperture, nearClipRays, meter);
-			const projectedPrimitiveCount =
-				(meter?.executedPrimitiveCount() ?? 0) - executedBeforeProjection;
-			if (
-				cacheState === PROJECTION_CACHE_PROMOTE &&
-				ordinaryProjectionCacheCrossingId !== null
-			) {
-				this.#projectionCache.store(
-					ordinaryProjectionCacheCrossingId,
-					this.#builderA,
-					projectedPrimitiveCount,
-					meter,
-				);
-			}
-		}
-		if (projected.fragmentCount === 0) return false;
-		this.#intersectWindow(inherited, projected, this.#builderB, meter);
-		if (this.#builderB.fragmentCount === 0) return false;
-		if (this.#builderB.ndcArea() < minimumNdcArea) return false;
-		if (coverage === NO_PORTAL_ARENA_WINDOW) {
-			const candidate = this.#commit(this.#builderB);
-			this.#admittedCoverage = candidate;
-			this.#admittedDelta = candidate;
-			return true;
-		}
-		this.#builderA.reset();
-		for (
-			let fragment = 0;
-			fragment < this.#builderB.fragmentCount;
-			fragment += 1
-		) {
-			if (
-				!this.#arenaWindowContainsBuilderFragment(
-					coverage,
-					this.#builderB,
-					fragment,
-				)
-			) {
-				this.#builderA.copyFragmentFromBuilder(this.#builderB, fragment, meter);
-			}
-		}
-		this.#builderA.finish(meter, this.#ndcAx, this.#ndcAy);
-		if (this.#builderA.fragmentCount === 0) return false;
-		this.#builderB.reset();
-		const coverageFirst = this.#windowFirstFragment[coverage]!;
-		const coverageCount = this.#windowFragmentCount[coverage]!;
-		for (let ordinal = 0; ordinal < coverageCount; ordinal += 1) {
-			const fragment = coverageFirst + ordinal;
-			if (!this.#builderA.containsArenaFragment(this, fragment)) {
-				this.#builderB.copyFragmentFromArena(this, fragment, meter);
-			}
-		}
-		for (
-			let fragment = 0;
-			fragment < this.#builderA.fragmentCount;
-			fragment += 1
-		) {
-			this.#builderB.copyFragmentFromBuilder(this.#builderA, fragment, meter);
-		}
-		this.#builderB.finish(meter, this.#ndcAx, this.#ndcAy);
-		this.#admittedDelta = this.#commit(this.#builderA);
-		this.#admittedCoverage = this.#commit(this.#builderB);
-		return true;
-	}
-
-	fragmentCount(window: number): number {
-		this.#requireWindow(window);
-		return this.#windowFragmentCount[window]!;
-	}
-
-	fragmentVertexCount(window: number, fragment: number): number {
-		const fragmentId = this.#fragmentId(window, fragment);
-		return this.#fragmentVertexCount[fragmentId]!;
-	}
-
-	vertexX(window: number, fragment: number, vertex: number): number {
-		return this.#vertex(window, fragment, vertex, this.#vertexX);
-	}
-
-	vertexY(window: number, fragment: number, vertex: number): number {
-		return this.#vertex(window, fragment, vertex, this.#vertexY);
-	}
-
-	/** Builder-only access using an already validated absolute fragment id. */
-	fragmentFirstVertex(fragment: number): number {
-		return this.#fragmentFirstVertex[fragment]!;
-	}
-
-	/** Builder-only access using an already validated absolute fragment id. */
-	absoluteFragmentVertexCount(fragment: number): number {
-		return this.#fragmentVertexCount[fragment]!;
-	}
-
-	/** Builder-only access using an already validated absolute vertex id. */
-	absoluteVertexX(vertex: number): number {
-		return this.#vertexX[vertex]!;
-	}
-
-	/** Builder-only access using an already validated absolute vertex id. */
-	absoluteVertexY(vertex: number): number {
-		return this.#vertexY[vertex]!;
-	}
-
-	#arenaWindowContainsBuilderFragment(
-		window: number,
-		candidate: PolygonBuilder,
-		candidateFragment: number,
-	): boolean {
-		const first = this.#windowFirstFragment[window]!;
-		const count = this.#windowFragmentCount[window]!;
-		for (let ordinal = 0; ordinal < count; ordinal += 1) {
-			if (
-				candidate.builderFragmentContainedByArenaFragment(
-					candidateFragment,
-					this,
-					first + ordinal,
-				)
-			) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	#commit(builder: PolygonBuilder): number {
-		if (builder.fragmentCount === 0)
-			throw new Error("Cannot commit an empty portal window.");
-		if (this.#windowCount >= this.#capacity.maximumWindowCount) {
-			throw capacityExceeded("maximumWindowCount");
-		}
-		if (
-			this.#fragmentCount + builder.fragmentCount >
-			this.#capacity.maximumFragmentCount
-		) {
-			throw capacityExceeded("maximumFragmentCount");
-		}
-		if (
-			this.#vertexCount + builder.liveVertexCount >
-			this.#capacity.maximumVertexCount
-		) {
-			throw capacityExceeded("maximumVertexCount");
-		}
-		const window = this.#windowCount;
-		this.#windowFirstFragment[window] = this.#fragmentCount;
-		this.#windowFragmentCount[window] = builder.fragmentCount;
-		for (let fragment = 0; fragment < builder.fragmentCount; fragment += 1) {
-			const count = builder.fragmentVertexCount(fragment);
-			this.#fragmentFirstVertex[this.#fragmentCount] = this.#vertexCount;
-			this.#fragmentVertexCount[this.#fragmentCount] = count;
-			for (let vertex = 0; vertex < count; vertex += 1) {
-				this.#vertexX[this.#vertexCount] = builder.vertexX(fragment, vertex);
-				this.#vertexY[this.#vertexCount] = builder.vertexY(fragment, vertex);
-				this.#vertexCount += 1;
-			}
-			this.#fragmentCount += 1;
-		}
-		this.#windowCount += 1;
-		this.#recordHighWater();
-		return window;
-	}
-
-	#fragmentId(window: number, fragment: number): number {
-		this.#requireWindow(window);
-		const count = this.#windowFragmentCount[window]!;
-		if (!Number.isInteger(fragment) || fragment < 0 || fragment >= count) {
-			throw new Error(
-				`Portal window ${window} fragment ${fragment} is unavailable.`,
-			);
-		}
-		return this.#windowFirstFragment[window]! + fragment;
-	}
-
-	#intersectWindow(
-		window: number,
-		clip: PortalProjectedApertureReader,
-		output: PolygonBuilder,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		output.reset();
-		const first = this.#windowFirstFragment[window]!;
-		const count = this.#windowFragmentCount[window]!;
-		for (let ordinal = 0; ordinal < count; ordinal += 1) {
-			const subjectFragment = first + ordinal;
-			const subjectCount = this.#fragmentVertexCount[subjectFragment]!;
-			const subjectFirst = this.#fragmentFirstVertex[subjectFragment]!;
-			arenaBounds(this, subjectFragment, this.#boundsScratch, 0, meter);
-			for (
-				let clipFragment = 0;
-				clipFragment < clip.fragmentCount;
-				clipFragment += 1
-			) {
-				charge(meter, "exactIntersectionPairCount", 1);
-				clip.writeBounds(clipFragment, this.#boundsScratch, 4, meter);
-				if (boundsDisjoint(this.#boundsScratch, 0, 4)) continue;
-				ensureFragmentCapacity(
-					subjectCount,
-					this.#capacity.maximumVerticesPerFragment,
-				);
-				for (let vertex = 0; vertex < subjectCount; vertex += 1) {
-					this.#ndcAx[vertex] = this.#vertexX[subjectFirst + vertex]!;
-					this.#ndcAy[vertex] = this.#vertexY[subjectFirst + vertex]!;
-				}
-				charge(meter, "createdNdcVertexCount", subjectCount);
-				charge(meter, "createdPolygonCount", 1);
-				let activeX = this.#ndcAx;
-				let activeY = this.#ndcAy;
-				let scratchX = this.#ndcBx;
-				let scratchY = this.#ndcBy;
-				let activeCount = subjectCount;
-				const clipCount = clip.fragmentVertexCount(clipFragment);
-				for (let edge = 0; edge < clipCount && activeCount >= 3; edge += 1) {
-					activeCount = clipNdcPolygon(
-						activeX,
-						activeY,
-						activeCount,
-						clip.vertexX(clipFragment, edge),
-						clip.vertexY(clipFragment, edge),
-						clip.vertexX(clipFragment, (edge + 1) % clipCount),
-						clip.vertexY(clipFragment, (edge + 1) % clipCount),
-						scratchX,
-						scratchY,
-						meter,
-					);
-					const previousX = activeX;
-					const previousY = activeY;
-					activeX = scratchX;
-					activeY = scratchY;
-					scratchX = previousX;
-					scratchY = previousY;
-				}
-				if (activeCount < 3) continue;
-				output.addRawPolygon(activeX, activeY, activeCount, meter);
-			}
-		}
-		output.finish(meter, this.#ndcAx, this.#ndcAy);
-	}
-
 	#projectAperture(
 		projection: PreparedPortalProjection,
 		input: PreparedPortalApertureProjectionInput,
 		nearClipRays: boolean,
 		meter: PortalWindowPrimitiveMeter | null,
 	): void {
-		this.#builderA.reset();
+		this.#bounds.fill(Infinity, 0, 2);
+		this.#bounds.fill(-Infinity, 2);
 		const offsetX =
 			(input.landblockCoordinates.x - projection.anchorCoordinates.x) *
 			OUTDOOR_LANDBLOCK_WORLD_SIZE;
@@ -1002,709 +461,18 @@ export class PortalWindowArena implements PortalArenaWindowReader {
 				}
 			}
 			if (!finite) continue;
+			charge(meter, "polygonBoundsVertexVisitCount", count);
 			for (let vertex = 0; vertex < count; vertex += 1) {
-				this.#ndcAx[vertex] = activeX[vertex]! / activeW[vertex]!;
-				this.#ndcAy[vertex] = activeY[vertex]! / activeW[vertex]!;
+				const x = activeX[vertex]! / activeW[vertex]!;
+				const y = activeY[vertex]! / activeW[vertex]!;
+				this.#bounds[0] = Math.min(this.#bounds[0]!, x);
+				this.#bounds[1] = Math.min(this.#bounds[1]!, y);
+				this.#bounds[2] = Math.max(this.#bounds[2]!, x);
+				this.#bounds[3] = Math.max(this.#bounds[3]!, y);
 			}
-			charge(meter, "createdNdcVertexCount", count);
-			charge(meter, "createdPolygonCount", 1);
-			this.#builderA.addRawPolygon(this.#ndcAx, this.#ndcAy, count, meter);
 		}
-		this.#builderA.finish(meter, this.#ndcAx, this.#ndcAy);
-		this.#recordTemporaryHighWater();
-	}
-
-	#recordHighWater(): void {
-		this.#trace.fragmentHighWaterCount = Math.max(
-			this.#trace.fragmentHighWaterCount,
-			this.#fragmentCount,
-		);
-		this.#trace.vertexHighWaterCount = Math.max(
-			this.#trace.vertexHighWaterCount,
-			this.#vertexCount,
-		);
-		this.#trace.windowHighWaterCount = Math.max(
-			this.#trace.windowHighWaterCount,
-			this.#windowCount,
-		);
-		this.#recordTemporaryHighWater();
-	}
-
-	#recordTemporaryHighWater(): void {
-		this.#trace.temporaryFragmentHighWaterCount = Math.max(
-			this.#trace.temporaryFragmentHighWaterCount,
-			this.#builderA.fragmentHighWaterCount,
-			this.#builderB.fragmentHighWaterCount,
-		);
-		this.#trace.temporaryVertexHighWaterCount = Math.max(
-			this.#trace.temporaryVertexHighWaterCount,
-			this.#builderA.vertexHighWaterCount,
-			this.#builderB.vertexHighWaterCount,
-		);
-	}
-
-	#requireWindow(window: number): void {
-		if (
-			!Number.isInteger(window) ||
-			window < 0 ||
-			window >= this.#windowCount
-		) {
-			throw new Error(`Portal arena window ${window} is unavailable.`);
-		}
-	}
-
-	#vertex(
-		window: number,
-		fragment: number,
-		vertex: number,
-		values: Float64Array,
-	): number {
-		const fragmentId = this.#fragmentId(window, fragment);
-		const count = this.#fragmentVertexCount[fragmentId]!;
-		if (!Number.isInteger(vertex) || vertex < 0 || vertex >= count) {
-			throw new Error(
-				`Portal fragment ${fragmentId} vertex ${vertex} is unavailable.`,
-			);
-		}
-		return values[this.#fragmentFirstVertex[fragmentId]! + vertex]!;
 	}
 }
-
-class PolygonBuilder {
-	readonly #capacity: PortalWindowArenaCapacity;
-	readonly #copyX: Float64Array;
-	readonly #copyY: Float64Array;
-	readonly #fragmentFirstVertex: Uint32Array;
-	readonly #fragmentVertexCount: Uint32Array;
-	readonly #normalizeX: Float64Array;
-	readonly #normalizeY: Float64Array;
-	readonly #vertexX: Float64Array;
-	readonly #vertexY: Float64Array;
-	fragmentCount = 0;
-	fragmentHighWaterCount = 0;
-	vertexCount = 0;
-	vertexHighWaterCount = 0;
-
-	constructor(capacity: PortalWindowArenaCapacity) {
-		this.#capacity = capacity;
-		this.#copyX = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#copyY = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#fragmentFirstVertex = new Uint32Array(
-			capacity.maximumTemporaryFragmentCount,
-		);
-		this.#fragmentVertexCount = new Uint32Array(
-			capacity.maximumTemporaryFragmentCount,
-		);
-		this.#normalizeX = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#normalizeY = new Float64Array(capacity.maximumVerticesPerFragment);
-		this.#vertexX = new Float64Array(capacity.maximumTemporaryVertexCount);
-		this.#vertexY = new Float64Array(capacity.maximumTemporaryVertexCount);
-	}
-
-	get capacityBytes(): number {
-		return typedArrayBytes([
-			this.#copyX,
-			this.#copyY,
-			this.#fragmentFirstVertex,
-			this.#fragmentVertexCount,
-			this.#normalizeX,
-			this.#normalizeY,
-			this.#vertexX,
-			this.#vertexY,
-		]);
-	}
-
-	get liveVertexCount(): number {
-		let count = 0;
-		for (let fragment = 0; fragment < this.fragmentCount; fragment += 1) {
-			count += this.#fragmentVertexCount[fragment]!;
-		}
-		return count;
-	}
-
-	reset(): void {
-		this.fragmentCount = 0;
-		this.vertexCount = 0;
-	}
-
-	addRawPolygon(
-		x: Float64Array,
-		y: Float64Array,
-		count: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		const normalizedCount = normalizePolygon(
-			x,
-			y,
-			count,
-			this.#normalizeX,
-			this.#normalizeY,
-			meter,
-		);
-		if (normalizedCount < 3) return;
-		for (let fragment = 0; fragment < this.fragmentCount; fragment += 1) {
-			if (this.#identityEqualsRaw(fragment, x, y, normalizedCount, meter))
-				return;
-		}
-		this.#appendRaw(x, y, normalizedCount);
-	}
-
-	copyFragmentFromBuilder(
-		source: PolygonBuilder,
-		fragment: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		const count = source.fragmentVertexCount(fragment);
-		ensureFragmentCapacity(count, this.#capacity.maximumVerticesPerFragment);
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			this.#copyX[vertex] = source.vertexX(fragment, vertex);
-			this.#copyY[vertex] = source.vertexY(fragment, vertex);
-		}
-		this.addRawPolygon(this.#copyX, this.#copyY, count, meter);
-	}
-
-	copyFragmentFromArena(
-		source: PortalWindowArena,
-		fragment: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		const count = source.absoluteFragmentVertexCount(fragment);
-		ensureFragmentCapacity(count, this.#capacity.maximumVerticesPerFragment);
-		const first = source.fragmentFirstVertex(fragment);
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			this.#copyX[vertex] = source.absoluteVertexX(first + vertex);
-			this.#copyY[vertex] = source.absoluteVertexY(first + vertex);
-		}
-		this.addRawPolygon(this.#copyX, this.#copyY, count, meter);
-	}
-
-	finish(
-		meter: PortalWindowPrimitiveMeter | null,
-		scratchX: Float64Array,
-		scratchY: Float64Array,
-	): void {
-		for (let left = 0; left < this.fragmentCount; left += 1) {
-			for (let right = left + 1; right < this.fragmentCount;) {
-				const mergedCount = this.#merge(left, right, scratchX, scratchY, meter);
-				if (mergedCount === 0) {
-					right += 1;
-					continue;
-				}
-				this.#replace(left, scratchX, scratchY, mergedCount);
-				this.#remove(right);
-				right = left + 1;
-			}
-		}
-		for (let index = 1; index < this.fragmentCount; index += 1) {
-			let cursor = index;
-			while (cursor > 0) {
-				charge(meter, "fragmentSortComparisonCount", 1);
-				if (this.#compareIdentity(cursor - 1, cursor, meter) <= 0) break;
-				this.#swap(cursor - 1, cursor);
-				cursor -= 1;
-			}
-		}
-	}
-
-	fragmentVertexCount(fragment: number): number {
-		return this.#fragmentVertexCount[fragment]!;
-	}
-
-	vertexX(fragment: number, vertex: number): number {
-		return this.#vertexX[this.#fragmentFirstVertex[fragment]! + vertex]!;
-	}
-
-	vertexY(fragment: number, vertex: number): number {
-		return this.#vertexY[this.#fragmentFirstVertex[fragment]! + vertex]!;
-	}
-
-	ndcArea(): number {
-		let area = 0;
-		for (let fragment = 0; fragment < this.fragmentCount; fragment += 1) {
-			area += Math.abs(this.#signedArea(fragment, null));
-		}
-		return area;
-	}
-
-	writeBounds(
-		fragment: number,
-		target: Float64Array,
-		offset: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): void {
-		const count = this.fragmentVertexCount(fragment);
-		charge(meter, "polygonBoundsVertexVisitCount", 1);
-		let minX = this.vertexX(fragment, 0);
-		let minY = this.vertexY(fragment, 0);
-		let maxX = minX;
-		let maxY = minY;
-		for (let vertex = 1; vertex < count; vertex += 1) {
-			charge(meter, "polygonBoundsVertexVisitCount", 1);
-			const x = this.vertexX(fragment, vertex);
-			const y = this.vertexY(fragment, vertex);
-			minX = Math.min(minX, x);
-			minY = Math.min(minY, y);
-			maxX = Math.max(maxX, x);
-			maxY = Math.max(maxY, y);
-		}
-		target[offset] = minX;
-		target[offset + 1] = minY;
-		target[offset + 2] = maxX;
-		target[offset + 3] = maxY;
-	}
-
-	containsArenaFragment(arena: PortalWindowArena, candidate: number): boolean {
-		for (let fragment = 0; fragment < this.fragmentCount; fragment += 1) {
-			const containerCount = this.fragmentVertexCount(fragment);
-			const candidateCount = arena.absoluteFragmentVertexCount(candidate);
-			const candidateFirst = arena.fragmentFirstVertex(candidate);
-			let contained = true;
-			for (let vertex = 0; vertex < candidateCount && contained; vertex += 1) {
-				contained = pointInBuilderFragment(
-					this,
-					fragment,
-					containerCount,
-					arena.absoluteVertexX(candidateFirst + vertex),
-					arena.absoluteVertexY(candidateFirst + vertex),
-				);
-			}
-			if (contained) return true;
-		}
-		return false;
-	}
-
-	builderFragmentContainedByArenaFragment(
-		candidate: number,
-		arena: PortalWindowArena,
-		container: number,
-	): boolean {
-		const candidateCount = this.fragmentVertexCount(candidate);
-		const containerCount = arena.absoluteFragmentVertexCount(container);
-		const containerFirst = arena.fragmentFirstVertex(container);
-		for (let vertex = 0; vertex < candidateCount; vertex += 1) {
-			const x = this.vertexX(candidate, vertex);
-			const y = this.vertexY(candidate, vertex);
-			for (let edge = 0; edge < containerCount; edge += 1) {
-				const next = (edge + 1) % containerCount;
-				if (
-					edgeDistance(
-						arena.absoluteVertexX(containerFirst + edge),
-						arena.absoluteVertexY(containerFirst + edge),
-						arena.absoluteVertexX(containerFirst + next),
-						arena.absoluteVertexY(containerFirst + next),
-						x,
-						y,
-					) < -PORTAL_WINDOW_NDC_EPSILON
-				) {
-					return false;
-				}
-			}
-		}
-		return true;
-	}
-
-	#appendRaw(x: Float64Array, y: Float64Array, count: number): void {
-		if (this.fragmentCount >= this.#capacity.maximumTemporaryFragmentCount) {
-			throw capacityExceeded("maximumTemporaryFragmentCount");
-		}
-		if (this.vertexCount + count > this.#capacity.maximumTemporaryVertexCount) {
-			throw capacityExceeded("maximumTemporaryVertexCount");
-		}
-		this.#fragmentFirstVertex[this.fragmentCount] = this.vertexCount;
-		this.#fragmentVertexCount[this.fragmentCount] = count;
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			this.#vertexX[this.vertexCount] = x[vertex]!;
-			this.#vertexY[this.vertexCount] = y[vertex]!;
-			this.vertexCount += 1;
-		}
-		this.fragmentCount += 1;
-		this.fragmentHighWaterCount = Math.max(
-			this.fragmentHighWaterCount,
-			this.fragmentCount,
-		);
-		this.vertexHighWaterCount = Math.max(
-			this.vertexHighWaterCount,
-			this.vertexCount,
-		);
-	}
-
-	#compareIdentity(
-		left: number,
-		right: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): number {
-		const leftCount = this.fragmentVertexCount(left);
-		const rightCount = this.fragmentVertexCount(right);
-		charge(meter, "polygonIdentityVertexVisitCount", leftCount + rightCount);
-		const count = Math.min(leftCount, rightCount);
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			const x =
-				quantize(this.vertexX(left, vertex)) -
-				quantize(this.vertexX(right, vertex));
-			if (x !== 0) return x;
-			const y =
-				quantize(this.vertexY(left, vertex)) -
-				quantize(this.vertexY(right, vertex));
-			if (y !== 0) return y;
-		}
-		return leftCount - rightCount;
-	}
-
-	#identityEqualsRaw(
-		fragment: number,
-		x: Float64Array,
-		y: Float64Array,
-		count: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): boolean {
-		const existingCount = this.fragmentVertexCount(fragment);
-		charge(meter, "polygonIdentityVertexVisitCount", existingCount);
-		if (existingCount !== count) return false;
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			if (
-				quantize(this.vertexX(fragment, vertex)) !== quantize(x[vertex]!) ||
-				quantize(this.vertexY(fragment, vertex)) !== quantize(y[vertex]!)
-			) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	#merge(
-		left: number,
-		right: number,
-		x: Float64Array,
-		y: Float64Array,
-		meter: PortalWindowPrimitiveMeter | null,
-	): number {
-		const leftCount = this.fragmentVertexCount(left);
-		const rightCount = this.fragmentVertexCount(right);
-		for (let leftEdge = 0; leftEdge < leftCount; leftEdge += 1) {
-			for (let rightEdge = 0; rightEdge < rightCount; rightEdge += 1) {
-				charge(meter, "mergeEdgePairTestCount", 1);
-				if (
-					!approximatelyEqual(
-						this.vertexX(left, leftEdge),
-						this.vertexY(left, leftEdge),
-						this.vertexX(right, (rightEdge + 1) % rightCount),
-						this.vertexY(right, (rightEdge + 1) % rightCount),
-					) ||
-					!approximatelyEqual(
-						this.vertexX(left, (leftEdge + 1) % leftCount),
-						this.vertexY(left, (leftEdge + 1) % leftCount),
-						this.vertexX(right, rightEdge),
-						this.vertexY(right, rightEdge),
-					)
-				) {
-					continue;
-				}
-				let count = 0;
-				count = this.#appendPath(
-					left,
-					(leftEdge + 1) % leftCount,
-					leftEdge,
-					x,
-					y,
-					count,
-					meter,
-				);
-				count = this.#appendPath(
-					right,
-					(rightEdge + 2) % rightCount,
-					(rightEdge + rightCount - 1) % rightCount,
-					x,
-					y,
-					count,
-					meter,
-				);
-				for (let vertex = 0; vertex < count; vertex += 1) {
-					charge(meter, "mergeConvexityVertexTestCount", 1);
-					if (
-						edgeDistance(
-							x[vertex]!,
-							y[vertex]!,
-							x[(vertex + 1) % count]!,
-							y[(vertex + 1) % count]!,
-							x[(vertex + 2) % count]!,
-							y[(vertex + 2) % count]!,
-						) < -PORTAL_WINDOW_NDC_EPSILON
-					) {
-						return 0;
-					}
-				}
-				return normalizePolygon(
-					x,
-					y,
-					count,
-					this.#normalizeX,
-					this.#normalizeY,
-					meter,
-				);
-			}
-		}
-		return 0;
-	}
-
-	#appendPath(
-		fragment: number,
-		start: number,
-		end: number,
-		x: Float64Array,
-		y: Float64Array,
-		count: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): number {
-		const vertexCount = this.fragmentVertexCount(fragment);
-		for (let vertex = start; ; vertex = (vertex + 1) % vertexCount) {
-			if (count >= x.length) {
-				throw capacityExceeded("maximumVerticesPerFragment");
-			}
-			charge(meter, "mergeBoundaryVertexVisitCount", 1);
-			x[count] = this.vertexX(fragment, vertex);
-			y[count] = this.vertexY(fragment, vertex);
-			count += 1;
-			if (vertex === end) return count;
-		}
-	}
-
-	#remove(fragment: number): void {
-		for (let index = fragment; index + 1 < this.fragmentCount; index += 1) {
-			this.#fragmentFirstVertex[index] = this.#fragmentFirstVertex[index + 1]!;
-			this.#fragmentVertexCount[index] = this.#fragmentVertexCount[index + 1]!;
-		}
-		this.fragmentCount -= 1;
-	}
-
-	#replace(
-		fragment: number,
-		x: Float64Array,
-		y: Float64Array,
-		count: number,
-	): void {
-		if (this.vertexCount + count > this.#capacity.maximumTemporaryVertexCount) {
-			throw capacityExceeded("maximumTemporaryVertexCount");
-		}
-		this.#fragmentFirstVertex[fragment] = this.vertexCount;
-		this.#fragmentVertexCount[fragment] = count;
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			this.#vertexX[this.vertexCount] = x[vertex]!;
-			this.#vertexY[this.vertexCount] = y[vertex]!;
-			this.vertexCount += 1;
-		}
-		this.vertexHighWaterCount = Math.max(
-			this.vertexHighWaterCount,
-			this.vertexCount,
-		);
-	}
-
-	#signedArea(
-		fragment: number,
-		meter: PortalWindowPrimitiveMeter | null,
-	): number {
-		const count = this.fragmentVertexCount(fragment);
-		let twiceArea = 0;
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			charge(meter, "normalizationVertexVisitCount", 1);
-			const next = (vertex + 1) % count;
-			twiceArea +=
-				this.vertexX(fragment, vertex) * this.vertexY(fragment, next) -
-				this.vertexY(fragment, vertex) * this.vertexX(fragment, next);
-		}
-		return twiceArea / 2;
-	}
-
-	#swap(left: number, right: number): void {
-		const first = this.#fragmentFirstVertex[left]!;
-		const count = this.#fragmentVertexCount[left]!;
-		this.#fragmentFirstVertex[left] = this.#fragmentFirstVertex[right]!;
-		this.#fragmentVertexCount[left] = this.#fragmentVertexCount[right]!;
-		this.#fragmentFirstVertex[right] = first;
-		this.#fragmentVertexCount[right] = count;
-	}
-}
-
-const FULL_WINDOW_X = new Float64Array([-1, 1, 1, -1]);
-const FULL_WINDOW_Y = new Float64Array([-1, -1, 1, 1]);
-
-function normalizePolygon(
-	x: Float64Array,
-	y: Float64Array,
-	inputCount: number,
-	scratchX: Float64Array,
-	scratchY: Float64Array,
-	meter: PortalWindowPrimitiveMeter | null,
-): number {
-	if (inputCount < 3) return 0;
-	ensureFragmentCapacity(inputCount, scratchX.length);
-	let count = 0;
-	for (let vertex = 0; vertex < inputCount; vertex += 1) {
-		charge(meter, "normalizationVertexVisitCount", 1);
-		const currentX = x[vertex]!;
-		const currentY = y[vertex]!;
-		if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) {
-			throw new Error("Portal-window polygon contains a non-finite vertex.");
-		}
-		if (
-			currentX < -1 - PORTAL_WINDOW_NDC_EPSILON ||
-			currentX > 1 + PORTAL_WINDOW_NDC_EPSILON ||
-			currentY < -1 - PORTAL_WINDOW_NDC_EPSILON ||
-			currentY > 1 + PORTAL_WINDOW_NDC_EPSILON
-		) {
-			throw new Error(
-				"Portal-window polygon lies outside normalized device space.",
-			);
-		}
-		if (
-			count === 0 ||
-			!approximatelyEqual(
-				scratchX[count - 1]!,
-				scratchY[count - 1]!,
-				currentX,
-				currentY,
-			)
-		) {
-			scratchX[count] = currentX;
-			scratchY[count] = currentY;
-			count += 1;
-		}
-	}
-	if (
-		count > 1 &&
-		approximatelyEqual(
-			scratchX[0]!,
-			scratchY[0]!,
-			scratchX[count - 1]!,
-			scratchY[count - 1]!,
-		)
-	) {
-		count -= 1;
-	}
-	let changed = true;
-	while (changed && count >= 3) {
-		changed = false;
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			charge(meter, "normalizationVertexVisitCount", 1);
-			const previous = (vertex + count - 1) % count;
-			const next = (vertex + 1) % count;
-			const cross = edgeDistance(
-				scratchX[previous]!,
-				scratchY[previous]!,
-				scratchX[vertex]!,
-				scratchY[vertex]!,
-				scratchX[next]!,
-				scratchY[next]!,
-			);
-			const forwardDot =
-				(scratchX[vertex]! - scratchX[previous]!) *
-					(scratchX[next]! - scratchX[vertex]!) +
-				(scratchY[vertex]! - scratchY[previous]!) *
-					(scratchY[next]! - scratchY[vertex]!);
-			if (
-				Math.abs(cross) <= PORTAL_WINDOW_NDC_EPSILON &&
-				forwardDot >= -PORTAL_WINDOW_NDC_EPSILON
-			) {
-				for (let shift = vertex; shift + 1 < count; shift += 1) {
-					scratchX[shift] = scratchX[shift + 1]!;
-					scratchY[shift] = scratchY[shift + 1]!;
-				}
-				count -= 1;
-				changed = true;
-				break;
-			}
-		}
-	}
-	if (count < 3) return 0;
-	let twiceArea = 0;
-	for (let vertex = 0; vertex < count; vertex += 1) {
-		charge(meter, "normalizationVertexVisitCount", 1);
-		const next = (vertex + 1) % count;
-		twiceArea +=
-			scratchX[vertex]! * scratchY[next]! - scratchY[vertex]! * scratchX[next]!;
-	}
-	if (
-		!Number.isFinite(twiceArea) ||
-		Math.abs(twiceArea / 2) <=
-			PORTAL_WINDOW_NDC_EPSILON * PORTAL_WINDOW_NDC_EPSILON
-	) {
-		return 0;
-	}
-	if (twiceArea < 0) reversePolygon(scratchX, scratchY, count);
-	// Half-space clipping preserves convexity. Remove only subpixel inward residue after winding is
-	// canonical; tiny outward turns remain real visibility and must survive exact intersection.
-	changed = true;
-	while (changed && count >= 3) {
-		changed = false;
-		for (let vertex = 0; vertex < count; vertex += 1) {
-			charge(meter, "normalizationVertexVisitCount", 1);
-			const previous = (vertex + count - 1) % count;
-			const next = (vertex + 1) % count;
-			const turn = edgeDistance(
-				scratchX[previous]!,
-				scratchY[previous]!,
-				scratchX[vertex]!,
-				scratchY[vertex]!,
-				scratchX[next]!,
-				scratchY[next]!,
-			);
-			const forwardDot =
-				(scratchX[vertex]! - scratchX[previous]!) *
-					(scratchX[next]! - scratchX[vertex]!) +
-				(scratchY[vertex]! - scratchY[previous]!) *
-					(scratchY[next]! - scratchY[vertex]!);
-			if (
-				turn < -PORTAL_WINDOW_NDC_EPSILON &&
-				turn >= -PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON &&
-				forwardDot >= -PORTAL_WINDOW_NDC_EPSILON
-			) {
-				for (let shift = vertex; shift + 1 < count; shift += 1) {
-					scratchX[shift] = scratchX[shift + 1]!;
-					scratchY[shift] = scratchY[shift + 1]!;
-				}
-				count -= 1;
-				changed = true;
-				break;
-			}
-		}
-	}
-	if (count < 3) return 0;
-	for (let vertex = 0; vertex < count; vertex += 1) {
-		charge(meter, "normalizationVertexVisitCount", 1);
-		const first = vertex;
-		const second = (vertex + 1) % count;
-		const third = (vertex + 2) % count;
-		const turn = edgeDistance(
-			scratchX[first]!,
-			scratchY[first]!,
-			scratchX[second]!,
-			scratchY[second]!,
-			scratchX[third]!,
-			scratchY[third]!,
-		);
-		if (turn < -PORTAL_WINDOW_NDC_EPSILON) {
-			throw new Error(
-				`Portal-window fragment must be convex; turn ${vertex} is ${turn} across (${scratchX[first]}, ${scratchY[first]}), (${scratchX[second]}, ${scratchY[second]}), (${scratchX[third]}, ${scratchY[third]}).`,
-			);
-		}
-	}
-	let first = 0;
-	for (let vertex = 1; vertex < count; vertex += 1) {
-		charge(meter, "normalizationVertexVisitCount", 1);
-		if (
-			scratchX[vertex]! < scratchX[first]! ||
-			(scratchX[vertex] === scratchX[first] &&
-				scratchY[vertex]! < scratchY[first]!)
-		) {
-			first = vertex;
-		}
-	}
-	for (let vertex = 0; vertex < count; vertex += 1) {
-		x[vertex] = scratchX[(first + vertex) % count]!;
-		y[vertex] = scratchY[(first + vertex) % count]!;
-	}
-	return count;
-}
-
 function clipHomogeneousPolygon(
 	x: Float64Array,
 	y: Float64Array,
@@ -1842,71 +610,6 @@ function spatialPlaneDistance(
 	return plane.normal.x * x + plane.normal.y * y + plane.normal.z * z + plane.d;
 }
 
-function clipNdcPolygon(
-	x: Float64Array,
-	y: Float64Array,
-	count: number,
-	edgeStartX: number,
-	edgeStartY: number,
-	edgeEndX: number,
-	edgeEndY: number,
-	outputX: Float64Array,
-	outputY: Float64Array,
-	meter: PortalWindowPrimitiveMeter | null,
-): number {
-	charge(meter, "createdPolygonCount", 1);
-	let outputCount = 0;
-	let previous = count - 1;
-	charge(meter, "ndcClipVertexEdgeTestCount", 1);
-	let previousDistance = edgeDistance(
-		edgeStartX,
-		edgeStartY,
-		edgeEndX,
-		edgeEndY,
-		x[previous]!,
-		y[previous]!,
-	);
-	let previousInside = previousDistance >= -PORTAL_WINDOW_NDC_EPSILON;
-	for (let current = 0; current < count; current += 1) {
-		charge(meter, "ndcClipVertexEdgeTestCount", 1);
-		const currentDistance = edgeDistance(
-			edgeStartX,
-			edgeStartY,
-			edgeEndX,
-			edgeEndY,
-			x[current]!,
-			y[current]!,
-		);
-		const currentInside = currentDistance >= -PORTAL_WINDOW_NDC_EPSILON;
-		if (currentInside !== previousInside) {
-			const denominator = previousDistance - currentDistance;
-			if (Math.abs(denominator) > Number.EPSILON) {
-				ensureOutputVertex(outputCount, outputX.length);
-				const fraction = Math.min(
-					1,
-					Math.max(0, previousDistance / denominator),
-				);
-				outputX[outputCount] =
-					x[previous]! + (x[current]! - x[previous]!) * fraction;
-				outputY[outputCount] =
-					y[previous]! + (y[current]! - y[previous]!) * fraction;
-				outputCount += 1;
-				charge(meter, "createdNdcVertexCount", 1);
-			}
-		}
-		if (currentInside) {
-			ensureOutputVertex(outputCount, outputX.length);
-			outputX[outputCount] = x[current]!;
-			outputY[outputCount] = y[current]!;
-			outputCount += 1;
-		}
-		previous = current;
-		previousDistance = currentDistance;
-		previousInside = currentInside;
-	}
-	return outputCount;
-}
-
 function clipDistance(
 	x: number,
 	y: number,
@@ -1936,115 +639,6 @@ function clipDistance(
 			throw new Error(`Portal homogeneous clip plane ${plane} is unavailable.`);
 	}
 }
-
-function arenaBounds(
-	arena: PortalWindowArena,
-	fragment: number,
-	target: Float64Array,
-	offset: number,
-	meter: PortalWindowPrimitiveMeter | null,
-): void {
-	const first = arena.fragmentFirstVertex(fragment);
-	const count = arena.absoluteFragmentVertexCount(fragment);
-	charge(meter, "polygonBoundsVertexVisitCount", 1);
-	let minX = arena.absoluteVertexX(first);
-	let minY = arena.absoluteVertexY(first);
-	let maxX = minX;
-	let maxY = minY;
-	for (let vertex = 1; vertex < count; vertex += 1) {
-		charge(meter, "polygonBoundsVertexVisitCount", 1);
-		const x = arena.absoluteVertexX(first + vertex);
-		const y = arena.absoluteVertexY(first + vertex);
-		minX = Math.min(minX, x);
-		minY = Math.min(minY, y);
-		maxX = Math.max(maxX, x);
-		maxY = Math.max(maxY, y);
-	}
-	target[offset] = minX;
-	target[offset + 1] = minY;
-	target[offset + 2] = maxX;
-	target[offset + 3] = maxY;
-}
-
-function boundsDisjoint(
-	bounds: Float64Array,
-	left: number,
-	right: number,
-): boolean {
-	return (
-		bounds[left + 2]! < bounds[right]! - PORTAL_WINDOW_NDC_EPSILON ||
-		bounds[right + 2]! < bounds[left]! - PORTAL_WINDOW_NDC_EPSILON ||
-		bounds[left + 3]! < bounds[right + 1]! - PORTAL_WINDOW_NDC_EPSILON ||
-		bounds[right + 3]! < bounds[left + 1]! - PORTAL_WINDOW_NDC_EPSILON
-	);
-}
-
-function pointInBuilderFragment(
-	builder: PolygonBuilder,
-	fragment: number,
-	count: number,
-	x: number,
-	y: number,
-): boolean {
-	for (let edge = 0; edge < count; edge += 1) {
-		const next = (edge + 1) % count;
-		if (
-			edgeDistance(
-				builder.vertexX(fragment, edge),
-				builder.vertexY(fragment, edge),
-				builder.vertexX(fragment, next),
-				builder.vertexY(fragment, next),
-				x,
-				y,
-			) < -PORTAL_WINDOW_NDC_EPSILON
-		) {
-			return false;
-		}
-	}
-	return true;
-}
-
-function edgeDistance(
-	startX: number,
-	startY: number,
-	endX: number,
-	endY: number,
-	pointX: number,
-	pointY: number,
-): number {
-	return (
-		(endX - startX) * (pointY - startY) - (endY - startY) * (pointX - startX)
-	);
-}
-
-function approximatelyEqual(
-	leftX: number,
-	leftY: number,
-	rightX: number,
-	rightY: number,
-): boolean {
-	return (
-		Math.abs(leftX - rightX) <= PORTAL_WINDOW_NDC_EPSILON &&
-		Math.abs(leftY - rightY) <= PORTAL_WINDOW_NDC_EPSILON
-	);
-}
-
-function reversePolygon(x: Float64Array, y: Float64Array, count: number): void {
-	for (let left = 0, right = count - 1; left < right; left += 1, right -= 1) {
-		const swapX = x[left]!;
-		const swapY = y[left]!;
-		x[left] = x[right]!;
-		y[left] = y[right]!;
-		x[right] = swapX;
-		y[right] = swapY;
-	}
-}
-
-function quantize(value: number): number {
-	const rounded = Math.round(value / PORTAL_WINDOW_NDC_EPSILON);
-	return Object.is(rounded, -0) ? 0 : rounded;
-}
-
 function ensureFragmentCapacity(count: number, capacity: number): void {
 	if (count > capacity) {
 		throw capacityExceeded("maximumVerticesPerFragment");
@@ -2073,49 +667,4 @@ function chargeNear(
 ): void {
 	if (count <= 0) return;
 	meter?.consume(kind, count);
-}
-
-function typedArrayBytes(values: readonly ArrayBufferView[]): number {
-	let bytes = 0;
-	for (const value of values) bytes += value.byteLength;
-	return bytes;
-}
-
-function validateCapacity(capacity: PortalWindowArenaCapacity): void {
-	for (const [name, value, minimum] of [
-		["maximumApertureVertexCount", capacity.maximumApertureVertexCount, 3],
-		["maximumFragmentCount", capacity.maximumFragmentCount, 1],
-		[
-			"maximumTemporaryFragmentCount",
-			capacity.maximumTemporaryFragmentCount,
-			1,
-		],
-		["maximumVertexCount", capacity.maximumVertexCount, 4],
-		["maximumTemporaryVertexCount", capacity.maximumTemporaryVertexCount, 4],
-		["maximumVerticesPerFragment", capacity.maximumVerticesPerFragment, 4],
-		["maximumWindowCount", capacity.maximumWindowCount, 1],
-	] as const) {
-		if (!Number.isSafeInteger(value) || value < minimum) {
-			throw new Error(
-				`Portal window arena ${name} must be an integer at least ${minimum}.`,
-			);
-		}
-	}
-}
-
-function validateProjectionCacheCapacity(
-	capacity: PortalProjectedApertureCacheCapacity,
-): void {
-	for (const [name, value] of Object.entries(capacity)) {
-		if (!Number.isSafeInteger(value) || value < 0) {
-			throw new Error(
-				`Portal projection cache capacity ${name} must be a non-negative safe integer.`,
-			);
-		}
-	}
-	if (capacity.maximumEntryCount > 0x1_0000) {
-		throw new Error(
-			"Portal projection cache maximumEntryCount exceeds Uint16 entry storage.",
-		);
-	}
 }

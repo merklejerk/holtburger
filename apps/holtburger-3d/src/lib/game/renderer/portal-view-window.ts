@@ -11,7 +11,7 @@ import {
 /** Shared normalization tolerance for normalized-device-coordinate portal geometry. */
 export const PORTAL_WINDOW_NDC_EPSILON = 0.000_001;
 /** Signed-turn tolerance used only for winding-inverting residue after convex clipping. */
-export const PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON = 0.000_01;
+const PORTAL_WINDOW_NDC_SIMPLIFICATION_EPSILON = 0.000_01;
 
 /** One convex NDC polygon retained independently from the aperture's other triangles. */
 interface PortalViewWindowFragment {
@@ -97,9 +97,7 @@ export type PortalWindowPrimitiveKind =
 	| "ndcClipVertexEdgeTestCount"
 	| "normalizationVertexVisitCount"
 	| "polygonBoundsVertexVisitCount"
-	| "polygonIdentityVertexVisitCount"
-	| "projectionCacheFragmentWriteCount"
-	| "projectionCacheVertexWriteCount";
+	| "polygonIdentityVertexVisitCount";
 
 /** Validated per-view projection reused across every aperture traversal in one plan. */
 export class PortalWindowProjector {
@@ -166,8 +164,6 @@ interface PortalWindowProjectionDiagnostics {
 	readonly outputVertexCount: number;
 	readonly polygonBoundsVertexVisitCount: number;
 	readonly polygonIdentityVertexVisitCount: number;
-	readonly projectionCacheFragmentWriteCount: number;
-	readonly projectionCacheVertexWriteCount: number;
 }
 
 /** Explicit empty/visible result from one or more sequential aperture intersections. */
@@ -219,8 +215,6 @@ interface MutablePortalWindowProjectionDiagnostics {
 	normalizationVertexVisitCount: number;
 	polygonBoundsVertexVisitCount: number;
 	polygonIdentityVertexVisitCount: number;
-	projectionCacheFragmentWriteCount: number;
-	projectionCacheVertexWriteCount: number;
 }
 
 type HomogeneousClipDistance = (vertex: ClipVertex) => number;
@@ -1214,8 +1208,6 @@ function createDiagnostics(
 		normalizationVertexVisitCount: 0,
 		polygonBoundsVertexVisitCount: 0,
 		polygonIdentityVertexVisitCount: 0,
-		projectionCacheFragmentWriteCount: 0,
-		projectionCacheVertexWriteCount: 0,
 	};
 }
 
@@ -1282,10 +1274,6 @@ function finishDiagnostics(
 		polygonBoundsVertexVisitCount: diagnostics.polygonBoundsVertexVisitCount,
 		polygonIdentityVertexVisitCount:
 			diagnostics.polygonIdentityVertexVisitCount,
-		projectionCacheFragmentWriteCount:
-			diagnostics.projectionCacheFragmentWriteCount,
-		projectionCacheVertexWriteCount:
-			diagnostics.projectionCacheVertexWriteCount,
 	};
 }
 

@@ -5,6 +5,7 @@
 		"src/explorer/main.ts",
 		"src/harness/browser/main.ts",
 		"src/harness/browser/dynamic-material-table-probe.ts",
+		"src/harness/browser/portal-traversal-investigation.ts",
 		"electron/main.ts",
 		"electron/preload.cts",
 		"forge.config.cjs",

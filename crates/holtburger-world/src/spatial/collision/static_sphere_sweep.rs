@@ -678,6 +678,9 @@ impl MovingSphereCast {
         if distance < minimum - reach || distance + approach > maximum + reach {
             return Ok(());
         }
+        if self.admits_contact_tangent(vertices, normal, distance, maximum, approach) {
+            return Ok(());
+        }
         let triangle = Triangle::new(
             parry_vector(vertices[0] - start),
             parry_vector(vertices[1] - start),
@@ -685,10 +688,13 @@ impl MovingSphereCast {
         );
         // A sphere approaching the finite face has an exact plane hit. Generic GJK casts
         // can converge late even on flat terrain; use them only when face containment
-        // does not prove the hit (edges, vertices, or an initially penetrating sphere).
-        let time = (self.ball.radius - distance) / approach;
-        if (0.0..=1.0).contains(&time) {
-            let point = parry_vector(self.displacement * time - normal * self.ball.radius);
+        // does not prove the hit (edges or vertices). Initial front-side face overlap
+        // is time zero: an iterative future cast can otherwise report a later hit and
+        // incorrectly admit a support adjustment deeper into an already contacted wall.
+        let time = ((self.ball.radius - distance) / approach).max(0.0);
+        if distance >= 0.0 && time <= 1.0 {
+            let face_distance = distance + approach * time;
+            let point = parry_vector(self.displacement * time - normal * face_distance);
             let closest = triangle.project_local_point(point, true).point;
             if (closest - point).length_squared()
                 <= crate::spatial::bsp_query::CONTACT_EPSILON.powi(2)
@@ -751,6 +757,57 @@ impl MovingSphereCast {
         Ok(())
     }
 
+    /// Admits only near-tangent travel whose entire chord remains at the fixed face boundary.
+    /// The cheap approach/proximity gates keep higher precision work off ordinary incoming casts.
+    fn admits_contact_tangent(
+        &self,
+        vertices: [Vector3; 3],
+        normal: Vector3,
+        distance: f32,
+        maximum: f32,
+        approach: f32,
+    ) -> bool {
+        // gamma(n) = n*u/(1-n*u), u = half an f32 epsilon. A 3-D dot has
+        // three products and two additions. Only a sign within that evaluation's
+        // uncertainty is eligible; this does not assume arbitrary producer error is small.
+        let magnitude = (self.displacement.x * normal.x).abs()
+            + (self.displacement.y * normal.y).abs()
+            + (self.displacement.z * normal.z).abs();
+        if -approach as f64 > roundoff_bound(5) * magnitude as f64 {
+            return false;
+        }
+        let start = world_vector(self.pose.translation);
+        let end = start + self.displacement;
+        let extent = Vector3::new(
+            start.x.abs().max(end.x.abs()),
+            start.y.abs().max(end.y.abs()),
+            start.z.abs().max(end.z.abs()),
+        );
+        let coordinate_magnitude = extent.x * normal.x.abs()
+            + extent.y * normal.y.abs()
+            + extent.z * normal.z.abs()
+            + self.ball.radius;
+        // Eight operations cover stored center/endpoint rounding and a plane evaluation.
+        // This boundary is geometric: existing depth consumes the allowance, so repeated
+        // calls cannot replenish it by measuring only the next inward displacement.
+        let uncertainty = roundoff_bound(8) * coordinate_magnitude as f64;
+        if distance < 0.0 || (distance - maximum - self.ball.radius).abs() as f64 > uncertainty {
+            return false;
+        }
+        let dot = |a: Vector3, b: Vector3| {
+            a.x as f64 * b.x as f64 + a.y as f64 * b.y as f64 + a.z as f64 * b.z as f64
+        };
+        let normal_length = dot(normal, normal).sqrt();
+        // Enclose every vertex, including warped fan triangles. Separation from this
+        // half-space also excludes that triangle's finite edges and vertices.
+        let boundary = vertices
+            .iter()
+            .map(|v| dot(*v, normal))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let clearance = (dot(start, normal).min(dot(end, normal)) - boundary) / normal_length;
+        clearance >= self.ball.radius as f64 - uncertainty
+    }
+
     fn update_shape_hit(
         &self,
         target: &dyn parry3d::shape::Shape,
@@ -791,6 +848,12 @@ impl MovingSphereCast {
 /// use CONTACT_EPSILON. This changes query clearance, never the registered body size.
 fn hard_contact_radius(radius: f32) -> f32 {
     radius - crate::spatial::bsp_query::CONTACT_EPSILON.min(radius * 0.5)
+}
+
+/// Standard forward-error factor for a bounded sequence of rounded f32 operations.
+fn roundoff_bound(operations: u32) -> f64 {
+    let error = operations as f64 * (f32::EPSILON as f64 * 0.5);
+    error / (1.0 - error)
 }
 
 fn cast_options() -> ShapeCastOptions {
@@ -923,6 +986,60 @@ mod tests {
     use holtburger_common::Quaternion;
     use holtburger_content::{ColliderScale, CollisionBall, CollisionCylinder, LandblockPlacement};
     use std::sync::Arc;
+
+    /// Captured flared-wall face and lower-sphere position from cell 0x00a9013d.
+    /// Kept as numeric geometry so regressions require no installed client archives.
+    fn flared_wall_contact() -> ([Vector3; 3], Vector3, Vector3) {
+        (
+            [
+                Vector3::new(25.000006, -37.3333, 2.1),
+                Vector3::new(22.302883, -35.00002, -2.9802e-9),
+                Vector3::new(24.999985, -37.69712, -2.9802e-9),
+            ],
+            Vector3::new(-0.70185983, -0.7018589, 0.12160195),
+            Vector3::new(23.068447, -36.365875, 0.4808845),
+        )
+    }
+
+    #[test]
+    fn initially_contacting_face_blocks_settle_at_time_zero() {
+        let (vertices, normal, start) = flared_wall_contact();
+        let mut hit = None;
+        MovingSphereCast::new(&Ball::new(0.48), start, Vector3::new(0.0, 0.0, -0.04))
+            .update_triangle_hit(vertices, normal, &mut hit)
+            .unwrap();
+        assert_eq!(hit.unwrap().time_of_impact, 0.0);
+    }
+
+    #[test]
+    fn flared_face_admits_rounded_tangent_but_rejects_inward_travel_and_deep_overlap() {
+        let (vertices, normal, start) = flared_wall_contact();
+        let tangent = Vector3::new(0.07140775, -0.07001371, 0.008046641);
+        assert!(tangent.dot(&normal) < 0.0);
+        let query = |start, travel| {
+            let mut hit = None;
+            MovingSphereCast::new(&Ball::new(0.48), start, travel)
+                .update_triangle_hit(vertices, normal, &mut hit)
+                .unwrap();
+            hit
+        };
+        assert!(query(start, tangent).is_none());
+        assert!(query(start, normal * -0.0000001).is_some());
+        assert!(query(start, tangent - normal * 0.001).is_some());
+        assert!(query(start - normal * 0.001, tangent).is_some());
+        assert!(query(start, normal * 0.001).is_none());
+    }
+
+    #[test]
+    fn initial_face_contact_does_not_extend_a_finite_triangle() {
+        let (vertices, normal, start) = flared_wall_contact();
+        let outside = start + Vector3::new(10.0, -10.0, 0.0);
+        let mut hit = None;
+        MovingSphereCast::new(&Ball::new(0.48), outside, Vector3::new(0.0, 0.0, -0.04))
+            .update_triangle_hit(vertices, normal, &mut hit)
+            .unwrap();
+        assert!(hit.is_none());
+    }
 
     #[test]
     fn wall_tangent_is_admitted_without_endpoint_rounding() {

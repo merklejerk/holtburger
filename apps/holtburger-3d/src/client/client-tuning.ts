@@ -1,6 +1,6 @@
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
-import { hexRgba, normalizedRgbaColor } from "../lib/frontend-color";
+import { hexRgba } from "../lib/frontend-color";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
 import type {
@@ -21,12 +21,6 @@ const CLIENT_FRAME_SETTINGS = {
 	...SHARED_FRAME_SETTINGS,
 	/** Match retail presentation until an explicitly enabled client diagnostic asks otherwise. */
 	showRetailHiddenGeometry: false,
-	entitySelectionOutline: {
-		/** Golden depth-always edge shared visually with the offscreen arrow. */
-		color: normalizedRgbaColor(hexRgba("#ffd129ff")),
-		/** Authored in CSS pixels so render scale changes sampling rather than apparent thickness. */
-		widthCssPixels: 2,
-	},
 } as const satisfies FrameSettings;
 
 const CLIENT_PORTAL_TRANSITION = {

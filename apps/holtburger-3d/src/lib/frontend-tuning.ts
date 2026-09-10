@@ -356,6 +356,18 @@ export const SHARED_FRONTEND_TUNING = {
 	},
 
 	rendering: {
+		/** Steady contrasting bands with a softly breathing exterior halo. */
+		entitySelectionOutline: {
+			color: hexRgba("#fff0a6ff"),
+			widthCssPixels: 2,
+			borderColor: hexRgba("#960606ff"),
+			borderWidthCssPixels: 2,
+			haloColor: hexRgba("#f5a50599"),
+			haloWidthCssPixels: 4,
+			/** One keeps the halo steady; zero lets it fade completely. */
+			breathingMinimum: 0.35,
+			breathingPeriodSeconds: 1.0,
+		},
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: hexRgba("#260d0dff"),
 		/** Shared initial nameplate workload and Canvas appearance for Client and Explorer. */

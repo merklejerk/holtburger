@@ -9,7 +9,9 @@ use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
-use holtburger_content::{ContentDecodeCache, ContentRepository};
+use holtburger_content::{
+    ColliderScale, CollisionCylinder, CollisionShape, ContentDecodeCache, ContentRepository,
+};
 use holtburger_core::{
     CharacterJumpReadiness, ContentAssetService, PreciseJumpCandidateBudget,
     PreciseJumpPredictionBudget, PreciseJumpPredictionRequest, PreciseJumpTarget,
@@ -21,9 +23,13 @@ use holtburger_world::state::{
     PlayerMotionTableSource, SelfJumpCapabilities, SelfMovementCapabilities, SelfMovementKinematics,
 };
 use holtburger_world::{
-    CollisionScene, ContactState, EdgeProtection, GroundState, GroundSupport,
-    PhysicalBodyDefinition, PhysicalBodyResponseState, PhysicalBodyState, PhysicalCollisionFilter,
-    SpatialBody, SpatialScene, StaticSurfaceRayRequest,
+    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
+    EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, GroundState, GroundSupport,
+    LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyDefinition,
+    PhysicalBodyResponseState, PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity,
+    PreparedEntityTargetGeometry, SpatialBody, SpatialBodyId, SpatialScene,
+    StaticSurfaceRayRequest,
 };
 
 const SIMULATION_INTEREST_RADIUS: i32 = 2;
@@ -49,6 +55,9 @@ struct Args {
     /// Timed predictor evaluations after one untimed warmup.
     #[arg(long, default_value_t = 10_000)]
     iterations: usize,
+    /// Synthetic solid peers placed away from the jump to measure population overhead.
+    #[arg(long, default_value_t = 0)]
+    peers: usize,
     /// Maximum analytic arcs evaluated per target.
     #[arg(long, default_value_t = 6)]
     candidates: usize,
@@ -101,7 +110,8 @@ fn main() -> Result<()> {
         holtburger_world::CollisionSurfaceRayHit::Environment(target_hit),
     )?;
     let now = Instant::now();
-    let (scene, body_id) = player_scene(&collision, owner, cell, args.start, now)?;
+    let (mut scene, body_id) = player_scene(&collision, owner, cell, args.start, now)?;
+    add_population(&mut scene, owner, cell, args.start, args.peers, now)?;
     let capabilities = representative_capabilities();
     let budget = PreciseJumpPredictionBudget::new(
         PreciseJumpCandidateBudget::new(args.candidates)?,
@@ -129,22 +139,66 @@ fn main() -> Result<()> {
     let analytic_elapsed = analytic_timer.elapsed();
     let entity_collision = scene.entity_collision_snapshot()?;
     let request = PreciseJumpPredictionRequest {
-        spatial_scene: &scene,
+        body: scene.body(body_id),
         collision_scene: &collision,
         entity_collision: &entity_collision,
-        body_id,
         capabilities: &capabilities,
         target: &target,
         budget,
         start_time: now,
     };
     let warmup = diagnose_precise_jump(request)?;
+    // Whole-scene cloning is a historical baseline; live work now shares the publication.
+    let capture_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(scene.clone());
+    }
+    let capture_elapsed = capture_timer.elapsed();
+    let mut publication_build_elapsed = std::time::Duration::ZERO;
+    for _ in 0..args.iterations {
+        let mut capture = scene.clone();
+        // Publish the same peer pose to measure a cold successor rather than the shared read.
+        let id = SpatialBodyId::Entity(Guid(1));
+        if let Some(body) = capture.body(id).cloned() {
+            capture
+                .update_body(body)
+                .context("capture fixture peer disappeared")?;
+        } else {
+            capture.register_body(SpatialBody::new(
+                id,
+                scene
+                    .body(body_id)
+                    .context("capture fixture mover disappeared")?
+                    .pose,
+                now,
+            ));
+            capture
+                .remove_body(id)
+                .context("temporary capture body disappeared")?;
+        }
+        let timer = Instant::now();
+        black_box(capture.entity_collision_snapshot()?);
+        publication_build_elapsed += timer.elapsed();
+    }
+    let snapshot_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(scene.entity_collision_snapshot()?);
+    }
+    let snapshot_elapsed = snapshot_timer.elapsed();
     let timer = Instant::now();
     for _ in 0..args.iterations {
         black_box(diagnose_precise_jump(black_box(request))?);
     }
     let elapsed = timer.elapsed();
     let diagnostics = warmup.diagnostics();
+    println!(
+        "capture iterations={} peers={} scene_clone_mean_us={:.3} publication_build_mean_us={:.3} publication_reuse_mean_us={:.3}",
+        args.iterations,
+        args.peers,
+        capture_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        publication_build_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        snapshot_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+    );
     println!(
         "precise_jump_benchmark owner=0x{:08X} cell={} center_colliders={center_colliders} center_env_cells={center_cells}",
         owner.0,
@@ -225,6 +279,81 @@ fn player_scene(
     });
     scene.register_body(body);
     Ok((scene, body_id))
+}
+
+/// Synthetic population isolates preparation cost from additional path obstructions.
+fn add_population(
+    scene: &mut SpatialScene,
+    owner: Guid,
+    cell: Option<Guid>,
+    start: Vector3,
+    count: usize,
+    now: Instant,
+) -> Result<()> {
+    let profile = retail_player_grounded_profile(EdgeProtection::None)?;
+    let geometry = Arc::new(PreparedEntityTargetGeometry {
+        setup_radius: 0.5,
+        collision_animations: Default::default(),
+        physics_bsp_parts: Vec::new(),
+        fallback_setup_did: 0x0200_0001,
+        fallback_shapes: vec![Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+            low_point: Vector3::zero(),
+            radius: 0.5,
+            height: 2.0,
+        }))],
+        fallback_scale: ColliderScale::uniform(1.0)?,
+    });
+    let configuration = DynamicPhysicalBodyConfiguration::new(
+        DynamicPhysicalBodyDefinition {
+            movement: profile.definition,
+            response_policy: profile.response_policy,
+            entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
+                target_geometry: geometry,
+                dynamic_collision: EntityDynamicCollisionPolicy {
+                    is_static: false,
+                    target: EntityCollisionParticipation::Solid,
+                    mover_accepts_response: true,
+                    accepts_peer_reports: true,
+                    missile: false,
+                    path_clipped: false,
+                },
+                reporting: EntityCollisionReportPolicy {
+                    enabled: true,
+                    as_environment: false,
+                },
+                uses_physics_bsp: false,
+                elasticity: PhysicalElasticity::DEFAULT,
+                default_animation_available: false,
+                default_script_available: false,
+            },
+        },
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Retained,
+            integration: LocalIntegrationDemand::Eligible,
+        },
+    )?;
+    for index in 0..count {
+        let id = SpatialBodyId::Entity(Guid(u32::try_from(index)? + 1));
+        let pose = WorldPosition {
+            landblock_id: cell.unwrap_or(owner),
+            coords: start + Vector3::new(20.0 + (index % 16) as f32, (index / 16) as f32, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        scene.register_body(SpatialBody::new(id, pose, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(configuration.clone()),
+                PhysicalCollisionFilter::ALL,
+                cell,
+            )
+            .context("population body disappeared during installation")?;
+    }
+    Ok(())
 }
 
 fn representative_capabilities() -> SelfJumpCapabilities {

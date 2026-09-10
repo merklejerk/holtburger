@@ -45,7 +45,7 @@ const child = spawn(
 		"dev:client",
 		"--",
 		"--vite-port",
-		"1432",
+		"0",
 		"--account",
 		account,
 		"--password",
@@ -74,7 +74,9 @@ const consoleMessages = new Map();
 const hops = [];
 try {
 	const browserWebSocketUrl = await waitForDevToolsUrl(child, () => output);
+	printReport({ stage: "devtools-endpoint" });
 	const pageWebSocketUrl = await waitForPageWebSocketUrl(browserWebSocketUrl);
+	printReport({ stage: "client-page-endpoint" });
 	client = await createCdpClient(pageWebSocketUrl);
 	client.on("Runtime.consoleAPICalled", (message) => {
 		recordConsoleMessage({
@@ -479,9 +481,9 @@ async function waitForPageWebSocketUrl(browserWebSocketUrl) {
 	const { port } = new URL(browserWebSocketUrl);
 	const startedAt = Date.now();
 	for (;;) {
-		const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then(
-			(response) => response.json(),
-		);
+		const targets = await fetch(`http://127.0.0.1:${port}/json/list`, {
+			signal: AbortSignal.timeout(10_000),
+		}).then((response) => response.json());
 		const page = targets.find(
 			(target) => target.type === "page" && target.url.includes("/client/"),
 		);
@@ -581,6 +583,13 @@ async function installEvidenceCollector(client_) {
 }
 
 async function capturePreciseJumpEntry(client_, milliseconds) {
+	// World-ready notices precede gameplay input admission during portal-space activation.
+	await waitFor(
+		client_,
+		"() => window.__holtburgerProbeEvidence.lifecycle?.kind === 'in-world'",
+		milliseconds,
+		"in-world precise-jump input",
+	);
 	const bounds = await evaluate(
 		client_,
 		`() => {

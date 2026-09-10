@@ -1,3 +1,5 @@
+mod camera_collision;
+pub use camera_collision::{CameraCollisionQuery, SphereCollisionQuery};
 mod bsp_query;
 mod cell_index;
 mod child_body;
@@ -27,8 +29,8 @@ mod volume_query;
 
 pub use mobile_contact::{
     ContactBodyPath, ContactBodyUpdate, ContactCollectionUpdate, ContactImpactPoint,
-    ContactMobility, ContactMotionSegment, ContactStepActuation, GroundedContactState,
-    MOBILE_CONTACT_ANGULAR_CHORDS, MOBILE_CONTACT_CORRECTION_FRACTION,
+    ContactMobility, ContactMotionSegment, ContactStepActuation, FrozenContactTargets,
+    GroundedContactState, MOBILE_CONTACT_ANGULAR_CHORDS, MOBILE_CONTACT_CORRECTION_FRACTION,
     MOBILE_CONTACT_CORRECTION_TRAVEL_RADIUS_RATIO, MOBILE_CONTACT_HARD_SLIDE_PASSES,
     MOBILE_CONTACT_PASSES, MOBILE_CONTACT_TICK_SECONDS, MOBILE_CONTACT_TOLERANCE_METERS,
     MOBILE_CONTACT_TOLERANCE_RADIUS_RATIO, MobileContactBody, MobileContactChange,

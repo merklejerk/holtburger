@@ -359,7 +359,15 @@ pub(super) struct ClientCameraSceneInput {
     /// Current hydrated local-player instance, including its independently prepared body.
     target: Option<CameraTargetInput>,
     /// Collision topology paired with the captured target placement.
-    collision: Option<Arc<holtburger_world::CollisionScene>>,
+    collision: Option<Result<CameraCollisionPublication, String>>,
+}
+
+/// Environment and entities captured together before the independent camera worker reads them.
+struct CameraCollisionPublication {
+    /// Installed environment geometry and topology.
+    environment: Arc<holtburger_world::CollisionScene>,
+    /// Prepared entity geometry from the captured body-store epoch.
+    entities: Arc<holtburger_world::EntityCollisionSnapshot>,
 }
 
 /// Local-player identity and body preparation state from one publication.
@@ -416,7 +424,16 @@ impl ClientCameraSceneInput {
         });
         Self {
             target,
-            collision: collision.map(|snapshot| Arc::clone(&snapshot.scene)),
+            collision: collision.map(|snapshot| {
+                world
+                    .scene
+                    .entity_collision_snapshot()
+                    .map(|entities| CameraCollisionPublication {
+                        environment: Arc::clone(&snapshot.scene),
+                        entities,
+                    })
+                    .map_err(|error| format!("camera collision capture failed: {error:#}"))
+            }),
         }
     }
 
@@ -630,6 +647,9 @@ impl ClientCameraRuntime {
         let Some(collision) = input.collision.as_ref() else {
             return Ok(None);
         };
+        let collision = collision
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
         let Some(active) = self.active.as_mut() else {
             return Ok(None);
         };
@@ -646,14 +666,14 @@ impl ClientCameraRuntime {
                     // Even a failed traversal must not be replayed on every camera tick.
                     active.consumed_travel = Some(*instant);
                     target_samples_from_dynamic_path(
-                        collision.as_ref(),
+                        collision.environment.as_ref(),
                         path,
                         &mut active.target_body,
                         active.pivot_offset,
                     )
                 } else {
                     target_sample_from_pose(
-                        collision.as_ref(),
+                        collision.environment.as_ref(),
                         body.pose,
                         &mut active.target_body,
                         active.pivot_offset,
@@ -674,22 +694,26 @@ impl ClientCameraRuntime {
             }
         };
         let initial_visual_pivot = active.controller.visual_pivot();
-        let outcome =
-            match active
-                .controller
-                .advance(collision.as_ref(), duration_seconds, &samples)
-            {
-                Ok(outcome) => outcome,
-                Err(_) => {
-                    return project_camera_failure(
-                        active,
-                        duration_ms,
-                        ClientCameraFailureReason::ControllerInput,
-                        KinematicBoomDiagnostics::default(),
-                    )
-                    .map(Some);
-                }
-            };
+        let outcome = match active.controller.advance(
+            &holtburger_world::spatial::CameraCollisionQuery {
+                environment: collision.environment.as_ref(),
+                entities: &collision.entities,
+                target: SpatialBodyId::LocalPlayer(active.identity.player_guid),
+            },
+            duration_seconds,
+            &samples,
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return project_camera_failure(
+                    active,
+                    duration_ms,
+                    ClientCameraFailureReason::ControllerInput,
+                    KinematicBoomDiagnostics::default(),
+                )
+                .map(Some);
+            }
+        };
         let tick = project_camera_outcome(active, initial_visual_pivot, duration_ms, outcome)?;
         Ok(Some(tick))
     }
@@ -721,6 +745,9 @@ impl ClientCameraRuntime {
         let Some(collision) = input.collision.as_ref() else {
             return Ok(false);
         };
+        let collision = collision
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
         let body = input
             .body(pending.identity)
             .context("client camera target body is unavailable")?;
@@ -733,7 +760,7 @@ impl ClientCameraRuntime {
             body.pose,
         );
         let initial_sample = target_sample_from_pose(
-            collision.as_ref(),
+            collision.environment.as_ref(),
             body.pose,
             &mut target_body,
             resolve_camera_pivot_offset(sphere.center, 0.0),
@@ -1553,7 +1580,13 @@ mod tests {
             visual_pivot(moved_pose, active.pivot_offset).coords
         );
         assert!(Arc::ptr_eq(
-            moved.collision.as_ref().unwrap(),
+            &moved
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .environment,
             &collision.scene
         ));
     }

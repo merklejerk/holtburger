@@ -9,7 +9,7 @@ use holtburger_world::{
     CollisionQueryError, CollisionScene, CollisionSurfaceRayHit, ContactMotionSegment,
     ContactState, EntityCollisionSnapshot, GroundState, GroundedBodyActuation, GroundedLaunch,
     HardSphereSweepHit, PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponseState,
-    PlacedMotionPath, SpatialBody, SpatialBodyId, SpatialScene,
+    PlacedMotionPath, SpatialBody, SpatialScene,
 };
 use thiserror::Error;
 
@@ -125,14 +125,12 @@ pub enum PreciseJumpPredictionBudgetError {
 /// Immutable authority and target facts required by one replaceable prediction.
 #[derive(Clone, Copy)]
 pub struct PreciseJumpPredictionRequest<'a> {
-    /// Canonical scene copied before any speculative mutation.
-    pub spatial_scene: &'a SpatialScene,
+    /// Captured mover; only this body is copied for each speculative candidate.
+    pub body: Option<&'a SpatialBody>,
     /// Immutable installed static collision snapshot.
     pub collision_scene: &'a CollisionScene,
     /// Immutable peer targets sealed once for this complete evaluation.
     pub entity_collision: &'a EntityCollisionSnapshot,
-    /// Player body to launch inside each private scene copy.
-    pub body_id: SpatialBodyId,
     /// Fresh authority-resolved movement and jump facts.
     pub capabilities: &'a SelfJumpCapabilities,
     /// Collision-backed target retained from the nearest surface ray.
@@ -388,7 +386,7 @@ fn predict_precise_jump_inner(
     request: PreciseJumpPredictionRequest<'_>,
     diagnostics: &mut PreciseJumpPredictionDiagnostics,
 ) -> Result<PreciseJumpPredictionOutcome, PreciseJumpPredictionError> {
-    let Some(body) = request.spatial_scene.body(request.body_id) else {
+    let Some(body) = request.body else {
         return Ok(PreciseJumpPredictionOutcome::Unproven(
             PreciseJumpUnprovenReason::BodyUnavailable,
         ));
@@ -439,24 +437,29 @@ fn predict_precise_jump_inner(
         Ok(candidates) => candidates,
         Err(rejection) => return Ok(map_candidate_rejection(rejection)),
     };
+    let frozen = request
+        .entity_collision
+        .prepare_frozen_contacts(owner_for_position(body.pose.landblock_id))
+        .map_err(PreciseJumpPredictionError::Solver)?;
+    let prepared = PreparedJumpPrediction {
+        request,
+        body,
+        frozen,
+        support_sphere: spheres.support,
+        walkable_normal_z: config.walkable_normal_z,
+        gravity: config.gravity,
+        landing_tolerance: candidates
+            .envelope()
+            .landing_tolerance()
+            .support_sphere_radius(),
+    };
     let mut last_failure = None;
     let mut first_unproven = None;
     let mut lowest_landing: Option<PreciseJumpPredictedLanding> = None;
     diagnostics.generated_candidates = candidates.candidates().len();
     for candidate in candidates.candidates() {
         diagnostics.evaluated_candidates += 1;
-        match predict_candidate(
-            request,
-            spheres.support,
-            config.walkable_normal_z,
-            config.gravity,
-            candidates
-                .envelope()
-                .landing_tolerance()
-                .support_sphere_radius(),
-            *candidate,
-            diagnostics,
-        )? {
+        match predict_candidate(&prepared, *candidate, diagnostics)? {
             CandidatePrediction::Reached(landing) => {
                 if landing.candidate.extent() == candidates.candidates()[0].extent() {
                     return Ok(PreciseJumpPredictionOutcome::Reachable(landing));
@@ -591,22 +594,38 @@ impl TrajectoryPlacementBuilder {
     }
 }
 
-fn predict_candidate(
-    request: PreciseJumpPredictionRequest<'_>,
+/// Validated per-evaluation geometry and immutable targets reused by every candidate.
+struct PreparedJumpPrediction<'a> {
+    /// Original authority, target, and finite-work policy.
+    request: PreciseJumpPredictionRequest<'a>,
+    /// Validated mover, avoiding optional-body recovery inside each candidate.
+    body: &'a SpatialBody,
+    /// Frozen peer index in the trajectory's fixed coordinate frame.
+    frozen: holtburger_world::spatial::FrozenContactTargets,
+    /// Grounded support sphere used to relate contacts to the desired landing.
     support_sphere: holtburger_world::GroundedSphere,
+    /// Minimum walkable contact normal from the mover's grounded configuration.
     walkable_normal_z: f32,
+    /// Authored acceleration used by the verified trajectory contract.
     gravity: f32,
+    /// Landing allowance resolved once by the candidate envelope.
     landing_tolerance: f32,
+}
+
+fn predict_candidate(
+    prepared: &PreparedJumpPrediction<'_>,
     candidate: PreciseJumpLaunchCandidate,
     diagnostics: &mut PreciseJumpPredictionDiagnostics,
 ) -> Result<CandidatePrediction, PreciseJumpPredictionError> {
-    let mut scene = request.spatial_scene.clone();
+    let request = prepared.request;
+    let support_sphere = prepared.support_sphere;
+    let walkable_normal_z = prepared.walkable_normal_z;
+    let gravity = prepared.gravity;
+    let landing_tolerance = prepared.landing_tolerance;
     let launch = GroundedLaunch::new(candidate.world_velocity())
         .expect("analytic precise-jump candidates always launch upward with finite velocity");
-    let initial_body = request
-        .spatial_scene
-        .body(request.body_id)
-        .expect("prediction body was validated before candidate evaluation");
+    let initial_body = prepared.body;
+    let mut mover = initial_body.clone();
     let initial_anchor = owner_for_position(initial_body.pose.landblock_id);
     let trajectory_origin = point_between_anchors(
         initial_body.pose.coords,
@@ -622,10 +641,9 @@ fn predict_candidate(
             GroundedBodyActuation::coast()
         };
         let now = request.start_time + PRECISE_JUMP_FIXED_TICK * tick;
-        let result = match scene.tick_physical_body_against_entity_snapshot(
-            request.body_id,
+        let result = match prepared.frozen.tick(
+            &mut mover,
             request.collision_scene,
-            request.entity_collision,
             PhysicalBodyActuation::Grounded(grounded),
             PRECISE_JUMP_FIXED_TICK.as_secs_f32(),
             now,
@@ -651,9 +669,7 @@ fn predict_candidate(
                 PreciseJumpUnprovenReason::CollisionUnavailable { owner },
             ));
         }
-        let solved = scene
-            .body(request.body_id)
-            .expect("speculative body cannot disappear during a single-body tick");
+        let solved = &mover;
         if tick == 1 && solved.contact != ContactState::Airborne {
             return Ok(CandidatePrediction::Failed(
                 PreciseJumpCandidateFailure::LaunchDidNotLeaveSupport,
@@ -866,6 +882,7 @@ fn point_between_anchors(point: Vector3, source: Guid, target: Guid) -> Vector3 
 
 #[cfg(test)]
 mod tests {
+    use holtburger_world::SpatialBodyId;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -1205,10 +1222,9 @@ mod tests {
         now: Instant,
     ) -> PreciseJumpPredictionRequest<'a> {
         PreciseJumpPredictionRequest {
-            spatial_scene: scene,
+            body: scene.body(body_id),
             collision_scene: collision,
             entity_collision,
-            body_id,
             capabilities,
             target,
             budget: PreciseJumpPredictionBudget::new(
@@ -1631,10 +1647,9 @@ mod tests {
         let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
         let entity_collision = scene.entity_collision_snapshot().unwrap();
         let outcome = predict_precise_jump(PreciseJumpPredictionRequest {
-            spatial_scene: &scene,
+            body: scene.body(body_id),
             collision_scene: &collision,
             entity_collision: &entity_collision,
-            body_id,
             capabilities: &capabilities(),
             target: &target,
             budget: PreciseJumpPredictionBudget::new(
@@ -1845,10 +1860,9 @@ mod tests {
         let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
         let entity_collision = scene.entity_collision_snapshot().unwrap();
         let outcome = predict_precise_jump(PreciseJumpPredictionRequest {
-            spatial_scene: &scene,
+            body: scene.body(body_id),
             collision_scene: &collision,
             entity_collision: &entity_collision,
-            body_id,
             capabilities: &capabilities(),
             target: &target,
             budget: PreciseJumpPredictionBudget::new(
@@ -1887,10 +1901,9 @@ mod tests {
         let entity_collision = scene.entity_collision_snapshot().unwrap();
 
         let lowest_arc = predict_precise_jump(PreciseJumpPredictionRequest {
-            spatial_scene: &scene,
+            body: scene.body(body_id),
             collision_scene: &collision,
             entity_collision: &entity_collision,
-            body_id,
             capabilities: &capabilities(),
             target: &target,
             budget: PreciseJumpPredictionBudget::new(
@@ -1935,10 +1948,9 @@ mod tests {
         let target = downward_target(&collision, Vector3::new(113.0, 96.0, 0.0));
         let entity_collision = scene.entity_collision_snapshot().unwrap();
         let outcome = predict_precise_jump(PreciseJumpPredictionRequest {
-            spatial_scene: &scene,
+            body: scene.body(body_id),
             collision_scene: &collision,
             entity_collision: &entity_collision,
-            body_id,
             capabilities: &capabilities(),
             target: &target,
             budget: PreciseJumpPredictionBudget::new(

@@ -318,6 +318,8 @@ pub struct ExplorerPossessedBodyEpoch {
 pub struct ExplorerEntityCollectionTick {
     /// Every scheduled accepted body tick, including stable possessed-body evidence.
     pub ticks: Vec<ExplorerEntityPhysicalTick>,
+    /// Frozen peers paired with this collection's target paths while possession is active.
+    pub entity_collision: Option<Result<Arc<holtburger_world::EntityCollisionSnapshot>, String>>,
     /// Bodies whose physical steps reached unavailable static coverage.
     pub coverage_rejections: Vec<HostPhysicalBodyCoverageRejection>,
     /// Possessed identity for this epoch, absent after release or retirement.
@@ -2052,79 +2054,73 @@ impl ExplorerEntityRuntime {
                 .wake_dynamic_body(SpatialBodyId::Entity(active.guid));
         }
         let mut proposal = None;
-        let collection =
-            self.simulation
-                .tick_dynamic_entity_collection(delta_seconds, now, |body| {
-                    match possession.as_ref() {
-                        Some((active, object_scale, previous_playback))
-                            if body.id == SpatialBodyId::Entity(active.guid) =>
-                        {
-                            let table = self
-                                .motion_catalog
-                                .table(active.motion_table_id)
-                                .context("active possession motion table vanished")?;
-                            let (next, actuation) = propose_possession_tick(
-                                active.clone(),
-                                previous_playback.as_ref(),
-                                table,
-                                body,
-                                *object_scale,
-                                self.possession_profile,
-                                delta_seconds,
-                            )?;
-                            let collision_pose = next.playback.collision_pose();
-                            assert!(
-                                proposal.replace(next).is_none(),
-                                "possessed body scheduled twice"
-                            );
-                            Ok(holtburger_world::PhysicalBodyInput::autonomous(actuation)
-                                .with_collision_pose(collision_pose))
-                        }
-                        _ => {
-                            let actuation =
-                                crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
-                                    body,
-                                )?;
-                            let Some(guid) = body.id.authoritative_guid() else {
-                                anyhow::bail!("Explorer collection body has no entity identity");
-                            };
-                            let Some(offset) = offsets.get(&guid) else {
-                                return Ok(holtburger_world::PhysicalBodyInput::autonomous(
-                                    actuation,
-                                ));
-                            };
-                            let instance = registry
-                                .entities
-                                .get(&guid)
-                                .expect("scheduled entity lost its registry instance");
-                            let physical = body
-                                .physical
-                                .as_ref()
-                                .expect("scheduled entity lost its physical definition");
-                            let offset = if matches!(
-                                physical.definition,
-                                PhysicalBodyDefinition::Grounded { .. }
-                            ) {
-                                gate_authored_offset(
-                                    *offset,
-                                    body.contact,
-                                    instance.definition.object_scale,
-                                )
-                            } else {
-                                holtburger_common::RigidTransform {
-                                    translation: offset.translation
-                                        * instance.definition.object_scale,
-                                    ..*offset
-                                }
-                            };
-                            Ok(holtburger_world::PhysicalBodyInput::referenced(
-                                actuation,
-                                holtburger_world::PhysicalReferenceInput::body(Some(offset)),
-                                false,
-                            ))
-                        }
-                    }
-                })?;
+        let collection = self.simulation.tick_dynamic_entity_collection(
+            delta_seconds,
+            now,
+            possession.is_some(),
+            |body| match possession.as_ref() {
+                Some((active, object_scale, previous_playback))
+                    if body.id == SpatialBodyId::Entity(active.guid) =>
+                {
+                    let table = self
+                        .motion_catalog
+                        .table(active.motion_table_id)
+                        .context("active possession motion table vanished")?;
+                    let (next, actuation) = propose_possession_tick(
+                        active.clone(),
+                        previous_playback.as_ref(),
+                        table,
+                        body,
+                        *object_scale,
+                        self.possession_profile,
+                        delta_seconds,
+                    )?;
+                    let collision_pose = next.playback.collision_pose();
+                    assert!(
+                        proposal.replace(next).is_none(),
+                        "possessed body scheduled twice"
+                    );
+                    Ok(holtburger_world::PhysicalBodyInput::autonomous(actuation)
+                        .with_collision_pose(collision_pose))
+                }
+                _ => {
+                    let actuation =
+                        crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body)?;
+                    let Some(guid) = body.id.authoritative_guid() else {
+                        anyhow::bail!("Explorer collection body has no entity identity");
+                    };
+                    let Some(offset) = offsets.get(&guid) else {
+                        return Ok(holtburger_world::PhysicalBodyInput::autonomous(actuation));
+                    };
+                    let instance = registry
+                        .entities
+                        .get(&guid)
+                        .expect("scheduled entity lost its registry instance");
+                    let physical = body
+                        .physical
+                        .as_ref()
+                        .expect("scheduled entity lost its physical definition");
+                    let offset =
+                        if matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. }) {
+                            gate_authored_offset(
+                                *offset,
+                                body.contact,
+                                instance.definition.object_scale,
+                            )
+                        } else {
+                            holtburger_common::RigidTransform {
+                                translation: offset.translation * instance.definition.object_scale,
+                                ..*offset
+                            }
+                        };
+                    Ok(holtburger_world::PhysicalBodyInput::referenced(
+                        actuation,
+                        holtburger_world::PhysicalReferenceInput::body(Some(offset)),
+                        false,
+                    ))
+                }
+            },
+        )?;
 
         let mut possession_outcomes = BTreeMap::new();
         if let (Some((expected, _, _)), Some(mut accepted)) = (possession.as_ref(), proposal)
@@ -2242,6 +2238,7 @@ impl ExplorerEntityRuntime {
             })
         });
         Ok(ExplorerEntityCollectionTick {
+            entity_collision: collection.entity_collision,
             ticks,
             coverage_rejections: collection.coverage_rejections,
             possession,
@@ -2808,7 +2805,7 @@ mod tests {
 
         let baseline_at = Instant::now();
         let baseline = simulation
-            .tick_dynamic_entity_collection(0.1, baseline_at, coasting())
+            .tick_dynamic_entity_collection(0.1, baseline_at, false, coasting())
             .unwrap();
         assert!(baseline.collision_reports.is_empty());
         simulation
@@ -2826,6 +2823,7 @@ mod tests {
             .tick_dynamic_entity_collection(
                 0.1,
                 baseline_at + std::time::Duration::from_millis(200),
+                false,
                 coasting(),
             )
             .unwrap();
@@ -3356,7 +3354,7 @@ mod tests {
         for step in 0..240 {
             let now = start + std::time::Duration::from_millis(step * 33);
             if simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting())
+                .tick_dynamic_entity_collection(1.0 / 30.0, now, false, coasting())
                 .unwrap()
                 .bodies
                 .is_empty()
@@ -4858,7 +4856,7 @@ mod tests {
         for step in 0..240 {
             let now = start + std::time::Duration::from_millis(step * 33);
             let tick = simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting())
+                .tick_dynamic_entity_collection(1.0 / 30.0, now, false, coasting())
                 .unwrap();
             if tick.bodies.is_empty() {
                 settled_at = Some(now);
@@ -4868,7 +4866,7 @@ mod tests {
         let settled_at = settled_at.expect("the grounded fixture body must settle");
         assert!(
             simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting())
+                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, false, coasting())
                 .unwrap()
                 .bodies
                 .is_empty(),
@@ -4890,7 +4888,7 @@ mod tests {
             .unwrap();
 
         let collection = simulation
-            .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting())
+            .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, false, coasting())
             .unwrap();
         assert!(collection.bodies.is_empty());
         assert_eq!(
@@ -5018,6 +5016,7 @@ mod tests {
             .unwrap();
         let unavailable_owner = Guid(0xda55_ffff);
         let rejected_target = ExplorerEntityCollectionTick {
+            entity_collision: collection.entity_collision.clone(),
             ticks: Vec::new(),
             coverage_rejections: vec![
                 crate::host_simulation_runtime::HostPhysicalBodyCoverageRejection {
@@ -5048,6 +5047,7 @@ mod tests {
         ));
 
         let missing_target = ExplorerEntityCollectionTick {
+            entity_collision: collection.entity_collision.clone(),
             ticks: Vec::new(),
             coverage_rejections: Vec::new(),
             possession: Some(ExplorerPossessedBodyEpoch {
@@ -5087,6 +5087,25 @@ mod tests {
             }) if identity == receipt.identity
         ));
 
+        // Query preparation failure holds the camera without invalidating accepted target motion.
+        let mut collection = collection;
+        let prepared_entities = collection.entity_collision.take();
+        collection.entity_collision = Some(Err("injected collision preparation failure".into()));
+        boom.publish_target(&collection);
+        assert!(matches!(
+            boom.advance(1.0 / 30.0, Ok).unwrap(),
+            Some(HostKinematicBoomTick::Held {
+                reason: HostKinematicBoomFailureReason::TargetContract,
+                ..
+            })
+        ));
+        collection.entity_collision = prepared_entities;
+        boom.publish_target(&collection);
+        assert!(matches!(
+            boom.advance(1.0 / 30.0, Ok).unwrap(),
+            Some(HostKinematicBoomTick::Advanced { .. })
+        ));
+
         let replacement_possession = entities.possess(guid).unwrap();
         let replacement = boom
             .start(HostKinematicBoomStartRequest {
@@ -5109,6 +5128,7 @@ mod tests {
             "a stale stop must preserve the replacement"
         );
         let replacement_missing_target = ExplorerEntityCollectionTick {
+            entity_collision: collection.entity_collision.clone(),
             ticks: Vec::new(),
             coverage_rejections: Vec::new(),
             possession: Some(ExplorerPossessedBodyEpoch {

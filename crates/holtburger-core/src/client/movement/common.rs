@@ -1,15 +1,14 @@
+use super::position_publication::PositionSample;
 use crate::client::movement_types::{
     CharacterDrive, Gait, LateralMotion, LongitudinalMotion, MotionStyle, MovementPacketMetadata,
     Turn,
 };
-use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_world::WorldState;
 use holtburger_world::context::WorldContextExt;
 use std::f32::consts::{PI, TAU};
-use std::time::Duration;
 
 // ACE's movement packets carry a run-rate / speed scalar, not a standalone
 // "already world-space" speed constant divorced from animation. In the retail
@@ -19,7 +18,6 @@ use std::time::Duration;
 // value is the *maximum* run speed for a fully capped player, not the speed
 // every character should emit or simulate.
 const FALLBACK_RUN_RATE_SCALAR: f32 = 4.5;
-pub(super) const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
 pub(super) const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
@@ -90,31 +88,22 @@ fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> 
     u8::from(resolve_contact(world, metadata))
 }
 
-pub(super) fn has_autonomous_position_sync_target(world: &WorldState) -> bool {
-    let Some(position) = world.local_player_runtime_pose() else {
-        return false;
-    };
-
-    world.player.guid != Guid::NULL && position.landblock_id != Guid::NULL
-}
-
 pub(super) fn build_autonomous_position(
     world: &WorldState,
     metadata: MovementPacketMetadata,
-) -> Option<AutonomousPositionActionData> {
-    let position = world.local_player_runtime_pose()?;
-    if world.player.guid == Guid::NULL || position.landblock_id == Guid::NULL {
-        return None;
-    }
-
-    Some(AutonomousPositionActionData {
-        position,
-        instance_sequence: world.player.instance_sequence,
-        server_control_sequence: world.player.server_control_sequence,
-        teleport_sequence: world.player.teleport_sequence,
-        force_position_sequence: world.player.force_position_sequence,
-        last_contact: encode_last_contact(world, metadata),
-    })
+) -> Option<(AutonomousPositionActionData, PositionSample)> {
+    let sample = PositionSample::capture(world)?;
+    Some((
+        AutonomousPositionActionData {
+            position: sample.pose,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+            last_contact: encode_last_contact(world, metadata),
+        },
+        sample,
+    ))
 }
 
 fn hold_key_for_motion_state(state: CharacterDrive) -> HoldKey {

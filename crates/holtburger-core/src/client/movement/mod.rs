@@ -1,4 +1,5 @@
 mod common;
+mod position_publication;
 mod system;
 
 #[cfg(test)]

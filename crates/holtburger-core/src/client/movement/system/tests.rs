@@ -1,7 +1,7 @@
 use super::super::common::{
-    AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND,
-    WALK_FORWARD_MOTION_COMMAND, build_autonomous_position, build_motion_state_raw_motion_state,
-    player_run_rate_scalar, raw_motion_state_with_motion_style,
+    TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
+    build_autonomous_position, build_motion_state_raw_motion_state, player_run_rate_scalar,
+    raw_motion_state_with_motion_style,
 };
 use super::*;
 use crate::client::movement_types::{Gait, LongitudinalMotion};
@@ -1053,7 +1053,7 @@ fn unchanged_motion_intent_does_not_require_server_refresh() {
 }
 
 #[test]
-fn autonomous_position_heartbeat_defaults_to_contact_when_unresolved() {
+fn autonomous_position_defaults_to_contact_when_unresolved() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -1072,7 +1072,7 @@ fn autonomous_position_heartbeat_defaults_to_contact_when_unresolved() {
     seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("moving player should emit autonomous position action");
 
     assert_eq!(position_action.position, position);
@@ -1100,7 +1100,7 @@ fn autonomous_position_uses_packet_contact_when_runtime_contact_is_unknown() {
     seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("moving player should emit autonomous position action");
 
     assert_eq!(position_action.last_contact, 1);
@@ -1124,7 +1124,7 @@ fn autonomous_position_uses_typed_runtime_contact_before_packet_fallback() {
             .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Sliding,)
     );
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("placed player should emit autonomous position action");
 
     assert_eq!(position_action.last_contact, 1);
@@ -1147,7 +1147,7 @@ fn autonomous_position_can_be_built_for_turn_only_motion() {
     seed_authored_manual_motion_world(&mut world, guid);
     world.entities.insert(entity);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("turning player should emit autonomous position action");
 
     assert_eq!(position_action.position, position);
@@ -1170,7 +1170,7 @@ fn autonomous_position_can_be_built_for_stationary_player() {
     world.player.force_position_sequence = 44;
     seed_local_player(&mut world, guid, position);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("autonomous position action should emit even when stationary");
 
     assert_eq!(position_action.position, position);
@@ -1853,203 +1853,149 @@ async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
 }
 
 #[tokio::test]
-async fn movement_heartbeat_arms_then_sends_for_stationary_player_with_valid_pose() {
+async fn position_publication_uses_accepted_pose_and_survives_stationary_ticks() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-
     world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0100),
+        ..WorldPosition::default()
+    };
+    seed_local_player(&mut world, guid, pose);
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let now = Instant::now();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now,
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("movement heartbeat should arm successfully");
-
-    assert!(!sent);
-    assert_eq!(session.game_action_sequence, 0);
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("movement heartbeat should send once armed");
-
-    assert!(sent);
-    assert_eq!(session.game_action_sequence, 1);
-    assert!(session.bytes_out > 0);
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    let mut accepted = pose;
+    accepted.landblock_id = Guid(0x1000_0101);
+    world.set_local_player_runtime_pose(accepted);
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    let deadline = now + super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
+    assert!(
+        movement
+            .publish_position_after_simulation(deadline, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    assert_eq!(session.game_action_sequence, 3);
+    movement.retire_movement_epoch();
+    assert!(
+        movement
+            .publish_position_after_simulation(deadline, &world, &mut session)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
-async fn movement_heartbeat_skips_players_without_valid_runtime_pose() {
-    let world = WorldState::synthetic();
-    let mut movement = MovementSystem::new();
-    let mut session = Session::new_test();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            Instant::now(),
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("stationary heartbeat check should succeed");
-
-    assert!(!sent);
-    assert_eq!(session.game_action_sequence, 0);
-    assert!(movement.next_autonomous_position_heartbeat_at.is_none());
-}
-
-#[tokio::test]
-async fn armed_movement_heartbeat_stays_armed_when_player_stops_moving() {
+async fn position_publication_requires_a_valid_player_and_resets_after_absence() {
     let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-    let mut entity = Entity::new(guid, "Player".to_string(), position);
-    entity.velocity = Vector3::new(1.0, 0.0, 0.0);
-
-    world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-    world.entities.insert(entity);
-
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let now = Instant::now();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now,
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("moving heartbeat check should arm successfully");
-
-    assert!(!sent);
-    assert!(movement.next_autonomous_position_heartbeat_at.is_some());
-
-    let stationary_entity = world
-        .entities
-        .get_mut(guid)
-        .expect("synthetic player entity should exist");
-    stationary_entity.velocity = Vector3::zero();
-    stationary_entity.omega = Vector3::zero();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("armed heartbeat should send one final stationary sync");
-
-    assert!(sent);
-    assert_eq!(session.game_action_sequence, 1);
-    assert!(movement.next_autonomous_position_heartbeat_at.is_some());
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    let guid = Guid(0x0102_0304);
+    world.player.guid = guid;
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0100),
+            ..WorldPosition::default()
+        },
+    );
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    world.player.guid = Guid::NULL;
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    world.player.guid = guid;
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
-async fn movement_tick_emits_autonomous_position_heartbeat_when_due() {
+async fn motion_packet_and_explicit_sync_share_the_routine_publication_baseline() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-    let mut entity = Entity::new(guid, "Player".to_string(), position);
-    entity.velocity = Vector3::new(2.0, 0.0, 0.0);
-
     world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-    world.entities.insert(entity);
-
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0100),
+            ..WorldPosition::default()
+        },
+    );
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
-    let start = Instant::now();
-
+    let now = Instant::now();
     movement
-        .tick(start, &mut world, &mut session)
-        .await
-        .expect("first movement tick should arm the heartbeat");
-
-    assert_eq!(session.game_action_sequence, 0);
-
-    movement
-        .tick(
-            start + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
+        .execute_motion_state_at(
+            CharacterDrive::builder().run().forward().build(),
             &mut world,
             &mut session,
+            now,
         )
         .await
-        .expect("second movement tick should emit the heartbeat");
-
+        .unwrap();
     assert_eq!(session.game_action_sequence, 1);
-}
-
-#[tokio::test]
-async fn stop_without_active_movement_keeps_autonomous_position_heartbeat_armed() {
-    let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-
-    world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-
-    let mut movement = MovementSystem::new();
-    let mut session = Session::new_test();
-    let now = Instant::now();
-    movement.note_drive_published(published_drive(
-        CharacterDrive::builder()
-            .run()
-            .forward()
-            .turn_right()
-            .build(),
-        MotionStyle::PreserveServer,
-    ));
-    movement.refresh_autonomous_position_heartbeat_schedule(now, &world);
-
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    let later = now + super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
     movement
-        .execute_stop_at(
-            now,
-            &mut world,
+        .send_autonomous_position_sync(
+            later,
+            &world,
             &mut session,
             MovementPacketMetadata::default(),
-            false,
         )
         .await
-        .expect("stop request should succeed");
-
-    assert!(movement.next_autonomous_position_heartbeat_at.is_some());
+        .unwrap();
+    assert!(
+        !movement
+            .publish_position_after_simulation(later, &world, &mut session)
+            .await
+            .unwrap()
+    );
+    assert_eq!(session.game_action_sequence, 2);
 }
 
 #[test]

@@ -1,9 +1,8 @@
 use super::common::{
-    AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, build_autonomous_position,
-    build_motion_state_raw_motion_state, encode_contact_long_jump,
-    has_autonomous_position_sync_target, normalize_heading, raw_motion_state_with_motion_style,
-    signed_heading_delta,
+    build_autonomous_position, build_motion_state_raw_motion_state, encode_contact_long_jump,
+    normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
 };
+use super::position_publication::{PositionPublication, PositionSample};
 use crate::client::character_motion::{
     CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,
     CharacterMotionReadiness, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
@@ -185,7 +184,8 @@ pub(crate) struct MovementSystem {
     published_motion: Option<PublishedMotion>,
     /// A local takeover must reach ACE even when its drive equals the last published drive.
     movement_publication_required: bool,
-    next_autonomous_position_heartbeat_at: Option<Instant>,
+    /// Shared successful-send baseline for movement and autonomous position packets.
+    position_publication: PositionPublication,
 }
 
 /// Client-only ordering retained around the actor-neutral jump attempt.
@@ -258,7 +258,7 @@ impl MovementSystem {
             pending_manual_playback_stop: false,
             published_motion: None,
             movement_publication_required: false,
-            next_autonomous_position_heartbeat_at: None,
+            position_publication: PositionPublication::default(),
         }
     }
 
@@ -274,9 +274,6 @@ impl MovementSystem {
         self.queued_control_commands
             .push(QueuedControlCommand::ServerDirective(motion));
         self.process_control_commands(now, world);
-        if motion.is_some() {
-            self.refresh_autonomous_position_heartbeat_schedule(now, world);
-        }
     }
 
     fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
@@ -315,7 +312,7 @@ impl MovementSystem {
         self.published_motion = None;
         self.movement_publication_required = false;
         self.clear_server_controlled_motion();
-        self.clear_autonomous_position_heartbeat_schedule();
+        self.position_publication = PositionPublication::default();
     }
 
     pub(crate) fn has_active_manual_drive(&self) -> bool {
@@ -334,15 +331,6 @@ impl MovementSystem {
             self.active_movement,
             Some(ActiveMovement::ServerDirected(_))
         )
-    }
-
-    fn clear_autonomous_position_heartbeat_schedule(&mut self) {
-        self.next_autonomous_position_heartbeat_at = None;
-    }
-
-    fn refresh_autonomous_position_heartbeat_schedule(&mut self, now: Instant, world: &WorldState) {
-        self.next_autonomous_position_heartbeat_at = has_autonomous_position_sync_target(world)
-            .then_some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
     }
 
     pub(crate) fn enqueue_drive_intent(&mut self, intent: PlayerDriveIntent, now: Instant) {
@@ -578,7 +566,7 @@ impl MovementSystem {
         }
 
         let transient_sent = if let Some(intent) = self.pending_transient_motion.take() {
-            self.execute_transient_motion_at(intent, world, session)
+            self.execute_transient_motion_at(intent, world, session, now)
                 .await?;
             true
         } else {
@@ -621,15 +609,6 @@ impl MovementSystem {
                 | Some(ActiveMovement::ServerDirected(_)) => {}
             }
         }
-
-        let _ = self
-            .maybe_send_autonomous_position_heartbeat(
-                now,
-                world,
-                session,
-                MovementPacketMetadata::default(),
-            )
-            .await?;
 
         Ok(events)
     }
@@ -1033,7 +1012,7 @@ impl MovementSystem {
                 had_active_local_motion,
                 self.published_motion.is_some(),
             );
-            Self::send_stop_pulse(world, session, metadata).await?;
+            self.send_stop_pulse(world, session, metadata, now).await?;
             if had_active_local_motion {
                 self.send_autonomous_position_sync(now, world, session, metadata)
                     .await?;
@@ -1050,13 +1029,15 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
         world: &mut WorldState,
         session: &mut Session,
-        _now: Instant,
+        now: Instant,
     ) -> Result<Vec<WorldEvent>> {
         let state_events = Vec::new();
 
         if self.should_send_motion_state_pulse(state, metadata.motion_style) {
             log::info!("movement: sending resolved motion pulse state={:?}", state);
-            Self::send_motion_state_pulse(world, session, state, metadata).await?;
+            let raw = build_motion_state_raw_motion_state(world, state, metadata.motion_style);
+            self.send_motion_packet(world, session, raw, metadata, now)
+                .await?;
             self.note_drive_published(published_drive(state, metadata.motion_style));
         }
 
@@ -1068,6 +1049,7 @@ impl MovementSystem {
         intent: TransientMotionIntent,
         world: &mut WorldState,
         session: &mut Session,
+        now: Instant,
     ) -> Result<()> {
         let movement_sequence = world.player.next_move_seq();
         world
@@ -1086,7 +1068,14 @@ impl MovementSystem {
             },
             intent.motion_style,
         );
-        Self::send_transient_motion_pulse(world, session, raw_motion_state).await?;
+        self.send_motion_packet(
+            world,
+            session,
+            raw_motion_state,
+            MovementPacketMetadata::default(),
+            now,
+        )
+        .await?;
         self.note_transient_motion_sent();
         Ok(())
     }
@@ -1139,7 +1128,7 @@ impl MovementSystem {
         self.send_autonomous_position_sync(now, world, session, metadata)
             .await?;
 
-        Self::send_stop_pulse(world, session, metadata).await?;
+        self.send_stop_pulse(world, session, metadata, now).await?;
         self.note_stop_published();
 
         Ok(world_events)
@@ -1181,41 +1170,28 @@ impl MovementSystem {
         Ok(world_events)
     }
 
-    async fn maybe_send_autonomous_position_heartbeat(
+    /// One routine publication decision after physics has committed this tick's movement.
+    pub(crate) async fn publish_position_after_simulation(
         &mut self,
         now: Instant,
         world: &WorldState,
         session: &mut Session,
-        metadata: MovementPacketMetadata,
     ) -> Result<bool> {
-        let Some(next_heartbeat_at) = self.next_autonomous_position_heartbeat_at else {
-            if has_autonomous_position_sync_target(world) {
-                self.next_autonomous_position_heartbeat_at =
-                    Some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
-            }
+        let Some((pulse, sample)) =
+            build_autonomous_position(world, MovementPacketMetadata::default())
+        else {
+            self.position_publication = PositionPublication::default();
             return Ok(false);
         };
-
-        if now < next_heartbeat_at {
-            return Ok(false);
-        }
-
-        let Some(pulse) = build_autonomous_position(world, metadata) else {
-            self.clear_autonomous_position_heartbeat_schedule();
+        let Some(reason) = self.position_publication.observe(sample, now) else {
             return Ok(false);
         };
-
-        session
-            .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
-            .await?;
-
-        if has_autonomous_position_sync_target(world) {
-            self.refresh_autonomous_position_heartbeat_schedule(now, world);
-        } else {
-            self.clear_autonomous_position_heartbeat_schedule();
-        }
-
-        Ok(true)
+        log::trace!(
+            "movement: position publication {reason:?} at {:?}",
+            sample.pose
+        );
+        self.submit_autonomous_position(now, session, pulse, sample)
+            .await
     }
 
     pub(crate) async fn send_autonomous_position_sync(
@@ -1225,17 +1201,26 @@ impl MovementSystem {
         session: &mut Session,
         metadata: MovementPacketMetadata,
     ) -> Result<bool> {
-        let Some(pulse) = build_autonomous_position(world, metadata) else {
-            self.clear_autonomous_position_heartbeat_schedule();
+        let Some((pulse, sample)) = build_autonomous_position(world, metadata) else {
+            self.position_publication = PositionPublication::default();
             return Ok(false);
         };
+        self.submit_autonomous_position(now, session, pulse, sample)
+            .await
+    }
 
+    /// Commit publication only after the session accepts the matching captured packet.
+    async fn submit_autonomous_position(
+        &mut self,
+        now: Instant,
+        session: &mut Session,
+        pulse: AutonomousPositionActionData,
+        sample: PositionSample,
+    ) -> Result<bool> {
         session
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
             .await?;
-
-        self.refresh_autonomous_position_heartbeat_schedule(now, world);
-
+        self.position_publication.record(sample, now);
         Ok(true)
     }
 
@@ -1251,35 +1236,14 @@ impl MovementSystem {
         self.published_motion != Some(PublishedMotion::Drive(published_drive(state, motion_style)))
     }
 
-    async fn send_motion_state_pulse(
-        world: &WorldState,
-        session: &mut Session,
-        state: CharacterDrive,
-        metadata: MovementPacketMetadata,
-    ) -> Result<()> {
-        let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: build_motion_state_raw_motion_state(
-                world,
-                state,
-                metadata.motion_style,
-            ),
-            position: world.local_player_runtime_pose().unwrap_or_default(),
-            instance_sequence: world.player.instance_sequence,
-            server_control_sequence: world.player.server_control_sequence,
-            teleport_sequence: world.player.teleport_sequence,
-            force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(world, metadata),
-        };
-
-        session
-            .send_action(GameAction::MoveToState(Box::new(data)))
-            .await
-    }
-
-    async fn send_transient_motion_pulse(
+    /// Movement, transient, and stop packets carry the same position/contact contract.
+    async fn send_motion_packet(
+        &mut self,
         world: &WorldState,
         session: &mut Session,
         raw_motion_state: RawMotionState,
+        metadata: MovementPacketMetadata,
+        now: Instant,
     ) -> Result<()> {
         let data = MoveToStateActionData {
             raw_motion_state,
@@ -1288,35 +1252,31 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(world, MovementPacketMetadata::default()),
+            contact_long_jump: encode_contact_long_jump(world, metadata),
         };
-
+        let sample = PositionSample::capture(world);
         session
             .send_action(GameAction::MoveToState(Box::new(data)))
-            .await
+            .await?;
+        if let Some(sample) = sample {
+            self.position_publication.record(sample, now);
+        }
+        Ok(())
     }
 
     async fn send_stop_pulse(
+        &mut self,
         world: &WorldState,
         session: &mut Session,
         metadata: MovementPacketMetadata,
+        now: Instant,
     ) -> Result<()> {
-        let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_motion_style(
-                world,
-                RawMotionState::default(),
-                metadata.motion_style,
-            ),
-            position: world.local_player_runtime_pose().unwrap_or_default(),
-            instance_sequence: world.player.instance_sequence,
-            server_control_sequence: world.player.server_control_sequence,
-            teleport_sequence: world.player.teleport_sequence,
-            force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(world, metadata),
-        };
-
-        session
-            .send_action(GameAction::MoveToState(Box::new(data)))
+        let raw = raw_motion_state_with_motion_style(
+            world,
+            RawMotionState::default(),
+            metadata.motion_style,
+        );
+        self.send_motion_packet(world, session, raw, metadata, now)
             .await
     }
 }

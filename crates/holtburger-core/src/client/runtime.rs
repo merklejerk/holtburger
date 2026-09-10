@@ -361,6 +361,11 @@ impl ClientRuntime {
                                 })))
                                 .await?;
                         }
+                        // Jump publishes its release origin/velocity, not the accepted contact
+                        // after this step. Keep the departure report in the routine decision.
+                        self.movement
+                            .publish_position_after_simulation(now, &self.world, &mut self.session)
+                            .await?;
                         if let Some(feedback) = simulation_tick.character_motion_feedback {
                             let _ = self
                                 .client_view_event_tx

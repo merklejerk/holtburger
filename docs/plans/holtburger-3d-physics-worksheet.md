@@ -233,6 +233,134 @@ The test still provided a useful contract check. `finish_sphere_path` had applie
 - The existing full-radius horizontal support-footprint approximation remains. This work proves the seam fix and listed compatibility checks, not a census of all collision/content behavior or complete retail parity.
 - The overall worksheet remains **open** for the user’s next physics issue.
 
+## 2. Brief directional slowdowns while running through a hallway
+
+- Status: **Implemented and verified with automated checks and live host runs**. User visual confirmation remains optional; the worksheet stays open.
+- Reported/investigated: 2026-09-10.
+- Report: At full running speed, moving straight ahead from the parked character produces roughly two slight slowdowns. Similar behavior occurs in some hallways and directions.
+- Captured parked pose: cell `0x001e0122`, position `(470.2124, -328.0878, -17.9950)`, rotation `(w=0.00699426, x=0, y=0, z=0.99997431)`. User confirmed the facing direction is the reproduction direction.
+- Investigation: Passive diagnostic login captured the pose without issuing movement. Compare production contact-solver travel against requested speed, then identify the geometry and exact decision at each loss. Distinguish collision response, contact-pass exhaustion, and presentation/network timing before assigning a cause.
+- Scope: Investigation and worksheet evidence; no production fix selected yet.
+
+### Findings and evidence
+
+**The live position-confirmation constraint periodically throttles otherwise valid running.** The geometry-only replay does not reproduce the slowdown. There are also two physical NPCs near the middle of this particular route; the original live run deflects around them. Those deflections should not be conflated with the independently measured synchronization slowdown.
+
+- Passive login captured the parked pose, setup `0x02001a9c`, and scale 1. No graphical client or TUI was needed.
+- Offline production contact-collection replay traversed the authored hallway from the parked pose, both along the facing direction and exactly south, at 8 and 18 m/s. After motor acceleration, travel stays at the requested speed until the real end wall around Y = -407.8535. The diagnostic uses the standard human sphere pair and no live entities or server confirmations; it isolates static geometry rather than reproducing the complete character runtime.
+- A 6.5-second live forward run through the actual client host showed approximately 18 m/s before the dips. It remained grounded at Z = -17.995. This establishes actual host movement loss independently of renderer timing.
+- A subsequent instrumented northbound run independently reproduced gradual throttling. Of 82 sampled full-speed proposed steps, 64 were reduced by the confirmation constraint. These are samples from one diagnostic run, not population statistics.
+- At `(468.62317, -390.74673, -17.995)` in cell `0x001e0128`, the producer requested Y travel `+0.541215`; the confirmation layer reduced it to `+0.21835627`. Its accumulated distance was `13.948165`, giving the exact multiplier `(20 - 13.948165) / (20 - 5) = 0.403456`. The resulting accepted tick travelled `+0.21835327`, at Y velocity `7.260342` m/s. Its path contained ordinary travel without a hard impact. The next confirmation reset the distance to `0.21840854`, and the next full-speed proposal was admitted without damping.
+- The two physical Viamontian Knights were observed around `(470, -369.98)` and `(468.587, -372.98)`. The forward run's sideways excursions occur in this area. Their presence is established; this investigation does not claim that every NPC-contact response is correct.
+
+### Cause and source contract
+
+1. `client/messages.rs::apply_local_position_authority` classifies ordinary local-player position packets as `AuthoritativePoseEffect::Confirm`.
+2. `SpatialScene` applies the confirmation to `PoseReconciliationState`. It starts with the distance from the newly confirmed pose to the current client pose.
+3. `pose_reconciliation.rs::retail_constraint_distances` permits 5 m of indoor travel before damping and uses a 20 m limit. `constrain_translation` scales each proposed step, accumulating the scaled distance until another confirmation arrives. The live diagnostic directly captured this reduction before collision handling.
+4. `client/movement/common.rs` sets the routine autonomous-position heartbeat to one second. `maybe_send_autonomous_position_heartbeat` checks that deadline; it does not trigger on cell or contact-plane changes. At 18 m/s, five metres takes roughly 0.28 seconds, so a healthy connection can still spend much of the interval throttled.
+5. ACE `Player_Tick.cs::UpdatePlayerPosition` sends an update to the player after an accepted position update, including when the broader one-second broadcast threshold has not elapsed. The client's outgoing-report policy therefore matters to when its next confirmation becomes available.
+
+Retail references establish an actual publication-policy gap, not grounds to delete the constraint:
+
+- `acclient.c:304336-304373`: the same 5/20 m indoor and 10/50 m outdoor thresholds.
+- `acclient.c:372268-372319`: contact-gated travel damping and reset from confirmed/current separation.
+- `acclient.c:139027-139039`: routine local-player position updates re-arm the constraint.
+- `acclient.c:682586-682608`: `ShouldSendPositionEvent` sends early when the cell or contact plane differs, before the ordinary time interval expires. On the timed path, it checks that position actually changed.
+- `acclient.c:682671-682708`: `SendPositionEvent` checks valid supported placement and records the sent position, time, and contact plane together.
+- `acclient.c:682267`: retail's ordinary position interval is also one second. Merely copying that interval omits its event-driven send conditions.
+
+### Agreed design direction — movement position publication
+
+Status: **Implemented**. Replace timer-only routine scheduling with one publication decision combining cell change, meaningful support change, distance travelled, and heartbeat. Retail establishes the omitted behavior and useful reference contracts; reproducing its exact trigger set is not a requirement. Measure this policy before introducing a complete contact-plane trigger.
+
+#### Ownership and available facts
+
+Keep publication policy in the existing `holtburger-core` client `MovementSystem`. It already owns movement packets, sequence metadata, control authority, successful movement publication, and world-epoch cleanup. A small internal publication state/helper is appropriate; a separate top-level system or frontend event channel is unnecessary.
+
+| Owner | Responsibility |
+| --- | --- |
+| `holtburger-world` | Produce accepted placement, committed cell, contact state, and support facts; retain the server-confirmation constraint. |
+| Core `MovementSystem` | Decide when to report those facts, construct movement packets, and record successful publication. |
+| `holtburger-session` | Transport packets; do not derive gameplay publication policy. |
+| 3D app | Supply input; no position-report scheduler or copied physics state. |
+
+`MovementSystem::tick` already receives `WorldState`. Existing builders read `local_player_runtime_pose` and runtime contact state; the scene exposes the player's body, accepted motion, and physical response. These facts can be read directly. Retained support contains a normal, footprint classification, and source proof, but not a complete contact plane. Do not expand that contract solely to copy retail's plane comparison.
+
+Current runtime ordering publishes movement before physics simulation. Keep input admission before simulation, but evaluate routine position publication after the accepted physics step, still through `MovementSystem`. This lets the decision use the newly accepted cell, support, and travel without introducing asynchronous state transfer.
+
+#### Proposed triggers
+
+| Trigger | Meaning and boundary |
+| --- | --- |
+| Committed cell change | Report entry into a different cell. Sphere overlap with an adjacent cell alone is not a committed transition. |
+| Meaningful support change | Report landing, leaving support, or switching support bodies, such as floor to moving platform. Verify stable support identity before implementing the comparison. |
+| Distance travelled | Report after a measured budget of accepted travel since the last position publication. Faster actual movement naturally sends more frequently; held input against a wall does not. |
+| Heartbeat | Preserve a maximum routine interval and explicitly define unchanged-pose behavior and any outstanding synchronization needs. |
+
+Combine applicable triggers into at most one routine position report per simulation tick. Do not equate a new triangle, supporting polygon, or collision-proof revision with a meaningful support change: those can change while traversing one continuous floor. Contact state and support source already exist. The implementation uses entity body IDs as stable support identity and ignores static-world proof revisions; grounded/sliding transitions and support disappearance are covered explicitly.
+
+Prefer accumulated accepted travel over displacement from the last sent position, because turns and backtracking still consume the confirmation travel allowance. The existing `AcceptedBodyMotion` stores net displacement divided by tick duration, not exact path length. Decide whether summing consecutive accepted tick displacements is sufficient; if exact within-tick path length is necessary, derive it once in the physics owner. Do not silently treat requested speed or retained velocity as distance actually travelled. Teleports and other epoch resets must not count as ordinary travel.
+
+#### Publication state and constraints
+
+- Consolidate related bookkeeping around the last successfully published position sample: pose/cell, meaningful support state as available, send time, and travel accumulated since publication. Audit every position-bearing send path, including `MoveToState`, stops, and explicit synchronization. Respect differences in the facts each packet carries rather than resetting all baselines indiscriminately.
+- Advance send bookkeeping only after successful submission to the session. Sending a report does not itself confirm the position: only incoming authority resets the spatial confirmation constraint.
+- Preserve packet sequence metadata, control/autonomy rules, and world-epoch cleanup. Audit packet/contact eligibility for landing and leaving support; do not copy retail's supported-placement gate in a way that makes the proposed departure trigger unreachable.
+- Keep confirmation damping intact. Choose the distance budget with room below the 5 m indoor threshold for normal confirmation latency and tick granularity. Select the actual budget from measurements, not an unexplained constant. No cadence can prevent throttling when confirmations stop arriving.
+- More frequent reports cost bandwidth and server work. Measure publication frequency alongside speed stability. A distance trigger may also be useful outdoors, where the free-travel threshold differs; avoid inventing separate speed-adaptive timers unless the simpler policy proves inadequate.
+- Document the departure from retail scheduling with source citations and measured scope under the repository's compatibility-marker convention. The bounded evidence below establishes the improvement for the tested conditions, without claiming complete retail equivalence.
+
+#### Validation requirements
+
+Replay the same hallway at the character's actual full speed. Capture sent and received positions, report reasons, and pre/post-constraint displacement; distinguish clear-floor intervals from NPC encounters. Measure trigger contributions separately so a successful combined run does not hide an ineffective or noisy trigger.
+
+Focused checks should cover committed cell transitions, landing/departure and support-body changes, continuous-floor polygon changes, fast and slow travel, backtracking, stationary/wall-blocked input, heartbeat behavior, failed sends, position-bearing message coordination, and authority/teleport resets. Test latency and missing confirmations to ensure the safeguard still works. The implementation outcome below records the selected support comparison, distance budget, unchanged-pose heartbeat behavior, and post-simulation integration.
+
+### Implementation outcome and verification
+
+- [x] Resolve publication ownership and support identity without adding a new subsystem.
+- [x] Replace the timer-only state and evaluate routine publication after accepted simulation.
+- [x] Coordinate successful movement/transient/stop and autonomous-position publication.
+- [x] Verify meaningful support changes, distance/backtracking, heartbeat, and epoch behavior.
+- [x] Reproduce the improvement in the live hallway and measure report cadence.
+- [x] Remove temporary production diagnostics and rebuild the clean host.
+
+`MovementSystem` retains a small `PositionPublication` helper in `client/movement/position_publication.rs`. Initial valid placement reports immediately. Subsequent routine reports combine committed-cell change, contact/support-body change, **2 m accumulated accepted travel**, and a **one-second heartbeat**. The heartbeat remains active while stationary, preserving the prior keepalive behavior. At most one routine decision is evaluated per simulation tick; explicit command packets retain their own protocol ordering.
+
+Support comparison distinguishes unknown, airborne, grounded, and sliding states. Supported states retain the entity body ID when present; static geometry and its proof revisions do not create distinct supporting bodies. No full contact plane or new shared-world API was added. The runtime reads the world's solved facts directly.
+
+Distance is the sum of successive accepted tick displacements in `WorldPosition` coordinates, not retained velocity or a straight line from the last report. It counts backtracking across ticks. It intentionally does not request exact within-tick collision-path length: this publication budget is an early-report policy, not the authoritative confirmation constraint. Player identity and instance, teleport, force-position, and server-control sequences delimit the baseline; retirement/absence clears it. Normal server confirmations do not clear the publisher's travel counter, and sending never clears the world's confirmation constraint.
+
+Movement-state, transient-motion, and stop packets now share one packet-construction/submission path and update the same successful-publication baseline as autonomous position reports. Failed submission does not record a successful report. The jump packet remains separate: it carries the launch origin and velocity rather than the accepted post-step contact sample. ACE `Player.cs::HandleActionJump` applies the jump velocity/contact transition without consuming `jump.Position`; the subsequent routine support-departure report must not be suppressed by treating that action as a position confirmation.
+
+#### Evidence
+
+| Check | Observed result |
+| --- | --- |
+| Real confirmation constraint, 18 m/s and 100 ms delayed echoes, one-second-only control | Throttles below 60% of requested speed. |
+| Same synthetic case with the 2 m trigger | No damping; a slower 6 m/s run also remains unthrottled and sends fewer reports. |
+| Same policy with confirmations withheld | Still throttles below 1% of requested speed; reporting does not bypass the safeguard. |
+| Live southbound clear hallway section, approximately Y -326 to -364 | 70 full-speed proposed steps, zero damped; maximum observed pre-step confirmation distance 1.628 m. |
+| Live northbound return, approximately Y -363 to -333 | 57 full-speed proposed steps, zero damped; maximum observed pre-step confirmation distance 1.631 m. |
+| Return-run publication reasons | During the 1.8-second drive: 13 distance reports and 3 cell reports, about 8.9 routine reports/s. Entire capture additionally included one initial and two heartbeat reports. |
+| Core/world suites after implementation cleanup | 378 core and 724 world tests passed (1,102 total), plus doctests. |
+| Final checks | Core/world/3D-host all-target clippy passed with warnings denied; formatting and diff checks passed; clean debug host rebuilt successfully. |
+
+These are two local-host run captures and deterministic fixtures, not a latency or content census. The 2 m budget reserves 3 m before the indoor damping threshold; tick granularity and time awaiting confirmation consume that margin. The 100 ms delayed-echo fixture and actual hallway runs validate this choice for those conditions. Higher latency can still cause damping, intentionally. Extra network/server work is the measured trade-off; no runtime-configurable speed timer or adaptive latency controller was added.
+
+Policy tests independently exercise the triggers, support-body transitions, ignored geometry-proof changes, retry bookkeeping, backtracking, stationary behavior, and all recorded epochs. Integration tests verify that accepted placement is read at publication and that motion packets/explicit synchronization prevent a redundant routine report. The full core suite retains packet metadata and authority/control tests. The `RETAIL DIVERGENCE` comment cites the original scheduling rules and the bounded verification scope.
+
+Final live pose: `(471.0750, -331.6026, -17.995)` in `0x001e0122`, near the original entrance and facing approximately north. Both diagnostic clients disconnected cleanly. The requested pre-commit code-quality pass covered the publication policy, packet builders and send paths, post-simulation runtime integration, epoch cleanup, tests, and worksheet. It found no blocking design issues. The delayed-confirmation fixture now schedules its 100 ms echoes by time rather than assuming three simulation ticks.
+
+### Diagnostic artifacts and cleanup
+
+Implementation evidence is also retained under `/tmp/holtburger-publication-live.jsonl`, `/tmp/holtburger-publication-live-stderr.txt`, `/tmp/holtburger-publication-return.jsonl`, `/tmp/holtburger-publication-return-stderr.txt`, and `/tmp/holtburger-publication-final-tests.txt`. Temporary constraint/report logging was removed; shared world physics and its confirmation safeguard have no implementation diff.
+
+Session-local evidence: `/tmp/holtburger-hallway-passive.json`, `/tmp/holtburger-hallway-live.jsonl`, `/tmp/holtburger-hallway-offline.txt`, `/tmp/holtburger-hallway-offline-18.txt`, `/tmp/holtburger-hallway-instrumented.jsonl`, and `/tmp/holtburger-hallway-instrumented-stderr.txt`. Temporary offline harness and instrumented source copies are retained only under `/tmp`; no credential values belong in this worksheet.
+
+The original diagnosis runs moved the character. At that stage, the last observed pose after the return run was: `(467.2666, -366.6013, -17.995)` in `0x001e0126`, facing approximately north. Diagnostic clients disconnected after each capture.
+
 ## Issue queue
 
 Awaiting subsequent user reports. Worksheet remains open after individual issues are resolved.

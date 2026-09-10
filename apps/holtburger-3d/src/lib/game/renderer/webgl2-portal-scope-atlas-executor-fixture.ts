@@ -409,6 +409,7 @@ function createProductionPackedFrame(
 ): PortalScopeAtlasFrameView {
 	const planner = new PortalScopeAtlasPlanner(
 		PRODUCTION_PACKED_FIXTURE_POLICY.culler,
+		PRODUCTION_PACKED_FIXTURE_POLICY.maximumPathDepth,
 	);
 	const input = createProductionPackedInput(kind);
 	const frame = planner.plan(createProductionPackedTopology(kind), input, {

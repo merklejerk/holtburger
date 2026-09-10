@@ -3,13 +3,10 @@ import {
 	createPortalRenderCapacityPolicy,
 	PORTAL_RENDER_CAPACITY_POLICY,
 } from "./portal-render-capacity-policy";
-import {
-	PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT,
-	PORTAL_ROOT_WINDOW_VERTEX_COUNT,
-} from "./portal-window-arena";
+import { PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT } from "./portal-window-arena";
 
 describe("portal render capacity policy", () => {
-	it("owns the accepted depth and derives every arena dimension", () => {
+	it("bounds CPU traversal by work storage independently from GPU rounds", () => {
 		const selection = {
 			maximumAuthoredApertureVertexCount: 7,
 			maximumPathDepth: 3,
@@ -29,33 +26,16 @@ describe("portal render capacity policy", () => {
 			2 * selection.maximumAuthoredApertureVertexCount;
 
 		expect(policy.culler).toEqual({
-			maximumDepth: selection.maximumPathDepth,
+			maximumDepth: selection.maximumScopeWindowWorkItemCount,
 			maximumProjectionPrimitiveCount:
 				selection.maximumProjectionPrimitiveCount,
 			maximumWorkItemCount: selection.maximumScopeWindowWorkItemCount,
 			windowArena: {
 				maximumApertureVertexCount: maximumVisibilityApertureVertexCount,
-				maximumFragmentCount:
-					1 + Math.floor(selection.maximumProjectionPrimitiveCount / 3),
-				maximumTemporaryFragmentCount: Math.floor(
-					selection.maximumProjectionPrimitiveCount / 3,
-				),
-				maximumTemporaryVertexCount: Math.max(
-					selection.maximumProjectionPrimitiveCount,
-					PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-						selection.maximumPathDepth *
-							(maximumVisibilityApertureVertexCount +
-								PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT),
-				),
-				maximumVertexCount:
-					PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-					selection.maximumProjectionPrimitiveCount,
 				maximumVerticesPerFragment:
-					PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-					selection.maximumPathDepth *
-						(maximumVisibilityApertureVertexCount +
-							PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT),
-				maximumWindowCount: selection.maximumScopeWindowWorkItemCount * 2 - 2,
+					maximumVisibilityApertureVertexCount +
+					PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT,
+				maximumWindowCount: selection.maximumScopeWindowWorkItemCount + 1,
 			},
 		});
 		expect(policy.scopeAtlas).toEqual(selection.scopeAtlas);
@@ -63,7 +43,7 @@ describe("portal render capacity policy", () => {
 
 	it("publishes one immutable production policy", () => {
 		expect(PORTAL_RENDER_CAPACITY_POLICY.culler.maximumDepth).toBe(
-			PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+			PORTAL_RENDER_CAPACITY_POLICY.maximumScopeWindowWorkItemCount,
 		);
 		expect(Object.isFrozen(PORTAL_RENDER_CAPACITY_POLICY)).toBe(true);
 		expect(Object.isFrozen(PORTAL_RENDER_CAPACITY_POLICY.culler)).toBe(true);

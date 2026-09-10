@@ -40,6 +40,7 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 	/** Independent arenas prevent another camera from overwriting a prepared view. */
 	readonly planner = new PortalScopeAtlasPlanner(
 		PORTAL_RENDER_CAPACITY_POLICY.culler,
+		PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 	);
 	/** Routing state is local to this view, while device targets remain pipeline-owned. */
 	readonly router = new PortalScopeAtlasOpaqueRouter();

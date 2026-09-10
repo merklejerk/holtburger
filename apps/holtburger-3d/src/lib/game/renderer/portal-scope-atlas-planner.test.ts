@@ -1,3 +1,4 @@
+import { scopeKey } from "../scene/scope";
 import { describe, expect, it } from "vitest";
 import { getLandblockCoordinates } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
@@ -52,7 +53,6 @@ const TEST_ATLAS_PACKING_EXTENT = 400;
 const TEST_ATLAS_UNSAFE_PIXEL_EXTENT = 100_000_000;
 const TEST_ATLAS_UNSAFE_TILE_EXTENT = 20_000_000;
 const TEST_UINT32_OVERFLOW = 0x1_0000_0000;
-const TEST_RECTANGLE_VERTEX_COUNT = 4;
 
 describe("portal scope-window culler bridge", () => {
 	it("matches the immutable planner coverage through a cyclic topology", () => {
@@ -100,7 +100,7 @@ describe("portal scope-window culler bridge", () => {
 		expect(actual.trace.arenaCapacityBytes).toBeGreaterThan(0);
 	});
 
-	it("matches near-plane and multipart immutable projection results", () => {
+	it("encloses near-plane and multipart exact coverage in rectangles", () => {
 		const nearChild = envCellScope("near-child");
 		const splitChild = envCellScope("split-child");
 		const graph = topology(
@@ -129,14 +129,22 @@ describe("portal scope-window culler bridge", () => {
 
 		const actual = culler.cull(graph, input);
 
-		expect(scopeWindowSnapshot(actual)).toEqual(
-			expected
-				.map(({ scope, window }) => ({
-					scope: scopeIdentity(scope),
-					window: windowSnapshot(window),
-				}))
-				.sort((left, right) => left.scope.localeCompare(right.scope)),
-		);
+		for (const reference of expected) {
+			const ordinal = actual.selectedScopeOrdinal(scopeKey(reference.scope));
+			if (ordinal === null)
+				throw new Error("Reference scope missing from rectangle traversal.");
+			const left = actual.selectedMinimumNdcX(ordinal),
+				bottom = actual.selectedMinimumNdcY(ordinal);
+			const right = actual.selectedMaximumNdcX(ordinal),
+				top = actual.selectedMaximumNdcY(ordinal);
+			for (const fragment of reference.window.fragments)
+				for (const { x, y } of fragment.vertices) {
+					expect(x).toBeGreaterThanOrEqual(left - 1e-6);
+					expect(x).toBeLessThanOrEqual(right + 1e-6);
+					expect(y).toBeGreaterThanOrEqual(bottom - 1e-6);
+					expect(y).toBeLessThanOrEqual(top + 1e-6);
+				}
+		}
 		let splitOrdinal = -1;
 		for (let ordinal = 0; ordinal < actual.selectedScopeCount; ordinal += 1) {
 			if (
@@ -147,7 +155,6 @@ describe("portal scope-window culler bridge", () => {
 			}
 		}
 		expect(splitOrdinal).toBeGreaterThanOrEqual(0);
-		expect(actual.selectedFragmentCount(splitOrdinal)).toBe(2);
 	});
 
 	it("declines a whole fan-out frontier when fixed queue capacity is exhausted", () => {
@@ -218,35 +225,41 @@ describe("portal scope-window culler bridge", () => {
 		]);
 	});
 
-	it("declines a whole frontier when committed polygon capacity is exhausted", () => {
-		const child = envCellScope("child");
-		const graph = topology(
-			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
-			[crossing("child", OUTDOOR_SCOPE, child)],
+	it("rejects rectangle storage too small for the work queue", () => {
+		expect(
+			() =>
+				new PortalScopeWindowCuller({
+					maximumDepth: 8,
+					maximumProjectionPrimitiveCount: 100_000,
+					maximumWorkItemCount: 8,
+					windowArena: { ...scopeWindowArenaCapacity(), maximumWindowCount: 1 },
+				}),
+		).toThrow("windows for the work-item budget");
+	});
+
+	it("completes cell traversal beyond the independent GPU propagation limit", () => {
+		const count = PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth + 8;
+		const cells = Array.from({ length: count }, (_, i) =>
+			envCellScope(`long-${i}`),
 		);
-		const culler = new PortalScopeWindowCuller({
-			maximumDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
-			maximumProjectionPrimitiveCount: 100_000,
-			maximumWorkItemCount: 8,
-			windowArena: {
-				...scopeWindowArenaCapacity(),
-				maximumFragmentCount: 1,
-			},
-		});
-
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				...cells.map((s, i) => topologyScope(s, `long-${i}`)),
+			],
+			cells.map((cell, i) =>
+				crossing(`long-${i}`, i === 0 ? OUTDOOR_SCOPE : cells[i - 1]!, cell),
+			),
+		);
+		const culler = new PortalScopeWindowCuller(
+			PORTAL_RENDER_CAPACITY_POLICY.culler,
+		);
 		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
-
-		expect(frame.status).toBe("truncated");
-		expect(frame.completedDepth).toBe(0);
-		expect(frame.declinedDepth).toBe(1);
-		expect(frame.trace.exceptionalDiagnosticHeapRecordCreationCount).toBe(1);
-		expect(scopeWindowSnapshot(frame)).toEqual([
-			{
-				scope: "outdoor",
-				window: windowSnapshot(createFullPortalViewWindow()),
-			},
-		]);
-		expect(frame.trace.portalOwnedFrameHeapRecordCreationCount).toBe(0);
+		expect(frame.status).toBe("complete");
+		expect(frame.selectedScopeCount).toBe(count + 1);
+		expect(frame.completedDepth).toBeGreaterThan(
+			PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+		);
 	});
 
 	it("declines the frontier before a projection exceeds its atomic primitive budget", () => {
@@ -308,6 +321,27 @@ describe("portal scope-window culler bridge", () => {
 });
 
 describe("portal scope-atlas planning", () => {
+	it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+		"rejects invalid GPU propagation depth %s",
+		(depth) => {
+			expect(
+				() =>
+					new PortalScopeAtlasPlanner(
+						PORTAL_RENDER_CAPACITY_POLICY.culler,
+						depth,
+					),
+			).toThrow(
+				"Portal GPU propagation depth must be a nonnegative safe integer.",
+			);
+		},
+	);
+	it("accepts zero GPU propagation rounds", () => {
+		expect(
+			() =>
+				new PortalScopeAtlasPlanner(PORTAL_RENDER_CAPACITY_POLICY.culler, 0),
+		).not.toThrow();
+	});
+
 	it("packs conservative tile bounds and derives clip transforms without heap records", () => {
 		const child = envCellScope("child");
 		const graph = topology(
@@ -361,7 +395,6 @@ describe("portal scope-atlas planning", () => {
 			portalOwnedFrameHeapRecordCreationCount: 0,
 			tilePixelCount: 12_500,
 			tilePlacementAttemptCount: 2,
-			windowVertexReadCount: 8,
 		});
 		expect(frame.trace.arenaCapacityBytes).toBeGreaterThan(0);
 	});
@@ -859,9 +892,6 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.tileCount).toBe(TEST_ATLAS_PACKING_CHILD_COUNT + 1);
 		expect(frame.trace.packingAttemptCount).toBe(1);
 		expect(frame.trace.tilePlacementAttemptCount).toBe(frame.tileCount);
-		expect(frame.trace.windowVertexReadCount).toBe(
-			frame.tileCount * TEST_RECTANGLE_VERTEX_COUNT,
-		);
 		expect(frame.trace.tileSortComparisonCount).toBeLessThanOrEqual(
 			frame.tileCount * Math.ceil(Math.log2(frame.tileCount)),
 		);
@@ -1024,12 +1054,15 @@ describe("portal scope-atlas planning", () => {
 });
 
 function scopeAtlasPlanner(): PortalScopeAtlasPlanner {
-	return new PortalScopeAtlasPlanner({
-		maximumDepth: TEST_ATLAS_MAXIMUM_PATH_DEPTH,
-		maximumProjectionPrimitiveCount: 100_000,
-		maximumWorkItemCount: 64,
-		windowArena: scopeWindowArenaCapacity(),
-	});
+	return new PortalScopeAtlasPlanner(
+		{
+			maximumDepth: TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+			maximumProjectionPrimitiveCount: 100_000,
+			maximumWorkItemCount: 64,
+			windowArena: scopeWindowArenaCapacity(),
+		},
+		TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+	);
 }
 
 function atlasPlanInput(
@@ -1051,29 +1084,33 @@ function scopeWindowSnapshot(
 }[] {
 	return Array.from({ length: frame.selectedScopeCount }, (_, ordinal) => ({
 		scope: scopeIdentity(frame.selectedScope(ordinal)),
-		window: Array.from(
-			{ length: frame.selectedFragmentCount(ordinal) },
-			(_, fragment) =>
-				Array.from(
-					{
-						length: frame.selectedFragmentVertexCount(ordinal, fragment),
-					},
-					(_, vertex) => [
-						frame.selectedVertexX(ordinal, fragment, vertex),
-						frame.selectedVertexY(ordinal, fragment, vertex),
-					],
-				),
-		),
+		window: [
+			[
+				[
+					frame.selectedMinimumNdcX(ordinal),
+					frame.selectedMinimumNdcY(ordinal),
+				],
+				[
+					frame.selectedMaximumNdcX(ordinal),
+					frame.selectedMinimumNdcY(ordinal),
+				],
+				[
+					frame.selectedMaximumNdcX(ordinal),
+					frame.selectedMaximumNdcY(ordinal),
+				],
+				[
+					frame.selectedMinimumNdcX(ordinal),
+					frame.selectedMaximumNdcY(ordinal),
+				],
+			],
+		],
 	})).sort((left, right) => left.scope.localeCompare(right.scope));
 }
 
 function scopeWindowArenaCapacity() {
 	return {
 		maximumApertureVertexCount: 64,
-		maximumFragmentCount: 2_048,
-		maximumTemporaryFragmentCount: 256,
-		maximumTemporaryVertexCount: 16_384,
-		maximumVertexCount: 16_384,
+
 		maximumVerticesPerFragment: 64,
 		maximumWindowCount: 512,
 	};

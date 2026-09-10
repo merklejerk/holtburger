@@ -1,15 +1,12 @@
 import type { PortalScopeWindowCullerCapacity } from "./portal-scope-window-culler";
 import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "./portal-arrival-metadata";
-import {
-	PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT,
-	PORTAL_ROOT_WINDOW_VERTEX_COUNT,
-} from "./portal-window-arena";
+import { PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT } from "./portal-window-arena";
 
 /** Independent limits selected from Gate C and the archive-wide authored-geometry census. */
 interface PortalRenderCapacityLimits {
 	/** Archive-wide maximum authored source-aperture vertex count. */
 	readonly maximumAuthoredApertureVertexCount: number;
-	/** Complete portal frontier rounds accepted by Gate C. */
+	/** Maximum GPU propagation rounds; independent of CPU cell traversal. */
 	readonly maximumPathDepth: number;
 	/** Checked projection/admission operations accepted in one camera plan. */
 	readonly maximumProjectionPrimitiveCount: number;
@@ -41,14 +38,7 @@ export interface PortalRenderCapacityPolicy extends PortalRenderCapacitySelectio
 	readonly culler: PortalScopeWindowCullerCapacity;
 }
 
-/**
- * Derive storage from independently bounded work instead of selecting each backing array by feel.
- *
- * Every non-root committed or temporary polygon vertex is created or visited by the atomic
- * projection meter before it is appended. The root contributes four unmetered vertices. A convex
- * aperture can gain at most one vertex per homogeneous clip plane, and each crossing can add that
- * many half-plane boundaries to an inherited convex fragment.
- */
+/** Derive bounded rectangle storage and aperture scratch from independently selected limits. */
 export function createPortalRenderCapacityPolicy(
 	selection: PortalRenderCapacitySelection,
 ): PortalRenderCapacityPolicy {
@@ -59,34 +49,17 @@ export function createPortalRenderCapacityPolicy(
 		2 * selection.maximumAuthoredApertureVertexCount;
 	const maximumProjectedApertureFragmentVertexCount =
 		maximumVisibilityApertureVertexCount + PORTAL_HOMOGENEOUS_CLIP_PLANE_COUNT;
-	const maximumVerticesPerFragment =
-		PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-		selection.maximumPathDepth * maximumProjectedApertureFragmentVertexCount;
-	const maximumMeteredFragmentCount = Math.floor(
-		selection.maximumProjectionPrimitiveCount / 3,
-	);
-	const maximumWindowCount = Math.max(
-		1,
-		selection.maximumScopeWindowWorkItemCount * 2 - 2,
-	);
+	// Rectangular intersections never add polygon edges. Only one aperture is clipped at a time.
 	const culler = Object.freeze({
-		maximumDepth: selection.maximumPathDepth,
+		// Every queued item advances at most one level. The queue/work budget already bounds
+		// CPU depth; the GPU propagation limit must not truncate intra-island cell traversal.
+		maximumDepth: selection.maximumScopeWindowWorkItemCount,
 		maximumProjectionPrimitiveCount: selection.maximumProjectionPrimitiveCount,
 		maximumWorkItemCount: selection.maximumScopeWindowWorkItemCount,
 		windowArena: Object.freeze({
 			maximumApertureVertexCount: maximumVisibilityApertureVertexCount,
-			maximumFragmentCount: 1 + maximumMeteredFragmentCount,
-			maximumTemporaryFragmentCount: Math.max(1, maximumMeteredFragmentCount),
-			maximumTemporaryVertexCount: Math.max(
-				PORTAL_ROOT_WINDOW_VERTEX_COUNT,
-				selection.maximumProjectionPrimitiveCount,
-				maximumVerticesPerFragment,
-			),
-			maximumVertexCount:
-				PORTAL_ROOT_WINDOW_VERTEX_COUNT +
-				selection.maximumProjectionPrimitiveCount,
-			maximumVerticesPerFragment,
-			maximumWindowCount,
+			maximumVerticesPerFragment: maximumProjectedApertureFragmentVertexCount,
+			maximumWindowCount: selection.maximumScopeWindowWorkItemCount + 1,
 		}),
 	}) satisfies PortalScopeWindowCullerCapacity;
 	return Object.freeze({

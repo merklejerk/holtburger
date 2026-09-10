@@ -132,6 +132,7 @@ impl ClientCameraService {
     pub(super) fn publish_active_world(&self, input: ClientCameraSceneInput) {
         let mut state = self.state.lock().expect("camera state poisoned");
         state.ordinary_input_allowed = true;
+        state.controller.observe_target(&input);
         state.input = Some(input);
     }
 

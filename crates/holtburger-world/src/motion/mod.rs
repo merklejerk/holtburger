@@ -42,8 +42,8 @@ pub use observed::{
     OBSERVED_WALK_SPEED_MPS, observed_locomotion_order,
 };
 pub use registry::{
-    BodyMotionRuntime, MotionActionEnqueueOutcome, MotionPresentation, MotionRuntimeRegistry,
-    PlayingMotionClip, RemoteMotionSample, SettledMotionPose,
+    AuthoredCollisionPose, BodyMotionRuntime, MotionActionEnqueueOutcome, MotionPresentation,
+    MotionRuntimeRegistry, PlayingMotionClip, RemoteMotionSample, SettledMotionPose,
 };
 pub(crate) use registry::{RemoteFramePolicy, RemoteMotionInput};
 pub use selection::{

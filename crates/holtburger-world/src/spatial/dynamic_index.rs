@@ -27,6 +27,8 @@ pub struct EntityCollisionProof {
     body_id: SpatialBodyId,
     pose: WorldPosition,
     target_geometry: Arc<PreparedEntityTargetGeometry>,
+    /// Immutable instance part poses that identify the queried surface at capture time.
+    collision_poses: Arc<[holtburger_common::RigidTransform]>,
     uses_physics_bsp: bool,
     placement: SpatialMembership,
 }
@@ -212,6 +214,7 @@ fn selectable_target_proof(body: &SpatialBody) -> Option<EntityCollisionProof> {
         body_id: body.id,
         pose: body.pose,
         target_geometry: dynamic.collision.target_geometry.clone(),
+        collision_poses: dynamic.collision_poses.poses.clone(),
         uses_physics_bsp: dynamic.collision.uses_physics_bsp,
         placement: dynamic.placement.clone(),
     })
@@ -233,12 +236,10 @@ pub(crate) fn placed_target_shapes(
         geometry
             .physics_bsp_parts
             .iter()
-            .map(|part| {
-                let placement = compose_part(
-                    &root,
-                    part.local_origin * object_scale,
-                    part.local_orientation,
-                );
+            .enumerate()
+            .map(|(index, part)| {
+                let pose = dynamic.collision_poses.poses[index];
+                let placement = compose_part(&root, pose.translation * object_scale, pose.rotation);
                 let scale = ColliderScale::from_components(part.scale.components() * object_scale)?;
                 PlacedCollisionShape::new(part.shape.clone(), placement, scale)
             })

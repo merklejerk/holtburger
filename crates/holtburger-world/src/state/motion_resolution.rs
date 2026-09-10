@@ -737,6 +737,59 @@ impl WorldState {
         ticks
     }
 
+    /// Selects initial authored playback without advancing time, then samples physical parts.
+    pub fn initial_authored_collision_pose(
+        &mut self,
+        guid: Guid,
+    ) -> crate::motion::AuthoredCollisionPose {
+        let Some(source) = self.motion_table_source_for_guid(guid) else {
+            return crate::motion::AuthoredCollisionPose::Placement;
+        };
+        let table_id = motion_table_id_for_source(source);
+        if self
+            .motion_runtimes
+            .get(guid)
+            .is_none_or(|runtime| runtime.motion_table_id() != table_id)
+        {
+            let contact = self
+                .runtime_body_id_for_guid(guid)
+                .and_then(|id| self.scene.body(id))
+                .map_or(ContactState::Unknown, |body| body.contact);
+            self.reconcile_authored_motion_support(guid, contact);
+        }
+        self.motion_runtimes
+            .get(guid)
+            .map_or(crate::motion::AuthoredCollisionPose::Placement, |runtime| {
+                runtime.collision_pose()
+            })
+    }
+
+    /// Publishes each physical target's current authored pose after hook processing.
+    pub fn publish_authored_collision_poses(
+        &mut self,
+        collision: &crate::CollisionScene,
+    ) -> anyhow::Result<()> {
+        let samples = self
+            .entities
+            .iter()
+            .filter_map(|entity| {
+                let body_id = self.runtime_body_id_for_guid(entity.guid)?;
+                let sample = self
+                    .motion_runtimes
+                    .get(entity.guid)
+                    .map_or(crate::motion::AuthoredCollisionPose::Placement, |runtime| {
+                        runtime.collision_pose()
+                    });
+                Some((body_id, sample))
+            })
+            .collect::<Vec<_>>();
+        for (body_id, sample) in samples {
+            self.scene
+                .publish_collision_pose(body_id, sample, collision)?;
+        }
+        Ok(())
+    }
+
     /// Executes host-owned physics hooks and blocked-solidification retries for one world tick.
     pub fn apply_authored_motion_physics(
         &mut self,

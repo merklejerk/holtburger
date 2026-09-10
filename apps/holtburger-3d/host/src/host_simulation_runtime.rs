@@ -426,6 +426,24 @@ impl HostSimulationRuntime {
         )
     }
 
+    /// Publishes host-owned authored target poses before the next collection snapshot.
+    pub fn publish_collision_poses(
+        &self,
+        samples: &[(
+            SpatialBodyId,
+            holtburger_world::motion::AuthoredCollisionPose,
+        )],
+    ) -> Result<()> {
+        let mut state = self.state.lock().expect("host simulation lock poisoned");
+        let collision = state.residency.snapshot().scene.clone();
+        for &(body, sample) in samples {
+            state
+                .bodies
+                .publish_collision_pose(body, sample, &collision)?;
+        }
+        Ok(())
+    }
+
     /// Advances explorer actors through the shared bounded collection. These local actors have
     /// authored or autonomous input with contact-return capture disabled. Server-driven fixed
     /// snaps and checked reference recovery are unsupported here and return an explicit error.

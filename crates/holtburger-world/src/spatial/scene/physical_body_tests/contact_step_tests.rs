@@ -2800,6 +2800,7 @@ fn contact_collection_reports_crossed_ethereal_trigger_without_blocking() {
             scene.register_body(SpatialBody::new(id, pose(Vector3::new(x, 96.0, 1.0)), now));
             let geometry = PreparedEntityTargetGeometry {
                 setup_radius: 0.5,
+                collision_animations: Default::default(),
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
                 fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {

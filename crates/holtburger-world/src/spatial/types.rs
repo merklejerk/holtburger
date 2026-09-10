@@ -119,6 +119,8 @@ pub struct PhysicalBodyInput {
     /// Whether a remote body may capture a return target from contact alone. Server-classified
     /// projectiles stay excluded after local impact clears their current collision flags.
     capture_contact_return: bool,
+    /// Authored target pose proposed with this input and committed with the body transaction.
+    collision_pose: Option<crate::motion::AuthoredCollisionPose>,
     /// Source-owned suspension survives unavailable target geometry; consumed by recovery admission.
     pub(super) recovery_suspended: bool,
     /// Controller/response command for the actual body, sampled once per admitted collection.
@@ -140,6 +142,7 @@ impl PhysicalBodyInput {
     /// Autonomous input has no server reference to restore after contact.
     pub fn autonomous(actuation: super::PhysicalBodyActuation) -> Self {
         Self {
+            collision_pose: None,
             capture_contact_return: false,
             recovery_suspended: true,
             actuation,
@@ -157,9 +160,16 @@ impl PhysicalBodyInput {
         Self {
             actuation,
             reference: Some(reference),
+            collision_pose: None,
             recovery_suspended: matches!(reference, PhysicalReferenceInput::Sticky(_)),
             capture_contact_return,
         }
+    }
+
+    /// Joins an authored target pose to the same acceptance boundary as its motion proposal.
+    pub fn with_collision_pose(mut self, sample: crate::motion::AuthoredCollisionPose) -> Self {
+        self.collision_pose = Some(sample);
+        self
     }
 
     /// Suppresses placement recovery while a source command owns pursuit, including intervals
@@ -203,12 +213,19 @@ impl PhysicalBodyInput {
         &self,
         body: &mut SpatialBody,
         reconciliation: &mut Option<super::PoseReconciliationState>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let wake = !self.permits_dynamic_settling() || body.has_pose_reconciliation_work();
         let physical = body
             .physical
             .as_mut()
             .context("physical input requires body physics")?;
+        let pose_changed = match (self.collision_pose, physical.dynamic.as_mut()) {
+            (Some(sample), Some(dynamic)) => dynamic
+                .collision_poses
+                .apply(&dynamic.collision.target_geometry, sample)?,
+            (Some(_), None) => anyhow::bail!("authored collision pose requires a dynamic body"),
+            (None, _) => false,
+        };
         let definition = physical.definition;
         // Direct ephemeral queries legitimately have no dynamic lifecycle. Collection bodies do;
         // fresh input wakes them before the kernel chooses which bodies receive ordinary forces.
@@ -232,7 +249,7 @@ impl PhysicalBodyInput {
         {
             body.retained.velocity = retained_velocity;
         }
-        Ok(())
+        Ok(pose_changed)
     }
 }
 

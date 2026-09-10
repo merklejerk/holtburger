@@ -429,6 +429,311 @@ Session-local diagnostic artifacts remain available:
 - Isolated structural prototype: `/tmp/wall-structural-prototype.py`, `/tmp/wall-structural-results-final.json`.
 - Offset-body arithmetic reproduction: `/tmp/wall-root-publication-repro.py`, `/tmp/wall-root-publication-repro.json`.
 
+## Issue 4 — Excessive overlap with closed doors
+
+Status: **Resolved — implemented and accepted by the user.** Final quality review completed; included in the issue 4 commit.
+
+### Report and consequence
+
+The user reports that entities, including the player, enter visibly closed doors too deeply. Movement eventually stops, but the player's position can reach the opposite side as understood by ACE, allowing a locked door to open.
+
+ACE `Door.ActOnUse` admits use when `!IsLocked || behind` (`ACE/Source/ACE.Server/WorldObjects/Door.cs:91`). `WorldObject.GetRelativeDir` compares the player's horizontal root position with the door's origin and facing (`WorldObject.cs:990`). A negative facing dot product means behind. This opens the door through its permitted back-side interaction; it does not itself clear the lock property.
+
+### Proven collision-pose mismatch
+
+A passive local-ACE probe observed +Holtmage in cell `0x001e0224` at approximately `(61.0114, -279.9394, -8.9950)`, and a closed Door `0x7001e018` (WCID 278), setup `0x0200024f`, at `(120, -295.245, -12)`. Its presentation holds animation `0x03000559`, frame 0. This is an observed door from the same dungeon, not yet confirmed by the user as the exact reported instance. The probe did not drive the player or use the door.
+
+Dynamic target preparation (`crates/holtburger-core/src/dynamic_entity.rs::prepare_target_geometry`, `stable_part_frames`) captures the setup default animation's first frame, otherwise its Resting/Default placement. `placed_target_shapes` in `crates/holtburger-world/src/spatial/dynamic_index.rs` continues placing those captured part transforms. The current motion cursor does not update them.
+
+This door has no setup default animation. Its Default placement has the two blocking panels about 30 degrees inward from closed, with centers at local Y `-0.441256` and `-0.444426`. Its actual closed animation frame has nearly straight panels, at Y `-0.00865101` and `-0.00450118`. The visible closed door and its collision geometry therefore disagree substantially. Both panels use physics BSP `0x0100097c`; the third part has no physics BSP. The player's authored movement spheres have radius 0.48 m.
+
+A temporary asset-backed probe placed these exact BSPs and each set of part transforms into the production `CollisionScene::sweep_hard_sphere` query. The scene contained only the target door, with resident empty static coverage. It tested a radius-0.48 sphere at upper-body height across seven lateral positions from both sides (28 queries total). At the doorway center, approaching from the front:
+
+| Collision part pose | Player center Y at first hit, relative to door origin |
+| --- | --- |
+| Current setup Default placement | -0.228175 m: already behind ACE's side boundary |
+| Actual closed animation frame 0 | +0.620705 m: remains in front |
+
+Changing only the part poses moves first contact forward by approximately 0.849 m. Both variants block travel; the setup pose creates an inward pocket near the middle. This reproduces the consequential geometric error with the production sweep, without changing collision radius, tolerances, or response. It is not a complete live movement/interaction replay or a full content census.
+
+### Retail evidence and correction direction
+
+Retail `CPartArray::UpdateParts` combines the object's frame with **current animation part frames** and scale (`acclient-eor-source/acclient.c:314107-314132`). `CPartArray::FindObjCollisions` visits those parts (`:313270-313287`), and `CPhysicsPart::find_obj_collisions` transforms the moving spheres using the part's current pose before testing its physics BSP (`:303185-303200`). The useful clue is pose ownership, not a special door penetration allowance.
+
+The correction should make dynamic physics-BSP part placement follow the host-owned authored motion pose. The existing motion cursor should remain the single timing owner; collision needs the part transforms sampled from it, including initial settled poses and animation transitions. The renderer must not become the source of physical transforms. Keep shared BSP meshes immutable and update their placement, including affected collision bounds/shadow membership. Resolve ordering with ethereal hooks and pending solidification so each collision query sees coherent geometry and participation.
+
+This is a broader missing connection between authored motion and dynamic collision, demonstrated by a common door asset. It does not justify rewriting the movement solver or adding door-specific radius/padding. Detailed implementation scope and a content census remain to be worked out. A closed-pose-only patch would fix this sample while leaving collision wrong during other solid animation states; evaluate that limitation explicitly before choosing a narrower scope.
+
+Verification for implementation should include this exact front/back reproduction, initial login to a closed door, open/close transitions and obstructed solidification, and a live user check at the reported door. Tests retained in the repository should use asset-free representative geometry rather than depend on locally installed archives.
+
+Diagnostics: `/tmp/holtburger-door-passive.jsonl`, `/tmp/door-asset-results.txt`, `/tmp/door-sweep-probe.rs`, `/tmp/door-sweep-results.txt`. Temporary Rust harness source was removed after the experiment. No production code changed.
+
+### Follow-up investigation — scope and cost (2026-09-10)
+
+Progress: completed an archive/catalog census and traced the runtime integration boundaries. No production implementation or performance claim yet.
+
+#### Census method and corrections
+
+The existing `physics_bsp_part_animation` diagnostic is insufficient for this issue: it excludes single-part setups, follows only setup-default motion tables, and classifies animation of any part rather than the actual physics-BSP part indices. Its claim that a single part is necessarily root-equivalent is incorrect: retail composes the object root with the animation's part transform even for one part. Do not use that diagnostic's old population estimate to scope this fix.
+
+A temporary replacement scanned unique EOR-namespace setup/GfxObj resources and joined `dats/weenies.hwc` setup IDs with template motion-table IDs. For each BSP-carrying setup, it examined its default animation and the union of setup-default and template motion-table animations. It compared only BSP-carrying part tracks with the pose currently chosen by `stable_part_frames`, and separately checked whether those tracks change within an animation. Frames and quaternion components were compared exactly, so tiny authored differences remain counted.
+
+| Measurement | Result |
+| --- | ---: |
+| Setups carrying at least one physics-BSP part | 530 |
+| Those with a discovered animation source | 128 |
+| Setups with a differing collision-part pose in that source envelope | 92 |
+| Those with collision-part tracks varying within an animation | 87 |
+| Differing-pose setups with only one model part | 45 |
+| Setups with 1 / 2 / 9 / 11 differing collision parts | 54 / 36 / 1 / 1 |
+| Unique differing `(animation ID, part index)` tracks | 121 |
+| Frame samples in those tracks | 5,677 |
+| Raw 7-float transform payload for those samples | 158,956 bytes (about 155 KiB) |
+
+These are **potential asset combinations**, not active solid objects or live concurrency. The union deliberately includes entire referenced animations rather than only selected clip windows and gameplay-reachable command sequences. Templates sharing a setup need not share behavior. Live appearance substitutions and runtime motion-table overrides are not enumerated. The payload estimate excludes containers, indexing, unchanged tracks, and any additional pose storage; it is not a runtime memory measurement or a complete upper bound.
+
+The scan reported two unavailable GfxObj references (`0x00000000`, `0x01004e29`) and 50 animation/part combinations without a corresponding frame track, concentrated in setups `0x020003b5` and `0x02001bf2`. These were reported, not silently treated as stationary. Retail `UpdateParts` limits updates to the smaller of setup and animation part counts (`acclient.c:314119-314129`); handling shorter animations is therefore a real pose-retention question, not automatically corrupt content. This census does not simulate transitions through those combinations.
+
+Representative authored candidates (template names identify content, not guaranteed active solid-state behavior):
+
+| Setup | Example template | Differing collision parts |
+| --- | --- | ---: |
+| `0x0200024f` | Door, WCID 278; reported reproduction asset | 2 |
+| `0x02000310` | Sliding Door, WCID 720 | 1 |
+| `0x02000c56` | Bookcase, WCID 15301 | 2 |
+| `0x02000bde` | Fireplace / Portcullis, WCIDs 14467 / 22615 | 1 |
+| `0x0200025a` | Pressure Plate, WCID 298 | 1, no within-animation variation found |
+| `0x020018c4` | Walkway, WCID 72919 | 1, no within-animation variation found |
+| `0x02000fda` | Sealed Door, WCID 25565 | 11; nine vary within animation |
+| `0x02001bf2` | Rynthid Assessment Crystal / Sparking Crystal | 9; includes shorter-animation caveat above |
+
+#### Runtime and retail findings
+
+- Retail `CSequence::get_curr_animframe` selects `floor(frame_number)` and uses the placement frame only when no animation is current (`acclient.c:326259-326270`). Its collision parts do not require interpolating a complete skeleton every physics tick. Retain the host cursor as timing owner and detect actual collision-pose changes; a changed clip/frame identity alone does not prove the transforms changed.
+- The host already owns clip identity and whole frame through `MotionSequenceRuntime`. However, `MotionAnimation::project` in `crates/holtburger-content/src/motion_sequence.rs` currently discards part transforms while extracting their hooks. This requires a deliberate extension of simulation content, not merely connecting two existing complete contracts. Preserve only justified collision-pose data rather than retaining every character limb track by default.
+- `PreparedEntityBspPart` currently stores local transforms inside shared prepared target geometry. Keep immutable meshes/preparation shareable; give changing instance poses an explicit runtime owner. Avoid rebuilding or reloading BSP meshes for frame changes.
+- Client simulation advances authored motion, applies authored physics hooks, and then runs physical movement (`crates/holtburger-core/src/client/simulation.rs:153`). `apply_authored_motion_physics` retries pending solidification and runs ethereal hooks (`crates/holtburger-world/src/state/motion_resolution.rs:741`). The exact pose visible to each solidification check must be designed and verified, including ticks crossing multiple hook frames; merely installing the final tick pose before all hooks may not preserve event-time behavior.
+- `placed_target_shapes` feeds movement, peer overlap, snapshots and spatial indexing. Update this common source rather than add a door-only query. Indoor BSP-body membership derives from transformed part boxes, so a stationary root does not imply unchanged membership.
+- `EntityCollisionProof` retains root pose, target geometry, branch and membership. Once instance part poses can change independently, retained surface proofs must include the owner-produced pose identity or equivalent geometry fact, so a precise-jump target cannot remain valid after its surface moves.
+- Existing dynamic snapshots/index preparation already places target shapes. Attribute new cost separately from existing work; a transform microbenchmark alone would not measure membership traversal, snapshots, contact queries or support invalidation.
+
+#### Performance evaluation shape
+
+No user-provided crowded scene is required. The archive supplies representative assets. Start with a production-path controlled workload at 1, 16, 64 and 256 copies, using the common two-panel door and the 11-part sealed door as separate workloads. Label high counts as synthetic stress, not observed live density. Include settled, repeatedly changing solid poses, and normal ethereal open/close behavior as distinct cases; forcing solid poses is a diagnostic stress condition, not a claim about authored gameplay.
+
+Measure an unchanged baseline and a candidate through pose selection/publication, membership refresh, and ordinary collision queries. Use both open-space placement and portal-straddling indoor placement because the latter exercises cell traversal. Include a player approaching the objects, and report how many part transforms actually changed. Report median and spread across at least five runs, with build profile, tick cadence, object count and geometry configuration. A settled workload should demonstrate absence of repeated pose updates. The user-suggested dungeon 6146 remains an optional overall live regression workload; a mob crowd alone cannot isolate this cost.
+
+The census supports a small-data, selective-update approach: 90 of 92 candidate setups have only one or two differing collision parts. It does **not** yet prove the complete update is cheap. Remaining work before final implementation scope: settle pose/hook ordering and shorter-animation semantics, account for initial settled-body installation and appearance replacement, and prototype the common collision-pose update boundary before timing it. Moving surfaces pushing or carrying actors is a separate response question; updating geometry alone must not be described as complete moving-platform physics.
+
+Artifacts: `/tmp/collision-pose-census.txt` (complete rows and exceptions), `/tmp/collision-pose-census-build.txt`, `/tmp/collision_pose_census.rs` (reproducible temporary source). The temporary binary source was removed from the repository after the run. The older census was inspected but not rewritten as part of this investigation.
+
+### Proposed solution — shared authored collision poses
+
+Status: **Implemented and accepted.** The user authorized implementation and accepted the candidate after the requested live-check handoff. This section supersedes the earlier suggestion that part transforms necessarily belong in the global `MotionAnimation` projection.
+
+#### Constraints and scope
+
+Goal: every dynamic physics-BSP target uses the host-selected authored part pose, including its initial settled state, while retaining shared immutable collision meshes.
+
+The required contract is the collision pose of the model's BSP parts, not a new skeleton simulation. Scope includes single- and multi-part targets, setup placement fallback, settled and changing animations, effective motion-table changes, appearance/setup replacement, state reconciliation, cell membership, and retained surface-reference validity. Root motion and sphere/cylinder movement bodies keep their existing meanings. Static landblock placement is not converted into animated entities.
+
+The existing motion owner selects and advances playback. The content layer supplies decoded tracks. The scene owns mutable instance collision placement. No renderer-to-host pose messages, archive reads during a physics tick, independent collision clock, per-frame BSP rebuilding, or door-specific collision padding.
+
+Concessions: use retail's whole-frame part sampling. This does not implement swept moving-obstacle collision, actor pushing, or platform carrying. Pose replacement must still invalidate stale support/target facts and preserve existing collision/solidification behavior. If verification demonstrates that the reported door requires additional response behavior, stop and scope that evidence rather than silently growing a moving-platform solver.
+
+#### Alternatives considered
+
+| Approach | Assessment |
+| --- | --- |
+| Force doors to a known closed frame | Too narrow: bypasses current motion selection and leaves other poses/objects wrong. |
+| Retain every animation part in the global motion catalog | Simple access, but expands the shared simulation payload to all character limbs. Current bootstrap deliberately seeks past approximately 52 MB of transforms; the sparse collision population does not justify undoing that globally. |
+| Rebuild prepared geometry whenever a frame changes | Reuses an existing path but confuses immutable content preparation with instance movement, introducing allocation and asynchronous readiness into animation. |
+| Prepare sparse collision tracks with the body, then publish instance poses | **Recommended.** Extends existing preparation and scene boundaries, preserves one clock, and limits data to a proven consumer. |
+
+#### Ownership and data flow
+
+1. **Content preparation:** for the effective setup/appearance, identify actual BSP part indices. Resolve the entity's effective motion table using the existing entity-over-setup selection rule, plus any setup default animation used by the runtime. Prepare immutable tracks for those indices across the reachable animations. Preserve constant tracks as constants and varying tracks as frame arrays. Preserve the distinction between an authored missing part track and missing/unavailable content. Share prepared content using the existing content-service/cache conventions; do not introduce a global cache framework for this feature.
+2. **Body definition:** retain meshes, part indices/scales, initial placement poses and prepared track references as immutable facts. Initial transforms are explicitly initial values, not simultaneously the live collision pose. Use `RigidTransform` for related origin/orientation values where compatible with existing math types. A private validated aggregate ties instance pose slots to ordered BSP parts; consumers must not zip unrelated public vectors or synthesize missing transforms.
+3. **Motion selection:** expose one reusable owner-produced sample identifying the selected authored animation and whole frame, or explicit placement-pose state. Derive it at the motion owner using its existing action/command precedence. Do not ask collision to interpret `MotionPresentation::Playing`, infer a cursor from elapsed time, or select a presentation-only locomotion channel independently. Resolve any necessary common selection helper once and reuse it without making renderer policy own physics.
+4. **World instance:** retain the current local collision-part poses with the body's dynamic runtime state. Apply the selected sample to those slots, compare the resulting transforms, and publish only actual changes. The scene owns a collision-pose identity/revision if needed by retained surface proofs; it changes with geometry, not merely a new animation ID or frame. No revision or pose traffic is added to the frontend just for implementation bookkeeping.
+5. **Scene publication:** one scene operation updates part poses and their geometry-dependent membership together. Root position is unchanged by a local part-pose update. Route movement sweeps, peer overlap, snapshots/indexing, support queries, and target proofs through the existing common placed-target-shape path. Snapshots retain a coherent pose rather than referencing mutable live transforms. Refresh affected support/reference facts when a stationary-root object's surface moves.
+
+Preparation captures effective motion-table identity in addition to setup and appearance; it participates in async completion currentness. A frame change does **not** cause a preparation job. On setup/appearance/table replacement, prepare the successor content through the existing coordinator, reject stale completions, and initialize from the **current** motion sample when installing. Reuse geometry for motion-only preparation where practical; do not invoke full-body replacement on ordinary pose updates.
+
+Initially installed bodies receive their selected settled collision pose. The original plan also required topology-resolved membership before any query; the later real-door verification withdrew that broader installation rewrite as a blocker. Existing installation seeds membership from the root cell, and normal collection refresh resolves coverage before movement snapshots. For an already moving body whose new animation omits trailing parts, retain those current part poses: retail updates only `min(setup parts, animation parts)` (`acclient.c:314119-314129`). An initial body seeds all slots from the established setup/default preparation policy, then applies authored entries. Missing resource data is an explicit preparation failure/readiness condition, never equivalent to an authored omitted track. Table switches and shorter clips therefore require stateful instance poses even though the tracks remain immutable.
+
+#### Tick ordering and retail evidence
+
+Retail queues hooks while traversing frames: `CSequence::execute_hooks` calls `add_anim_hook` (`acclient.c:326199-326215`). It does not execute collision queries at each departed frame. In the dynamic-object path, `UpdatePositionInternal` advances the sequence and processes queued hooks (`:308262-308298`); `UpdateObjectInternal` subsequently calls `set_frame`, including for objects without movement spheres (`:310860-310950`). `set_frame` refreshes parts (`:309528-309546`). Pending ethereal restoration is checked before this advance (`:310850-310855`).
+
+For the client dynamic-body path, preserve that relationship:
+
+1. Advance the existing motion owner once and retain its ordered hooks/final pose sample.
+2. Run pending solidification and authored hooks against the previously published collision pose, preserving the current hook order.
+3. Publish the sampled new part poses and refresh membership for changed bodies.
+4. Run the ordinary movement/contact queries against that coherent successor geometry.
+
+This is a deliberate simplification supported by the dynamic retail path, not a per-hook replay engine. Retail's separate static-object animation path updates parts before processing hooks (`:309397-309409`); do not present the dynamic order as universal. During implementation, verify the reported door's dynamic classification and closing-hook boundary against these references and a focused test. If that classification contradicts the intended client path, resolve it before wiring the order.
+
+Ethereal objects still need a coherent current pose for later solidification and re-entry. Do not freeze animation poses merely because collision participation is currently disabled. Snapshot/state replacement and initial installation must not wait for a nonzero motion tick to synchronize a settled pose.
+
+#### Implementation phases and acceptance
+
+**Phase 1 — Content and sample contract.** Extend content-owned collision preparation and `ClientEntityBodyFacts`/preparation identity, using `dynamic_entity.rs` and the existing content service. Add the owner-produced pose sample in the world motion registry. Keep global root/hook bootstrap sparse. Cover a single moving part, a constant non-default pose, sparse BSP indices among visual parts, a shorter animation, and an explicit missing-resource failure. Acceptance: the observed door's frame-0 sample resolves its correct two panel transforms through prepared content without any tick-time I/O or second cursor.
+
+**Phase 2 — Runtime ownership and common placement.** Cut over `PreparedEntityBspPart`'s live-placement use to scene-owned instance poses; retain only honest initial/prepared facts in the definition. Update `placed_target_shapes`, dynamic snapshots, `EntityCollisionProof`, and membership publication together. Acceptance: changing only a part pose moves the common collision surface and invalidates its old retained proof; snapshots remain unchanged after later live updates; a repeated identical pose performs no membership refresh. Sphere/cylinder target branches do not require animation tracks.
+
+**Phase 3 — Lifecycle and tick integration.** Wire initial installation, current-pose sampling after hooks, motion-table/appearance replacement, and authoritative state reconciliation through the same publication boundary. Exercise closed-door login, opening/closing, obstructed solidification/retry, a multi-frame hook tick, and an ethereal object's later return to solid. Acceptance: no queryable setup-pose interval on closed-door installation; no stale async completion resets a newer pose; ordinary frame changes never reprepare geometry. Reassess scope here if moving-surface response, default-animation timing, or hook classification exposes a demonstrated gap.
+
+**Phase 4 — Correctness and cost.** Re-run the real door's front/back sweep comparison and verify live with the user. Retain asset-free regressions for the behavioral invariants; keep installed-archive probes in diagnostics. Run the controlled baseline/candidate workload described above, including settled and portal-straddling cases. Acceptance: front approach stops before ACE's side boundary, expected open passage remains available, back-side interaction remains possible, and measured costs are reported with workload and repeated-run spread. An unexplained cost that scales with all character limb tracks or requires settled geometry refresh every tick requires redesign before closeout.
+
+**Phase 5 — Quality and cleanup.** Remove the obsolete `AnimatedPhysicsBsp` refusal for newly supported cases and tests preserving frozen collision placement. Sweep comments claiming all part transforms are presentation-only or single parts are necessarily root-equivalent; replace or retire the misleading old census. Keep root/hook-only decoder comments accurate about their consumer rather than pretending pruned frames prove authored absence. Run affected content/world/core/host checks and tests, clippy with warnings denied, formatting and diff checks. No frontend contract change is expected; if implementation crosses that boundary, add the corresponding browser verification. No commit until requested.
+
+#### Definition of done and remaining decisions
+
+Done means the common collision path follows the host pose across initial state and transitions, geometry-dependent references remain coherent, settled objects avoid repeated pose work, the live door report is resolved, and validation/performance evidence is recorded. The existing mesh and motion timing owners remain singular. This should add a small content projection plus one instance-pose publication path; if implementation starts resembling a second animation system or requires a general scene invalidation framework, revisit the boundary before adding it.
+
+No user preference is needed to choose the recommended architecture. Implementation must still settle exact cache reuse with existing content service APIs, verify dynamic door hook classification, and trace default-animation/no-table ownership before extending that branch. These are bounded engineering checks, not permission gates or justification for a new clock.
+
+### Implementation progress
+
+- Added `holtburger-content::collision_pose`: sparse collision-part animation projection, constant-track compaction, explicit whole-frame bounds, authored trailing-part omission, and preparation of a motion-table/default-animation closure using `ContentDecodeCache`. This remains off the tick path. Three focused asset-free tests pass.
+- Added an authored collision-pose sample on the existing world motion runtime, using its command/action sequence rather than the presentation-only locomotion sequence. No new cursor or clock.
+- Began the scene cutover: dynamic bodies retain immutable instance pose arrays independently of prepared meshes. Common target placement reads these poses; retained collision proofs include them, so snapshots preserve a coherent pose value. Current initialization still uses the previous prepared pose; animated publication and initial settled synchronization are not wired yet.
+- `cargo check -p holtburger-world` and content/world all-target clippy with warnings denied pass for this intermediate state. This is not end-to-end validation and the door behavior is not fixed yet.
+- Additional census: one of the 92 differing-pose setups has a setup default animation (`0x02001bf2`, the crystal family); its catalog templates also specify motion tables. Bulk client playback requires network motion/table input. The no-table default-animation path still needs an explicit lifecycle decision if reached; no demonstrated blocker to the door path was established by this scan. Evidence: `/tmp/collision-pose-default-sources.txt`.
+- Next: connect prepared tracks and effective table identity to body preparation/currentness, publish sampled poses with scene membership, then wire installation and tick ordering. No production runtime integration claim, no performance claim, no commit.
+
+### Implementation progress — preparation and client publication
+
+- Wired collision-track preparation into the shared dynamic definition builder, using the content decode cache from the client content service (and a retained decode cache in Explorer preparation). Effective motion-table identity now participates in client async preparation/currentness. Removed the obsolete moving-default-BSP refusal and its Explorer fixture/test that enshrined rejection.
+- Replaced parallel runtime pose fields with `CollisionPartPoses`, a validated ordered pose aggregate plus its last applied owner sample. Shared meshes remain immutable. Repeated identical samples do not allocate/recompute poses; an animation/frame change whose transforms are equal does not refresh membership. Missing trailing tracks retain their prior poses.
+- Initial client configurations apply the selected authored sample before installation. A zero-time existing motion reconciliation establishes the cursor if necessary; no separate clock is used. Frame publication follows existing hook processing and precedes movement queries. Pose and membership publication uses a private body candidate and commits only after successful resolution.
+- Body state/demand reconfiguration preserves instance poses when prepared target geometry is unchanged. Collision snapshots/proofs retain the pose value. Existing entity-support queries recheck the target each collection (`mobile_contact/step.rs:758` onward), so no separate support invalidation system was added.
+- Added a scene-level regression for pose change, repeated-frame no-op, immutable snapshot behavior, surface-proof invalidation, and pose retention across reconfiguration.
+- Current validation: 78 content + 726 world + 378 core + 283 host library tests pass (1,465 total). Content/world/core/host all-target clippy passes with warnings denied. Logs: `/tmp/collision-pose-integration-tests.txt`, `/tmp/collision-pose-integration-clippy.txt`.
+- Still incomplete: real-asset candidate verification and live door test, performance matrix, deeper lifecycle tests (shorter clips/solidification/initial async replacement), Explorer playback publication integration or explicit scope resolution, stale diagnostic vocabulary cleanup, and final quality review. The client code path is wired, but end-to-end correctness and completion are not yet claimed.
+
+### Implementation progress — real-asset component measurements
+
+The real WCID 278 two-panel door and WCID 25565 sealed door both prepare successfully through the new `prepare_dynamic_entity_physical_definition` path, including sparse tracks from their motion tables. The diagnostic installs configurations sampled at frame 0 and calls production `SpatialScene::publish_collision_pose`, snapshot compilation, and one production surface ray per iteration.
+
+Workload: release build, 120 iterations per run, five runs per combination, 1/16/64/256 copies, either fixed frame 0 or cycling frames 0–31 once per iteration. It measures component time per iteration; it does not advance motion clocks or claim a particular animation framerate. All targets are forced solid for this diagnostic. Outdoor copies are spread on an 8 m grid in one empty resident landblock. Indoor copies deliberately coincide at the actual dungeon door position `(120, -295.245, -12)`, cell `0x001e016f`, with real dungeon topology. The indoor case stresses coincident targets/cell traversal and is not claimed representative gameplay density. The ray starts in front of the first target. These are comparisons of settled/changing workloads on the candidate, **not a complete old-build/new-build client benchmark**.
+
+| Domain | Setup | Copies | Pose | Median µs/iteration | Five-run range µs |
+| --- | --- | ---: | --- | ---: | --- |
+| Outdoor | `0200024f` | 1 | Settled | 2.84 | 2.83–2.95 |
+| Outdoor | `0200024f` | 1 | Changing | 3.40 | 3.39–3.46 |
+| Outdoor | `0200024f` | 16 | Settled | 12.30 | 12.16–12.41 |
+| Outdoor | `0200024f` | 16 | Changing | 20.62 | 20.59–21.20 |
+| Outdoor | `0200024f` | 64 | Settled | 43.97 | 43.71–45.24 |
+| Outdoor | `0200024f` | 64 | Changing | 77.60 | 77.09–78.10 |
+| Outdoor | `0200024f` | 256 | Settled | 166.38 | 162.96–211.94 |
+| Outdoor | `0200024f` | 256 | Changing | 298.52 | 295.90–301.31 |
+| Outdoor | `02000fda` | 1 | Settled | 12.32 | 12.31–12.43 |
+| Outdoor | `02000fda` | 1 | Changing | 14.05 | 13.97–14.11 |
+| Outdoor | `02000fda` | 16 | Settled | 55.37 | 55.06–55.39 |
+| Outdoor | `02000fda` | 16 | Changing | 81.32 | 81.05–82.36 |
+| Outdoor | `02000fda` | 64 | Settled | 189.08 | 188.39–192.08 |
+| Outdoor | `02000fda` | 64 | Changing | 294.70 | 292.51–297.24 |
+| Outdoor | `02000fda` | 256 | Settled | 519.59 | 514.20–519.97 |
+| Outdoor | `02000fda` | 256 | Changing | 940.73 | 938.26–947.49 |
+| Dungeon doorway | `0200024f` | 1 | Settled | 16.31 | 16.29–16.53 |
+| Dungeon doorway | `0200024f` | 1 | Changing | 18.30 | 18.26–18.48 |
+| Dungeon doorway | `0200024f` | 16 | Settled | 38.31 | 38.19–38.59 |
+| Dungeon doorway | `0200024f` | 16 | Changing | 68.69 | 68.31–69.16 |
+| Dungeon doorway | `0200024f` | 64 | Settled | 113.10 | 112.01–113.84 |
+| Dungeon doorway | `0200024f` | 64 | Changing | 235.97 | 234.86–237.05 |
+| Dungeon doorway | `0200024f` | 256 | Settled | 420.38 | 417.10–421.79 |
+| Dungeon doorway | `0200024f` | 256 | Changing | 918.40 | 908.81–930.44 |
+| Dungeon doorway | `02000fda` | 1 | Settled | 25.27 | 25.22–26.03 |
+| Dungeon doorway | `02000fda` | 1 | Changing | 30.16 | 30.12–30.26 |
+| Dungeon doorway | `02000fda` | 16 | Settled | 181.70 | 180.78–182.03 |
+| Dungeon doorway | `02000fda` | 16 | Changing | 261.70 | 261.34–263.44 |
+| Dungeon doorway | `02000fda` | 64 | Settled | 689.09 | 688.41–706.52 |
+| Dungeon doorway | `02000fda` | 64 | Changing | 1011.44 | 1009.59–1013.24 |
+| Dungeon doorway | `02000fda` | 256 | Settled | 2788.09 | 2700.79–2791.93 |
+| Dungeon doorway | `02000fda` | 256 | Changing | 4004.00 | 3997.99–4033.86 |
+
+The measurements support the expected shape: pose changes add modest per-target work, while actual indoor topology is more expensive than empty outdoor coverage. At 256 overlapping complex doors this remains a synthetic stress load; it must not be quoted as a normal dungeon scene. This does not replace the live player collision/interaction check or prove moving-platform response.
+
+Retail classification was checked explicitly: the observed closed-door mask `0x10018` does not contain `PhysicsState::STATIC` (`0x1`), so the plan's dynamic-object hook/part ordering applies to this door. It is not inferred from the object's stationary root.
+
+Artifacts: `/tmp/collision-pose-probe.txt`, `/tmp/collision-pose-probe-indoor.txt`, `/tmp/collision-pose-probe-outdoor.rs`, `/tmp/collision-pose-probe-indoor.rs`. The temporary harness file was removed from the worktree. A live client test request is pending with the user; independent lifecycle/Explorer integration and quality work remain.
+
+### Implementation progress — Explorer and replacement continuity
+
+- Explorer now publishes ordinary authored collision poses through the shared scene path. Possessed playback attaches its proposed sample to `PhysicalBodyInput`; the scene applies it to the speculative body and publishes it with the accepted movement result. Failed sample preparation leaves the previous collision pose intact.
+- Initial Explorer BSP configurations sample the existing motion-table playback before installation. Clean instance replacement initializes its new playback consistently with its new body. Non-BSP entities keep their existing initialization path.
+- Contact collection publication now resolves BSP part-box membership at the accepted root and part pose, instead of retaining movement-sphere coverage as the final target membership.
+- Client preparation checks the effective motion-table identity before selecting the initial sample. Compatible part slots retain live poses across a prepared-library replacement before applying the new clip, so omitted trailing parts do not reset to setup placement. Ordinary state/demand reconfiguration continues to retain current poses.
+- Extended the asset-free scene regression to exercise accepted and rejected pose proposals and omitted-part retention across a library replacement. It passes. All 1,465 content/world/core/host library tests and all-target clippy with warnings denied passed before this final regression extension; the extended regression then passed separately. Logs: `/tmp/collision-pose-lifecycle-tests.txt`, `/tmp/collision-pose-lifecycle-clippy.txt`, `/tmp/collision-pose-replacement-regression.txt`.
+- The candidate is available for the requested live door check. Issue remains open and uncommitted. Remaining review includes initial installation/cell-membership visibility (the low-level installation API still takes a seed cell, not collision topology), hook/solidification lifecycle coverage, default-animation scope, stale diagnostic cleanup, and final quality review. Current tests do not establish all of phase 3 or the full definition of done.
+
+### Implementation stop — initial collision publication contract
+
+The user requested a stop for a major blocker/gap. An initial-publication gap is now reproduced, rather than inferred. The existing `physics_bsp_placement_uses_part_boxes_beyond_the_movement_sphere` fixture installs a BSP body just inside an indoor/outdoor portal. Its correctly resolved part-box membership reaches outdoors, but the installed body's published membership does not. A temporary assertion of initial published outdoor reach failed with `initial published membership omits BSP portal reach`; evidence is `/tmp/collision-pose-initial-membership-gap.txt`. The diagnostic assertion was removed after recording the failure; the retained test currently verifies the resolver, not initial publication.
+
+Cause: `PhysicalBodyState::new_dynamic` seeds membership from the root cell, and `SpatialScene::set_dynamic_physical_body` does not receive collision topology. Client completion and Explorer installation can therefore publish an initialized part pose with incomplete cell coverage. A later collection refresh corrects coverage, but that does not satisfy the plan's explicit requirement that the initial body be coherent before it becomes queryable. Identical-sample suppression does not repair this interval. This is a pre-existing installation-contract weakness exposed by the stronger pose-publication requirement; the current candidate does not close it.
+
+Recommended scope adjustment, pending user review:
+
+1. Make the world scene's production installation/reconfiguration path stage a complete candidate body, selected part poses, and topology-resolved membership before publishing it. Preserve the previous body on a genuine preparation failure. Known missing collision residency should produce the existing suspended state, not an indexed target with guessed coverage.
+2. Have client completion supply its resident collision scene after async currentness checks. Have Explorer supply its host collision snapshot while holding the existing simulation lock, before publishing body/registry success.
+3. Keep readiness and publication in these existing owners. Do not introduce another animation clock or a general invalidation system. Restrict unchecked seed-only construction to paths whose caller explicitly completes placement before exposure.
+4. Require regressions for portal-reaching geometry immediately after installation, missing topology at installation, and replacement failure preserving the previous queryable body. Recheck initial hook/solidification queries against the completed target membership.
+
+Independent progress before the stop: animated pose publication now retains the latest pose and suspends its collision target when required collision topology is absent. The ordinary residency refresh restores it when topology returns. The new asset-free `animated_target_retains_pose_while_collision_residency_is_absent` regression passes. This uses existing body suspension and target-index admission; no extra clock or readiness state was added.
+
+Validation at this stop: all 1,466 content/world/core/host library tests pass; all-target clippy with warnings denied, formatting, and diff whitespace checks pass. Logs: `/tmp/collision-pose-prepause-tests.txt`, `/tmp/collision-pose-prepause-clippy.txt`. These passing checks do not prove the unresolved initial-publication requirement.
+
+Implementation remains open and uncommitted. Live door feedback can still inform the geometry correction, but cannot substitute for this initial-publication requirement. Awaiting review of the installation-contract adjustment before implementing it.
+
+### Verification correction — installation gap is not a demonstrated door blocker
+
+The user challenged whether the synthetic installation-membership mismatch can cause a real failure and authorized verification. The earlier classification as a major blocker was too strong. The synthetic assertion proves incomplete initial coverage is representable; it does not prove that a production collision consumer observes a harmful state.
+
+Real-content verification used the recorded door `0x7001e018` (WCID 278, setup `0x0200024f`), its exact recorded root `(120, -295.2449951171875, -12)`, identity rotation, cell `0x001e016f`, animation `0x03000559`, and the installed dungeon collision asset `0x001effff`. For every frame 0–31, the diagnostic installed the production prepared definition at that frame, recorded initial membership, then ran the normal collection residency refresh with movement excluded and recorded resolved membership. Frames 0–2 occupy only `0x001e016f`; frames 3–31 also reach `0x001e016d`. Thus real geometry does cross a cell boundary, but the recorded closed pose does not have the proposed missing-cell problem.
+
+The real animation has forward ethereal-on and backward ethereal-off hooks at frame 1. Its actual motion table `0x09000016` plays opening at +30 fps and closing at -30 fps, with settled closed/open frames 0/31. The production `MotionSequenceRuntime`, using the real projected closing clip at normal speed and the maximum admitted physics interval (`MOBILE_CONTACT_TICK_SECONDS`, 1/30 s), fired ethereal-off on frame 1 → 0. This held for starting phase offsets of 0, 0.1, 0.5, and 0.9 ticks. Both the previously published pose used by the hook and its successor occupy only the original cell. The extra-cell poses occur while normal door playback is ethereal.
+
+Production ordering was checked: client completion installation precedes the simulation call (`client/runtime.rs`); hooks precede pose publication (`client/simulation.rs`); normal movement collection refreshes every participating body's placement before building its query snapshots (`scene/contact_collection.rs`). The proposed pre-refresh solidification query exists, but its actual door frames do not require the missing neighboring cell.
+
+Conclusion: no gameplay failure was reproduced for this door's ordinary closed/open/closing path. This is not a proof for every animated asset, unusual playback speed, or other query consumer. **Withdraw the installation-contract change as a blocker to issue 4 on the current evidence.** Do not broaden the architecture solely to satisfy the synthetic initial-membership assertion. Preserve it as an unproven edge case until a concrete content/consumer/timing combination demonstrates an observable failure. The previous stop section is investigation history, not a current implementation gate.
+
+Artifacts: `/tmp/door-membership-verify.rs`, `/tmp/door-membership-verify.txt`, `/tmp/door-membership-verify-build.txt`, with recorded-instance provenance in `/tmp/holtburger-door-passive.jsonl`. The asset-dependent diagnostic was removed from the worktree after execution. No production code was changed during this verification.
+
+### Quality pass and candidate contact verification
+
+- Applied the code-quality-review skill to the changed content projection, client preparation/currentness, world cursor sample, scene pose/snapshot placement, client hook ordering, and Explorer initialization/proposal consumers. Immutable tracks remain content-owned; current authored frame selection remains motion-owned; collision poses and query coverage remain scene-owned. No additional animation clock or general installation framework was added.
+- Consolidated duplicated Explorer spawn/replacement collision-playback initialization into one helper and renamed its missing-table error to `UnprojectedMotionTable`, reflecting its use beyond possession. Moved the collision-pose scene regressions into their own module alongside the existing contact tests.
+- Retired `physics_bsp_part_animation.rs` and its derived fixed-list `bsp_setup_solidity.rs` diagnostic. Their single-part/root-equivalence assumption and incomplete table population were disproven by this investigation. Historical mentions above explain the superseded evidence; neither tool remains available to produce a misleading census.
+- Added an asset-free world regression for multiple ethereal hooks observing the previously published part pose, subsequent pose publication changing overlap, blocked solidification preserving that pose, and successful retry after the peer clears. A round collision part isolates transform/state ownership from BSP-specific polygon behavior. Added explicit missing-animation rejection alongside invalid-frame rejection in the scene transaction regression.
+- All 1,467 content/world/core/host library tests pass after cleanup and the new hook regression. All-target clippy also covers the debug harness with its physics-profiling feature. Logs: `/tmp/collision-pose-final-library-tests.txt`, `/tmp/collision-pose-quality-clippy.txt`; final verification is recorded in `/tmp/collision-pose-final-clippy.txt`.
+
+The real-asset contact probe prepares the observed door and the recorded character's humanoid setup (`0x02001a9c`) through the production definition builder, installs sampled configurations, and calls `SpatialScene::dynamic_body_overlaps_peer`. It compares initial setup placement with closed animation frame 0 at a controlled outdoor root. It samples player-root positions at 5 mm intervals, using the authored lower/upper spheres (radius 0.48, center heights 0.475/1.35). This is a first-overlap measurement through the shared placed-target path, not a full movement-solver or live-client result.
+
+| Pose | Player lateral offset | First overlap approaching from front (+Y) | First overlap approaching from back (-Y) |
+| --- | ---: | ---: | ---: |
+| Setup placement | -0.8 m | +0.230 m | -1.205 m |
+| Setup placement | 0 m | -0.230 m | -1.405 m |
+| Setup placement | +0.8 m | +0.230 m | -1.205 m |
+| Closed frame 0 | -0.8 m | +0.620 m | -0.625 m |
+| Closed frame 0 | 0 m | +0.620 m | -0.635 m |
+| Closed frame 0 | +0.8 m | +0.615 m | -0.630 m |
+
+Values are root Y relative to the door origin. At the center, the setup pose admits the player 23 cm behind the door origin before contact; the corrected closed pose contacts 62 cm in front. This independently corroborates the earlier raw-shape sweep through the actual candidate definition/instance-placement path. Back-side contact remains on the back side. The diagnostic initially used an owner ID as an outdoor position cell; that harness error was corrected to a valid outdoor cell before these measurements. Artifacts: `/tmp/door-contact-verify.rs`, `/tmp/door-contact-verify.txt`, `/tmp/door-contact-verify-build.txt`. The asset-dependent diagnostic was removed from the worktree.
+
+Current outcome: the user replied “lgtm” to the requested live-check handoff. Issue 4 is resolved on that acceptance, the automated checks, and the real-content evidence above. No more specific account of the user's test procedure is inferred. The synthetic installation concern remains withdrawn as a blocker; no broader installation rewrite is included.
+
+### Closeout
+
+- Collision BSP parts now follow the existing authored motion cursor, including the settled closed-door pose. Immutable meshes/tracks remain separate from instance poses; hooks retain their existing ordering.
+- Quality cleanup and automated verification passed: 1,467 library tests plus all-target clippy with warnings denied, including the debug harness profiling feature. Real-content contact and animation/cell-coverage results are recorded above with their limits.
+- User acceptance completes the pending handoff. Historical progress and stop sections above are retained as investigation history, not outstanding gates. The user subsequently requested a final code-quality pass and commit.
+- Final commit review covered content projection and its preparation callers, client async currentness and installation, motion sampling and hook ordering, scene publication and snapshot/proof consumers, and Explorer initialization and accepted movement proposals. Corrected two displaced method documentation blocks and documented the retained pose field in surface proofs. No further blocking quality findings. This final pass changed comments and worksheet text only; the 1,467 passing tests remain applicable. Formatting and whitespace checks were repeated.
+- This worksheet remains open for subsequent issues.
+
 ## Issue queue
 
 Awaiting subsequent user reports. Worksheet remains open after individual issues are resolved.

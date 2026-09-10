@@ -11,6 +11,8 @@ struct CollectionActuator {
     reconciliation: Option<PoseReconciliationState>,
     /// Independent final nominal continuation used to decide return completion.
     nominal_velocity: Vector3,
+    /// Collision pose already sampled on the speculative body, preserved on publication.
+    collision_poses: super::super::dynamic_body::CollisionPartPoses,
 }
 
 impl CollectionActuator {
@@ -86,6 +88,7 @@ impl CollectionActuator {
                     physical.definition,
                     PhysicalBodyDefinition::FreeSphere { .. }
                 ) && body.retained.acceleration == Vector3::zero());
+        dynamic.collision_poses = self.collision_poses;
         dynamic.activity = if quiet {
             DynamicBodyActivity::Settled
         } else {
@@ -223,13 +226,29 @@ impl SpatialScene {
             if integrates_mobile {
                 let input = input_for(&body)?;
                 let mut reconciliation = body.reconciliation.as_deref().copied();
-                input.prepare(&mut body, &mut reconciliation)?;
+                if input.prepare(&mut body, &mut reconciliation)? {
+                    let cell = body.physical.as_ref().and_then(|p| p.response.cell());
+                    let placement = resolve_dynamic_body_placement(collision, &body, cell)?;
+                    body.physical
+                        .as_mut()
+                        .and_then(|p| p.dynamic.as_mut())
+                        .context("prepared collision pose lost its dynamic state")?
+                        .placement = placement;
+                }
+                let collision_poses = body
+                    .physical
+                    .as_ref()
+                    .and_then(|p| p.dynamic.as_ref())
+                    .context("collection input lost its dynamic state")?
+                    .collision_poses
+                    .clone();
                 actuators.insert(
                     body.id,
                     CollectionActuator {
                         input,
                         reconciliation,
                         nominal_velocity: body.nominal.velocity,
+                        collision_poses,
                     },
                 );
             }
@@ -305,6 +324,25 @@ impl SpatialScene {
                 now,
             )? {
                 recovery_requests.push((body.id, destination));
+            }
+            if body
+                .physical
+                .as_ref()
+                .and_then(|physical| physical.dynamic.as_ref())
+                .is_some_and(|dynamic| dynamic.collision.uses_physics_bsp)
+            {
+                // The contact result owns movement-sphere coverage. BSP targets publish their
+                // part-box coverage at the accepted root and authored pose instead.
+                let placement = resolve_dynamic_body_placement(
+                    collision,
+                    &body,
+                    update.membership.committed_cell(),
+                )?;
+                body.physical
+                    .as_mut()
+                    .and_then(|physical| physical.dynamic.as_mut())
+                    .context("BSP publication lost its dynamic state")?
+                    .placement = placement;
             }
             if let Some(owner) = update.unavailable_owner {
                 coverage_rejections.push(DynamicEntityCollectionCoverageRejection {

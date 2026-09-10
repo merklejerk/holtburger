@@ -31,6 +31,15 @@ use super::state::{MotionCommand, MotionOrder, MotionState};
 /// (`acclient.c:329811-329837,329866-329872`).
 pub(super) const RETAIL_RUN_FORWARD_BASE_SPEED_MPS: f32 = 4.0;
 
+/// Collision pose selected by the authored motion owner; carries no independent timing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoredCollisionPose {
+    /// No commanded animation is installed; retain the body's prepared placement pose.
+    Placement,
+    /// Whole-frame authored part pose from the authoritative command/action sequence.
+    Animation { animation_id: u32, frame: usize },
+}
+
 /// One body's ordinary playback and effects, with optional independent locomotion presentation.
 #[derive(Debug, Clone)]
 pub struct BodyMotionRuntime {
@@ -287,6 +296,23 @@ impl BodyMotionRuntime {
             *self = Self::establish(table, self.steady_order);
             self.remote_motion = remote;
             self.sticky = sticky;
+        }
+    }
+
+    /// Effective table bound to this cursor, used when prepared collision content is replaced.
+    pub fn motion_table_id(&self) -> u32 {
+        self.motion_table_id
+    }
+
+    /// Samples commanded playback for physical parts, excluding presentation-only locomotion.
+    pub fn collision_pose(&self) -> AuthoredCollisionPose {
+        match self.sequence.current_clip() {
+            Some(current) => AuthoredCollisionPose::Animation {
+                animation_id: current.node.animation().id,
+                frame: usize::try_from(self.sequence.current_frame())
+                    .expect("installed authored sequence has a nonnegative frame"),
+            },
+            None => AuthoredCollisionPose::Placement,
         }
     }
 

@@ -679,6 +679,74 @@ impl SpatialScene {
         Some(())
     }
 
+    /// Publishes a changed authored pose with resolved membership, or suspends an unresident target.
+    /// Returns false when this body has no BSP parts or its sampled transforms are unchanged.
+    pub fn publish_collision_pose(
+        &mut self,
+        body_id: SpatialBodyId,
+        sample: crate::motion::AuthoredCollisionPose,
+        collision: &CollisionScene,
+    ) -> anyhow::Result<bool> {
+        let Some(body) = self.body_store.body(body_id) else {
+            return Ok(false);
+        };
+        let Some(dynamic) = body.physical.as_ref().and_then(|p| p.dynamic.as_ref()) else {
+            return Ok(false);
+        };
+        if dynamic.collision_poses.sample == Some(sample)
+            || dynamic
+                .collision
+                .target_geometry
+                .physics_bsp_parts
+                .is_empty()
+        {
+            return Ok(false);
+        }
+        let mut candidate = body.clone();
+        let next = candidate
+            .physical
+            .as_mut()
+            .and_then(|p| p.dynamic.as_mut())
+            .context("collision pose candidate lost its dynamic state")?;
+        let changed = next
+            .collision_poses
+            .apply(&next.collision.target_geometry, sample)?;
+        if changed {
+            let placement = resolve_dynamic_body_placement(
+                collision,
+                &candidate,
+                dynamic.placement.committed_cell(),
+            );
+            let next = candidate
+                .physical
+                .as_mut()
+                .and_then(|p| p.dynamic.as_mut())
+                .context("collision pose candidate lost its dynamic state")?;
+            match placement {
+                Ok(placement) => next.placement = placement,
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<CollisionQueryError>(),
+                        Some(
+                            CollisionQueryError::UnknownMotionCell { .. }
+                                | CollisionQueryError::UnavailableOwner { .. }
+                        )
+                    ) =>
+                {
+                    // Playback can outlive collision residency. Retain its latest part poses,
+                    // but exclude the body from queries until ordinary residency refresh succeeds.
+                    next.activity = DynamicBodyActivity::Suspended;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        *self
+            .body_store
+            .body_mut(body_id)
+            .expect("collision pose body disappeared during publication") = candidate;
+        Ok(changed)
+    }
+
     /// Adds, removes, or reconfigures dynamic-entity physics without replacing its pose body.
     ///
     /// Pose and kinematics always survive. Exact movement geometry preserves response memory;
@@ -726,6 +794,12 @@ impl SpatialScene {
                     .dynamic
                     .as_mut()
                     .expect("dynamic configuration produced generic physical state");
+                if previous_dynamic.collision.target_geometry
+                    == next_dynamic.collision.target_geometry
+                    && next_dynamic.collision_poses.sample.is_none()
+                {
+                    next_dynamic.collision_poses = previous_dynamic.collision_poses.clone();
+                }
                 let unchanged = previous.definition == next.definition
                     && previous.collision_filter == next.collision_filter
                     && previous.response_policy == next.response_policy
@@ -1138,7 +1212,15 @@ impl SpatialScene {
             .cloned()
             .with_context(|| format!("physical body {body_id:?} is not registered"))?;
         let mut reconciliation = body.reconciliation.as_deref().copied();
-        input.prepare(&mut body, &mut reconciliation)?;
+        if input.prepare(&mut body, &mut reconciliation)? {
+            let cell = body.physical.as_ref().and_then(|p| p.response.cell());
+            let placement = resolve_dynamic_body_placement(collision, &body, cell)?;
+            body.physical
+                .as_mut()
+                .and_then(|p| p.dynamic.as_mut())
+                .context("prepared collision pose lost its dynamic state")?
+                .placement = placement;
+        }
         let mut actuation = input.placement_actuation(&body);
         if let PhysicalBodyActuation::FixedPosition { rotation, .. } = &mut actuation
             && let Some(state) = reconciliation.as_mut()
@@ -2106,6 +2188,7 @@ mod physical_body_tests {
             align_path,
             PreparedEntityTargetGeometry {
                 setup_radius: 0.5,
+                collision_animations: Default::default(),
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
                 fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
@@ -2221,6 +2304,7 @@ mod physical_body_tests {
     fn fallback_target(shape: Arc<CollisionShape>) -> PreparedEntityTargetGeometry {
         PreparedEntityTargetGeometry {
             setup_radius: 0.5,
+            collision_animations: Default::default(),
             physics_bsp_parts: Vec::new(),
             fallback_setup_did: 0x0200_0001,
             fallback_shapes: vec![shape],
@@ -2677,6 +2761,7 @@ mod physical_body_tests {
         );
     }
 
+    mod collision_pose_tests;
     mod contact_step_tests;
 
     #[test]
@@ -3686,6 +3771,7 @@ mod physical_body_tests {
                     false,
                     PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        collision_animations: Default::default(),
                         physics_bsp_parts: vec![PreparedEntityBspPart {
                             part_index: 0,
                             gfx_obj_did: 0x0100_0001,
@@ -3784,6 +3870,7 @@ mod physical_body_tests {
                     false,
                     PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        collision_animations: Default::default(),
                         physics_bsp_parts: vec![PreparedEntityBspPart {
                             part_index: 0,
                             gfx_obj_did: 0x0100_0001,
@@ -3830,6 +3917,7 @@ mod physical_body_tests {
                     false,
                     PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        collision_animations: Default::default(),
                         physics_bsp_parts: Vec::new(),
                         fallback_setup_did: 0x0200_0002,
                         fallback_shapes: vec![Arc::new(CollisionShape::Cylinder(

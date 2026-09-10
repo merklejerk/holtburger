@@ -111,6 +111,11 @@ pub struct ContentAssetService {
 }
 
 impl ContentAssetService {
+    /// Existing decoded records shared with asynchronous collision-track preparation.
+    pub(crate) fn decode_cache(&self) -> &ContentDecodeCache {
+        &self.decode_cache
+    }
+
     /// Constructs the golden content entrypoint without eagerly requiring region-scoped data.
     pub fn new(content: Arc<ContentRepository>, decode_cache: Arc<ContentDecodeCache>) -> Self {
         Self::build(content, decode_cache, Arc::new(StdMutex::new(None)))

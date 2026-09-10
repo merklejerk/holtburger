@@ -50,6 +50,8 @@ const EXPLORER_GUID_END: u32 = 0xffff_fffe;
 pub enum ExplorerEntityRuntimeError {
     /// The app-local GUID range has no unallocated identity remaining.
     GuidExhausted,
+    /// Prepared collision tracks could not supply the selected initial authored pose.
+    InvalidCollisionPose { guid: Guid, cause: String },
     /// The monotonic instance-generation counter cannot advance.
     GenerationExhausted,
     /// A new spawn attempted to publish an already-live identity.
@@ -65,7 +67,7 @@ pub enum ExplorerEntityRuntimeError {
     /// A possession target has no motion table from either entity or setup content.
     MissingPossessionMotionTable { guid: Guid },
     /// A target names a table absent from the projected runtime motion contract.
-    UnprojectedPossessionMotionTable { guid: Guid, motion_table_id: u32 },
+    UnprojectedMotionTable { guid: Guid, motion_table_id: u32 },
     /// A possession target's authored collision owner is absent from current simulation interest.
     PossessionTargetMissingCollisionOwner { guid: Guid, owner: Guid },
     /// A possession target lies beyond AC's authored outdoor landscape.
@@ -100,6 +102,9 @@ pub enum ExplorerEntityRuntimeError {
 impl Display for ExplorerEntityRuntimeError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidCollisionPose { guid, cause } => {
+                write!(formatter, "entity {guid:?} collision pose: {cause}")
+            }
             Self::GuidExhausted => {
                 formatter.write_str("Explorer dynamic-entity GUID range exhausted")
             }
@@ -134,7 +139,7 @@ impl Display for ExplorerEntityRuntimeError {
                 "Explorer entity 0x{:08X} has no motion table to possess",
                 guid.0
             ),
-            Self::UnprojectedPossessionMotionTable {
+            Self::UnprojectedMotionTable {
                 guid,
                 motion_table_id,
             } => write!(
@@ -1204,6 +1209,8 @@ impl ExplorerEntityRuntime {
         let guid = prepared.definition.identity.guid;
         validate_attached_children(guid, &children)?;
         let (prepared, children) = self.resolve_group_motion_tables(prepared, children);
+        let (physical, initial_playback) =
+            self.prepare_initial_collision_playback(&prepared.definition, physical)?;
         let mut registry = self
             .registry
             .lock()
@@ -1221,6 +1228,9 @@ impl ExplorerEntityRuntime {
         let body =
             self.simulation
                 .install_dynamic_entity(&prepared.definition, initial, physical)?;
+        if let Some(playback) = initial_playback {
+            registry.motion.playback.replace_body(guid, playback);
+        }
         let instance = registry.publish(prepared, physical_demand, generation);
         let children = children
             .into_iter()
@@ -1276,6 +1286,8 @@ impl ExplorerEntityRuntime {
         let guid = prepared.definition.identity.guid;
         validate_attached_children(guid, &children)?;
         let (prepared, children) = self.resolve_group_motion_tables(prepared, children);
+        let (physical, initial_playback) =
+            self.prepare_initial_collision_playback(&prepared.definition, physical)?;
         let mut registry = self
             .registry
             .lock()
@@ -1296,6 +1308,9 @@ impl ExplorerEntityRuntime {
                 .replace_dynamic_entity(&prepared.definition, initial, physical)?;
         registry.motion.retire_target(guid, expected_generation);
         registry.motion.playback.clear_locomotion_presentation(guid);
+        if let Some(playback) = initial_playback {
+            registry.motion.playback.replace_body(guid, playback);
+        }
         let (removed, installed) = registry.replace(prepared, physical_demand, generation);
         let removed_children = removed_child_guids
             .into_iter()
@@ -1558,7 +1573,7 @@ impl ExplorerEntityRuntime {
             .motion_table_did
             .ok_or(ExplorerEntityRuntimeError::MissingPossessionMotionTable { guid })?;
         let table = self.motion_catalog.table(motion_table_id).ok_or(
-            ExplorerEntityRuntimeError::UnprojectedPossessionMotionTable {
+            ExplorerEntityRuntimeError::UnprojectedMotionTable {
                 guid,
                 motion_table_id,
             },
@@ -1812,6 +1827,58 @@ impl ExplorerEntityRuntime {
             .map(|entity| entity.definition.body_height)
     }
 
+    /// Samples one initial cursor for both collision preparation and installed playback.
+    fn prepare_initial_collision_playback(
+        &self,
+        definition: &DynamicEntityDefinition,
+        physical: Option<DynamicPhysicalBodyConfiguration>,
+    ) -> Result<
+        (
+            Option<DynamicPhysicalBodyConfiguration>,
+            Option<BodyMotionRuntime>,
+        ),
+        ExplorerEntityRuntimeError,
+    > {
+        let guid = definition.identity.guid;
+        let needs_collision_pose = physical.as_ref().is_some_and(|configuration| {
+            !configuration
+                .definition()
+                .entity_collision
+                .target_geometry
+                .physics_bsp_parts
+                .is_empty()
+        });
+        let initial_playback = definition
+            .content
+            .motion_table_did
+            .filter(|_| needs_collision_pose)
+            .map(|table_id| {
+                self.motion_catalog
+                    .table(table_id)
+                    .map(BodyMotionRuntime::new)
+                    .ok_or(ExplorerEntityRuntimeError::UnprojectedMotionTable {
+                        guid,
+                        motion_table_id: table_id,
+                    })
+            })
+            .transpose()?;
+        let initial_pose = initial_playback.as_ref().map_or(
+            holtburger_world::motion::AuthoredCollisionPose::Placement,
+            BodyMotionRuntime::collision_pose,
+        );
+        let physical = physical
+            .map(|configuration| {
+                configuration
+                    .with_collision_pose(initial_pose, None)
+                    .map_err(|error| ExplorerEntityRuntimeError::InvalidCollisionPose {
+                        guid,
+                        cause: error.to_string(),
+                    })
+            })
+            .transpose()?;
+        Ok((physical, initial_playback))
+    }
+
     /// Resolves each definition's setup-default motion table before the group becomes contract.
     ///
     /// The entity's own property is the override; absent, the setup's default is the table it
@@ -1946,6 +2013,26 @@ impl ExplorerEntityRuntime {
             .lock()
             .expect("Explorer entity registry lock poisoned");
         let offsets = self.advance_unpossessed_motion(&mut registry, delta_seconds);
+        let collision_samples = registry
+            .entities
+            .keys()
+            .filter(|guid| {
+                registry
+                    .motion
+                    .active
+                    .as_ref()
+                    .is_none_or(|active| active.guid != **guid)
+            })
+            .filter_map(|guid| {
+                registry
+                    .motion
+                    .playback
+                    .get(*guid)
+                    .map(|runtime| (SpatialBodyId::Entity(*guid), runtime.collision_pose()))
+            })
+            .collect::<Vec<_>>();
+        self.simulation
+            .publish_collision_poses(&collision_samples)?;
         let possession = registry.motion.active.clone().and_then(|active| {
             let instance = registry.entities.get(&active.guid)?;
             (instance.generation == active.entity_generation).then_some((
@@ -1985,11 +2072,13 @@ impl ExplorerEntityRuntime {
                                 self.possession_profile,
                                 delta_seconds,
                             )?;
+                            let collision_pose = next.playback.collision_pose();
                             assert!(
                                 proposal.replace(next).is_none(),
                                 "possessed body scheduled twice"
                             );
-                            Ok(holtburger_world::PhysicalBodyInput::autonomous(actuation))
+                            Ok(holtburger_world::PhysicalBodyInput::autonomous(actuation)
+                                .with_collision_pose(collision_pose))
                         }
                         _ => {
                             let actuation =
@@ -2428,6 +2517,7 @@ mod tests {
                 ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     setup_radius: 0.5,
+                    collision_animations: Default::default(),
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),

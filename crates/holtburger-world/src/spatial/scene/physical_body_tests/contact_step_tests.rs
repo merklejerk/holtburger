@@ -43,6 +43,73 @@ fn contact_stair_scene(step_height: f32, ceiling: bool) -> CollisionScene {
 }
 
 #[test]
+fn upper_sphere_blocker_limits_both_spheres_coverage() {
+    let owner = Guid(0xda55_ffff);
+    let origin = Vector3::new(180.0, 96.0, 10.0);
+    let primary = Sphere {
+        center: Vector3::zero(),
+        radius: 0.5,
+    };
+    let upper = Sphere {
+        center: Vector3::new(0.0, 0.0, 2.0),
+        radius: 0.5,
+    };
+    let blocker = PlacedCollider::new(
+        Arc::new(CollisionShape::Ball(CollisionBall {
+            center: Vector3::zero(),
+            radius: 0.5,
+        })),
+        LandblockPlacement {
+            origin: origin + upper.center + Vector3::new(4.0, 0.0, 0.0),
+            orientation: Quaternion::identity(),
+        },
+        ColliderScale::uniform(1.0).unwrap(),
+        StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+    )
+    .unwrap();
+    let mut collision = CollisionScene::new();
+    collision
+        .insert(LandblockCollisionAsset {
+            landblock_id: owner.0,
+            terrain: TerrainCollisionSurface::empty(),
+            static_geometry: LandblockColliders::new(vec![blocker], Vec::new()),
+        })
+        .unwrap();
+    for constraint in [None, Some(upper)] {
+        let definition = PhysicalBodyDefinition::grounded(
+            PhysicalSphereSet::new(primary, constraint).unwrap(),
+            GROUNDED_CONFIG,
+        )
+        .unwrap();
+        let id = SpatialBodyId::LocalPlayer(Guid(1));
+        let mut body = SpatialBody::new(id, pose(origin), Instant::now());
+        body.retained.velocity = Vector3::new(20.0 / MOBILE_CONTACT_TICK_SECONDS, 0.0, 0.0);
+        body.physical = Some(PhysicalBodyState::new_dynamic(
+            dynamic_definition(definition, false),
+            PhysicalCollisionFilter::ALL,
+            None,
+        ));
+        let result = advance_body_contacts(
+            &collision,
+            &[body],
+            owner,
+            MOBILE_CONTACT_TICK_SECONDS,
+            |_, _| ContactStepActuation::ballistic(Vector3::zero()),
+        )
+        .unwrap();
+        let update = &result[0];
+        if constraint.is_some() {
+            assert_eq!(update.unavailable_owner, None);
+            assert!(update.displacement.x > 0.0 && update.displacement.x < 4.0);
+            assert_eq!(update.membership.committed_cell(), None);
+        } else {
+            assert_eq!(update.unavailable_owner, Some(Guid(0xdb55_ffff)));
+            assert_eq!(update.displacement, Vector3::zero());
+        }
+    }
+}
+
+#[test]
 fn published_root_path_does_not_turn_offset_sphere_rotation_into_translation() {
     let now = Instant::now();
     let collision = flat_collision_scene();

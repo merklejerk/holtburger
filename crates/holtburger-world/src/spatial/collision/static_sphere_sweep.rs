@@ -1,7 +1,9 @@
 //! Continuous static swept-sphere collision over resident AC geometry.
 
 use holtburger_common::{Guid, Vector3};
-use holtburger_content::{CollisionPolygon, CollisionShape, PlacedCollisionShape};
+use holtburger_content::{
+    CellCollisionPortalTarget, CollisionPolygon, CollisionShape, PlacedCollisionShape,
+};
 use parry3d::math::{Pose, Vector as ParryVector};
 use parry3d::query::{PointQuery, ShapeCastOptions, cast_shapes};
 use parry3d::shape::{Ball, Cylinder, Triangle};
@@ -9,11 +11,11 @@ use parry3d::shape::{Ball, Cylinder, Triangle};
 use crate::spatial::{SpatialBodyId, volume_query::placed_volume_sweep_contact};
 
 use super::{
-    CollisionQueryError, CollisionQueryPolicy, CollisionScene, GlobalCellRange, MotionWaypoint,
-    MotionWaypointPlacement, PhysicalCollisionExclusions, PhysicalCollisionFilter,
-    PlacedMotionPath, PlacedMotionPathRequest, SpatialMembership, SphereSweep,
-    UncoveredCollisionQuery, anchor_to_landblock, landblock_key, overlapped_terrain_cells,
-    point_between_landblocks, touched_landblocks, validate_sweep,
+    CELL_PLANE_TOLERANCE, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
+    GlobalCellRange, MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionExclusions,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacedMotionPathRequest, SpatialMembership,
+    SphereSweep, UncoveredCollisionQuery, anchor_to_landblock, landblock_key,
+    overlapped_terrain_cells, point_between_landblocks, touched_landblocks, validate_sweep,
 };
 
 /// One continuous sphere displacement against resident static collision geometry.
@@ -82,18 +84,25 @@ pub struct HardEntityShape<'a> {
 pub struct HardSphereSweep {
     /// Earliest hard obstruction; absence admits the complete requested segment.
     pub hit: Option<HardSphereSweepHit>,
-    /// Complete attempted geometry, not proof of travel past `hit`. Callers retain only the
-    /// accepted prefix. Fractions describe this segment and do not advance physical time.
+    /// Collision-limited path, normalized to [0, 1]. Hit time remains in the original
+    /// requested segment; path fractions describe only the accepted geometric prefix.
     pub path: PlacedMotionPath,
 }
 
-/// Internal geometry and domain facts produced together by the static query.
+/// Resident hit candidates before a composed body establishes its stopping fraction.
+/// Coverage is deliberately deferred until all movement spheres and hard targets contribute.
+pub(crate) struct PreparedHardSphereSweep {
+    /// Original request; final placement is resolved only for accepted travel.
+    request: StaticSphereSweepRequest,
+    /// Earliest resident blocker in original request fractions.
+    pub(crate) hit: Option<HardSphereSweepHit>,
+}
+
+/// Resident static candidates and the domains used to select hard-entity candidates.
 struct StaticSphereTrace {
-    /// Earliest static obstruction found during this traversal.
+    /// Earliest resident static hit in original request fractions.
     hit: Option<StaticSphereSweepHit>,
-    /// Complete attempted geometry in the request anchor.
-    path: PlacedMotionPath,
-    /// Union of reached domains, reused for hard-entity admission.
+    /// Candidate domains used when admitting hard-entity geometry.
     membership: SpatialMembership,
 }
 
@@ -109,9 +118,20 @@ impl CollisionScene {
         request: StaticSphereSweepRequest,
         entities: impl IntoIterator<Item = HardEntityShape<'a>>,
     ) -> Result<HardSphereSweep, CollisionQueryError> {
-        let traced = self
-            .trace_static_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)?
-            .value;
+        let prepared = self.prepare_hard_sphere(request, entities)?;
+        let fraction = prepared.hit.map_or(1.0, |hit| hit.contact().time_of_impact);
+        let hit = prepared.hit;
+        let path = self.finish_hard_sphere_path(prepared, fraction)?;
+        Ok(HardSphereSweep { hit, path })
+    }
+
+    /// Collects resident hits without making a coverage claim about the attempted suffix.
+    pub(crate) fn prepare_hard_sphere<'a>(
+        &self,
+        request: StaticSphereSweepRequest,
+        entities: impl IntoIterator<Item = HardEntityShape<'a>>,
+    ) -> Result<PreparedHardSphereSweep, CollisionQueryError> {
+        let traced = self.trace_static_sphere(request)?;
         let mut earliest = traced.hit.map(HardSphereSweepHit::World);
         let ball = Ball::new(request.radius);
         let moving = MovingSphereCast::new(&ball, request.start, request.end);
@@ -133,10 +153,144 @@ impl CollisionScene {
                 earliest = Some(HardSphereSweepHit::Entity { body_id, hit });
             }
         }
-        Ok(HardSphereSweep {
+        Ok(PreparedHardSphereSweep {
+            request,
             hit: earliest,
-            path: traced.path,
         })
+    }
+
+    /// Validates coverage and placement through the shared body's stopping fraction.
+    pub(crate) fn finish_hard_sphere_path(
+        &self,
+        prepared: PreparedHardSphereSweep,
+        fraction: f32,
+    ) -> Result<PlacedMotionPath, CollisionQueryError> {
+        Ok(self
+            .finish_sphere_path(
+                prepared.request,
+                fraction,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    fn finish_sphere_path(
+        &self,
+        request: StaticSphereSweepRequest,
+        fraction: f32,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<PlacedMotionPath>, CollisionQueryError> {
+        let end = request.start + (request.end - request.start) * fraction;
+        let path = self.transit_motion_path(PlacedMotionPathRequest {
+            anchor: request.anchor,
+            previous_cell: request.previous_cell,
+            start: request.start,
+            radius: request.radius,
+            waypoints: &[MotionWaypoint {
+                center: end,
+                end_fraction: 1.0,
+                placement: MotionWaypointPlacement::Traverse,
+            }],
+        })?;
+        let mut start = path.initial();
+        let mut unavailable_owner = None;
+        for leg in path.legs() {
+            let end = leg.end();
+            let membership = start
+                .placement()
+                .clone()
+                .merge_reached(end.placement().clone());
+            let sweep = SphereSweep {
+                anchor: request.anchor,
+                start: start.center(),
+                end: end.center(),
+                radius: request.radius,
+            };
+            // Interior owners are independent of nominal terrain coordinates. Outdoor
+            // coverage applies only while this accepted leg actually reaches outside.
+            let coverage = self.complete_query(policy, &[], &membership, ())?;
+            unavailable_owner = unavailable_owner.or(coverage.unavailable_owner);
+            // Recovery into outdoors supplies no portal crossing to bound the interval,
+            // so conservatively validate the whole accepted leg in that exceptional case.
+            let intervals = if start.placement().committed_cell().is_none()
+                || (end.placement().committed_cell().is_none() && end.recovery().is_some())
+            {
+                vec![(0.0, 1.0)]
+            } else {
+                self.outdoor_portal_overlap_intervals(sweep, &membership)?
+            };
+            for (low, high) in intervals {
+                let displacement = sweep.end - sweep.start;
+                let touched = touched_landblocks(SphereSweep {
+                    start: sweep.start + displacement * low,
+                    end: sweep.start + displacement * high,
+                    ..sweep
+                });
+                let coverage =
+                    self.complete_query(policy, &touched, &SpatialMembership::outdoor(), ())?;
+                unavailable_owner = unavailable_owner.or(coverage.unavailable_owner);
+            }
+            start = end;
+        }
+        Ok(UncoveredCollisionQuery {
+            value: path,
+            unavailable_owner,
+        })
+    }
+
+    /// Restricts terrain coverage to sphere overlap with authored outside portal planes.
+    /// This uses the same plane band as cell reach, including overlap before a center crossing.
+    /// The path already splits at center crossings; a leg starting outdoors is handled in full.
+    fn outdoor_portal_overlap_intervals(
+        &self,
+        sweep: SphereSweep,
+        membership: &SpatialMembership,
+    ) -> Result<Vec<(f32, f32)>, CollisionQueryError> {
+        let mut intervals = Vec::new();
+        for cell in membership.reached_env_cells() {
+            let owner = landblock_key(*cell);
+            let asset = self
+                .landblocks
+                .get(&owner)
+                .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
+            let volume = asset
+                .static_geometry
+                .cell_volume((cell.0 & 0xffff) as u16)
+                .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
+            let start = volume.placement.to_local_space(anchor_to_landblock(
+                sweep.start,
+                sweep.anchor,
+                owner,
+            ));
+            let end = volume.placement.to_local_space(anchor_to_landblock(
+                sweep.end,
+                sweep.anchor,
+                owner,
+            ));
+            for portal in &volume.portals {
+                if portal.target != CellCollisionPortalTarget::Outdoor {
+                    continue;
+                }
+                let start_distance = portal.plane.distance_to_point(&start);
+                let delta = portal.plane.distance_to_point(&end) - start_distance;
+                let reach = sweep.radius + CELL_PLANE_TOLERANCE;
+                if delta == 0.0 {
+                    if start_distance.abs() < reach {
+                        intervals.push((0.0, 1.0));
+                    }
+                    continue;
+                }
+                let first = (-reach - start_distance) / delta;
+                let last = (reach - start_distance) / delta;
+                let low = first.min(last).max(0.0);
+                let high = first.max(last).min(1.0);
+                if low < high {
+                    intervals.push((low, high));
+                }
+            }
+        }
+        intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Ok(intervals)
     }
 
     /// Returns the earliest continuous static obstruction along the complete requested segment.
@@ -158,18 +312,19 @@ impl CollisionScene {
         request: StaticSphereSweepRequest,
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>, CollisionQueryError> {
-        let traced = self.trace_static_sphere(request, policy)?;
+        let traced = self.trace_static_sphere(request)?;
+        let fraction = traced.hit.map_or(1.0, |hit| hit.time_of_impact);
+        let accepted = self.finish_sphere_path(request, fraction, policy)?;
         Ok(UncoveredCollisionQuery {
-            value: traced.value.hit,
-            unavailable_owner: traced.unavailable_owner,
+            value: traced.hit,
+            unavailable_owner: accepted.unavailable_owner,
         })
     }
 
     fn trace_static_sphere(
         &self,
         request: StaticSphereSweepRequest,
-        policy: CollisionQueryPolicy,
-    ) -> Result<UncoveredCollisionQuery<StaticSphereTrace>, CollisionQueryError> {
+    ) -> Result<StaticSphereTrace, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.start,
@@ -179,36 +334,16 @@ impl CollisionScene {
         validate_sweep(sweep)?;
         let displacement = request.end - request.start;
 
-        let placement_path = self.transit_motion_path(PlacedMotionPathRequest {
-            previous_cell: request.previous_cell,
-            anchor: request.anchor,
-            start: request.start,
-            radius: request.radius,
-            waypoints: &[MotionWaypoint {
-                center: request.end,
-                end_fraction: 1.0,
-                placement: MotionWaypointPlacement::Traverse,
-            }],
-        })?;
-        let mut swept_placement = placement_path.initial().placement().clone();
-        for leg in placement_path.legs() {
-            swept_placement = swept_placement.merge_reached(leg.end().placement().clone());
-        }
+        let swept_placement = self.sweep_candidate_membership(sweep, request.previous_cell)?;
 
         let touched = touched_landblocks(sweep);
         // Every representable nonzero move needs collision admission. Treating small
         // travel as stationary lets repeated contact corrections creep through hard walls.
         if displacement.length_squared() == 0.0 {
-            return self.complete_query(
-                policy,
-                &touched,
-                &swept_placement,
-                StaticSphereTrace {
-                    hit: None,
-                    path: placement_path,
-                    membership: swept_placement.clone(),
-                },
-            );
+            return Ok(StaticSphereTrace {
+                hit: None,
+                membership: swept_placement,
+            });
         }
 
         let moving_ball = Ball::new(request.radius);
@@ -262,16 +397,10 @@ impl CollisionScene {
             update_water_restriction_hit(self, sweep, &touched, &mut earliest);
         }
 
-        self.complete_query(
-            policy,
-            &touched,
-            &swept_placement,
-            StaticSphereTrace {
-                hit: earliest,
-                path: placement_path,
-                membership: swept_placement.clone(),
-            },
-        )
+        Ok(StaticSphereTrace {
+            hit: earliest,
+            membership: swept_placement,
+        })
     }
 }
 

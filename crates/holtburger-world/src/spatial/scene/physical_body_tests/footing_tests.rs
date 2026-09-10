@@ -82,7 +82,7 @@ fn hit(
         .sweep_static_sphere(StaticSphereSweepRequest {
             anchor: Guid(0xda55_ffff),
             start,
-            end,
+            displacement: end - start,
             radius,
             previous_cell: None,
             filter: PhysicalCollisionFilter::ALL,

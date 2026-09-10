@@ -1,5 +1,7 @@
 //! Production horizontal-footing and hard-clearance regression fixtures.
 
+use holtburger_content::{CellCollisionPortal, CellCollisionPortalTarget, CellVolume};
+
 use super::*;
 use crate::spatial::bsp_query::CONTACT_EPSILON;
 use crate::spatial::{
@@ -1256,6 +1258,182 @@ fn player_pair_exemption_revokes_hard_body_support() {
         assert_eq!(body.contact == ContactState::Airborne, !pk);
         if !pk {
             assert!(body.retained.velocity.z < 0.0);
+        }
+    }
+}
+
+/// Two connected indoor floor sections at extended dungeon coordinates. The sloped floor
+/// is also a containment plane, so a long downward proposal leaves the volume behind it.
+fn dungeon_ramp_seam() -> CollisionScene {
+    let seam = Vector3::new(390.0, -270.0, 0.0);
+    let mut colliders = Vec::new();
+    let mut volumes = Vec::new();
+    for (selector, low, high, slope, side, target) in [
+        (0x0100, -10.0, 0.0, 0.5, -1.0, 0x0101),
+        (0x0101, 0.0, 10.0, 0.0, 1.0, 0x0100),
+    ] {
+        let normal = Vector3::new(-slope, 0.0, 1.0).normalize();
+        let vertices = vec![
+            Vector3::new(low, -2.0, low * slope),
+            Vector3::new(high, -2.0, high * slope),
+            Vector3::new(high, 2.0, high * slope),
+            Vector3::new(low, 2.0, low * slope),
+        ];
+        let box_bounds = CollisionBox::from_points(vertices.iter().copied()).unwrap();
+        let bounds = Sphere {
+            center: box_bounds.center(),
+            radius: box_bounds.circumradius(),
+        };
+        let shape = Arc::new(CollisionShape::Bsp(BspSolid {
+            bsp: BspNode::Leaf(BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: Some(bounds),
+                poly_ids: vec![0],
+            }),
+            bounds,
+            box_bounds,
+            polygons: HashMap::from([(
+                0,
+                CollisionPolygon {
+                    vertices,
+                    normal,
+                    d: 0.0,
+                },
+            )]),
+        }));
+        let placement = LandblockPlacement {
+            origin: seam,
+            orientation: Quaternion::identity(),
+        };
+        colliders.push(
+            PlacedCollider::new(
+                shape,
+                placement,
+                ColliderScale::uniform(1.0).unwrap(),
+                StaticColliderPlacement::EnvCellShell {
+                    cell_id: 0xda55_0000 | u32::from(selector),
+                },
+            )
+            .unwrap(),
+        );
+        volumes.push(CellVolume {
+            cell_selector: selector,
+            placement,
+            planes: vec![
+                Plane { normal, d: 0.0 },
+                Plane {
+                    normal: Vector3::new(side, 0.0, 0.0),
+                    d: 0.0,
+                },
+            ],
+            portals: vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(-side, 0.0, 0.0),
+                    d: 0.0,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::EnvCell(target),
+                outdoor_building: None,
+            }],
+        });
+    }
+    let mut collision = CollisionScene::new();
+    collision
+        .insert(LandblockCollisionAsset {
+            landblock_id: 0xda55_ffff,
+            terrain: TerrainCollisionSurface::empty(),
+            static_geometry: LandblockColliders::new(colliders, volumes),
+        })
+        .unwrap();
+    collision
+}
+
+#[test]
+fn dungeon_ramp_seam_crosses_both_directions_without_unrelated_outdoor_content() {
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    for direction in [-1.0, 1.0] {
+        let root_x = 390.0 - direction * 2.0;
+        let (cell, height) = if direction > 0.0 {
+            let normal_z = Vector3::new(-0.5, 0.0, 1.0).normalize().z;
+            (
+                Guid(0xda55_0100),
+                -1.0 + primary.radius / normal_z - primary.center.z,
+            )
+        } else {
+            (Guid(0xda55_0101), primary.radius - primary.center.z)
+        };
+        let replay = |outdoor_control| {
+            let mut collision = dungeon_ramp_seam();
+            if outdoor_control {
+                collision
+                    .insert(LandblockCollisionAsset {
+                        landblock_id: 0xdc53_ffff,
+                        terrain: TerrainCollisionSurface::empty(),
+                        static_geometry: LandblockColliders::new(Vec::new(), Vec::new()),
+                    })
+                    .unwrap();
+            }
+            let mut body = SpatialBody::new(
+                SpatialBodyId::LocalPlayer(Guid(1)),
+                WorldPosition {
+                    landblock_id: cell,
+                    coords: Vector3::new(root_x, -270.0, height),
+                    rotation: Quaternion::identity(),
+                },
+                Instant::now(),
+            );
+            body.physical = Some(PhysicalBodyState::new_dynamic(
+                dynamic_definition(definition, false),
+                PhysicalCollisionFilter::ALL,
+                Some(cell),
+            ));
+            let input =
+                GroundedBodyActuation::drive(Vector3::new(direction * 3.0, 0.0, 0.0)).unwrap();
+            let mut trajectory = Vec::new();
+            for _ in 0..100 {
+                let result = crate::spatial::advance_body_contact_collection(
+                    &collision,
+                    std::slice::from_ref(&body),
+                    Guid(0xda55_ffff),
+                    MOBILE_CONTACT_TICK_SECONDS,
+                    |body, ground, _| grounded_step_input(body, ground, &input),
+                )
+                .unwrap();
+                let update = &result.bodies[0];
+                assert_eq!(update.unavailable_owner, None);
+                assert!(update.ground.walkable_support().is_some());
+                update.apply_physical_state(&mut body).unwrap();
+                trajectory.push((body.pose, update.ground));
+            }
+            assert!(
+                (body.pose.coords.x - 390.0) * direction > 2.0,
+                "seam stalled at {:?}",
+                body.pose
+            );
+            assert_eq!(
+                body.pose.landblock_id,
+                if direction > 0.0 {
+                    Guid(0xda55_0101)
+                } else {
+                    Guid(0xda55_0100)
+                }
+            );
+            trajectory
+        };
+        let baseline = replay(false);
+        let control = replay(true);
+        for ((pose, ground), (control_pose, control_ground)) in baseline.iter().zip(&control) {
+            assert_eq!(pose, control_pose);
+            assert_eq!(
+                std::mem::discriminant(ground),
+                std::mem::discriminant(control_ground)
+            );
+            assert_eq!(
+                ground.walkable_support().unwrap().normal,
+                control_ground.walkable_support().unwrap().normal
+            );
         }
     }
 }

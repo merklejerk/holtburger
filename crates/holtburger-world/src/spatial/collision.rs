@@ -3,7 +3,7 @@
 mod entity_surface_ray;
 mod selection_ray;
 mod static_sphere_sweep;
-pub(crate) use static_sphere_sweep::sphere_path_touches_shape;
+pub(crate) use static_sphere_sweep::{PreparedHardSphereSweep, sphere_path_touches_shape};
 mod static_surface_ray;
 
 pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
@@ -1846,8 +1846,6 @@ impl CollisionScene {
             };
             validate_sweep_radius(sweep, allow_zero_radius)?;
             let touched = touched_landblocks(sweep);
-            let mut transition_count = 0;
-            let mut cursor = 0.0;
             let segment = PlacementMotionSegment {
                 anchor: request.anchor,
                 start: geometric_start,
@@ -1855,36 +1853,14 @@ impl CollisionScene {
                 radius: request.radius,
                 touched: &touched,
             };
-            while let Some(transition) =
-                self.next_placement_transition(segment, cursor, current_cell)?
-            {
-                transition_count += 1;
-                if transition_count > self.motion_transition_limit {
-                    return Err(CollisionQueryError::MotionTransitionLimitExceeded);
-                }
-                let center =
-                    interpolate_point(geometric_start, waypoint.center, transition.fraction);
-                let (placement, recovery) = self.placement_for_committed_cell(
-                    request.anchor,
-                    center,
-                    request.radius,
-                    transition.target_cell,
-                    allow_zero_radius,
-                )?;
-                let end_fraction = geometric_start_fraction
-                    + (waypoint.end_fraction - geometric_start_fraction) * transition.fraction;
-                append_motion_leg(
-                    &mut path,
-                    end_fraction,
-                    PlacedMotionPoint {
-                        center,
-                        placement,
-                        recovery,
-                    },
-                );
-                current_cell = path.final_point().placement.committed_cell;
-                cursor = transition.fraction;
-            }
+            current_cell = self.append_portal_transitions(
+                &mut path,
+                segment,
+                geometric_start_fraction,
+                waypoint.end_fraction,
+                current_cell,
+                allow_zero_radius,
+            )?;
 
             let inferred = self.infer_placement_from_cell(
                 request.anchor,
@@ -1929,6 +1905,107 @@ impl CollisionScene {
         }
 
         Ok(path)
+    }
+
+    /// Appends directed center crossings; endpoint containment belongs to the caller.
+    fn append_portal_transitions(
+        &self,
+        path: &mut PlacedMotionPath,
+        segment: PlacementMotionSegment<'_>,
+        start_fraction: f32,
+        end_fraction: f32,
+        mut current_cell: Option<Guid>,
+        allow_zero_radius: bool,
+    ) -> Result<Option<Guid>, CollisionQueryError> {
+        let mut transition_count = 0;
+        let mut cursor = 0.0;
+        while let Some(transition) =
+            self.next_placement_transition(segment, cursor, current_cell)?
+        {
+            transition_count += 1;
+            if transition_count > self.motion_transition_limit {
+                return Err(CollisionQueryError::MotionTransitionLimitExceeded);
+            }
+            let center = interpolate_point(segment.start, segment.end, transition.fraction);
+            let (placement, recovery) = self.placement_for_committed_cell(
+                segment.anchor,
+                center,
+                segment.radius,
+                transition.target_cell,
+                allow_zero_radius,
+            )?;
+            let end_fraction =
+                start_fraction + (end_fraction - start_fraction) * transition.fraction;
+            append_motion_leg(
+                path,
+                end_fraction,
+                PlacedMotionPoint {
+                    center,
+                    placement,
+                    recovery,
+                },
+            );
+            current_cell = path.final_point().placement.committed_cell;
+            cursor = transition.fraction;
+        }
+        Ok(current_cell)
+    }
+
+    /// Builds candidate domains for collision without recovering the unaccepted endpoint.
+    /// Initial placement still uses ordinary recovery: an invalid retained start is distinct
+    /// from a proposed endpoint behind a solid floor or wall.
+    fn sweep_candidate_membership(
+        &self,
+        sweep: SphereSweep,
+        previous_cell: Option<Guid>,
+    ) -> Result<SpatialMembership, CollisionQueryError> {
+        let (placement, recovery) = self.infer_placement_from_cell(
+            sweep.anchor,
+            sweep.start,
+            sweep.radius,
+            previous_cell,
+            false,
+        )?;
+        let current_cell = placement.committed_cell();
+        let mut path = PlacedMotionPath {
+            anchor: landblock_key(sweep.anchor),
+            initial: PlacedMotionPoint {
+                center: sweep.start,
+                placement,
+                recovery,
+            },
+            legs: Vec::new(),
+        };
+        let touched = touched_landblocks(sweep);
+        let current_cell = self.append_portal_transitions(
+            &mut path,
+            PlacementMotionSegment {
+                anchor: sweep.anchor,
+                start: sweep.start,
+                end: sweep.end,
+                radius: sweep.radius,
+                touched: &touched,
+            },
+            0.0,
+            1.0,
+            current_cell,
+            false,
+        )?;
+        let placement = self
+            .transit_cell_allow_uncovered(CellTransitRequest {
+                anchor: sweep.anchor,
+                previous_cell: current_cell,
+                center: sweep.end,
+                radius: sweep.radius,
+            })?
+            .value;
+        // Candidate reach does not certify placement at the proposed endpoint. Only the
+        // collision-limited path is subsequently allowed to recover and publish a center domain.
+        let mut reached = path.initial().placement().clone();
+        for leg in path.legs() {
+            reached = reached.merge_reached(leg.end().placement().clone());
+        }
+        Ok(reached.merge_reached(placement))
     }
 
     fn placement_for_committed_cell(
@@ -3244,6 +3321,231 @@ mod tests {
             })
             .unwrap()
             .expect("fixture sweep must hit")
+    }
+
+    #[test]
+    fn indoor_floor_sweep_does_not_require_outdoors_beyond_the_floor() {
+        let cell = Guid(0xda55_0100);
+        let center = Vector3::new(390.0, -270.0, 0.0);
+        let floor = PlacedCollider::new(
+            Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::new(0.0, 0.0, -1.0),
+                radius: 10.0,
+                height: 1.0,
+            })),
+            LandblockPlacement {
+                origin: center,
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::EnvCellShell { cell_id: cell.0 },
+        )
+        .unwrap();
+        let mut room = volume(0x0100, Vec::new());
+        // A floor half-space suffices to distinguish valid initial containment from the
+        // proposed endpoint below the floor, independently of portal or wall geometry.
+        room.planes.push(Plane {
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: 0.0,
+        });
+        let mut scene = scene(vec![floor], vec![room]);
+        let request = StaticSphereSweepRequest {
+            anchor: Guid(0xda55_ffff),
+            start: center + Vector3::new(0.0, 0.0, 1.0),
+            end: center + Vector3::new(0.0, 0.0, -1.0),
+            previous_cell: Some(cell),
+            radius: 0.5,
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        let without_outdoors = scene.sweep_static_sphere(request);
+        let unrelated = outdoor_landblock_owner_at(request.anchor, center).unwrap();
+        scene.insert(outdoor_asset(unrelated, Vec::new())).unwrap();
+        let with_outdoors = scene.sweep_static_sphere(request);
+        let hit = with_outdoors.unwrap().expect("the floor blocks this probe");
+        assert!(hit.time_of_impact > 0.0 && hit.time_of_impact < 1.0);
+        assert_eq!(hit.normal, Vector3::new(0.0, 0.0, 1.0));
+        assert_eq!(without_outdoors, Ok(Some(hit)));
+    }
+
+    #[test]
+    fn sphere_sweep_requires_coverage_before_a_blocker_but_not_after_it() {
+        let owner = Guid(0xda55_ffff);
+        let missing = Guid(0xdb55_ffff);
+        let request = StaticSphereSweepRequest {
+            anchor: owner,
+            start: Vector3::new(20.0, 20.0, 10.0),
+            end: Vector3::new(300.0, 20.0, 10.0),
+            previous_cell: None,
+            radius: 0.5,
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        let blocker = |x| {
+            PlacedCollider::new(
+                Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 1.0,
+                })),
+                LandblockPlacement {
+                    origin: Vector3::new(x, 20.0, 10.0),
+                    orientation: Quaternion::identity(),
+                },
+                ColliderScale::uniform(1.0).unwrap(),
+                StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+            )
+            .unwrap()
+        };
+        let before = scene(vec![blocker(50.0)], Vec::new());
+        let hit = before.sweep_static_sphere(request).unwrap().unwrap();
+        let accepted = request.start + (request.end - request.start) * hit.time_of_impact;
+        assert!(accepted.x < METERS_PER_LANDBLOCK);
+
+        let after = scene(vec![blocker(250.0)], Vec::new());
+        assert_eq!(
+            after.sweep_static_sphere(request),
+            Err(CollisionQueryError::UnavailableOwner { owner: missing.0 })
+        );
+
+        // A hard entity is an equally valid earlier stop. Static preparation must not reject
+        // its unaccepted suffix before entity hits have participated in the minimum.
+        let empty = scene(Vec::new(), Vec::new());
+        let entity = blocker(50.0);
+        let membership = SpatialMembership::outdoor();
+        let hit = empty
+            .sweep_hard_sphere(
+                request,
+                [HardEntityShape {
+                    body_id: crate::SpatialBodyId::Entity(Guid(42)),
+                    shape: &entity,
+                    membership: &membership,
+                }],
+            )
+            .unwrap();
+        assert!(matches!(hit.hit, Some(HardSphereSweepHit::Entity { .. })));
+        assert!(hit.path.final_point().center().x < METERS_PER_LANDBLOCK);
+        assert_eq!(
+            empty.sweep_hard_sphere(request, []),
+            Err(CollisionQueryError::UnavailableOwner { owner: missing.0 })
+        );
+    }
+
+    #[test]
+    fn indoor_travel_to_a_distant_exit_does_not_require_terrain_under_the_rooms() {
+        let boundary = METERS_PER_LANDBLOCK * 2.0 + 10.0;
+        let mut room = volume(
+            0x0100,
+            vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -boundary,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::Outdoor,
+                outdoor_building: None,
+            }],
+        );
+        room.planes.push(Plane {
+            normal: Vector3::new(-1.0, 0.0, 0.0),
+            d: boundary,
+        });
+        let mut collision = scene(Vec::new(), vec![room]);
+        collision
+            .insert(outdoor_asset(Guid(0xdc55_ffff), Vec::new()))
+            .unwrap();
+        let result = collision
+            .sweep_hard_sphere(
+                StaticSphereSweepRequest {
+                    anchor: Guid(0xda55_ffff),
+                    start: Vector3::new(20.0, 20.0, 10.0),
+                    end: Vector3::new(boundary + 1.0, 20.0, 10.0),
+                    previous_cell: Some(Guid(0xda55_0100)),
+                    radius: 0.5,
+                    filter: PhysicalCollisionFilter::ALL,
+                },
+                [],
+            )
+            .unwrap();
+        assert_eq!(result.path.final_point().placement().committed_cell(), None);
+    }
+
+    #[test]
+    fn outdoor_portal_overlap_requires_neighbor_before_center_crossing() {
+        let owner = Guid(0xda55_ffff);
+        let neighbor = Guid(0xdb55_ffff);
+        let cell = Guid(0xda55_0100);
+        let boundary = METERS_PER_LANDBLOCK;
+        let mut room = volume(
+            0x0100,
+            vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -boundary,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::Outdoor,
+                outdoor_building: None,
+            }],
+        );
+        room.planes.push(Plane {
+            normal: Vector3::new(-1.0, 0.0, 0.0),
+            d: boundary,
+        });
+        let mut collision = scene(Vec::new(), vec![room]);
+        let request = |x| StaticSphereSweepRequest {
+            anchor: owner,
+            start: Vector3::new(boundary - 2.0, 20.0, 10.0),
+            end: Vector3::new(x, 20.0, 10.0),
+            previous_cell: Some(cell),
+            radius: 0.5,
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        assert!(
+            collision
+                .sweep_hard_sphere(request(boundary - 1.0), [])
+                .unwrap()
+                .hit
+                .is_none()
+        );
+        // The sphere reaches outside before its center leaves the room. Both this overlap
+        // and the full exit require the neighbor; endpoint-center ownership alone is insufficient.
+        for end in [boundary - 0.25, boundary + 1.0] {
+            assert_eq!(
+                collision.sweep_hard_sphere(request(end), []),
+                Err(CollisionQueryError::UnavailableOwner { owner: neighbor.0 })
+            );
+        }
+        collision
+            .insert(outdoor_asset(neighbor, Vec::new()))
+            .unwrap();
+        let overlap = collision
+            .sweep_hard_sphere(request(boundary - 0.25), [])
+            .unwrap();
+        assert_eq!(
+            overlap.path.final_point().placement().committed_cell(),
+            Some(cell)
+        );
+        assert!(overlap.path.final_point().placement().reaches_outdoors());
+        let exit = collision
+            .sweep_hard_sphere(request(boundary + 1.0), [])
+            .unwrap();
+        assert_eq!(exit.path.final_point().placement().committed_cell(), None);
+        assert!(!exit.path.has_recovery());
+        let entry = collision
+            .sweep_hard_sphere(
+                StaticSphereSweepRequest {
+                    start: exit.path.final_point().center(),
+                    end: request(boundary - 2.0).end,
+                    previous_cell: None,
+                    ..request(boundary - 2.0)
+                },
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            entry.path.final_point().placement().committed_cell(),
+            Some(cell)
+        );
+        assert!(!entry.path.final_point().placement().reaches_outdoors());
+        assert!(!entry.path.has_recovery());
     }
 
     #[test]

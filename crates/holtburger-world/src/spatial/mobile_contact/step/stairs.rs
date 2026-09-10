@@ -162,7 +162,7 @@ pub(super) fn try_edge_slide(
     if fraction == 0.0 {
         return Ok(NavigationFooting::Unsupported);
     }
-    let path = accepted_prefix(swept.path, fraction)?;
+    let path = swept.path;
     super::translate_to(body, &path)?;
     body.motion.push(ContactMotionSegment::Travel {
         path,
@@ -562,7 +562,13 @@ fn settle_down(
         {
             return Ok(SettleOutcome::Unsupported);
         }
-        Some(Box::new(accepted_prefix(down.path, fraction)?))
+        // The path is normalized to the collision-limited descent, whereas the support
+        // fraction still refers to the original requested drop.
+        let stop_fraction = down.hit.map_or(1.0, |hit| hit.contact().time_of_impact);
+        Some(Box::new(accepted_prefix(
+            down.path,
+            fraction / stop_fraction,
+        )?))
     } else {
         None
     };
@@ -619,7 +625,7 @@ pub(super) fn try_stair_maneuver(
     if fraction == 0.0 {
         return Ok(None);
     }
-    let up = accepted_prefix(up.path, fraction)?;
+    let up = up.path;
     cursor.accept(&up)?;
     let rise = cursor.spheres.primary().center.z - initial.center.z;
     if rise <= CONTACT_EPSILON {

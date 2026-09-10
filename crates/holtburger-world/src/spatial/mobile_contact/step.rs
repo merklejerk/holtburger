@@ -21,10 +21,11 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use holtburger_content::PlacedCollisionShape;
 
 use super::*;
+use crate::spatial::collision::PreparedHardSphereSweep;
 use crate::spatial::{
     CollisionQueryError, CollisionScene, GroundState, GroundedLaunch, GroundedSphere,
-    HardEntityShape, HardSphereSweep, HardSphereSweepHit, PlacedMotionPath,
-    StaticSphereSweepRequest, dynamic_index::placed_target_shapes, physical_body::impact_velocity,
+    HardEntityShape, HardSphereSweepHit, PlacedMotionPath, StaticSphereSweepRequest,
+    dynamic_index::placed_target_shapes, physical_body::impact_velocity,
 };
 
 /// Maximum stop/slide continuations for ordinary travel in one physical tick.
@@ -342,11 +343,11 @@ impl ContactBodyPath {
     }
 }
 
-/// Attempted two-sphere translation and the earliest hard blocker from either sphere.
+/// Collision-limited two-sphere translation and its earliest hard blocker.
 struct BodySweep {
     /// One shared blocking fraction for both sphere paths.
     hit: Option<HardSphereSweepHit>,
-    /// Both attempted proofs, clipped together when applying an accepted prefix.
+    /// Both accepted paths, normalized together to their shared stopping fraction.
     path: ContactBodyPath,
 }
 
@@ -1017,7 +1018,7 @@ fn advance_projectile_translation(
     };
     let fraction = swept.hit.map_or(1.0, |hit| hit.contact().time_of_impact);
     if fraction > 0.0 {
-        let path = accepted_prefix(swept.path, fraction)?;
+        let path = swept.path;
         translate_to(projectile, &path)?;
         projectile.motion.push(ContactMotionSegment::Travel {
             path,
@@ -1255,7 +1256,7 @@ fn advance_hard_candidate(
         }
         let fraction = swept.hit.map_or(1.0, |hit| hit.contact().time_of_impact);
         if fraction > 0.0 {
-            let path = accepted_prefix(swept.path, fraction)?;
+            let path = swept.path;
             translate_to(body, &path)?;
             let end_fraction = elapsed + (1.0 - elapsed) * fraction;
             body.motion.push(ContactMotionSegment::Travel {
@@ -1507,9 +1508,14 @@ fn sweep_body_chords(
     {
         hit = Some(upper_hit);
     }
+    let fraction = hit.map_or(1.0, |hit| hit.contact().time_of_impact);
+    let primary = collision.finish_hard_sphere_path(primary, fraction)?;
+    let upper = upper
+        .map(|upper| collision.finish_hard_sphere_path(upper, fraction))
+        .transpose()?;
     Ok(BodySweep {
         hit,
-        path: ContactBodyPath::new(primary.path, upper.map(|upper| upper.path)),
+        path: ContactBodyPath::new(primary, upper),
     })
 }
 
@@ -1520,7 +1526,7 @@ fn sweep_motion_sphere(
     contact: &ContactParticipant,
     requested: Vector3,
     sphere: GroundedSphere,
-) -> std::result::Result<HardSphereSweep, CollisionQueryError> {
+) -> std::result::Result<PreparedHardSphereSweep, CollisionQueryError> {
     let center = sphere.center + requested * 0.5;
     let reach = sphere.radius + requested.length() * 0.5;
     let candidates = hard
@@ -1537,7 +1543,7 @@ fn sweep_motion_sphere(
                     membership: &target.contact.membership,
                 })
         });
-    collision.sweep_hard_sphere(
+    collision.prepare_hard_sphere(
         StaticSphereSweepRequest {
             anchor,
             start: sphere.center,

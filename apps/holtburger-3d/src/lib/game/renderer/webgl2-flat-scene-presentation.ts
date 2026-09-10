@@ -16,7 +16,10 @@ import {
 } from "./color-grade-policy";
 import type { PortalTransitionComposition } from "./portal-transition-composition";
 import type { WebGL2EntitySelectionMask } from "./webgl2-entity-selection-pass";
-import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
+import {
+	selectionHaloOpacity,
+	type EntitySelectionOutlineSettings,
+} from "./entity-selection-outline-policy";
 import {
 	validatePortalWarpDriveTuning,
 	type PortalWarpDriveTuning,
@@ -76,6 +79,9 @@ uniform int uTunnelEnabled;
 uniform int uSelectionMaskEnabled;
 uniform vec4 uSelectionOutlineColor;
 uniform float uSelectionOutlineWidth;
+uniform vec4 uSelectionBorderColor;
+uniform vec4 uSelectionHaloColor;
+uniform vec3 uSelectionRadii; // border width, halo width, CSS pixel sampling step
 uniform float uWarpAccelerationExponent;
 uniform float uWarpMaximumZoom;
 uniform vec2 uWarpRadialSmear;
@@ -167,22 +173,32 @@ float selectionMaskAt(vec2 outputPixel, vec2 textureExtent) {
 	return texture(uSelectionMask, selectionSourceUv(outputPixel, textureExtent)).r;
 }
 
-/** Tunable output-pixel dilation minus the original mask leaves only an exterior edge. */
-float selectionOuterEdge(vec2 textureExtent) {
-	float center = selectionMaskAt(gl_FragCoord.xy, textureExtent);
-	if (center >= 0.5) return 0.0;
-	float cardinal = uSelectionOutlineWidth;
-	float diagonal = cardinal * 0.70710678;
-	float expanded = 0.0;
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2( cardinal,  0.0), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2(-cardinal,  0.0), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2( 0.0,  cardinal), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2( 0.0, -cardinal), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2( diagonal,  diagonal), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2(-diagonal,  diagonal), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2( diagonal, -diagonal), textureExtent));
-	expanded = max(expanded, selectionMaskAt(gl_FragCoord.xy + vec2(-diagonal, -diagonal), textureExtent));
-	return step(0.5, expanded);
+/**
+ * Approximate silhouette distance on a CSS-pixel grid. Cost grows with the square of the
+ * total CSS radius; render scale increases sampling density without increasing this kernel.
+ */
+vec4 selectionAppearance(vec2 textureExtent) {
+	if (selectionMaskAt(gl_FragCoord.xy, textureExtent) >= 0.5) return vec4(0.0);
+	float borderEnd = uSelectionOutlineWidth + uSelectionRadii.x;
+	float radius = borderEnd + uSelectionRadii.y;
+	float spacing = uSelectionRadii.z;
+	int extent = int(ceil(radius / spacing));
+	float nearest = radius + spacing;
+	for (int y = -extent; y <= extent; ++y) {
+		for (int x = -extent; x <= extent; ++x) {
+			vec2 offset = vec2(float(x), float(y)) * spacing;
+			float distance = length(offset);
+			if (distance > radius || distance >= nearest) continue;
+			if (selectionMaskAt(gl_FragCoord.xy + offset, textureExtent) >= 0.5) {
+				nearest = distance;
+			}
+		}
+	}
+	if (nearest <= uSelectionOutlineWidth) return uSelectionOutlineColor;
+	if (nearest <= borderEnd) return uSelectionBorderColor;
+	if (uSelectionRadii.y <= 0.0) return vec4(0.0);
+	float feather = 1.0 - smoothstep(borderEnd, radius, nearest);
+	return vec4(uSelectionHaloColor.rgb, uSelectionHaloColor.a * feather);
 }
 
 /** Forward zoom plus radial sample history, evaluated backward for destination reveal. */
@@ -254,13 +270,8 @@ void main() {
 		uColorGradeEnabled != 0
 			? vec4(applyColorGrade(scene.rgb, gl_FragCoord.xy), scene.a)
 			: scene;
-	float selectionEdge =
-		uSelectionMaskEnabled != 0 ? selectionOuterEdge(textureExtent) : 0.0;
-	outColor = mix(
-		presented,
-		uSelectionOutlineColor,
-		selectionEdge * selectionOpacity * uSelectionOutlineColor.a
-	);
+	vec4 selection = uSelectionMaskEnabled != 0 ? selectionAppearance(textureExtent) : vec4(0.0);
+	outColor = vec4(mix(presented.rgb, selection.rgb, selectionOpacity * selection.a), presented.a);
 }
 `;
 
@@ -284,6 +295,9 @@ export class WebGL2FlatScenePresentation {
 		readonly selectionMaskEnabled: WebGLUniformLocation;
 		readonly selectionOutlineColor: WebGLUniformLocation;
 		readonly selectionOutlineWidth: WebGLUniformLocation;
+		readonly selectionBorderColor: WebGLUniformLocation;
+		readonly selectionHaloColor: WebGLUniformLocation;
+		readonly selectionRadii: WebGLUniformLocation;
 		readonly warpAccelerationExponent: WebGLUniformLocation;
 		readonly warpMaximumZoom: WebGLUniformLocation;
 		readonly warpRadialSmear: WebGLUniformLocation;
@@ -368,6 +382,17 @@ export class WebGL2FlatScenePresentation {
 					program,
 					"uSelectionMaskEnabled",
 				),
+				selectionBorderColor: requireWebGL2Uniform(
+					gl,
+					program,
+					"uSelectionBorderColor",
+				),
+				selectionHaloColor: requireWebGL2Uniform(
+					gl,
+					program,
+					"uSelectionHaloColor",
+				),
+				selectionRadii: requireWebGL2Uniform(gl, program, "uSelectionRadii"),
 				selectionOutlineColor: requireWebGL2Uniform(
 					gl,
 					program,
@@ -463,7 +488,8 @@ export class WebGL2FlatScenePresentation {
 		composition: FlatScenePresentationInput,
 		selectionOutline: EntitySelectionOutlineSettings,
 		renderScale: number,
-		selectionMask: WebGL2EntitySelectionMask | null = null,
+		selectionMask: WebGL2EntitySelectionMask | null,
+		timeSeconds: number,
 	): void {
 		if (this.#destroyed) {
 			throw new Error("Flat scene presentation has been destroyed.");
@@ -499,6 +525,28 @@ export class WebGL2FlatScenePresentation {
 			gl.uniform1f(
 				this.#uniforms.selectionOutlineWidth,
 				selectionOutline.widthCssPixels * renderScale,
+			);
+			const border = selectionOutline.borderColor;
+			const halo = selectionOutline.haloColor;
+			gl.uniform4f(
+				this.#uniforms.selectionBorderColor,
+				border.red,
+				border.green,
+				border.blue,
+				border.alpha,
+			);
+			gl.uniform4f(
+				this.#uniforms.selectionHaloColor,
+				halo.red,
+				halo.green,
+				halo.blue,
+				selectionHaloOpacity(selectionOutline, timeSeconds),
+			);
+			gl.uniform3f(
+				this.#uniforms.selectionRadii,
+				selectionOutline.borderWidthCssPixels * renderScale,
+				selectionOutline.haloWidthCssPixels * renderScale,
+				renderScale,
 			);
 			if (
 				composition.kind === "origin-to-tunnel" ||

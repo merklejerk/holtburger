@@ -5,7 +5,7 @@ import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./color-grade-policy";
 import { resolvePortalTransitionComposition } from "./portal-transition-composition";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
 import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
-import { DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS } from "./entity-selection-outline-policy";
+import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import { WebGL2FlatSceneTarget } from "./webgl2-flat-scene-target";
 
 const FIXTURE_EXTENT = 17;
@@ -81,8 +81,10 @@ export function runPortalTransitionPresentationFixture(
 				enrichPortalTransitionFrame(plan, tunnelSample),
 				{ origin, tunnel },
 			),
-			DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS,
+			SHARED_FRAME_SETTINGS.entitySelectionOutline,
 			1,
+			null,
+			0,
 		);
 		gl.finish();
 		return readPixelCensus(gl, plan);
@@ -164,8 +166,10 @@ function sampleWarpDrive(
 				}),
 				{ origin, tunnel },
 			),
-			DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS,
+			SHARED_FRAME_SETTINGS.entitySelectionOutline,
 			1,
+			null,
+			0,
 		);
 		gl.finish();
 		const pixels = new Uint8Array(FIXTURE_PIXEL_COUNT * 4);

@@ -1,3 +1,4 @@
+import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import {
 	createLandblockOffset,
 	createLandblockWorldOrigin,
@@ -319,10 +320,7 @@ import {
 	type FlatScenePresentationInput,
 } from "./webgl2-flat-scene-presentation";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
-import {
-	DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS,
-	type EntitySelectionOutlineSettings,
-} from "./entity-selection-outline-policy";
+import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
 import { resolvePortalTransitionComposition } from "./portal-transition-composition";
 import { WebGL2TransitionSnapshot } from "./webgl2-transition-snapshot";
 import {
@@ -1119,7 +1117,7 @@ export class WebGL2Renderer implements Renderer {
 	};
 	/** This frame's depth-independent selection edge appearance. */
 	#frameEntitySelectionOutline: EntitySelectionOutlineSettings =
-		DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS;
+		SHARED_FRAME_SETTINGS.entitySelectionOutline;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused metrics record for the frame's effective AO distance interval. */
@@ -1720,7 +1718,6 @@ export class WebGL2Renderer implements Renderer {
 		if (profile && finalizationStartedAt !== undefined) {
 			profile.finishCpuPhase("finalization", finalizationStartedAt);
 		}
-		void input.timeSeconds;
 	}
 
 	#drawPortalTransitionFrameContent(
@@ -4119,6 +4116,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#frameEntitySelectionOutline,
 				this.#renderScale,
 				selectionMask,
+				this.#skyClockSeconds,
 			);
 		} finally {
 			presentationGpu?.finish();

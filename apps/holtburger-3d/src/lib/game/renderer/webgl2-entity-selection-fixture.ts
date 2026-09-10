@@ -1,3 +1,4 @@
+import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import type { ObjectGeometryKey } from "../geometry/types";
 import { Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
@@ -75,12 +76,20 @@ const DISABLED_COLOR_GRADE: ColorGradeSettings = {
 	parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
 };
 const FIXTURE_OUTLINE_SETTINGS = {
+	borderColor: { red: 0.1, green: 0.1, blue: 0.1, alpha: 1 },
+	haloColor: { red: 1, green: 0.8, blue: 0.1, alpha: 0.6 },
+	borderWidthCssPixels: 1,
+	haloWidthCssPixels: 3,
+	breathingMinimum: 0.3,
+	breathingPeriodSeconds: 2,
 	color: { red: 0.1, green: 0.9, blue: 0.4, alpha: 1 },
 	widthCssPixels: 3,
 } as const satisfies EntitySelectionOutlineSettings;
 
 /** Real-browser mask, compositor, resize, and teardown evidence. */
 export interface WebGL2EntitySelectionFixtureResult {
+	/** Default appearance on dark, light, and gold backgrounds, minimum then peak halo. */
+	readonly appearancePreview: string;
 	readonly currentTransformFollowed: boolean;
 	readonly depthIndependentMaskPixel: number;
 	readonly initialActiveMaskBytes: number;
@@ -181,9 +190,88 @@ export function runWebGL2EntitySelectionFixture(
 			FIXTURE_OUTLINE_SETTINGS,
 			1,
 			initial.mask,
+			0,
 		);
 		const scenePixels = readDefaultPixels(gl, INITIAL_SIZE, INITIAL_SIZE);
 		const outlinePixelCount = countOutlinePixels(scenePixels);
+		// A half-cycle changes only the feathered halo; the bright core remains steady.
+		presenter.present(
+			target,
+			DISABLED_COLOR_GRADE,
+			{ kind: "scene-only" },
+			FIXTURE_OUTLINE_SETTINGS,
+			1,
+			initial.mask,
+			FIXTURE_OUTLINE_SETTINGS.breathingPeriodSeconds / 2,
+		);
+		const peakPixels = readDefaultPixels(gl, INITIAL_SIZE, INITIAL_SIZE);
+		if (
+			countOutlinePixels(peakPixels) !== outlinePixelCount ||
+			!peakPixels.some((channel, index) => channel !== scenePixels[index])
+		) {
+			throw new Error(
+				"Selection halo must breathe while the core remains steady.",
+			);
+		}
+		presenter.present(
+			target,
+			DISABLED_COLOR_GRADE,
+			{ kind: "scene-only" },
+			FIXTURE_OUTLINE_SETTINGS,
+			2,
+			initial.mask,
+			0,
+		);
+		if (
+			countOutlinePixels(readDefaultPixels(gl, INITIAL_SIZE, INITIAL_SIZE)) <=
+			outlinePixelCount
+		) {
+			throw new Error(
+				"Selection CSS widths must grow in drawing-buffer pixels with render scale.",
+			);
+		}
+		const preview = document.createElement("canvas");
+		preview.width = INITIAL_SIZE * 3;
+		preview.height = INITIAL_SIZE * 2;
+		const context = preview.getContext("2d");
+		if (context === null)
+			throw new Error("Selection preview requires a 2D canvas.");
+		const backgrounds = [
+			[0.03, 0.03, 0.03],
+			[0.9, 0.9, 0.9],
+			[0.9, 0.65, 0.1],
+		] as const;
+		const appearance = SHARED_FRAME_SETTINGS.entitySelectionOutline;
+		for (const [column, background] of backgrounds.entries()) {
+			for (let row = 0; row < 2; row += 1) {
+				gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+				gl.clearColor(background[0], background[1], background[2], 1);
+				gl.clear(gl.COLOR_BUFFER_BIT);
+				presenter.present(
+					target,
+					DISABLED_COLOR_GRADE,
+					{ kind: "scene-only" },
+					appearance,
+					1,
+					initial.mask,
+					(row * appearance.breathingPeriodSeconds) / 2,
+				);
+				const pixels = readDefaultPixels(gl, INITIAL_SIZE, INITIAL_SIZE);
+				context.putImageData(
+					new ImageData(
+						new Uint8ClampedArray(pixels),
+						INITIAL_SIZE,
+						INITIAL_SIZE,
+					),
+					column * INITIAL_SIZE,
+					row * INITIAL_SIZE,
+				);
+			}
+		}
+		const appearancePreview = preview.toDataURL();
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+		gl.clearColor(0, 0, 0, 1);
+		gl.clear(gl.COLOR_BUFFER_BIT);
 		const interiorPreserved = pixelIsBlack(
 			scenePixels,
 			INITIAL_SIZE,
@@ -203,6 +291,7 @@ export function runWebGL2EntitySelectionFixture(
 			FIXTURE_OUTLINE_SETTINGS,
 			1,
 			initial.mask,
+			0,
 		);
 		const portalWarpOutlinePixelCount = countOutlinePixels(
 			readDefaultPixels(gl, INITIAL_SIZE, INITIAL_SIZE),
@@ -237,6 +326,7 @@ export function runWebGL2EntitySelectionFixture(
 		pass.destroy();
 		const destroyedDiagnostics = pass.getDiagnostics();
 		return {
+			appearancePreview,
 			currentTransformFollowed:
 				initialPositionMaskPixel === 255 &&
 				previousPositionMaskPixel === 0 &&

@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { z } from "zod";
+	import {
+		weenieCatalogCapabilitySchema,
+		type WeenieCatalogCapability,
+	} from "../lib/host/weenie-catalog-capability";
 	import ClientMessageDialog from "./ClientMessageDialog.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import {
@@ -146,6 +151,8 @@
 	let entitySelection: ClientEntitySelection | null = null;
 	let entityInteractions: ClientEntityInteractions | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
+	/** Session-local diagnostic policy; each use captures the current value. */
+	let unrestrictedUse = $state(false);
 	let hoveredEntityGuid = $state<number | null>(null);
 	let preciseJumpActive = $state(false);
 	let inputDispatch: Promise<void> = Promise.resolve();
@@ -401,6 +408,17 @@
 		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
 			if (!event.repeat) inputArbiter.enterPrecise();
+			return;
+		}
+		if (
+			APP_INPUT.shortcut("interact", event) &&
+			!event.ctrlKey &&
+			!event.altKey &&
+			!event.metaKey &&
+			!event.isComposing
+		) {
+			event.preventDefault();
+			if (!event.repeat) entityInteractions?.interact(unrestrictedUse);
 			return;
 		}
 		if (inputArbiter !== null && characterInput.apply(event, true))
@@ -695,10 +713,24 @@
 		};
 	});
 
+	/** One startup result consumed only by the diagnostics panel. */
+	let entityMetadata = $state<WeenieCatalogCapability | null>(null);
 	onMount(() => {
+		let disposed = false;
 		const unsubscribeToast = toastCenter.subscribe((next) => (toast = next));
 		const transport = createElectronHostTransport();
 		hostTransport = transport;
+		void transport
+			.invoke("host_status")
+			.then((value) => {
+				const status = z
+					.object({ entityMetadata: weenieCatalogCapabilitySchema })
+					.parse(value);
+				if (!disposed) entityMetadata = status.entityMetadata;
+			})
+			.catch((error: unknown) => {
+				if (!disposed) commandFailure = diagnostic(error);
+			});
 		const owner = new ClientLifecycleSession(
 			hostClientLifecycleTransport(transport),
 		);
@@ -725,6 +757,7 @@
 			onFailure: appendChatError,
 		});
 		entityInteractions = interactions;
+		unrestrictedUse = false;
 		const unsubscribeSelection = selection.subscribe((guid) => {
 			selectedEntityGuid = guid;
 			presentationSession?.setSelectedEntityGuid(guid);
@@ -743,6 +776,7 @@
 		});
 
 		return () => {
+			disposed = true;
 			dialogOwner.destroy();
 			unsubscribeDialogs();
 			dialogs = null;
@@ -782,6 +816,7 @@
 
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
+		{entityMetadata}
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 		{debugEnabled}
 		{readMinimapFrame}
@@ -789,13 +824,15 @@
 		{readFrameRates}
 		{readTargetIndicatorFrame}
 		{readSelectedEntityDisplay}
-		onInteractEntity={() => entityInteractions?.interact()}
+		onInteractEntity={() => entityInteractions?.interact(unrestrictedUse)}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
 		onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
 		{entityCollisionDisabled}
 		onEntityCollisionDisabledChange={setEntityCollisionDisabled}
+		{unrestrictedUse}
+		onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
 		{playerName}
 		{worldName}
 		{vitals}

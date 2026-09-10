@@ -34,3 +34,22 @@ describe("minimap selection", () => {
 		).toBeNull();
 	});
 });
+
+it("selects either end and the middle of a door, with deterministic overlap", () => {
+	const door = { guid: 4, x: -30, y: 0, end: { x: 30, y: 0 } };
+	for (const x of [-30, 0, 30])
+		expect(closestMinimapSelectionGuid([door], x, 2, 3)).toBe(4);
+	expect(closestMinimapSelectionGuid([door], 34, 0, 3)).toBeNull();
+	expect(closestMinimapSelectionGuid([door], 0, 4, 3)).toBeNull();
+	expect(
+		closestMinimapSelectionGuid([door, { guid: 2, x: 0, y: 0 }], 0, 0, 3),
+	).toBe(2);
+	expect(
+		closestMinimapSelectionGuid(
+			[{ guid: 4, x: 0, y: 0, end: { x: 0, y: 0 } }],
+			0,
+			0,
+			3,
+		),
+	).toBe(4);
+});

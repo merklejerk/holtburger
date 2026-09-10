@@ -1,9 +1,37 @@
-//! Cached entity facts relevant to feedback after a submitted Use action.
+//! Cached entity facts governing use admission and feedback.
 
 use holtburger_common::Guid;
 use holtburger_common::properties::{ObjectDescriptionFlag, Usable, WorldObjectExt};
 
 use crate::context::WorldContextExt;
+
+/// A known object whose authored useability prohibits a direct Use request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntityUseRejection {
+    /// Door explicitly disallowing direct use; another activation mechanism is not guaranteed.
+    Door { name: String },
+    /// Other object with the explicit NO useability bit.
+    Object { name: String },
+}
+
+/// Reject explicit NO useability; absent objects and unspecified useability supply no rejection.
+pub fn entity_use_rejection(
+    world: &impl WorldContextExt,
+    guid: Guid,
+) -> Option<EntityUseRejection> {
+    let entity = world.get_entity(guid)?;
+    // ItemUses::IsUseable tests only NO (acclient.c:286680-286683). Missing public useability
+    // initializes to UNDEF, not NO. Lock state is a separate server-owned activation constraint.
+    if entity.usable_flags().allows_direct_use() {
+        return None;
+    }
+    let name = entity.name().to_owned();
+    Some(if entity.flags.contains(ObjectDescriptionFlag::DOOR) {
+        EntityUseRejection::Door { name }
+    } else {
+        EntityUseRejection::Object { name }
+    })
+}
 
 /// Local use understanding, without deciding how a frontend presents concurrent notices.
 #[derive(Debug, Clone, PartialEq, Eq)]

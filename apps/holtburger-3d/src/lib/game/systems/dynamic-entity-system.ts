@@ -24,6 +24,7 @@ import type { SceneChildTransform, SceneGraph, SceneNodeId } from "../scene";
 import type { SceneSpatialPlacement } from "../scene";
 import {
 	type ParentLocation,
+	type SetupSidewaysSpan,
 	RESTING_PLACEMENT_KEY,
 	resolveObjectPresentationBounds,
 	type ResolvedObjectPresentation,
@@ -77,6 +78,8 @@ interface DynamicAttachmentFrame extends SceneChildTransform {
 }
 
 interface DynamicEntityRecord {
+	/** Stable setup bounds at source scale, independent of animated presentation bounds. */
+	setupBounds: AABB3;
 	readonly rootNodeId: SceneNodeId;
 	readonly visualRootNodeId: SceneNodeId;
 	/** Source-neutral visual facts retained for behavior staging and deterministic phase identity. */
@@ -452,6 +455,7 @@ export class DynamicEntitySystem<
 		});
 		const rigidPresentationBounds = staticPresentationBounds(source);
 		const record: DynamicEntityRecord = {
+			setupBounds: rigidPresentationBounds.clone(),
 			animationHandle: null,
 			emitterHandles: [],
 			motionClosure: null,
@@ -605,8 +609,10 @@ export class DynamicEntitySystem<
 					entity.appliedEnvelopeRadius,
 					AABB3.zero(),
 				);
+				const setupBounds = staticPresentationBounds(source);
 				stage.commit(owner.templateOwnerId);
 				entity.source = source;
+				entity.setupBounds = setupBounds;
 				entity.renderable = renderable;
 				entity.attachmentFrames = attachmentFrames;
 				entity.motionPlayback = visual.motionPlayback;
@@ -969,6 +975,20 @@ export class DynamicEntitySystem<
 		if (!this.#entities.has(nodeId))
 			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
 		this.#placements.applyPath(nodeId, advance, durationMs, startedAtMs);
+	}
+
+	/** Approximate authored sideways span; no animation or mesh work occurs during map sampling. */
+	setupSidewaysSpan(nodeId: SceneNodeId): SetupSidewaysSpan | null {
+		const entity = this.#entities.get(nodeId);
+		if (!entity) return null;
+		const bounds = entity.setupBounds;
+		const xScale = entity.rootScale.x / entity.source.scale.x;
+		const zScale = entity.rootScale.z / entity.source.scale.z;
+		return {
+			minX: bounds.min.x * xScale,
+			maxX: bounds.max.x * xScale,
+			z: (bounds.min.z + bounds.max.z) * 0.5 * zScale,
+		};
 	}
 
 	/** Apply one projected absolute root scale without reloading or replacing visual resources. */

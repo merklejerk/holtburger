@@ -1,5 +1,6 @@
 //! Catalog-backed Explorer entity preparation and serialized lifecycle operations.
 
+use holtburger_content::WeenieCatalogCapability;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::io::Cursor;
@@ -39,8 +40,8 @@ use crate::explorer_entity_runtime::{
     ExplorerEntityRuntimeError, ExplorerEntitySpawnOutcome, ExplorerPreparedEntity,
 };
 use crate::explorer_weenie_catalog::{
-    ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerCatalogSearchError,
-    ExplorerWeenieCatalogSource, ExplorerWeenieSearchRequest, ExplorerWeenieSearchResult,
+    ExplorerCatalogLookupError, ExplorerCatalogSearchError, ExplorerWeenieCatalogSource,
+    ExplorerWeenieSearchRequest, ExplorerWeenieSearchResult,
 };
 use crate::host_simulation_runtime::HostSimulationRuntime;
 use crate::weenie_appearance::{
@@ -467,7 +468,7 @@ impl ExplorerEntityDriver {
     }
 
     /// Returns catalog capability without touching entity or solver state.
-    pub fn catalog_capability(&self) -> ExplorerCatalogCapability {
+    pub fn catalog_capability(&self) -> WeenieCatalogCapability {
         self.catalog.capability()
     }
 
@@ -1075,6 +1076,9 @@ fn template_definition_input(
                 weenie_type,
                 item_type,
                 template.attackable,
+                holtburger_common::properties::Usable::from_raw(
+                    template.item_useable.unwrap_or(0) as u32
+                ),
             ),
             template.radar_behavior,
             template.obvious_radar_range,
@@ -1241,6 +1245,7 @@ mod tests {
                 WeenieType::LifeStone,
                 None,
                 None,
+                holtburger_common::properties::Usable::UNDEF
             ),
             holtburger_core::DynamicEntityMapBlipCategory::Lifestone
         );
@@ -1249,6 +1254,7 @@ mod tests {
                 WeenieType::Generic,
                 Some(ItemType::LIFE_STONE),
                 None,
+                holtburger_common::properties::Usable::UNDEF
             ),
             holtburger_core::DynamicEntityMapBlipCategory::Lifestone
         );
@@ -1300,8 +1306,8 @@ mod tests {
     }
 
     impl ExplorerWeenieCatalogSource for MemoryCatalog {
-        fn capability(&self) -> ExplorerCatalogCapability {
-            ExplorerCatalogCapability::Available {
+        fn capability(&self) -> WeenieCatalogCapability {
+            WeenieCatalogCapability::Available {
                 path: "memory.hwc".into(),
                 record_count: self.templates.len(),
             }
@@ -1489,6 +1495,7 @@ mod tests {
             rotation_speed: None,
             radar_blip_color: None,
             radar_behavior: None,
+            item_useable: None,
             obvious_radar_range: None,
             attackable: None,
             appearance: Default::default(),
@@ -2313,15 +2320,15 @@ mod tests {
     /// An absent catalog is a capability boundary, not a spawn that silently produces nothing.
     #[test]
     fn unavailable_catalog_reports_its_reason_and_refuses_every_spawn() {
-        use crate::explorer_weenie_catalog::ExplorerCatalogUnavailableKind;
+        use holtburger_content::WeenieCatalogUnavailableKind;
 
         struct UnavailableCatalog;
 
         impl ExplorerWeenieCatalogSource for UnavailableCatalog {
-            fn capability(&self) -> ExplorerCatalogCapability {
-                ExplorerCatalogCapability::Unavailable {
+            fn capability(&self) -> WeenieCatalogCapability {
+                WeenieCatalogCapability::Unavailable {
                     path: None,
-                    kind: ExplorerCatalogUnavailableKind::MissingContentLocation,
+                    kind: WeenieCatalogUnavailableKind::MissingContentLocation,
                     reason: "no weenie catalog beside the selected content".to_owned(),
                 }
             }
@@ -2350,7 +2357,7 @@ mod tests {
 
         assert!(matches!(
             driver.catalog_capability(),
-            ExplorerCatalogCapability::Unavailable { .. }
+            WeenieCatalogCapability::Unavailable { .. }
         ));
         let error = driver
             .spawn_by_wcid(request(1, ExplorerPhysicalMode::Integrated))

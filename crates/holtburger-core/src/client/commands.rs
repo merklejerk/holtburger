@@ -12,6 +12,7 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
+use holtburger_world::interaction::EntityUseRejection;
 use holtburger_world::spell::MagicSchool;
 use std::time::Instant;
 
@@ -135,7 +136,7 @@ impl ClientRuntime {
             ClientCommand::Identify(_)
             | ClientCommand::ReadBookPage { .. }
             | ClientCommand::QueryHealth(_)
-            | ClientCommand::Use(_)
+            | ClientCommand::Use { .. }
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
@@ -474,14 +475,31 @@ impl ClientRuntime {
                 })))
                 .await
             }
-            ClientCommand::Use(guid) => {
+            ClientCommand::Use { guid, unrestricted } => {
+                if !unrestricted
+                    && let Some(rejection) =
+                        holtburger_world::interaction::entity_use_rejection(&self.world, guid)
+                {
+                    // Retail rejects before sending Use or incrementing busy state (acclient.c:414496-414587).
+                    let message = match rejection {
+                        EntityUseRejection::Door { name } => {
+                            format!("You can't open or close this {name} that way")
+                        }
+                        EntityUseRejection::Object { name } => format!("The {name} cannot be used"),
+                    };
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(message),
+                    );
+                    return Ok(());
+                }
                 log::info!(">>> Using: 0x{:08X}", guid);
                 if !self.arm_busy_operation(BusyOperationKind::Use) {
                     return Ok(());
                 }
                 let feedback =
                     holtburger_world::interaction::describe_entity_use(&self.world, guid);
-                // Retail submits Use before local feedback (acclient.c:414515). Cached lock state
+                // After useability admission, retail submits Use before progress feedback (acclient.c:414515). Cached lock state
                 // must never suppress the wire command or imply a server-side activation failure.
                 self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
                     .await?;
@@ -1411,7 +1429,10 @@ mod tests {
     };
     use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut as _};
+    use holtburger_common::properties::{
+        ObjectDescriptionFlag, PropertyDataId, PropertyInt, Usable,
+        WorldObjectPropertyAccessorsMut as _,
+    };
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_protocol::messages::{
@@ -1795,6 +1816,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unusable_entities_reject_before_busy_and_allow_explicit_override() {
+        for (flags, expected) in [
+            (
+                ObjectDescriptionFlag::DOOR,
+                "You can't open or close this Door that way",
+            ),
+            (ObjectDescriptionFlag::empty(), "The Door cannot be used"),
+        ] {
+            let mut client = build_test_client();
+            let guid = Guid(7);
+            let mut entity = Entity::new(guid, "Door".into(), WorldPosition::default());
+            entity.flags = flags;
+            entity
+                .properties
+                .ints
+                .insert(PropertyInt::ItemUseable, Usable::NO.bits() as i32);
+            client.world.add_entity(entity);
+            let mut events = client.subscribe_client_view_events();
+            client
+                .handle_command(ClientCommand::Use {
+                    guid,
+                    unrestricted: false,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 0);
+            assert!(client.active_busy_operation.is_none());
+            assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event,
+                ClientViewEvent::ActionResult { source: ActionResultSource::Client, reason: ActionResultReason::General(message) } if message == expected
+            )));
+            client
+                .handle_command(ClientCommand::Use {
+                    guid,
+                    unrestricted: true,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+            assert!(client.active_busy_operation.is_some());
+            client
+                .handle_command(ClientCommand::Use {
+                    guid,
+                    unrestricted: true,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+        }
+    }
+
+    #[tokio::test]
     async fn locked_container_feedback_follows_use_without_suppressing_the_wire_command() {
         let mut client = build_test_client();
         let guid = Guid(7);
@@ -1805,7 +1878,10 @@ mod tests {
         client.world.add_entity(entity);
         let mut events = client.subscribe_client_view_events();
         client
-            .handle_command(ClientCommand::Use(guid))
+            .handle_command(ClientCommand::Use {
+                guid,
+                unrestricted: false,
+            })
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
@@ -1822,7 +1898,10 @@ mod tests {
         );
         // Existing busy admission owns repeat rejection; it must not manufacture another local use.
         client
-            .handle_command(ClientCommand::Use(guid))
+            .handle_command(ClientCommand::Use {
+                guid,
+                unrestricted: false,
+            })
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);

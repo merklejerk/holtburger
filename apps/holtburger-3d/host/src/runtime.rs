@@ -83,6 +83,7 @@ impl HostRuntime {
     /// Mode-specific status remains a shared content command but identifies the selected root.
     pub fn status(&self) -> HostStatus {
         HostStatus {
+            entity_metadata: self.content().weenie_catalog.capability(),
             app_name: "holtburger-3d",
             status: match self.mode() {
                 HostMode::Explorer => "explorer-host-ready",

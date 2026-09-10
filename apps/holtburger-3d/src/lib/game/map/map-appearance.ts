@@ -143,3 +143,6 @@ export const MAP_MINIMUM_VIEW_DIAMETER =
 	MAP_TUNING.zoom.minimumViewDiameterMeters;
 export const MAP_MAXIMUM_VIEW_DIAMETER =
 	MAP_TUNING.zoom.maximumViewDiameterMeters;
+
+/** Screen-space thickness of an otherwise world-sized door bar. */
+export const MAP_DOOR_THICKNESS_PIXELS = MAP_TUNING.blips.doorThicknessPixels;

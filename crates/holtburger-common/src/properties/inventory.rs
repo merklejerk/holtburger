@@ -312,6 +312,12 @@ bitflags! {
 }
 
 impl Usable {
+    /// Retail's direct-use admission bit: UNDEF is allowed, explicit NO is not
+    /// (acclient.c:286680-286683). This says nothing about server lock or quest checks.
+    pub fn allows_direct_use(self) -> bool {
+        !self.contains(Self::NO)
+    }
+
     pub fn from_raw(bits: u32) -> Self {
         Self::from_bits_retain(bits)
     }

@@ -858,9 +858,10 @@ mod tests {
             ("query_client_entity_health", 0),
             ("use_client_entity", 7),
         ] {
-            let decoded: HostCommand =
-                serde_json::from_value(serde_json::json!({ "command": command, "guid": guid }))
-                    .unwrap();
+            let decoded: HostCommand = serde_json::from_value(
+                serde_json::json!({ "command": command, "guid": guid, "unrestricted": false }),
+            )
+            .unwrap();
             match (command, decoded) {
                 (
                     "query_client_entity_health",
@@ -870,7 +871,10 @@ mod tests {
                 ) => assert_eq!(decoded.0, guid),
                 (
                     "use_client_entity",
-                    HostCommand::Client(ClientHostCommand::UseClientEntity { guid: decoded }),
+                    HostCommand::Client(ClientHostCommand::UseClientEntity {
+                        guid: decoded,
+                        unrestricted: false,
+                    }),
                 ) => assert_eq!(decoded.0, guid),
                 _ => panic!("interaction did not decode into the client inventory"),
             }

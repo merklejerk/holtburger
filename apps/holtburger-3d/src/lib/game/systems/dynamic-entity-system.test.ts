@@ -95,6 +95,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			new Vec3(3, 0, 0),
 		);
 		system.removeOwner("owner");
+		expect(system.setupSidewaysSpan(root)).toBeNull();
 		expect(scene.hasNode(frame)).toBe(false);
 		expect(system.requestPartNode(root, 2)).toBeNull();
 		await system.destroy();
@@ -175,6 +176,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const pose = system.getPartToObjectTransforms(root);
 		stage.commit();
 		stage.release();
+		expect(system.setupSidewaysSpan(root)).toEqual({ minX: -2, maxX: 2, z: 0 });
 		const currentPresentation = system.getVisiblePresentation(root);
 		expect(
 			currentPresentation?.visual.parts[0]?.renderState.textureVelocity,
@@ -1185,6 +1187,8 @@ describe("DynamicEntitySystem authored ownership", () => {
 			new AABB3(new Vec3(-3, -10, -4), new Vec3(0, 14, 8)),
 		);
 		const sweptBounds = scene.getNode(nodeId)?.localBounds;
+		const setupSpan = system.setupSidewaysSpan(nodeId);
+		expect(setupSpan).toEqual({ minX: 0, maxX: 12, z: 2 });
 		system.publishPresentation([sample]);
 		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
 			new AABB3(new Vec3(0, 0, -4), new Vec3(12, 3, 8)),
@@ -1193,6 +1197,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			new AABB3(new Vec3(0, 0, -4), new Vec3(12, 3, 8)),
 		);
 		expect(scene.getNode(nodeId)?.localBounds).toEqual(sweptBounds);
+		expect(system.setupSidewaysSpan(nodeId)).toEqual(setupSpan);
 	});
 
 	it("applies an absolute root scale without replacing prepared visual resources", async () => {
@@ -1230,7 +1235,17 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const initialCullingBounds = scene.getNode(nodeId)?.localBounds?.clone();
 		if (!initialCullingBounds) throw new Error("Entity has no culling bounds.");
 
+		expect(system.setupSidewaysSpan(nodeId)).toEqual({
+			minX: 1,
+			maxX: 2,
+			z: 0.5,
+		});
 		system.updateRootScale(nodeId, 2);
+		expect(system.setupSidewaysSpan(nodeId)).toEqual({
+			minX: 2,
+			maxX: 4,
+			z: 1,
+		});
 
 		expect(system.getPreparedAnimation(nodeId)).toBe(prepared);
 		expect(scene.getResolvedPlacement(partNodeId)?.localToLandblock.m11).toBe(

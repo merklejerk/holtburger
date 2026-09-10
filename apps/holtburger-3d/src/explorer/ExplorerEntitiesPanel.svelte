@@ -1,11 +1,12 @@
 <script lang="ts">
+	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
+
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 	import ExplorerEntityInspector from "./ExplorerEntityInspector.svelte";
 	import ExplorerEntityList from "./ExplorerEntityList.svelte";
 	import ExplorerEntitySpawnComposer from "./ExplorerEntitySpawnComposer.svelte";
 	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 	import type {
-		ExplorerCatalogCapability,
 		ExplorerWeenieSearchRequest,
 		ExplorerWeenieSearchResult,
 	} from "./explorer-entity-commands";
@@ -23,8 +24,11 @@
 	} from "./explorer-entity-possession";
 
 	interface Props {
+		/** Cold selection shared with the Explorer minimap. */
+		readonly selection: ExplorerEntitySelection | null;
+		readonly select: (selection: ExplorerEntitySelection | null) => void;
 		readonly runtimeReady: boolean;
-		readonly catalog: ExplorerCatalogCapability | null;
+		readonly catalog: WeenieCatalogCapability | null;
 		readonly entities: readonly DynamicEntityView[];
 		readonly presentationError: string | null;
 		readonly search: (
@@ -49,6 +53,8 @@
 	}
 
 	let {
+		selection,
+		select,
 		runtimeReady,
 		catalog,
 		entities,
@@ -65,7 +71,6 @@
 		readExplorerEntity,
 		readBoomCameraStatus,
 	}: Props = $props();
-	let selection = $state<ExplorerEntitySelection | null>(null);
 	let pending = $state<ExplorerEntityOperation | null>(null);
 	let failure = $state<ExplorerEntityOperationFailure | null>(null);
 	let runRateRequestSerial = 0;
@@ -82,10 +87,6 @@
 	const spawnFailure = $derived(
 		failure?.operation.kind === "spawn" ? failure.message : null,
 	);
-
-	$effect(() => {
-		if (selection !== null && selected === null) selection = null;
-	});
 
 	async function perform(
 		operation: ExplorerEntityOperation,
@@ -219,7 +220,7 @@
 		{entities}
 		selected={selection}
 		possessed={possessedSelection}
-		select={(next) => (selection = next)}
+		{select}
 	/>
 
 	{#if selected !== null}
@@ -232,7 +233,7 @@
 			{possession}
 			{readExplorerEntity}
 			{readBoomCameraStatus}
-			select={(next) => (selection = next)}
+			{select}
 			despawn={runDespawn}
 			possess={runPossession}
 			setStance={runStance}

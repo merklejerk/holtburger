@@ -1,21 +1,18 @@
-//! App-local discovery and point lookup for the optional offline Explorer weenie catalog.
+//! Explorer fuzzy search and point lookup over shared optional catalog content.
+use holtburger_content::{WeenieCatalogCapability, WeenieCatalogContent};
 
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use holtburger_weenie_catalog::{
-    CatalogIdentityReadError, CatalogLookupError, CatalogOpenError, WeenieCatalog, WeenieTemplate,
+    CatalogIdentityReadError, CatalogLookupError, WeenieCatalog, WeenieTemplate,
     WeenieTemplateIdentity,
 };
 use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Config, Matcher, Utf32String};
 use serde::{Deserialize, Serialize};
 
-const CATALOG_FILE_NAME: &str = "weenies.hwc";
-const CATALOG_OVERRIDE_ENV: &str = "HOLTBURGER_WEENIE_CATALOG";
 /// Maximum user-authored query size accepted by the app-local host boundary.
 pub const EXPLORER_WEENIE_SEARCH_MAX_QUERY_BYTES: usize = 128;
 /// Maximum result population returned through one Explorer host command.
@@ -112,44 +109,6 @@ struct RankedCandidate<'a> {
     rank: SearchRank,
 }
 
-/// Why Explorer weenie spawning is unavailable without conflating absence and invalid content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ExplorerCatalogUnavailableKind {
-    /// No selected content location exists from which to derive the conventional sibling path.
-    MissingContentLocation,
-    /// The exact selected catalog path does not exist.
-    Missing,
-    /// The selected file exists but cannot satisfy the catalog format contract.
-    Invalid,
-}
-
-/// Complete user-facing capability state for Explorer weenie creation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(
-    tag = "status",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-pub enum ExplorerCatalogCapability {
-    /// A validated catalog is ready for indexed point lookup.
-    Available {
-        /// Exact selected catalog path.
-        path: PathBuf,
-        /// Number of indexed WCID templates.
-        record_count: usize,
-    },
-    /// Catalog lookup is disabled with one exact, stable reason.
-    Unavailable {
-        /// Selected path, absent only when no content location could be derived.
-        path: Option<PathBuf>,
-        /// Whether the path was missing or the selected file was invalid.
-        kind: ExplorerCatalogUnavailableKind,
-        /// Exact opening/discovery failure suitable for Explorer feedback.
-        reason: String,
-    },
-}
-
 /// Point-lookup failure from the app-local optional catalog capability.
 #[derive(Debug)]
 pub enum ExplorerCatalogLookupError {
@@ -180,7 +139,7 @@ impl Error for ExplorerCatalogLookupError {
 /// Injected catalog boundary used by the Explorer entity driver and focused host tests.
 pub trait ExplorerWeenieCatalogSource: Send + Sync {
     /// Returns the complete immutable capability state.
-    fn capability(&self) -> ExplorerCatalogCapability;
+    fn capability(&self) -> WeenieCatalogCapability;
 
     /// Resolves one exact WCID without scanning or caching template payloads.
     fn lookup(&self, wcid: u32) -> Result<Option<WeenieTemplate>, ExplorerCatalogLookupError>;
@@ -192,90 +151,35 @@ pub trait ExplorerWeenieCatalogSource: Send + Sync {
     ) -> Result<Vec<ExplorerWeenieSearchResult>, ExplorerCatalogSearchError>;
 }
 
-/// Concrete optional catalog selected once during Explorer host composition.
+/// Explorer-only fuzzy search over shared optional static content.
 #[derive(Debug)]
 pub struct ExplorerWeenieCatalog {
-    capability: ExplorerCatalogCapability,
-    catalog: Option<WeenieCatalog>,
+    content: Arc<WeenieCatalogContent>,
     search_index: OnceLock<Result<Arc<[SearchCandidate]>, Arc<str>>>,
 }
 
 impl ExplorerWeenieCatalog {
-    /// Applies one already-resolved app-local override and opens the resulting exact catalog path.
-    ///
-    /// Environment policy stays outside this deterministic constructor so injected host tests cannot
-    /// be changed by an operator's process environment.
-    pub fn discover(selected_content: Option<&Path>, explicit_override: Option<PathBuf>) -> Self {
-        match explicit_override.or_else(|| selected_content.and_then(default_catalog_path)) {
-            Some(path) => Self::open(path),
-            None => Self {
-                capability: ExplorerCatalogCapability::Unavailable {
-                    path: None,
-                    kind: ExplorerCatalogUnavailableKind::MissingContentLocation,
-                    reason: "Explorer weenie spawning is unavailable because no selected HBA content location can supply weenies.hwc".to_owned(),
-                },
-                catalog: None,
-                search_index: OnceLock::new(),
-            },
-        }
-    }
-
-    /// Resolves the production process override before applying deterministic discovery policy.
-    pub fn discover_from_environment(selected_content: Option<&Path>) -> Self {
-        Self::discover(
-            selected_content,
-            std::env::var_os(CATALOG_OVERRIDE_ENV).map(PathBuf::from),
-        )
-    }
-
-    fn open(path: PathBuf) -> Self {
-        match WeenieCatalog::open(&path) {
-            Ok(catalog) => Self {
-                capability: ExplorerCatalogCapability::Available {
-                    path,
-                    record_count: catalog.len(),
-                },
-                catalog: Some(catalog),
-                search_index: OnceLock::new(),
-            },
-            Err(error) => {
-                let kind = match &error {
-                    CatalogOpenError::Unavailable { source, .. }
-                        if source.kind() == ErrorKind::NotFound =>
-                    {
-                        ExplorerCatalogUnavailableKind::Missing
-                    }
-                    _ => ExplorerCatalogUnavailableKind::Invalid,
-                };
-                Self {
-                    capability: ExplorerCatalogCapability::Unavailable {
-                        path: Some(path),
-                        kind,
-                        reason: error.to_string(),
-                    },
-                    catalog: None,
-                    search_index: OnceLock::new(),
-                }
-            }
+    /// Search state belongs to Explorer; content ownership is shared with client composition.
+    pub fn new(content: Arc<WeenieCatalogContent>) -> Self {
+        Self {
+            content,
+            search_index: OnceLock::new(),
         }
     }
 }
 
 impl ExplorerWeenieCatalogSource for ExplorerWeenieCatalog {
-    fn capability(&self) -> ExplorerCatalogCapability {
-        self.capability.clone()
+    fn capability(&self) -> WeenieCatalogCapability {
+        self.content.capability()
     }
 
     fn lookup(&self, wcid: u32) -> Result<Option<WeenieTemplate>, ExplorerCatalogLookupError> {
-        let Some(catalog) = &self.catalog else {
-            let reason = match &self.capability {
-                ExplorerCatalogCapability::Unavailable { reason, .. } => reason.clone(),
-                ExplorerCatalogCapability::Available { .. } => {
-                    unreachable!("available catalog capability lost its reader")
-                }
-            };
-            return Err(ExplorerCatalogLookupError::Unavailable { reason });
-        };
+        let catalog =
+            self.content
+                .reader()
+                .map_err(|reason| ExplorerCatalogLookupError::Unavailable {
+                    reason: reason.to_owned(),
+                })?;
         catalog
             .lookup(wcid)
             .map_err(ExplorerCatalogLookupError::Lookup)
@@ -290,15 +194,12 @@ impl ExplorerWeenieCatalogSource for ExplorerWeenieCatalog {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let Some(catalog) = &self.catalog else {
-            let reason = match &self.capability {
-                ExplorerCatalogCapability::Unavailable { reason, .. } => reason.clone(),
-                ExplorerCatalogCapability::Available { .. } => {
-                    unreachable!("available catalog capability lost its reader")
-                }
-            };
-            return Err(ExplorerCatalogSearchError::Unavailable { reason });
-        };
+        let catalog =
+            self.content
+                .reader()
+                .map_err(|reason| ExplorerCatalogSearchError::Unavailable {
+                    reason: reason.to_owned(),
+                })?;
         let index = self.search_index.get_or_init(|| {
             build_search_index(catalog)
                 .map(Arc::from)
@@ -426,20 +327,24 @@ fn rank_match(
     })
 }
 
-fn default_catalog_path(selected_content: &Path) -> Option<PathBuf> {
-    if selected_content.is_dir() {
-        return Some(selected_content.join(CATALOG_FILE_NAME));
-    }
-    selected_content
-        .parent()
-        .map(|parent| parent.join(CATALOG_FILE_NAME))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_content::WeenieCatalogUnavailableKind;
+    use holtburger_content::weenie_catalog::WEENIE_CATALOG_FILE_NAME as CATALOG_FILE_NAME;
     use holtburger_weenie_catalog::{TemplatePhysics, WeenieTemplate, write_catalog_atomic};
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    fn discover_catalog(
+        content: Option<&Path>,
+        override_path: Option<PathBuf>,
+    ) -> ExplorerWeenieCatalog {
+        ExplorerWeenieCatalog::new(Arc::new(WeenieCatalogContent::discover(
+            content,
+            override_path,
+        )))
+    }
 
     fn template(wcid: u32) -> WeenieTemplate {
         WeenieTemplate {
@@ -461,6 +366,7 @@ mod tests {
             rotation_speed: None,
             radar_blip_color: None,
             radar_behavior: None,
+            item_useable: None,
             obvious_radar_range: None,
             attackable: None,
             appearance: Default::default(),
@@ -473,16 +379,41 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_parses_native_switch_index_and_rejects_invalid_types() {
+        use holtburger_common::properties::WeenieType;
+        let directory = tempdir().unwrap();
+        let path = directory.path().join(CATALOG_FILE_NAME);
+        let mut switch = template(286);
+        switch.weenie_type = WeenieType::Switch as i32;
+        write_catalog_atomic(&path, &[switch.clone()]).unwrap();
+        let content = WeenieCatalogContent::discover(None, Some(path.clone()));
+        let types = content.types().expect("parsed metadata");
+        assert_eq!(types.get(286), Some(WeenieType::Switch));
+        assert_eq!(types.get(999), None);
+        switch.weenie_type = i32::MAX;
+        write_catalog_atomic(&path, &[switch]).unwrap();
+        let invalid = WeenieCatalogContent::discover(None, Some(path));
+        assert!(matches!(
+            invalid.capability(),
+            WeenieCatalogCapability::Unavailable {
+                kind: WeenieCatalogUnavailableKind::Invalid,
+                ..
+            }
+        ));
+        assert!(invalid.types().is_none());
+    }
+
+    #[test]
     fn directory_and_hba_selections_choose_only_the_canonical_sibling_name() {
         let directory = tempdir().unwrap();
         let path = directory.path().join(CATALOG_FILE_NAME);
         write_catalog_atomic(&path, &[template(42)]).unwrap();
 
         for selected in [directory.path(), &directory.path().join("client.hba")] {
-            let catalog = ExplorerWeenieCatalog::discover(Some(selected), None);
+            let catalog = discover_catalog(Some(selected), None);
             assert!(matches!(
                 catalog.capability(),
-                ExplorerCatalogCapability::Available { path: selected, .. } if selected == path
+                WeenieCatalogCapability::Available { path: selected, .. } if selected == path
             ));
             assert_eq!(catalog.lookup(42).unwrap(), Some(template(42)));
         }
@@ -497,10 +428,10 @@ mod tests {
         write_catalog_atomic(selected.join(CATALOG_FILE_NAME), &[template(1)]).unwrap();
         write_catalog_atomic(&override_path, &[template(2)]).unwrap();
 
-        let catalog = ExplorerWeenieCatalog::discover(Some(&selected), Some(override_path.clone()));
+        let catalog = discover_catalog(Some(&selected), Some(override_path.clone()));
         assert!(matches!(
             catalog.capability(),
-            ExplorerCatalogCapability::Available { path, .. } if path == override_path
+            WeenieCatalogCapability::Available { path, .. } if path == override_path
         ));
         assert!(catalog.lookup(1).unwrap().is_none());
         assert_eq!(catalog.lookup(2).unwrap(), Some(template(2)));
@@ -509,23 +440,23 @@ mod tests {
     #[test]
     fn absence_and_invalid_selected_files_have_distinct_exact_capabilities() {
         let directory = tempdir().unwrap();
-        let missing = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let missing = discover_catalog(Some(directory.path()), None);
         assert!(matches!(
             missing.capability(),
-            ExplorerCatalogCapability::Unavailable {
-                kind: ExplorerCatalogUnavailableKind::Missing,
+            WeenieCatalogCapability::Unavailable {
+                kind: WeenieCatalogUnavailableKind::Missing,
                 ..
             }
         ));
 
         let path = directory.path().join(CATALOG_FILE_NAME);
         std::fs::write(&path, b"not a catalog").unwrap();
-        let invalid = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let invalid = discover_catalog(Some(directory.path()), None);
         assert!(matches!(
             invalid.capability(),
-            ExplorerCatalogCapability::Unavailable {
+            WeenieCatalogCapability::Unavailable {
                 path: Some(selected),
-                kind: ExplorerCatalogUnavailableKind::Invalid,
+                kind: WeenieCatalogUnavailableKind::Invalid,
                 reason,
             } if selected == path && reason.contains("corrupt")
         ));
@@ -545,7 +476,7 @@ mod tests {
         prefix.name = Some("Rynthid Assessment Device".to_owned());
         prefix.class_name = "assessment_device".to_owned();
         write_catalog_atomic(&path, &[first, prefix, second]).unwrap();
-        let catalog = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let catalog = discover_catalog(Some(directory.path()), None);
 
         let exact = catalog
             .search(&ExplorerWeenieSearchRequest {
@@ -592,7 +523,7 @@ mod tests {
         by_class.name = Some("Unrelated Object".to_owned());
         by_class.class_name = "rynthid_device".to_owned();
         write_catalog_atomic(&path, &[by_name, by_class]).unwrap();
-        let catalog = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let catalog = discover_catalog(Some(directory.path()), None);
 
         let results = catalog
             .search(&ExplorerWeenieSearchRequest {
@@ -619,7 +550,7 @@ mod tests {
         abdomen.name = Some("Olthoi Abdomen Fragment".to_owned());
         abdomen.class_name = "olthoiabdomenfragmentrot2".to_owned();
         write_catalog_atomic(&path, &[abdomen, exact, worker]).unwrap();
-        let catalog = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let catalog = discover_catalog(Some(directory.path()), None);
 
         let results = catalog
             .search(&ExplorerWeenieSearchRequest {
@@ -639,7 +570,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join(CATALOG_FILE_NAME);
         write_catalog_atomic(&path, &[template(1)]).unwrap();
-        let catalog = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let catalog = discover_catalog(Some(directory.path()), None);
 
         assert!(
             catalog
@@ -677,7 +608,7 @@ mod tests {
     #[test]
     fn unavailable_catalog_and_cached_index_failure_remain_loud() {
         let directory = tempdir().unwrap();
-        let missing = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let missing = discover_catalog(Some(directory.path()), None);
         assert!(matches!(
             missing.search(&ExplorerWeenieSearchRequest {
                 query: "anything".to_owned(),
@@ -689,7 +620,7 @@ mod tests {
         let path = directory.path().join(CATALOG_FILE_NAME);
         let value = template(7);
         write_catalog_atomic(&path, std::slice::from_ref(&value)).unwrap();
-        let catalog = ExplorerWeenieCatalog::discover(Some(directory.path()), None);
+        let catalog = discover_catalog(Some(directory.path()), None);
         let mut bytes = std::fs::read(&path).unwrap();
         let payload_offset = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
         let name_tag_offset = payload_offset + 4 + 4 + 4 + value.class_name.len();

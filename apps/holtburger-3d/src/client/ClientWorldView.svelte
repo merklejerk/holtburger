@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useViewportInputGate } from "../lib/input/viewport-input-context";
 	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
 	import { APP_INPUT } from "../lib/input/app-input";
@@ -43,6 +44,8 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** Startup catalog availability for switch classification diagnostics. */
+		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly cameraController: ClientViewportCameraController | null;
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
@@ -57,6 +60,9 @@
 		/** Runtime-confirmed local player response override. */
 		readonly entityCollisionDisabled: boolean;
 		readonly onEntityCollisionDisabledChange: (disabled: boolean) => void;
+		/** Explicit local override of authored useability for diagnostic requests. */
+		readonly unrestrictedUse: boolean;
+		readonly onUnrestrictedUseChange: (enabled: boolean) => void;
 		readonly showRetailHiddenGeometry: boolean;
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
@@ -79,6 +85,7 @@
 	}
 
 	let {
+		entityMetadata,
 		cameraController,
 		debugEnabled,
 		readMinimapFrame,
@@ -91,6 +98,8 @@
 		hoveredEntityGuid,
 		entityCollisionDisabled,
 		onEntityCollisionDisabledChange,
+		unrestrictedUse,
+		onUnrestrictedUseChange,
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 		playerName,
@@ -494,9 +503,12 @@
 				(hudLayout = { ...hudLayout, diagnostics })}
 		>
 			<ClientDebugPanel
+				{entityMetadata}
 				{readDiagnostics}
 				{entityCollisionDisabled}
 				{onEntityCollisionDisabledChange}
+				{unrestrictedUse}
+				{onUnrestrictedUseChange}
 				{showRetailHiddenGeometry}
 				{onShowRetailHiddenGeometryChange}
 			/>

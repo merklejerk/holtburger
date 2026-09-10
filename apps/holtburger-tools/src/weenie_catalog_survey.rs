@@ -1890,6 +1890,7 @@ mod tests {
             rotation_speed: None,
             radar_blip_color: None,
             radar_behavior: None,
+            item_useable: None,
             obvious_radar_range: None,
             attackable: None,
             appearance: Default::default(),

@@ -59,15 +59,17 @@ export class ClientEntityInteractions {
 		return this.#target === null ? null : this.#target.healthFraction;
 	}
 
-	/** Capture the current selected identity at the button edge. Core owns use/busy semantics. */
-	interact(): void {
+	/** Capture the current selected identity at the interaction edge. Core owns use/busy semantics. */
+	interact(unrestricted: boolean): void {
 		if (
 			this.#destroyed ||
 			this.#target === null ||
 			this.#lifecycle.state().lifecycle?.kind !== "in-world"
 		)
 			return;
-		void this.#lifecycle.useEntity(this.#target.guid).catch(this.#onFailure);
+		void this.#lifecycle
+			.useEntity(this.#target.guid, unrestricted)
+			.catch(this.#onFailure);
 	}
 
 	/** Release the server subscription before the surrounding client transport is torn down. */

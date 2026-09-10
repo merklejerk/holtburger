@@ -31,6 +31,7 @@ fn template(wcid: u32) -> WeenieTemplate {
         rotation_speed: Some(2.0),
         radar_blip_color: Some(3),
         radar_behavior: Some(4),
+        item_useable: Some(1),
         obvious_radar_range: Some(60.0),
         attackable: Some(false),
         appearance: TemplateAppearance {

@@ -263,3 +263,15 @@ export interface ResolvedObjectPresentation {
 	readonly selectionBounds: AABB3 | null;
 	readonly sortingBounds: AABB3 | null;
 }
+
+/** Approximate setup-pose span along authored local X (sideways), in scene-axis object space.
+ * Whole-object scale is included; live entity placement has not yet been applied.
+ */
+export interface SetupSidewaysSpan {
+	/** Leftmost setup extent along local X. */
+	readonly minX: number;
+	/** Rightmost setup extent along local X. */
+	readonly maxX: number;
+	/** Setup footprint center along scene-local Z, retaining an off-center pivot. */
+	readonly z: number;
+}

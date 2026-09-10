@@ -1,3 +1,4 @@
+import type { SetupSidewaysSpan } from "../resolution/presentation";
 import { createLandblockWorldOrigin } from "../landblocks";
 import {
 	renderVector3,
@@ -3580,12 +3581,23 @@ export class GamePresentationRuntime {
 	 * inspector snapshot, so nothing that draws entities depends on a diagnostics path.
 	 */
 	*listPresentedSpawnedEntities(): Generator<{
+		readonly sidewaysSpan: SetupSidewaysSpan | null;
 		readonly view: DynamicEntityView;
 		readonly placement: ScenePlacement;
 	}> {
 		for (const [guid, record] of this.#spawnedDesiredEntities) {
 			const placement = this.spawnedEntityPlacement(guid);
-			if (placement) yield { placement, view: record.entity };
+			if (placement) {
+				const nodeId = this.#spawnedPresentations.get(guid)?.nodeId;
+				yield {
+					placement,
+					view: record.entity,
+					sidewaysSpan:
+						nodeId === undefined
+							? null
+							: this.#dynamics.setupSidewaysSpan(nodeId),
+				};
+			}
 		}
 	}
 

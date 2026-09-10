@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, WeenieType,
+    ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, Usable, WeenieType,
 };
 use holtburger_common::{Guid, Placement, Quaternion, Vector3};
 use holtburger_content::{
@@ -59,6 +59,12 @@ pub enum DynamicEntityMapBlipCategory {
     Mob,
     Portal,
     Lifestone,
+    /// Door permitting direct Use; server locks and other constraints remain independent.
+    Door,
+    /// Door explicitly disabling direct Use in its public useability.
+    DoorNoDirectUse,
+    /// Native ACE Switch, including lever/button variants and other activatable scenery.
+    Switch,
     #[default]
     Other,
 }
@@ -162,7 +168,15 @@ impl DynamicEntityRadarFacts {
 pub fn semantic_dynamic_entity_map_blip_category(
     flags: ObjectDescriptionFlag,
     item_type: Option<ItemType>,
+    weenie_type: Option<WeenieType>,
+    usable: Usable,
 ) -> DynamicEntityMapBlipCategory {
+    if flags.contains(ObjectDescriptionFlag::DOOR) {
+        return door_map_category(usable);
+    }
+    if weenie_type == Some(WeenieType::Switch) {
+        return DynamicEntityMapBlipCategory::Switch;
+    }
     let presentation_class = semantic_dynamic_entity_presentation_class(flags, item_type);
     map_blip_category(
         presentation_class,
@@ -243,7 +257,14 @@ pub fn explorer_dynamic_entity_map_blip_category(
     weenie_type: WeenieType,
     item_type: Option<ItemType>,
     attackable: Option<bool>,
+    usable: Usable,
 ) -> DynamicEntityMapBlipCategory {
+    if weenie_type == WeenieType::Door {
+        return door_map_category(usable);
+    }
+    if weenie_type == WeenieType::Switch {
+        return DynamicEntityMapBlipCategory::Switch;
+    }
     let presentation_class =
         explorer_dynamic_entity_presentation_class(weenie_type, item_type, attackable);
     map_blip_category(
@@ -253,6 +274,15 @@ pub fn explorer_dynamic_entity_map_blip_category(
             WeenieType::LifeStone | WeenieType::AllegianceBindstone
         ) || item_type.is_some_and(|value| value.contains(ItemType::LIFE_STONE)),
     )
+}
+
+/// Resolve the same useability predicate consumed by direct-use admission.
+fn door_map_category(usable: Usable) -> DynamicEntityMapBlipCategory {
+    if usable.allows_direct_use() {
+        DynamicEntityMapBlipCategory::Door
+    } else {
+        DynamicEntityMapBlipCategory::DoorNoDirectUse
+    }
 }
 
 /// Refines the general presentation class only where map semantics require another landmark.
@@ -1446,6 +1476,58 @@ mod tests {
     };
 
     #[test]
+    fn interactable_categories_share_direct_use_semantics_across_modes() {
+        for (usable, expected) in [
+            (Usable::UNDEF, DynamicEntityMapBlipCategory::Door),
+            (Usable::REMOTE, DynamicEntityMapBlipCategory::Door),
+            (Usable::NO, DynamicEntityMapBlipCategory::DoorNoDirectUse),
+            (
+                Usable::NO | Usable::REMOTE,
+                DynamicEntityMapBlipCategory::DoorNoDirectUse,
+            ),
+        ] {
+            // Network door identity remains usable without a catalog, and wins over stale metadata.
+            for kind in [None, Some(WeenieType::Switch)] {
+                assert_eq!(
+                    semantic_dynamic_entity_map_blip_category(
+                        ObjectDescriptionFlag::DOOR,
+                        None,
+                        kind,
+                        usable
+                    ),
+                    expected
+                );
+            }
+            assert_eq!(
+                explorer_dynamic_entity_map_blip_category(WeenieType::Door, None, None, usable),
+                expected
+            );
+            assert_eq!(
+                semantic_dynamic_entity_map_blip_category(
+                    ObjectDescriptionFlag::empty(),
+                    None,
+                    Some(WeenieType::Switch),
+                    usable
+                ),
+                DynamicEntityMapBlipCategory::Switch
+            );
+            assert_eq!(
+                explorer_dynamic_entity_map_blip_category(WeenieType::Switch, None, None, usable),
+                DynamicEntityMapBlipCategory::Switch
+            );
+        }
+        assert_eq!(
+            semantic_dynamic_entity_map_blip_category(
+                ObjectDescriptionFlag::empty(),
+                None,
+                None,
+                Usable::REMOTE
+            ),
+            DynamicEntityMapBlipCategory::Other
+        );
+    }
+
+    #[test]
     fn authored_radar_facts_type_in_domain_values() {
         let facts = DynamicEntityRadarFacts::from_authored(
             "test",
@@ -1516,7 +1598,12 @@ mod tests {
 
         for (name, flags, item_type, expected) in cases {
             assert_eq!(
-                semantic_dynamic_entity_map_blip_category(flags, item_type),
+                semantic_dynamic_entity_map_blip_category(
+                    flags,
+                    item_type,
+                    None,
+                    holtburger_common::properties::Usable::UNDEF
+                ),
                 expected,
                 "{name}"
             );
@@ -1565,7 +1652,12 @@ mod tests {
 
         for (name, weenie_type, item_type, attackable, expected) in cases {
             assert_eq!(
-                explorer_dynamic_entity_map_blip_category(weenie_type, item_type, attackable),
+                explorer_dynamic_entity_map_blip_category(
+                    weenie_type,
+                    item_type,
+                    attackable,
+                    holtburger_common::properties::Usable::UNDEF
+                ),
                 expected,
                 "{name}"
             );

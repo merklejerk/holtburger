@@ -55,6 +55,8 @@ pub(crate) struct PendingChildLink {
 /// Hand-writing to `self.entities` or scene body state directly will break the
 /// authority/runtime split and is not allowed.
 pub struct WorldState {
+    /// Optional startup-parsed ACE types for content-derived classification.
+    pub weenie_types: Option<Arc<holtburger_content::WeenieTypeIndex>>,
     pub entities: EntityManager,
     pub player: PlayerState,
     pub server_time: Option<ServerTimeSync>,
@@ -394,6 +396,7 @@ impl WorldState {
 
     pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
         Self {
+            weenie_types: bootstrap.weenie_types.clone(),
             entities: EntityManager::new(),
             player: PlayerState::new(),
             server_time: None,

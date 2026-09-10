@@ -51,3 +51,25 @@ export function translateBounds(
 	}
 	return new AABB3(new Vec3(minX, minY, minZ), new Vec3(maxX, maxY, maxZ));
 }
+
+/** Euclidean distance to a closed 2D segment, treating coincident endpoints as a point. */
+export function pointToSegmentDistance2d(
+	x: number,
+	y: number,
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+): number {
+	const dx = endX - startX,
+		dy = endY - startY;
+	const lengthSquared = dx * dx + dy * dy;
+	const t =
+		lengthSquared === 0
+			? 0
+			: Math.max(
+					0,
+					Math.min(1, ((x - startX) * dx + (y - startY) * dy) / lengthSquared),
+				);
+	return Math.hypot(startX + t * dx - x, startY + t * dy - y);
+}

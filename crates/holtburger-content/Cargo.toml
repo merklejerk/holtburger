@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 holtburger-common.workspace = true
+holtburger-weenie-catalog.workspace = true
+serde.workspace = true
 holtburger-dat.workspace = true
 anyhow.workspace = true
 binrw.workspace = true

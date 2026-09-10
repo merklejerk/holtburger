@@ -29,11 +29,12 @@ export.
 | `default_scale: Option<f64>`            | `weenie_properties_float`, `type = PropertyFloat.DefaultScale (39)`                                      | Scale distribution and scaled collision geometry                                     |
 | `friction: Option<f64>`                 | `weenie_properties_float`, `type = PropertyFloat.Friction (78)`                                          | Response-policy distribution and validation                                          |
 | `elasticity: Option<f64>`               | `weenie_properties_float`, `type = PropertyFloat.Elasticity (79)`                                        | Response-policy distribution and validation                                          |
-| `translucency: Option<f64>`             | `weenie_properties_float`, `type = PropertyFloat.Translucency (76)`                                      | Explorer dynamic-entity object translucency                                           |
+| `translucency: Option<f64>`             | `weenie_properties_float`, `type = PropertyFloat.Translucency (76)`                                      | Explorer dynamic-entity object translucency                                          |
 | `maximum_velocity: Option<f64>`         | `weenie_properties_float`, `type = PropertyFloat.MaximumVelocity (26)`                                   | Explorer missile launch magnitude; actual velocity is live state                     |
 | `rotation_speed: Option<f64>`           | `weenie_properties_float`, `type = PropertyFloat.RotationSpeed (27)`                                     | Explorer missile spin magnitude; actual omega is live state                          |
 | `radar_blip_color: Option<i32>`         | `weenie_properties_int`, `type = PropertyInt.RadarBlipColor (95)`                                        | Explicit overhead-map color                                                          |
 | `radar_behavior: Option<i32>`           | `weenie_properties_int`, `type = PropertyInt.ShowableOnRadar (133)`                                      | Overhead-map visibility                                                              |
+| `item_useable: Option<i32>`             | `weenie_properties_int`, `type = PropertyInt.ItemUseable (16)`                                           | Explorer door direct-use classification; absence follows UNDEF                       |
 | `obvious_radar_range: Option<f64>`      | `weenie_properties_float`, `type = PropertyFloat.ObviousRadarRange (104)`                                | Lossless authored radar fact retained for inspection                                 |
 | `attackable: Option<bool>`              | `weenie_properties_bool`, `type = PropertyBool.Attackable (19)`                                          | Hostile/friendly semantic map-color fallback; absence retains ACE's `true` default   |
 | `physics.base_mask: Option<u32>`        | Bit-preserving reinterpretation of `weenie_properties_int.value`, `type = PropertyInt.PhysicsState (93)` | Base-mask absence/zero distinction, unknown-bit preservation, bit/combination census |
@@ -122,12 +123,12 @@ review condition rather than permission to trust incidental MySQL row order.
 The catalog includes every base `weenie` row, including records without setup or display-name
 properties, so Phase R0 can measure missing facts. A missing setup is not an export error.
 
-## `.hwc` File Format Version 10
+## `.hwc` File Format Version 11
 
 Every integer and binary64 float bit pattern is little-endian. Strings are length-prefixed UTF-8.
 There is no compression, checksum, implicit serializer metadata, or unknown-field skipping in
-version 10, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
-Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v10
+version 11, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
+Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v11
 reader does not reinterpret older payloads.
 
 The file layout is:
@@ -141,7 +142,7 @@ The file layout is:
 | Offset | Width | Field          | Contract                                   |
 | -----: | ----: | -------------- | ------------------------------------------ |
 |      0 |     8 | magic          | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
-|      8 |     4 | version        | `10`                                       |
+|      8 |     4 | version        | `11`                                       |
 |     12 |     4 | header length  | `64`                                       |
 |     16 |     4 | record count   | `0..=1,048,576`                            |
 |     20 |     4 | reserved       | All zero; aligns the 64-bit offset fields  |
@@ -149,7 +150,7 @@ The file layout is:
 |     32 |     8 | payload length | Sum of every indexed record length         |
 |     40 |     8 | index offset   | Exactly `payload offset + payload length`  |
 |     48 |     8 | index length   | Exactly `record count * 16`                |
-|     56 |     8 | reserved       | All zero in version 10                     |
+|     56 |     8 | reserved       | All zero in version 11                     |
 
 The file ends exactly after the index. A valid index has no gaps or overlapping payload ranges.
 
@@ -174,14 +175,14 @@ Every other tag is invalid.
 6. five `Option<u32>` DIDs: setup, motion table, sound table, physics-effect table, palette base
 7. six `Option<f64>` values: default scale, friction, elasticity, translucency, maximum velocity,
    rotation speed
-8. optional radar blip color and behavior integers, optional obvious radar range, and nullable
+8. optional radar blip color, behavior, and ItemUseable integers (in that order), optional obvious radar range, and nullable
    authored attackable
 9. `physics.base_mask: Option<u32>`
 10. eleven nullable booleans in the order of the nullable-override table above
 11. `appearance`: eleven optional DIDs in the order documented above; optional heritage and gender
-   ints; optional heritage and sex strings; then optional `item_type`, `default_combat_style`,
-   `clothing_priority`, and `valid_locations` ints; optional unsigned palette template; and optional
-   shade
+    ints; optional heritage and sex strings; then optional `item_type`, `default_combat_style`,
+    `clothing_priority`, and `valid_locations` ints; optional unsigned palette template; and optional
+    shade
 12. `wielded`: `u32` count then
     `{ wcid: u32, destination_type: i32, palette_template: u32, shade: f64 }`
 13. `sub_palettes`: `u32` count then `{ sub_palette_did: u32, offset: u16, length: u16 }`

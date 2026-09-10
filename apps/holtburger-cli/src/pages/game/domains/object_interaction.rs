@@ -48,14 +48,20 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             ));
         }
         AppAction::Read { guid } => {
-            result.commands.push(ClientCommand::Use(guid));
+            result.commands.push(ClientCommand::Use {
+                guid,
+                unrestricted: false,
+            });
             result.merge(ui::apply_context_view_change(
                 state,
                 ContextView::Book(guid),
             ));
         }
         AppAction::Use { guid } | AppAction::TalkTo { guid } | AppAction::Open { guid } => {
-            result.commands.push(ClientCommand::Use(guid));
+            result.commands.push(ClientCommand::Use {
+                guid,
+                unrestricted: false,
+            });
         }
         AppAction::Close { guid } => {
             result.commands.push(ClientCommand::CloseContainer(guid));

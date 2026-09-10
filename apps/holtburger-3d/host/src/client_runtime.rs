@@ -151,6 +151,8 @@ pub enum ClientHostCommand {
     /// Use the selected world object through core's existing busy-operation behavior.
     UseClientEntity {
         guid: holtburger_common::Guid,
+        /// Explicit app-local diagnostic choice, captured for this use attempt.
+        unrestricted: bool,
     },
     /// Answer exactly the confirmation occurrence displayed by the renderer.
     RespondToClientConfirmation {
@@ -549,8 +551,8 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        UseClientEntity { guid } => runtime
-            .send_command(ClientCommand::Use(guid))
+        UseClientEntity { guid, unrestricted } => runtime
+            .send_command(ClientCommand::Use { guid, unrestricted })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

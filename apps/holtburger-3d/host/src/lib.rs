@@ -240,6 +240,8 @@ pub struct MotionTableClosureRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostStatus {
+    /// Availability of optional static classification for native switches.
+    pub entity_metadata: holtburger_content::WeenieCatalogCapability,
     /// Stable label used by the frontend to identify the active host shell.
     pub app_name: &'static str,
     /// Human-readable lifecycle state for diagnostics.

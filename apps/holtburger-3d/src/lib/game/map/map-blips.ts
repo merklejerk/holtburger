@@ -1,7 +1,12 @@
+import { pointToSegmentDistance2d } from "../math/geometry-utils";
+import type { SetupSidewaysSpan } from "../resolution/presentation";
 import { createLandblockWorldOrigin } from "../landblocks";
 import type { DynamicEntityView } from "../runtime/dynamic-entity-feed";
 import type { ScenePlacement } from "../scene";
-import type { DynamicEntityMapBlipCategory } from "./map-blip-category";
+import {
+	isInteractableMapCategory,
+	type DynamicEntityMapBlipCategory,
+} from "./map-blip-category";
 import {
 	mapHeadingFromSceneTransform,
 	type ProjectedMapView,
@@ -17,6 +22,8 @@ import {
  * from the last discontinuous correction.
  */
 export interface MapEntity {
+	/** Setup-pose width at current root scale; absent while geometry is unavailable. */
+	readonly sidewaysSpan: SetupSidewaysSpan | null;
 	readonly view: DynamicEntityView;
 	/** Where the entity is being drawn right now, in its landblock's local frame. */
 	readonly placement: ScenePlacement;
@@ -29,6 +36,13 @@ export interface MapEntity {
  * transform the map did rather than reimplementing zoom and rotation and drifting from it.
  */
 export interface MapBlip {
+	/** Projected door span; null retains the ordinary point marker when width is unavailable. */
+	readonly span: {
+		readonly startX: number;
+		readonly startY: number;
+		readonly endX: number;
+		readonly endY: number;
+	} | null;
 	readonly guid: number;
 	readonly name: string;
 	/** Clip-space position, both axes in [-1, 1] for anything on screen. */
@@ -43,7 +57,7 @@ export interface MapBlip {
 				readonly headingRadians: number;
 		  }
 		| {
-				/** Producer-resolved class selecting an ordinary circular marker's color. */
+				/** Producer-resolved class selecting the marker shape and color. */
 				readonly category: DynamicEntityMapBlipCategory;
 				/** Entity height minus map-anchor height in world metres. */
 				readonly heightOffsetMeters: number;
@@ -54,7 +68,8 @@ export interface MapBlip {
  * Select and place the blips for one map frame.
  *
  * Retail drew only objects whose `ShowableOnRadar` was one of the three show values, then applied
- * a fixed radius. We keep the visibility semantics and drop the radius:
+ * a fixed radius. Ordinary objects retain those visibility semantics; doors and switches
+ * are explicit landmarks. All markers use the current map extent:
  *
  * RETAIL DIVERGENCE: retail limited blips to `CPlayerSystem::GetRadarRadius`, a flat 75 m outdoors
  * and 25 m indoors (acclient.c:378719-378725), tested as a horizontal distance compare
@@ -71,9 +86,12 @@ export function selectMapBlips(
 ): readonly MapBlip[] {
 	const { view, worldToClip } = projection;
 	const blips: MapBlip[] = [];
-	for (const { view: entity, placement } of entities) {
+	for (const { view: entity, placement, sidewaysSpan } of entities) {
 		const controlled = entity.identity.guid === controlledEntityGuid;
 		const behavior = entity.presentation.radar.behavior;
+		const interactable = isInteractableMapCategory(
+			entity.presentation.radar.category,
+		);
 		// The controlled marker is navigation chrome rather than an object's radar appearance. It
 		// remains available even when the controlled entity is hidden or authored as ShowNever.
 		// RETAIL QUIRK: despite their conditional names, ShowMovement and ShowAttacking are always
@@ -82,13 +100,23 @@ export function selectMapBlips(
 		// 43,913-template catalog census found every defined value 0..4 in shipped content.
 		if (
 			!controlled &&
+			!interactable &&
 			behavior !== "ShowMovement" &&
 			behavior !== "ShowAttacking" &&
 			behavior !== "ShowAlways"
 		) {
 			continue;
 		}
-		if (!controlled && entity.physics.hidden) continue;
+		// RETAIL DIVERGENCE: InqShowableOnRadar excludes unset radar behavior
+		// (acclient.c:417954-417970). We expose doors and native switches as map landmarks.
+		// The 43,913-template census found all 542 doors and 193 switches omit radar behavior;
+		// 92 switches are server-only and cannot reach a normal live-client feed. Restoring the
+		// retail predicate would hide these landmarks. Map drawing cannot affect server content.
+		if (
+			!controlled &&
+			(entity.physics.hidden || (interactable && entity.physics.noDraw))
+		)
+			continue;
 		const origin = createLandblockWorldOrigin(placement.landblockId);
 		const [clipX, clipY] = projectMapWorldPoint(
 			worldToClip,
@@ -96,8 +124,36 @@ export function selectMapBlips(
 			origin.x + placement.localTransform.m41,
 			origin.z + placement.localTransform.m43,
 		);
-		if (Math.abs(clipX) > 1 || Math.abs(clipY) > 1) continue;
+		const category = entity.presentation.radar.category;
+		let span: MapBlip["span"] = null;
+		if (
+			!controlled &&
+			(category === "door" || category === "door-no-direct-use") &&
+			sidewaysSpan !== null &&
+			sidewaysSpan.maxX > sidewaysSpan.minX
+		) {
+			// AC forward is +Y and sideways is X. Deliberately approximate half-open setup geometry;
+			// unusual door models keep this convention rather than guessing a different axis.
+			const m = placement.localTransform;
+			const project = (x: number) =>
+				projectMapWorldPoint(
+					worldToClip,
+					view,
+					origin.x + m.m11 * x + m.m31 * sidewaysSpan.z + m.m41,
+					origin.z + m.m13 * x + m.m33 * sidewaysSpan.z + m.m43,
+				);
+			const start = project(sidewaysSpan.minX),
+				end = project(sidewaysSpan.maxX);
+			span = { startX: start[0], startY: start[1], endX: end[0], endY: end[1] };
+		}
+		if (
+			span === null
+				? Math.abs(clipX) > 1 || Math.abs(clipY) > 1
+				: !spanIntersectsMap(span)
+		)
+			continue;
 		blips.push({
+			span,
 			// RETAIL DIVERGENCE: retail selects marker fill from the effective RadarColor
 			// (acclient.c:252944-253079). We use the producer-resolved semantic category so players,
 			// NPCs, mobs, portals, and lifestones retain stable frontend-tunable identities instead
@@ -124,4 +180,18 @@ export function selectMapBlips(
 		});
 	}
 	return blips;
+}
+
+/** Keep a span whose center lies outside the circular map but whose geometry crosses it. */
+function spanIntersectsMap(span: NonNullable<MapBlip["span"]>): boolean {
+	return (
+		pointToSegmentDistance2d(
+			0,
+			0,
+			span.startX,
+			span.startY,
+			span.endX,
+			span.endY,
+		) <= 1
+	);
 }

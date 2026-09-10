@@ -183,3 +183,13 @@ demonstrating a need.
 - **`holtburger-dat`**: HBA/resource composition and low-level file parsers.
 - **`holtburger-common`**: shared math and source-domain primitives.
 - **`binrw`**: binary decoding support for focused content queries.
+
+## Optional entity metadata
+
+`WeenieCatalogContent` resolves the caller-selected `weenies.hwc` path, reports missing
+or invalid content explicitly, and owns the portable catalog reader. At startup it
+parses an immutable `WeenieTypeIndex` for world bootstrap, so live WCID classification
+never opens files. Environment variables remain host inputs; Explorer fuzzy search
+remains app-local. The catalog is optional: network door flags remain authoritative
+without it, while native switch classification needs a known WCID. Authored
+ItemUseable belongs to Explorer catalog preparation; live entities use received state.

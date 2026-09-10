@@ -12,20 +12,6 @@ export const EXPLORER_WEENIE_SEARCH_RESULT_LIMIT = 32;
 const unsigned32 = z.number().int().min(0).max(0xffff_ffff);
 const generation = z.number().int().nonnegative();
 
-const explorerCatalogCapabilitySchema = z.discriminatedUnion("status", [
-	z.object({
-		status: z.literal("available"),
-		path: z.string(),
-		recordCount: z.number().int().nonnegative(),
-	}),
-	z.object({
-		status: z.literal("unavailable"),
-		path: z.string().nullable(),
-		kind: z.enum(["missing-content-location", "missing", "invalid"]),
-		reason: z.string(),
-	}),
-]);
-
 const explorerEntityMutationReceiptSchema = z.object({
 	guid: unsigned32,
 	generation,
@@ -59,9 +45,6 @@ const explorerWeenieSearchRequestSchema = z.object({
 	limit: z.number().int().positive().max(EXPLORER_WEENIE_SEARCH_RESULT_LIMIT),
 });
 
-export type ExplorerCatalogCapability = z.infer<
-	typeof explorerCatalogCapabilitySchema
->;
 export type ExplorerEntityMutationReceipt = z.infer<
 	typeof explorerEntityMutationReceiptSchema
 >;
@@ -132,13 +115,6 @@ type CameraRelativeEntityCandidate = Pick<
 	ExplorerEntitySpawnRequest,
 	"cameraPose" | "candidate" | "rotation"
 >;
-
-/** Validate catalog capability before it can alter Explorer controls. */
-export function decodeExplorerCatalogCapability(
-	value: unknown,
-): ExplorerCatalogCapability {
-	return explorerCatalogCapabilitySchema.parse(value);
-}
 
 /** Validate the exact identity returned after one ordered host mutation. */
 export function decodeExplorerEntityMutationReceipt(

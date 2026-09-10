@@ -153,6 +153,8 @@ interface FrontendMapTuning {
 		readonly maximumElevationBrightnessAdjustment: number;
 		/** Marker radius in canvas pixels. */
 		readonly radiusPixels: number;
+		/** Legible screen-space thickness for world-sized door bars. */
+		readonly doorThicknessPixels: number;
 	};
 	/** Visible world extent bounds for indoor and outdoor maps. */
 	readonly zoom: {

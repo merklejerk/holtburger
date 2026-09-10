@@ -1272,12 +1272,20 @@ fn advance_hard_candidate(
         };
         body.record_impact(hit, elapsed, anchor);
         let normal = hit.contact().normal;
-        body.kinematic_velocity =
-            body.kinematic_velocity - normal * body.kinematic_velocity.dot(&normal).min(0.0);
-        body.mobile.velocity =
-            movement.impact_velocity(body, normal, body.ground().walkable_support().is_some());
-        if let HardMovement::Correction(displacement) = &mut movement {
-            *displacement = *displacement - normal * displacement.dot(&normal).min(0.0);
+        if let Some(response) = SupportedWallResponse::for_body(body, normal) {
+            body.kinematic_velocity = response.apply(body.kinematic_velocity);
+            body.mobile.velocity = response.apply(body.mobile.velocity);
+            if let HardMovement::Correction(displacement) = &mut movement {
+                *displacement = response.apply(*displacement);
+            }
+        } else {
+            body.kinematic_velocity =
+                body.kinematic_velocity - normal * body.kinematic_velocity.dot(&normal).min(0.0);
+            body.mobile.velocity =
+                movement.impact_velocity(body, normal, body.ground().walkable_support().is_some());
+            if let HardMovement::Correction(displacement) = &mut movement {
+                *displacement = *displacement - normal * displacement.dot(&normal).min(0.0);
+            }
         }
         // Keep every accepted prefix when the fixed pass budget ends. Remaining physical
         // time is stationary; no geometric retry or catch-up displacement is queued.
@@ -1288,6 +1296,63 @@ fn advance_hard_candidate(
         return stairs::settle_after_movement(collision, hard, anchor, body, movement);
     }
     Ok(stairs::NavigationFooting::Unchanged)
+}
+
+/// Response to a blocking wall while stable movement retains a proved support plane.
+/// The same constraint applies to physical velocity, authored travel, and positional correction.
+/// RETAIL DIVERGENCE: retail flattens the sliding normal before intersecting it with
+/// support (acclient.c:300478-300493,300623-300668). Retaining the actual wall normal
+/// agrees on flat floors; on slopes it also preserves obstacle clearance. Flattening
+/// an overhanging wall directs uphill travel inward in the slope regression below,
+/// leaving subsequent sweeps to reject it. Sweeps and support validation remain mandatory.
+/// Evidence scope: the two reported 00A9 cells and synthetic floor/wall fixtures;
+/// no authored-slope census or universal retail-compatibility claim is made.
+struct SupportedWallResponse {
+    /// Current walkable support; retained at its authored precision.
+    support: Vector3,
+    /// Actual blocking face or closest-feature normal, including its vertical component.
+    wall: Vector3,
+    /// Unit intersection direction, or zero when the two constraints have no unique intersection.
+    tangent: Vector3,
+}
+
+impl SupportedWallResponse {
+    fn for_body(body: &WorkingBody<'_>, wall: Vector3) -> Option<Self> {
+        let grounded = body.grounded?;
+        let support = grounded.ground.walkable_support()?;
+        if body.policy.surface_motion != crate::spatial::PhysicalSurfaceMotion::Stable
+            || wall.z >= grounded.config.walkable_normal_z
+        {
+            return None;
+        }
+        Some(Self::new(support.normal, wall))
+    }
+
+    fn new(support: Vector3, wall: Vector3) -> Self {
+        let intersection = support.cross(&wall);
+        let length = intersection.length();
+        Self {
+            support,
+            wall,
+            tangent: if length > 0.0 {
+                intersection / length
+            } else {
+                Vector3::zero()
+            },
+        }
+    }
+
+    fn apply(&self, incoming: Vector3) -> Vector3 {
+        let supported =
+            incoming - self.support * (incoming.dot(&self.support) / self.support.length_squared());
+        if supported.dot(&self.wall) >= 0.0 {
+            supported
+        } else {
+            // Solve both constraints together. Projecting against only the wall can lift
+            // a standing body, after which ledge protection rejects the whole candidate.
+            self.tangent * supported.dot(&self.tangent)
+        }
+    }
 }
 
 /// Physical impact response shared by swept hits and accepted landing probes.
@@ -1559,6 +1624,27 @@ fn sweep_motion_sphere(
 #[cfg(test)]
 mod actuation_tests {
     use super::*;
+
+    #[test]
+    fn supported_wall_response_keeps_slope_and_obstacle_constraints_together() {
+        let floor = Vector3::new(0.0, -0.5, 3.0_f32.sqrt() * 0.5);
+        let wall = Vector3::new(-0.98, 0.0, -0.2);
+        let wall = wall / wall.length();
+        let response = SupportedWallResponse::new(floor, wall);
+        let incoming = Vector3::new(2.0, 1.0, 1.0 / 3.0_f32.sqrt());
+        let result = response.apply(incoming);
+        let tolerance = 8.0 * f32::EPSILON * incoming.length();
+        assert!(result.dot(&floor).abs() <= tolerance);
+        assert!(result.dot(&wall).abs() <= tolerance);
+        assert!(result.y > 0.0 && result.z > 0.0);
+        assert!(result.length() <= incoming.length());
+        // Flattening this overhanging wall would send uphill travel into the true surface.
+        let flat_axis = floor.cross(&Vector3::new(wall.x, wall.y, 0.0));
+        let flat_result = flat_axis * (incoming.dot(&flat_axis) / flat_axis.length_squared());
+        assert!(flat_result.dot(&wall) < -tolerance);
+        let retreat = response.apply(Vector3::new(-2.0, 0.0, 0.0));
+        assert_eq!(retreat, Vector3::new(-2.0, 0.0, 0.0));
+    }
 
     #[test]
     fn initial_pair_envelopes_cover_every_relaxation_pass() {

@@ -5980,3 +5980,94 @@ fn player_exemptions_remove_physical_resistance_and_report_touches() {
         }
     }
 }
+
+/// Stable characters must not lift off a flared wall and have ledge protection undo every move.
+#[test]
+fn ledge_protected_character_slides_flared_walls_without_losing_support() {
+    for yaw in [0.0_f32, 30.0] {
+        let now = Instant::now();
+        let mut collision = flat_collision_scene();
+        let mut asset = flat_collision_asset(0);
+        let facing =
+            Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), yaw.to_radians()).unwrap();
+        let flare = Quaternion::from_axis_angle(Vector3::new(0.0, 1.0, 0.0), 10.0_f32.to_radians())
+            .unwrap();
+        let origin = Vector3::new(96.0, 96.0, 1.0);
+        asset.static_geometry = LandblockColliders::new(
+            vec![
+                PlacedCollider::new(
+                    polygon_wall_shape(),
+                    LandblockPlacement {
+                        origin,
+                        orientation: facing.multiply(&flare),
+                    },
+                    ColliderScale::uniform(1.0).unwrap(),
+                    StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+                )
+                .unwrap(),
+            ],
+            Vec::new(),
+        );
+        collision.insert(asset).unwrap();
+        let mut scene = SpatialScene::new();
+        let id = SpatialBodyId::LocalPlayer(Guid(1));
+        let definition = grounded_definition();
+        let PhysicalBodyDefinition::Grounded { config, .. } = definition else {
+            unreachable!()
+        };
+        assert_eq!(config.edge_protection, EdgeProtection::Creature);
+        let primary = definition.spheres().primary();
+        let start = Vector3::new(96.0, 96.0, primary.radius - primary.center.z)
+            + facing.rotate_vector(Vector3::new(-0.6, -0.5, 0.0));
+        scene.register_body(SpatialBody::new(id, pose(start), now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
+        let tangent = facing.rotate_vector(Vector3::new(0.0, 1.0, 0.0));
+        let mut direction = 1.0;
+        let mut travel = 0.0;
+        for tick in 0..180 {
+            let before = scene.body(id).unwrap().pose.coords;
+            let along = (before - start).dot(&tangent);
+            if along > 1.0 {
+                direction = -1.0;
+            } else if along < 0.0 {
+                direction = 1.0;
+            }
+            let drive = facing.rotate_vector(Vector3::new(2.0, direction, 0.0));
+            scene.wake_dynamic_body(id);
+            scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    now + Duration::from_secs_f32((tick + 1) as f32 * CONTACT_INTERVAL),
+                    |_| {
+                        Ok(PhysicalBodyInput::referenced(
+                            PhysicalBodyActuation::grounded_drive(drive)?,
+                            PhysicalReferenceInput::body(None),
+                            true,
+                        ))
+                    },
+                )
+                .unwrap();
+            let after = scene.body(id).unwrap();
+            travel += (after.pose.coords - before).dot(&tangent).abs();
+            assert_eq!(
+                after.contact,
+                ContactState::Grounded,
+                "yaw={yaw} tick={tick}"
+            );
+            assert!((after.pose.coords.z - start.z).abs() < 0.0001);
+        }
+        assert!(
+            travel > 180.0 * CONTACT_INTERVAL * 0.9,
+            "yaw={yaw} travel={travel}"
+        );
+    }
+}

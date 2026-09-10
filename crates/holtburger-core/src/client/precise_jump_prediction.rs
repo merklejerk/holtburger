@@ -870,12 +870,12 @@ mod tests {
     use std::sync::Arc;
 
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::{Quaternion, Sphere};
+    use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        BspSolid, CellVolume, ColliderScale, CollisionBall, CollisionBox, CollisionPolygon,
-        CollisionShape, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
-        LandblockTerrain, PlacedCollider, StaticColliderPlacement, TerrainCellDiagonals,
-        TerrainCollisionSurface,
+        BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+        CollisionBall, CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders,
+        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, PlacedCollider,
+        StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
     use holtburger_protocol::messages::movement::MotionStance;
@@ -1483,6 +1483,107 @@ mod tests {
             )
             .unwrap();
         assert!(!target.is_current(&scene, &collision));
+    }
+
+    #[test]
+    fn entity_surface_targeting_crosses_portals_and_keeps_straddling_targets() {
+        let source = Guid(0xda55_0100);
+        let target = Guid(0xda55_0101);
+        let plane = Plane {
+            normal: Vector3::new(1.0, 0.0, 0.0),
+            d: -10.0,
+        };
+        let mut collision = CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: OWNER.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![
+                        CellVolume {
+                            cell_selector: source.0 as u16,
+                            placement: LandblockPlacement {
+                                origin: Vector3::zero(),
+                                orientation: Quaternion::identity(),
+                            },
+                            planes: vec![Plane {
+                                normal: plane.normal * -1.0,
+                                d: -plane.d,
+                            }],
+                            portals: vec![CellCollisionPortal {
+                                plane,
+                                positive_side: true,
+                                target: CellCollisionPortalTarget::EnvCell(target.0 as u16),
+                                outdoor_building: None,
+                            }],
+                        },
+                        CellVolume {
+                            cell_selector: target.0 as u16,
+                            placement: LandblockPlacement {
+                                origin: Vector3::zero(),
+                                orientation: Quaternion::identity(),
+                            },
+                            planes: vec![plane],
+                            portals: vec![CellCollisionPortal {
+                                plane,
+                                positive_side: false,
+                                target: CellCollisionPortalTarget::EnvCell(source.0 as u16),
+                                outdoor_building: None,
+                            }],
+                        },
+                    ],
+                ),
+            })
+            .unwrap();
+        for x in [13.0, 10.25] {
+            let now = Instant::now();
+            let mut scene = SpatialScene::new();
+            let id = SpatialBodyId::Entity(Guid(0x5000_0002));
+            let center = Vector3::new(x, 10.0, 10.0);
+            let radius = 0.4;
+            add_solid_dynamic_ball(&mut scene, id, center, radius, now);
+            scene
+                .relocate_dynamic_body(
+                    id,
+                    WorldPosition {
+                        landblock_id: target,
+                        coords: center,
+                        rotation: Quaternion::identity(),
+                    },
+                    now,
+                )
+                .unwrap();
+            scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    holtburger_world::MOBILE_CONTACT_TICK_SECONDS,
+                    now,
+                    |_| {
+                        Err(anyhow::anyhow!(
+                            "non-integrating target must not request movement"
+                        ))
+                    },
+                )
+                .unwrap();
+            let hit = collision
+                .cast_surface_ray(
+                    &scene.entity_collision_snapshot().unwrap(),
+                    StaticSurfaceRayRequest {
+                        anchor: OWNER,
+                        start: Vector3::new(5.0, 10.0, 10.0),
+                        direction: Vector3::new(1.0, 0.0, 0.0),
+                        maximum_distance: 20.0,
+                        previous_cell: Some(source),
+                        filter: PhysicalCollisionFilter::ALL,
+                    },
+                    |candidate| candidate == id,
+                )
+                .unwrap()
+                .unwrap();
+            assert!((hit.point().x - (x - radius)).abs() < 0.0001, "{hit:?}");
+            assert!(matches!(hit, CollisionSurfaceRayHit::Entity(_)));
+        }
     }
 
     #[test]

@@ -9,10 +9,10 @@ use holtburger_content::{
     ActiveRegionData, ContentDecodeCache, ContentRepository, GeneratedSceneryAsset,
     GeneratedSceneryAssetAssembler, LandblockAsset, LandblockAssetAssembler,
     LandblockColliderAssembler, LandblockCollisionAsset, LandblockInteriorSystemAssembler,
-    LandblockInteriorSystemAsset, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedRegionRenderProfile, ResolvedSetupAppearance, ResolvedSurfaceTexture,
-    ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable, TerrainCollisionSurface,
-    TexturePixelFormat,
+    LandblockInteriorSystemAsset, LandblockSceneClass, MaterialAppearanceInput,
+    ResolvedMaterialRecipe, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
+    ResolvedSurfaceTexture, ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable,
+    TerrainCollisionSurface, TexturePixelFormat,
 };
 use holtburger_dat::file_type::{
     Animation, GfxObj, GfxObjDegradeInfo, MotionTable, Palette, ParticleEmitterInfo, PhysicsScript,
@@ -234,19 +234,31 @@ impl ContentAssetService {
     /// The merge stays here so app and diagnostic callers cannot accidentally omit generated
     /// scenery, building shells, indoor objects, or cell containment volumes.
     pub fn resolve_collision(&self, landblock: &LandblockAsset) -> Result<LandblockCollisionAsset> {
-        let scenery = self.resolve_generated_scenery(landblock)?;
-        let generated = scenery
-            .objects
-            .iter()
-            .map(|object| {
+        // Dungeon terrain records are content metadata, not traversable outdoor space.
+        // Use the same content classification as render demand; never generate outdoor
+        // scenery merely to discard it after collision assembly.
+        let (generated, terrain) = match landblock.scene_class {
+            LandblockSceneClass::DungeonOnly => (Vec::new(), TerrainCollisionSurface::empty()),
+            LandblockSceneClass::OutdoorOnly | LandblockSceneClass::OutdoorWithEnvCells => {
+                let scenery = self.resolve_generated_scenery(landblock)?;
+                let generated = scenery
+                    .objects
+                    .iter()
+                    .map(|object| {
+                        (
+                            object.source_did,
+                            object.source_family,
+                            object.placement,
+                            object.scale,
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 (
-                    object.source_did,
-                    object.source_family,
-                    object.placement,
-                    object.scale,
+                    generated,
+                    TerrainCollisionSurface::from_terrain(&landblock.terrain)?,
                 )
-            })
-            .collect::<Vec<_>>();
+            }
+        };
         let interior = self.resolve_interior_system(landblock)?;
         let static_geometry = LandblockColliderAssembler
             .assemble(
@@ -265,7 +277,7 @@ impl ContentAssetService {
 
         Ok(LandblockCollisionAsset {
             landblock_id: landblock.landblock_id,
-            terrain: TerrainCollisionSurface::from_terrain(&landblock.terrain)?,
+            terrain,
             static_geometry,
         })
     }
@@ -926,6 +938,39 @@ mod tests {
             format!("{error:#}")
                 .contains("RegionDesc has no terrain payload required for generated scenery")
         );
+    }
+
+    #[test]
+    fn dungeon_collision_requires_interior_content_but_not_outdoor_tables() {
+        let owner = 0xda55_ffff;
+        let source = Arc::new(InMemoryResourceSource::default().with_file(
+            EOR_CELL_NAMESPACE,
+            owner,
+            cell_landblock_bytes(owner, false),
+        ));
+        // This source intentionally has no scenery tables. Supply the classified
+        // foundation directly to isolate collision assembly from classification.
+        let service = test_service(ContentRepository::from_mounts(vec![source]));
+        let mut foundation = (*service.load_landblock(owner).unwrap().unwrap()).clone();
+        for class in [
+            LandblockSceneClass::OutdoorOnly,
+            LandblockSceneClass::OutdoorWithEnvCells,
+        ] {
+            foundation.scene_class = class;
+            assert!(service.resolve_collision(&foundation).is_err());
+        }
+        foundation.scene_class = LandblockSceneClass::DungeonOnly;
+        let collision = service.resolve_collision(&foundation).unwrap();
+        assert!(collision.terrain.cells.is_empty());
+        assert!(!collision.terrain.entirely_water);
+        foundation
+            .env_cell_refs
+            .push(holtburger_content::LandblockEnvCellRef {
+                source_index: 0,
+                env_cell_id: 0xda55_0100,
+            });
+        let error = service.resolve_collision(&foundation).unwrap_err();
+        assert!(format!("{error:#}").contains("DA550100"), "{error:#}");
     }
 
     #[test]

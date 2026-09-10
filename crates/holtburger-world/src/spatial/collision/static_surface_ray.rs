@@ -10,10 +10,9 @@ use super::static_sphere_sweep::{
     landblock_entry_hit, parry_vector, placed_anchor_point, swept_query_cells, world_vector,
 };
 use super::{
-    CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy, CollisionScene, MotionWaypoint,
-    MotionWaypointPlacement, PhysicalCollisionExclusions, PhysicalCollisionFilter,
-    PlacedMotionPathRequest, SpatialMembership, SphereSweep, UncoveredCollisionQuery,
-    anchor_to_landblock, touched_landblocks, validate_point_sweep,
+    CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, SpatialMembership, SphereSweep,
+    UncoveredCollisionQuery, anchor_to_landblock, touched_landblocks, validate_point_sweep,
 };
 
 const DIRECTION_LENGTH_TOLERANCE: f32 = 0.000_1;
@@ -110,14 +109,36 @@ impl CollisionScene {
         request: StaticSurfaceRayRequest,
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<StaticSelectionRayTrace>, CollisionQueryError> {
-        validate_ray(request)?;
-        let end = request.start + request.direction * request.maximum_distance;
-        let full_path = self.transit_surface_ray_path(request, end)?;
-        let mut swept_placement = full_path.initial().placement().clone();
-        for leg in full_path.legs() {
-            swept_placement = swept_placement.merge_reached(leg.end().placement().clone());
-        }
+        let traced = self.traverse_surface_ray(request, policy, |interval, placement| {
+            Ok::<_, CollisionQueryError>(
+                self.cast_static_ray_in_domain(interval, placement)
+                    .map(|candidate| (candidate.distance, candidate)),
+            )
+        })?;
+        Ok(UncoveredCollisionQuery {
+            value: StaticSelectionRayTrace {
+                static_hit: traced.value.hit.map(|hit| StaticSurfaceRayHit {
+                    point: hit.point,
+                    distance: hit.distance,
+                    normal: hit.candidate.normal,
+                    placement: hit.placement,
+                    proof: self
+                        .owner_proof(hit.candidate.owner)
+                        .expect("installed candidate retains its owner proof"),
+                }),
+                reached: traced.value.reached,
+            },
+            unavailable_owner: traced.unavailable_owner,
+        })
+    }
 
+    /// Narrow phase for one ray restricted to a single traversed domain.
+    pub(super) fn cast_static_ray_in_domain(
+        &self,
+        request: StaticSurfaceRayRequest,
+        swept_placement: &SpatialMembership,
+    ) -> Option<SurfaceCandidate> {
+        let end = request.start + request.direction * request.maximum_distance;
         let full_sweep = ray_sweep(request, end);
         let full_touched = touched_landblocks(full_sweep);
         let ray = Ray::new(parry_vector(request.start), parry_vector(request.direction));
@@ -146,7 +167,7 @@ impl CollisionScene {
             }
         }
 
-        for selected in self.selected_colliders(swept_query_cells(full_sweep), &swept_placement) {
+        for selected in self.selected_colliders(swept_query_cells(full_sweep), swept_placement) {
             let collider = &self.landblocks[&selected.reference.owner]
                 .static_geometry
                 .colliders[selected.reference.collider_index];
@@ -195,51 +216,7 @@ impl CollisionScene {
             }
         }
 
-        let clipped_end =
-            earliest.map_or(end, |hit| request.start + request.direction * hit.distance);
-        let clipped_path = self.transit_surface_ray_path(request, clipped_end)?;
-        let mut clipped_placement = clipped_path.initial().placement().clone();
-        for leg in clipped_path.legs() {
-            clipped_placement = clipped_placement.merge_reached(leg.end().placement().clone());
-        }
-        let touched = touched_landblocks(ray_sweep(request, clipped_end));
-        let unavailable_owner = self
-            .complete_query(policy, &touched, &clipped_placement, ())?
-            .unavailable_owner;
-        let hit = earliest.map(|candidate| StaticSurfaceRayHit {
-            point: clipped_end,
-            distance: candidate.distance,
-            normal: candidate.normal,
-            placement: clipped_path.final_point().placement().clone(),
-            proof: self
-                .owner_proof(candidate.owner)
-                .expect("an installed collision candidate retains its owner proof"),
-        });
-        Ok(UncoveredCollisionQuery {
-            value: StaticSelectionRayTrace {
-                static_hit: hit,
-                reached: clipped_placement,
-            },
-            unavailable_owner,
-        })
-    }
-
-    pub(super) fn transit_surface_ray_path(
-        &self,
-        request: StaticSurfaceRayRequest,
-        end: Vector3,
-    ) -> Result<super::PlacedMotionPath, CollisionQueryError> {
-        self.transit_motion_path_allowing_point_radius(PlacedMotionPathRequest {
-            previous_cell: request.previous_cell,
-            anchor: request.anchor,
-            start: request.start,
-            radius: 0.0,
-            waypoints: &[MotionWaypoint {
-                center: end,
-                end_fraction: 1.0,
-                placement: MotionWaypointPlacement::Traverse,
-            }],
-        })
+        earliest
     }
 }
 
@@ -895,6 +872,247 @@ mod tests {
         assert_eq!(
             sealed_scene.cast_static_surface_ray(indoor_ray).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn distant_endpoint_cannot_admit_outdoor_geometry_before_an_indoor_hit() {
+        let cell = Guid(0xda55_0100);
+        let mut room = volume(0x0100, Vec::new());
+        room.planes.push(Plane {
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: 0.0,
+        });
+        let floor = ball_collider(
+            Vector3::new(10.0, 10.0, -1.0),
+            1.0,
+            StaticColliderPlacement::EnvCellShell { cell_id: cell.0 },
+        );
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(asset(
+                OWNER,
+                TerrainCollisionSurface::empty(),
+                vec![floor, outdoor_ball(Vector3::new(10.0, 10.0, 2.0), 0.5, 0)],
+                vec![room],
+            ))
+            .unwrap();
+        let ray = StaticSurfaceRayRequest {
+            previous_cell: Some(cell),
+            ..request(
+                Vector3::new(10.0, 10.0, 4.0),
+                Vector3::new(0.0, 0.0, -1.0),
+                20.0,
+            )
+        };
+        let hit = scene.cast_static_surface_ray(ray).unwrap().unwrap();
+        assert_eq!(hit.point, Vector3::new(10.0, 10.0, 0.0));
+        assert_eq!(hit.placement.committed_cell(), Some(cell));
+    }
+
+    #[test]
+    fn real_exit_admits_only_the_outdoor_suffix_and_entry_admits_the_indoor_suffix() {
+        let cell = Guid(0xda55_0100);
+        let mut room = volume(
+            0x0100,
+            vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -10.0,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::Outdoor,
+                outdoor_building: None,
+            }],
+        );
+        room.planes.push(Plane {
+            normal: Vector3::new(-1.0, 0.0, 0.0),
+            d: 10.0,
+        });
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(asset(
+                OWNER,
+                TerrainCollisionSurface::empty(),
+                vec![
+                    outdoor_ball(Vector3::new(7.0, 10.0, 10.0), 1.0, 0),
+                    outdoor_ball(Vector3::new(15.0, 10.0, 10.0), 1.0, 1),
+                    ball_collider(
+                        Vector3::new(6.0, 10.0, 10.0),
+                        0.5,
+                        StaticColliderPlacement::IndoorStatic {
+                            source_cell_id: cell.0,
+                            source_index: 0,
+                        },
+                    ),
+                ],
+                vec![room],
+            ))
+            .unwrap();
+        let exit = StaticSurfaceRayRequest {
+            previous_cell: Some(cell),
+            ..request(
+                Vector3::new(8.0, 10.0, 10.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                20.0,
+            )
+        };
+        let hit = scene.cast_static_surface_ray(exit).unwrap().unwrap();
+        assert_eq!(hit.point.x, 14.0);
+        assert!(hit.placement.reaches_outdoors());
+        let on_exit = StaticSurfaceRayRequest {
+            start: Vector3::new(10.0, 10.0, 10.0),
+            ..exit
+        };
+        assert_eq!(
+            scene
+                .cast_static_surface_ray(on_exit)
+                .unwrap()
+                .unwrap()
+                .point
+                .x,
+            14.0
+        );
+        let on_entry = StaticSurfaceRayRequest {
+            previous_cell: None,
+            direction: Vector3::new(-1.0, 0.0, 0.0),
+            ..on_exit
+        };
+        assert_eq!(
+            scene
+                .cast_static_surface_ray(on_entry)
+                .unwrap()
+                .unwrap()
+                .point
+                .x,
+            6.5
+        );
+        let entry = request(
+            Vector3::new(12.0, 10.0, 10.0),
+            Vector3::new(-1.0, 0.0, 0.0),
+            10.0,
+        );
+        let hit = scene.cast_static_surface_ray(entry).unwrap().unwrap();
+        assert_eq!(hit.point.x, 6.5);
+        assert_eq!(hit.placement.committed_cell(), Some(cell));
+    }
+
+    #[test]
+    fn indoor_blocker_precedes_missing_portal_target_but_clear_prefix_requires_it() {
+        let cell = Guid(0xda55_0100);
+        let room = volume(
+            0x0100,
+            vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -10.0,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::EnvCell(0x0101),
+                outdoor_building: None,
+            }],
+        );
+        let ray = StaticSurfaceRayRequest {
+            previous_cell: Some(cell),
+            ..request(
+                Vector3::new(5.0, 10.0, 10.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                20.0,
+            )
+        };
+        for blocked in [true, false] {
+            let mut scene = CollisionScene::new();
+            let colliders = if blocked {
+                vec![ball_collider(
+                    Vector3::new(8.0, 10.0, 10.0),
+                    1.0,
+                    StaticColliderPlacement::EnvCellShell { cell_id: cell.0 },
+                )]
+            } else {
+                Vec::new()
+            };
+            scene
+                .insert(asset(
+                    OWNER,
+                    TerrainCollisionSurface::empty(),
+                    colliders,
+                    vec![room.clone()],
+                ))
+                .unwrap();
+            if blocked {
+                assert_eq!(
+                    scene.cast_static_surface_ray(ray).unwrap().unwrap().point.x,
+                    7.0
+                );
+            } else {
+                assert_eq!(
+                    scene.cast_static_surface_ray(ray),
+                    Err(CollisionQueryError::UnknownMotionCell { cell: 0xda55_0101 })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn indoor_crossing_of_a_water_owner_boundary_is_not_an_outdoor_entry() {
+        let cell = Guid(0xda55_0100);
+        let mut room = volume(
+            0x0100,
+            vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -210.0,
+                },
+                positive_side: true,
+                target: CellCollisionPortalTarget::Outdoor,
+                outdoor_building: None,
+            }],
+        );
+        room.planes.push(Plane {
+            normal: Vector3::new(-1.0, 0.0, 0.0),
+            d: 210.0,
+        });
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(asset(
+                OWNER,
+                TerrainCollisionSurface::empty(),
+                Vec::new(),
+                vec![room],
+            ))
+            .unwrap();
+        scene
+            .insert(asset(
+                Guid(0xdb55_ffff),
+                TerrainCollisionSurface {
+                    entirely_water: true,
+                    ..TerrainCollisionSurface::empty()
+                },
+                Vec::new(),
+                Vec::new(),
+            ))
+            .unwrap();
+        let ray = StaticSurfaceRayRequest {
+            previous_cell: Some(cell),
+            ..request(
+                Vector3::new(190.0, 96.0, 10.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                30.0,
+            )
+        };
+        assert_eq!(scene.cast_static_surface_ray(ray).unwrap(), None);
+        let outdoor_ray = StaticSurfaceRayRequest {
+            previous_cell: None,
+            ..ray
+        };
+        assert_eq!(
+            scene
+                .cast_static_surface_ray(outdoor_ray)
+                .unwrap()
+                .unwrap()
+                .point
+                .x,
+            192.0
         );
     }
 

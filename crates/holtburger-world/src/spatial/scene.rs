@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::dynamic_index::DynamicShadowIndex;
 mod contact_collection;
 
 #[cfg(test)]
@@ -69,6 +67,8 @@ fn resolve_dynamic_body_placement(
 #[derive(Debug, Clone)]
 pub(crate) struct SpatialBodyStore {
     bodies: HashMap<SpatialBodyId, SpatialBody>,
+    /// Lazy collision-only publication shared by readers until an entity body may change.
+    entity_queries: std::sync::OnceLock<Result<std::sync::Arc<EntityCollisionSnapshot>, String>>,
     config: SpatialSamplingConfig,
     next_ephemeral_body_id: u64,
 }
@@ -148,6 +148,7 @@ impl Default for SpatialBodyStore {
     fn default() -> Self {
         Self {
             bodies: HashMap::new(),
+            entity_queries: std::sync::OnceLock::new(),
             config: SpatialSamplingConfig::default(),
             next_ephemeral_body_id: 1,
         }
@@ -181,19 +182,31 @@ impl SpatialBodyStore {
     }
 
     fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
+        if matches!(body_id, SpatialBodyId::Entity(_)) {
+            self.entity_queries.take();
+        }
         self.bodies.get_mut(&body_id)
     }
 
     fn register_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
+        if matches!(body.id, SpatialBodyId::Entity(_)) {
+            self.entity_queries.take();
+        }
         self.bodies.insert(body.id, body)
     }
 
     fn update_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
+        if matches!(body.id, SpatialBodyId::Entity(_)) {
+            self.entity_queries.take();
+        }
         let existing = self.bodies.get_mut(&body.id)?;
         Some(std::mem::replace(existing, body))
     }
 
     fn remove_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
+        if matches!(body_id, SpatialBodyId::Entity(_)) {
+            self.entity_queries.take();
+        }
         self.bodies.remove(&body_id)
     }
 
@@ -491,8 +504,19 @@ impl SpatialScene {
     }
 
     /// Seals the current entity target population once for replaceable speculative work.
-    pub fn entity_collision_snapshot(&self) -> anyhow::Result<EntityCollisionSnapshot> {
-        EntityCollisionSnapshot::compile(self.body_store.bodies.values())
+    pub fn entity_collision_snapshot(
+        &self,
+    ) -> anyhow::Result<std::sync::Arc<EntityCollisionSnapshot>> {
+        self.body_store
+            .entity_queries
+            .get_or_init(|| {
+                EntityCollisionSnapshot::compile(self.body_store.bodies.values())
+                    .map(std::sync::Arc::new)
+                    .map_err(|error| format!("entity collision publication failed: {error:#}"))
+            })
+            .as_ref()
+            .cloned()
+            .map_err(|error| anyhow::anyhow!("{error}"))
     }
 
     /// Verifies that one retained selectable entity surface still names identical live geometry.
@@ -1070,103 +1094,6 @@ impl SpatialScene {
             |_, _| Ok(()),
         )
         .map(|(result, ())| result)
-    }
-
-    /// Advances a speculative mover against immutable authored entity surfaces using the common
-    /// contact step. Only the mover is published; peers, report lifetimes, and authority stay intact.
-    /// Frozen peers are hard sweep targets, an intentional prediction approximation.
-    pub fn tick_physical_body_against_entity_snapshot(
-        &mut self,
-        body_id: SpatialBodyId,
-        collision: &CollisionScene,
-        targets: &EntityCollisionSnapshot,
-        actuation: PhysicalBodyActuation,
-        delta_seconds: f32,
-        now: Instant,
-    ) -> anyhow::Result<super::ContactBodyUpdate> {
-        let mut mover = self
-            .body_store
-            .body(body_id)
-            .cloned()
-            .context("prediction body is not registered")?;
-        let physical = mover
-            .physical
-            .as_mut()
-            .context("prediction body has no physics")?;
-        anyhow::ensure!(
-            !matches!(
-                physical.definition,
-                PhysicalBodyDefinition::FixedPosition { .. }
-            ),
-            "prediction requires a mobile body"
-        );
-        if let Some(dynamic) = &mut physical.dynamic {
-            dynamic.activity = DynamicBodyActivity::Active;
-            dynamic.demand.integration = LocalIntegrationDemand::Eligible;
-        }
-        if let PhysicalBodyActuation::FreeFlight {
-            retained_velocity, ..
-        } = &actuation
-        {
-            mover.retained.velocity = *retained_velocity;
-        }
-        let mut bodies = targets
-            .targets
-            .values()
-            .filter(|peer| peer.id != body_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        for peer in &mut bodies {
-            peer.physical
-                .as_mut()
-                .and_then(|physical| physical.dynamic.as_mut())
-                .context("sealed entity target lost its dynamic state")?
-                .demand
-                .integration = LocalIntegrationDemand::Excluded;
-        }
-        let anchor = Guid((mover.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-        bodies.push(mover);
-        let mut result = super::mobile_contact::advance_body_contact_collection_without_reports(
-            collision,
-            &bodies,
-            anchor,
-            delta_seconds,
-            |body, ground, interval| {
-                anyhow::ensure!(
-                    body.id == body_id,
-                    "frozen prediction peer entered integration"
-                );
-                actuation.contact_step_input(
-                    body.physical
-                        .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("contact input requires body physics"))?,
-                    body.pose.rotation,
-                    body.retained.acceleration,
-                    ground,
-                    None,
-                    interval,
-                )
-            },
-        )?;
-        anyhow::ensure!(
-            result.bodies.len() == 1,
-            "prediction must produce exactly one mover"
-        );
-        let update = result
-            .bodies
-            .pop()
-            .context("prediction lost its mover result")?;
-        let mut body = self
-            .body_store
-            .body(body_id)
-            .cloned()
-            .context("prediction body disappeared")?;
-        update.apply_physical_state(&mut body)?;
-        body.sampling.mode = SpatialSampleMode::SimulatingVelocity;
-        body.sampling.last_derived_at = now;
-        self.update_body(body)
-            .context("prediction body disappeared during publication")?;
-        Ok(update)
     }
 
     /// Solves one body provisionally and commits it only after its consumer accepts the result.
@@ -2826,7 +2753,7 @@ mod physical_body_tests {
             dynamic_activity(&scene, target_only),
             DynamicBodyActivity::Settled
         );
-        let index = DynamicShadowIndex::compile(scene.body_store.bodies.values()).unwrap();
+        let index = scene.entity_collision_snapshot().unwrap().index.clone();
         assert_eq!(
             index.candidates(
                 Some(SpatialBodyId::Ephemeral(999)),
@@ -3936,7 +3863,7 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        let index = DynamicShadowIndex::compile(scene.body_store.bodies.values()).unwrap();
+        let index = scene.entity_collision_snapshot().unwrap().index.clone();
         assert_eq!(
             index.candidates(
                 Some(cylinder_id),
@@ -4413,16 +4340,18 @@ mod physical_body_tests {
             .integration = LocalIntegrationDemand::Excluded;
         let actuation = PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, 4.0, 0.0)).unwrap();
         let quantum = super::super::MOBILE_CONTACT_TICK_SECONDS;
-        let result = prediction
-            .tick_physical_body_against_entity_snapshot(
-                mover,
+        let mut predicted_body = prediction.body(mover).unwrap().clone();
+        let prepared = targets.prepare_frozen_contacts(Guid(0xda55ffff)).unwrap();
+        let result = prepared
+            .tick(
+                &mut predicted_body,
                 &collision,
-                &targets,
                 actuation.clone(),
                 quantum,
                 now,
             )
             .unwrap();
+        prediction.update_body(predicted_body).unwrap();
         collection
             .advance_dynamic_entity_collection(&collision, quantum, now, |body| {
                 let mut input = collection_input(body)?;
@@ -4431,7 +4360,6 @@ mod physical_body_tests {
             })
             .unwrap();
         assert_eq!(prediction.body(peer).unwrap(), &peer_before);
-        assert_eq!(targets.body(peer).unwrap(), &peer_before);
         assert!(result.motion.iter().any(|segment| matches!(segment,
             super::super::ContactMotionSegment::Impact {
                 hit: super::super::HardSphereSweepHit::Entity { body_id, .. }, ..

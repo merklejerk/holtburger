@@ -395,7 +395,7 @@ impl ClientRuntime {
                         DynamicEntityEvent::Ticked { batch } => Some(batch),
                         _ => None,
                     });
-                    let camera_input = active_world.then(|| {
+                    let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
                         camera::ClientCameraSceneInput::capture(
                             &self.world, collision_snapshot.as_deref(), dynamic_batch,
                         )

@@ -11,9 +11,7 @@ use super::{
     StaticSurfaceRayRequest,
 };
 use crate::spatial::SpatialBodyId;
-use crate::spatial::dynamic_index::{
-    EntityCollisionProof, EntityCollisionSnapshot, placed_target_shapes,
-};
+use crate::spatial::dynamic_index::{EntityCollisionProof, EntityCollisionSnapshot};
 
 /// Earliest selectable entity surface reached by a finite collision-backed ray.
 #[derive(Debug, Clone, PartialEq)]
@@ -180,22 +178,15 @@ impl CollisionScene {
             let Some(proof) = entities.proof(body_id) else {
                 continue;
             };
-            let body = entities
-                .body(body_id)
+            let target = entities
+                .target(body_id)
                 .context("dynamic target index returned a missing entity")?;
-            for shape in placed_target_shapes(
-                body.physical
-                    .as_ref()
-                    .and_then(|physical| physical.dynamic.as_ref())
-                    .context("prepared target lost dynamic physics")?,
-                body.pose,
-                request.anchor,
-            )? {
+            for shape in target.shapes.iter() {
                 let Some(hit) = cast_placed_collision_shape(
                     &ray,
                     request.maximum_distance,
-                    &shape,
-                    request.anchor,
+                    shape,
+                    target.anchor,
                     request.anchor,
                 ) else {
                     continue;

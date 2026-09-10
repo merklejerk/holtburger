@@ -141,9 +141,11 @@ fn authored_panel_pose_changes_shared_collision_and_retires_old_surface_proofs()
         .as_mut()
         .unwrap()
         .activity = DynamicBodyActivity::Settled;
-    let before =
-        crate::spatial::dynamic_index::EntityCollisionSnapshot::compile([scene.body(id).unwrap()])
-            .unwrap();
+    let before = scene.entity_collision_snapshot().unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &before,
+        &scene.entity_collision_snapshot().unwrap()
+    ));
     let proof = before.proof(id).unwrap();
     let collision = flat_collision_scene();
     let sample = AuthoredCollisionPose::Animation {
@@ -160,9 +162,8 @@ fn authored_panel_pose_changes_shared_collision_and_retires_old_surface_proofs()
             .publish_collision_pose(id, sample, &collision)
             .unwrap()
     );
-    let after =
-        crate::spatial::dynamic_index::EntityCollisionSnapshot::compile([scene.body(id).unwrap()])
-            .unwrap();
+    let after = scene.entity_collision_snapshot().unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&before, &after));
     assert!(before.proves(&proof));
     assert!(!after.proves(&proof));
     let target_x = |body: &SpatialBody| {
@@ -171,8 +172,18 @@ fn authored_panel_pose_changes_shared_collision_and_retires_old_surface_proofs()
             .point_to_landblock_space(Vector3::zero())
             .x
     };
-    assert_eq!(target_x(before.body(id).unwrap()), 96.0);
-    assert_eq!(target_x(after.body(id).unwrap()), 97.0);
+    assert_eq!(
+        before.target(id).unwrap().shapes[0]
+            .point_to_landblock_space(Vector3::zero())
+            .x,
+        96.0
+    );
+    assert_eq!(
+        after.target(id).unwrap().shapes[0]
+            .point_to_landblock_space(Vector3::zero())
+            .x,
+        97.0
+    );
     // State/demand reconfiguration must preserve the instance's current local pose.
     scene
         .set_dynamic_physical_body(id, Some(config.clone()), PhysicalCollisionFilter::ALL, None)
@@ -249,4 +260,203 @@ fn authored_panel_pose_changes_shared_collision_and_retires_old_surface_proofs()
         .set_dynamic_physical_body(id, Some(replacement), PhysicalCollisionFilter::ALL, None)
         .unwrap();
     assert_eq!(target_x(scene.body(id).unwrap()), 97.0);
+}
+
+#[test]
+fn camera_queries_share_animated_solids_and_refresh_participation() {
+    use crate::spatial::{
+        CameraCollisionQuery, CollisionQueryPolicy, FreeSphereConfig, FreeSphereOutcome,
+        FreeSphereRequest, FreeSphereState, SphereCollisionQuery, StaticSphereSweepRequest,
+        solve_free_sphere,
+    };
+    let now = Instant::now();
+    let (animation_id, config) = animated_panel_configuration();
+    let id = SpatialBodyId::Entity(Guid(12));
+    let camera_target = SpatialBodyId::LocalPlayer(Guid(99));
+    let owner = Guid(0xda55ffff);
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(
+        id,
+        pose(Vector3::new(96.0, 96.0, 1.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(id, Some(config), PhysicalCollisionFilter::ALL, None)
+        .unwrap();
+    scene
+        .body_mut(id)
+        .unwrap()
+        .physical
+        .as_mut()
+        .unwrap()
+        .dynamic
+        .as_mut()
+        .unwrap()
+        .collision
+        .contact_response = crate::spatial::EntityContactResponse::Obstacle;
+    let environment = flat_collision_scene();
+    let before = scene.entity_collision_snapshot().unwrap();
+    let query = CameraCollisionQuery {
+        environment: &environment,
+        entities: &before,
+        target: camera_target,
+    };
+    let request = StaticSphereSweepRequest {
+        anchor: owner,
+        start: Vector3::new(94.0, 96.0, 1.0),
+        displacement: Vector3::new(5.0, 0.0, 0.0),
+        previous_cell: None,
+        radius: 0.3,
+        filter: PhysicalCollisionFilter::ALL,
+    };
+    let hit = query
+        .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
+        .unwrap()
+        .value
+        .unwrap();
+    assert!(hit.time_of_impact < 0.4);
+    let config = FreeSphereConfig {
+        maximum_substep_distance: 0.1,
+        maximum_substeps: 64,
+        maximum_contact_passes: 8,
+        separation_epsilon: 0.0001,
+    };
+    let outcome = solve_free_sphere(
+        &query,
+        config,
+        FreeSphereRequest {
+            body: FreeSphereState {
+                pose: pose(request.start),
+                cell: None,
+                radius: request.radius,
+            },
+            displacement: request.displacement,
+            filter: request.filter,
+            query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
+        },
+    )
+    .unwrap();
+    let FreeSphereOutcome::Solved { body, .. } = outcome else {
+        panic!("camera movement should converge");
+    };
+    assert!(body.pose.coords.x < 96.0 - request.radius + 0.001);
+    // An authored pose changes even when the root is stationary and the target is active.
+    scene
+        .publish_collision_pose(
+            id,
+            AuthoredCollisionPose::Animation {
+                animation_id,
+                frame: 1,
+            },
+            &environment,
+        )
+        .unwrap();
+    let after = scene.entity_collision_snapshot().unwrap();
+    let moved_query = CameraCollisionQuery {
+        environment: &environment,
+        entities: &after,
+        target: camera_target,
+    };
+    let overlap = crate::spatial::settle_free_sphere_with_policy(
+        &moved_query,
+        config,
+        FreeSphereState {
+            pose: pose(Vector3::new(96.9, 96.0, 1.0)),
+            cell: None,
+            radius: request.radius,
+        },
+        request.filter,
+        CollisionQueryPolicy::RequireCollisionCoverage,
+    )
+    .unwrap();
+    let crate::spatial::FreeSphereSettleOutcome::Settled { body, .. } = overlap else {
+        panic!("camera overlap should separate");
+    };
+    assert!(body.pose.coords.x <= 97.0 - request.radius + 0.001);
+    let moved_hit = moved_query
+        .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
+        .unwrap()
+        .value
+        .unwrap();
+    assert!(
+        (moved_hit.time_of_impact - hit.time_of_impact - 1.0 / request.displacement.x).abs()
+            < 0.001
+    );
+    // Old publications remain internally consistent and never observe later mutations.
+    assert_eq!(
+        query
+            .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
+            .unwrap()
+            .value,
+        Some(hit)
+    );
+    let excluded = CameraCollisionQuery {
+        environment: &environment,
+        entities: &after,
+        target: id,
+    };
+    assert!(
+        excluded
+            .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
+            .unwrap()
+            .value
+            .is_none()
+    );
+    scene
+        .body_mut(id)
+        .unwrap()
+        .physical
+        .as_mut()
+        .unwrap()
+        .dynamic
+        .as_mut()
+        .unwrap()
+        .collision
+        .dynamic_collision
+        .target = EntityCollisionParticipation::Ethereal;
+    let ethereal = scene.entity_collision_snapshot().unwrap();
+    assert!(
+        CameraCollisionQuery {
+            environment: &environment,
+            entities: &ethereal,
+            target: camera_target
+        }
+        .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
+        .unwrap()
+        .value
+        .is_none()
+    );
+    let dynamic = scene
+        .body_mut(id)
+        .unwrap()
+        .physical
+        .as_mut()
+        .unwrap()
+        .dynamic
+        .as_mut()
+        .unwrap();
+    dynamic.collision.dynamic_collision.target = EntityCollisionParticipation::Solid;
+    dynamic.collision.contact_response = crate::spatial::EntityContactResponse::Character(
+        crate::EntityIntegrationEligibility::Frozen,
+    );
+    let creature = scene.entity_collision_snapshot().unwrap();
+    assert!(
+        CameraCollisionQuery {
+            environment: &environment,
+            entities: &creature,
+            target: camera_target
+        }
+        .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
+        .unwrap()
+        .value
+        .is_none()
+    );
+    scene.remove_body(id).unwrap();
+    assert!(
+        scene
+            .entity_collision_snapshot()
+            .unwrap()
+            .target(id)
+            .is_none()
+    );
 }

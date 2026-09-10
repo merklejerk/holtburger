@@ -14,11 +14,50 @@ use super::volume_query::placed_shape_contacts;
 use super::{DynamicBodyActivity, SpatialBody, SpatialBodyId, SpatialMembership};
 use crate::{EntityCollisionParticipation, LocalTargetDemand, PreparedEntityTargetGeometry};
 
-/// Immutable entity targets and broad-phase membership sealed for one speculative evaluation.
+/// Immutable posed entity targets and broad-phase membership shared by camera and prediction queries.
 #[derive(Debug, Clone)]
 pub struct EntityCollisionSnapshot {
-    pub(crate) targets: BTreeMap<SpatialBodyId, SpatialBody>,
+    pub(crate) targets: BTreeMap<SpatialBodyId, EntityCollisionTarget>,
     pub(crate) index: DynamicShadowIndex,
+}
+
+/// Collision-only immutable entity record, without integration, animation cursors, or reports.
+#[derive(Debug, Clone)]
+pub(crate) struct EntityCollisionTarget {
+    /// Normalized frame containing the prepared shapes.
+    pub(crate) anchor: Guid,
+    /// Common directional collision and membership facts.
+    pub(super) contact: super::mobile_contact::ContactParticipant,
+    /// Current posed geometry shared across all queries on this publication.
+    pub(crate) shapes: Arc<[PlacedCollisionShape]>,
+    /// Landing-target identity exists only when the producer admits a settled solid target.
+    proof: Option<EntityCollisionProof>,
+    /// Camera obstacles include solid non-creatures even while their authored poses change.
+    /// Retail viewer transitions skip creatures in acclient.c:304639–304650.
+    pub(crate) camera_solid: bool,
+}
+
+impl EntityCollisionTarget {
+    /// Places the already-prepared geometry in one solver frame without resampling animation.
+    pub(crate) fn shapes_in(&self, anchor: Guid) -> Result<Vec<PlacedCollisionShape>> {
+        self.shapes
+            .iter()
+            .map(|shape| {
+                if anchor == self.anchor {
+                    return Ok(shape.clone());
+                }
+                let mut placement = shape.placement;
+                placement.origin = WorldPosition {
+                    landblock_id: self.anchor,
+                    coords: placement.origin,
+                    rotation: placement.orientation,
+                }
+                .reanchor_to_landblock_owner(anchor)?
+                .coords;
+                PlacedCollisionShape::new(shape.shape.clone(), placement, shape.scale)
+            })
+            .collect()
+    }
 }
 
 /// Exact collision-relevant identity of one selectable entity surface.
@@ -45,34 +84,66 @@ impl EntityCollisionProof {
 }
 
 impl EntityCollisionSnapshot {
+    /// Places and indexes frozen peers once in the trajectory's common coordinate frame.
+    pub fn prepare_frozen_contacts(&self, anchor: Guid) -> Result<super::FrozenContactTargets> {
+        super::FrozenContactTargets::compile(anchor, self.targets.values())
+    }
+
     pub(crate) fn compile<'a>(bodies: impl IntoIterator<Item = &'a SpatialBody>) -> Result<Self> {
-        let targets = bodies
-            .into_iter()
-            .filter(|body| matches!(body.id, SpatialBodyId::Entity(_)))
-            .filter(|body| {
-                body.physical
-                    .as_ref()
-                    .and_then(|physical| physical.dynamic.as_ref())
-                    .is_some()
-            })
-            .map(|body| (body.id, body.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let index = DynamicShadowIndex::compile(targets.values())?;
+        let mut targets = BTreeMap::new();
+        for body in bodies {
+            if !matches!(body.id, SpatialBodyId::Entity(_)) {
+                continue;
+            }
+            let Some(dynamic) = indexed_dynamic_body(body) else {
+                continue;
+            };
+            let physical = body
+                .physical
+                .as_ref()
+                .context("indexed entity lost physics")?;
+            let anchor = owner(body.pose);
+            let target = EntityCollisionTarget {
+                anchor,
+                contact: super::mobile_contact::ContactParticipant::from_dynamic(
+                    body,
+                    dynamic,
+                    physical.collision_filter,
+                ),
+                shapes: placed_target_shapes(dynamic, body.pose, anchor)?.into(),
+                proof: selectable_target_proof(body),
+                camera_solid: dynamic.collision.dynamic_collision.target
+                    == EntityCollisionParticipation::Solid
+                    && matches!(
+                        dynamic.collision.contact_response,
+                        super::EntityContactResponse::Obstacle
+                    ),
+            };
+            targets.insert(body.id, target);
+        }
+        let index = DynamicShadowIndex::compile_prepared(targets.iter().map(|(id, target)| {
+            (
+                *id,
+                &target.contact.membership,
+                target.anchor,
+                target.shapes.as_ref(),
+            )
+        }));
         Ok(Self { targets, index })
     }
 
-    pub(crate) fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
+    pub(crate) fn target(&self, body_id: SpatialBodyId) -> Option<&EntityCollisionTarget> {
         self.targets.get(&body_id)
     }
 
     pub(crate) fn proof(&self, body_id: SpatialBodyId) -> Option<EntityCollisionProof> {
-        self.body(body_id).and_then(selectable_target_proof)
+        self.target(body_id).and_then(|target| target.proof.clone())
     }
 
     /// Verifies one retained entity surface against this sealed target population.
     pub fn proves(&self, proof: &EntityCollisionProof) -> bool {
-        self.body(proof.body_id())
-            .is_some_and(|body| proof.matches(body))
+        self.target(proof.body_id())
+            .is_some_and(|target| target.proof.as_ref() == Some(proof))
     }
 }
 
@@ -84,26 +155,6 @@ pub(crate) struct DynamicShadowIndex {
 }
 
 impl DynamicShadowIndex {
-    /// Rebuilds one immutable tick-start index from the canonical body population.
-    pub(crate) fn compile<'a>(bodies: impl IntoIterator<Item = &'a SpatialBody>) -> Result<Self> {
-        let prepared = bodies
-            .into_iter()
-            .filter_map(|body| indexed_dynamic_body(body).map(|dynamic| (body, dynamic)))
-            .map(|(body, dynamic)| {
-                let anchor = owner(body.pose);
-                Ok((
-                    body.id,
-                    &dynamic.placement,
-                    anchor,
-                    placed_target_shapes(dynamic, body.pose, anchor)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self::compile_prepared(prepared.iter().map(
-            |(id, placement, anchor, shapes)| (*id, *placement, *anchor, shapes.as_slice()),
-        )))
-    }
-
     /// Indexes already-admitted targets from their current membership and placed geometry.
     /// The preparation owner resolves participation; indexing never recovers body physics.
     pub(crate) fn compile_prepared<'a>(

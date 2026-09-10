@@ -428,6 +428,8 @@ enum PublishedBoomTarget {
     Ready {
         /// Immutable topology that proved the target samples.
         collision: Arc<holtburger_world::CollisionScene>,
+        /// Coherent entity geometry captured with the parent publication.
+        entities: Arc<holtburger_world::EntityCollisionSnapshot>,
         /// Nonempty normalized path, produced by the target adapters or registration seed.
         samples: PublishedTargetPath,
         /// Coverage gap retained in every camera result until a newer publication repairs it.
@@ -587,6 +589,9 @@ impl HostKinematicBoomRuntime {
             target.scene_residency == holtburger_world::PhysicalBodySceneResidency::Resident,
             "kinematic boom target is outside current simulation interest"
         );
+        let entities = target
+            .entity_collision
+            .map_err(|error| anyhow::anyhow!("camera entity capture failed: {error}"))?;
         let body = target.body;
         let collision = target.collision;
         let selected = selected_target_sphere(&body)?;
@@ -651,6 +656,7 @@ camera pivot rests on its collision geometry alone",
                     target_body,
                     target: PublishedBoomTarget::Ready {
                         collision,
+                        entities,
                         samples: PublishedTargetPath::stationary(visual_pivot, seed),
                         unavailable_owner: None,
                     },
@@ -804,8 +810,22 @@ camera pivot rests on its collision geometry alone",
         // can advance its own collision response this tick.
         active.target_sphere_role = selected;
         active.target_body = target_body;
+        let Some(entities) = collection.entity_collision.as_ref() else {
+            eprintln!("possessed camera collection has no entity collision publication");
+            active.target = PublishedBoomTarget::Failed(KinematicBoomDiagnostics::default());
+            return;
+        };
+        let entities = match entities {
+            Ok(entities) => entities,
+            Err(error) => {
+                eprintln!("camera entity capture failed: {error}");
+                active.target = PublishedBoomTarget::Failed(KinematicBoomDiagnostics::default());
+                return;
+            }
+        };
         active.target = PublishedBoomTarget::Ready {
             collision,
+            entities: Arc::clone(entities),
             samples,
             unavailable_owner,
         };
@@ -876,12 +896,13 @@ fn advance_camera(
     active: &mut ActiveHostKinematicBoom,
     duration_seconds: f32,
 ) -> HostKinematicBoomTick {
-    let (collision, samples, unavailable_owner) = match &mut active.target {
+    let (collision, entities, samples, unavailable_owner) = match &mut active.target {
         PublishedBoomTarget::Ready {
             collision,
+            entities,
             samples,
             unavailable_owner,
-        } => (collision, samples, unavailable_owner),
+        } => (collision, entities, samples, unavailable_owner),
         PublishedBoomTarget::Failed(diagnostics) => {
             let diagnostics = *diagnostics;
             return project_hold(
@@ -893,9 +914,15 @@ fn advance_camera(
     };
     let unavailable_owner = *unavailable_owner;
     let initial_visual_pivot = active.controller.visual_pivot();
-    let result = active
-        .controller
-        .advance(collision, duration_seconds, &samples.samples);
+    let result = active.controller.advance(
+        &holtburger_world::spatial::CameraCollisionQuery {
+            environment: collision.as_ref(),
+            entities: entities.as_ref(),
+            target: holtburger_world::SpatialBodyId::Entity(active.identity.guid),
+        },
+        duration_seconds,
+        &samples.samples,
+    );
     samples.retain_endpoint();
     let mut outcome = match result {
         Ok(outcome) => outcome,

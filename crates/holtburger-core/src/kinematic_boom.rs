@@ -1,11 +1,12 @@
-//! Stateful host-side third-person boom behavior over world-owned static collision.
+//! Stateful host-side third-person boom behavior over world-owned collision queries.
 
 use crate::placed_motion::present_placed_motion_pose;
 use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_world::spatial::SphereCollisionQuery;
 use holtburger_world::{
-    CollisionQueryPolicy, CollisionScene, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
+    CollisionQueryPolicy, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
     FreeSphereSettleOutcome, FreeSphereState, MotionWaypoint, MotionWaypointPlacement,
     PhysicalCollisionFilter, PlacedMotionPath, PlacedMotionPathRequest, StaticSphereSweepRequest,
     UncoveredCollisionQuery, settle_free_sphere_with_policy, solve_free_sphere,
@@ -731,7 +732,7 @@ impl KinematicBoomController {
     /// Advances a complete fixed tick transaction over exact target path boundaries.
     pub fn advance(
         &mut self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         duration_seconds: f32,
         target_samples: &[KinematicBoomTargetSample],
     ) -> Result<KinematicBoomOutcome, KinematicBoomInputError> {
@@ -881,7 +882,7 @@ impl KinematicBoomController {
     /// Proves the first projection envelope before any camera placement is published.
     fn initialize_clearance(
         &mut self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         target_samples: &[KinematicBoomTargetSample],
     ) -> Result<KinematicBoomOutcome, KinematicBoomInputError> {
         let Some(latest) = target_samples.last().copied() else {
@@ -970,7 +971,7 @@ impl KinematicBoomController {
     /// Advances one old-envelope-safe leg toward a placement that can admit a larger projection.
     fn advance_clearance_growth(
         &mut self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         collision_proof: &mut KinematicBoomCollisionProof,
         camera: KinematicBoomPlacement,
         committed: KinematicBoomClearance,
@@ -1084,13 +1085,15 @@ impl KinematicBoomController {
                 ));
             }
         };
-        let path = match scene.transit_motion_path(PlacedMotionPathRequest {
-            previous_cell: start.cell,
-            anchor,
-            start: start_pose.coords,
-            radius: committed.radius,
-            waypoints: &motion,
-        }) {
+        let path = match scene
+            .environment()
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: start.cell,
+                anchor,
+                start: start_pose.coords,
+                radius: committed.radius,
+                waypoints: &motion,
+            }) {
             Ok(path) if !path.has_recovery() => path,
             _ => {
                 return KinematicBoomClearanceGrowth::Published(held(
@@ -1140,7 +1143,7 @@ impl KinematicBoomController {
     /// Authors placement for one staged camera transaction and commits it atomically.
     fn commit_staged_motion(
         &mut self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         staged: Self,
         frame: KinematicBoomTickFrame,
         waypoints: Vec<MotionWaypoint>,
@@ -1148,13 +1151,15 @@ impl KinematicBoomController {
         diagnostics: KinematicBoomDiagnostics,
     ) -> Result<KinematicBoomOutcome, KinematicBoomInputError> {
         let camera = self.camera();
-        let advance = match scene.transit_motion_path(PlacedMotionPathRequest {
-            previous_cell: camera.cell,
-            anchor: frame.anchor,
-            start: frame.start.coords,
-            radius: clearance.radius,
-            waypoints: &waypoints,
-        }) {
+        let advance = match scene
+            .environment()
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: camera.cell,
+                anchor: frame.anchor,
+                start: frame.start.coords,
+                radius: clearance.radius,
+                waypoints: &waypoints,
+            }) {
             Ok(path) if !path.has_recovery() => KinematicBoomAdvance::Continuous { path },
             Ok(_) => {
                 return Ok(self.commit_reseed(
@@ -1189,7 +1194,7 @@ impl KinematicBoomController {
     /// Recover a discontinuity only after proving the full camera envelope near the target seed.
     fn commit_reseed(
         &mut self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         mut staged: Self,
         reason: KinematicBoomReseedReason,
         clearance: KinematicBoomClearance,
@@ -1281,7 +1286,7 @@ impl KinematicBoomController {
 
     fn advance_control_leg(
         &mut self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         direction: Vector3,
         delta_seconds: f32,
     ) -> Result<ControlLegMotion, KinematicBoomFailureReason> {
@@ -1382,7 +1387,7 @@ impl KinematicBoomController {
 
     fn cast_to_reach(
         &self,
-        scene: &CollisionScene,
+        scene: &dyn SphereCollisionQuery,
         direction: Vector3,
         reach: f32,
         clearance_radius: f32,
@@ -1402,7 +1407,7 @@ impl KinematicBoomController {
             });
         }
         let hit = scene
-            .sweep_static_sphere_with_policy(
+            .sweep_sphere(
                 StaticSphereSweepRequest {
                     anchor,
                     start: seed_pose.coords,
@@ -1419,6 +1424,7 @@ impl KinematicBoomController {
         });
         let safe = seed_pose.coords + ray * (safe_distance / ray_length);
         let path = scene
+            .environment()
             .transit_motion_path(PlacedMotionPathRequest {
                 previous_cell: seed.cell,
                 anchor,
@@ -1687,6 +1693,7 @@ fn fallback(
 
 #[cfg(test)]
 mod tests {
+    use holtburger_world::CollisionScene;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -2025,6 +2032,33 @@ mod tests {
         assert!(
             settled,
             "unobstructed boom did not settle within activation work"
+        );
+    }
+
+    #[test]
+    fn newly_closed_obstruction_keeps_camera_on_target_side() {
+        let target = wall_sample();
+        let mut controller = wall_controller(Vector3::new(1.0, 0.0, 0.0));
+        settle_reach(&mut controller, &empty_scene(), target);
+        assert!(controller.camera().pose.coords.x > 10.0);
+        let mut panel = wall_x(10.0);
+        // A thin two-sided panel can appear between a valid camera and its target.
+        let CollisionShape::Bsp(solid) = Arc::get_mut(&mut panel.geometry.shape).unwrap() else {
+            unreachable!()
+        };
+        solid.bsp = BspNode::Leaf(BspLeaf {
+            index: 0,
+            solid: 0,
+            sphere: Some(solid.bounds),
+            poly_ids: vec![1],
+        });
+        let scene = collision_scene(vec![panel]);
+        let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+        assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+        assert!(
+            controller.camera().pose.coords.x < 10.0,
+            "camera stayed beyond the closed panel: {:?}",
+            controller.camera()
         );
     }
 

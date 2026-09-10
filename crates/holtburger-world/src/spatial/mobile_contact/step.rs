@@ -19,6 +19,7 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use holtburger_content::PlacedCollisionShape;
+use std::borrow::Cow;
 
 use super::*;
 use crate::spatial::collision::PreparedHardSphereSweep;
@@ -648,6 +649,7 @@ impl<'a> WorkingBody<'a> {
 }
 
 /// Immutable authored geometry admitted as a one-way sweep target.
+#[derive(Debug, Clone)]
 struct SweepTarget {
     /// Identity, filtering, and current collision-domain membership.
     contact: ContactParticipant,
@@ -669,7 +671,126 @@ pub fn advance_body_contacts(
     bodies: &[SpatialBody],
     anchor: Guid,
     delta_seconds: f32,
+    actuation_for: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
+) -> Result<Vec<ContactBodyUpdate>> {
+    advance_contacts(
+        collision,
+        bodies,
+        anchor,
+        delta_seconds,
+        actuation_for,
+        None,
+    )
+}
+
+/// Frozen geometry prepared once for repeated single-body prediction ticks.
+#[derive(Debug, Clone)]
+pub struct FrozenContactTargets {
+    /// Common coordinate frame retained across the speculative trajectory.
+    anchor: Guid,
+    /// Authored peer surfaces and their spatial index; never mutated by prediction.
+    hard: HardTargets,
+}
+
+impl FrozenContactTargets {
+    pub(crate) fn compile<'a>(
+        anchor: Guid,
+        targets: impl IntoIterator<Item = &'a crate::spatial::dynamic_index::EntityCollisionTarget>,
+    ) -> Result<Self> {
+        let hard = targets
+            .into_iter()
+            .map(|target| {
+                Ok(SweepTarget {
+                    contact: target.contact.clone(),
+                    shapes: target.shapes_in(anchor)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            anchor,
+            hard: HardTargets::new(hard)?,
+        })
+    }
+
+    /// Applies one ordinary physical tick to private mover state against this frozen query.
+    /// On error the private body must be discarded; input admission may already have mutated it.
+    pub fn tick(
+        &self,
+        body: &mut SpatialBody,
+        collision: &CollisionScene,
+        actuation: crate::spatial::PhysicalBodyActuation,
+        seconds: f32,
+        now: std::time::Instant,
+    ) -> Result<ContactBodyUpdate> {
+        let physical = body
+            .physical
+            .as_mut()
+            .context("prediction body has no physics")?;
+        ensure!(
+            !matches!(
+                physical.definition,
+                PhysicalBodyDefinition::FixedPosition { .. }
+            ),
+            "prediction requires a mobile body"
+        );
+        if let Some(dynamic) = &mut physical.dynamic {
+            dynamic.activity = DynamicBodyActivity::Active;
+            dynamic.demand.integration = LocalIntegrationDemand::Eligible;
+        }
+        if let crate::spatial::PhysicalBodyActuation::FreeFlight {
+            retained_velocity, ..
+        } = actuation
+        {
+            body.retained.velocity = retained_velocity;
+        }
+        let update = self.advance(collision, body, seconds, |body, ground| {
+            actuation.contact_step_input(
+                body.physical
+                    .as_ref()
+                    .context("contact input requires body physics")?,
+                body.pose.rotation,
+                body.retained.acceleration,
+                ground,
+                None,
+                seconds,
+            )
+        })?;
+        update.apply_physical_state(body)?;
+        body.sampling.mode = crate::spatial::SpatialSampleMode::SimulatingVelocity;
+        body.sampling.last_derived_at = now;
+        Ok(update)
+    }
+
+    /// Advances only the mover; immutable peers supply collision without integration or reports.
+    fn advance(
+        &self,
+        collision: &CollisionScene,
+        body: &SpatialBody,
+        seconds: f32,
+        actuation: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
+    ) -> Result<ContactBodyUpdate> {
+        let updates = advance_contacts(
+            collision,
+            std::slice::from_ref(body),
+            self.anchor,
+            seconds,
+            actuation,
+            Some(&self.hard),
+        )?;
+        let [update]: [ContactBodyUpdate; 1] = updates
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("frozen prediction must produce exactly one mover"))?;
+        Ok(update)
+    }
+}
+
+fn advance_contacts(
+    collision: &CollisionScene,
+    bodies: &[SpatialBody],
+    anchor: Guid,
+    delta_seconds: f32,
     mut actuation_for: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
+    frozen: Option<&HardTargets>,
 ) -> Result<Vec<ContactBodyUpdate>> {
     ensure!(
         delta_seconds.is_finite()
@@ -690,7 +811,9 @@ pub fn advance_body_contacts(
         let Some(contact) = PreparedBodyContact::from_body(body, anchor)? else {
             continue;
         };
-        if let PreparedContactTarget::Hard(geometry) = contact.source.target {
+        if frozen.is_none()
+            && let PreparedContactTarget::Hard(geometry) = contact.source.target
+        {
             hard.push(SweepTarget {
                 shapes: placed_target_shapes(geometry, body.pose, anchor)?,
                 contact: contact.participant.clone(),
@@ -749,7 +872,10 @@ pub fn advance_body_contacts(
             body.contact.body_id,
         )
     });
-    let mut hard = HardTargets::new(hard)?;
+    let mut hard = match frozen {
+        Some(hard) => Cow::Borrowed(hard),
+        None => Cow::Owned(HardTargets::new(hard)?),
+    };
     // Prepare all hard targets before any body validates support or consumes its input.
     for body in &mut moving {
         if let Some(grounded) = body.grounded {
@@ -783,12 +909,14 @@ pub fn advance_body_contacts(
                 advance_ordinary_motion(collision, &hard, anchor, body, delta_seconds)?;
             }
         }
-        if let PreparedContactTarget::Hard(geometry) = body.source.target {
+        if frozen.is_none()
+            && let PreparedContactTarget::Hard(geometry) = body.source.target
+        {
             let mut pose = body.source.body.pose;
             pose.coords = pose.coords + body.displacement();
             pose.rotation = body.rotation;
             let shapes = placed_target_shapes(geometry, pose, anchor)?;
-            hard.replace(SweepTarget {
+            hard.to_mut().replace(SweepTarget {
                 contact: body.contact.clone(),
                 shapes,
             })?;
@@ -876,7 +1004,7 @@ pub fn advance_body_contacts(
             let mut pose = body.source.body.pose;
             pose.coords = pose.coords + displacement;
             pose.rotation = body.rotation;
-            projectile_targets.push(SweepTarget {
+            projectile_targets.to_mut().push(SweepTarget {
                 contact: body.contact.clone(),
                 shapes: placed_target_shapes(geometry, pose, anchor)?,
             })?;

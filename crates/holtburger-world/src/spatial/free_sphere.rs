@@ -1,17 +1,16 @@
-//! Bounded static-collision movement for unregistered spheres.
+//! Bounded collision-query movement for unregistered spheres.
 
 use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 
-use super::PhysicalCollisionFilter;
 use super::collision::{
-    CellTransitRequest, CollisionQueryPolicy, CollisionScene, MotionWaypoint,
-    MovementObstructionRequest, MovementRestrictionRequest, PlacementRequest,
-    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact,
-    anchor_point_to_cell_position, anchor_point_to_outdoor_position, landblock_key,
-    separating_displacement,
+    CellTransitRequest, CollisionQueryPolicy, MotionWaypoint, MovementObstructionRequest,
+    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, SpatialMembership,
+    SphereSweep, StaticContact, anchor_point_to_cell_position, anchor_point_to_outdoor_position,
+    landblock_key, separating_displacement,
 };
+use super::{PhysicalCollisionFilter, SphereCollisionQuery};
 
 /// Explicit safety budgets for one free-sphere displacement solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -125,7 +124,7 @@ pub enum FreeSphereOutcome {
 
 /// Solves one bounded free-sphere displacement without grounded behavior.
 pub fn solve_free_sphere(
-    scene: &CollisionScene,
+    scene: &dyn SphereCollisionQuery,
     config: FreeSphereConfig,
     request: FreeSphereRequest,
 ) -> Result<FreeSphereOutcome> {
@@ -136,8 +135,8 @@ pub fn solve_free_sphere(
 /// Force integration and physical response remain outside this cursor.
 #[derive(Clone)]
 pub(super) struct FreeSphereMotion<'a> {
-    /// Immutable environment used for every interval.
-    scene: &'a CollisionScene,
+    /// Immutable collision queries used for every interval.
+    scene: &'a dyn SphereCollisionQuery,
     /// Contact and geometric work limits for this solve.
     config: FreeSphereConfig,
     /// Original pose, collision policy, and direction used to choose the response normal.
@@ -160,7 +159,7 @@ pub(super) struct FreeSphereMotion<'a> {
 
 impl<'a> FreeSphereMotion<'a> {
     pub(super) fn prepare(
-        scene: &'a CollisionScene,
+        scene: &'a dyn SphereCollisionQuery,
         config: FreeSphereConfig,
         request: FreeSphereRequest,
     ) -> Result<Self> {
@@ -323,7 +322,7 @@ impl<'a> FreeSphereMotion<'a> {
 /// continuous motion to the returned placement must solve that leg independently with their
 /// already-committed collision envelope.
 pub fn settle_free_sphere(
-    scene: &CollisionScene,
+    scene: &dyn SphereCollisionQuery,
     config: FreeSphereConfig,
     body: FreeSphereState,
     filter: PhysicalCollisionFilter,
@@ -339,7 +338,7 @@ pub fn settle_free_sphere(
 
 /// Separates a stationary sphere under one explicit collision-coverage policy.
 pub fn settle_free_sphere_with_policy(
-    scene: &CollisionScene,
+    scene: &dyn SphereCollisionQuery,
     config: FreeSphereConfig,
     body: FreeSphereState,
     filter: PhysicalCollisionFilter,
@@ -425,20 +424,20 @@ pub(super) fn close_partial_motion(
 }
 
 fn movement_contacts(
-    scene: &CollisionScene,
+    scene: &dyn SphereCollisionQuery,
     sweep: SphereSweep,
     placement: &SpatialMembership,
     filter: PhysicalCollisionFilter,
     query_policy: CollisionQueryPolicy,
     unavailable_owner: &mut Option<Guid>,
 ) -> Result<Vec<StaticContact>> {
-    let obstruction = scene.movement_obstructions_with_policy(
+    let obstruction = scene.environment().movement_obstructions_with_policy(
         MovementObstructionRequest { sweep, placement },
         query_policy,
     )?;
     remember_unavailable_owner(unavailable_owner, obstruction.unavailable_owner);
     let mut contacts = obstruction.value;
-    let restriction = scene.movement_restrictions_with_policy(
+    let restriction = scene.environment().movement_restrictions_with_policy(
         MovementRestrictionRequest {
             sweep,
             placement,
@@ -448,20 +447,23 @@ fn movement_contacts(
     )?;
     remember_unavailable_owner(unavailable_owner, restriction.unavailable_owner);
     contacts.extend(restriction.value);
+    contacts.extend(scene.entity_contacts(sweep.anchor, sweep.end, sweep.radius, placement)?);
     Ok(contacts)
 }
 
 fn placement_contacts(
-    scene: &CollisionScene,
+    scene: &dyn SphereCollisionQuery,
     request: PlacementRequest<'_>,
     filter: PhysicalCollisionFilter,
     query_policy: CollisionQueryPolicy,
     unavailable_owner: &mut Option<Guid>,
 ) -> Result<Vec<StaticContact>> {
-    let placement_contacts = scene.placement_contacts_with_policy(request, query_policy)?;
+    let placement_contacts = scene
+        .environment()
+        .placement_contacts_with_policy(request, query_policy)?;
     remember_unavailable_owner(unavailable_owner, placement_contacts.unavailable_owner);
     let mut contacts = placement_contacts.value;
-    let restrictions = scene.placement_restrictions_with_policy(
+    let restrictions = scene.environment().placement_restrictions_with_policy(
         PlacementRestrictionRequest {
             anchor: request.anchor,
             center: request.center,
@@ -473,6 +475,12 @@ fn placement_contacts(
     )?;
     remember_unavailable_owner(unavailable_owner, restrictions.unavailable_owner);
     contacts.extend(restrictions.value);
+    contacts.extend(scene.entity_contacts(
+        request.anchor,
+        request.center,
+        request.radius,
+        request.placement,
+    )?);
     Ok(contacts)
 }
 
@@ -498,19 +506,21 @@ fn remember_collision_normal(
 }
 
 fn transit(
-    scene: &CollisionScene,
+    scene: &dyn SphereCollisionQuery,
     anchor: Guid,
     body: FreeSphereState,
     center: Vector3,
     query_policy: CollisionQueryPolicy,
     unavailable_owner: &mut Option<Guid>,
 ) -> Result<SpatialMembership> {
-    let query = scene.transit_cell_allow_uncovered(CellTransitRequest {
-        previous_cell: body.cell,
-        anchor,
-        center,
-        radius: body.radius,
-    })?;
+    let query = scene
+        .environment()
+        .transit_cell_allow_uncovered(CellTransitRequest {
+            previous_cell: body.cell,
+            anchor,
+            center,
+            radius: body.radius,
+        })?;
     if query_policy == CollisionQueryPolicy::RequireCollisionCoverage
         && let Some(owner) = query.unavailable_owner
     {
@@ -572,6 +582,7 @@ fn validate(config: FreeSphereConfig, radius: f32, displacement: Vector3) -> Res
 
 #[cfg(test)]
 mod tests {
+    use crate::spatial::CollisionScene;
     use std::collections::HashMap;
     use std::sync::Arc;
 

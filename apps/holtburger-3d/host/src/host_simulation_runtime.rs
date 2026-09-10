@@ -122,6 +122,8 @@ pub struct HostPhysicalBodyTick {
 pub struct HostPhysicalBodySceneSnapshot {
     /// Complete registered body state from the snapshot epoch.
     pub body: SpatialBody,
+    /// Entity geometry from the same body-store epoch; capture failure is explicit.
+    pub entity_collision: Result<Arc<holtburger_world::EntityCollisionSnapshot>, String>,
     /// Immutable collision topology paired with `scene_residency`.
     pub collision: Arc<CollisionScene>,
     /// Body placement relative to `collision`.
@@ -158,6 +160,8 @@ pub struct HostDynamicBodyTick {
 pub struct HostDynamicEntityCollectionTick {
     /// Stable-ID body publications from one bounded collection.
     pub bodies: Vec<HostDynamicBodyTick>,
+    /// Camera-demanded capture after commit; failure does not discard accepted simulation output.
+    pub entity_collision: Option<Result<Arc<holtburger_world::EntityCollisionSnapshot>, String>>,
     /// Body-local coverage rejections that did not prevent independent commits.
     pub coverage_rejections: Vec<HostPhysicalBodyCoverageRejection>,
     /// First-touch and end edges; silent refreshes are intentionally absent.
@@ -452,6 +456,7 @@ impl HostSimulationRuntime {
         &self,
         delta_seconds: f32,
         now: std::time::Instant,
+        capture_entity_queries: bool,
         mut input_for: impl FnMut(&SpatialBody) -> Result<holtburger_world::PhysicalBodyInput>,
     ) -> Result<HostDynamicEntityCollectionTick> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
@@ -524,7 +529,14 @@ impl HostSimulationRuntime {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let entity_collision = capture_entity_queries.then(|| {
+            state
+                .bodies
+                .entity_collision_snapshot()
+                .map_err(|error| format!("{error:#}"))
+        });
         Ok(HostDynamicEntityCollectionTick {
+            entity_collision,
             bodies: ticks,
             coverage_rejections,
             collision_reports: collection.collision_reports,
@@ -606,6 +618,10 @@ impl HostSimulationRuntime {
             physical.response.cell(),
         );
         Some(HostPhysicalBodySceneSnapshot {
+            entity_collision: state
+                .bodies
+                .entity_collision_snapshot()
+                .map_err(|error| format!("{error:#}")),
             body,
             collision,
             scene_residency,

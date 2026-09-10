@@ -313,6 +313,53 @@ impl CollisionScene {
             .value)
     }
 
+    /// Camera entity admission shares the static sweep's already-resolved spatial domains.
+    pub(crate) fn sweep_camera_sphere(
+        &self,
+        entities: &crate::spatial::EntityCollisionSnapshot,
+        excluded: SpatialBodyId,
+        request: StaticSphereSweepRequest,
+        policy: CollisionQueryPolicy,
+    ) -> anyhow::Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>> {
+        let traced = self.trace_static_sphere(request)?;
+        let mut earliest = traced.hit;
+        let end = request.end();
+        let extent = request.radius;
+        let minimum = holtburger_common::Vector3::new(
+            request.start.x.min(end.x) - extent,
+            request.start.y.min(end.y) - extent,
+            request.start.z.min(end.z) - extent,
+        );
+        let maximum = holtburger_common::Vector3::new(
+            request.start.x.max(end.x) + extent,
+            request.start.y.max(end.y) + extent,
+            request.start.z.max(end.z) + extent,
+        );
+        let ball = Ball::new(request.radius);
+        let moving = MovingSphereCast::new(&ball, request.start, request.displacement);
+        for id in entities.index.candidates(
+            Some(excluded),
+            request.anchor,
+            minimum,
+            maximum,
+            &traced.membership,
+        ) {
+            let target = &entities.targets[&id];
+            if !target.camera_solid {
+                continue;
+            }
+            for shape in target.shapes.iter() {
+                moving.update_collider_hit(shape, target.anchor, request.anchor, &mut earliest)?;
+            }
+        }
+        let fraction = earliest.map_or(1.0, |hit| hit.time_of_impact);
+        let accepted = self.finish_sphere_path(request, fraction, policy)?;
+        Ok(UncoveredCollisionQuery {
+            value: earliest,
+            unavailable_owner: accepted.unavailable_owner,
+        })
+    }
+
     /// Returns the earliest installed obstruction under one explicit coverage policy.
     pub fn sweep_static_sphere_with_policy(
         &self,

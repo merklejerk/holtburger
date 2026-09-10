@@ -15,8 +15,9 @@
 mod step;
 pub use step::{
     ContactBodyPath, ContactBodyUpdate, ContactCollectionUpdate, ContactImpactPoint,
-    ContactMotionSegment, ContactStepActuation, MOBILE_CONTACT_ANGULAR_CHORDS,
-    MOBILE_CONTACT_HARD_SLIDE_PASSES, advance_body_contact_collection, advance_body_contacts,
+    ContactMotionSegment, ContactStepActuation, FrozenContactTargets,
+    MOBILE_CONTACT_ANGULAR_CHORDS, MOBILE_CONTACT_HARD_SLIDE_PASSES,
+    advance_body_contact_collection, advance_body_contacts,
 };
 pub(crate) use step::{
     advance_body_contact_collection_without_reports, checked_recovery_destination,
@@ -256,19 +257,19 @@ struct PreparedBodyContact<'a> {
 
 /// Source facts retained while a mobile working shape changes during contact passes.
 #[derive(Debug, Clone)]
-struct ContactParticipant {
+pub(super) struct ContactParticipant {
     /// Normalized public identity, independent from state-derived physics policy.
-    player_collision: Option<crate::PlayerCollisionStatus>,
+    pub(super) player_collision: Option<crate::PlayerCollisionStatus>,
     /// Canonical identity used for stable pair order, hard queries, and publication.
-    body_id: SpatialBodyId,
+    pub(super) body_id: SpatialBodyId,
     /// Whether the producer retains this body as a target for other movers.
-    target_demand: LocalTargetDemand,
+    pub(super) target_demand: LocalTargetDemand,
     /// Existing directional collision semantics; reporting remains independently owned.
-    policy: EntityDynamicCollisionPolicy,
+    pub(super) policy: EntityDynamicCollisionPolicy,
     /// Proven collision domains; overlapping coordinates in disconnected EnvCells do not collide.
-    membership: SpatialMembership,
+    pub(super) membership: SpatialMembership,
     /// Body-owned exclusions used by hard-obstacle correction sweeps.
-    filter: super::PhysicalCollisionFilter,
+    pub(super) filter: super::PhysicalCollisionFilter,
 }
 
 /// Immutable source facts retained through contact preparation and working motion.
@@ -308,14 +309,7 @@ impl<'a> PreparedBodyContact<'a> {
                 if dynamic.activity == DynamicBodyActivity::Suspended {
                     return Ok(None);
                 }
-                ContactParticipant {
-                    player_collision: dynamic.collision.player_collision,
-                    body_id: body.id,
-                    target_demand: dynamic.demand.target,
-                    policy: dynamic.collision.dynamic_collision,
-                    membership: dynamic.placement.clone(),
-                    filter: physical.collision_filter,
-                }
+                ContactParticipant::from_dynamic(body, dynamic, physical.collision_filter)
             }
             // Movement-only bodies have no authored peer geometry or report owner. Their
             // response cell seeds the same checked sphere traversal used by entity movers.
@@ -428,6 +422,22 @@ impl<'a> PreparedBodyContact<'a> {
 }
 
 impl ContactParticipant {
+    /// Captures collision-only facts shared by live and frozen query preparation.
+    pub(super) fn from_dynamic(
+        body: &SpatialBody,
+        dynamic: &super::physical_body::DynamicBodyRuntimeState,
+        filter: super::PhysicalCollisionFilter,
+    ) -> Self {
+        Self {
+            player_collision: dynamic.collision.player_collision,
+            body_id: body.id,
+            target_demand: dynamic.demand.target,
+            policy: dynamic.collision.dynamic_collision,
+            membership: dynamic.placement.clone(),
+            filter,
+        }
+    }
+
     fn receives_response_from(&self, peer: &Self) -> bool {
         self.body_id != peer.body_id
             && peer.target_demand == LocalTargetDemand::Retained

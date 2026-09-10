@@ -7,8 +7,8 @@ use std::time::Instant;
 use holtburger_common::{Guid, Vector3};
 use holtburger_world::state::SelfJumpCapabilities;
 use holtburger_world::{
-    CollisionQueryError, ContactState, PhysicalBodyDefinition, PhysicalCollisionFilter,
-    SpatialBodyId, SpatialScene, StaticSurfaceRayRequest, WorldState,
+    CollisionQueryError, ContactState, EntityCollisionSnapshot, PhysicalBodyDefinition,
+    PhysicalCollisionFilter, SpatialBody, SpatialBodyId, StaticSurfaceRayRequest, WorldState,
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -156,7 +156,10 @@ struct PreciseJumpWork {
     evaluation_id: PreciseJumpEvaluationId,
     aim: PreciseJumpAimRequest,
     authority: PreciseJumpAuthority,
-    spatial_scene: SpatialScene,
+    /// Private launch state paired with the shared obstacle publication.
+    body: SpatialBody,
+    /// Immutable peer geometry shared with other queries of this world publication.
+    entities: Arc<EntityCollisionSnapshot>,
     peer_entity_generations: BTreeMap<SpatialBodyId, u16>,
     collision: Arc<SimulationSceneSnapshot>,
     start_time: Instant,
@@ -248,12 +251,29 @@ impl PreciseJumpRuntime {
             .checked_add(1)
             .expect("precise-jump work generation exhausted");
         let evaluation_id = self.allocate_evaluation_id();
+        let Some(body) = world
+            .scene
+            .body(SpatialBodyId::LocalPlayer(world.player.guid))
+            .cloned()
+        else {
+            return Some(self.immediate_evaluation(aim, PreciseJumpEvaluationStatus::SolverFailed));
+        };
+        let entities = match world.scene.entity_collision_snapshot() {
+            Ok(entities) => entities,
+            Err(error) => {
+                log::error!("precise-jump collision capture failed: {error:#}");
+                return Some(
+                    self.immediate_evaluation(aim, PreciseJumpEvaluationStatus::SolverFailed),
+                );
+            }
+        };
         let work = PreciseJumpWork {
             generation: self.next_generation,
             evaluation_id,
             aim,
             authority,
-            spatial_scene: world.scene.clone(),
+            body,
+            entities,
             peer_entity_generations: precise_jump_peer_entity_generations(world),
             collision,
             start_time: Instant::now(),
@@ -430,10 +450,11 @@ impl PreciseJumpRuntime {
             .entity_collision_snapshot()
             .map_err(|_| reject(PreciseJumpTransactionRejection::FreshResolutionRejected))?;
         let evaluation = diagnose_precise_jump(PreciseJumpPredictionRequest {
-            spatial_scene: &world.scene,
+            body: world
+                .scene
+                .body(SpatialBodyId::LocalPlayer(world.player.guid)),
             collision_scene: collision.scene.as_ref(),
             entity_collision: &entity_collision,
-            body_id: SpatialBodyId::LocalPlayer(world.player.guid),
             capabilities: &current.capabilities,
             target: &retained.target,
             budget: prediction_budget(),
@@ -608,21 +629,11 @@ fn evaluate(work: PreciseJumpWork) -> PreciseJumpCompletion {
         previous_cell: work.aim.previous_cell,
         filter: work.authority.collision_filter,
     };
-    let entity_collision = match work.spatial_scene.entity_collision_snapshot() {
-        Ok(snapshot) => snapshot,
-        Err(_) => {
-            return PreciseJumpCompletion {
-                generation: work.generation,
-                authority: work.authority.clone(),
-                retained: None,
-                evaluation: base_evaluation(&work, PreciseJumpEvaluationStatus::SolverFailed),
-            };
-        }
-    };
+    let entity_collision = &work.entities;
     let hit = match work
         .collision
         .scene
-        .cast_surface_ray(&entity_collision, ray, |body_id| {
+        .cast_surface_ray(entity_collision, ray, |body_id| {
             work.peer_entity_generations.contains_key(&body_id)
         }) {
         Ok(Some(hit)) => hit,
@@ -685,10 +696,9 @@ fn evaluate(work: PreciseJumpWork) -> PreciseJumpCompletion {
         }
     };
     let prediction = diagnose_precise_jump(PreciseJumpPredictionRequest {
-        spatial_scene: &work.spatial_scene,
+        body: Some(&work.body),
         collision_scene: work.collision.scene.as_ref(),
-        entity_collision: &entity_collision,
-        body_id: SpatialBodyId::LocalPlayer(work.authority.player),
+        entity_collision,
         capabilities: &work.authority.capabilities,
         target: &target,
         budget: prediction_budget(),

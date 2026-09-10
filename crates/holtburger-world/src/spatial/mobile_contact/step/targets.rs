@@ -13,6 +13,7 @@ use crate::spatial::bsp_query::CONTACT_EPSILON;
 
 /// Owns target geometry and its index together so accepted pose changes update both.
 /// Leaf IDs are stable vector slots; query results restore body identity order for hit ties.
+#[derive(Debug, Clone)]
 pub(super) struct HardTargets {
     /// Prepared geometry; existing slots never move when projectile targets are appended.
     bodies: Vec<SweepTarget>,

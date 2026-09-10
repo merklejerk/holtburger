@@ -220,6 +220,7 @@ void main() { outColor = vec4(vec3(texture(uDepth, vec4(uSample, 0.0, 0.75))), 1
 		);
 		const matrix = Mat4.identity();
 		const part = {
+			renderState: { translucency: 0, textureVelocity: [0, 0] as const },
 			frameInstance: {
 				sourceToLandblock: matrix,
 				color: { a: 1, b: 1, g: 1, r: 1 },
@@ -233,6 +234,7 @@ void main() { outColor = vec4(vec3(texture(uDepth, vec4(uSample, 0.0, 0.75))), 1
 					["padding", [part]],
 					["caster", [part]],
 				]),
+				0,
 			);
 			const pose = poses.get("caster");
 			targets.attachLayer(0);

@@ -68,6 +68,8 @@ export interface ArticulatedPose {
 
 /** Effect-owned render state for one authored rigid part. */
 export interface PartRenderState {
+	/** Object-owned U/V cycles per second, sampled by renderer frame preparation. */
+	readonly textureVelocity: readonly [number, number];
 	/** Retail translucency: zero is unchanged and one suppresses the part entirely. */
 	readonly translucency: number;
 }

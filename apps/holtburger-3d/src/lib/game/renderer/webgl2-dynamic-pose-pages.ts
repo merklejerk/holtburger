@@ -1,8 +1,9 @@
+import { textureScrollPhase } from "./texture-scroll-phase";
 import { writeMat4ToFloat32Array } from "../math/matrices";
 import type { ActiveDynamicPart } from "../systems/components";
 
-/** One matrix plus part color/opacity, stored as five RGBA32F texels per row. */
-export const DYNAMIC_POSE_TEXELS = 5;
+/** One matrix, part color/opacity, and base UV offset in six RGBA32F texels per row. */
+export const DYNAMIC_POSE_TEXELS = 6;
 const FLOATS_PER_PART = DYNAMIC_POSE_TEXELS * 4;
 
 /** Draw address shared by every pass selecting the same entity in one frame. */
@@ -17,7 +18,7 @@ interface DynamicPoseAddress {
 interface PosePage {
 	/** Immutable device allocation shared by all entity addresses on this page. */
 	readonly texture: WebGLTexture;
-	/** Retained matrix/color staging storage matching the page's maximum row capacity. */
+	/** Retained transform/color/UV staging storage matching the page's maximum row capacity. */
 	readonly data: Float32Array;
 	/** Current populated prefix, reset before packing the next frame. */
 	usedRows: number;
@@ -44,8 +45,9 @@ export class WebGL2DynamicPosePages<TKey extends string> {
 	upload(
 		entities: ReadonlyMap<
 			TKey,
-			readonly Pick<ActiveDynamicPart, "frameInstance">[]
+			readonly Pick<ActiveDynamicPart, "frameInstance" | "renderState">[]
 		>,
+		clockSeconds: number,
 	): void {
 		const addresses = new Map<TKey, DynamicPoseAddress>();
 		for (const page of this.#pages) page.usedRows = 0;
@@ -61,7 +63,7 @@ export class WebGL2DynamicPosePages<TKey extends string> {
 				page = this.#page(++pageIndex);
 			addresses.set(key, { texture: page.texture, firstRow: page.usedRows });
 			let offset = page.usedRows * FLOATS_PER_PART;
-			for (const { frameInstance } of parts) {
+			for (const { frameInstance, renderState } of parts) {
 				writeMat4ToFloat32Array(
 					frameInstance.sourceToLandblock,
 					page.data,
@@ -71,6 +73,12 @@ export class WebGL2DynamicPosePages<TKey extends string> {
 				page.data[offset + 17] = frameInstance.color.g;
 				page.data[offset + 18] = frameInstance.color.b;
 				page.data[offset + 19] = frameInstance.color.a;
+				const phase = textureScrollPhase(
+					renderState.textureVelocity,
+					clockSeconds,
+				);
+				page.data[offset + 20] = phase[0];
+				page.data[offset + 21] = phase[1];
 				offset += FLOATS_PER_PART;
 			}
 			page.usedRows += parts.length;

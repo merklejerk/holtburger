@@ -15,6 +15,7 @@ import {
 import { Mat4, Quat, Vec3 } from "../math/types";
 import { requireSceneNodeId } from "../scene/utils";
 import type { SceneNodeId } from "../scene";
+import type { PreparedBehaviorCommand } from "../behavior/prepared-behavior-command";
 import type { PartRenderState } from "./components";
 
 /** Retail schedules an `FPHook` only at or above this duration. */
@@ -33,6 +34,16 @@ interface TranslucencyRamp {
 	readonly end: number;
 	elapsedSeconds: number;
 	readonly start: number;
+}
+
+/** Object-owned effects for one rigid part, retired together with its layout. */
+interface PartEffectState {
+	/** Current committed translucency, also the baseline for whole-object writes. */
+	translucency: number;
+	/** Active authored transition, or null when the committed level is stationary. */
+	translucencyRamp: TranslucencyRamp | null;
+	/** U/V cycles per second, sampled against the shared renderer clock. */
+	textureVelocity: readonly [number, number];
 }
 
 interface EffectState {
@@ -55,8 +66,8 @@ interface EffectState {
 	 */
 	scale: number;
 	scaleRamp: ScaleRamp | null;
-	readonly partTranslucencies: number[];
-	readonly translucencyRamps: Array<TranslucencyRamp | null>;
+	/** Complete effects indexed by the installed authored part layout. */
+	readonly parts: PartEffectState[];
 }
 
 /** Render-cadence effect facts computed without exposing mutable effect state. */
@@ -114,11 +125,11 @@ export class EffectSystem implements EffectCommandPort {
 			scale: 1,
 			scaleRamp: null,
 			dirty: true,
-			partTranslucencies: Array.from(
-				{ length: partCount },
-				() => initialTranslucency,
-			),
-			translucencyRamps: Array.from({ length: partCount }, () => null),
+			parts: Array.from({ length: partCount }, () => ({
+				translucency: initialTranslucency,
+				translucencyRamp: null,
+				textureVelocity: [0, 0],
+			})),
 		});
 	}
 
@@ -127,7 +138,7 @@ export class EffectSystem implements EffectCommandPort {
 		if (!Number.isFinite(translucency) || translucency < 0 || translucency > 1)
 			throw new Error("Object translucency must be between zero and one.");
 		const state = this.#requiredState(nodeId);
-		state.partTranslucencies.fill(translucency);
+		for (const part of state.parts) part.translucency = translucency;
 		state.dirty = true;
 	}
 
@@ -181,7 +192,7 @@ export class EffectSystem implements EffectCommandPort {
 			state.omega.x !== 0 ||
 			state.omega.y !== 0 ||
 			state.omega.z !== 0 ||
-			state.translucencyRamps.some((ramp) => ramp !== null);
+			state.parts.some((part) => part.translucencyRamp !== null);
 		if (animating) state.dirty = true;
 		if (state.scaleRamp) {
 			state.scaleRamp.elapsedSeconds += stepSeconds;
@@ -200,23 +211,16 @@ export class EffectSystem implements EffectCommandPort {
 			delta,
 			state.committedOrientation,
 		);
-		for (
-			let partIndex = 0;
-			partIndex < state.translucencyRamps.length;
-			partIndex += 1
-		) {
-			const ramp = state.translucencyRamps[partIndex];
-			if (!ramp) continue;
+		for (const part of state.parts) {
+			const ramp = part.translucencyRamp;
+			if (ramp === null) continue;
 			ramp.elapsedSeconds += stepSeconds;
 			if (ramp.elapsedSeconds >= ramp.durationSeconds) {
-				state.partTranslucencies[partIndex] = ramp.end;
-				state.translucencyRamps[partIndex] = null;
-				continue;
+				part.translucency = ramp.end;
+				part.translucencyRamp = null;
+			} else {
+				part.translucency = sampleRamp(ramp, ramp.elapsedSeconds);
 			}
-			state.partTranslucencies[partIndex] = sampleRamp(
-				ramp,
-				ramp.elapsedSeconds,
-			);
 		}
 	}
 
@@ -302,18 +306,19 @@ export class EffectSystem implements EffectCommandPort {
 			requireSceneNodeId(target.targetId, "EffectSystem"),
 		);
 		state.dirty = true;
-		if (values.partIndex >= state.partTranslucencies.length)
+		const part = state.parts[values.partIndex];
+		if (part === undefined)
 			throw new Error(
 				`TransparentPart index ${values.partIndex} is out of range for active effect state.`,
 			);
 		this.#appliedCommandCount += 1;
 		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
-			state.partTranslucencies[values.partIndex] = values.end;
-			state.translucencyRamps[values.partIndex] = null;
+			part.translucency = values.end;
+			part.translucencyRamp = null;
 			return;
 		}
-		state.partTranslucencies[values.partIndex] = values.start;
-		state.translucencyRamps[values.partIndex] = {
+		part.translucency = values.start;
+		part.translucencyRamp = {
 			durationSeconds: values.durationSeconds,
 			elapsedSeconds: 0,
 			end: values.end,
@@ -321,7 +326,50 @@ export class EffectSystem implements EffectCommandPort {
 		};
 	}
 
-	/** Sample fractional visual state without committing time or emitting semantic hooks. */
+	/**
+	 * RETAIL DIVERGENCE: acclient.c:305404/305425 assigns rates globally by GfxObj ID.
+	 * We assign only this object's parts; other copies without hooks remain stationary.
+	 * Restoring retail ownership would couple independent objects and require shared retention.
+	 * Census 2026-09-10: 11 whole-object script hooks, 11 direct setup carriers, 13 graphics
+	 * assets; no animation or part-scoped hooks. The cell placement scan also found four direct
+	 * non-hook copies (01002A63 in 00F10125/126/138; 01004D3C in 2C31FFFE), which now stay still.
+	 * Generated scenery and server spawns were not included in that placement census.
+	 */
+	applyTextureVelocity(
+		target: BehaviorTarget,
+		command: Extract<
+			PreparedBehaviorCommand,
+			{ kind: "texture-velocity" | "texture-velocity-part" }
+		>,
+	): void {
+		const state = this.#requiredState(
+			requireSceneNodeId(target.targetId, "EffectSystem"),
+		);
+		let selected: readonly PartEffectState[] = state.parts;
+		if (command.kind === "texture-velocity-part") {
+			const part = state.parts[command.partIndex];
+			if (part === undefined)
+				throw new Error(
+					`TextureVelocityPart index ${command.partIndex} is out of range for active effect state.`,
+				);
+			selected = [part];
+		}
+		const velocity: readonly [number, number] = [
+			command.uSpeed,
+			command.vSpeed,
+		];
+		for (const part of selected) {
+			if (
+				part.textureVelocity[0] === velocity[0] &&
+				part.textureVelocity[1] === velocity[1]
+			)
+				continue;
+			part.textureVelocity = velocity;
+			state.dirty = true;
+		}
+		this.#appliedCommandCount += 1;
+	}
+
 	/**
 	 * Sample one state's presentation, interpolated across the shared clock's current sub-step.
 	 *
@@ -342,17 +390,16 @@ export class EffectSystem implements EffectCommandPort {
 			),
 		);
 		return {
-			partRenderStates: state.partTranslucencies.map(
-				(translucency, partIndex) => {
-					const ramp = state.translucencyRamps[partIndex];
-					return {
-						translucency:
-							ramp === null
-								? translucency
-								: sampleRamp(ramp, ramp.elapsedSeconds + fractionalSeconds),
-					};
-				},
-			),
+			partRenderStates: state.parts.map((part) => ({
+				textureVelocity: part.textureVelocity,
+				translucency:
+					part.translucencyRamp === null
+						? part.translucency
+						: sampleRamp(
+								part.translucencyRamp,
+								part.translucencyRamp.elapsedSeconds + fractionalSeconds,
+							),
+			})),
 			rootTransformModifier: multiplyMat4(
 				createRotationMat4(
 					multiplyQuaternion(delta, state.committedOrientation),

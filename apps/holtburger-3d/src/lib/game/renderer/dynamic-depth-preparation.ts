@@ -21,7 +21,10 @@ export type DynamicDepthPresentation = Pick<
 		/** Identity of the already-staged physical index generation. */
 		readonly appearance: VisibleDynamicPresentation["visual"]["appearance"];
 		/** Complete pose rows, including fully hidden parts that retain a dense selector. */
-		readonly parts: readonly Pick<ActiveDynamicPart, "frameInstance">[];
+		readonly parts: readonly Pick<
+			ActiveDynamicPart,
+			"frameInstance" | "renderState"
+		>[];
 	};
 };
 

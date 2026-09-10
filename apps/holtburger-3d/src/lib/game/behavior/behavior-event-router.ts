@@ -92,6 +92,14 @@ export interface BehaviorObservation {
 
 /** Persistent visual and material state. Widened only by proven commands, never speculatively. */
 export interface EffectCommandPort {
+	/** Assign object-owned part rates; rendering derives phase from the shared clock. */
+	applyTextureVelocity(
+		target: BehaviorTarget,
+		command: Extract<
+			PreparedBehaviorCommand,
+			{ kind: "texture-velocity" | "texture-velocity-part" }
+		>,
+	): void;
 	applySetOmega(target: BehaviorTarget, omega: Vec3Like): void;
 	applyTransparentPart(
 		target: BehaviorTarget,
@@ -334,14 +342,8 @@ export class BehaviorEventRouter {
 
 			case "texture-velocity":
 			case "texture-velocity-part":
-				// Decoded losslessly and deliberately unconsumed. The whole-object arm previously
-				// reported a distinct "applied at preparation" outcome, claiming a staging-time
-				// resolver carried it as a material fact — but that resolver had no callers, so the
-				// outcome was a lie and nothing ever scrolled. Both the resolver and the outcome
-				// are gone rather than left as vocabulary nothing produces. Binding it is a render-contract change with zero measured
-				// consumers: the workload authors none, and an archive census found no part-scoped
-				// hook anywhere. Reporting honestly is better than a resolved-looking no-op.
-				return "no-consumer";
+				this.#consumers.effects.applyTextureVelocity(target, command);
+				return mode === "initial-state" ? "folded-initial-state" : "executed";
 
 			case "replace-object":
 				// Intentionally inert, not merely unimplemented: retail has no `Execute` for hook

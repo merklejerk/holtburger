@@ -379,7 +379,10 @@ function selectionInput(
 	const sourceToLandblock = Mat4.identity();
 	sourceToLandblock.m41 = translationX;
 	const parts = [
-		{ frameInstance: { color: { a: 1, b: 1, g: 1, r: 1 }, sourceToLandblock } },
+		{
+			renderState: { translucency: 0, textureVelocity: [0, 0] as const },
+			frameInstance: { color: { a: 1, b: 1, g: 1, r: 1 }, sourceToLandblock },
+		},
 	];
 	const depths = new DynamicDepthPreparations(
 		() => ({
@@ -399,6 +402,7 @@ function selectionInput(
 			[PADDING_NODE_ID, parts],
 			[NODE_ID, parts],
 		]),
+		0,
 	);
 	if (selection === null)
 		throw new Error("Selection fixture produced no geometry.");

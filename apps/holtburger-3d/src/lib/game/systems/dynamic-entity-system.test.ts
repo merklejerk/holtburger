@@ -123,6 +123,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 			{ generation: installation.generation, targetId: behaviorTargetId(root) },
 			{ partIndex: 0, start: 0.4, end: 0.4, durationSeconds: 0 },
 		);
+		effects.applyTextureVelocity(
+			{ generation: installation.generation, targetId: behaviorTargetId(root) },
+			{ kind: "texture-velocity", uSpeed: 0.125, vSpeed: -0.25 },
+		);
 		const replacement = {
 			...base.source,
 			presentation: {
@@ -161,6 +165,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		system.publishPresentation([
 			{
 				...sample,
+				effects: effects.samplePresentation(root),
 				articulatedPose: {
 					authoredRootTransform: null,
 					partToObjectTransforms: [advancedPart],
@@ -171,6 +176,16 @@ describe("DynamicEntitySystem authored ownership", () => {
 		stage.commit();
 		stage.release();
 		const currentPresentation = system.getVisiblePresentation(root);
+		expect(
+			currentPresentation?.visual.parts[0]?.renderState.textureVelocity,
+		).toEqual([0.125, -0.25]);
+		expect(
+			effects.samplePresentation(root).partRenderStates[0]?.textureVelocity,
+		).toEqual([0.125, -0.25]);
+		expect(
+			system.getVisiblePresentation(sibling)?.visual.parts[0]?.renderState
+				.textureVelocity,
+		).toEqual([0, 0]);
 		expect(currentPresentation?.visual).not.toBe(previousPresentation?.visual);
 		expect(currentPresentation?.visual.layout.key).not.toBe(
 			previousPresentation?.visual.layout.key,
@@ -985,7 +1000,22 @@ describe("DynamicEntitySystem authored ownership", () => {
 			translucency: 0,
 		});
 		// Retail ignores later SetTranslucency writes while cloaked; it does not invent cloak alpha.
-		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
+		const cloakedSample = presentationSample(firstPrepared, 0.8);
+		system.publishPresentation([
+			{
+				...cloakedSample,
+				effects: {
+					...cloakedSample.effects,
+					partRenderStates: [
+						{ translucency: 0.8, textureVelocity: [0.125, 0] },
+					],
+				},
+			},
+		]);
+		expect(
+			system.getVisiblePresentation(firstNodeId)?.visual.parts[0]?.renderState
+				.textureVelocity,
+		).toEqual([0.125, 0]);
 		expect(
 			system.getVisiblePresentation(firstNodeId)?.visual.parts[0],
 		).toMatchObject({
@@ -1377,7 +1407,7 @@ function presentationSample(
 		effects: {
 			partRenderStates: Array.from(
 				{ length: animation.animation.partCount },
-				() => ({ translucency }),
+				() => ({ translucency, textureVelocity: [0, 0] as const }),
 			),
 			rootTransformModifier: Mat4.identity(),
 		},

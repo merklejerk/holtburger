@@ -26,6 +26,7 @@ function build(isLive = true) {
 		applyScale: vi.fn(),
 		applySetOmega: vi.fn(),
 		applyTransparentPart: vi.fn(),
+		applyTextureVelocity: vi.fn(),
 	};
 	const audio = {
 		playSound: vi.fn<
@@ -73,6 +74,17 @@ const SET_OMEGA: PreparedBehaviorCommand = {
 };
 
 describe("BehaviorEventRouter", () => {
+	it.each<PreparedBehaviorCommand>([
+		{ kind: "texture-velocity", uSpeed: 0.1, vSpeed: 0.1 },
+		{ kind: "texture-velocity-part", partIndex: 1, uSpeed: 0.1, vSpeed: 0 },
+	])("rejects a stale texture target before applying $kind", (command) => {
+		const { router, effects } = build(false);
+		expect(router.dispatch(command, TARGET, PROVENANCE, "live")).toBe(
+			"rejected-stale-target",
+		);
+		expect(effects.applyTextureVelocity).not.toHaveBeenCalled();
+	});
+
 	it("routes a persistent command and labels replay distinctly from live execution", () => {
 		const { effects, router } = build();
 

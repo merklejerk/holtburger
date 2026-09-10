@@ -1530,9 +1530,10 @@ export class DynamicEntitySystem<
 			if (!transform || !sampledRenderState) {
 				throw new Error("Validated dynamic sample became incomplete.");
 			}
-			if (!entity.presentationState.cloaked) {
-				part.renderState = sampledRenderState;
-			}
+			// Cloaking suppresses translucency hooks, not independent texture rates.
+			part.renderState = entity.presentationState.cloaked
+				? { ...sampledRenderState, translucency: part.renderState.translucency }
+				: sampledRenderState;
 			composeObjectPartTransform(
 				transform,
 				entity.rootScale,
@@ -1728,7 +1729,7 @@ function createActiveParts(
 			partIndex,
 			// Staging-only placeholder. The required effect sample replaces it before the owner
 			// can publish, including a nonzero object-translucency baseline.
-			renderState: { translucency: 0 },
+			renderState: { translucency: 0, textureVelocity: [0, 0] },
 		});
 	}
 	return parts;

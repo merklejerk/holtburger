@@ -3,6 +3,7 @@ import {
 	behaviorTargetId,
 	type BehaviorTarget,
 } from "../behavior/behavior-event-router";
+import { buildEffectRouter } from "../behavior/behavior-test-harness";
 import { Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import { EffectSystem } from "./effect-system";
@@ -41,6 +42,94 @@ function advance(effects: EffectSystem, elapsedSeconds: number): void {
 }
 
 describe("EffectSystem", () => {
+	it("folds part rates without sharing ownership or continually invalidating presentation", () => {
+		const effects = install();
+		const other = "scene-node:2" as SceneNodeId;
+		effects.install(other, 2, 0);
+		const { router } = buildEffectRouter(effects);
+		const provenance = {
+			assetId: "0x33000D34" as const,
+			authoredOrder: 0,
+			authoredPosition: 1,
+			producer: "physics-script" as const,
+		};
+		router.dispatch(
+			{ kind: "texture-velocity", uSpeed: 0.25, vSpeed: 0.5 },
+			TARGET,
+			provenance,
+			"initial-state",
+		);
+		router.dispatch(
+			{ kind: "texture-velocity-part", partIndex: 1, uSpeed: -0.1, vSpeed: 0 },
+			TARGET,
+			provenance,
+			"live",
+		);
+		expect(
+			effects
+				.samplePresentation(NODE_ID)
+				.partRenderStates.map((p) => p.textureVelocity),
+		).toEqual([
+			[0.25, 0.5],
+			[-0.1, 0],
+		]);
+		expect(
+			effects
+				.samplePresentation(other)
+				.partRenderStates.map((p) => p.textureVelocity),
+		).toEqual([
+			[0, 0],
+			[0, 0],
+		]);
+		expect(router.getObservations().map((o) => o.outcome)).toEqual([
+			"folded-initial-state",
+			"executed",
+		]);
+		advance(effects, 1);
+		expect(effects.needsPresentation(NODE_ID)).toBe(false);
+		effects.applyTextureVelocity(TARGET, {
+			kind: "texture-velocity-part",
+			partIndex: 1,
+			uSpeed: -0.1,
+			vSpeed: 0,
+		});
+		expect(effects.needsPresentation(NODE_ID)).toBe(false);
+		effects.applyObjectTranslucency(NODE_ID, 0.4);
+		expect(
+			effects.samplePresentation(NODE_ID).partRenderStates[1]?.textureVelocity,
+		).toEqual([-0.1, 0]);
+		effects.applyTextureVelocity(TARGET, {
+			kind: "texture-velocity",
+			uSpeed: 0,
+			vSpeed: 0,
+		});
+		expect(
+			effects
+				.samplePresentation(NODE_ID)
+				.partRenderStates.map((p) => p.textureVelocity),
+		).toEqual([
+			[0, 0],
+			[0, 0],
+		]);
+		effects.remove(NODE_ID);
+		effects.install(NODE_ID, 1, 0);
+		expect(effects.samplePresentation(NODE_ID).partRenderStates).toEqual([
+			{ translucency: 0, textureVelocity: [0, 0] },
+		]);
+	});
+
+	it("rejects a texture hook outside the installed part layout", () => {
+		const effects = install(1);
+		expect(() =>
+			effects.applyTextureVelocity(TARGET, {
+				kind: "texture-velocity-part",
+				partIndex: 1,
+				uSpeed: 1,
+				vSpeed: 1,
+			}),
+		).toThrow("TextureVelocityPart index 1 is out of range");
+	});
+
 	it("seeds every part from whole-object translucency before part commands", () => {
 		const effects = install(3, 0.5);
 		expect(translucencies(effects)).toEqual([0.5, 0.5, 0.5]);

@@ -54,7 +54,7 @@ export const OBJECT_TEXTURE_UNITS = {
 	base: 0,
 	palette: 1,
 	detail: 2,
-	/** Dense part poses; separate from fragment material and portal/shadow samplers. */
+	/** Per-entity part transforms, colors, and UV offsets, independent from shared materials. */
 	poses: 3,
 	/** Cold appearance records selected by the merged geometry material attribute. */
 	materials: 4,
@@ -158,6 +158,7 @@ ${fogDeclarations}
 ${WEBGL2_SCENE_LIGHTING_GLSL}
 
 out vec2 vTextureCoordinate;
+flat out vec2 vTextureOffset;
 out vec4 vInstanceColor;
 out vec3 vLighting;
 ${pssmDeclarations}
@@ -169,6 +170,7 @@ void main() {
 	vec3 landblockPosition = (${transform} * vec4(aPosition, 1.0)).xyz;
 	vec3 anchoredPosition = landblockPosition + uLandblockOffset;
 	vTextureCoordinate = aTextureCoordinate;
+	vTextureOffset = ${transformSource === "pose-table" ? "texelFetch(uPoses, ivec2(5, uFirstPoseRow + int(aPart)), 0).xy" : "vec2(0.0)"};
 	vInstanceColor = ${instanceColor};
 	// Retail's fixed-function pipeline lights meshes per vertex; the emissive term is added
 	// in the fragment stage where the per-draw surface luminosity lives.
@@ -308,13 +310,15 @@ uniform float uDetailTiling;
 ${fogDeclarations}
 
 in vec2 vTextureCoordinate;
+flat in vec2 vTextureOffset;
 in vec4 vInstanceColor;
 in vec3 vLighting;
 ${distanceFog ? "in float vViewerDistance;" : ""}
 out vec4 fragmentColor;
 
 vec2 sourceUv() {
-	return uWrapRepeat != 0 ? fract(vTextureCoordinate) : clamp(vTextureCoordinate, 0.0, 1.0);
+	vec2 coordinate = vTextureCoordinate + vTextureOffset;
+	return uWrapRepeat != 0 ? fract(coordinate) : clamp(coordinate, 0.0, 1.0);
 }
 
 vec2 pixelRectUv(vec2 source, vec4 rect, vec2 atlasSize) {
@@ -413,7 +417,7 @@ vec4 sampleMaterial() {
 	if (uMaterialKind == 1) {
 		vec4 direct = (
 			uWrapRepeat != 0
-				? sampleRepeatingPixelRect(uBase, vTextureCoordinate, uBaseRect)
+				? sampleRepeatingPixelRect(uBase, vTextureCoordinate + vTextureOffset, uBaseRect)
 				: texture(
 					uBase,
 					pixelRectUv(uv, uBaseRect, vec2(textureSize(uBase, 0)))

@@ -729,6 +729,14 @@ impl KinematicBoomController {
         }
     }
 
+    /// Retire a missing or discontinuous target route while preserving operator intent.
+    /// The next advance proves placement at its target seed instead of sweeping invented travel.
+    pub(crate) fn invalidate_target_path(&mut self) {
+        self.placement_state = KinematicBoomPlacementState::Unproven {
+            placement: self.camera(),
+        };
+    }
+
     /// Advances a complete fixed tick transaction over exact target path boundaries.
     pub fn advance(
         &mut self,
@@ -2568,6 +2576,52 @@ mod tests {
         assert_eq!(placement.value.cell, Some(cell));
         assert_eq!(placement.value.pose.landblock_id, cell);
         assert_eq!(placement.value.pose.coords, Vector3::new(201.0, -40.0, 2.0));
+    }
+
+    #[test]
+    fn target_discontinuity_reproves_placement_and_preserves_operator_requests() {
+        let mut controller = controller(64);
+        let scene = empty_scene();
+        settle_reach(&mut controller, &scene, sample());
+        let intent = KinematicBoomIntent {
+            sequence: 1,
+            view_direction: Vector3::new(0.0, 1.0, 0.0),
+            cumulative_zoom_displacement: 1.0,
+        };
+        controller.accept_intent(intent).unwrap();
+        let requested = clearance(2, 0.4);
+        controller.request_clearance(requested).unwrap();
+        let desired_reach = controller.desired_reach();
+        controller.invalidate_target_path();
+        assert!(controller.committed_clearance().is_none());
+        let mut destination = sample();
+        destination.visual_pivot.coords.x += 20.0;
+        destination.target_seed.placement.pose.coords.x += 20.0;
+        let outcome = controller
+            .advance(&scene, 1.0 / 60.0, &[destination])
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            KinematicBoomOutcome::Advanced {
+                advance: KinematicBoomAdvance::Reseeded { .. },
+                ..
+            }
+        ));
+        assert!(
+            placement_distance(
+                controller.camera().pose,
+                destination.target_seed.placement.pose
+            )
+            .unwrap()
+                < 1e-6
+        );
+        assert_eq!(
+            controller.camera().cell,
+            destination.target_seed.placement.cell
+        );
+        assert_eq!(controller.committed_clearance(), Some(requested));
+        assert_eq!(controller.desired_reach(), desired_reach);
+        assert_eq!(controller.intent, intent);
     }
 
     #[test]

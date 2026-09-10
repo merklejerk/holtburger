@@ -5,6 +5,8 @@
 //! path to the independent camera worker. The host forwards semantic inputs and receives a
 //! serializable path; it never owns a second body or collision scene.
 
+mod target_playback;
+
 use crate::placed_motion::present_placed_motion_pose;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,10 +32,8 @@ use crate::kinematic_boom::{
     KinematicBoomUpdateAcceptance, interpolate_pose, resolve_camera_pivot_offset,
     serialize_kinematic_boom_path, standard_kinematic_boom_profile, stationary_kinematic_boom_path,
 };
-use crate::{
-    DynamicEntityHostTime, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
-    DynamicEntityTickBatch,
-};
+use crate::{DynamicEntityPlacementAdvanceKind, DynamicEntityTickBatch};
+use target_playback::{TargetPlayback, TargetTravel, TargetUpdate};
 
 /// Renderer-authored camera registration request.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -380,12 +380,12 @@ struct CameraTargetInput {
 
 /// Minimal physical target data needed by the camera controller.
 struct CameraBodyInput {
-    /// Current accepted root placement, also used when a published path was already consumed.
+    /// Latest authoritative root placement, used to detect and recover discontinuities.
     pose: WorldPosition,
     /// Absent while physical content is still being prepared.
     definition: Option<PhysicalBodyDefinition>,
-    /// Accepted travel and its existing publication instant; consumed once per camera instance.
-    travel: Option<(DynamicEntityHostTime, DynamicEntityPlacedPath)>,
+    /// Latest movement publication: timed travel or an explicit discontinuity.
+    update: Option<TargetUpdate>,
 }
 
 impl ClientCameraSceneInput {
@@ -400,24 +400,29 @@ impl ClientCameraSceneInput {
                 .scene
                 .body(SpatialBodyId::LocalPlayer(identity.0))
                 .map(|body| {
-                    let travel = batch.and_then(|batch| {
+                    let update = batch.and_then(|batch| {
                         batch
                             .advances
                             .iter()
                             .find(|advance| {
                                 advance.entity.identity.guid == identity.0
                                     && advance.entity.generation == identity.1
-                                    && matches!(
-                                        advance.kind,
-                                        DynamicEntityPlacementAdvanceKind::Integrated
-                                    )
                             })
-                            .map(|advance| (batch.host_time, advance.path.clone()))
+                            .map(|advance| match advance.kind {
+                                DynamicEntityPlacementAdvanceKind::Integrated => {
+                                    TargetUpdate::Travel(TargetTravel {
+                                        instant: batch.host_time,
+                                        seconds: batch.duration_ms / 1_000.0,
+                                        path: Arc::new(advance.path.clone()),
+                                    })
+                                }
+                                _ => TargetUpdate::Reset(batch.host_time),
+                            })
                     });
                     CameraBodyInput {
                         pose: body.pose,
                         definition: body.physical.as_ref().map(|physical| physical.definition),
-                        travel,
+                        update,
                     }
                 });
             CameraTargetInput { identity, body }
@@ -470,8 +475,8 @@ struct ActiveCamera {
     pivot_offset: Vector3,
     /// Parent-driven target sphere whose topology is reconciled by the shared spatial solver.
     target_body: ChildSpatialBody,
-    /// Prevents an independent camera tick from replaying already consumed target travel.
-    consumed_travel: Option<DynamicEntityHostTime>,
+    /// Bounded, publication-fed parent travel consumed at camera cadence.
+    target_playback: TargetPlayback,
     sequence: u64,
 }
 
@@ -643,6 +648,17 @@ impl ClientCameraRuntime {
         self.pending = None;
     }
 
+    /// Preserve travel before a later world publication can replace the worker input.
+    pub(super) fn observe_target(&mut self, input: &ClientCameraSceneInput) {
+        if let Some(active) = self.active.as_mut()
+            && let Some(body) = input.body(active.identity)
+        {
+            active
+                .target_playback
+                .observe(body.pose, body.update.as_ref());
+        }
+    }
+
     /// Advances against a published query view without reading mutable world state.
     pub(super) fn advance(
         &mut self,
@@ -671,32 +687,30 @@ impl ClientCameraRuntime {
             .body(active.identity)
             .context("client camera target body is unavailable")
             .and_then(|body| {
-                if let Some((instant, path)) = body
-                    .travel
-                    .as_ref()
-                    .filter(|(instant, _)| active.consumed_travel != Some(*instant))
-                {
-                    // Even a failed traversal must not be replayed on every camera tick.
-                    active.consumed_travel = Some(*instant);
-                    target_samples_from_dynamic_path(
-                        collision.environment.as_ref(),
-                        path,
-                        &mut active.target_body,
-                        active.pivot_offset,
-                    )
-                } else {
-                    target_sample_from_pose(
-                        collision.environment.as_ref(),
-                        body.pose,
-                        &mut active.target_body,
-                        active.pivot_offset,
-                    )
-                    .map(|sample| vec![sample])
+                active
+                    .target_playback
+                    .observe(body.pose, body.update.as_ref());
+                if let Some(pose) = active.target_playback.take_reseed() {
+                    active.target_body =
+                        ChildSpatialBody::new(active.target_body.definition(), pose);
+                    active.controller.invalidate_target_path();
                 }
+                let (initial, waypoints) =
+                    active.target_playback.advance(duration.as_secs_f64())?;
+                target_samples_from_parent_path(
+                    collision.environment.as_ref(),
+                    initial,
+                    &waypoints,
+                    &mut active.target_body,
+                    active.pivot_offset,
+                )
             });
         let samples = match samples {
             Ok(samples) => samples,
             Err(_) => {
+                if let Some(body) = input.body(active.identity) {
+                    active.target_playback.recover(body.pose);
+                }
                 return project_camera_failure(
                     active,
                     duration_ms,
@@ -721,6 +735,9 @@ impl ClientCameraRuntime {
         let outcome = match active.controller.advance(query, duration_seconds, &samples) {
             Ok(outcome) => outcome,
             Err(_) => {
+                if let Some(body) = input.body(active.identity) {
+                    active.target_playback.recover(body.pose);
+                }
                 return project_camera_failure(
                     active,
                     duration_ms,
@@ -731,6 +748,13 @@ impl ClientCameraRuntime {
             }
         };
         let tick = project_camera_outcome(active, initial_visual_pivot, duration_ms, outcome)?;
+        if matches!(
+            tick,
+            ClientCameraTick::Held { .. } | ClientCameraTick::Fallback { .. }
+        ) && let Some(body) = input.body(active.identity)
+        {
+            active.target_playback.recover(body.pose);
+        }
         Ok(Some(tick))
     }
 
@@ -810,7 +834,10 @@ impl ClientCameraRuntime {
             target_sphere_role: sphere.role,
             pivot_offset,
             target_body,
-            consumed_travel: None,
+            target_playback: TargetPlayback::new(
+                body.pose,
+                body.update.as_ref().map(TargetUpdate::instant),
+            ),
             sequence: 0,
         });
         self.pending = None;
@@ -886,22 +913,14 @@ fn selected_sphere(definition: PhysicalBodyDefinition) -> SelectedSphere {
         })
 }
 
-fn target_samples_from_dynamic_path(
+fn target_samples_from_parent_path(
     scene: &holtburger_world::CollisionScene,
-    path: &DynamicEntityPlacedPath,
+    initial: WorldPosition,
+    parent_waypoints: &[ChildSpatialBodyWaypoint],
     target_body: &mut ChildSpatialBody,
     pivot_offset: Vector3,
 ) -> Result<Vec<KinematicBoomTargetSample>> {
-    let parent_waypoints = path
-        .legs
-        .iter()
-        .map(|leg| ChildSpatialBodyWaypoint {
-            parent_pose: leg.end.pose,
-            end_fraction: leg.end_fraction,
-        })
-        .collect::<Vec<_>>();
-    let child_path =
-        target_body.reconcile_parent_path(scene, path.initial.pose, &parent_waypoints)?;
+    let child_path = target_body.reconcile_parent_path(scene, initial, parent_waypoints)?;
     let samples = child_path
         .legs()
         .iter()
@@ -913,7 +932,12 @@ fn target_samples_from_dynamic_path(
             )?;
             Ok(KinematicBoomTargetSample {
                 end_fraction: leg.end_fraction(),
-                visual_pivot: visual_pivot_at_fraction(path, leg.end_fraction(), pivot_offset)?,
+                visual_pivot: visual_pivot_at_fraction(
+                    initial,
+                    parent_waypoints,
+                    leg.end_fraction(),
+                    pivot_offset,
+                )?,
                 target_seed: KinematicBoomTargetSeed {
                     placement: KinematicBoomPlacement {
                         pose,
@@ -965,27 +989,27 @@ fn target_sample_from_pose(
 }
 
 fn visual_pivot_at_fraction(
-    path: &DynamicEntityPlacedPath,
+    initial: WorldPosition,
+    waypoints: &[ChildSpatialBodyWaypoint],
     fraction: f32,
     pivot_offset: Vector3,
 ) -> Result<WorldPosition> {
     let mut start_fraction = 0.0;
-    let mut start = path.initial.pose;
-    for leg in &path.legs {
-        if fraction <= leg.end_fraction {
+    let mut start = initial;
+    for leg in waypoints {
+        if fraction == leg.end_fraction {
+            return Ok(visual_pivot(leg.parent_pose, pivot_offset));
+        }
+        if fraction < leg.end_fraction {
             let span = leg.end_fraction - start_fraction;
-            let local_fraction = if span > 0.0 {
-                (fraction - start_fraction) / span
-            } else {
-                1.0
-            };
+            let local_fraction = (fraction - start_fraction) / span;
             return Ok(visual_pivot(
-                interpolate_pose(start, leg.end.pose, local_fraction)?,
+                interpolate_pose(start, leg.parent_pose, local_fraction)?,
                 pivot_offset,
             ));
         }
         start_fraction = leg.end_fraction;
-        start = leg.end.pose;
+        start = leg.parent_pose;
     }
     anyhow::bail!("client camera target fraction is outside the accepted parent path")
 }
@@ -1201,15 +1225,175 @@ mod tests {
     use crate::client::ClientState;
     use crate::client::builder::build_test_client;
     use crate::{SimulationSceneInterest, SimulationSceneOwnerAvailability};
-    use holtburger_common::Sphere;
+    use holtburger_common::{Plane, Sphere};
     use holtburger_content::{
-        CellVolume, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
-        TerrainCollisionSurface,
+        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockColliders,
+        LandblockCollisionAsset, LandblockPlacement, TerrainCollisionSurface,
     };
     use holtburger_world::{
         CollisionScene, FreeSphereConfig, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
         PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
     };
+
+    #[test]
+    fn partial_parent_travel_commits_the_child_portal_only_when_crossed() {
+        let cell = Guid(0x10000100);
+        let initial = WorldPosition {
+            landblock_id: cell,
+            coords: Vector3::new(11.0, 10.0, 4.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        let mut end = initial;
+        end.landblock_id = Guid(0x10000001);
+        end.coords.x = 9.0;
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0x1000ffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
+                        cell_selector: 0x100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: holtburger_common::Quaternion::identity(),
+                        },
+                        planes: vec![Plane {
+                            normal: Vector3::new(1.0, 0.0, 0.0),
+                            d: -10.0,
+                        }],
+                        portals: vec![CellCollisionPortal {
+                            plane: Plane {
+                                normal: Vector3::new(1.0, 0.0, 0.0),
+                                d: -10.0,
+                            },
+                            positive_side: true,
+                            target: CellCollisionPortalTarget::Outdoor,
+                            outdoor_building: None,
+                        }],
+                    }],
+                ),
+            })
+            .unwrap();
+        let point = |pose| crate::DynamicEntityPathPoint {
+            pose,
+            spatial_membership: crate::DynamicEntitySpatialMembership {
+                reaches_outdoors: true,
+                reached_env_cell_ids: vec![cell],
+            },
+        };
+        let seconds = 0.03;
+        let update = TargetUpdate::Travel(TargetTravel {
+            instant: crate::DynamicEntityHostTime::new(seconds).unwrap(),
+            seconds,
+            path: Arc::new(crate::DynamicEntityPlacedPath {
+                initial: point(initial),
+                legs: vec![crate::DynamicEntityPathLeg {
+                    end_fraction: 1.0,
+                    end: point(end),
+                }],
+            }),
+        });
+        let mut playback = TargetPlayback::new(initial, None);
+        playback.observe(end, Some(&update));
+        let mut child = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(Vector3::zero(), 0.1).unwrap(),
+            initial,
+        );
+        let (start, waypoints) = playback.advance(seconds * 0.25).unwrap();
+        let samples =
+            target_samples_from_parent_path(&scene, start, &waypoints, &mut child, Vector3::zero())
+                .unwrap();
+        assert_eq!(child.committed_cell(), Some(cell));
+        assert_eq!(
+            samples.last().unwrap().target_seed.placement.cell,
+            Some(cell)
+        );
+        let (start, waypoints) = playback.advance(seconds * 0.5).unwrap();
+        let samples =
+            target_samples_from_parent_path(&scene, start, &waypoints, &mut child, Vector3::zero())
+                .unwrap();
+        assert_eq!(child.committed_cell(), None);
+        assert_eq!(samples.last().unwrap().target_seed.placement.cell, None);
+        assert!((samples.last().unwrap().visual_pivot.coords.x - 9.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn camera_preserves_source_speed_across_independent_service_phases() {
+        // These deliberately incommensurate test clocks reproduce the original cadence defect.
+        let source_ms = 30_u64;
+        let service_ms = 16_u64;
+        let source_speed = 5.0_f32;
+        for phase in [0_u64, 7, 15] {
+            let (client, collision, batch) = super::super::tests::floor_contact_publication();
+            let mut camera = registered_camera(&client.world);
+            let mut input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+            camera
+                .advance(&input, Duration::from_millis(service_ms))
+                .unwrap();
+            let base = input.target.as_ref().unwrap().body.as_ref().unwrap().pose;
+            let mut last_publication = 0;
+            let mut previous_z = camera
+                .active
+                .as_ref()
+                .unwrap()
+                .controller
+                .visual_pivot()
+                .coords
+                .z;
+            for now in (phase..1200).step_by(service_ms as usize) {
+                let publication = now / source_ms + 1;
+                if publication != last_publication {
+                    let mut path = batch.advances[0].path.clone();
+                    let mut start = base;
+                    start.coords.z +=
+                        (publication - 1) as f32 * source_speed * source_ms as f32 / 1000.0;
+                    let mut end = base;
+                    end.coords.z += publication as f32 * source_speed * source_ms as f32 / 1000.0;
+                    path.initial.pose = start;
+                    path.legs.truncate(1);
+                    path.legs[0].end_fraction = 1.0;
+                    path.legs[0].end.pose = end;
+                    let body = input.target.as_mut().unwrap().body.as_mut().unwrap();
+                    body.pose = end;
+                    body.update = Some(TargetUpdate::Travel(TargetTravel {
+                        instant: crate::DynamicEntityHostTime::new(
+                            publication as f64 * source_ms as f64 / 1000.0,
+                        )
+                        .unwrap(),
+                        seconds: source_ms as f64 / 1000.0,
+                        path: Arc::new(path),
+                    }));
+                    camera.observe_target(&input);
+                    last_publication = publication;
+                }
+                let tick = camera
+                    .advance(&input, Duration::from_millis(service_ms))
+                    .unwrap()
+                    .unwrap();
+                assert!(matches!(tick, ClientCameraTick::Advanced { .. }));
+                let z = camera
+                    .active
+                    .as_ref()
+                    .unwrap()
+                    .controller
+                    .visual_pivot()
+                    .coords
+                    .z;
+                // After the existing vertical filter settles, the camera must not alternate
+                // between near-stationary and double-speed output as publications arrive.
+                if now > 600 {
+                    let speed = (z - previous_z) / (service_ms as f32 / 1000.0);
+                    assert!(
+                        (speed - source_speed).abs() < 1.0,
+                        "phase={phase} now={now} speed={speed}"
+                    );
+                }
+                previous_z = z;
+            }
+        }
+    }
 
     #[test]
     fn boom_follows_player_entity_exclusion_without_restarting_the_camera() {
@@ -1320,15 +1504,31 @@ mod tests {
         let (client, collision, batch) = super::super::tests::floor_contact_publication();
         let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), Some(&batch));
         let body = input.target.as_ref().unwrap().body.as_ref().unwrap();
-        let (_, path) = body.travel.as_ref().unwrap();
+        let TargetUpdate::Travel(travel) = body.update.as_ref().unwrap() else {
+            panic!("expected integrated travel");
+        };
+        let path = travel.path.as_ref();
         assert_eq!(path, &batch.advances[0].path);
         let mut child = ChildSpatialBody::new(
             ChildSpatialBodyDefinition::new(Vector3::zero(), 0.1).unwrap(),
             path.initial.pose,
         );
-        let samples =
-            target_samples_from_dynamic_path(&collision.scene, path, &mut child, Vector3::zero())
-                .unwrap();
+        let waypoints = path
+            .legs
+            .iter()
+            .map(|leg| ChildSpatialBodyWaypoint {
+                parent_pose: leg.end.pose,
+                end_fraction: leg.end_fraction,
+            })
+            .collect::<Vec<_>>();
+        let samples = target_samples_from_parent_path(
+            &collision.scene,
+            path.initial.pose,
+            &waypoints,
+            &mut child,
+            Vector3::zero(),
+        )
+        .unwrap();
         for leg in &path.legs {
             let sample = samples
                 .iter()

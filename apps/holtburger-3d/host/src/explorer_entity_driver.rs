@@ -360,6 +360,8 @@ pub struct DatExplorerEntityContentPreparer {
     /// `ContentRepository::read_asset` parses on every call, so the immutable table is retained
     /// once here rather than re-decoded per spawn. This is retained content, not entity state.
     char_gen: OnceLock<Arc<CharGen>>,
+    /// Shared animation decoding for physical content preparation.
+    collision_decode_cache: holtburger_content::ContentDecodeCache,
 }
 
 impl DatExplorerEntityContentPreparer {
@@ -368,6 +370,7 @@ impl DatExplorerEntityContentPreparer {
         Self {
             content,
             char_gen: OnceLock::new(),
+            collision_decode_cache: holtburger_content::ContentDecodeCache::new(),
         }
     }
 }
@@ -385,7 +388,7 @@ impl ExplorerEntityContentPreparer for DatExplorerEntityContentPreparer {
         &self,
         definition: &DynamicEntityDefinition,
     ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
-        prepare_dynamic_entity_physics(definition, &self.content)
+        prepare_dynamic_entity_physics(definition, &self.content, &self.collision_decode_cache)
     }
 
     fn char_gen(&self) -> Result<Arc<CharGen>, ExplorerAppearanceContentError> {
@@ -1339,8 +1342,6 @@ mod tests {
         Prepares,
         /// Generic DAT/content failure.
         FailsContent,
-        /// The measured WCID 52077 boundary: a default animation moves physics-BSP parts.
-        FailsAnimatedPhysicsBsp,
     }
 
     struct FixtureContent {
@@ -1382,14 +1383,6 @@ mod tests {
                         wcid: definition.identity.wcid,
                         resource_did: definition.content.setup_did,
                         source: anyhow!("injected physical preparation failure"),
-                    });
-                }
-                FixturePhysical::FailsAnimatedPhysicsBsp => {
-                    return Err(DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp {
-                        wcid: definition.identity.wcid,
-                        setup_did: definition.content.setup_did,
-                        animation_did: 0x0300_0227,
-                        moving_part_indices: vec![3],
                     });
                 }
             }
@@ -1450,6 +1443,7 @@ mod tests {
                 ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     setup_radius: 0.5,
+                    collision_animations: Default::default(),
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),
@@ -1992,71 +1986,6 @@ mod tests {
             error,
             ExplorerEntityDriverError::Runtime(ExplorerEntityRuntimeError::NotRegistered { .. })
         ));
-    }
-
-    /// The measured WCID 52077 boundary. Moving physics-BSP geometry has no supported target
-    /// representation, so physical allocation must be refused at both entry points while the
-    /// template stays a valid pose-only visual.
-    #[test]
-    fn animated_physics_bsp_rejects_physical_allocation_but_remains_a_valid_visual() {
-        let (entities, driver) = driver(
-            vec![template(52077)],
-            FixturePhysical::FailsAnimatedPhysicsBsp,
-        );
-
-        let simulated = driver
-            .spawn_by_wcid(request(52077, ExplorerPhysicalMode::Integrated))
-            .unwrap_err();
-        assert!(
-            matches!(
-                simulated,
-                ExplorerEntityDriverError::Preparation(
-                    DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp { wcid, .. }
-                ) if wcid == 52077
-            ),
-            "simulated spawn must name the moving physics-BSP reason, got {simulated:?}"
-        );
-        assert!(
-            entities.snapshot().unwrap().is_empty(),
-            "a rejected solver spawn must not leave a registry or body record"
-        );
-
-        // The same template still realizes as a pose-only entity: the rejection is about local
-        // physical simulation, not about the object existing or animating.
-        let visual = driver
-            .spawn_by_wcid(request(52077, ExplorerPhysicalMode::PoseOnly))
-            .unwrap();
-        assert_eq!(
-            visual.body.participation,
-            holtburger_world::PhysicalBodyParticipation::PoseOnly
-        );
-        assert_eq!(entities.snapshot().unwrap().len(), 1);
-
-        // Later solver enablement rejects with the same typed reason and leaves the live pose-only
-        // entity untouched, so a failed upgrade cannot strand a half-physical instance.
-        let upgrade = driver
-            .replace_physics_state(
-                visual.instance.definition.identity.guid,
-                visual.instance.generation,
-                PhysicsState::GRAVITY,
-                ExplorerPhysicalMode::Integrated,
-            )
-            .unwrap_err();
-        assert!(
-            matches!(
-                upgrade,
-                ExplorerEntityDriverError::Preparation(
-                    DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp { wcid, .. }
-                ) if wcid == 52077
-            ),
-            "later solver enablement must reject for the same reason, got {upgrade:?}"
-        );
-        let survivor = entities.snapshot().unwrap();
-        assert_eq!(survivor.len(), 1, "the pose-only entity must survive");
-        assert_eq!(
-            survivor[0].input.placement.world().unwrap().participation,
-            holtburger_world::PhysicalBodyParticipation::PoseOnly
-        );
     }
 
     /// The White Rabbit case: a weenie wearing nothing paints itself through its own

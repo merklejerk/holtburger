@@ -531,6 +531,8 @@ pub(crate) struct DynamicBodyRuntimeState {
     pub(crate) object_scale: f32,
     /// Prepared target geometry and effective directional collision policy.
     pub(crate) collision: DynamicBodyCollisionDefinition,
+    /// Current validated collision-part poses, shared immutably by snapshots.
+    pub(crate) collision_poses: super::dynamic_body::CollisionPartPoses,
     /// Producer-owned target and integration demand consumed without reinterpretation.
     pub(crate) demand: LocalPhysicalDemand,
     /// Solver-owned activity, independent from semantic and presentation state.
@@ -655,7 +657,7 @@ impl PhysicalBodyState {
         collision_filter: PhysicalCollisionFilter,
         cell: Option<Guid>,
     ) -> Self {
-        let (definition, demand, object_scale) = configuration.into_parts();
+        let (definition, demand, object_scale, collision_poses) = configuration.into_parts();
         let DynamicPhysicalBodyDefinition {
             movement,
             response_policy,
@@ -668,6 +670,7 @@ impl PhysicalBodyState {
         state.dynamic = Some(DynamicBodyRuntimeState {
             unit_movement: movement,
             object_scale,
+            collision_poses,
             collision: entity_collision,
             demand,
             activity: if demand.integration == LocalIntegrationDemand::Eligible {

@@ -1,5 +1,6 @@
 pub mod active_region;
 pub mod character_gen;
+pub mod collision_pose;
 pub mod decode_cache;
 pub mod generated_scenery;
 pub mod interior;

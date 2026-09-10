@@ -15,6 +15,7 @@ use crate::{
     SpatialSampleMode, WorldBootstrap,
 };
 
+use crate::motion::AuthoredCollisionPose;
 use crate::state::motion_resolution::test_support::{
     FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
 };
@@ -27,11 +28,16 @@ use holtburger_common::properties::{
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ParentLocation, Placement, Quaternion,
 };
+use holtburger_content::collision_pose::CollisionPoseLibrary;
 use holtburger_content::{
     ColliderScale, CollisionBall, CollisionShape, MotionHook, MotionHookDirection,
     MotionHookEffect, MotionSequenceCatalog, SoulEmoteCatalog,
 };
-use holtburger_dat::file_type::{MotionTable, SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{
+    Animation, MotionTable, SkillTable, SpellTable, XpTable, animation::AnimationFlags,
+    setup_model::AnimationFrame,
+};
+use holtburger_dat::graphics::Frame;
 use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
@@ -3651,6 +3657,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
             ),
             target_geometry: Arc::new(crate::PreparedEntityTargetGeometry {
                 setup_radius: 0.5,
+                collision_animations: Default::default(),
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
                 fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
@@ -3776,6 +3783,172 @@ fn authored_ethereal_tick(guid: Guid, ethereal: bool) -> AuthoredBodyMotionTick 
         },
     });
     AuthoredBodyMotionTick { guid, tick }
+}
+
+#[test]
+fn solidification_uses_published_part_pose_and_preserves_it_through_retry() {
+    let mut state = WorldState::synthetic();
+    let door = Guid(0x7000_0101);
+    let peer = Guid(0x7000_0102);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xda55_0020),
+        coords: Vector3::new(96.0, 96.0, 1.0),
+        rotation: Quaternion::identity(),
+    };
+    state.add_entity(Entity::new(door, "Door".to_owned(), pose));
+    state.add_entity(Entity::new(
+        peer,
+        "Peer".to_owned(),
+        WorldPosition {
+            coords: pose.coords + Vector3::new(0.75, 0.0, 0.0),
+            ..pose
+        },
+    ));
+    state.entities.get_mut(door).unwrap().physics.reconcile(
+        crate::resolve_effective_entity_physics_state(PhysicsState::HAS_PHYSICS_BSP),
+    );
+    let base = set_state_dynamic_definition();
+    let mut definition = base.definition().clone();
+    let mut geometry = (*definition.entity_collision.target_geometry).clone();
+    // A round part isolates authored placement from mesh-specific contact behavior.
+    geometry.physics_bsp_parts = vec![crate::PreparedEntityBspPart {
+        part_index: 0,
+        gfx_obj_did: 0x0100_0001,
+        local_origin: Vector3::zero(),
+        local_orientation: Quaternion::identity(),
+        scale: ColliderScale::uniform(1.0).unwrap(),
+        shape: geometry.fallback_shapes[0].clone(),
+    }];
+    let animation_id = 0x0300_0001;
+    geometry.collision_animations = CollisionPoseLibrary::project(
+        [Arc::new(Animation {
+            id: animation_id,
+            flags: AnimationFlags::empty(),
+            num_parts: 1,
+            num_frames: 2,
+            pos_frames: Vec::new(),
+            part_frames: [10.0, 0.0]
+                .into_iter()
+                .map(|x| AnimationFrame {
+                    frames: vec![Frame {
+                        origin: Vector3::new(x, 0.0, 0.0),
+                        orientation: Quaternion::identity(),
+                    }],
+                    hooks: Vec::new(),
+                })
+                .collect(),
+        })],
+        &[0],
+    )
+    .unwrap();
+    definition.entity_collision.target_geometry = Arc::new(geometry);
+    definition.entity_collision.uses_physics_bsp = true;
+    let config = crate::DynamicPhysicalBodyConfiguration::new(definition, base.demand())
+        .unwrap()
+        .with_collision_pose(
+            AuthoredCollisionPose::Animation {
+                animation_id,
+                frame: 0,
+            },
+            None,
+        )
+        .unwrap();
+    for (guid, config) in [(door, config), (peer, base)] {
+        state
+            .scene
+            .set_dynamic_physical_body(
+                SpatialBodyId::Entity(guid),
+                Some(config),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+    let mut collision = crate::CollisionScene::new();
+    collision
+        .insert(holtburger_content::LandblockCollisionAsset {
+            landblock_id: 0xda55_ffff,
+            terrain: holtburger_content::TerrainCollisionSurface::empty(),
+            static_geometry: holtburger_content::LandblockColliders::default(),
+        })
+        .unwrap();
+
+    // Multiple hooks in one tick observe the previously published part, away from the peer.
+    let mut tick = authored_ethereal_tick(door, true);
+    tick.tick
+        .hooks
+        .extend(authored_ethereal_tick(door, false).tick.hooks);
+    state.apply_authored_motion_physics(&[tick]).unwrap();
+    assert!(
+        !state
+            .entities
+            .get(door)
+            .unwrap()
+            .physics
+            .has_pending_solidification()
+    );
+    assert!(
+        !state
+            .scene
+            .dynamic_body_overlaps_peer(SpatialBodyId::Entity(door))
+            .unwrap()
+    );
+
+    state
+        .scene
+        .publish_collision_pose(
+            SpatialBodyId::Entity(door),
+            AuthoredCollisionPose::Animation {
+                animation_id,
+                frame: 1,
+            },
+            &collision,
+        )
+        .unwrap();
+    assert!(
+        state
+            .scene
+            .dynamic_body_overlaps_peer(SpatialBodyId::Entity(door))
+            .unwrap()
+    );
+    state
+        .apply_authored_motion_physics(&[
+            authored_ethereal_tick(door, true),
+            authored_ethereal_tick(door, false),
+        ])
+        .unwrap();
+    assert!(
+        state
+            .entities
+            .get(door)
+            .unwrap()
+            .physics
+            .has_pending_solidification()
+    );
+    assert!(
+        state
+            .scene
+            .dynamic_body_overlaps_peer(SpatialBodyId::Entity(door))
+            .unwrap()
+    );
+
+    state.scene.apply_runtime_body_pose(
+        SpatialBodyId::Entity(peer),
+        WorldPosition {
+            coords: pose.coords + Vector3::new(3.0, 0.0, 0.0),
+            ..pose
+        },
+        SpatialSampleMode::AuthoritativeOnly,
+    );
+    state.apply_authored_motion_physics(&[]).unwrap();
+    let physics = state.entities.get(door).unwrap().physics;
+    assert!(!physics.has_pending_solidification());
+    assert!(
+        !physics
+            .effective()
+            .semantic
+            .contains(PhysicsState::ETHEREAL)
+    );
 }
 
 #[test]

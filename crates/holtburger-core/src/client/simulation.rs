@@ -164,6 +164,9 @@ pub(super) fn tick_with_precise_jump(
         });
     }
     let mut events = world.apply_authored_motion_physics(&authored_ticks)?;
+    if let Some(collision) = collision {
+        world.publish_authored_collision_poses(&collision.scene)?;
+    }
     let pending_jump = movement
         .take_pending_jump_attempt()
         .map(|pending| prepare_player_jump(world, pending));

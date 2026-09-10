@@ -6,7 +6,6 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, WeenieType,
@@ -315,6 +314,8 @@ pub struct DynamicEntityPhysicalPreparationInput {
     pub wcid: u32,
     /// Setup resource owning movement and target geometry.
     pub setup_did: u32,
+    /// Effective motion table captured with asynchronous preparation facts.
+    pub motion_table_did: Option<u32>,
     /// Lossless part substitutions that may replace target BSP geometry.
     pub appearance: EntityAppearance,
     /// Optional authored friction; absence selects the ACE default.
@@ -534,15 +535,6 @@ pub enum DynamicEntityPhysicalPreparationError {
         setup_did: u32,
         #[source]
         source: SetupPhysicalShapeError,
-    },
-    #[error(
-        "WCID {wcid} setup 0x{setup_did:08X} default animation 0x{animation_did:08X} moves physics-BSP parts {moving_part_indices:?}"
-    )]
-    AnimatedPhysicsBsp {
-        wcid: u32,
-        setup_did: u32,
-        animation_did: u32,
-        moving_part_indices: Vec<usize>,
     },
     #[error(
         "WCID {wcid} setup 0x{setup_did:08X} physics script 0x{script_did:08X} contains collision-mutating hook {hook_type}"
@@ -885,6 +877,7 @@ const fn participation(physical: bool) -> PhysicalBodyParticipation {
 pub fn prepare_dynamic_entity_physics(
     definition: &DynamicEntityDefinition,
     content: &ContentRepository,
+    cache: &holtburger_content::ContentDecodeCache,
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
     prepare_dynamic_entity_physical_facts(
         DynamicEntityPhysicalFacts {
@@ -898,12 +891,14 @@ pub fn prepare_dynamic_entity_physics(
             ),
             wcid: definition.identity.wcid,
             setup_did: definition.content.setup_did,
+            motion_table_did: definition.content.motion_table_did,
             appearance: &definition.appearance,
             friction: definition.friction,
             elasticity: definition.elasticity,
             physics: definition.physics,
         },
         content,
+        cache,
     )
 }
 
@@ -911,6 +906,7 @@ pub fn prepare_dynamic_entity_physics(
 pub fn prepare_dynamic_entity_physical_definition(
     input: DynamicEntityPhysicalPreparationInput,
     content: &ContentRepository,
+    cache: &holtburger_content::ContentDecodeCache,
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
     let friction = input
         .friction
@@ -929,12 +925,14 @@ pub fn prepare_dynamic_entity_physical_definition(
             is_contact_character: input.is_contact_character,
             wcid: input.wcid,
             setup_did: input.setup_did,
+            motion_table_did: input.motion_table_did,
             appearance: &input.appearance,
             friction,
             elasticity,
             physics: input.physics,
         },
         content,
+        cache,
     )
 }
 
@@ -942,6 +940,7 @@ struct DynamicEntityPhysicalFacts<'a> {
     is_contact_character: bool,
     wcid: u32,
     setup_did: u32,
+    motion_table_did: Option<u32>,
     appearance: &'a EntityAppearance,
     friction: PhysicalFriction,
     elasticity: PhysicalElasticity,
@@ -951,11 +950,13 @@ struct DynamicEntityPhysicalFacts<'a> {
 fn prepare_dynamic_entity_physical_facts(
     facts: DynamicEntityPhysicalFacts<'_>,
     content: &ContentRepository,
+    cache: &holtburger_content::ContentDecodeCache,
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
     let DynamicEntityPhysicalFacts {
         is_contact_character,
         wcid,
         setup_did,
+        motion_table_did,
         appearance,
         friction,
         elasticity,
@@ -1011,7 +1012,7 @@ fn prepare_dynamic_entity_physical_facts(
             source,
         },
     )?;
-    let target_geometry = prepare_target_geometry(
+    let mut target_geometry = prepare_target_geometry(
         wcid,
         setup_did,
         appearance,
@@ -1019,6 +1020,24 @@ fn prepare_dynamic_entity_physical_facts(
         setup_preparation.physics.has_physics_bsp,
         content,
     )?;
+
+    target_geometry.collision_animations =
+        holtburger_content::collision_pose::CollisionPoseLibrary::prepare(
+            content,
+            cache,
+            motion_table_did.or(setup.default_motion_table),
+            setup.default_animation,
+            &target_geometry
+                .physics_bsp_parts
+                .iter()
+                .map(|part| part.part_index)
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|source| DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: setup_did,
+            source,
+        })?;
 
     Ok(DynamicPhysicalBodyDefinition {
         movement,
@@ -1157,30 +1176,6 @@ fn prepare_target_geometry(
                 effective_bsp_shapes.push((part_index, gfx_obj_did, shape));
             }
         }
-        if let (Some(animation_did), Some(animation)) =
-            (setup.default_animation, &default_animation)
-        {
-            let indices = effective_bsp_shapes
-                .iter()
-                .map(|(part_index, _, _)| *part_index)
-                .collect::<Vec<_>>();
-            let moving_part_indices =
-                moving_part_indices(animation, &indices).map_err(|source| {
-                    DynamicEntityPhysicalPreparationError::Content {
-                        wcid,
-                        resource_did: animation_did,
-                        source,
-                    }
-                })?;
-            if !moving_part_indices.is_empty() {
-                return Err(DynamicEntityPhysicalPreparationError::AnimatedPhysicsBsp {
-                    wcid,
-                    setup_did,
-                    animation_did,
-                    moving_part_indices,
-                });
-            }
-        }
     }
 
     validate_setup_part_arrays(wcid, setup_did, setup)?;
@@ -1246,6 +1241,7 @@ fn prepare_target_geometry(
 
     Ok(PreparedEntityTargetGeometry {
         setup_radius: setup.radius,
+        collision_animations: Default::default(),
         physics_bsp_parts,
         fallback_setup_did: setup_did,
         fallback_shapes,
@@ -1285,28 +1281,6 @@ fn stable_part_frames<'a>(
                 .or_else(|| setup.placement_frames.get(&Placement::Default))
                 .map(|placement| &placement.anim_frame)
         })
-}
-
-fn moving_part_indices(
-    animation: &Animation,
-    part_indices: &[usize],
-) -> anyhow::Result<Vec<usize>> {
-    let mut moving = Vec::new();
-    for &part_index in part_indices {
-        let frames = animation
-            .part_frames
-            .iter()
-            .map(|frame| frame.frames.get(part_index))
-            .collect::<Option<Vec<_>>>()
-            .with_context(|| format!("missing physics-BSP part index {part_index}"))?;
-        if frames
-            .first()
-            .is_some_and(|first| frames.iter().skip(1).any(|frame| *frame != *first))
-        {
-            moving.push(part_index);
-        }
-    }
-    Ok(moving)
 }
 
 fn validate_default_script_stability(
@@ -1800,6 +1774,7 @@ mod tests {
                 ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     setup_radius: 0.5,
+                    collision_animations: Default::default(),
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {

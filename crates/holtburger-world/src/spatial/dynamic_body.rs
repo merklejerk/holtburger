@@ -16,9 +16,9 @@ pub struct PreparedEntityBspPart {
     pub part_index: usize,
     /// Immutable GfxObj content identity that owns the physics BSP.
     pub gfx_obj_did: u32,
-    /// Part origin relative to the entity root after root scaling.
+    /// Initial part origin relative to the entity root, before instance scaling.
     pub local_origin: Vector3,
-    /// Part orientation relative to the entity root.
+    /// Initial part orientation relative to the entity root.
     pub local_orientation: Quaternion,
     /// Complete part and root scale applied to the authored shape.
     pub scale: ColliderScale,
@@ -38,11 +38,79 @@ impl PartialEq for PreparedEntityBspPart {
     }
 }
 
+/// Validated instance poses in the definition's BSP-part order, plus the last applied sample.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CollisionPartPoses {
+    pub(crate) poses: Arc<[holtburger_common::RigidTransform]>,
+    pub(crate) sample: Option<crate::motion::AuthoredCollisionPose>,
+}
+
+impl CollisionPartPoses {
+    fn new(geometry: &PreparedEntityTargetGeometry) -> Self {
+        Self {
+            poses: geometry
+                .physics_bsp_parts
+                .iter()
+                .map(|part| holtburger_common::RigidTransform {
+                    translation: part.local_origin,
+                    rotation: part.local_orientation,
+                })
+                .collect(),
+            sample: None,
+        }
+    }
+
+    pub(crate) fn apply(
+        &mut self,
+        geometry: &PreparedEntityTargetGeometry,
+        sample: crate::motion::AuthoredCollisionPose,
+    ) -> anyhow::Result<bool> {
+        if self.sample == Some(sample) || geometry.physics_bsp_parts.is_empty() {
+            return Ok(false);
+        }
+        let mut poses = self.poses.to_vec();
+        match sample {
+            crate::motion::AuthoredCollisionPose::Placement => {
+                poses = Self::new(geometry).poses.to_vec();
+            }
+            crate::motion::AuthoredCollisionPose::Animation {
+                animation_id,
+                frame,
+            } => {
+                for (part_index, pose) in geometry
+                    .collision_animations
+                    .animation(animation_id)?
+                    .sample(frame)?
+                {
+                    let slot = geometry
+                        .physics_bsp_parts
+                        .iter()
+                        .position(|part| part.part_index == part_index)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "prepared collision track has no matching BSP part {part_index}"
+                            )
+                        })?;
+                    poses[slot] = pose;
+                }
+            }
+        }
+        let changed = poses.as_slice() != &*self.poses;
+        if changed {
+            self.poses = poses.into();
+        }
+        self.sample = Some(sample);
+        Ok(changed)
+    }
+}
+
 /// Both retail target branches retained so a complete live state replacement is reversible.
 #[derive(Debug, Clone)]
 pub struct PreparedEntityTargetGeometry {
     /// Authored setup radius at scale one, used for target-directed melee clearance.
     pub setup_radius: f32,
+    /// Shared collision-part tracks prepared for the entity's effective motion sources.
+    pub collision_animations: holtburger_content::collision_pose::CollisionPoseLibrary,
     /// Actual appearance-substituted BSP parts used when `HasPhysicsBSP` is set.
     pub physics_bsp_parts: Vec<PreparedEntityBspPart>,
     /// Immutable SetupModel identity that owns the ordered fallback volumes.
@@ -55,7 +123,8 @@ pub struct PreparedEntityTargetGeometry {
 
 impl PartialEq for PreparedEntityTargetGeometry {
     fn eq(&self, other: &Self) -> bool {
-        self.setup_radius == other.setup_radius
+        self.collision_animations == other.collision_animations
+            && self.setup_radius == other.setup_radius
             && self.physics_bsp_parts == other.physics_bsp_parts
             && self.fallback_scale == other.fallback_scale
             && self.fallback_setup_did == other.fallback_setup_did
@@ -138,6 +207,8 @@ pub struct DynamicPhysicalBodyConfiguration {
     demand: LocalPhysicalDemand,
     /// Current absolute whole-object scale applied when the runtime body is installed.
     object_scale: f32,
+    /// Initial instance poses validated before this configuration becomes queryable.
+    collision_poses: CollisionPartPoses,
 }
 
 /// Failure to join prepared body facts to producer-owned local demand.
@@ -160,6 +231,7 @@ impl DynamicPhysicalBodyConfiguration {
             return Err(DynamicPhysicalBodyConfigurationError::NoLocalPhysicalDemand);
         }
         Ok(Self {
+            collision_poses: CollisionPartPoses::new(&definition.entity_collision.target_geometry),
             definition,
             demand,
             object_scale: 1.0,
@@ -180,6 +252,34 @@ impl DynamicPhysicalBodyConfiguration {
         Ok(configuration)
     }
 
+    /// Initializes collision at the current authored pose before publishing the body.
+    pub fn with_collision_pose(
+        mut self,
+        sample: crate::motion::AuthoredCollisionPose,
+        previous_body: Option<&super::SpatialBody>,
+    ) -> anyhow::Result<Self> {
+        // A new table may omit trailing parts. Seed compatible part slots from the live body
+        // before applying its selected clip, even when the prepared animation library changed.
+        if let Some(previous) = previous_body
+            .and_then(|body| body.physical.as_ref())
+            .and_then(|physical| physical.dynamic.as_ref())
+            .filter(|dynamic| {
+                dynamic.collision.target_geometry.physics_bsp_parts
+                    == self
+                        .definition
+                        .entity_collision
+                        .target_geometry
+                        .physics_bsp_parts
+            })
+        {
+            self.collision_poses.poses = previous.collision_poses.poses.clone();
+            self.collision_poses.sample = None;
+        }
+        self.collision_poses
+            .apply(&self.definition.entity_collision.target_geometry, sample)?;
+        Ok(self)
+    }
+
     /// Prepared geometry and response facts, independent from producer policy.
     pub const fn definition(&self) -> &DynamicPhysicalBodyDefinition {
         &self.definition
@@ -191,8 +291,20 @@ impl DynamicPhysicalBodyConfiguration {
     }
 
     /// Separates the joined configuration at the canonical scene ownership boundary.
-    pub(crate) fn into_parts(self) -> (DynamicPhysicalBodyDefinition, LocalPhysicalDemand, f32) {
-        (self.definition, self.demand, self.object_scale)
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        DynamicPhysicalBodyDefinition,
+        LocalPhysicalDemand,
+        f32,
+        CollisionPartPoses,
+    ) {
+        (
+            self.definition,
+            self.demand,
+            self.object_scale,
+            self.collision_poses,
+        )
     }
 }
 
@@ -213,6 +325,7 @@ mod tests {
     fn prepared_geometry_equality_uses_immutable_content_identity_not_arc_identity() {
         let left = PreparedEntityTargetGeometry {
             setup_radius: 0.5,
+            collision_animations: Default::default(),
             physics_bsp_parts: vec![PreparedEntityBspPart {
                 part_index: 0,
                 gfx_obj_did: 0x0100_0001,
@@ -227,6 +340,7 @@ mod tests {
         };
         let right = PreparedEntityTargetGeometry {
             setup_radius: 0.5,
+            collision_animations: Default::default(),
             physics_bsp_parts: vec![PreparedEntityBspPart {
                 shape: ball_shape(),
                 ..left.physics_bsp_parts[0].clone()
@@ -279,6 +393,7 @@ mod tests {
                 ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     setup_radius: 0.5,
+                    collision_animations: Default::default(),
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0,
                     fallback_shapes: Vec::new(),

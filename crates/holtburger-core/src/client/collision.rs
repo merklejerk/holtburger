@@ -66,6 +66,8 @@ pub struct ClientEntityBodyFacts {
     pub physics: EffectiveEntityPhysicsState,
     /// Setup resource defining physical geometry.
     pub setup_did: u32,
+    /// Motion source captured for collision-track preparation and completion currentness.
+    pub motion_table_did: Option<u32>,
     /// Current world-owned scale joined only when the prepared unit body is installed.
     pub object_scale: f32,
     /// Optional authored surface friction.
@@ -91,6 +93,7 @@ impl ClientEntityBodyFacts {
             && self.wcid == other.wcid
             && self.appearance == other.appearance
             && self.setup_did == other.setup_did
+            && self.motion_table_did == other.motion_table_did
             && option_f32_eq(self.friction, other.friction)
             && option_f32_eq(self.elasticity, other.elasticity)
     }
@@ -149,6 +152,7 @@ pub fn client_entity_body_facts(
         appearance: entity.appearance.clone(),
         physics: entity.physics.effective(),
         setup_did,
+        motion_table_did: world.effective_motion_table_id_for_guid(guid),
         object_scale: entity.scale.effective(),
         friction: property_f32(&entity.properties, PropertyFloat::Friction),
         elasticity: property_f32(&entity.properties, PropertyFloat::Elasticity),
@@ -204,12 +208,14 @@ impl ClientCollisionSource for ContentClientCollisionSource {
                 is_contact_character: facts.is_contact_character,
                 wcid: facts.wcid,
                 setup_did: facts.setup_did,
+                motion_table_did: facts.motion_table_did,
                 appearance: facts.appearance,
                 friction: facts.friction,
                 elasticity: facts.elasticity,
                 physics: facts.physics,
             },
             &self.content,
+            self.service.decode_cache(),
         )
         .context("could not prepare dynamic-entity collision geometry")
     }
@@ -494,7 +500,15 @@ impl ClientCollisionCoordinator {
                         continue;
                     }
                     let body_id = SpatialBodyId::LocalPlayer(completion.target.player.guid);
-                    let physical = match completion.result {
+                    let configuration = match completion.result.and_then(|physical| {
+                        prepare_initial_configuration(
+                            world,
+                            current.player.guid,
+                            physical,
+                            completion.target.demand,
+                            current.facts.object_scale,
+                        )
+                    }) {
                         Ok(physical) => physical,
                         Err(cause) => {
                             self.body_readiness = ClientBodyReadiness::Unavailable {
@@ -521,14 +535,7 @@ impl ClientCollisionCoordinator {
                         residency_is_indoors(live_residency).then_some(live_residency);
                     let Some(_outcome) = world.scene.set_dynamic_physical_body(
                         body_id,
-                        Some(
-                            DynamicPhysicalBodyConfiguration::with_object_scale(
-                                physical,
-                                completion.target.demand,
-                                current.facts.object_scale,
-                            )
-                            .expect("local-player completion carries integration demand"),
-                        ),
+                        Some(configuration),
                         PhysicalCollisionFilter::ALL,
                         initial_cell,
                     ) else {
@@ -567,7 +574,15 @@ impl ClientCollisionCoordinator {
                         if !current.definition_eq(&target.facts) {
                             continue;
                         }
-                        let physical = match result {
+                        let configuration = match result.and_then(|physical| {
+                            prepare_initial_configuration(
+                                world,
+                                guid,
+                                physical,
+                                target.demand,
+                                current.object_scale,
+                            )
+                        }) {
                             Ok(physical) => physical,
                             Err(cause) => {
                                 log::warn!(
@@ -587,14 +602,7 @@ impl ClientCollisionCoordinator {
                         let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
                         let Some(outcome) = world.scene.set_dynamic_physical_body(
                             target.body_id,
-                            Some(
-                                DynamicPhysicalBodyConfiguration::with_object_scale(
-                                    physical,
-                                    target.demand,
-                                    current.object_scale,
-                                )
-                                .expect("remote completion carries valid non-empty demand"),
-                            ),
+                            Some(configuration),
                             PhysicalCollisionFilter::ALL,
                             initial_cell,
                         ) else {
@@ -957,6 +965,23 @@ fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRem
         })
 }
 
+fn prepare_initial_configuration(
+    world: &mut WorldState,
+    guid: Guid,
+    physical: DynamicPhysicalBodyDefinition,
+    demand: LocalPhysicalDemand,
+    scale: f32,
+) -> Result<DynamicPhysicalBodyConfiguration, String> {
+    let sample = world.initial_authored_collision_pose(guid);
+    let previous_body = world
+        .runtime_body_id_for_guid(guid)
+        .and_then(|id| world.scene.body(id));
+    DynamicPhysicalBodyConfiguration::with_object_scale(physical, demand, scale)
+        .map_err(|error| error.to_string())?
+        .with_collision_pose(sample, previous_body)
+        .map_err(|error| error.to_string())
+}
+
 fn remove_physical_body(
     world: &mut WorldState,
     body_id: SpatialBodyId,
@@ -1184,6 +1209,7 @@ mod tests {
                     ),
                     target_geometry: Arc::new(holtburger_world::PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        collision_animations: Default::default(),
                         physics_bsp_parts: Vec::new(),
                         fallback_setup_did: 0,
                         fallback_shapes: Vec::new(),

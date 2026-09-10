@@ -138,6 +138,7 @@ fn crowd(
     let profile = retail_player_grounded_profile(EdgeProtection::Creature)?;
     let geometry = Arc::new(PreparedEntityTargetGeometry {
         setup_radius: 0.5,
+        collision_animations: Default::default(),
         physics_bsp_parts: Vec::new(),
         fallback_setup_did: 0x0200_0001,
         fallback_shapes: vec![Arc::new(CollisionShape::Cylinder(CollisionCylinder {

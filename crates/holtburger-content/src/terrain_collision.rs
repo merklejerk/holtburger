@@ -47,7 +47,7 @@ pub struct TerrainCollisionSurface {
 }
 
 impl TerrainCollisionSurface {
-    /// Empty non-water collision surface used by synthetic collision products.
+    /// Empty non-water collision surface for owners without traversable outdoor terrain.
     pub const fn empty() -> Self {
         Self {
             cells: Vec::new(),

@@ -913,6 +913,134 @@ Current outcome: the user replied “lgtm” to the requested live-check handoff
 - Final commit review covered content projection and its preparation callers, client async currentness and installation, motion sampling and hook ordering, scene publication and snapshot/proof consumers, and Explorer initialization and accepted movement proposals. Corrected two displaced method documentation blocks and documented the retained pose field in surface proofs. No further blocking quality findings. This final pass changed comments and worksheet text only; the 1,467 passing tests remain applicable. Formatting and whitespace checks were repeated.
 - This worksheet remains open for subsequent issues.
 
+## 5. Camera-dependent door selection and precise-jump targeting
+
+**Status: implemented, accepted by the user, and closed. Final quality review completed for commit.**
+
+Reports:
+- Door in `0x001103b3` cannot be selected while the boom camera is in `0x001103b4`; moving the camera into the lower cell restores selection.
+- Player in `0x00a9011e`, camera in `0x00a90159`: precise-jump targeting appears to hit an invisible nearby surface. Moving the camera into the player's cell restores floor targeting.
+
+### Initial evidence
+
+Both consumers use the shared static-surface ray path: entity selection clips browser mesh refinement at the host's static hit; precise jump compares that static hit with entity collision surfaces. The frontend samples both rays from the presented camera, including its cell assignment.
+
+Decoded the four reported cells. Both cell pairs connect vertically: `03b3/03b4` at Z = 21.002; `011e/0159` at Z = 0. Their connecting portal polygons are absent from the physics polygon maps. The initial hypothesis that targeting's all-polygon iteration directly tests a portal polygon is not supported by these assets.
+
+Production static-collision queries against the complete real assets pass through both openings. In `00A9`, six vertical samples (origins above and below the seam) reach the Z = -6 floor, including 192 m ray limits. All 81 oblique samples from a 3×3 upper-cell grid to a 3×3 floor grid also reach the floor at the production precise-jump limit of 120 m. Four rays from the upper `0011` cell toward its lower doorways hit static geometry beyond the intended doorway points. These are offline static-scene probes, not full live selection results.
+
+A passive live login confirms the character is parked in `0x00a9011e`, at `(69.0980148, -67.0580444, -5.9949999)`. No movement or jump was dispatched. Aim-only queries reproduce a discrepancy: downward rays from `(70,-70,3)` and `(69.098,-67.058,3)` hit Z = -0.9000003, normal +Z, and report `unproven`; starting at `(70,-70,-1)` reaches the Z = -6 floor and reports `reachable`. The invisible hit is therefore reproduced in the live host and absent from the offline static scene. Identifying its exact collision owner is the next step; do not infer that it is the portal plane.
+
+Artifacts: `/tmp/portal-ray-probe.txt`, `/tmp/portal-ray-probe-long.txt`, `/tmp/portal-ray-grid.txt`, `/tmp/portal-ray-door.txt`, `/tmp/portal-ray-live.jsonl`, `/tmp/portal-ray-live-aim.jsonl`. Temporary asset probes and owner instrumentation were subsequently removed.
+
+### Root cause and controlled reproductions
+
+The missing offline ingredient was neighboring **outdoor** collision residency. Adding `0x00a8ffff` reproduces the live `00A9` hit exactly, with that neighbor's owner proof. Removing all static colliders and cell volumes from the neighbor leaves the failure intact: its terrain alone supplies Z = -0.9000003. This rules out a dynamic entity and identifies the invisible horizontal surface as outdoor terrain, not a portal.
+
+The traced 120 m downward path starts correctly in `0x00a90159`, crosses the real portal at Z = 0 into `0x00a9011e`, then ends at Z = -117. That un-clipped endpoint lies beyond the floor and cannot be contained by an interior cell. Generic placement recovery returns `Recovered { previous_cell: 0x00a9011e, recovered_cell: None }`, with `reaches_outdoors: true`. `trace_static_surface_ray_with_policy` merges every endpoint's membership before any collision test. The distant endpoint's recovery therefore admits outdoor terrain and entirely-water barriers against the **whole** ray, including its earlier indoor prefix. The floor hit that should have stopped the ray is discovered too late to prevent this domain contamination.
+
+The door cells reproduce the same failure family when `0x0010ffff` is resident. A ray from upper-cell `(40,1,22)` toward the lower doorway point `(40,-4.5,19)` is clipped at `(40,0,21.454546)`, distance 1.1390877 m, normal +Y, with owner `0x0010ffff`. This is the entirely-water landblock entry barrier, while the hit's own placement remains `0x001103b4`. Starting instead at lower-cell `(40,-1,20)` reaches ordinary dungeon geometry beyond the doorway, at `(40,-8,18)`. These are controlled real-content rays; the actual live door instance and user's exact camera ray have not been captured. Do not equate this reproduction with an exact end-to-end door-selection trace.
+
+Why zoom matters: in the jump report, zooming below the erroneous outdoor terrain plane puts it behind the ray; in the door reproduction, starting inside the nominal water landblock avoids its entry barrier. Neither change repairs the query's domain handling. The vertical portal configuration makes the symptoms conspicuous but is not a necessary condition for this broader bug.
+
+Ownership and correction direction: the shared world ray traversal/geometry-selection boundary owns this, not the frontend selection or precise-jump systems. Geometry must be eligible only over the ray intervals that actually inhabit its domain. An unaccepted distant endpoint's placement recovery must not authorize outdoor geometry along an indoor prefix. Preserve real indoor-to-outdoor exits, outdoor starts, and through-wall selection prevention; do not simply disable outdoor hits whenever the camera starts indoors. Inspect whether the sphere-query domain handling can provide a shared rule without importing body-placement recovery into visibility/targeting semantics. Formal implementation scope and tests remain to be agreed.
+
+This is the same failure class as issue 1, in the separate finite-ray implementation. The earlier sphere correction did not cover this consumer. Entity surface rays also merge full-path membership; review that adjacent consumer when scoping the shared ray contract, without claiming an independently reproduced entity-target failure.
+
+Additional artifacts: `/tmp/portal-ray-live-trace.jsonl`, `/tmp/portal-ray-neighbor.txt`, `/tmp/portal-ray-final-probe.txt`, `/tmp/portal-ray-final-paths.txt`, and archived diagnostic source `/tmp/portal-ray-final-probe.rs`. Temporary production instrumentation and asset-dependent executable were removed. Live probes only logged in, registered a diagnostic camera, and sampled aim; they did not move the character or commit jumps. No product behavior was changed.
+
+### Loading-policy evidence and corrected terminology
+
+The renderer and collision runtime do not currently share a resolved scene context. Renderer demand classifies an `env-cell` or `automatic-landblock` target through the existing `LandblockSceneClass` (`scene-target.ts:85–119`); dungeon demand selects the owner's EnvCells layer. In contrast, `ClientCollisionCoordinator::target_from_world` (`client/collision.rs:658–681`) always calls `SimulationSceneInterest::follow_neighborhood` with radius 1 and exit margin 1. `simulation_scene.rs:36–86` expands numeric owner coordinates without considering dungeon classification. This requests up to nine nominal owners (fewer at map edges), and can retain earlier owners within the wider exit radius.
+
+`ContentAssetService::resolve_collision` (`content_assets.rs:236–270`) unconditionally resolves outdoor generated scenery and converts the owner's terrain to `TerrainCollisionSurface`; `LandblockColliderAssembler::assemble` also assembles outdoor explicit/generated/building placements before interior geometry. Thus there are two distinct loading gaps: unnecessary geographic neighbor demand, and creation of outdoor collision products for dungeon-only owners themselves.
+
+Fresh decoded classifications: `0x0010ffff` = DungeonOnly (656 cells), `0x0011ffff` = DungeonOnly (712), `0x00a8ffff` = DungeonOnly (447), `0x00a9ffff` = DungeonOnly (360); all four have zero outdoor explicit objects. **Correction to earlier shorthand:** the reproduced “outdoor geometry” is dummy terrain/water collision synthesized from neighboring dungeon-only owners' terrain records, not evidence that those owners have traversable overworld content. The records exist; promoting them to playable outdoor collision is the mistake.
+
+ACE corroborates both classification and isolation: `ACE/Source/ACE.Server/Physics/Common/Landblock.cs:575–608` defines IsDungeon from zero height indices, EnvCells, no buildings, with the northwest exception. `ACE/Source/ACE.Server/Managers/LandblockManager.cs:577–582` returns no adjacent landblocks for a dungeon. Our content classifier already implements that predicate (`content/landblock.rs:366–386`); do not introduce a competing heuristic based on cell selector, negative coordinates, or the presence of any EnvCells.
+
+Consequences demonstrated: false targeting hits and reproduction sensitivity to resident neighbors. Consequences visible from code: unnecessary content assembly/retention and independent renderer/collision policy decisions. CPU, memory, and latency costs have not been measured. Do not present them as benchmark results or claim other gameplay failures without reproductions.
+
+### Problem-solving constraints, distribution, and concessions
+
+1. Classification is content-owned and computed once in the existing landblock foundation. Renderer and collision consumers use that fact; neither derives a replacement predicate. OutdoorWithEnvCells must remain outdoor-capable, including owners that contain disconnected interiors as well as overworld.
+2. Dungeon residency follows the authored owner and all its interior cells/objects, regardless of whether coordinates lie outside its nominal 192 m square. Internal portal targets are owner-local selectors (`interior.rs:271–274`). Numeric proximity is not dungeon connectivity. Teleports switch context; they do not establish geometric adjacency.
+3. Blocking content work stays in the existing asynchronous source/coordinator boundary. Missing/failed classification must be explicit and must not default to outdoors. Source-generation, request-generation, player/destination currentness, and existing body-readiness guards must survive.
+4. Dungeon-only collision products contain no terrain, water-entry barrier, or outdoor static layers. Preserve EnvCell shells, containment volumes, portal topology, indoor static objects, and dynamic entity preparation. Raw decoded terrain remains available to content inspection; do not erase source data.
+5. Retained outdoor owners must not survive a switch into dungeon-only demand through the outdoor hysteresis rule. Conversely, genuine outdoor movement retains existing neighborhood behavior. Residency remains an owner-set mechanism, not a new global scene-mode singleton.
+6. Rays must respect actual portal traversal even when unrelated geometry is resident. A long unaccepted endpoint cannot authorize a new domain. Real exterior exits and outdoor starts continue to work. Indoor/outdoor transitions must constrain both geometry and required coverage to their own portions of the ray.
+7. A query may report explicit missing coverage or invalid origin; it must not invent an outdoor route to recover a speculative endpoint. Keep bounded traversal/cycle guards. No arbitrary maximum indoor distance, portal-count hack, or camera-zoom workaround.
+8. Keep the existing physical motion solver and its accepted-placement recovery intact. Targeting is not body movement. Share proven portal-intersection primitives and owner-selection mechanics where appropriate, without forcing rays through body-placement publication.
+
+### Fresh local-content census
+
+A complete pass over present, non-pruned CellLandblock entries assembled 65,025 owners through the production `LandblockAssetAssembler`: 1,720 DungeonOnly, 61,620 OutdoorOnly, and 1,685 OutdoorWithEnvCells. The 1,720 dungeon-only owners contain 611,764 EnvCells, **zero exterior portals** (authored portal flag `0x04`), and **zero outdoor explicit placements**. This supports owner-local dungeon residency without excluding a shipped exterior exit in this archive. It does not prove the same distribution for future/custom archives, nor count generated scenery outputs. Preserve truthful classification and explicit error handling rather than silently accommodating contradictory content.
+
+Scope: locally discovered archive, all present/non-pruned owners assembled successfully, all dungeon EnvCells decoded. The probe uses the production content classifier and decoded portal records; it does not run a performance benchmark or measure geometric extents. Artifacts: `/tmp/dungeon-scope-census.txt`, `/tmp/dungeon-scope-census.stderr` (empty), and `/tmp/dungeon-scope-probe.rs`. The temporary asset-dependent executable was removed from the worktree.
+
+### Neighborhood and ownership map
+
+`LandblockAssetAssembler` (content classification) → cached `ContentAssetService` foundation → two independent consumers:
+- Frontend scene-interest policy selects render layers; retain this app-local ownership.
+- `ClientCollisionCoordinator` resolves collision context asynchronously, selects owner demand, then uses the existing `SimulationSceneResidency` request/publication machinery. Collision content assembly consumes the same foundation classification to choose legal layers.
+
+Installed collision products → world portal traversal and interval-scoped ray casts → entity-selection candidates/static distance limit, and precise-jump environment/entity surface evaluation. The frontend continues to supply the presented camera ray and refine rendered entity meshes; neither frontend caller gains a dungeon exception.
+
+### Recommended solution shape
+
+**A. Correct collision content at its producer.** Branch complete collision assembly on the existing scene class. DungeonOnly builds the interior product and an empty non-water terrain surface, skipping outdoor generated/explicit/building work. Reuse the existing `TerrainCollisionSurface::empty` representation and interior assembly loop; do not add an optional terrain field plus a redundant dungeon boolean. Refactor assembly into shared interior work and class-selected outdoor work as needed, rather than assembling everything and filtering afterward. Apply this to the common product so client, Explorer, and diagnostics agree.
+
+**B. Resolve classification before expanding client demand.** Extend the injected content-source contract to return the owner's existing scene classification without constructing full collision. Resolve it on the existing scene-worker/completion channel, keyed by normalized authoritative owner and content-source generation. A typed pending/resolved/failed context stage in the coordinator feeds the current residency machinery: DungeonOnly → exactly its owner; either outdoor-capable class → the existing neighborhood/hysteresis rule. Never run a synchronous content read inside `observe` or optimistically prefetch nine owners before classification. Reuse the cached foundation for subsequent collision assembly. Separate player/body fact capture from scene-interest derivation so body completion checks do not depend on classification I/O. Guard late completions after teleport, disconnect, and source changes; retire prior context demand on the normal publication path. Do not add a second source cache/service or move renderer radii into core.
+
+**C. Make finite-ray traversal describe query intervals, not speculative body placements.** Use an ordered, bounded traversal of the source domain and actual portal crossings. Each interval owns its allowed static/entity geometry and coverage; stop at the nearest admissible hit. No endpoint containment recovery is needed to decide candidates. Preserve the hit point's cell membership and the reached prefix needed by selection. Reuse `next_placement_transition`'s directed portal geometry where its contract fits, separating it from `placement_for_committed_cell` recovery rather than adding an `is_ray` switch to the body solver. Cast within each allowed interval (not a whole-ray first hit subsequently rejected, which can hide a later valid intersection). Bound outdoors to exterior intervals even when a genuine exit occurs farther along the ray. Keep transition-time ties and straddling entity membership deterministic.
+
+Static and entity surface queries should consume one traversal contract. Avoid retaining their duplicate full-path membership-merging algorithms. Selection's existing static-distance clipping remains; precise jump's existing target eligibility remains. Exact internal helper/type shape should follow the implementation's smallest reusable cut; no general collision framework or persistent portal cache is required.
+
+### Alternatives considered
+
+- Loading only the dungeon owner: removes neighbors, but leaves its own dummy terrain and does not fix real mixed/outdoor scenes.
+- Removing dummy terrain alone: corrects products, but leaves needless residency and the ray's domain leak against legitimate outdoor geometry.
+- Reusing only `sweep_candidate_membership`: removes speculative endpoint recovery, but its merged reach still loses where along a genuine indoor-to-outdoor path outdoor geometry becomes eligible. Useful primitives, insufficient final ray contract.
+- Disable outdoor ray tests for all indoor origins: breaks targeting through real exits.
+- Shared renderer/collision loading manager or universal scene flag: couples independent lifecycles and expands scope. Shared content facts plus typed local demand are sufficient.
+
+### Verification and implementation boundaries
+
+The implementation followed three phases, beginning with producer and residency corrections, then ray traversal. The original verification scope follows; completed results and acceptance are recorded below.
+
+- Content: synthetic DungeonOnly products contain interior geometry but no terrain/water/outdoor colliders; outdoor and mixed classes retain their legal layers. Verify generated-scenery work is not requested for DungeonOnly. Keep classifier boundary tests tied to ACE's predicate.
+- Coordinator: dungeon entry requests exactly its owner and sheds retained outdoor neighbors; mixed owners preserve outdoor demand. Test outdoor↔dungeon and dungeon↔dungeon teleports, late classification completions, source changes, and explicit missing/failed classification. Use injected sources; no runtime-asset-dependent committed tests.
+- Ray correctness: indoor floor before an uncontained distant endpoint, indoor prefix before a genuine outdoor exit with overlapping terrain, outdoor→indoor entry, an exterior hit after a real exit, water-entry barriers restricted to outdoor intervals, finite range/no-hit, portal-boundary ties, and legitimate walls occluding entities. Include missing data beyond an earlier blocker versus missing data on the accepted prefix. Exercise entity targets across seams through the same traversal.
+- Real content: replay the recorded `00A9` rays both with and without adjacent products, and the `0011` upper/lower doorway rays. Correct results must not depend on irrelevant residency. Repeat the aim-only live capture; capture actual door selection when the character is parked there. Browser-harness verification must cover the presented-ray/selection and marker handoff for the completed change; no claim of exact live door acceptance yet.
+- Run relevant content/world/core/host tests, warnings-denied Clippy, formatting, and diff checks after implementation. No benchmark was requested; any performance claim needs separate measurements.
+
+
+### Implementation progress
+
+- Phase 1 implemented: complete collision assembly skips outdoor scenery/terrain for DungeonOnly, and the collider assembler retains only interior assembly for that class. Existing empty non-water terrain represents the absence; raw content remains intact. A synthetic source test proves absent outdoor tables do not block dungeon assembly and missing promised interior content still fails. Content/core library suites passed (78 + 379 tests) before phase 2 edits. Recorded real-content rays now hit the dungeon floor/beyond-door geometry with neighbors installed; `/tmp/dungeon-phase1-real-content.txt`.
+- Phase 2 implemented, further verification pending: classification runs on the existing scene worker channel before owner-set selection. Current owner/context state gates demand; body fact capture is independent. Dungeon demand drops geographic hysteresis, outdoor-capable demand preserves it. Twenty-two coordinator tests pass, including dungeon-to-dungeon and return-to-outdoor residency. The seam test now waits for classification and verifies no collision reload/republication, rather than equating any scene-worker job with collision loading. `/tmp/dungeon-phase2-tests.txt`.
+- All three phases and final quality/runtime verification are complete; see the results below. No commit requested or made.
+
+### Implementation verification and quality review
+
+All three production changes are implemented. Static and entity surface rays now share `surface_ray_path.rs` traversal; their previous full-body-path union and the unused point-radius motion-path wrapper were removed. Each iteration finds the current domain's nearest candidate before searching for earlier portals, avoiding missing-target errors beyond a blocker. Coverage is checked only for the accepted domain interval. Directed crossings at the origin use the existing portal tolerance; an explicit portal-origin regression first failed and then passed (`/tmp/dungeon-phase3-boundary-control.txt`, `/tmp/dungeon-phase3-ray-tests.txt`). A surface wins an exact boundary-distance tie in the source domain. Physical motion recovery is unchanged.
+
+The entity seam regression uses a target whose geometry fits its movement/residency bounds, refreshes membership through the production collection, and covers both a farther-cell target and a target straddling the seam. An initial diagnostic fixture used a 1 m target sphere with the helper's smaller character movement bounds, so its membership did not cover the target's full geometry; that inconsistent fixture was corrected, not treated as proof of this ray contract. No generic target-residency rewrite was added.
+
+Current automated results: 78 content + 737 world + 383 core + 283 host library tests = **1,481 passing**. All-target Clippy for those crates passes with warnings denied. Logs: `/tmp/dungeon-final-library-tests.txt`, `/tmp/dungeon-final-clippy.txt`. Coordinator coverage includes classification absence/failure without outdoor fallback, stale completions, owner switching, and retained seam crossings without collision reload. The injected content source is immutable for the coordinator lifetime; source replacement creates a new coordinator, while shared residency's existing source-generation guards remain intact.
+
+Quality review covered content foundation → common collision producer → client source/coordinator → shared residency publication, including interruption/error paths; and presented frontend ray → unchanged host/core adapters → static/entity world traversal → selection distance limit / precise-jump target proof. Renderer scene-class policy remains independent but consumes the same existing content fact. No new global scene-mode service, persistent ray cache, or movement solver was introduced. Additional state is confined to the coordinator's asynchronous classification stage; body preparation remains independent. New regression tests account for much of the diff.
+
+The rebuilt debug host passed the same aim-only live probe on the parked `00A9` character: starts `(70,-70,3)`, `(69.098,-67.058,3)`, and `(70,-70,-1)` all target `(x,y,-6)` in `0x00a9011e` and report `reachable`. Previously the upper two hit Z = -0.9 and reported `unproven`. No movement or jump was committed. Artifacts: `/tmp/dungeon-final-live-aim.jsonl`, `/tmp/dungeon-final-live-aim.stderr`, `/tmp/dungeon-final-host-build.txt`. Browser/UI verification and the exact live door-click handoff remain pending at this point.
+
+### Acceptance and closeout
+
+The user reported “lgtm” after the manual-test handoff for door selection from `0x001103b4` and precise-jump targeting from `0x00a90159`. This closes issue 5. The acceptance is user-reported; the automated live probe independently verified the recorded jump rays, while exact live door selection was not captured by automation.
+
+The browser probe reached the rendered world but dispatched the precise-jump shortcut while lifecycle was still `portal-space`, before gameplay input became enabled. It timed out and disconnected cleanly. This is a remaining probe-readiness limitation, not evidence of a product regression. No harness change was included. Historical pending-verification notes above describe earlier investigation stages and are superseded by this closeout.
+
+Final commit review rechecked the accumulated diff, including the new shared traversal file, collision product producers, classification completion/reset handling, activation readiness, selection prefix consumption, and precise-jump hit/proof consumption. No blocking quality findings or additional production changes. Existing visual-membership limitations in selection remain outside this correction. The 1,481 passing library tests, warnings-denied Clippy, live ray replay, and user acceptance remain applicable; formatting and whitespace checks were repeated. The user requested this review and commit.
+
 ## Issue queue
 
-Awaiting subsequent user reports. Worksheet remains open after individual issues are resolved.
+Issue 5 is closed following user acceptance. Worksheet remains open for subsequent reports; the previously recorded issue 3a follow-up remains separate.

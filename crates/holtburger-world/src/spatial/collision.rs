@@ -5,6 +5,7 @@ mod selection_ray;
 mod static_sphere_sweep;
 pub(crate) use static_sphere_sweep::{PreparedHardSphereSweep, sphere_path_touches_shape};
 mod static_surface_ray;
+mod surface_ray_path;
 
 pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
 pub use selection_ray::{
@@ -1799,29 +1800,13 @@ impl CollisionScene {
         &self,
         request: PlacedMotionPathRequest<'_>,
     ) -> Result<PlacedMotionPath, CollisionQueryError> {
-        self.transit_motion_path_internal(request, false)
-    }
-
-    /// Point rays share portal traversal with body motion but intentionally have no body radius.
-    fn transit_motion_path_allowing_point_radius(
-        &self,
-        request: PlacedMotionPathRequest<'_>,
-    ) -> Result<PlacedMotionPath, CollisionQueryError> {
-        self.transit_motion_path_internal(request, true)
-    }
-
-    fn transit_motion_path_internal(
-        &self,
-        request: PlacedMotionPathRequest<'_>,
-        allow_zero_radius: bool,
-    ) -> Result<PlacedMotionPath, CollisionQueryError> {
         validate_motion_waypoints(request.waypoints)?;
         let (initial_placement, initial_recovery) = self.infer_placement_from_cell(
             request.anchor,
             request.start,
             request.radius,
             request.previous_cell,
-            allow_zero_radius,
+            false,
         )?;
         let mut path = PlacedMotionPath {
             anchor: landblock_key(request.anchor),
@@ -1844,7 +1829,7 @@ impl CollisionScene {
                 end: waypoint.center,
                 radius: request.radius,
             };
-            validate_sweep_radius(sweep, allow_zero_radius)?;
+            validate_sweep_radius(sweep, false)?;
             let touched = touched_landblocks(sweep);
             let segment = PlacementMotionSegment {
                 anchor: request.anchor,
@@ -1859,7 +1844,7 @@ impl CollisionScene {
                 geometric_start_fraction,
                 waypoint.end_fraction,
                 current_cell,
-                allow_zero_radius,
+                false,
             )?;
 
             let inferred = self.infer_placement_from_cell(
@@ -1867,7 +1852,7 @@ impl CollisionScene {
                 waypoint.center,
                 request.radius,
                 current_cell,
-                allow_zero_radius,
+                false,
             )?;
             let (placement, recovery) = match waypoint.placement {
                 MotionWaypointPlacement::Traverse => inferred,
@@ -1886,7 +1871,7 @@ impl CollisionScene {
                         waypoint.center,
                         request.radius,
                         cell,
-                        allow_zero_radius,
+                        false,
                     )?
                 }
             };

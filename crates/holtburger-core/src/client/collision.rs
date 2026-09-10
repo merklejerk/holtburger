@@ -19,12 +19,11 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow};
 use holtburger_common::Guid;
-#[cfg(test)]
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyDataId, PropertyFloat, WorldObjectPropertyAccessors as _,
 };
-use holtburger_content::{ContentRepository, LandblockCollisionAsset};
+use holtburger_content::{ContentRepository, LandblockCollisionAsset, LandblockSceneClass};
 use holtburger_world::{
     DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
     EntityAppearance, EntityCollisionParticipation, EntityIntegrationEligibility,
@@ -177,6 +176,9 @@ fn property_f32(
 
 /// Injectable synchronous content source used by the asynchronous coordinator.
 pub trait ClientCollisionSource: Send + Sync + 'static {
+    /// Resolves the existing content classification before geographic demand is expanded.
+    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>>;
+
     /// Loads one normalized landblock owner, or `None` when no CellLandblock exists.
     fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>>;
 
@@ -198,6 +200,13 @@ impl ContentClientCollisionSource {
 }
 
 impl ClientCollisionSource for ContentClientCollisionSource {
+    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
+        Ok(self
+            .service
+            .load_landblock(owner.0)?
+            .map(|asset| asset.scene_class))
+    }
+
     fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
         self.service.load_collision(landblock_id)
     }
@@ -241,7 +250,7 @@ pub enum ClientBodyReadiness {
 #[derive(Clone)]
 struct ClientSpatialTarget {
     player: ClientPlayerIdentity,
-    interest: SimulationSceneInterest,
+    position: WorldPosition,
     facts: ClientEntityBodyFacts,
 }
 
@@ -275,6 +284,31 @@ struct ClientRemoteBodyDemand {
     status: ClientRemoteBodyStatus,
 }
 
+/// Classification of the current authored owner; source lifetime is the coordinator lifetime.
+struct ClientSceneContext {
+    /// Authored owner, independent of the player's coordinates within its cells.
+    owner: Guid,
+    /// Classification outcome used to choose demand and report activation failures.
+    state: ClientSceneContextState,
+}
+
+/// Pending and terminal classification outcomes cannot silently become outdoor demand.
+enum ClientSceneContextState {
+    Pending,
+    Ready(LandblockSceneClass),
+    Failed(String),
+}
+
+/// Owner-scoped content result returned through the existing scene worker channel.
+struct ClientSceneContextCompletion {
+    /// Retires a result after replacement or interruption of scene work.
+    generation: u64,
+    /// The content owner whose classification was requested.
+    owner: Guid,
+    /// Successful content fact or terminal diagnostic; no outdoor fallback.
+    result: Result<LandblockSceneClass, String>,
+}
+
 struct ClientSceneCompletion {
     generation: u64,
     batch: SimulationSceneBatchCompletion,
@@ -296,6 +330,7 @@ struct ClientRemoteBodyCompletion {
 }
 
 enum ClientSpatialCompletion {
+    Context(ClientSceneContextCompletion),
     Scene(ClientSceneCompletion),
     Body(Box<ClientBodyCompletion>),
     RemoteBodies(ClientRemoteBodyCompletion),
@@ -307,6 +342,8 @@ pub struct ClientCollisionCoordinator {
     completion_tx: UnboundedSender<ClientSpatialCompletion>,
     completion_rx: UnboundedReceiver<ClientSpatialCompletion>,
     scene_worker: Option<tokio::task::JoinHandle<()>>,
+    /// Resolved before requesting any collision owner set.
+    scene_context: Option<ClientSceneContext>,
     body_worker: Option<tokio::task::JoinHandle<()>>,
     remote_body_worker: Option<tokio::task::JoinHandle<()>>,
     residency: SimulationSceneResidency,
@@ -327,6 +364,7 @@ impl ClientCollisionCoordinator {
             completion_tx,
             completion_rx,
             scene_worker: None,
+            scene_context: None,
             body_worker: None,
             remote_body_worker: None,
             residency: SimulationSceneResidency::default(),
@@ -378,6 +416,20 @@ impl ClientCollisionCoordinator {
 
     /// Checks exact destination coverage; pending content must never become a terminal failure.
     pub(super) fn destination_scene_ready(&self, residency: Guid) -> Result<bool> {
+        if let Some(context) = &self.scene_context {
+            let owner = Guid((residency.0 & 0xffff_0000) | 0xffff);
+            if context.owner != owner {
+                return Ok(false);
+            }
+            match &context.state {
+                ClientSceneContextState::Pending => return Ok(false),
+                ClientSceneContextState::Failed(cause) => anyhow::bail!(
+                    "Destination {:#010X} collision classification failed: {cause}",
+                    residency.0
+                ),
+                ClientSceneContextState::Ready(_) => {}
+            }
+        }
         let snapshot = self.residency.snapshot();
         let ready = if residency_is_indoors(residency) {
             snapshot.scene.contains_env_cell(residency)
@@ -416,13 +468,11 @@ impl ClientCollisionCoordinator {
     /// Independently refreshes scene interest and immutable authoritative-body definition demand.
     pub fn observe(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
         let mut events = self.observe_remote_bodies(world);
-        let Some(target) = Self::target_from_world(world, self.residency.desired_interest()) else {
+        let Some(target) = Self::target_from_world(world) else {
             self.clear();
             return events;
         };
-        if let Some(request) = self.residency.request_interest(target.interest) {
-            self.start_scene_loading(request);
-        }
+        self.observe_scene_context(target.position);
         let body_target = ClientBodyTarget {
             player: target.player,
             demand: local_player_physical_demand(target.facts.physics),
@@ -458,6 +508,27 @@ impl ClientCollisionCoordinator {
         let mut events = Vec::new();
         while let Ok(completion) = self.completion_rx.try_recv() {
             match completion {
+                ClientSpatialCompletion::Context(completion) => {
+                    if completion.generation != self.scene_generation
+                        || Self::target_from_world(world).is_none_or(|target| {
+                            Guid((target.position.landblock_id.0 & 0xffff_0000) | 0xffff)
+                                != completion.owner
+                        })
+                    {
+                        continue;
+                    }
+                    self.scene_worker = None;
+                    self.scene_context = Some(ClientSceneContext {
+                        owner: completion.owner,
+                        state: match completion.result {
+                            Ok(class) => ClientSceneContextState::Ready(class),
+                            Err(cause) => ClientSceneContextState::Failed(cause),
+                        },
+                    });
+                    if let Some(target) = Self::target_from_world(world) {
+                        self.observe_scene_context(target.position);
+                    }
+                }
                 ClientSpatialCompletion::Scene(completion) => {
                     if completion.generation != self.scene_generation {
                         continue;
@@ -483,9 +554,7 @@ impl ClientCollisionCoordinator {
                         continue;
                     }
                     self.body_worker = None;
-                    let Some(current) =
-                        Self::target_from_world(world, self.residency.desired_interest())
-                    else {
+                    let Some(current) = Self::target_from_world(world) else {
                         self.body_target = None;
                         self.body_readiness = ClientBodyReadiness::Waiting;
                         continue;
@@ -639,13 +708,15 @@ impl ClientCollisionCoordinator {
             .take()
             .inspect(|worker| worker.abort());
         self.residency.retire_pending();
+        self.scene_context = None;
         self.body_target = None;
         self.body_readiness = ClientBodyReadiness::Waiting;
         self.remote_bodies.clear();
     }
 
     pub fn clear(&mut self) {
-        if self.body_target.is_some()
+        if self.scene_context.is_some()
+            || self.body_target.is_some()
             || !self.remote_bodies.is_empty()
             || self.residency.snapshot().revision != 0
             || !matches!(self.body_readiness, ClientBodyReadiness::Waiting)
@@ -655,10 +726,7 @@ impl ClientCollisionCoordinator {
         }
     }
 
-    fn target_from_world(
-        world: &WorldState,
-        previous_interest: &SimulationSceneInterest,
-    ) -> Option<ClientSpatialTarget> {
+    fn target_from_world(world: &WorldState) -> Option<ClientSpatialTarget> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return None;
@@ -666,20 +734,79 @@ impl ClientCollisionCoordinator {
         let entity = world.player_entity()?;
         let position = entity.position;
         let facts = client_player_body_facts(world).ok()?;
-        let interest = SimulationSceneInterest::follow_neighborhood(
-            position,
-            CLIENT_COLLISION_OWNER_RADIUS,
-            CLIENT_COLLISION_EXIT_MARGIN,
-            previous_interest,
-        )?;
         Some(ClientSpatialTarget {
             player: ClientPlayerIdentity {
                 guid,
                 instance_sequence: facts.instance_sequence,
             },
-            interest,
+            position,
             facts,
         })
+    }
+
+    /// Resolves content off-thread, then selects owner demand from its authoritative class.
+    fn observe_scene_context(&mut self, position: WorldPosition) {
+        let owner = Guid((position.landblock_id.0 & 0xffff_0000) | 0xffff);
+        if self
+            .scene_context
+            .as_ref()
+            .is_none_or(|context| context.owner != owner)
+        {
+            if let Some(worker) = self.scene_worker.take() {
+                worker.abort();
+                self.residency.retire_pending();
+            }
+            self.scene_generation = self.scene_generation.saturating_add(1);
+            let generation = self.scene_generation;
+            self.scene_context = Some(ClientSceneContext {
+                owner,
+                state: ClientSceneContextState::Pending,
+            });
+            let source = Arc::clone(&self.source);
+            let completion_tx = self.completion_tx.clone();
+            self.scene_worker = Some(tokio::spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    source.load_scene_class(owner)?.ok_or_else(|| {
+                        anyhow!("Collision owner {:#010X} is absent from content", owner.0)
+                    })
+                })
+                .await
+                .map_err(|error| format!("Collision classification worker failed: {error}"))
+                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                let _ = completion_tx.send(ClientSpatialCompletion::Context(
+                    ClientSceneContextCompletion {
+                        generation,
+                        owner,
+                        result,
+                    },
+                ));
+            }));
+            return;
+        }
+        let Some(ClientSceneContext {
+            state: ClientSceneContextState::Ready(class),
+            ..
+        }) = &self.scene_context
+        else {
+            return;
+        };
+        let interest = match class {
+            LandblockSceneClass::DungeonOnly => {
+                SimulationSceneInterest::new([owner]).expect("authored owner is normalized")
+            }
+            LandblockSceneClass::OutdoorOnly | LandblockSceneClass::OutdoorWithEnvCells => {
+                SimulationSceneInterest::follow_neighborhood(
+                    position,
+                    CLIENT_COLLISION_OWNER_RADIUS,
+                    CLIENT_COLLISION_EXIT_MARGIN,
+                    self.residency.desired_interest(),
+                )
+                .expect("known player owner and configured radii are valid")
+            }
+        };
+        if let Some(request) = self.residency.request_interest(interest) {
+            self.start_scene_loading(request);
+        }
     }
 
     fn start_scene_loading(&mut self, request: SimulationSceneRequest) {
@@ -1138,12 +1265,22 @@ mod tests {
     #[derive(Default)]
     struct FakeSource {
         loaded: Mutex<Vec<u32>>,
+        classes: Mutex<BTreeMap<Guid, Result<Option<LandblockSceneClass>, String>>>,
         missing: Mutex<Vec<u32>>,
         prepared: AtomicUsize,
         body_gate: Mutex<Option<BodyGate>>,
     }
 
     impl ClientCollisionSource for FakeSource {
+        fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
+            self.classes
+                .lock()
+                .unwrap()
+                .get(&owner)
+                .cloned()
+                .unwrap_or(Ok(Some(LandblockSceneClass::OutdoorOnly)))
+                .map_err(anyhow::Error::msg)
+        }
         fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
             self.loaded.lock().unwrap().push(landblock_id);
             if self.missing.lock().unwrap().contains(&landblock_id) {
@@ -1691,13 +1828,120 @@ mod tests {
         for owner in [0x1234_0001, 0x1334_0001, 0x1234_0001] {
             world.entities.get_mut(guid).unwrap().position.landblock_id = Guid(owner);
             coordinator.observe(&mut world);
-            assert!(
-                coordinator.scene_worker.is_none(),
-                "a retained seam crossing must not schedule collision loading"
-            );
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while coordinator.scene_worker.is_some() {
+                    coordinator.poll(&mut world, Instant::now());
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("classification should complete");
         }
         assert_eq!(coordinator.snapshot().revision, 2);
         assert_eq!(source.loaded.lock().unwrap().len(), 12);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dungeon_context_replaces_geographic_residency_and_outdoor_context_restores_it() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        world.seed_local_player_entity(guid, "Player", position(0x1234_0001));
+        facts(&mut world, guid);
+        let source = Arc::new(FakeSource::default());
+        source.classes.lock().unwrap().insert(
+            Guid(0x1235_ffff),
+            Ok(Some(LandblockSceneClass::DungeonOnly)),
+        );
+        source.classes.lock().unwrap().insert(
+            Guid(0x1236_ffff),
+            Ok(Some(LandblockSceneClass::DungeonOnly)),
+        );
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+        coordinator.observe(&mut world);
+        wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
+        assert!(coordinator.residency.desired_interest().owners().len() > 1);
+        for (revision, owner) in [(2, 0x1235_ffff), (3, 0x1236_ffff)] {
+            world.entities.get_mut(guid).unwrap().position.landblock_id = Guid(owner);
+            coordinator.invalidate();
+            coordinator.observe(&mut world);
+            wait_for_scene_revision(&mut coordinator, &mut world, revision).await;
+            assert_eq!(
+                coordinator.residency.desired_interest().owners(),
+                &[Guid(owner)]
+            );
+            assert_eq!(coordinator.residency.availability().len(), 1);
+        }
+        world.entities.get_mut(guid).unwrap().position.landblock_id = Guid(0x1234_0001);
+        coordinator.invalidate();
+        coordinator.observe(&mut world);
+        wait_for_scene_revision(&mut coordinator, &mut world, 4).await;
+        assert!(coordinator.residency.desired_interest().owners().len() > 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn missing_or_failed_classification_never_requests_outdoor_collision() {
+        for outcome in [Ok(None), Err("classification decode failed".to_string())] {
+            let mut world = WorldState::synthetic();
+            let guid = Guid(0x5000_0001);
+            world.seed_local_player_entity(guid, "Player", position(0x1234_0001));
+            facts(&mut world, guid);
+            let source = Arc::new(FakeSource::default());
+            source
+                .classes
+                .lock()
+                .unwrap()
+                .insert(Guid(0x1234_ffff), outcome);
+            let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+            coordinator.observe(&mut world);
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while coordinator.scene_worker.is_some() {
+                    coordinator.poll(&mut world, Instant::now());
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                coordinator
+                    .destination_scene_ready(Guid(0x1234_0001))
+                    .is_err()
+            );
+            assert!(source.loaded.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn retired_classification_cannot_replace_a_new_owner_context() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        world.seed_local_player_entity(guid, "Player", position(0x1234_0001));
+        facts(&mut world, guid);
+        let source = Arc::new(FakeSource::default());
+        source.classes.lock().unwrap().insert(
+            Guid(0x4567_ffff),
+            Ok(Some(LandblockSceneClass::DungeonOnly)),
+        );
+        let mut coordinator = ClientCollisionCoordinator::new(source);
+        coordinator.observe(&mut world);
+        let retired = coordinator.scene_generation;
+        coordinator.invalidate();
+        world.entities.get_mut(guid).unwrap().position.landblock_id = Guid(0x4567_0100);
+        coordinator.observe(&mut world);
+        coordinator
+            .completion_tx
+            .send(ClientSpatialCompletion::Context(
+                ClientSceneContextCompletion {
+                    generation: retired,
+                    owner: Guid(0x1234_ffff),
+                    result: Ok(LandblockSceneClass::OutdoorOnly),
+                },
+            ))
+            .unwrap();
+        wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
+        assert_eq!(
+            coordinator.residency.desired_interest().owners(),
+            &[Guid(0x4567_ffff)]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

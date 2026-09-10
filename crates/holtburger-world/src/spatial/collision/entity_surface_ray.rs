@@ -5,10 +5,10 @@ use holtburger_common::Vector3;
 use parry3d::query::Ray;
 
 use super::static_sphere_sweep::parry_vector;
-use super::static_surface_ray::{cast_placed_collision_shape, ray_sweep, validate_ray};
+use super::static_surface_ray::{SurfaceCandidate, cast_placed_collision_shape};
 use super::{
     CollisionQueryPolicy, CollisionScene, SpatialMembership, StaticSurfaceRayHit,
-    StaticSurfaceRayRequest, touched_landblocks,
+    StaticSurfaceRayRequest,
 };
 use crate::spatial::SpatialBodyId;
 use crate::spatial::dynamic_index::{
@@ -77,6 +77,12 @@ struct EntityCandidate {
     proof: EntityCollisionProof,
 }
 
+/// Provenance selected by a single domain-scoped narrow phase.
+enum RayCandidate {
+    Environment(SurfaceCandidate),
+    Entity(EntityCandidate),
+}
+
 impl CollisionScene {
     /// Returns the nearest installed environment or selectable entity surface.
     ///
@@ -88,35 +94,68 @@ impl CollisionScene {
         request: StaticSurfaceRayRequest,
         targetable: impl Fn(SpatialBodyId) -> bool,
     ) -> Result<Option<CollisionSurfaceRayHit>> {
-        let environment = self.cast_static_surface_ray(request)?;
-        let mut entity_request = request;
-        if let Some(hit) = &environment {
-            entity_request.maximum_distance = hit.distance;
-        }
-        let entity = self.cast_entity_surface_ray(entities, entity_request, targetable)?;
-        Ok(match (environment, entity) {
-            (Some(environment), Some(entity)) if entity.distance < environment.distance => {
-                Some(CollisionSurfaceRayHit::Entity(entity))
+        let trace = self.traverse_surface_ray(
+            request,
+            CollisionQueryPolicy::RequireCollisionCoverage,
+            |interval, placement| {
+                let environment = self.cast_static_ray_in_domain(interval, placement);
+                let entity_request = StaticSurfaceRayRequest {
+                    maximum_distance: environment
+                        .as_ref()
+                        .map_or(interval.maximum_distance, |hit| hit.distance),
+                    ..interval
+                };
+                let entity = self.cast_entity_ray_in_domain(
+                    entities,
+                    entity_request,
+                    placement,
+                    &targetable,
+                )?;
+                Ok::<_, anyhow::Error>(match (environment, entity) {
+                    (Some(environment), Some(entity)) if entity.distance < environment.distance => {
+                        Some((entity.distance, RayCandidate::Entity(entity)))
+                    }
+                    (Some(environment), _) => {
+                        Some((environment.distance, RayCandidate::Environment(environment)))
+                    }
+                    (None, Some(entity)) => Some((entity.distance, RayCandidate::Entity(entity))),
+                    (None, None) => None,
+                })
+            },
+        )?;
+        Ok(trace.value.hit.map(|hit| match hit.candidate {
+            RayCandidate::Environment(candidate) => {
+                CollisionSurfaceRayHit::Environment(StaticSurfaceRayHit {
+                    point: hit.point,
+                    distance: hit.distance,
+                    normal: candidate.normal,
+                    placement: hit.placement,
+                    proof: self
+                        .owner_proof(candidate.owner)
+                        .expect("installed candidate retains its owner proof"),
+                })
             }
-            (Some(environment), _) => Some(CollisionSurfaceRayHit::Environment(environment)),
-            (None, Some(entity)) => Some(CollisionSurfaceRayHit::Entity(entity)),
-            (None, None) => None,
-        })
+            RayCandidate::Entity(candidate) => {
+                CollisionSurfaceRayHit::Entity(EntitySurfaceRayHit {
+                    point: hit.point,
+                    distance: hit.distance,
+                    normal: candidate.normal,
+                    placement: hit.placement,
+                    proof: candidate.proof,
+                })
+            }
+        }))
     }
 
-    fn cast_entity_surface_ray(
+    /// Entity candidates share the environment ray's exact current domain and distance limit.
+    fn cast_entity_ray_in_domain(
         &self,
         entities: &EntityCollisionSnapshot,
         request: StaticSurfaceRayRequest,
-        targetable: impl Fn(SpatialBodyId) -> bool,
-    ) -> Result<Option<EntitySurfaceRayHit>> {
-        validate_ray(request)?;
+        placement: &SpatialMembership,
+        targetable: &impl Fn(SpatialBodyId) -> bool,
+    ) -> Result<Option<EntityCandidate>> {
         let end = request.start + request.direction * request.maximum_distance;
-        let full_path = self.transit_surface_ray_path(request, end)?;
-        let mut swept_placement = full_path.initial().placement().clone();
-        for leg in full_path.legs() {
-            swept_placement = swept_placement.merge_reached(leg.end().placement().clone());
-        }
         let minimum = Vector3::new(
             request.start.x.min(end.x),
             request.start.y.min(end.y),
@@ -129,10 +168,9 @@ impl CollisionScene {
         );
         let ray = Ray::new(parry_vector(request.start), parry_vector(request.direction));
         let mut earliest = None::<EntityCandidate>;
-        for body_id in
-            entities
-                .index
-                .candidates(None, request.anchor, minimum, maximum, &swept_placement)
+        for body_id in entities
+            .index
+            .candidates(None, request.anchor, minimum, maximum, placement)
         {
             if !targetable(body_id) {
                 continue;
@@ -178,27 +216,6 @@ impl CollisionScene {
             }
         }
 
-        let clipped_end = earliest.as_ref().map_or(end, |candidate| {
-            request.start + request.direction * candidate.distance
-        });
-        let clipped_path = self.transit_surface_ray_path(request, clipped_end)?;
-        let mut clipped_placement = clipped_path.initial().placement().clone();
-        for leg in clipped_path.legs() {
-            clipped_placement = clipped_placement.merge_reached(leg.end().placement().clone());
-        }
-        let sweep = ray_sweep(request, clipped_end);
-        self.complete_query(
-            CollisionQueryPolicy::RequireCollisionCoverage,
-            &touched_landblocks(sweep),
-            &clipped_placement,
-            (),
-        )?;
-        Ok(earliest.map(|candidate| EntitySurfaceRayHit {
-            point: clipped_end,
-            distance: candidate.distance,
-            normal: candidate.normal,
-            placement: clipped_path.final_point().placement().clone(),
-            proof: candidate.proof,
-        }))
+        Ok(earliest)
     }
 }

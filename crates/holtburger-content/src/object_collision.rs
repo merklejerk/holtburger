@@ -21,7 +21,9 @@ use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
 
 use crate::TerrainCollisionSurface;
-use crate::landblock::{LandblockAsset, LandblockObjectSourceFamily, LandblockPlacement};
+use crate::landblock::{
+    LandblockAsset, LandblockObjectSourceFamily, LandblockPlacement, LandblockSceneClass,
+};
 use crate::source_reader::ContentSourceReader;
 
 /// One authored collision shape, shared by every placement that references it.
@@ -745,8 +747,12 @@ impl LandblockColliderAssembler {
         generated_placements: &[(u32, LandblockObjectSourceFamily, LandblockPlacement, f32)],
         interior: &crate::LandblockInteriorSystemAsset,
     ) -> Result<LandblockColliders> {
-        let mut complete =
-            self.assemble_outdoor(content, decode_cache, landblock, generated_placements)?;
+        let mut complete = match landblock.scene_class {
+            LandblockSceneClass::DungeonOnly => LandblockColliders::new(Vec::new(), Vec::new()),
+            LandblockSceneClass::OutdoorOnly | LandblockSceneClass::OutdoorWithEnvCells => {
+                self.assemble_outdoor(content, decode_cache, landblock, generated_placements)?
+            }
+        };
         complete.absorb(self.assemble_interior(content, decode_cache, landblock, interior)?);
         Ok(complete)
     }

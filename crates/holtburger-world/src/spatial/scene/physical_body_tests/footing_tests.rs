@@ -440,6 +440,49 @@ fn hard_entity_support_is_lost_when_it_becomes_mobile_or_nonblocking() {
 }
 
 #[test]
+fn entity_response_exclusion_drops_entity_support_and_preserves_environment_support() {
+    let now = Instant::now();
+    let (mut scene, collision, rider, platform) = hard_top_fixture(now);
+    let platform_before = scene.body(platform).unwrap().clone();
+    assert!(scene.set_physical_collision_exclusion(
+        rider,
+        crate::spatial::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+        true
+    ));
+    tick_collection(
+        &mut scene,
+        &collision,
+        MOBILE_CONTACT_TICK_SECONDS,
+        now + Duration::from_secs(1),
+    );
+    assert_eq!(scene.body(rider).unwrap().contact, ContactState::Airborne);
+    assert!(scene.body(rider).unwrap().retained.velocity.z < 0.0);
+    assert_eq!(
+        scene
+            .body(platform)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .collision_filter,
+        platform_before.physical.as_ref().unwrap().collision_filter
+    );
+    for tick in 1..=120 {
+        tick_collection(
+            &mut scene,
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now + Duration::from_secs(1)
+                + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+        );
+    }
+    let physical = scene.body(rider).unwrap().physical.as_ref().unwrap();
+    assert!(
+        matches!(physical.response.ground(), GroundState::Supported(support) if matches!(support.source, crate::spatial::SupportSource::World(_)))
+    );
+}
+
+#[test]
 fn falling_body_lands_on_hard_entity_and_reports_that_entity() {
     let now = Instant::now();
     let (mut scene, collision, rider, platform) = hard_top_fixture(now);

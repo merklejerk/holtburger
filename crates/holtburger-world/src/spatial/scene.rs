@@ -594,6 +594,30 @@ impl SpatialScene {
         }
     }
 
+    /// Changes selected body-local exclusions and wakes support/overlap recovery on the next tick.
+    /// Returns false while the body or its physical preparation is absent.
+    pub fn set_physical_collision_exclusion(
+        &mut self,
+        body_id: SpatialBodyId,
+        exclusion: super::PhysicalCollisionExclusions,
+        excluded: bool,
+    ) -> bool {
+        let Some(body) = self.body_store.body_mut(body_id) else {
+            return false;
+        };
+        let Some(physical) = body.physical.as_mut() else {
+            return false;
+        };
+        let filter = physical
+            .collision_filter
+            .with_exclusion(exclusion, excluded);
+        if physical.collision_filter != filter {
+            physical.collision_filter = filter;
+            wake_dynamic_runtime(body);
+        }
+        true
+    }
+
     /// Reactivates one dynamic body without changing semantic or physical policy.
     pub fn wake_dynamic_body(&mut self, body_id: SpatialBodyId) -> bool {
         self.body_store
@@ -4316,60 +4340,90 @@ mod physical_body_tests {
 
     #[test]
     fn frozen_prediction_matches_collection_hard_contact_without_mutating_the_peer() {
-        let now = Instant::now();
-        let (mut prediction, collision, (mover, peer)) = grounded_pair_fixture(false, now);
-        prediction.body_mut(mover).unwrap().retained.velocity = Vector3::new(0.0, 4.0, 0.0);
-        let mut peer_pose = prediction.body(peer).unwrap().pose;
-        peer_pose.coords.y += 0.12;
-        prediction
-            .relocate_dynamic_body(peer, peer_pose, now)
-            .unwrap();
-        let peer_before = prediction.body(peer).unwrap().clone();
-        let targets = prediction.entity_collision_snapshot().unwrap();
-        let mut collection = prediction.clone();
-        collection
-            .body_mut(peer)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .demand
-            .integration = LocalIntegrationDemand::Excluded;
-        let actuation = PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, 4.0, 0.0)).unwrap();
-        let quantum = super::super::MOBILE_CONTACT_TICK_SECONDS;
-        let mut predicted_body = prediction.body(mover).unwrap().clone();
-        let prepared = targets.prepare_frozen_contacts(Guid(0xda55ffff)).unwrap();
-        let result = prepared
-            .tick(
-                &mut predicted_body,
-                &collision,
-                actuation.clone(),
-                quantum,
-                now,
-            )
-            .unwrap();
-        prediction.update_body(predicted_body).unwrap();
-        collection
-            .advance_dynamic_entity_collection(&collision, quantum, now, |body| {
-                let mut input = collection_input(body)?;
-                input.actuation = actuation.clone();
-                Ok(input)
-            })
-            .unwrap();
-        assert_eq!(prediction.body(peer).unwrap(), &peer_before);
-        assert!(result.motion.iter().any(|segment| matches!(segment,
-            super::super::ContactMotionSegment::Impact {
-                hit: super::super::HardSphereSweepHit::Entity { body_id, .. }, ..
-            } if *body_id == peer
-        )));
-        let predicted = prediction.body(mover).unwrap();
-        let actual = collection.body(mover).unwrap();
-        assert_eq!(predicted.pose, actual.pose);
-        assert_eq!(predicted.retained.velocity, actual.retained.velocity);
-        assert_eq!(predicted.contact, actual.contact);
+        for disabled in [false, true] {
+            let now = Instant::now();
+            let (mut prediction, collision, (mover, peer)) = grounded_pair_fixture(false, now);
+            if disabled {
+                assert!(prediction.set_physical_collision_exclusion(
+                    mover,
+                    super::super::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+                    true
+                ));
+            }
+            prediction.body_mut(mover).unwrap().retained.velocity = Vector3::new(0.0, 4.0, 0.0);
+            let mut peer_pose = prediction.body(peer).unwrap().pose;
+            peer_pose.coords.y += 0.12;
+            prediction
+                .relocate_dynamic_body(peer, peer_pose, now)
+                .unwrap();
+            let peer_before = prediction.body(peer).unwrap().clone();
+            let targets = prediction.entity_collision_snapshot().unwrap();
+            let mut collection = prediction.clone();
+            collection
+                .body_mut(peer)
+                .unwrap()
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap()
+                .demand
+                .integration = LocalIntegrationDemand::Excluded;
+            let actuation =
+                PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, 4.0, 0.0)).unwrap();
+            let quantum = super::super::MOBILE_CONTACT_TICK_SECONDS;
+            let mut predicted_body = prediction.body(mover).unwrap().clone();
+            let prepared = targets.prepare_frozen_contacts(Guid(0xda55ffff)).unwrap();
+            let result = prepared
+                .tick(
+                    &mut predicted_body,
+                    &collision,
+                    actuation.clone(),
+                    quantum,
+                    now,
+                )
+                .unwrap();
+            prediction.update_body(predicted_body).unwrap();
+            collection
+                .advance_dynamic_entity_collection(&collision, quantum, now, |body| {
+                    let mut input = collection_input(body)?;
+                    input.actuation = actuation.clone();
+                    Ok(input)
+                })
+                .unwrap();
+            assert_eq!(prediction.body(peer).unwrap(), &peer_before);
+            assert_eq!(
+                !disabled,
+                result.motion.iter().any(|segment| matches!(segment,
+                    super::super::ContactMotionSegment::Impact {
+                        hit: super::super::HardSphereSweepHit::Entity { body_id, .. }, ..
+                    } if *body_id == peer
+                ))
+            );
+            let predicted = prediction.body(mover).unwrap();
+            let actual = collection.body(mover).unwrap();
+            assert_eq!(predicted.pose, actual.pose);
+            assert_eq!(predicted.retained.velocity, actual.retained.velocity);
+            assert_eq!(predicted.contact, actual.contact);
+            if disabled {
+                // Re-enable while slightly overlapping the obstacle, then retreat out of it.
+                let mut restored = predicted.clone();
+                restored.physical.as_mut().unwrap().collision_filter = PhysicalCollisionFilter::ALL;
+                let before = restored.pose.coords.y;
+                prepared
+                    .tick(
+                        &mut restored,
+                        &collision,
+                        PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, -4.0, 0.0))
+                            .unwrap(),
+                        quantum,
+                        now + Duration::from_secs_f32(quantum),
+                    )
+                    .unwrap();
+                assert!(restored.pose.coords.y < before);
+            }
+        }
     }
 
     #[test]

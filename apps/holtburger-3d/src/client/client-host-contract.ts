@@ -220,6 +220,7 @@ export function decodeClientConfirmationUpdated(value: unknown): {
 
 const currentStateSchema = z
 	.object({
+		entityCollisionDisabled: z.boolean(),
 		lifecycle: lifecycleSchema,
 		localPlayerGuid: guid.nullable(),
 		serverTime: finiteNumber.nullable(),
@@ -761,6 +762,11 @@ export interface ClientEntitySelectionQueryRequest {
 	readonly start: LandblockVector3;
 	readonly direction: readonly [number, number, number];
 	readonly previousCell: number | null;
+}
+
+/** Validates the runtime acknowledgement of the local entity collision override. */
+export function decodeClientEntityCollisionDisabled(value: unknown): boolean {
+	return z.boolean().parse(value);
 }
 
 /** Strictly validates the atomic client replacement level before mutable UI observes it. */

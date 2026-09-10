@@ -234,6 +234,7 @@ export class ClientPreciseJumpSession {
 			return;
 		}
 		if (
+			event.type === "entity-collision-disabled" ||
 			event.type === "presentation-discontinuity" ||
 			event.type === "exit-requested" ||
 			event.type === "camera-started" ||

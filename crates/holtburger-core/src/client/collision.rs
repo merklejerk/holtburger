@@ -354,6 +354,8 @@ pub struct ClientCollisionCoordinator {
     remote_body_generation: u64,
     remote_bodies: BTreeMap<SpatialBodyId, ClientRemoteBodyDemand>,
     scene_generation: u64,
+    /// Character-scoped local override, retained across body rebuilds and teleports.
+    entity_response_override: Option<Guid>,
 }
 
 impl ClientCollisionCoordinator {
@@ -375,6 +377,7 @@ impl ClientCollisionCoordinator {
             remote_body_generation: 0,
             remote_bodies: BTreeMap::new(),
             scene_generation: 0,
+            entity_response_override: None,
         }
     }
 
@@ -389,6 +392,39 @@ impl ClientCollisionCoordinator {
 
     pub fn body_readiness(&self) -> ClientBodyReadiness {
         self.body_readiness.clone()
+    }
+
+    /// Whether the current character has opted out of entity obstruction locally.
+    pub(super) fn entity_collision_disabled(&self) -> bool {
+        self.entity_response_override.is_some()
+    }
+
+    /// Retains character policy across body preparation gaps, applying it immediately when possible.
+    /// A request overtaken by character teardown acknowledges the already accepted state.
+    pub(super) fn set_entity_collision_disabled(
+        &mut self,
+        world: &mut WorldState,
+        disabled: bool,
+    ) -> bool {
+        if world.player_entity().is_none() {
+            return self.entity_collision_disabled();
+        }
+        let player = world.player.guid;
+        self.entity_response_override = disabled.then_some(player);
+        // An absent physical body is still preparing; installation consumes the retained override.
+        world.scene.set_physical_collision_exclusion(
+            SpatialBodyId::LocalPlayer(player),
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            disabled,
+        );
+        disabled
+    }
+
+    fn player_collision_filter(&self, player: ClientPlayerIdentity) -> PhysicalCollisionFilter {
+        PhysicalCollisionFilter::ALL.with_exclusion(
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            self.entity_response_override == Some(player.guid),
+        )
     }
 
     pub fn snapshot(&self) -> Arc<SimulationSceneSnapshot> {
@@ -472,6 +508,12 @@ impl ClientCollisionCoordinator {
             self.clear();
             return events;
         };
+        if self
+            .entity_response_override
+            .is_some_and(|player| player != target.player.guid)
+        {
+            self.entity_response_override = None;
+        }
         self.observe_scene_context(target.position);
         let body_target = ClientBodyTarget {
             player: target.player,
@@ -605,7 +647,7 @@ impl ClientCollisionCoordinator {
                     let Some(_outcome) = world.scene.set_dynamic_physical_body(
                         body_id,
                         Some(configuration),
-                        PhysicalCollisionFilter::ALL,
+                        self.player_collision_filter(completion.target.player),
                         initial_cell,
                     ) else {
                         self.body_readiness = ClientBodyReadiness::Waiting;
@@ -712,6 +754,17 @@ impl ClientCollisionCoordinator {
         self.body_target = None;
         self.body_readiness = ClientBodyReadiness::Waiting;
         self.remote_bodies.clear();
+    }
+
+    /// Retires the character-scoped debug policy at logout, including any remaining body.
+    pub(super) fn reset_entity_collision_override(&mut self, world: &mut WorldState) {
+        if let Some(player) = self.entity_response_override.take() {
+            world.scene.set_physical_collision_exclusion(
+                SpatialBodyId::LocalPlayer(player),
+                holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+                false,
+            );
+        }
     }
 
     pub fn clear(&mut self) {
@@ -1155,20 +1208,21 @@ fn reconfigure_physical_body(
     target: &ClientRemoteBodyTarget,
     events: &mut Vec<WorldEvent>,
 ) -> bool {
-    let Some((configuration, initial_cell)) = world.scene.body(target.body_id).and_then(|body| {
-        let configuration = body
-            .physical
-            .as_ref()?
-            .dynamic_configuration_for_state(target.facts.physics, target.demand)?;
-        let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
-        Some((configuration, initial_cell))
-    }) else {
+    let Some((configuration, initial_cell, filter)) =
+        world.scene.body(target.body_id).and_then(|body| {
+            let physical = body.physical.as_ref()?;
+            let configuration =
+                physical.dynamic_configuration_for_state(target.facts.physics, target.demand)?;
+            let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
+            Some((configuration, initial_cell, physical.collision_filter))
+        })
+    else {
         return false;
     };
     let Some(outcome) = world.scene.set_dynamic_physical_body(
         target.body_id,
         Some(configuration),
-        PhysicalCollisionFilter::ALL,
+        filter,
         initial_cell,
     ) else {
         return false;
@@ -1782,6 +1836,89 @@ mod tests {
         assert!(client.activation.is_none());
         assert_eq!(client.state, ClientState::InWorld);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn player_entity_override_survives_reconfiguration_and_rebuild_but_resets_at_logout() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        world.seed_local_player_entity(guid, "Player", position(0x1234_0001));
+        facts(&mut world, guid);
+        let mut coordinator = ClientCollisionCoordinator::new(Arc::new(FakeSource::default()));
+        let id = SpatialBodyId::LocalPlayer(guid);
+        assert!(world.scene.body(id).unwrap().physical.is_none());
+        assert!(coordinator.set_entity_collision_disabled(&mut world, true));
+        coordinator.observe(&mut world);
+        wait_for_readiness(&mut coordinator, &mut world, |ready| {
+            matches!(ready, ClientBodyReadiness::Ready { .. })
+        })
+        .await;
+        let excluded = |world: &WorldState| {
+            world
+                .scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .collision_filter
+                .excludes(holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE)
+        };
+        assert!(excluded(&world));
+        // Changing the debug policy must not replace another owner's domain exclusion.
+        let water = holtburger_world::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER;
+        assert!(
+            world
+                .scene
+                .set_physical_collision_exclusion(id, water, true)
+        );
+        assert!(!coordinator.set_entity_collision_disabled(&mut world, false));
+        assert!(!excluded(&world));
+        assert!(
+            world
+                .scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .collision_filter
+                .excludes(water)
+        );
+        assert!(coordinator.set_entity_collision_disabled(&mut world, true));
+        let target = coordinator.body_target.clone().unwrap();
+        assert!(reconfigure_local_player_body(
+            &mut world,
+            &target,
+            &mut Vec::new()
+        ));
+        assert!(excluded(&world));
+        coordinator.invalidate();
+        coordinator.observe(&mut world);
+        wait_for_readiness(&mut coordinator, &mut world, |ready| {
+            matches!(ready, ClientBodyReadiness::Ready { .. })
+        })
+        .await;
+        assert!(excluded(&world));
+        assert!(
+            world
+                .scene
+                .set_physical_collision_exclusion(id, water, true)
+        );
+        coordinator.reset_entity_collision_override(&mut world);
+        assert!(!coordinator.entity_collision_disabled());
+        assert!(!excluded(&world));
+        assert!(
+            world
+                .scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .collision_filter
+                .excludes(water)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -366,8 +366,8 @@ pub(super) struct ClientCameraSceneInput {
 struct CameraCollisionPublication {
     /// Installed environment geometry and topology.
     environment: Arc<holtburger_world::CollisionScene>,
-    /// Prepared entity geometry from the captured body-store epoch.
-    entities: Arc<holtburger_world::EntityCollisionSnapshot>,
+    /// Prepared peers from this epoch; absent when the followed player excludes entity response.
+    entities: Option<Arc<holtburger_world::EntityCollisionSnapshot>>,
 }
 
 /// Local-player identity and body preparation state from one publication.
@@ -425,14 +425,27 @@ impl ClientCameraSceneInput {
         Self {
             target,
             collision: collision.map(|snapshot| {
-                world
+                let excludes_entities = world
                     .scene
-                    .entity_collision_snapshot()
-                    .map(|entities| CameraCollisionPublication {
-                        environment: Arc::clone(&snapshot.scene),
-                        entities,
-                    })
-                    .map_err(|error| format!("camera collision capture failed: {error:#}"))
+                    .body(SpatialBodyId::LocalPlayer(world.player.guid))
+                    .and_then(|body| body.physical.as_ref())
+                    .is_some_and(|physical| {
+                        physical.collision_filter.excludes(
+                            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+                        )
+                    });
+                let entities =
+                    if excludes_entities {
+                        None
+                    } else {
+                        Some(world.scene.entity_collision_snapshot().map_err(|error| {
+                            format!("camera collision capture failed: {error:#}")
+                        })?)
+                    };
+                Ok(CameraCollisionPublication {
+                    environment: Arc::clone(&snapshot.scene),
+                    entities,
+                })
             }),
         }
     }
@@ -694,15 +707,18 @@ impl ClientCameraRuntime {
             }
         };
         let initial_visual_pivot = active.controller.visual_pivot();
-        let outcome = match active.controller.advance(
-            &holtburger_world::spatial::CameraCollisionQuery {
+        let entity_query = collision.entities.as_ref().map(|entities| {
+            holtburger_world::spatial::CameraCollisionQuery {
                 environment: collision.environment.as_ref(),
-                entities: &collision.entities,
+                entities,
                 target: SpatialBodyId::LocalPlayer(active.identity.player_guid),
-            },
-            duration_seconds,
-            &samples,
-        ) {
+            }
+        });
+        let query: &dyn holtburger_world::spatial::SphereCollisionQuery = match &entity_query {
+            Some(query) => query,
+            None => collision.environment.as_ref(),
+        };
+        let outcome = match active.controller.advance(query, duration_seconds, &samples) {
             Ok(outcome) => outcome,
             Err(_) => {
                 return project_camera_failure(
@@ -1194,6 +1210,110 @@ mod tests {
         CollisionScene, FreeSphereConfig, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
         PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
     };
+
+    #[test]
+    fn boom_follows_player_entity_exclusion_without_restarting_the_camera() {
+        let (mut client, collision, _) = super::super::tests::floor_contact_publication();
+        let player = SpatialBodyId::LocalPlayer(client.world.player.guid);
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        let mut request = start_request(
+            client.world.player.guid,
+            u64::from(client.world.player_entity().unwrap().instance_sequence()),
+        );
+        // Aim above the floor so the baseline reach is limited only by the inserted entity.
+        request.view_direction = [0.0, 0.0, 1.0];
+        camera.start(request, &client.world).unwrap();
+        let duration = ACTIVATION_SETTLE_STEP;
+        let clear = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&clear, duration).unwrap().unwrap();
+        }
+        let controller = &camera.active.as_ref().unwrap().controller;
+        let clear_reach = controller.rendered_reach();
+        assert!(clear_reach > 4.0);
+        let pivot = controller.visual_pivot();
+        let end = controller.camera().pose;
+        let mut blocker = client.world.scene.body(player).unwrap().clone();
+        blocker.id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        blocker.pose.coords = (pivot.coords + end.coords) * 0.5;
+        let physical = blocker.physical.as_ref().unwrap();
+        let configuration =
+            super::super::tests::dynamic_definition(physical.definition, physical.response_policy);
+        let mut definition = configuration.definition().clone();
+        definition.entity_collision.contact_response =
+            holtburger_world::EntityContactResponse::Obstacle;
+        Arc::make_mut(&mut definition.entity_collision.target_geometry).fallback_shapes =
+            vec![Arc::new(holtburger_content::CollisionShape::Ball(
+                holtburger_content::CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+            ))];
+        let blocker_id = blocker.id;
+        client.world.scene.register_body(blocker);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                blocker_id,
+                Some(
+                    holtburger_world::DynamicPhysicalBodyConfiguration::new(
+                        definition,
+                        configuration.demand(),
+                    )
+                    .unwrap(),
+                ),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let blocked = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&blocked, duration).unwrap().unwrap();
+        }
+        assert!(
+            camera.active.as_ref().unwrap().controller.rendered_reach() < clear_reach - 0.5,
+            "clear {clear_reach}, blocked {}",
+            camera.active.as_ref().unwrap().controller.rendered_reach()
+        );
+        assert!(client.world.scene.set_physical_collision_exclusion(
+            player,
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            true
+        ));
+        let excluded = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        assert!(
+            excluded
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .entities
+                .is_none()
+        );
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&excluded, duration).unwrap().unwrap();
+        }
+        assert!(
+            (camera.active.as_ref().unwrap().controller.rendered_reach() - clear_reach).abs()
+                < 0.01
+        );
+        assert!(client.world.scene.set_physical_collision_exclusion(
+            player,
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            false
+        ));
+        let restored = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&restored, duration).unwrap().unwrap();
+        }
+        assert!(
+            camera.active.as_ref().unwrap().controller.rendered_reach() < clear_reach - 0.5,
+            "clear {clear_reach}, blocked {}",
+            camera.active.as_ref().unwrap().controller.rendered_reach()
+        );
+    }
 
     #[test]
     fn physical_contact_path_survives_client_publication_and_camera_sampling() {

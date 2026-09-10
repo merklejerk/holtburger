@@ -85,6 +85,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"start_client_camera",
 	"set_client_camera_intent",
 	"set_client_camera_clearance",
+	"set_client_entity_collision_disabled",
 	"set_client_precise_jump_aim",
 	"query_client_entity_selection_candidates",
 	"commit_client_precise_jump",
@@ -131,6 +132,7 @@ const EXPLORER_HOST_EVENT_NAMES = [
 /** Client lifecycle, focused presentation, and terminal events. */
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
+	"client-entity-collision-disabled",
 	"client-lifecycle-changed",
 	"client-character-motion-capabilities-updated",
 	"client-character-motion-feedback",
@@ -201,6 +203,7 @@ export interface HostEventPayloadMap {
 	"explorer-physical-fly-motion": HostPhysicalFlyPath;
 	"explorer-physical-fly-failure": HostPhysicalFlyFailure;
 	"client-current-state": ClientCurrentState;
+	"client-entity-collision-disabled": boolean;
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
 	"client-character-motion-feedback": ClientCharacterMotionFeedback;

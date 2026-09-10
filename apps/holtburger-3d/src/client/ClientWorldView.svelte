@@ -54,6 +54,9 @@
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
+		/** Runtime-confirmed local player response override. */
+		readonly entityCollisionDisabled: boolean;
+		readonly onEntityCollisionDisabledChange: (disabled: boolean) => void;
 		readonly showRetailHiddenGeometry: boolean;
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
@@ -86,6 +89,8 @@
 		readTargetIndicatorFrame,
 		selectedEntityGuid,
 		hoveredEntityGuid,
+		entityCollisionDisabled,
+		onEntityCollisionDisabledChange,
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 		playerName,
@@ -490,6 +495,8 @@
 		>
 			<ClientDebugPanel
 				{readDiagnostics}
+				{entityCollisionDisabled}
+				{onEntityCollisionDisabledChange}
 				{showRetailHiddenGeometry}
 				{onShowRetailHiddenGeometryChange}
 			/>

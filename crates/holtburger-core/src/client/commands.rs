@@ -1,6 +1,6 @@
 use crate::client::types::{
     ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, ClientExitCause,
-    TargetSlot,
+    ClientViewEvent, TargetSlot,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
@@ -108,6 +108,17 @@ impl ClientRuntime {
 
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
+            ClientCommand::SetEntityCollisionDisabled(disabled) => {
+                let coordinator = self.collision_coordinator.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!("entity collision override requires client collision")
+                })?;
+                let disabled = coordinator.set_entity_collision_disabled(&mut self.world, disabled);
+                self.precise_jump.invalidate();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityCollisionDisabled(disabled));
+                Ok(())
+            }
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
             | ClientCommand::CreateCharacter(_)

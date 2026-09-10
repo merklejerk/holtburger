@@ -105,6 +105,7 @@ describe("ClientLifecycleSession", () => {
 
 		expect(transport.calls).toEqual([
 			"listen:client-dynamic-entity",
+			"listen:client-entity-collision-disabled",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
 			"listen:client-character-motion-capabilities-updated",
@@ -495,6 +496,7 @@ describe("ClientLifecycleSession", () => {
 function currentState(playerGuid: number): ClientCurrentState {
 	return {
 		lifecycle: { kind: "in-world" },
+		entityCollisionDisabled: false,
 		localPlayerGuid: playerGuid,
 		serverTime: 10,
 		worldGeneration: 2,

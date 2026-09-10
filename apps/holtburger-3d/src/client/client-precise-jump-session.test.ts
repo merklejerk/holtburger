@@ -301,6 +301,26 @@ describe("ClientPreciseJumpSession", () => {
 		).toHaveLength(2);
 	});
 
+	it("retires the old trajectory when the player collision policy is acknowledged", async () => {
+		const { cadence, precise, transport } = await fixture();
+		precise.enter();
+		precise.aim(ray);
+		transport.emit(
+			"client-precise-jump-evaluation",
+			evaluation(1, "reachable"),
+		);
+		precise.aim(ray);
+		transport.emit("client-entity-collision-disabled", true);
+		expect(precise.state()).toEqual({ kind: "inactive" });
+		expect(cadence.pendingTaskCount()).toBe(0);
+		expect(precise.activate()).toBe(false);
+		transport.emit(
+			"client-precise-jump-evaluation",
+			evaluation(1, "reachable"),
+		);
+		expect(precise.state()).toEqual({ kind: "inactive" });
+	});
+
 	it("cancels pending cadence work on camera replacement and destroy", async () => {
 		const { cadence, precise, transport } = await fixture();
 		precise.enter();

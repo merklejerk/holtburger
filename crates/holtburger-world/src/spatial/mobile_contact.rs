@@ -439,7 +439,10 @@ impl ContactParticipant {
     }
 
     fn receives_response_from(&self, peer: &Self) -> bool {
-        self.body_id != peer.body_id
+        !self
+            .filter
+            .excludes(super::PhysicalCollisionExclusions::ENTITY_RESPONSE)
+            && self.body_id != peer.body_id
             && peer.target_demand == LocalTargetDemand::Retained
             && self
                 .policy
@@ -573,6 +576,17 @@ mod tests {
         assert_eq!(response.first.velocity_change, Vector3::zero());
         assert!(response.second.displacement.length() > 0.0);
         assert!(resolve_participant_pair(&first, mobile, &first, mobile).is_none());
+        first.policy.mover_accepts_response = true;
+        first.filter = super::super::PhysicalCollisionFilter::excluding(
+            super::super::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+        );
+        let filtered = resolve_participant_pair(&first, mobile, &second, mobile).unwrap();
+        assert_eq!(filtered.first.displacement, Vector3::zero());
+        assert_eq!(filtered.first.velocity_change, Vector3::zero());
+        assert!(filtered.second.displacement.length() > 0.0);
+        first.filter = super::super::PhysicalCollisionFilter::ALL;
+        let restored = resolve_participant_pair(&first, mobile, &second, mobile).unwrap();
+        assert!(restored.first.displacement.length() > 0.0);
         first.membership = SpatialMembership::interior(Guid(0xda55_0100));
         second.membership = SpatialMembership::interior(Guid(0xda55_0101));
         assert!(resolve_participant_pair(&first, mobile, &second, mobile).is_none());

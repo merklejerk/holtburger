@@ -1,5 +1,6 @@
 import {
 	decodeClientCurrentState,
+	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
 	decodeClientDynamicSoundCue,
 	type ClientDynamicSoundCue,
@@ -84,6 +85,7 @@ type ClientCommandName = Extract<
 	| "start_client_camera"
 	| "set_client_camera_intent"
 	| "set_client_camera_clearance"
+	| "set_client_entity_collision_disabled"
 	| "set_client_precise_jump_aim"
 	| "query_client_entity_selection_candidates"
 	| "commit_client_precise_jump"
@@ -95,6 +97,7 @@ type ClientCommandName = Extract<
 type ClientEventName = Extract<
 	HostEventName,
 	| "client-current-state"
+	| "client-entity-collision-disabled"
 	| "client-lifecycle-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
@@ -150,6 +153,7 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "entity-collision-disabled"; readonly disabled: boolean }
 	| { readonly type: "dynamic-sound-cue"; readonly cue: ClientDynamicSoundCue }
 	| {
 			readonly type: "confirmation";
@@ -366,6 +370,13 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("set_client_camera_intent", { request });
 	}
 
+	/** Requests a player-only override; the accepted setting arrives through the host event. */
+	async setEntityCollisionDisabled(disabled: boolean): Promise<void> {
+		await this.#transport.invoke("set_client_entity_collision_disabled", {
+			disabled,
+		});
+	}
+
 	async setCameraClearance(
 		request: ClientCameraClearanceRequest,
 	): Promise<void> {
@@ -425,6 +436,16 @@ export class ClientLifecycleSession {
 	async #listenToSiblingEvents(): Promise<(() => void)[]> {
 		const unlisteners: (() => void)[] = [];
 		try {
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-entity-collision-disabled",
+					(payload) =>
+						this.#emit({
+							type: "entity-collision-disabled",
+							disabled: decodeClientEntityCollisionDisabled(payload),
+						}),
+				),
+			);
 			unlisteners.push(
 				await this.#transport.listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),

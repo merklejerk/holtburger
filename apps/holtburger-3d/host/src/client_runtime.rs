@@ -163,6 +163,10 @@ pub enum ClientHostCommand {
     StartClientCamera {
         request: holtburger_core::ClientCameraStartRequest,
     },
+    /// Local-player entity obstruction override.
+    SetClientEntityCollisionDisabled {
+        disabled: bool,
+    },
     SetClientCameraIntent {
         request: holtburger_core::ClientCameraIntentRequest,
     },
@@ -207,6 +211,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "start_client_camera",
     "set_client_camera_intent",
     "set_client_camera_clearance",
+    "set_client_entity_collision_disabled",
     "set_client_precise_jump_aim",
     "query_client_entity_selection_candidates",
     "commit_client_precise_jump",
@@ -575,6 +580,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         SetClientCameraIntent { request } => runtime
             .set_camera_intent(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientEntityCollisionDisabled { disabled } => runtime
+            .send_command(ClientCommand::SetEntityCollisionDisabled(disabled))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

@@ -72,6 +72,7 @@
 	} from "./client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 
+	let entityCollisionDisabled = $state(false);
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
 	);
@@ -236,7 +237,11 @@
 
 	function receive(event: ClientLifecycleSessionEvent): void {
 		switch (event.type) {
+			case "entity-collision-disabled":
+				entityCollisionDisabled = event.disabled;
+				return;
 			case "current-state":
+				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
 				playerName = event.state.playerName;
 				worldName = event.state.worldName;
@@ -477,6 +482,15 @@
 			name: presentationSession?.readSelectedEntityName() ?? null,
 			healthFraction: entityInteractions?.healthFraction() ?? null,
 		};
+	}
+
+	async function setEntityCollisionDisabled(disabled: boolean): Promise<void> {
+		try {
+			if (session === null) throw new Error("Client session unavailable.");
+			await session.setEntityCollisionDisabled(disabled);
+		} catch (error) {
+			toastCenter.publish({ message: String(error), tone: "warning" });
+		}
 	}
 
 	function setShowRetailHiddenGeometry(visible: boolean): void {
@@ -780,6 +794,8 @@
 		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
 		onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
+		{entityCollisionDisabled}
+		onEntityCollisionDisabledChange={setEntityCollisionDisabled}
 		{playerName}
 		{worldName}
 		{vitals}

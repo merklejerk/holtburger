@@ -177,6 +177,7 @@ describe("ClientCameraSession", () => {
 function currentState(): ClientCurrentState {
 	return {
 		lifecycle: { kind: "in-world" },
+		entityCollisionDisabled: false,
 		localPlayerGuid: PLAYER_GUID,
 		serverTime: 10,
 		worldGeneration: 1,

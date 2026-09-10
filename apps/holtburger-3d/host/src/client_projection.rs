@@ -239,6 +239,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Accepted local-player entity response override.
+    pub entity_collision_disabled: bool,
     /// Complete renderer-facing lifecycle level.
     pub lifecycle: ClientLifecycleWire,
     /// Exact local-player identity, absent until the server creates the player object.
@@ -577,6 +579,7 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    EntityCollisionDisabled(bool),
     CurrentState(ClientCurrentState),
     LifecycleChanged(ClientLifecycleWire),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
@@ -765,6 +768,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             lifecycle: (&snapshot.lifecycle).into(),
+            entity_collision_disabled: snapshot.entity_collision_disabled,
             local_player_guid: snapshot.local_player_guid,
             server_time: snapshot.server_time,
             world_generation: snapshot.world_generation,
@@ -781,6 +785,9 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::EntityCollisionDisabled(disabled) => {
+            Some(ClientHostEvent::EntityCollisionDisabled(disabled))
+        }
         ClientViewEvent::ApplicationSnapshot(snapshot) => {
             Some(ClientHostEvent::CurrentState((&snapshot).into()))
         }

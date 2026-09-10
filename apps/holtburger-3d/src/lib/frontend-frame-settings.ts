@@ -3,7 +3,6 @@ import { normalizedRgbaColor } from "./frontend-color";
 import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/ambient-occlusion-policy";
 import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/color-grade-policy";
 import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/entity-shadow-policy";
-import { DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS } from "./game/renderer/entity-selection-outline-policy";
 import type { NameplateSettings } from "./game/renderer/nameplate-policy";
 import type { FrameSettings } from "./game/renderer/renderer";
 import { LandblockLayerKind } from "./game/runtime/scene-interest";
@@ -58,7 +57,18 @@ export const SHARED_FRAME_SETTINGS = {
 		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
 	},
 	entityShadows: DEFAULT_ENTITY_SHADOW_SETTINGS,
-	entitySelectionOutline: DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS,
+	entitySelectionOutline: {
+		...SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline,
+		color: normalizedRgbaColor(
+			SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline.color,
+		),
+		borderColor: normalizedRgbaColor(
+			SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline.borderColor,
+		),
+		haloColor: normalizedRgbaColor(
+			SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline.haloColor,
+		),
+	},
 	distanceFogEnabled:
 		SHARED_FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
 	viewerLightEnabled:

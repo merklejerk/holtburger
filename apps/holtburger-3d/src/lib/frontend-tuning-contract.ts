@@ -1,3 +1,4 @@
+import type { EntitySelectionOutlineSettings } from "./game/renderer/entity-selection-outline-policy";
 import type { HexRgbColor, HexRgbaColor } from "./frontend-color";
 import type { MapBlipCategory } from "./game/map/map-blip-category";
 import type { AmbientOcclusionParameters } from "./game/renderer/ambient-occlusion-policy";
@@ -255,6 +256,18 @@ interface FrontendRenderingTuning {
 	readonly clearColor: HexRgbaColor;
 	/** Initial nameplate workload and Canvas appearance. */
 	readonly nameplates: FrontendNameplateTuning;
+	/** Layered selected-entity silhouette, authored with hexadecimal colors. */
+	readonly entitySelectionOutline: Omit<
+		EntitySelectionOutlineSettings,
+		"color" | "borderColor" | "haloColor"
+	> & {
+		/** Crisp core color. */
+		readonly color: HexRgbaColor;
+		/** Contrasting separator color. */
+		readonly borderColor: HexRgbaColor;
+		/** Halo color and peak opacity. */
+		readonly haloColor: HexRgbaColor;
+	};
 	/** Initial finished-scene color grade. */
 	readonly colorGrade: FrontendColorGradeTuning;
 	/** Shared ambient-occlusion defaults and resource controls. */

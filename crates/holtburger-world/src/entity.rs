@@ -1149,7 +1149,6 @@ pub struct Entity {
     pub acceleration: Vector3,
     pub omega: Vector3,
     pub gfx_id: Option<u32>,
-    pub icon_id: Option<u32>,
     pub flags: ObjectDescriptionFlag,
     pub weenie_flags: WeenieHeaderFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
@@ -1640,7 +1639,6 @@ impl Entity {
             self.omega = o;
         }
 
-        self.icon_id = Some(data.public_weenie_desc.icon_id);
         self.sequences = data.sequences;
 
         if let Some(val) = data.autonomous_movement {
@@ -1692,7 +1690,6 @@ impl Entity {
                 z: 0.0,
             },
             gfx_id: None,
-            icon_id: None,
             flags: ObjectDescriptionFlag::empty(),
             weenie_flags: WeenieHeaderFlag::empty(),
             weenie_flags2: WeenieHeaderFlag2::empty(),

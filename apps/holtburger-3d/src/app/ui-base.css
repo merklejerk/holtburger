@@ -1,6 +1,6 @@
 @layer base {
 	:root {
-		/* Component tokens are optional: resolve their palette defaults at the consumer. */
+		/* Palette-dependent component defaults resolve at the consumer. */
 		--ui-backdrop-filter: none;
 		/* Tint opacity for default panel/HUD backgrounds; explicit backgrounds bypass it. */
 		--ui-surface-opacity: 1;
@@ -49,6 +49,26 @@
 		/* Shared easing for small interactive embellishments. */
 		--ui-easing: cubic-bezier(0.238, 0.55, 0.546, 1.361);
 		--ui-hud-background-color: #00000044;
+		/* Item grid density, artwork scaling, strip controls and inventory layout. */
+		/* Minimum contents-grid cell size and fixed pack-strip cell size. */
+		--ui-item-cell-min-size: 36px;
+		--ui-item-cell-padding: 1px;
+		--ui-item-grid-gap: 5px;
+		--ui-item-icon-rendering: pixelated;
+		/* Quantity stays legible over artwork without changing the cell geometry. */
+		--ui-item-count-font: bold 20px / 1 Arial, Helvetica, sans-serif;
+		--ui-item-count-color: #fff;
+		--ui-item-count-shadow:
+			-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+		--ui-item-count-background: transparent;
+		--ui-item-count-inset: 1px;
+		--ui-item-strip-inset: 5px;
+		--ui-item-strip-arrow-height: 18px;
+		--ui-item-strip-up-glyph: "▲";
+		--ui-item-strip-down-glyph: "▼";
+		--ui-inventory-padding: 10px;
+		--ui-inventory-section-gap: 14px;
+		--ui-inventory-divider: 1px solid currentColor;
 	}
 	@supports (backdrop-filter: blur(1px)) {
 		.ui-theme .ui-panel {
@@ -478,6 +498,17 @@
 		outline-offset: var(--ui-item-selection-outline-offset, -2px);
 		box-shadow: var(--ui-item-selection-shadow, none);
 		background: var(--ui-item-selection-background, transparent);
+	}
+	/* Draw selection above opaque artwork as well as on the cell itself. */
+	.ui-theme .ui-item-cell[aria-pressed="true"]::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		border-radius: inherit;
+		outline: var(--ui-item-selection-outline, 2px solid currentColor);
+		outline-offset: var(--ui-item-selection-outline-offset, -2px);
+		box-shadow: var(--ui-item-selection-shadow, none);
 	}
 	.ui-theme .ui-item-strip-arrow {
 		color: var(--ui-item-strip-arrow-color, var(--ui-color-text));

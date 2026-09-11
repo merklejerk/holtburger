@@ -41,6 +41,10 @@ pub fn decode_vendor_item_supply(packed_stack_size: u32) -> Option<u32> {
 
 impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
     fn hydrate_from_pwd(&mut self, pwd: &PublicWeenieDescription) {
+        // Base art is mandatory in public descriptions, including explicit zero.
+        // Store it alongside updates so recreation and property deltas share one source.
+        self.dids
+            .insert(PropertyDataId::Icon, holtburger_common::Guid(pwd.icon_id));
         let flags = pwd.obj_desc_flags;
         if flags.contains(ObjectDescriptionFlag::STUCK) {
             self.bools.insert(PropertyBool::Stuck, true);

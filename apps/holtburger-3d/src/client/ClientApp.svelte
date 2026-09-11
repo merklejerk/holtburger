@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { ClientInventoryState } from "./client-inventory-state";
+	import { browserItemIconRepository } from "../app/item-icon-repository";
+	import { prepareItemIcons } from "../app/item-icon-source";
 	import {
 		clientSelectedEntity,
 		type ClientSelectedEntity,
@@ -88,6 +91,7 @@
 	);
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
+	let inventory = $state<ClientInventoryState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
 	let commandFailure = $state<string | null>(null);
@@ -747,6 +751,11 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		const icons = browserItemIconRepository((requests) =>
+			prepareItemIcons(transport, requests),
+		);
+		const inventoryOwner = new ClientInventoryState(owner, icons);
+		inventory = inventoryOwner;
 		const dialogOwner = new ClientDialogs(owner);
 		dialogs = dialogOwner;
 		const unsubscribeDialogs = dialogOwner.subscribe(
@@ -789,6 +798,9 @@
 
 		return () => {
 			disposed = true;
+			inventoryOwner.destroy();
+			inventory = null;
+			icons.dispose();
 			dialogOwner.destroy();
 			unsubscribeDialogs();
 			dialogs = null;
@@ -837,8 +849,7 @@
 		{readFrameRates}
 		{readTargetIndicatorFrame}
 		{readSelectedEntityDisplay}
-		readEntities={() =>
-			session === null ? { kind: "pending" } : session.entities.read()}
+		{inventory}
 		onSelectInventoryItem={(guid) => entitySelection?.selectInventoryItem(guid)}
 		onInteractEntity={() => entityInteractions?.interact(unrestrictedUse)}
 		{selectedEntityGuid}

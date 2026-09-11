@@ -36,6 +36,7 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"load_landblock_profile",
 	"load_sky_source",
 	"load_texture_pixels",
+	"prepare_item_icons",
 	"load_animation",
 	"load_setup_visual",
 	"load_physics_script",

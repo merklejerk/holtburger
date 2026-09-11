@@ -19,6 +19,8 @@ function item(
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 		location: { kind: "none" },
 		ownedByPlayer: false,
@@ -32,8 +34,12 @@ function item(
 export async function probeClientInventory(options: {
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly selection: ClientEntitySelection;
-	/** Mounted inventory consumer activity, independent of producer event count. */
+	/** Persistent inventory maintenance, independent of producer event count. */
 	readonly readSampleCount: () => number;
+	/** Synthetic content controls; production model, repository and browser decoding remain real. */
+	readonly readPreparedIconCount: () => number;
+	readonly holdIconPreparation: () => () => void;
+	readonly failIcon: (base: number) => void;
 	/** Actual camera/selection callbacks exposed by the production world view. */
 	readonly readViewportInput: () => {
 		readonly clicks: number;
@@ -123,6 +129,8 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: 12345,
+				stackCount: null,
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 			storage: {
 				kind: "container",
@@ -141,6 +149,8 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				stackCount: null,
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 		}),
 		...Array.from({ length: 9 }, (_, index) => owned(20 + index, 1, index)),
@@ -204,6 +214,8 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
 	update({
@@ -217,6 +229,8 @@ export async function probeClientInventory(options: {
 			wcid: 123,
 			weenieType: "Food",
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
 	baseline();
@@ -237,15 +251,15 @@ export async function probeClientInventory(options: {
 	)
 		throw new Error("Inventory footer did not show the server coin total.");
 	button("Sort inventory: Native (slot index)").click();
-	await tick();
+	await sample();
 	if (firstMainItem() !== "21")
 		throw new Error("Alphabetical sort did not reorder the section.");
 	button("Sort inventory: Alphabetical").click();
-	await tick();
+	await sample();
 	if (firstMainItem() !== "22")
 		throw new Error("Item type sort did not group the section.");
 	button("Sort inventory: Item type").click();
-	await tick();
+	await sample();
 	if (firstMainItem() !== "20")
 		throw new Error("Native sort did not restore server slot order.");
 	if (!cell(1).textContent?.replace(/\s+/g, " ").includes("Main Pack (9 / 24)"))
@@ -429,8 +443,10 @@ export async function probeClientInventory(options: {
 	await tick();
 	const samplesAtUnmount = options.readSampleCount();
 	await sample();
-	if (options.readSampleCount() !== samplesAtUnmount)
-		throw new Error("Unmounted inventory kept sampling its session.");
+	if (options.readSampleCount() <= samplesAtUnmount)
+		throw new Error(
+			"Hidden inventory stopped maintaining its persistent state.",
+		);
 	if (
 		document.querySelector(".client-inventory") !== null ||
 		JSON.stringify(windowRect()) !== JSON.stringify(placement)
@@ -495,6 +511,8 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
 	await sample();
@@ -585,14 +603,212 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
 	button("Inventory").click();
 	await sample();
-	if (!cell(20).textContent?.includes("Updated while closed"))
+	if (!cell(20).getAttribute("aria-label")?.includes("Updated while closed"))
 		throw new Error("Reopening inventory reused stale display.");
 	cell(20).click();
 	await sample();
+	const appearance = (guid: number, base: number) => {
+		const record = records.find((record) => record.guid === guid);
+		if (record === undefined || record.description.kind !== "known")
+			throw new Error(
+				"Known inventory fixture required for appearance update.",
+			);
+		update({
+			...record,
+			description: {
+				...record.description,
+				itemType: 0,
+				icon: { base, overlay: null, underlay: null, uiEffects: 0 },
+			},
+		});
+	};
+	const quantity = (guid: number, stackCount: number | null) => {
+		const record = records.find((record) => record.guid === guid);
+		if (record === undefined || record.description.kind !== "known")
+			throw new Error("Known quantity fixture required.");
+		update({ ...record, description: { ...record.description, stackCount } });
+	};
+	const badge = (guid: number) =>
+		cell(guid).querySelector<HTMLElement>(".item-grid-cell-count");
+	const artwork = (guid: number) => {
+		const image = cell(guid).querySelector("img");
+		if (
+			image === null ||
+			!image.complete ||
+			image.naturalWidth !== 32 ||
+			image.naturalHeight !== 32
+		)
+			throw new Error(`Item ${guid} has no decoded native-size artwork.`);
+		return image;
+	};
+	const revokeObjectURL = URL.revokeObjectURL;
+	const retiredUrls: string[] = [];
+	let retiredWhileDisplayed = false;
+	URL.revokeObjectURL = (url) => {
+		retiredUrls.push(url);
+		if (
+			[...document.querySelectorAll("img")].some((image) => image.src === url)
+		)
+			retiredWhileDisplayed = true;
+		revokeObjectURL.call(URL, url);
+	};
+	try {
+		button("Close Inventory").click();
+		const beforeHidden = options.readPreparedIconCount();
+		appearance(20, 0x06000001);
+		appearance(22, 0x06000001);
+		await sample();
+		if (options.readPreparedIconCount() !== beforeHidden + 1)
+			throw new Error(
+				"Hidden duplicate icons did not share a single preparation.",
+			);
+		button("Inventory").click();
+		await sample();
+		const sharedUrl = artwork(20).src;
+		if (artwork(22).src !== sharedUrl)
+			throw new Error(
+				"Duplicate cells did not share their retained image URL.",
+			);
+		const beforeCounts = options.readPreparedIconCount();
+		quantity(20, 2);
+		quantity(22, 2000);
+		quantity(31, 2000);
+		quantity(1, 99); // Main Pack is a role, never a stack badge for the player.
+		await sample();
+		if (
+			badge(20)?.textContent !== "2" ||
+			badge(22)?.textContent !== "2.0K" ||
+			document.querySelector('[data-item-guid="1"] .item-grid-cell-count') !==
+				null
+		)
+			throw new Error(
+				"Stack quantities did not remain entity-specific or leaked onto Main Pack.",
+			);
+		if (
+			!cell(20).getAttribute("aria-label")?.includes("quantity: 2") ||
+			!cell(22).title.includes("2000")
+		)
+			throw new Error(
+				"Stack quantity is missing from accessible labels/tooltips.",
+			);
+		const packBadges = [
+			...document.querySelectorAll(
+				'[data-item-guid="31"] .item-grid-cell-count',
+			),
+		];
+		if (
+			packBadges.length !== 2 ||
+			packBadges.some((element) => element.textContent !== "2.0K")
+		)
+			throw new Error(
+				"Pack-slot quantity did not match its contents-grid quantity.",
+			);
+		const countElement = badge(22);
+		if (countElement === null) throw new Error("Count element missing.");
+		const countRect = countElement.getBoundingClientRect();
+		const itemRect = cell(22).getBoundingClientRect();
+		if (
+			countRect.right > itemRect.right ||
+			countRect.bottom > itemRect.bottom ||
+			getComputedStyle(countElement).pointerEvents !== "none"
+		)
+			throw new Error("Count overlay escaped its cell or intercepted input.");
+		quantity(20, 1);
+		await sample();
+		if (badge(20) !== null) throw new Error("A count of one retained a badge.");
+		button("Close Inventory").click();
+		quantity(20, 7);
+		await sample();
+		button("Inventory").click();
+		await sample();
+		if (
+			badge(20)?.textContent !== "7" ||
+			artwork(20).src !== sharedUrl ||
+			artwork(22).src !== sharedUrl ||
+			options.readPreparedIconCount() !== beforeCounts
+		)
+			throw new Error(
+				"Hidden count updates changed artwork ownership or failed to refresh.",
+			);
+		cell(20).click();
+		if (selection.selectedGuid() !== 20)
+			throw new Error("Count decoration blocked selection.");
+		const release = options.holdIconPreparation();
+		try {
+			appearance(20, 0x06000002);
+			await sample();
+			if (
+				cell(20).querySelector(".item-icon-fallback") === null ||
+				cell(20).disabled
+			)
+				throw new Error(
+					"Loading artwork did not leave a usable named fallback.",
+				);
+			button("Close Inventory").click();
+			await sample();
+			const whileHeld = options.readPreparedIconCount();
+			button("Inventory").click();
+			await sample();
+			if (options.readPreparedIconCount() !== whileHeld)
+				throw new Error(
+					"Reopening during preparation duplicated retained work.",
+				);
+		} finally {
+			release();
+		}
+		await sample();
+		if (artwork(20).src === sharedUrl || artwork(22).src !== sharedUrl)
+			throw new Error(
+				"Late artwork completion did not replace only its current consumer.",
+			);
+		options.failIcon(0x06000003);
+		appearance(20, 0x06000003);
+		await sample();
+		const afterFailure = options.readPreparedIconCount();
+		if (
+			badge(20)?.textContent !== "7" ||
+			!cell(20)
+				.querySelector(".item-icon-fallback")
+				?.getAttribute("title")
+				?.includes("quantity: 7")
+		)
+			throw new Error(
+				"Missing-art fallback lost its count or count-bearing diagnostic tooltip.",
+			);
+		if (
+			!cell(20)
+				.querySelector(".item-icon-fallback")
+				?.getAttribute("title")
+				?.includes("Injected missing HUD fixture image")
+		)
+			throw new Error(
+				"Missing-art detail was absent from the fallback tooltip.",
+			);
+		if (
+			cell(20).querySelector(".item-icon-fallback") === null ||
+			cell(20).disabled
+		)
+			throw new Error("Missing artwork blocked its named fallback.");
+		cell(20).click();
+		if (selection.selectedGuid() !== 20)
+			throw new Error("Missing artwork prevented inventory selection.");
+		await sample();
+		if (options.readPreparedIconCount() !== afterFailure)
+			throw new Error("A retained missing image retried on the next sample.");
+		artwork(22);
+		if (retiredUrls.length === 0 || retiredWhileDisplayed)
+			throw new Error(
+				"Icon URLs were not retired strictly after their DOM consumers released them.",
+			);
+	} finally {
+		URL.revokeObjectURL = revokeObjectURL;
+	}
 	return {
 		initial,
 		wide,
@@ -601,7 +817,12 @@ export async function probeClientInventory(options: {
 		selectionRemoved: true,
 		reopenedCurrent: true,
 		inputIsolated: true,
-		samplingStoppedOnUnmount: true,
+		persistentMaintenanceWhileHidden: true,
+		sharedDecodedArtwork: true,
+		retirementAfterDomCommit: true,
+		closeDuringPreparation: true,
+		missingArtworkSelectable: true,
+		stackCountsWithoutRepreparation: true,
 		producerBurstDidNotRestartConsumer: true,
 	};
 }

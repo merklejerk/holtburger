@@ -150,6 +150,9 @@ pub enum SharedContentCommand {
         request: LoadLandblockProfileRequest,
     },
     LoadSkySource,
+    PrepareItemIcons {
+        request: crate::item_icons::PrepareItemIconsRequest,
+    },
     LoadTexturePixels {
         request: LoadTexturePixelsRequest,
     },
@@ -174,6 +177,7 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "load_landblock_profile",
     "load_sky_source",
     "load_texture_pixels",
+    "prepare_item_icons",
     "load_motion_table_closure",
 ];
 
@@ -262,6 +266,14 @@ pub async fn dispatch_shared_content(
             crate::load_sky_source_bytes(&runtime.content().runtime)
                 .await
                 .map_err(application_error)?,
+        )),
+        PrepareItemIcons { request } => Ok(HostResponse::Binary(
+            crate::item_icons::prepare_item_icon_bytes(
+                Arc::clone(&runtime.content().repository),
+                request,
+            )
+            .await
+            .map_err(application_error)?,
         )),
         LoadTexturePixels { request } => Ok(HostResponse::Binary(
             crate::load_texture_pixels_bytes(&runtime.content().runtime, request)

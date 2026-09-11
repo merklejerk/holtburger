@@ -39,6 +39,7 @@ pub mod host_mode;
 pub mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
+pub mod item_icons;
 pub mod landblock_profile;
 pub mod landblock_source_batch;
 pub mod map_geometry;

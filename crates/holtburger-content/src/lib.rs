@@ -9,6 +9,7 @@ pub mod material_capabilities;
 pub mod material_graph;
 pub mod motion_sequence;
 pub mod object_collision;
+pub mod render_surface_pixels;
 pub mod repository;
 pub mod selection_envelope;
 pub mod soul_emote;
@@ -18,6 +19,7 @@ pub mod terrain_topology;
 #[cfg(test)]
 mod test_support;
 pub mod texture_pixels;
+pub mod ui_assets;
 
 pub use active_region::ActiveRegionData;
 pub use character_gen::CharacterGenCatalog;

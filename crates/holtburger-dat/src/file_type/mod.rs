@@ -2,6 +2,7 @@ pub mod animation;
 pub mod char_gen;
 pub mod chat_pose_table;
 pub mod degrade_info;
+pub mod did_mapper;
 pub mod env_cell;
 pub mod environment;
 pub mod gfx_obj;
@@ -23,6 +24,7 @@ pub use animation::Animation;
 pub use char_gen::CharGen;
 pub use chat_pose_table::{ChatEmoteData, ChatPoseTable};
 pub use degrade_info::{DegradeBand, DegradeOrientation, GfxObjDegradeInfo};
+pub use did_mapper::{DidMapper, NumberedEnumMap};
 pub use env_cell::EnvCell;
 pub use environment::{CellStruct, Environment};
 pub use gfx_obj::GfxObj;
@@ -65,6 +67,7 @@ pub enum DatFileType {
     Table = 0x0E,
     PaletteSet = 0x0F,
     Clothing = 0x10,
+    DidMapper = 0x25,
     Scene = 0x12,
     Region = 0x13,
     CombatManeuverTable = 0x30,
@@ -134,6 +137,7 @@ impl DatFileType {
             0x0E => DatFileType::Table,
             0x0F => DatFileType::PaletteSet,
             0x10 => DatFileType::Clothing,
+            0x25 => DatFileType::DidMapper,
             0x12 => DatFileType::Scene,
             0x13 => DatFileType::Region,
             0x30 => DatFileType::CombatManeuverTable,
@@ -167,6 +171,7 @@ impl DatFileType {
             0x0E => DatFileType::Table,
             0x0F => DatFileType::PaletteSet,
             0x10 => DatFileType::Clothing,
+            0x25 => DatFileType::DidMapper,
             0x12 => DatFileType::Scene,
             0x13 => DatFileType::Region,
             0x30 => DatFileType::CombatManeuverTable,
@@ -201,6 +206,7 @@ impl fmt::Display for DatFileType {
             DatFileType::Table => "Table",
             DatFileType::PaletteSet => "PaletteSet",
             DatFileType::Clothing => "Clothing (CLO)",
+            DatFileType::DidMapper => "DID Mapper",
             DatFileType::Scene => "Scene (SCN)",
             DatFileType::Region => "Region (RGN)",
             DatFileType::CombatManeuverTable => "CombatManeuverTable",

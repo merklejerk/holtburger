@@ -59,6 +59,28 @@ visibility. Diagnostics windows retain their normal border resizing. Internal co
 and the layout-lock button remain CSS-owned. Layout edits are not persisted yet.
 Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
 
+## Inventory artwork
+
+The recoverable entity-facts stream carries base/overlay/underlay DIDs and effects
+from the world's property map, independently of scene residency. The persistent
+`ClientInventoryState` owns inventory preferences and references; mounted panels only
+sample its view. `ItemIconRepository` shares prepared images by complete appearance
+and uses the existing lease registry for both persistent owners and temporary DOM uses.
+
+The shared host command `prepare_item_icons` prepares at most 32 icons per batch in
+`spawn_blocking`, with no gameplay actor or renderer dependency. `holtburger-dat`
+decodes DID mappers, `holtburger-content` resolves static sources and normalizes pixels,
+and the app host owns retail recipe/composition policy. Responses contain native
+32×32 PNGs and per-icon diagnostics, with a 256 KiB frame ceiling. Required failures
+leave selectable names; missing optional layers retain usable artwork and report why.
+See [item UI theme hooks](ITEM_UI_THEMING.md) for cell visuals and selection styling.
+
+`HOLTBURGER_PROBE_MODE=inventory npm run probe:client:ui` uses the existing
+live probe credentials to check artwork and close/reopen retention without moving
+the character. This is a diagnostic command requiring local game assets. The canonical
+`npm run harness:browser -- --client-hud --brief` covers inventory behavior with
+synthetic artwork; the scoping worksheet retains the completed burst measurements.
+
 ## UI themes
 
 Both modes use **Holtburger Standard** from

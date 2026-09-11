@@ -146,7 +146,8 @@ export function decodeLandblockSourceBatch(
 			);
 		}
 		if (!isKnownLayer(record.layer)) continue;
-		const bytes = Uint8Array.from(response.subarray(range.start, range.end));
+		// Record decoders honor byteOffset and copy retained typed sections into owned buffers.
+		const bytes = response.subarray(range.start, range.end);
 		const decoded = decodeRecord(
 			record.layer,
 			bytes,

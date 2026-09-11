@@ -99,6 +99,12 @@ describe("planEnvCellMaterialization", () => {
 		expect(plan.shells).toHaveLength(2);
 		expect(new Set(plan.shells.map((shell) => shell.geometry)).size).toBe(2);
 		expect(plan.residentJobs).toHaveLength(2);
+		// Shared definitions still establish texture demand for each independent cell owner.
+		expect(
+			plan.residentJobs.map((job) =>
+				job.textureRequirements.map((fact) => fact.sourceAssetId),
+			),
+		).toEqual([["0x06000001"], ["0x06000001"]]);
 		expect(
 			plan.residentJobs.map((job) => ({
 				cell: job.source.envCellId,

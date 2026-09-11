@@ -117,6 +117,34 @@ describe("decodeOutdoorStaticRecord", () => {
 		);
 	});
 
+	it.each([
+		LandblockLayerKind.Buildings,
+		LandblockLayerKind.Objects,
+		LandblockLayerKind.Generated,
+	] as const)(
+		"owns decoded %s buffers independently of an unaligned batch view",
+		(layer) => {
+			const bytes = batchResponse(buildResponse({ layer }), layer);
+			const backing = new ArrayBuffer(bytes.length + 3);
+			const response = new Uint8Array(backing, 3);
+			response.set(bytes);
+			const expected = decodeLandblockSourceBatch(
+				bytes,
+				LANDBLOCK_ID,
+				new Set([layer]),
+				{} as ActiveRegionSource,
+			);
+			const actual = decodeLandblockSourceBatch(
+				response,
+				LANDBLOCK_ID,
+				new Set([layer]),
+				{} as ActiveRegionSource,
+			);
+			structuredClone(backing, { transfer: [backing] });
+			expect(actual).toEqual(expected);
+		},
+	);
+
 	it("rejects a resident whose closed source definition is absent", () => {
 		const response = buildResponse({
 			residents: [{ ...resident("direct"), source: "missing" }],

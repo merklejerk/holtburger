@@ -9,6 +9,17 @@ const CELL_ID = 0x00010100;
 const SURFACE_ID = 0x08000001;
 
 describe("decodeEnvCellRecord", () => {
+	it("owns decoded data independently of an unaligned record view", () => {
+		const bytes = envCellRecord();
+		const backing = new ArrayBuffer(bytes.length + 3);
+		const response = new Uint8Array(backing, 3);
+		response.set(bytes);
+		const expected = decodeEnvCellRecord(bytes, LAND_BLOCK_ID);
+		const actual = decodeEnvCellRecord(response, LAND_BLOCK_ID);
+		structuredClone(backing, { transfer: [backing] });
+		expect(actual).toEqual(expected);
+	});
+
 	it("decodes packed bounds while retaining empty cells", () => {
 		const source = decodeEnvCellRecord(
 			envCellRecord(

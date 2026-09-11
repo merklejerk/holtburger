@@ -35,7 +35,7 @@ pub mod stats;
 pub mod vendor;
 
 pub use self::state::WorldState;
-pub use attachment::{AttachmentError, EntityPlacement, PhysicsAttachment};
+pub use attachment::{AttachmentError, EntityPlacement, EntityPlacementIntent, PhysicsAttachment};
 pub use bootstrap::WorldBootstrap;
 pub use entity_appearance::{
     EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange, HeldItemPlacement,
@@ -112,6 +112,7 @@ pub use state::{
     SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,
     SelfMovementKinematicsError,
 };
+pub use state::{ResolvedScenePlacement, ScenePlacementError, UnresolvedScenePlacement};
 
 #[cfg(feature = "physics-profiling")]
 pub use spatial::{PhysicsWork, take_physics_work};

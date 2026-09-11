@@ -35,7 +35,10 @@ const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
 fn dead_authority_advances_once_despite_held_manual_drive() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x7000_0001);
-    let pose = WorldPosition::default();
+    let pose = WorldPosition {
+        landblock_id: Guid(0xda55_0001),
+        ..WorldPosition::default()
+    };
     world.seed_local_player_entity(guid, "Death fixture", pose);
     let velocity = Vector3::new(2.0, 0.0, 0.0);
     world.set_motion_sequences(explicit_motion_catalog(

@@ -1,8 +1,10 @@
+pub(crate) mod attachment_lifecycle;
 mod entity_scale;
 pub mod fellowship;
 pub mod liveness;
 pub mod motion_resolution;
 pub mod mutations;
+mod scene_placement;
 mod selection;
 pub mod self_movement;
 #[cfg(test)]
@@ -19,6 +21,7 @@ pub use motion_resolution::{
     LocalAuthoredMotionActionError, MotionCommandKinematics, MotionTableMovementProfile,
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
 };
+pub use scene_placement::{ResolvedScenePlacement, ScenePlacementError, UnresolvedScenePlacement};
 pub use self_movement::{
     RequiredSelfMovementKinematics, SelfJumpCapabilities, SelfJumpCapabilitiesError,
     SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,

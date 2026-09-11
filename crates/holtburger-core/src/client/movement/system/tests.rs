@@ -2002,7 +2002,7 @@ async fn motion_packet_and_explicit_sync_share_the_routine_publication_baseline(
 }
 
 #[test]
-fn local_visual_intent_preserves_channels_and_ends_on_stop_or_expiry() {
+fn client_directed_presentation_retains_idle_until_control_is_released() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_3390);
     world.player.guid = guid;
@@ -2017,27 +2017,6 @@ fn local_visual_intent_preserves_channels_and_ends_on_stop_or_expiry() {
     seed_authored_manual_motion_world(&mut world, guid);
     let mut movement = MovementSystem::new();
     let now = Instant::now();
-    for drive in [
-        CharacterDrive::builder().run().forward().build(),
-        CharacterDrive::builder()
-            .walk()
-            .backstep()
-            .strafe_left()
-            .turn_right()
-            .build(),
-    ] {
-        install_manual_drive(&mut movement, drive, Some(now));
-        let order = movement.local_locomotion_order(&world).unwrap().unwrap();
-        let expected = crate::motion_order_for_drive(
-            drive,
-            world.player_run_rate().unwrap(),
-            MotionCommand(MotionStance::NonCombat as u32),
-        )
-        .unwrap();
-        assert_eq!(order, expected);
-        movement.expire_active_movement(now);
-        assert!(movement.local_locomotion_order(&world).unwrap().is_none());
-    }
     movement.ingest_drive_intent(
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
@@ -2050,7 +2029,7 @@ fn local_visual_intent_preserves_channels_and_ends_on_stop_or_expiry() {
     );
     assert_eq!(
         movement
-            .local_locomotion_order(&world)
+            .client_directed_locomotion_order(&world)
             .unwrap()
             .unwrap()
             .forward
@@ -2058,10 +2037,31 @@ fn local_visual_intent_preserves_channels_and_ends_on_stop_or_expiry() {
             .0,
         MotionCommand::RUN_FORWARD
     );
+    movement.ingest_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle { pose: None }),
+        now,
+    );
+    let idle = movement
+        .client_directed_locomotion_order(&world)
+        .unwrap()
+        .unwrap();
+    assert_eq!(idle.forward, None);
+    assert_eq!(idle.sidestep, None);
+    assert_eq!(idle.turn, None);
     movement.ingest_drive_intent(PlayerDriveIntent::Stop, now);
-    assert!(movement.local_locomotion_order(&world).unwrap().is_none());
+    assert!(
+        movement
+            .client_directed_locomotion_order(&world)
+            .unwrap()
+            .is_none()
+    );
     install_manual_drive(&mut movement, CharacterDrive::default(), None);
-    assert!(movement.local_locomotion_order(&world).unwrap().is_none());
+    assert!(
+        movement
+            .client_directed_locomotion_order(&world)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
 	import { mapBlipFillStyle } from "../../lib/game/map/map-appearance";
+	import { probeBoomCameraCorrection } from "./boom-camera-probe";
 	import { probeClientAudio } from "./client-audio-probe";
 	import ClientMessageDialog from "../../client/ClientMessageDialog.svelte";
 	import {
@@ -601,6 +602,7 @@
 			actionFeedback: await probeActionFeedback(),
 			dialogs: await probeDialogs(),
 			audio: await probeClientAudio(),
+			boomCamera: await probeBoomCameraCorrection(),
 			use,
 			commands: [...interactionCommands],
 		};
@@ -912,7 +914,7 @@
 					collisionProof: { status: "covered" },
 					controlLegs: 0,
 					clearanceSweeps: 1,
-					transitSubsteps: 0,
+					continuitySweeps: 0,
 					contactPasses: 1,
 				},
 			},

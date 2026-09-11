@@ -93,8 +93,8 @@ pub use dynamic_body::{
 pub use dynamic_index::{EntityCollisionProof, EntityCollisionSnapshot};
 pub use free_sphere::{
     FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
-    FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere, settle_free_sphere_with_policy,
-    solve_free_sphere,
+    FreeSphereSettleConfig, FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere,
+    settle_free_sphere_with_policy, solve_free_sphere,
 };
 pub use grounded::{
     EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,

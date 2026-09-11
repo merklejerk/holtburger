@@ -1172,7 +1172,7 @@ function cameraTick(identity: {
 			collisionProof: { status: "covered" },
 			controlLegs: 0,
 			clearanceSweeps: 0,
-			transitSubsteps: 0,
+			continuitySweeps: 0,
 			contactPasses: 0,
 		},
 	};
@@ -1204,7 +1204,7 @@ function fallbackCameraTick(identity: {
 			collisionProof: { status: "covered" },
 			controlLegs: 0,
 			clearanceSweeps: 0,
-			transitSubsteps: 0,
+			continuitySweeps: 0,
 			contactPasses: 8,
 		},
 	};

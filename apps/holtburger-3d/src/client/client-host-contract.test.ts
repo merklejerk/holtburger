@@ -207,7 +207,7 @@ describe("client host wire contract", () => {
 				collisionProof: { status: "covered" },
 				controlLegs: 0,
 				clearanceSweeps: 0,
-				transitSubsteps: 0,
+				continuitySweeps: 0,
 				contactPasses: 8,
 			},
 		} as const;

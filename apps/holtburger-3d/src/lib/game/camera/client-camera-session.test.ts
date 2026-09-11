@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-	ClientCurrentState,
-	ClientCameraIdentity,
-	ClientCameraTick,
+import {
+	decodeClientCameraTick,
+	type ClientCurrentState,
+	type ClientCameraIdentity,
+	type ClientCameraTick,
 } from "../../../client/client-host-contract";
 import {
 	ClientLifecycleSession,
@@ -70,6 +71,31 @@ describe("ClientCameraSession", () => {
 		expect(camera.presentation(116)?.placement.position.x).toBeCloseTo(
 			camera.presentation(100)!.placement.position.x + 2,
 		);
+	});
+
+	it("discards queued camera travel when an obstruction correction arrives", async () => {
+		const transport = new FakeTransport();
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const camera = new ClientCameraSession(lifecycle);
+		await camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
+		camera.receive(tick(1, 10, 14), 100);
+		camera.receive(tick(2, 14, 18), 101);
+		const correction = {
+			...tick(3, 5, 5),
+			kind: "reseeded",
+			reason: "obstructed-path",
+		} satisfies ClientCameraTick;
+		camera.receive(decodeClientCameraTick(correction), 102);
+		for (const time of [102, 116, 164]) {
+			expect(camera.presentation(time)?.placement.position.x).toBeCloseTo(
+				5 + 0xda * 192,
+			);
+		}
+		expect(camera.status()).toMatchObject({
+			placementOutcome: { kind: "reseeded", reason: "obstructed-path" },
+		});
+		camera.destroy();
 	});
 
 	it("accumulates zoom and sends only changed semantic intent", async () => {
@@ -247,7 +273,7 @@ function tick(
 	sequence: number,
 	startX: number,
 	endX: number,
-): ClientCameraTick {
+): Extract<ClientCameraTick, { readonly kind: "advanced" }> {
 	return {
 		kind: "advanced",
 		...IDENTITY,
@@ -269,7 +295,7 @@ function tick(
 			collisionProof: { status: "covered" },
 			controlLegs: 1,
 			clearanceSweeps: 1,
-			transitSubsteps: 1,
+			continuitySweeps: 0,
 			contactPasses: 0,
 		},
 	};
@@ -293,7 +319,7 @@ function fallback(sequence: number, x: number): ClientCameraTick {
 			collisionProof: { status: "covered" },
 			controlLegs: 0,
 			clearanceSweeps: 0,
-			transitSubsteps: 0,
+			continuitySweeps: 0,
 			contactPasses: 8,
 		},
 	};

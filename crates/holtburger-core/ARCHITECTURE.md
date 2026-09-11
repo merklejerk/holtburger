@@ -48,7 +48,11 @@ delegating static collision queries and placed-path authoring to an injected wor
 snapshot. It is not a registered spatial body and owns no scheduler, possession lifecycle,
 transport, pointer gesture, or presentation clock. Applications adapt their actor path into target
 samples, advance the controller on their chosen fixed timeline, and publish the resulting
-collision-safe camera path with authoritative residency.
+collision-safe camera path with authoritative residency. Each control leg casts the camera envelope
+from a target-relative origin; the resulting radial endpoint owns placement. Bidirectional sweeps
+check whether successive endpoints admit interpolation, including geometry closing onto the old
+camera. Blocked interpolation publishes a discontinuity at the radial endpoint instead of sliding
+or retaining a camera body behind the obstruction. Stationary endpoints need no continuity sweep.
 
 The client composition services this controller in `client/camera_service.rs` on a dedicated
 worker against the latest immutable query input. Camera input and lifecycle serialization do not
@@ -58,11 +62,13 @@ registration, placement, and input together, and worker shutdown joins before re
 handles. Explorer's worker and possession permissions belong to its app-local host composition.
 
 Camera clearance is independent of the target seed. The controller retains a latest requested
-projection revision/radius and an optional committed revision/radius. Shrinks commit before the
-next ordinary solve; growth first finds a directionlessly separated candidate, reaches it under the
-old envelope, and acknowledges the new revision only on a later path solved with the new envelope.
-An impossible enlargement therefore leaves ordinary camera motion and the last acknowledged
-projection operational instead of becoming a terminal controller state.
+projection revision/radius and an optional committed revision/radius. Each tick attempts the
+requested envelope over the sampled target path and acknowledges it only on successful publication.
+If growth fails, one bounded retry uses the committed radius while retaining the pending request;
+a larger sphere fitting at the previous target position cannot prove that it fits along this tick's
+path. Diagnostics include both attempts. Each origin is settled for the camera radius because the
+target body can fit where a larger projection cannot. Settlement accepts only contact-pass and
+separation settings; movement-substep settings belong to the independent free-sphere motion solver.
 
 The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around a composite `MotionState`, plus one-shot `SnapFacing` and `Stop`. A motion state represents longitudinal, lateral, and turn axes independently, so diagonal translation does not require a named locomotion variant. [src/client/movement/mod.rs](src/client/movement/mod.rs) remains the sole executor boundary that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
 

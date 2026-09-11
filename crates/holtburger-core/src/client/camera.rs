@@ -174,8 +174,8 @@ pub struct ClientCameraDiagnostics {
     pub control_legs: usize,
     /// Radial clearance sweeps executed.
     pub clearance_sweeps: usize,
-    /// Portal-transit subdivisions evaluated.
-    pub transit_substeps: usize,
+    /// Sweeps checking safe interpolation between radial camera placements.
+    pub continuity_sweeps: usize,
     /// Free-sphere contact passes executed.
     pub contact_passes: usize,
 }
@@ -186,7 +186,7 @@ impl From<KinematicBoomDiagnostics> for ClientCameraDiagnostics {
             collision_proof: value.collision_proof.into(),
             control_legs: value.control_legs,
             clearance_sweeps: value.clearance_sweeps,
-            transit_substeps: value.transit_substeps,
+            continuity_sweeps: value.continuity_sweeps,
             contact_passes: value.contact_passes,
         }
     }
@@ -212,13 +212,15 @@ impl From<KinematicBoomFailureReason> for ClientCameraFailureReason {
     }
 }
 
-/// Reason a client camera was reseeded onto a safe target placement.
+/// Reason a client camera published a safe placement discontinuously.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientCameraReseedReason {
     InitialPlacement,
     PlacedPath,
     PlacementRecovery,
+    /// Geometry blocked interpolation to the target-origin camera placement.
+    ObstructedPath,
 }
 
 impl From<KinematicBoomReseedReason> for ClientCameraReseedReason {
@@ -227,6 +229,7 @@ impl From<KinematicBoomReseedReason> for ClientCameraReseedReason {
             KinematicBoomReseedReason::InitialPlacement => Self::InitialPlacement,
             KinematicBoomReseedReason::PlacedPath => Self::PlacedPath,
             KinematicBoomReseedReason::PlacementRecovery => Self::PlacementRecovery,
+            KinematicBoomReseedReason::ObstructedPath => Self::ObstructedPath,
         }
     }
 }

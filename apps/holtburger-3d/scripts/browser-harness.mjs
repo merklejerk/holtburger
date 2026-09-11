@@ -2178,16 +2178,16 @@ function summarizePossessionScenario(scenario) {
 						maximum.clearanceSweeps,
 						tick.diagnostics.clearanceSweeps,
 					),
-					transitSubsteps: Math.max(
-						maximum.transitSubsteps,
-						tick.diagnostics.transitSubsteps,
+					continuitySweeps: Math.max(
+						maximum.continuitySweeps,
+						tick.diagnostics.continuitySweeps,
 					),
 				}),
 				{
 					contactPasses: 0,
 					controlLegs: 0,
 					clearanceSweeps: 0,
-					transitSubsteps: 0,
+					continuitySweeps: 0,
 				},
 			),
 			postReleasePublishedBoom:

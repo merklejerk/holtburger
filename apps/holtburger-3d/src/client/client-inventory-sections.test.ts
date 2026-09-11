@@ -6,6 +6,7 @@ import {
 import { entityFacts } from "./client-entity-mirror.test-support";
 import {
 	clientInventorySections,
+	clientInventoryMembership,
 	clientInventoryPackSlots,
 	sortInventoryItems,
 } from "./client-inventory-sections";
@@ -49,6 +50,7 @@ describe("clientInventorySections", () => {
 					),
 					child(40, 1, { kind: "item", index: 0 }),
 					child(50, 10, { kind: "item", index: 0 }, true),
+					child(80, 50, { kind: "item", index: 0 }),
 					child(60, 1, { kind: "pending" }),
 					entityFacts(70, {
 						ownedByPlayer: true,
@@ -58,7 +60,11 @@ describe("clientInventorySections", () => {
 			},
 			1,
 		);
-		const sections = clientInventorySections(prepared.level);
+		const membership = clientInventoryMembership(prepared.level);
+		expect(
+			membership?.members.map((item) => item.guid).sort((a, b) => a - b),
+		).toEqual([1, 10, 20, 30, 40, 50, 60]);
+		const sections = clientInventorySections(membership);
 		expect(sections.map((section) => section.container.guid)).toEqual([
 			1, 30, 10,
 		]);
@@ -104,7 +110,9 @@ describe("clientInventorySections", () => {
 			},
 			1,
 		);
-		const sections = clientInventorySections(prepared.level);
+		const sections = clientInventorySections(
+			clientInventoryMembership(prepared.level),
+		);
 		expect(sections.map((section) => section.container.guid)).toEqual([
 			1, 3, 4,
 		]);
@@ -143,7 +151,9 @@ describe("clientInventoryPackSlots", () => {
 			1,
 		);
 		expect(
-			clientInventoryPackSlots(level).map((item) => item?.guid ?? null),
+			clientInventoryPackSlots(clientInventoryMembership(level)).map(
+				(item) => item?.guid ?? null,
+			),
 		).toEqual([1, 3, null, 2, null]);
 		const unknown = {
 			...root,
@@ -156,7 +166,9 @@ describe("clientInventoryPackSlots", () => {
 		};
 		const pending = mirror.prepareSnapshot({ entities: [unknown, bag] }, 1);
 		expect(
-			clientInventoryPackSlots(pending.level).map((item) => item?.guid ?? null),
+			clientInventoryPackSlots(clientInventoryMembership(pending.level)).map(
+				(item) => item?.guid ?? null,
+			),
 		).toEqual([1, null, null, 2]);
 	});
 });
@@ -174,6 +186,8 @@ describe("sortInventoryItems", () => {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				stackCount: null,
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 		});
 		const native = [

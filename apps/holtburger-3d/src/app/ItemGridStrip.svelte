@@ -86,6 +86,10 @@
 	@layer components {
 		.item-grid-strip {
 			position: relative;
+			/* Share the grid cell basis; the owning panel adds its own divider. */
+			width: calc(
+				var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
+			);
 			height: 100%;
 			min-height: 0;
 		}
@@ -94,7 +98,7 @@
 			overflow-y: auto;
 			overflow-x: hidden;
 			scrollbar-width: none;
-			padding: 0 var(--ui-item-strip-inset, 5px);
+			padding: 0 var(--ui-item-strip-inset);
 		}
 		.item-grid-strip-viewport::-webkit-scrollbar {
 			display: none;
@@ -102,22 +106,22 @@
 		.item-grid-strip-cells {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr);
-			gap: var(--ui-item-grid-gap, 5px);
+			gap: var(--ui-item-grid-gap);
 		}
 		.strip-arrow {
 			position: absolute;
 			z-index: 1;
-			left: var(--ui-item-strip-inset, 5px);
-			right: var(--ui-item-strip-inset, 5px);
-			height: var(--ui-item-strip-arrow-height, 18px);
+			left: var(--ui-item-strip-inset);
+			right: var(--ui-item-strip-inset);
+			height: var(--ui-item-strip-arrow-height);
 			padding: 0;
 			line-height: 1;
 		}
 		.strip-arrow-glyph-up::before {
-			content: var(--ui-item-strip-up-glyph, "▲");
+			content: var(--ui-item-strip-up-glyph);
 		}
 		.strip-arrow-glyph-down::before {
-			content: var(--ui-item-strip-down-glyph, "▼");
+			content: var(--ui-item-strip-down-glyph);
 		}
 		.strip-arrow-up {
 			top: 0;

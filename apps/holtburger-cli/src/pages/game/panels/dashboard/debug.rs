@@ -4,7 +4,8 @@ use crate::pages::game::ViewState;
 use crate::types::InspectTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
+    EnchantmentTypeFlags, PropertyDataId, PropertyFloat, PropertyInt, WorldObjectExt,
+    WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::SpatialEntitySample;
@@ -90,7 +91,10 @@ pub fn get_debug_info(
 
             lines.push(Line::from(format!("WCID:   {:?}", e.wcid)));
             lines.push(Line::from(format!("GfxID:  {:?}", e.gfx_id)));
-            lines.push(Line::from(format!("IconID: {:?}", e.icon_id)));
+            lines.push(Line::from(format!(
+                "IconID: {:?}",
+                e.get_data_prop(PropertyDataId::Icon)
+            )));
             lines.push(Line::from(format!("Vel:    {:?}", e.velocity)));
             lines.push(Line::from(format!("Accel:  {:?}", e.acceleration)));
             lines.push(Line::from(format!("Omega:  {:?}", e.omega)));

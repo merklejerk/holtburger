@@ -24,6 +24,8 @@ export function entityFacts(
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 		location: { kind: "none" },
 		ownedByPlayer: false,

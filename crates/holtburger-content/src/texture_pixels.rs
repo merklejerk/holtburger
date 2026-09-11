@@ -1,3 +1,4 @@
+use crate::render_surface_pixels::{decode_direct_color, require_uncompressed_length};
 use anyhow::{Result, bail};
 use holtburger_dat::file_type::{PixelFormatId, RenderSurface};
 
@@ -36,16 +37,9 @@ pub(crate) fn decode_render_surface_pixels(
     render_surface: &RenderSurface,
     output_format: TexturePixelFormat,
 ) -> Result<Vec<u8>> {
-    validate_source_length(render_surface)?;
+    require_uncompressed_length(render_surface, render_surface.format)?;
     match (output_format, render_surface.format) {
-        (TexturePixelFormat::Rgba8, PixelFormatId::A8R8G8B8) => {
-            let mut pixels = Vec::with_capacity(render_surface.source_data.len());
-            for source in render_surface.source_data.as_chunks::<4>().0 {
-                // DAT stores direct 32-bit colors in little-endian BGRA byte order.
-                pixels.extend_from_slice(&[source[2], source[1], source[0], source[3]]);
-            }
-            Ok(pixels)
-        }
+        (TexturePixelFormat::Rgba8, PixelFormatId::A8R8G8B8) => decode_direct_color(render_surface),
         (TexturePixelFormat::R8, PixelFormatId::CustomLandscapeAlpha)
         | (TexturePixelFormat::R8, PixelFormatId::A8) => Ok(render_surface.source_data.clone()),
         (TexturePixelFormat::Rgba8, format) => bail!(
@@ -59,41 +53,6 @@ pub(crate) fn decode_render_surface_pixels(
             format
         ),
     }
-}
-
-fn validate_source_length(render_surface: &RenderSurface) -> Result<()> {
-    let bytes_per_pixel = render_surface.format.bytes_per_pixel().ok_or_else(|| {
-        anyhow::anyhow!(
-            "RenderSurface 0x{:08X} format {:?} has no uncompressed pixel width",
-            render_surface.id,
-            render_surface.format
-        )
-    })?;
-    let pixel_count = usize::try_from(render_surface.width)?
-        .checked_mul(usize::try_from(render_surface.height)?)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "RenderSurface 0x{:08X} dimensions overflow",
-                render_surface.id
-            )
-        })?;
-    let expected_length = pixel_count
-        .checked_mul(usize::from(bytes_per_pixel))
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "RenderSurface 0x{:08X} byte length overflows",
-                render_surface.id
-            )
-        })?;
-    if render_surface.source_data.len() != expected_length {
-        bail!(
-            "RenderSurface 0x{:08X} {:?} expected {expected_length} source bytes, got {}",
-            render_surface.id,
-            render_surface.format,
-            render_surface.source_data.len()
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]

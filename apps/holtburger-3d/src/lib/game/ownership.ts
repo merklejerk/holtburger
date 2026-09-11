@@ -1,6 +1,6 @@
 /** Shared owner-to-resource lease accounting for runtime-managed resources. */
 export class LeaseRegistry<
-	TOwnerId extends string = string,
+	TOwnerId = string,
 	TLeaseId extends string = string,
 > {
 	readonly #leaseCounts: Map<TLeaseId, number> = new Map();

@@ -19,6 +19,19 @@ export interface ClientInventorySection {
 
 /** Frontend-only ordering; never changes server slot positions or the pack strip. */
 export type InventorySortMode = "native" | "alphabetical" | "item-type";
+
+/** Shared cycle for the persistent preference and the button's next-mode tooltip. */
+export function nextInventorySortMode(
+	mode: InventorySortMode,
+): InventorySortMode {
+	const next = {
+		native: "alphabetical",
+		alphabetical: "item-type",
+		"item-type": "native",
+	} as const;
+	return next[mode];
+}
+
 const itemNames = new Intl.Collator(undefined, {
 	sensitivity: "base",
 	numeric: true,
@@ -58,34 +71,70 @@ function compareSlot(a: ClientEntityFacts, b: ClientEntityFacts): number {
 	return a.guid - b.guid;
 }
 
-/** Direct carried storage gets sections; deeper storage remains an item in its parent. */
-export function clientInventorySections(
+/** Membership preserves the placement proof used by both inventory projections. */
+type InventoryChild = ClientEntityFacts & {
+	readonly ownedByPlayer: true;
+	readonly location: Extract<
+		ClientEntityFacts["location"],
+		{ kind: "contained" }
+	>;
+};
+function isInventoryChild(entity: ClientEntityFacts): entity is InventoryChild {
+	return entity.ownedByPlayer && entity.location.kind === "contained";
+}
+
+/** Shared, unsorted membership for resource references and lazy display projections. */
+export interface ClientInventoryMembership {
+	readonly root: ClientEntityFacts;
+	readonly carriedStorage: readonly ClientEntityFacts[];
+	readonly children: ReadonlyMap<number, readonly InventoryChild[]>;
+	/** Every identity represented by either contents or strip, once each. */
+	readonly members: readonly ClientEntityFacts[];
+}
+
+/** No sorting or resource work; equipped items and deeper contents are not displayed. */
+export function clientInventoryMembership(
 	level: ClientEntityLevel,
-): readonly ClientInventorySection[] {
-	if (level.playerGuid === null) return [];
+): ClientInventoryMembership | null {
+	if (level.playerGuid === null) return null;
 	const root = level.entities.get(level.playerGuid);
 	if (root === undefined)
 		throw new Error("Inventory level is missing its player root.");
-	const children = new Map<number, ClientEntityFacts[]>();
+	const children = new Map<number, InventoryChild[]>();
 	for (const entity of level.entities.values()) {
-		if (!entity.ownedByPlayer || entity.location.kind !== "contained") continue;
+		if (!isInventoryChild(entity)) continue;
 		const parent = entity.location.parentGuid;
 		const siblings = children.get(parent);
 		if (siblings === undefined) children.set(parent, [entity]);
 		else siblings.push(entity);
 	}
-	for (const siblings of children.values()) siblings.sort(compareSlot);
 	const carriedStorage = (children.get(root.guid) ?? []).filter(
 		(entity) => entity.storage.kind === "container",
 	);
+	const members = new Map<number, ClientEntityFacts>();
+	for (const container of [root, ...carriedStorage]) {
+		members.set(container.guid, container);
+		for (const child of children.get(container.guid) ?? [])
+			members.set(child.guid, child);
+	}
+	return { root, carriedStorage, children, members: [...members.values()] };
+}
+
+/** Direct carried storage gets sections; deeper storage remains an item in its parent. */
+export function clientInventorySections(
+	membership: ClientInventoryMembership | null,
+): readonly ClientInventorySection[] {
+	if (membership === null) return [];
+	const { root, children } = membership;
+	const carriedStorage = [...membership.carriedStorage].sort(compareSlot);
 	const sectionGuids = new Set(carriedStorage.map((entity) => entity.guid));
 	return [root, ...carriedStorage].map((container) => {
 		const items: ClientEntityFacts[] = [];
 		const packs: ClientEntityFacts[] = [];
 		const unslotted: ClientEntityFacts[] = [];
-		for (const child of children.get(container.guid) ?? []) {
-			if (child.location.kind !== "contained")
-				throw new Error("Inventory child has no container.");
+		for (const child of [...(children.get(container.guid) ?? [])].sort(
+			compareSlot,
+		)) {
 			switch (child.location.slot.kind) {
 				case "item":
 					items.push(child);
@@ -110,23 +159,15 @@ export function clientInventorySections(
 
 /** Main Pack followed by server-indexed pack slots, including foci and empty capacity. */
 export function clientInventoryPackSlots(
-	level: ClientEntityLevel,
+	membership: ClientInventoryMembership | null,
 ): readonly (ClientEntityFacts | null)[] {
-	if (level.playerGuid === null) return [];
-	const root = level.entities.get(level.playerGuid);
-	if (root === undefined)
-		throw new Error("Inventory level is missing its player root.");
+	if (membership === null) return [];
+	const { root, children } = membership;
 	const packs = new Map<number, ClientEntityFacts>();
 	let length =
 		root.storage.kind === "container" ? (root.storage.packCapacity ?? 0) : 0;
-	for (const entity of level.entities.values()) {
-		if (
-			!entity.ownedByPlayer ||
-			entity.location.kind !== "contained" ||
-			entity.location.parentGuid !== root.guid ||
-			entity.location.slot.kind !== "pack"
-		)
-			continue;
+	for (const entity of children.get(root.guid) ?? []) {
+		if (entity.location.slot.kind !== "pack") continue;
 		const index = entity.location.slot.index;
 		packs.set(index, entity);
 		// Retain announced occupants even while capacity hydration is outstanding.

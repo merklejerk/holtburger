@@ -61,6 +61,8 @@ async function fixture() {
 							wcid: null,
 							weenieType: null,
 							pyrealBalance: null,
+							stackCount: null,
+							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 						},
 					}),
 				),
@@ -179,6 +181,8 @@ describe("ClientEntityInteractions", () => {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				stackCount: null,
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 		});
 		f.emit("client-entity-facts-changed", { upserts: [creature], removed: [] });
@@ -197,6 +201,8 @@ describe("ClientEntityInteractions", () => {
 						wcid: null,
 						weenieType: null,
 						pyrealBalance: null,
+						stackCount: null,
+						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 					},
 				},
 			],

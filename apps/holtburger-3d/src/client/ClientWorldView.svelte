@@ -15,7 +15,7 @@
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
-	import type { ClientEntityRead } from "./client-entity-mirror";
+	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
@@ -56,8 +56,8 @@
 		/** Client-owned selected facts with optional presentation details. */
 		readonly readSelectedEntity: () => ClientSelectedEntity | null;
 		readonly readFrameRates: () => FrameRates | null;
-		/** Pull accepted inventory facts without reactive producer publication. */
-		readonly readEntities: () => ClientEntityRead;
+		/** Session-owned inventory state, independent of floating-panel mounts. */
+		readonly inventory: ClientInventoryState | null;
 		readonly onSelectInventoryItem: (guid: number) => void;
 		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
 		/** Use the currently selected entity through the session-owned interaction controller. */
@@ -101,7 +101,7 @@
 		readSelectedEntity,
 		readFrameRates,
 		readSelectedEntityDisplay,
-		readEntities,
+		inventory,
 		onSelectInventoryItem,
 		onInteractEntity,
 		readTargetIndicatorFrame,
@@ -514,11 +514,15 @@
 				(hudLayout = { ...hudLayout, floatingPanel })}
 		>
 			{#if activePanel === "inventory"}
-				<ClientInventoryPanel
-					{readEntities}
-					selectedGuid={selectedEntityGuid}
-					onSelectItem={onSelectInventoryItem}
-				/>
+				{#if inventory !== null}
+					{#key inventory}
+						<ClientInventoryPanel
+							{inventory}
+							selectedGuid={selectedEntityGuid}
+							onSelectItem={onSelectInventoryItem}
+						/>
+					{/key}
+				{/if}
 			{:else}
 				<ClientDebugPanel
 					{entityMetadata}

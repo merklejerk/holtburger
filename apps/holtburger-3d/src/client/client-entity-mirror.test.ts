@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ClientEntityMirror } from "./client-entity-mirror";
+import {
+	ClientEntityMirror,
+	clientEntityDeltaSchema,
+} from "./client-entity-mirror";
 import {
 	entityFacts,
 	playerEntitySnapshot,
@@ -37,6 +40,57 @@ function commit(
 }
 
 describe("ClientEntityMirror", () => {
+	it("preserves icon appearance through inventory-only deltas and recovery snapshots", () => {
+		const store = mirror();
+		const before = owned(item, player);
+		if (before.description.kind !== "known")
+			throw new Error("Known fixture required.");
+		const appearance = {
+			base: 0x06000001,
+			overlay: 0x06000002,
+			underlay: null,
+			uiEffects: 0x80000001,
+		};
+		const updated = {
+			...before,
+			description: { ...before.description, icon: appearance },
+		};
+		commit(store, [before]);
+		commit(store, [updated]);
+		const deltaRead = store.read();
+		if (deltaRead.kind !== "current")
+			throw new Error("Current level required.");
+		expect(deltaRead.level.entities.get(item)).toEqual(updated);
+		store.awaitSnapshot();
+		store.commit(
+			store.prepareSnapshot(
+				{ entities: [entityFacts(player), updated] },
+				player,
+			),
+		);
+		const recovered = store.read();
+		if (recovered.kind !== "current")
+			throw new Error("Current level required.");
+		expect(recovered.level.entities.get(item)).toEqual(
+			deltaRead.level.entities.get(item),
+		);
+		expect(() =>
+			clientEntityDeltaSchema.parse({
+				upserts: [
+					{
+						...updated,
+						description: {
+							...updated.description,
+							icon: { ...appearance, base: 0 },
+						},
+					},
+				],
+				removed: [],
+			}),
+		).toThrow();
+		expect(store.read()).toBe(recovered);
+	});
+
 	it("prepares a child-before-parent delta without exposing a partial level", () => {
 		const store = mirror();
 		const before = store.read();

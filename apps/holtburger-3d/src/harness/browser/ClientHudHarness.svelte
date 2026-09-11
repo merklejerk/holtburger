@@ -23,6 +23,8 @@
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
+	import { ClientInventoryState } from "../../client/client-inventory-state";
+	import { browserItemIconRepository } from "../../app/item-icon-repository";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
 	import type {
 		ClientChatErrorMessage,
@@ -247,6 +249,11 @@
 			selection,
 			commands: interactionCommands,
 			readSampleCount: () => inventorySampleCount,
+			readPreparedIconCount: () => preparedIconCount,
+			holdIconPreparation,
+			failIcon: (base) => {
+				iconFailures.add(base);
+			},
 			readViewportInput: () => ({
 				clicks: viewportSelectionPoints.length,
 				orbits: orbitDeltas.length,
@@ -321,8 +328,25 @@
 	let preciseJumpEnterCount = 0;
 	let preciseJumpActivationCount = 0;
 	let selectionMaintenanceCount = 0;
-	/** Counts mounted inventory pulls without publishing source facts reactively. */
+	/** Counts synthetic artwork preparation independently of inventory sampling. */
+	let preparedIconCount = 0;
+	let iconPreparationGate: Promise<void> | null = null;
+	const iconFailures = new Set<number>();
+	function holdIconPreparation(): () => void {
+		if (iconPreparationGate !== null)
+			throw new Error("Icon preparation is already held.");
+		let release = () => {};
+		iconPreparationGate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return () => {
+			iconPreparationGate = null;
+			release();
+		};
+	}
+	/** Counts persistent inventory pulls, including while its panel is hidden. */
 	let inventorySampleCount = 0;
+	let inventory = $state<ClientInventoryState | null>(null);
 	function readInventoryEntities() {
 		inventorySampleCount += 1;
 		return interactionLifecycle.entities.read();
@@ -361,6 +385,8 @@
 						wcid: guid === 7 ? 42 : null,
 						weenieType: null,
 						pyrealBalance: null,
+						stackCount: null,
+						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 					},
 					location: { kind: "none" },
 					ownedByPlayer: false,
@@ -1377,6 +1403,44 @@
 	}
 
 	onMount(() => {
+		// Synthetic artwork keeps the HUD probe independent of installed DAT files.
+		const image = Uint8Array.from(
+			atob(
+				"iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAM0lEQVR4nO3OQQEAMAjEsGN+Zm1ysDtk8EkNNHVf/yx2NucAAAAAAAAAAAAAAAAAAABJMlWEAnCwXL+/AAAAAElFTkSuQmCC",
+			),
+			(character) => character.charCodeAt(0),
+		);
+		const icons = browserItemIconRepository(async (requests) => {
+			preparedIconCount += requests.length;
+			if (iconPreparationGate !== null) await iconPreparationGate;
+			return requests.map(({ key, spec }) =>
+				spec.kind === "item" &&
+				spec.base !== null &&
+				iconFailures.has(spec.base)
+					? {
+							kind: "failed" as const,
+							key,
+							issues: [
+								{
+									layer: "base" as const,
+									code: "missing-asset" as const,
+									assetId: spec.base,
+									detail: "Injected missing HUD fixture image",
+								},
+							] as const,
+						}
+					: { kind: "ready" as const, key, image },
+			);
+		});
+		const inventoryOwner = new ClientInventoryState(
+			{
+				entities: { read: readInventoryEntities },
+				state: () => interactionLifecycle.state(),
+				subscribe: (listener) => interactionLifecycle.subscribe(listener),
+			},
+			icons,
+		);
+		inventory = inventoryOwner;
 		probeBrowserInput();
 		void interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
@@ -1411,6 +1475,9 @@
 			toggleMode,
 		};
 		return () => {
+			inventoryOwner.destroy();
+			inventory = null;
+			icons.dispose();
 			interactions.destroy();
 			unsubscribeSelection();
 			selection.destroy();
@@ -1466,7 +1533,7 @@
 	{readFrameRates}
 	readTargetIndicatorFrame={() => targetIndicatorFrame}
 	readSelectedEntityDisplay={() => interactions.display()}
-	readEntities={readInventoryEntities}
+	{inventory}
 	onSelectInventoryItem={(guid) => selection.selectInventoryItem(guid)}
 	onInteractEntity={() => interactions.interact(unrestrictedUse)}
 	selectedEntityGuid={selectedGuid}

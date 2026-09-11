@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use holtburger_common::{
     Guid,
     properties::{
-        PropertyInt, PropertyString, WeenieType, WorldObjectExt, WorldObjectPropertyAccessors,
+        PropertyDataId, PropertyInt, PropertyString, WeenieType, WorldObjectExt,
+        WorldObjectPropertyAccessors,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,20 @@ pub enum HealthQueryEligibility {
     Ineligible,
 }
 
+/// Server-authored inputs for UI icon composition, independent of scene appearance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityIconAppearance {
+    /// Base image DID; absent when no nonzero icon is supplied.
+    pub base: Option<u32>,
+    /// Authored artwork above the base, excluding the server's secondary-overlay scratch value.
+    pub overlay: Option<u32>,
+    /// Authored artwork below the working base/effects image.
+    pub underlay: Option<u32>,
+    /// Complete server effects mask; presentation chooses the retail mapping.
+    pub ui_effects: u32,
+}
+
 /// Display facts become known independently of storage announcements.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -38,6 +53,11 @@ pub enum EntityDescription {
     Known {
         /// Consumed by item cells, container headers, and the selected HUD.
         name: String,
+        /// Current quantity when MaxStackSize establishes stackability; consumed by item cells.
+        #[serde(rename = "stackCount")]
+        stack_count: Option<u32>,
+        /// Consumed by inventory and other UI item-image presentation.
+        icon: EntityIconAppearance,
         /// Public item classification consumed by frontend inventory type sorting.
         #[serde(rename = "itemType")]
         item_type: u32,
@@ -171,6 +191,17 @@ impl WorldState {
         }) {
             Some((entity, name, item_type)) => EntityDescription::Known {
                 name: name.to_owned(),
+                stack_count: entity.is_stackable().then(|| entity.stack_size()),
+                icon: EntityIconAppearance {
+                    base: entity.get_data_prop(PropertyDataId::Icon).map(|id| id.0),
+                    overlay: entity
+                        .get_data_prop(PropertyDataId::IconOverlay)
+                        .map(|id| id.0),
+                    underlay: entity
+                        .get_data_prop(PropertyDataId::IconUnderlay)
+                        .map(|id| id.0),
+                    ui_effects: entity.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
+                },
                 item_type: item_type.bits(),
                 object_flags: entity.flags.bits(),
                 wcid: entity.wcid,
@@ -359,6 +390,13 @@ mod tests {
             hydrated.description,
             EntityDescription::Known {
                 name: "Sword".into(),
+                stack_count: None,
+                icon: EntityIconAppearance {
+                    base: None,
+                    overlay: None,
+                    underlay: None,
+                    ui_effects: 0
+                },
                 item_type: ItemType::MELEE_WEAPON.bits(),
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
@@ -393,6 +431,13 @@ mod tests {
             facts.description,
             EntityDescription::Known {
                 name: "Creature".into(),
+                stack_count: None,
+                icon: EntityIconAppearance {
+                    base: None,
+                    overlay: None,
+                    underlay: None,
+                    ui_effects: 0
+                },
                 item_type: ItemType::CREATURE.bits(),
                 object_flags: 0,
                 wcid: None,

@@ -1,75 +1,104 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
+	import ItemIcon from "../app/ItemIcon.svelte";
+	import type { ItemIconDisplay } from "../app/item-icon-repository";
+	import type { ClientEntityFacts } from "./client-entity-mirror";
 	import type {
-		ClientEntityFacts,
-		ClientEntityRead,
-	} from "./client-entity-mirror";
-	import {
-		clientInventorySections,
-		clientInventoryPackSlots,
-		sortInventoryItems,
-		type InventorySortMode,
-		type ClientInventorySection,
-	} from "./client-inventory-sections";
+		ClientInventoryState,
+		ClientInventoryView,
+	} from "./client-inventory-state";
+	import { nextInventorySortMode } from "./client-inventory-sections";
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
-		/** Session-owned facts sampled only at this mounted consumer's cadence. */
-		readonly readEntities: () => ClientEntityRead;
-		/** Existing selection identity, shared with viewport and minimap. */
+		/** Stable session owner; the parent keys this component by that lifetime. */
+		readonly inventory: ClientInventoryState;
 		readonly selectedGuid: number | null;
-		/** Controller rechecks admission against current facts at the click edge. */
 		readonly onSelectItem: (guid: number) => void;
 	}
-	const { readEntities, selectedGuid, onSelectItem }: Props = $props();
-	let sections = $state<readonly ClientInventorySection[]>([]);
-	let packSlots = $state<readonly (ClientEntityFacts | null)[]>([]);
-	let pending = $state(true);
-	let sortMode = $state<InventorySortMode>("native");
+	const { inventory, selectedGuid, onSelectItem }: Props = $props();
+	let view = $state<ClientInventoryView | null>(null);
+	let displays = $state<ReadonlyMap<string, ItemIconDisplay>>(new Map());
+	const sections = $derived(view?.sections ?? []);
+	const packSlots = $derived(view?.packSlots ?? []);
+	const pending = $derived(view?.pending ?? true);
+	const sortMode = $derived(view?.sortMode ?? "native");
+	const rootDescription = $derived(sections[0]?.container.description);
+	const pyreals = $derived(
+		rootDescription?.kind === "known" ? rootDescription.pyrealBalance : null,
+	);
 	const sortLabels = {
 		native: "Native (slot index)",
 		alphabetical: "Alphabetical",
 		"item-type": "Item type",
 	};
-	const nextSort = {
-		native: "alphabetical",
-		alphabetical: "item-type",
-		"item-type": "native",
-	} as const;
-	const sortedSections = $derived(
-		sections.map((section) => ({
-			...section,
-			items: sortInventoryItems(section.items, sortMode),
-			packs: sortInventoryItems(section.packs, sortMode),
-			unslotted: sortInventoryItems(section.unslotted, sortMode),
-		})),
-	);
-	const rootDescription = $derived(sections[0]?.container.description);
-	const pyreals = $derived(
-		rootDescription?.kind === "known" ? rootDescription.pyrealBalance : null,
-	);
-	let revision: number | null = null;
 	let contents = $state<HTMLDivElement | null>(null);
+	let sampleNow: (() => void) | null = null;
 
 	onMount(() => {
-		const sample = () => {
-			const read = readEntities();
-			pending = read.kind === "pending";
-			if (read.kind === "pending" || read.level.revision === revision) return;
-			sections = clientInventorySections(read.level);
-			packSlots = clientInventoryPackSlots(read.level);
-			revision = read.level.revision;
+		const repository = inventory.icons;
+		const owner = repository.createOwner("display");
+		let lastView: ClientInventoryView | null = null;
+		let lastRevision = -1;
+		let displayedKeys = new Set<string>();
+		let disposed = false;
+		let sampling = false;
+		let resample = false;
+		const sample = async () => {
+			if (disposed) return;
+			if (sampling) {
+				resample = true;
+				return;
+			}
+			sampling = true;
+			try {
+				do {
+					resample = false;
+					const next = inventory.read();
+					const revision = repository.revision;
+					if (next === lastView && revision === lastRevision) break;
+					const keys = new Set(next.iconKeys.values());
+					for (const key of keys) repository.retainKey(owner, key);
+					const images = new Map(
+						[...keys].map((key) => [key, repository.read(key)]),
+					);
+					lastView = next;
+					lastRevision = revision;
+					view = next;
+					displays = images;
+					// New leases exist before publication; old URLs survive the DOM commit.
+					await tick();
+					for (const key of displayedKeys)
+						if (!keys.has(key)) repository.release(owner, key);
+					displayedKeys = keys;
+				} while (resample && !disposed);
+			} finally {
+				sampling = false;
+			}
 		};
-		sample();
+		sampleNow = () => {
+			void sample();
+		};
+		sampleNow();
 		const timer = window.setInterval(
-			sample,
+			sampleNow,
 			CLIENT_TUNING.inventory.displayIntervalMs,
 		);
-		return () => window.clearInterval(timer);
+		return () => {
+			disposed = true;
+			sampleNow = null;
+			window.clearInterval(timer);
+			// This is only the display-use guard; persistent model references survive closing.
+			void tick().then(() => repository.releaseOwner(owner));
+		};
 	});
 
+	function iconFor(guid: number): ItemIconDisplay | undefined {
+		const key = view?.iconKeys.get(guid);
+		return key === undefined ? undefined : displays.get(key);
+	}
 	function selectPack(guid: number): void {
 		onSelectItem(guid);
 		const section = contents?.querySelector<HTMLElement>(
@@ -99,10 +128,19 @@
 			<ItemGridCell
 				itemGuid={item.guid}
 				label={itemName(item)}
+				count={item.description.kind === "known"
+					? item.description.stackCount
+					: null}
 				selected={selectedGuid === item.guid}
 				disabled={pending || item.description.kind === "pending"}
 				onselect={() => onSelectItem(item.guid)}
-			/>
+			>
+				{#snippet visual(tooltipLabel: string)}<ItemIcon
+						{tooltipLabel}
+						display={iconFor(item.guid)}
+						name={itemName(item)}
+					/>{/snippet}
+			</ItemGridCell>
 		{/each}
 	</div>
 {/snippet}
@@ -114,7 +152,7 @@
 >
 	<div class="inventory-sections" bind:this={contents}>
 		{#if pending}<p role="status">Updating inventory…</p>{/if}
-		{#each sortedSections as section (section.container.guid)}
+		{#each sections as section (section.container.guid)}
 			<section
 				data-container-guid={section.container.guid}
 				aria-label={section.mainPack
@@ -165,9 +203,10 @@
 			type="button"
 			class="ui-hud-button inventory-sort"
 			aria-label={`Sort inventory: ${sortLabels[sortMode]}`}
-			title={`Sort: ${sortLabels[sortMode]}. Click for ${sortLabels[nextSort[sortMode]]}.`}
+			title={`Sort: ${sortLabels[sortMode]}. Click for ${sortLabels[nextInventorySortMode(sortMode)]}.`}
 			onclick={() => {
-				sortMode = nextSort[sortMode];
+				inventory.cycleSort();
+				sampleNow?.();
 			}}
 		>
 			<svg viewBox="0 0 24 24" aria-hidden="true"
@@ -192,6 +231,9 @@
 			{#each packSlots as item, index (index)}
 				<ItemGridCell
 					itemGuid={item?.guid ?? null}
+					count={index !== 0 && item?.description.kind === "known"
+						? item.description.stackCount
+						: null}
 					label={index === 0
 						? "Main Pack"
 						: item === null
@@ -204,7 +246,19 @@
 					onselect={() => {
 						if (item !== null) selectPack(item.guid);
 					}}
-				/>
+				>
+					{#snippet visual(tooltipLabel: string)}
+						<ItemIcon
+							{tooltipLabel}
+							display={item === null ? undefined : iconFor(item.guid)}
+							name={index === 0
+								? "Main Pack"
+								: item === null
+									? ""
+									: itemName(item)}
+						/>
+					{/snippet}
+				</ItemGridCell>
 			{/each}
 		</ItemGridStrip>
 	</aside>
@@ -215,10 +269,7 @@
 		.client-inventory {
 			display: grid;
 			grid-template-rows: minmax(0, 1fr) auto;
-			grid-template-columns: minmax(0, 1fr) var(
-					--ui-inventory-strip-width,
-					68px
-				);
+			grid-template-columns: minmax(0, 1fr) auto;
 			height: 100%;
 			min-height: 0;
 			overflow: hidden;
@@ -230,8 +281,8 @@
 			align-items: center;
 			justify-content: space-between;
 			gap: 8px;
-			padding: 4px var(--ui-inventory-padding, 10px);
-			border-top: var(--ui-inventory-divider, 1px solid currentColor);
+			padding: 4px var(--ui-inventory-padding);
+			border-top: var(--ui-inventory-divider);
 			white-space: nowrap;
 		}
 		.inventory-sort {
@@ -246,17 +297,17 @@
 		.inventory-sections {
 			min-width: 0;
 			overflow-y: auto;
-			padding: var(--ui-inventory-padding, 10px);
+			padding: var(--ui-inventory-padding);
 		}
 		.inventory-pack-strip {
 			grid-column: 2;
 			grid-row: 1 / -1;
 			min-height: 0;
-			border-left: var(--ui-inventory-divider, 1px solid currentColor);
+			border-left: var(--ui-inventory-divider);
 		}
 
 		section + section {
-			margin-top: var(--ui-inventory-section-gap, 14px);
+			margin-top: var(--ui-inventory-section-gap);
 		}
 		h3,
 		h4,
@@ -271,9 +322,9 @@
 			display: grid;
 			grid-template-columns: repeat(
 				auto-fill,
-				minmax(min(100%, var(--ui-item-cell-min-size, 56px)), 1fr)
+				minmax(min(100%, var(--ui-item-cell-min-size)), 1fr)
 			);
-			gap: var(--ui-item-grid-gap, 5px);
+			gap: var(--ui-item-grid-gap);
 			margin-bottom: 8px;
 		}
 		.inventory-header {

@@ -177,6 +177,8 @@ describe("ClientLifecycleSession", () => {
 							wcid: null,
 							weenieType: null,
 							pyrealBalance: null,
+							stackCount: null,
+							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 						},
 					}),
 				],
@@ -196,6 +198,8 @@ describe("ClientLifecycleSession", () => {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				stackCount: null,
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			});
 			// Leaving the character retains the cache until the next entry replaces it.
 			transport.emit("client-exit-requested", {
@@ -247,6 +251,8 @@ describe("ClientLifecycleSession", () => {
 						wcid: null,
 						weenieType: null,
 						pyrealBalance: null,
+						stackCount: null,
+						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 					},
 				}),
 			],
@@ -266,6 +272,8 @@ describe("ClientLifecycleSession", () => {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			stackCount: null,
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		});
 		session.stop();
 	});

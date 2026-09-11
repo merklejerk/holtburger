@@ -33,6 +33,18 @@ const clientEntityFactsSchema = z
 				.object({
 					kind: z.literal("known"),
 					name: z.string(),
+					/** Quantity only when world facts establish a stackable entity. */
+					stackCount: guid.nullable(),
+					/** Server icon inputs, independent of scene residency or asset readiness. */
+					icon: z
+						.object({
+							base: guid.positive().nullable(),
+							overlay: guid.positive().nullable(),
+							underlay: guid.positive().nullable(),
+							uiEffects: guid,
+						})
+						.strict()
+						.readonly(),
 					/** Public classification for inventory type sorting. */
 					itemType: guid,
 					/** Public description flags for selected-entity diagnostics. */

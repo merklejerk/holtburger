@@ -199,6 +199,265 @@ mod tests {
     }
 
     #[test]
+    fn stack_count_updates_and_late_stackability_reconstruct_inventory_snapshots() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::{
+            PublicUpdatePropertyIntData, inventory::types::SetStackSizeData,
+        };
+        use holtburger_world::entity_facts::{EntityDescription, SceneAvailability};
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Stack".into());
+        description.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.stack_size = Some(2);
+        description.public_weenie_desc.max_stack_size = Some(100);
+        let mut replacement = description.clone();
+        replacement.public_weenie_desc.stack_size = Some(3);
+        let update = |property: PropertyInt, value| {
+            GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                sequence: 1,
+                guid: ITEM,
+                property: property as u32,
+                value,
+            }))
+        };
+        for (message, expected) in [
+            (GameMessage::ObjectCreate(Box::new(description)), Some(2)),
+            (
+                GameMessage::SetStackSize(Box::new(SetStackSizeData {
+                    sequence: 1,
+                    object_guid: ITEM,
+                    stack_size: 1,
+                    value: 0,
+                })),
+                Some(1),
+            ),
+            (update(PropertyInt::StackSize, 20), Some(20)),
+            (update(PropertyInt::MaxStackSize, 1), None),
+            (update(PropertyInt::StackSize, 40), None),
+            (update(PropertyInt::MaxStackSize, 100), Some(40)),
+            (GameMessage::ObjectCreate(Box::new(replacement)), Some(3)),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let facts = &mirror[&ITEM];
+            assert_eq!(facts.scene_placement, SceneAvailability::Unavailable);
+            let EntityDescription::Known { stack_count, .. } = facts.description else {
+                panic!("known stack");
+            };
+            assert_eq!(stack_count, expected);
+        }
+        let mut no_maximum = ObjectDescriptionData::with_guid(ITEM);
+        no_maximum.public_weenie_desc.name = Some("Unestablished stack".into());
+        no_maximum.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        no_maximum.public_weenie_desc.container_id = Some(PLAYER);
+        no_maximum.public_weenie_desc.stack_size = Some(5);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(no_maximum))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(matches!(
+            mirror[&ITEM].description,
+            EntityDescription::Known {
+                stack_count: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn player_public_icon_wins_while_omitted_private_layers_survive_recreation() {
+        use holtburger_common::properties::{PropertyDataId, PropertyInt};
+        use holtburger_protocol::messages::{
+            PrivateUpdatePropertyDataIdData, PrivateUpdatePropertyIntData,
+        };
+        use holtburger_world::entity_facts::{EntityDescription, EntityIconAppearance};
+
+        let mut world = WorldState::synthetic();
+        world.handle_message(&player_baseline());
+        for (key, value) in [
+            (PropertyDataId::Icon, 0x06000001),
+            (PropertyDataId::IconOverlay, 0x06000002),
+        ] {
+            world.handle_message(&GameMessage::PrivateUpdatePropertyDataId(Box::new(
+                PrivateUpdatePropertyDataIdData {
+                    guid: Guid::NULL,
+                    sequence: 1,
+                    property: key as u32,
+                    value: Guid(value),
+                },
+            )));
+        }
+        world.handle_message(&GameMessage::PrivateUpdatePropertyInt(Box::new(
+            PrivateUpdatePropertyIntData {
+                guid: Guid::NULL,
+                sequence: 1,
+                property: PropertyInt::UiEffects as u32,
+                value: 7,
+            },
+        )));
+        let mut description = ObjectDescriptionData::with_guid(PLAYER);
+        description.public_weenie_desc.name = Some("Player".into());
+        description.public_weenie_desc.icon_id = 0x06000003;
+        for (overlay, effects, expected) in [
+            (
+                None,
+                None,
+                EntityIconAppearance {
+                    base: Some(0x06000003),
+                    overlay: Some(0x06000002),
+                    underlay: None,
+                    ui_effects: 7,
+                },
+            ),
+            (
+                Some(Guid::NULL),
+                Some(0),
+                EntityIconAppearance {
+                    base: Some(0x06000003),
+                    overlay: None,
+                    underlay: None,
+                    ui_effects: 0,
+                },
+            ),
+        ] {
+            description.public_weenie_desc.icon_overlay = overlay;
+            description.public_weenie_desc.ui_effects = effects;
+            world.handle_message(&GameMessage::ObjectCreate(Box::new(description.clone())));
+            let EntityDescription::Known { icon, .. } = world
+                .client_entity_facts(PLAYER)
+                .unwrap()
+                .unwrap()
+                .description
+            else {
+                panic!("known player");
+            };
+            assert_eq!(icon, expected);
+        }
+    }
+
+    #[test]
+    fn icon_updates_and_recreation_reconstruct_the_same_inventory_only_facts_as_snapshots() {
+        use holtburger_common::properties::{
+            ItemType, PropertyDataId, PropertyInt, WorldObjectPropertyAccessors,
+        };
+        use holtburger_protocol::messages::{
+            PublicUpdatePropertyDataIdData, PublicUpdatePropertyIntData,
+        };
+        use holtburger_world::entity_facts::{
+            EntityDescription, EntityIconAppearance, SceneAvailability,
+        };
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Icon item".into());
+        description.public_weenie_desc.item_type = ItemType::MELEE_WEAPON.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.icon_id = 0x06000001;
+        description.public_weenie_desc.icon_overlay = Some(Guid(0x06000002));
+        description.public_weenie_desc.icon_underlay = Some(Guid(0x06000003));
+        let mut replacement = description.clone();
+        replacement.public_weenie_desc.icon_id = 0x06000005;
+        replacement.public_weenie_desc.icon_overlay = None;
+        replacement.public_weenie_desc.icon_underlay = None;
+        let update = |key: PropertyDataId, value| {
+            GameMessage::PublicUpdatePropertyDataId(Box::new(PublicUpdatePropertyDataIdData {
+                sequence: 1,
+                guid: ITEM,
+                property: key as u32,
+                value: Guid(value),
+            }))
+        };
+        let cases = [
+            (
+                GameMessage::ObjectCreate(Box::new(description)),
+                (Some(0x06000001), Some(0x06000002), Some(0x06000003), 0),
+            ),
+            (
+                update(PropertyDataId::Icon, 0x06000004),
+                (Some(0x06000004), Some(0x06000002), Some(0x06000003), 0),
+            ),
+            (
+                GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyInt::UiEffects as u32,
+                    value: 0x80000001u32 as i32,
+                })),
+                (
+                    Some(0x06000004),
+                    Some(0x06000002),
+                    Some(0x06000003),
+                    0x80000001,
+                ),
+            ),
+            (
+                update(PropertyDataId::IconOverlay, 0),
+                (Some(0x06000004), None, Some(0x06000003), 0x80000001),
+            ),
+            (
+                GameMessage::ObjectCreate(Box::new(replacement)),
+                (Some(0x06000005), None, None, 0),
+            ),
+            (update(PropertyDataId::Icon, 0), (None, None, None, 0)),
+        ];
+        for (message, (base, overlay, underlay, ui_effects)) in cases {
+            for change in world.handle_message(&message) {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let facts = &mirror[&ITEM];
+            assert_eq!(facts.scene_placement, SceneAvailability::Unavailable);
+            let EntityDescription::Known { icon, .. } = &facts.description else {
+                panic!("known item");
+            };
+            assert_eq!(
+                icon,
+                &EntityIconAppearance {
+                    base,
+                    overlay,
+                    underlay,
+                    ui_effects
+                }
+            );
+        }
+        // A zero property update is the existing DID-removal primitive.
+        assert_eq!(
+            world
+                .entities
+                .get(ITEM)
+                .unwrap()
+                .get_data_prop(PropertyDataId::Icon),
+            None
+        );
+        // A public description carries mandatory zero literally; the shared accessor
+        // normalizes it while raw storage preserves its precedence over private values.
+        let mut zero = ObjectDescriptionData::with_guid(ITEM);
+        zero.public_weenie_desc.name = Some("No art".into());
+        world.handle_message(&GameMessage::ObjectCreate(Box::new(zero)));
+        assert_eq!(
+            world
+                .entities
+                .get(ITEM)
+                .unwrap()
+                .properties
+                .dids
+                .get(&PropertyDataId::Icon),
+            Some(&Guid::NULL)
+        );
+    }
+
+    #[test]
     fn deltas_reconstruct_pending_hydrated_moved_and_withdrawn_storage() {
         let mut world = WorldState::synthetic();
         world.seed_local_player_entity(PLAYER, "Player", Default::default());

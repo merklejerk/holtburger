@@ -178,6 +178,62 @@ try {
 		);
 		printReport({ ok: result.ok, trials: result.trials.length });
 		process.exitCode = result.ok ? 0 : 1;
+	} else if (mode === "inventory") {
+		await evaluate(
+			client,
+			`() => document.querySelector('button[aria-label="Inventory"]').click()`,
+		);
+		await waitFor(
+			client,
+			`() => {
+            const panel = document.querySelector('.client-inventory');
+            const images = [...document.querySelectorAll('.client-inventory img.item-icon')];
+            return panel?.getAttribute('aria-busy') === 'false' && images.length > 0 &&
+                images.every(image => image.complete && image.naturalWidth === 32);
+        }`,
+			timeoutMs,
+			"decoded inventory artwork",
+		);
+		const inventoryState = `() => ({
+            images: [...document.querySelectorAll('.client-inventory img.item-icon')].map(image => ({
+                guid: image.closest('[data-item-guid]').getAttribute('data-item-guid'),
+                url: image.src, width: image.naturalWidth, height: image.naturalHeight,
+                count: image.closest("[data-item-guid]").querySelector(".item-grid-cell-count")?.textContent ?? null,
+            })),
+            fallbacks: document.querySelectorAll('.client-inventory .item-icon-fallback').length,
+            containers: [...document.querySelectorAll('.client-inventory section')].map(section => section.getAttribute('aria-label')),
+        })`;
+		const before = await evaluate(client, inventoryState);
+		await evaluate(
+			client,
+			`() => document.querySelector('button[aria-label="Close Inventory"]').click()`,
+		);
+		await delay(1000);
+		await evaluate(
+			client,
+			`() => document.querySelector('button[aria-label="Inventory"]').click()`,
+		);
+		await waitFor(
+			client,
+			`() => document.querySelector('.client-inventory img.item-icon') !== null`,
+			timeoutMs,
+			"reopened inventory",
+		);
+		const after = await evaluate(client, inventoryState);
+		const retained =
+			JSON.stringify(before.images) === JSON.stringify(after.images);
+		const screenshotPath = await captureScreenshot(client);
+		printReport({
+			ok: retained,
+			mode,
+			before,
+			after,
+			retained,
+			screenshotPath,
+			consoleMessages: [...consoleMessages.values()],
+			page: await pageState(client),
+		});
+		process.exitCode = retained ? 0 : 1;
 	} else if (mode === "profile") {
 		const instrumentationEnabled = performanceInstrumentationEnabled;
 		await waitFor(
@@ -417,7 +473,7 @@ function requiredEnvironment(name) {
 function probeMode(value) {
 	if (value === undefined) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, precise-jump, profile, or streaming.",
+			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, precise-jump, profile, inventory, or streaming.",
 		);
 	}
 	const mode = value;
@@ -426,10 +482,11 @@ function probeMode(value) {
 		mode !== "passive-camera" &&
 		mode !== "precise-jump" &&
 		mode !== "profile" &&
+		mode !== "inventory" &&
 		mode !== "streaming"
 	) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, precise-jump, profile, or streaming.",
+			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, precise-jump, profile, inventory, or streaming.",
 		);
 	}
 	return mode;

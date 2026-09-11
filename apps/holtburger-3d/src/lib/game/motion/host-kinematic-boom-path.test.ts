@@ -48,6 +48,32 @@ function advanced() {
 }
 
 describe("host kinematic boom path", () => {
+	it("presents an initial doorway crossing before interpolating the next room", () => {
+		const tick = decodeHostKinematicBoomTick(
+			{
+				...advanced(),
+				path: {
+					initial: point(0xda550143, 10, 20),
+					legs: [
+						{ endFraction: 0, end: point(0xda550132, 10, 20) },
+						{ endFraction: 1, end: point(0xda550133, 14, 24) },
+					],
+				},
+			},
+			32,
+		);
+		if (tick.kind !== "advanced") throw new Error("fixture must advance");
+		for (const elapsed of [0, 16]) {
+			const view = evaluateHostKinematicBoomPath(tick.path, 32, elapsed);
+			expect(view.placement.residency.envCellId).toBe("0xda550132");
+			expect(Number.isFinite(view.placement.position.x)).toBe(true);
+		}
+		expect(
+			evaluateHostKinematicBoomPath(tick.path, 32, 32).placement.residency
+				.envCellId,
+		).toBe("0xda550133");
+	});
+
 	it("maps camera-forward input to the opposite pivot-to-camera host direction", () => {
 		expect(resolveKinematicBoomDirection([0.3, 0.5, -0.4])).toEqual([
 			-0.3, -0.5, 0.4,

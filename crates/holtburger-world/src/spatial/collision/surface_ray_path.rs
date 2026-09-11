@@ -4,9 +4,8 @@ use holtburger_common::Vector3;
 
 use super::static_surface_ray::{ray_sweep, validate_ray};
 use super::{
-    CELL_PLANE_TOLERANCE, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
-    PlacementMotionSegment, SpatialMembership, StaticSurfaceRayRequest, UncoveredCollisionQuery,
-    touched_landblocks,
+    CollisionQueryError, CollisionQueryPolicy, CollisionScene, PlacementMotionSegment,
+    SpatialMembership, StaticSurfaceRayRequest, UncoveredCollisionQuery, touched_landblocks,
 };
 
 /// A nearest candidate placed back into the original ray frame.
@@ -67,15 +66,7 @@ impl CollisionScene {
                 .map_or(segment_request.maximum_distance, |(distance, _)| *distance);
             let end = segment_request.start + request.direction * limit;
             let touched = touched_landblocks(ray_sweep(segment_request, end));
-            // Unlike a motion cursor that already consumed its starting boundary,
-            // each query interval must admit a directed crossing at its origin. Back
-            // the search cursor up by the existing portal tolerance; direction and
-            // target containment still determine whether that boundary is traversable.
-            let start_cursor = if limit > f32::EPSILON {
-                -2.0 * CELL_PLANE_TOLERANCE / limit
-            } else {
-                0.0
-            };
+            // Each newly cast interval must admit a directed crossing at its origin.
             let transition = self.next_placement_transition(
                 PlacementMotionSegment {
                     anchor: request.anchor,
@@ -84,7 +75,7 @@ impl CollisionScene {
                     radius: 0.0,
                     touched: &touched,
                 },
-                start_cursor,
+                None,
                 current_cell,
             )?;
             // A coincident surface wins the boundary tie in its source domain.

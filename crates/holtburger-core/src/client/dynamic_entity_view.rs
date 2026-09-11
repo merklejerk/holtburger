@@ -8,7 +8,10 @@ use holtburger_common::properties::{
     PropertyFloat, PropertyInt, PropertyString, WorldObjectExt as _,
     WorldObjectPropertyAccessors as _,
 };
-use holtburger_world::{EntityPlacement, PhysicalBodyParticipation, WorldState};
+use holtburger_world::{
+    EntityPlacement, PhysicalBodyParticipation, ResolvedScenePlacement, ScenePlacementError,
+    WorldState,
+};
 use thiserror::Error;
 
 use crate::{
@@ -25,6 +28,9 @@ use super::{ClientRuntime, ClientViewEvent};
 /// A client entity cannot enter the focused visual surface without these wire-derived facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ClientDynamicEntityViewError {
+    /// The retained attachment graph contains a contradictory relationship.
+    #[error(transparent)]
+    Placement(#[from] ScenePlacementError),
     #[error("client entity 0x{guid:08X} is not registered")]
     NotRegistered { guid: u32 },
     #[error("client entity 0x{guid:08X} has no WCID")]
@@ -43,11 +49,15 @@ pub enum ClientDynamicEntityViewError {
 pub fn project_client_dynamic_entity(
     world: &WorldState,
     guid: Guid,
-) -> Result<crate::DynamicEntityView, ClientDynamicEntityViewError> {
+) -> Result<Option<crate::DynamicEntityView>, ClientDynamicEntityViewError> {
     let entity = world
         .entities
         .get(guid)
         .ok_or(ClientDynamicEntityViewError::NotRegistered { guid: guid.0 })?;
+    let scene_placement = world.resolve_scene_placement(guid)?;
+    if matches!(scene_placement, ResolvedScenePlacement::Unresolved(_)) {
+        return Ok(None);
+    }
     let wcid = entity
         .wcid
         .ok_or(ClientDynamicEntityViewError::MissingWcid { guid: guid.0 })?;
@@ -68,7 +78,7 @@ pub fn project_client_dynamic_entity(
         return Err(ClientDynamicEntityViewError::InvalidTranslucency { guid: guid.0 });
     }
     let translucency = translucency as f32;
-    let placement = if let Some(attachment) = entity.attachment {
+    let placement = if let ResolvedScenePlacement::Attached { attachment, .. } = scene_placement {
         EntityPlacement::Attached(attachment)
     } else {
         let body_id = world
@@ -93,7 +103,7 @@ pub fn project_client_dynamic_entity(
         })
     };
 
-    Ok(project_dynamic_entity_view(DynamicEntityViewSource {
+    Ok(Some(project_dynamic_entity_view(DynamicEntityViewSource {
         generation: u64::from(entity.instance_sequence()),
         presentation_class: semantic_dynamic_entity_presentation_class(
             entity.flags,
@@ -127,7 +137,7 @@ pub fn project_client_dynamic_entity(
         ),
         placement,
         motion: world.motion_runtimes.motion_presentation(guid),
-    }))
+    })))
 }
 
 /// Projects every currently representable client entity in stable GUID order.
@@ -142,7 +152,7 @@ pub fn project_client_dynamic_entities(
     guids.sort_unstable();
     guids
         .into_iter()
-        .map(|guid| project_client_dynamic_entity(world, guid))
+        .filter_map(|guid| project_client_dynamic_entity(world, guid).transpose())
         .collect()
 }
 
@@ -179,7 +189,8 @@ impl ClientRuntime {
 
     pub(super) fn emit_dynamic_entity_upsert(&self, guid: Guid) {
         let entity = match project_client_dynamic_entity(&self.world, guid) {
-            Ok(entity) => entity,
+            Ok(Some(entity)) => entity,
+            Ok(None) => return,
             Err(error) => {
                 log::warn!("client dynamic-entity projection rejected: {error}");
                 return;
@@ -359,7 +370,11 @@ mod tests {
                 PhysicsState::GRAVITY,
             ));
         world.add_entity(entity);
-        Box::new(project_client_dynamic_entity(&world, guid).unwrap())
+        Box::new(
+            project_client_dynamic_entity(&world, guid)
+                .unwrap()
+                .expect("resolved fixture"),
+        )
     }
 
     #[test]
@@ -375,7 +390,9 @@ mod tests {
         entity.flags = ObjectDescriptionFlag::DOOR;
         let mut client = builder::build_test_client(ClientState::InWorld);
         client.world.add_entity(entity);
-        let before = project_client_dynamic_entity(&client.world, guid).unwrap();
+        let before = project_client_dynamic_entity(&client.world, guid)
+            .unwrap()
+            .expect("resolved fixture");
         assert_eq!(
             before.presentation.radar.category,
             crate::DynamicEntityMapBlipCategory::Door
@@ -445,7 +462,9 @@ mod tests {
         entity.set_did_prop(PropertyDataId::Setup, Guid(setup_did));
         world.add_entity(entity);
 
-        let projected = project_client_dynamic_entity(&world, guid).expect("projectable entity");
+        let projected = project_client_dynamic_entity(&world, guid)
+            .expect("projectable entity")
+            .expect("resolved fixture");
 
         assert_eq!(
             projected.presentation.content.motion_table_did,
@@ -637,7 +656,9 @@ mod tests {
         world
             .apply_entity_script_scale(guid, 3.0, 0.0, 1.0)
             .unwrap();
-        let client = project_client_dynamic_entity(&world, guid).unwrap();
+        let client = project_client_dynamic_entity(&world, guid)
+            .unwrap()
+            .expect("resolved fixture");
         let body = world
             .runtime_body_view(SpatialBodyId::Entity(guid))
             .unwrap();
@@ -768,7 +789,10 @@ mod tests {
 
     #[test]
     fn client_projection_rejections_each_have_a_reachable_source_shape() {
-        let pose = WorldPosition::default();
+        let pose = WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        };
 
         let world = WorldState::synthetic();
         assert_eq!(
@@ -848,7 +872,7 @@ mod tests {
             .world
             .add_entity(projectable_entity(player_guid, pose));
         let mut attached = projectable_entity(attached_guid, pose);
-        attached.attachment = Some(attachment);
+        attached.set_attachment(Some(attachment));
         client.world.add_entity(attached);
         let mut events = client.subscribe_client_view_events();
 
@@ -959,7 +983,8 @@ mod tests {
             .world
             .add_entity(projectable_entity(remote_guid, pose(8.0)));
         let before = project_client_dynamic_entity(&client.world, remote_guid)
-            .expect("remote should project before packet");
+            .expect("remote should project before packet")
+            .expect("placed remote");
 
         let events = client.world.handle_message(
             &holtburger_protocol::messages::GameMessage::UpdatePosition(Box::new(
@@ -976,7 +1001,8 @@ mod tests {
         );
         assert!(!events.is_empty());
         let after = project_client_dynamic_entity(&client.world, remote_guid)
-            .expect("remote should project after packet");
+            .expect("remote should project after packet")
+            .expect("placed remote");
         let (
             DynamicEntityPlacementView::World {
                 pose: before_pose,
@@ -1104,6 +1130,183 @@ mod tests {
                 )
                 .unwrap()
                 .is_none()
+        );
+    }
+    #[tokio::test]
+    async fn retained_attachment_publishes_and_replays_its_cue_only_after_parent_arrival() {
+        use holtburger_common::properties::PhysicsDescriptionFlag;
+        use holtburger_protocol::messages::object::messages::description::PhysicsDescParent;
+        use holtburger_protocol::messages::{GameMessage, ObjectDescriptionData, PlayScriptData};
+        use holtburger_protocol::traits::ProtocolPack;
+
+        fn creation(guid: Guid, parent: Option<Guid>) -> GameMessage {
+            let mut data = ObjectDescriptionData::with_guid(guid);
+            data.public_weenie_desc.name = Some("Scene fixture".into());
+            data.public_weenie_desc.wcid = 42;
+            data.csetup_id = Some(0x0200_0001);
+            data.pos = Some(WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            });
+            data.physics_flags = PhysicsDescriptionFlag::CSETUP | PhysicsDescriptionFlag::POSITION;
+            if let Some(parent) = parent {
+                data.parent = Some(PhysicsDescParent {
+                    id: parent,
+                    location_id: ParentLocation::RightHand as u32,
+                });
+                data.animation_frame = Some(Placement::RightHandCombat as u32);
+                data.physics_flags |=
+                    PhysicsDescriptionFlag::PARENT | PhysicsDescriptionFlag::ANIMATION_FRAME;
+            }
+            GameMessage::ObjectCreate(Box::new(data))
+        }
+        async fn send(client: &mut ClientRuntime, message: GameMessage) {
+            let mut bytes = Vec::new();
+            message.pack(&mut bytes);
+            client.handle_message(&bytes).await.unwrap();
+        }
+
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let child = Guid(0x80001596);
+        let parent = Guid(0x80001323);
+        send(&mut client, creation(child, Some(parent))).await;
+        send(
+            &mut client,
+            GameMessage::PlayScript(Box::new(PlayScriptData {
+                target: child,
+                script_cue: 10,
+                intensity: 0.5,
+            })),
+        )
+        .await;
+        assert!(client.world.entities.get(child).is_some());
+        assert!(
+            project_client_dynamic_entity(&client.world, child)
+                .unwrap()
+                .is_none()
+        );
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(event, ClientViewEvent::DynamicScriptCue(_)));
+            assert!(
+                !matches!(event, ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity })
+                if entity.identity.guid == child)
+            );
+        }
+        send(&mut client, creation(parent, None)).await;
+        let view = project_client_dynamic_entity(&client.world, child)
+            .unwrap()
+            .expect("resolved child");
+        assert_eq!(view.generation, 0);
+        assert!(
+            matches!(view.placement, DynamicEntityPlacementView::Attached { parent: owner, .. } if owner == parent)
+        );
+        let mut admitted = false;
+        let mut cue_count = 0;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity })
+                    if entity.identity.guid == child =>
+                {
+                    admitted = true
+                }
+                ClientViewEvent::DynamicScriptCue(cue) if cue.guid == child => {
+                    assert!(
+                        admitted,
+                        "scene admission precedes queued presentation effects"
+                    );
+                    cue_count += 1;
+                }
+                _ => {}
+            }
+        }
+        assert!(admitted);
+        assert_eq!(cue_count, 1);
+
+        send(
+            &mut client,
+            GameMessage::PickupEvent(Box::new(holtburger_protocol::messages::PickupEventData {
+                guid: parent,
+                instance_sequence: 0,
+                position_sequence: 1,
+            })),
+        )
+        .await;
+        assert!(client.world.entities.get(child).is_some());
+        assert!(
+            project_client_dynamic_entity(&client.world, child)
+                .unwrap()
+                .is_none()
+        );
+        let mut withdrawals = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::DynamicEntity(DynamicEntityEvent::Removed { guid, generation: 0 }) if guid == child)
+            {
+                withdrawals += 1;
+            }
+        }
+        assert_eq!(withdrawals, 1);
+        send(&mut client, creation(parent, None)).await;
+        assert!(
+            project_client_dynamic_entity(&client.world, child)
+                .unwrap()
+                .is_none()
+        );
+        send(
+            &mut client,
+            GameMessage::ParentEvent(Box::new(holtburger_protocol::messages::ParentEventData {
+                parent_guid: parent,
+                child_guid: child,
+                location: ParentLocation::RightHand as u32,
+                placement: Placement::RightHandCombat as u32,
+                parent_instance_sequence: 0,
+                child_position_sequence: 1,
+            })),
+        )
+        .await;
+        assert_eq!(
+            project_client_dynamic_entity(&client.world, child)
+                .unwrap()
+                .expect("readmitted child")
+                .generation,
+            0
+        );
+
+        while events.try_recv().is_ok() {}
+        let mut replacement = creation(child, Some(Guid(0x80009999)));
+        let GameMessage::ObjectCreate(data) = &mut replacement else {
+            unreachable!("creation helper returns ObjectCreate");
+        };
+        // PhysicsDesc's ninth timestamp is ObjectInstance, independent of position ordering.
+        data.sequences[8] = 1;
+        send(&mut client, replacement).await;
+        assert_eq!(
+            client
+                .world
+                .entities
+                .get(child)
+                .unwrap()
+                .instance_sequence(),
+            1
+        );
+        assert!(
+            project_client_dynamic_entity(&client.world, child)
+                .unwrap()
+                .is_none()
+        );
+        let mut removed_generations = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::DynamicEntity(DynamicEntityEvent::Removed { guid, generation }) =
+                event
+                && guid == child
+            {
+                removed_generations.push(generation);
+            }
+        }
+        assert_eq!(
+            removed_generations,
+            vec![0],
+            "withdraw the incarnation the frontend actually holds"
         );
     }
 }

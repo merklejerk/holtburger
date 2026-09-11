@@ -73,7 +73,13 @@ pub(crate) fn handle_message(
                 events.extend(state.set_player_position(data.pos.pos));
                 true
             } else {
-                state.apply_entity_position_pack(data.guid, &data.pos, events)
+                state.receive_placement_message(
+                    crate::state::attachment_lifecycle::DeferredPlacementMessage::Position(
+                        (**data).clone(),
+                    ),
+                    events,
+                );
+                true
             }
         }
         GameMessage::PrivateUpdatePosition(data) => {

@@ -62,7 +62,7 @@ pub fn get_debug_info(
                 class
             )));
 
-            if let Some(attachment) = e.attachment {
+            if let Some(attachment) = e.attachment() {
                 let parent_name =
                     name_lookup(attachment.parent).unwrap_or_else(|| "Unknown".to_string());
                 lines.push(Line::from(format!(
@@ -290,7 +290,7 @@ pub fn get_debug_info(
                 || e.stable_id().is_some()
                 || e.petable_id().is_some()
                 || e.csetup_id().is_some()
-                || e.attachment.is_some()
+                || e.attachment().is_some()
                 || e.default_script_cue().is_some()
                 || e.autonomous_movement
             {
@@ -307,7 +307,7 @@ pub fn get_debug_info(
                 if let Some(v) = e.csetup_id() {
                     lines.push(Line::from(format!("  CSetup:    0x{:08X}", v.0)));
                 }
-                if let Some(attachment) = e.attachment {
+                if let Some(attachment) = e.attachment() {
                     lines.push(Line::from(format!(
                         "  Attachment: 0x{:08X} {} / {}",
                         attachment.parent.0, attachment.location, attachment.placement

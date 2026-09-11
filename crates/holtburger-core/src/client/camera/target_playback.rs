@@ -39,9 +39,8 @@ impl TargetUpdate {
     }
 }
 
-/// At most the current interval and its immediate successor are retained.
-const MAX_PATHS: usize = 2;
-/// A stalled simulation must not turn two retained intervals into unbounded follow latency.
+/// Bound unconsumed travel time, rather than record count: a partially consumed head and
+/// short publication intervals can span several records without excessive follow latency.
 const MAX_SECONDS: f64 = super::super::PHYSICS_TICK_MS as f64 * 4.0 / 1_000.0;
 
 /// A single cursor owns both partial consumption and the remaining accepted intervals.
@@ -89,10 +88,7 @@ impl TargetPlayback {
             return;
         };
         let remaining = self.pending.iter().map(|item| item.seconds).sum::<f64>() - self.elapsed;
-        if travel.path.initial.pose != self.endpoint
-            || self.pending.len() == MAX_PATHS
-            || remaining + travel.seconds > MAX_SECONDS
-        {
+        if travel.path.initial.pose != self.endpoint || remaining + travel.seconds > MAX_SECONDS {
             self.recover(pose);
             return;
         }
@@ -310,7 +306,29 @@ mod tests {
     }
 
     #[test]
-    fn gaps_overflow_and_corrections_retire_history() {
+    fn continuous_publications_with_a_partial_head_do_not_reset_the_camera() {
+        let mut playback = TargetPlayback::new(pose(0.0), None);
+        let source = MAX_SECONDS / 4.0;
+        playback.observe(pose(1.0), Some(&travel(1, 0.0, 1.0)));
+        playback.advance(source * 0.9).unwrap();
+        playback.observe(pose(2.0), Some(&travel(2, 1.0, 2.0)));
+        playback.observe(pose(3.0), Some(&travel(3, 2.0, 3.0)));
+
+        // Three records represent only 2.1 source intervals of unconsumed travel. The
+        // partially consumed head must not turn ordinary publication jitter into a reset.
+        assert!(playback.take_reseed().is_none());
+        let (start, waypoints) = playback.advance(source * 3.0).unwrap();
+        assert!((start.coords.z - 0.9).abs() < 1e-6);
+        let crossed: Vec<_> = waypoints
+            .iter()
+            .map(|point| point.parent_pose.coords.z)
+            .collect();
+        assert_eq!(crossed, vec![1.0, 2.0, 3.0, 3.0]);
+        assert!(playback.pending.is_empty());
+    }
+
+    #[test]
+    fn gaps_and_explicit_corrections_retire_history() {
         let mut playback = TargetPlayback::new(pose(0.0), None);
         playback.observe(pose(1.0), Some(&travel(1, 0.0, 1.0)));
         playback.observe(pose(3.0), Some(&travel(3, 2.0, 3.0)));
@@ -319,20 +337,31 @@ mod tests {
             playback.advance(MAX_SECONDS).unwrap().1[0].parent_pose,
             pose(3.0)
         );
-        for id in 4..=6 {
-            playback.observe(
-                pose(id as f32),
-                Some(&travel(id, (id - 1) as f32, id as f32)),
-            );
-        }
-        assert_eq!(playback.take_reseed(), Some(pose(6.0)));
-        playback.observe(pose(7.0), Some(&travel(7, 6.0, 7.0)));
+        playback.observe(pose(7.0), Some(&travel(7, 3.0, 7.0)));
         let reset = TargetUpdate::Reset(DynamicEntityHostTime::new(8.0).unwrap());
         playback.observe(pose(7.0), Some(&reset));
         assert_eq!(playback.take_reseed(), Some(pose(7.0)));
         assert!(playback.pending.is_empty());
         playback.observe(pose(7.0), Some(&reset));
         assert!(playback.take_reseed().is_none());
+    }
+
+    #[test]
+    fn accumulated_travel_over_the_time_limit_still_retires_history() {
+        let mut playback = TargetPlayback::new(pose(0.0), None);
+        // Five nominal intervals exceed the four-interval time budget even when every
+        // individual publication is short and the geometric path remains continuous.
+        for id in 1..=5 {
+            playback.observe(
+                pose(id as f32),
+                Some(&travel(id, (id - 1) as f32, id as f32)),
+            );
+            if id < 5 {
+                assert!(playback.take_reseed().is_none());
+            }
+        }
+        assert_eq!(playback.take_reseed(), Some(pose(5.0)));
+        assert!(playback.pending.is_empty());
     }
 
     #[test]

@@ -27,6 +27,27 @@ pub struct PhysicsAttachment {
     pub placement: Placement,
 }
 
+/// Authoritative placement intent, independent of whether its prerequisites currently exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityPlacementIntent {
+    /// A received independent position supplies placement; a null location remains off-scene.
+    Independent,
+    /// The received parent relationship owns placement, including while the parent is missing.
+    Attached(PhysicsAttachment),
+    /// Placement was withdrawn; retained coordinates do not authorize an independent body.
+    Withdrawn,
+}
+
+impl EntityPlacementIntent {
+    /// Return the received parent relationship without claiming it is resolved in the scene.
+    pub const fn attachment(self) -> Option<PhysicsAttachment> {
+        match self {
+            Self::Attached(attachment) => Some(attachment),
+            Self::Independent | Self::Withdrawn => None,
+        }
+    }
+}
+
 /// One entity's mutually exclusive world-owned or parent-owned placement.
 ///
 /// `W` is the complete motion contract at the layer using this type: creation uses initial motion

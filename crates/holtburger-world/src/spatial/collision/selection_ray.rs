@@ -1,7 +1,5 @@
 //! Portal-scoped entity-selection broad phase over ordinary authoritative residency.
 
-use std::collections::BTreeSet;
-
 use holtburger_common::position::METERS_PER_LANDBLOCK;
 use holtburger_common::properties::{
     PropertyBool, PropertyDataId, WorldObjectPropertyAccessors as _,
@@ -13,7 +11,7 @@ use super::{
     CollisionQueryError, CollisionScene, PhysicalCollisionFilter, StaticSurfaceRayRequest,
     point_between_landblocks,
 };
-use crate::WorldState;
+use crate::{ResolvedScenePlacement, ScenePlacementError, WorldState};
 
 /// Camera ray normalized into one outdoor anchor frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,10 +45,12 @@ pub enum EntitySelectionCandidateResult {
 pub enum EntitySelectionQueryError {
     #[error(transparent)]
     Collision(#[from] CollisionQueryError),
-    #[error("attached entity 0x{child:08X} references missing ancestor 0x{ancestor:08X}")]
-    MissingAttachmentAncestor { child: Guid, ancestor: Guid },
-    #[error("attachment ancestry for entity 0x{child:08X} contains a cycle at 0x{ancestor:08X}")]
-    CyclicAttachmentAncestry { child: Guid, ancestor: Guid },
+    #[error(
+        "attached entity 0x{child:08X} has resolved ancestor 0x{ancestor:08X} without a runtime body"
+    )]
+    MissingAttachmentRootBody { child: Guid, ancestor: Guid },
+    #[error(transparent)]
+    Placement(#[from] ScenePlacementError),
 }
 
 impl WorldState {
@@ -91,22 +91,25 @@ impl WorldState {
             if entity.get_bool_prop(PropertyBool::UiHidden) {
                 continue;
             }
-            if entity.attachment.is_some() {
+            let placement = self.resolve_scene_placement(entity.guid)?;
+            if matches!(placement, ResolvedScenePlacement::Unresolved(_)) {
+                continue;
+            }
+            if let ResolvedScenePlacement::Attached { root: ancestor, .. } = placement {
                 // World-placed entities prove setup-backed eligibility by having a prepared
                 // envelope. Attachments deliberately bypass that envelope, so retain the same
                 // prerequisite explicitly before admitting their inherited scope.
                 if entity.get_data_prop(PropertyDataId::Setup).is_none() {
                     continue;
                 }
-                let ancestor = self.world_placed_attachment_ancestor(entity.guid)?;
                 let Some(body_id) = self.runtime_body_id_for_guid(ancestor) else {
-                    return Err(EntitySelectionQueryError::MissingAttachmentAncestor {
+                    return Err(EntitySelectionQueryError::MissingAttachmentRootBody {
                         child: entity.guid,
                         ancestor,
                     });
                 };
                 let body = self.scene.body(body_id).ok_or(
-                    EntitySelectionQueryError::MissingAttachmentAncestor {
+                    EntitySelectionQueryError::MissingAttachmentRootBody {
                         child: entity.guid,
                         ancestor,
                     },
@@ -158,32 +161,6 @@ impl WorldState {
                 candidate_guids,
             },
         ))
-    }
-
-    fn world_placed_attachment_ancestor(
-        &self,
-        child: Guid,
-    ) -> Result<Guid, EntitySelectionQueryError> {
-        let mut visited = BTreeSet::from([child]);
-        let mut current = child;
-        loop {
-            let entity = self.entities.get(current).ok_or(
-                EntitySelectionQueryError::MissingAttachmentAncestor {
-                    child,
-                    ancestor: current,
-                },
-            )?;
-            let Some(attachment) = entity.attachment else {
-                return Ok(current);
-            };
-            if !visited.insert(attachment.parent) {
-                return Err(EntitySelectionQueryError::CyclicAttachmentAncestry {
-                    child,
-                    ancestor: attachment.parent,
-                });
-            }
-            current = attachment.parent;
-        }
     }
 }
 
@@ -361,11 +338,11 @@ mod tests {
         let child = Guid(20);
         let mut attached = Entity::new(child, "attached".to_owned(), position(0.0, 0.0));
         attached.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
-        attached.attachment = Some(PhysicsAttachment {
+        attached.set_attachment(Some(PhysicsAttachment {
             parent,
             location: ParentLocation::RightHand,
             placement: Placement::RightHandCombat,
-        });
+        }));
         world.entities.insert(attached);
 
         let EntitySelectionCandidateResult::Available(result) = world
@@ -375,6 +352,41 @@ mod tests {
             panic!("installed collision owner should cover the ray");
         };
         assert_eq!(result.candidate_guids, vec![parent, child]);
+    }
+
+    #[test]
+    fn late_attachment_to_removed_parent_does_not_poison_other_selection_candidates() {
+        use holtburger_protocol::messages::{GameMessage, ParentEventData};
+
+        let collision = scene_with_wall(50.0);
+        let mut world = WorldState::synthetic();
+        let candidate = Guid(10);
+        let parent = Guid(0x8000_1323);
+        let child = Guid(0x8000_1596);
+        ready_entity(&mut world, candidate, 20.0, 2.0);
+        ready_entity(&mut world, parent, 30.0, 2.0);
+        let mut item = Entity::new(child, "ammo".into(), position(30.0, 10.0));
+        item.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        world.add_entity(item);
+        let attach = GameMessage::ParentEvent(Box::new(ParentEventData {
+            parent_guid: parent,
+            child_guid: child,
+            location: ParentLocation::RightHand as u32,
+            placement: Placement::RightHandCombat as u32,
+            parent_instance_sequence: 0,
+            child_position_sequence: 1,
+        }));
+        world.handle_message(&attach);
+        world.remove_entity(parent);
+        world.handle_message(&attach);
+        let EntitySelectionCandidateResult::Available(result) = world
+            .query_entity_selection_candidates(&collision, request())
+            .unwrap()
+        else {
+            panic!("fixture has complete collision coverage");
+        };
+        assert_eq!(result.candidate_guids, vec![candidate]);
+        assert!(world.entities.get(child).is_some());
     }
 
     #[test]
@@ -393,11 +405,11 @@ mod tests {
         let mut attached = Entity::new(child, "hidden attached".to_owned(), position(0.0, 0.0));
         attached.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         attached.set_bool_prop(PropertyBool::UiHidden, true);
-        attached.attachment = Some(PhysicsAttachment {
+        attached.set_attachment(Some(PhysicsAttachment {
             parent,
             location: ParentLocation::RightHand,
             placement: Placement::RightHandCombat,
-        });
+        }));
         world.entities.insert(attached);
 
         let EntitySelectionCandidateResult::Available(result) = world
@@ -417,11 +429,11 @@ mod tests {
         ready_entity(&mut world, parent, 20.0, 2.0);
         let child = Guid(20);
         let mut attached = Entity::new(child, "bare attached".to_owned(), position(0.0, 0.0));
-        attached.attachment = Some(PhysicsAttachment {
+        attached.set_attachment(Some(PhysicsAttachment {
             parent,
             location: ParentLocation::RightHand,
             placement: Placement::RightHandCombat,
-        });
+        }));
         world.entities.insert(attached);
 
         let EntitySelectionCandidateResult::Available(result) = world

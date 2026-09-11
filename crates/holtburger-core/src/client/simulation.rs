@@ -457,10 +457,17 @@ fn tick_physical_entities(
             matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
         });
     let local_locomotion = if local_character {
-        movement.local_locomotion_order(world)?
+        movement.client_directed_locomotion_order(world)?
     } else {
         None
     };
+    // Manual, server-directed, and idle local presentation use the authored cursor. Retire an
+    // earlier client-directed cursor before publication, even if this body produces no solve tick.
+    if local_locomotion.is_none() {
+        world
+            .motion_runtimes
+            .clear_locomotion_presentation(world.player.guid);
+    }
     let sticky_targets = world.prepare_sticky_body_targets();
     let projection = BodyProjectionResolver::new(&world.entities, &world.motion_runtimes);
     let entities = &world.entities;
@@ -618,12 +625,13 @@ fn tick_physical_entities(
             let source = if body_id == local_body_id {
                 local_locomotion.map(LocomotionPresentationSource::Command)
             } else {
-                None
+                Some(LocomotionPresentationSource::Observed(
+                    update.supported_motion,
+                ))
+            };
+            if let Some(source) = source {
+                world.present_character_locomotion(body_id, source, presentation, dt)?;
             }
-            .unwrap_or(LocomotionPresentationSource::Observed(
-                update.supported_motion,
-            ));
-            world.present_character_locomotion(body_id, source, presentation, dt)?;
         }
         body_motions.insert(guid, ClientBodyMotion::Physical(update.path));
     }

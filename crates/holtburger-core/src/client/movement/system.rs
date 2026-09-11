@@ -756,30 +756,25 @@ impl MovementSystem {
         })
     }
 
-    /// Resolves current local locomotion intent for presentation before collisions clip travel.
-    /// Explicit server control suppresses held local input; stop/expiry produces no override.
-    pub(crate) fn local_locomotion_order(&self, world: &WorldState) -> Result<Option<MotionOrder>> {
-        if self.has_server_controlled_motion() || world.player.guid.is_null() {
+    /// Supplies visual locomotion only for a controller whose displacement is independent of
+    /// authored playback. A settled controller retains explicit idle until it releases ownership.
+    pub(crate) fn client_directed_locomotion_order(
+        &self,
+        world: &WorldState,
+    ) -> Result<Option<MotionOrder>> {
+        let Some(ActiveMovement::ClientDirected(intent)) = self.active_movement else {
             return Ok(None);
-        }
-        let state = match self.active_movement {
-            Some(ActiveMovement::Manual { .. }) => self.character_motion.effective_drive(),
-            Some(ActiveMovement::ClientDirected(Some(intent))) => {
-                let Some(state) = Self::autonomous_wire_motion_state(world, intent) else {
-                    return Ok(None);
-                };
-                state
-            }
-            None
-            | Some(ActiveMovement::ClientDirected(None))
-            | Some(ActiveMovement::ServerDirected(_)) => return Ok(None),
         };
-        if state.is_stationary() {
+        if world.player.guid.is_null() {
             return Ok(None);
         }
+        // No displacement or facing request means this controller explicitly presents idle.
+        let state = intent
+            .and_then(|intent| Self::autonomous_wire_motion_state(world, intent))
+            .unwrap_or_default();
         let run_rate = world
             .player_run_rate()
-            .ok_or_else(|| anyhow::anyhow!("local locomotion run-rate is unavailable"))?;
+            .ok_or_else(|| anyhow::anyhow!("client-directed locomotion run-rate is unavailable"))?;
         Self::local_drive_order(world, state, run_rate).map(|(_, order)| Some(order))
     }
 

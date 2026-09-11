@@ -1136,6 +1136,7 @@ mod tests {
     const JUMP_FIXTURE_FALLING_ANIMATION: u32 = 0x0300_1005;
     const JUMP_FIXTURE_LANDING_ANIMATION: u32 = 0x0300_1006;
     const JUMP_FIXTURE_ACTION_ANIMATION: u32 = 0x0300_1007;
+    const STOP_FIXTURE_ANIMATION: u32 = 0x0300_1008;
     const JUMP_FIXTURE_ACTION_COMMAND: u32 = 0x1000_004A;
 
     /// A real motion-table fixture for jump presentation tests.
@@ -1285,8 +1286,8 @@ mod tests {
         .expect("jump presentation fixture should assemble")
     }
 
-    /// Minimal action fixture with a measurable root track for the local-adapter boundary.
-    fn local_action_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+    /// Authored action and locomotion fixture with measurable root tracks at clip boundaries.
+    fn local_authored_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
         let style = MotionStance::NonCombat as u32;
         let clip = |animation_id| MotionData {
             bitfield: 0,
@@ -1322,28 +1323,46 @@ mod tests {
             id: motion_table_id,
             default_style: style,
             style_defaults: HashMap::from([(style, FIXTURE_STAND_COMMAND)]),
-            cycles: HashMap::from([(
-                MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
-                clip(JUMP_FIXTURE_STAND_ANIMATION),
-            )]),
+            cycles: HashMap::from([
+                (
+                    MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                    clip(JUMP_FIXTURE_STAND_ANIMATION),
+                ),
+                (
+                    MotionTable::cycle_key(style, MotionTable::RUN_FORWARD_COMMAND),
+                    clip(JUMP_FIXTURE_RUN_ANIMATION),
+                ),
+                (
+                    MotionTable::cycle_key(style, MotionTable::WALK_FORWARD_COMMAND),
+                    clip(JUMP_FIXTURE_RUN_ANIMATION),
+                ),
+            ]),
             modifiers: HashMap::new(),
-            links: HashMap::from([(
-                MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
-                HashMap::from([(
-                    JUMP_FIXTURE_ACTION_COMMAND,
-                    clip(JUMP_FIXTURE_ACTION_ANIMATION),
-                )]),
-            )]),
+            links: HashMap::from([
+                (
+                    MotionTable::cycle_key(style, MotionTable::RUN_FORWARD_COMMAND),
+                    HashMap::from([(FIXTURE_STAND_COMMAND, clip(STOP_FIXTURE_ANIMATION))]),
+                ),
+                (
+                    MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                    HashMap::from([(
+                        JUMP_FIXTURE_ACTION_COMMAND,
+                        clip(JUMP_FIXTURE_ACTION_ANIMATION),
+                    )]),
+                ),
+            ]),
         };
         MotionSequenceCatalog::assemble(
             [table],
             [
                 animation(JUMP_FIXTURE_STAND_ANIMATION, Vector3::zero()),
+                animation(JUMP_FIXTURE_RUN_ANIMATION, Vector3::new(0.0, 0.1, 0.0)),
+                animation(STOP_FIXTURE_ANIMATION, Vector3::new(0.0, 0.02, 0.0)),
                 animation(JUMP_FIXTURE_ACTION_ANIMATION, Vector3::new(0.0, 0.25, 0.0)),
             ],
             [],
         )
-        .expect("local action fixture should assemble")
+        .expect("local authored motion fixture should assemble")
     }
 
     /// Routes a constructed message through the same pack/unpack boundary as an ACE datagram.
@@ -1362,7 +1381,7 @@ mod tests {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_1007);
         let motion_table_id = 0x0900_1007;
-        world.set_motion_sequences(local_action_motion_catalog(motion_table_id));
+        world.set_motion_sequences(local_authored_motion_catalog(motion_table_id));
         world.seed_local_player_entity(guid, "Player", WorldPosition::default());
         world
             .entities
@@ -1449,7 +1468,7 @@ mod tests {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_1008);
         let motion_table_id = 0x0900_1008;
-        world.set_motion_sequences(local_action_motion_catalog(motion_table_id));
+        world.set_motion_sequences(local_authored_motion_catalog(motion_table_id));
         world.seed_local_player_entity(guid, "Player", WorldPosition::default());
         world
             .entities
@@ -1717,6 +1736,142 @@ mod tests {
                 current: 100,
             },
         );
+    }
+
+    #[tokio::test]
+    async fn manual_release_keeps_authored_presentation_through_the_final_moving_stop_tick() {
+        const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(48.0, 48.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        client.world.seed_local_player_entity(guid, "Player", pose);
+        client
+            .world
+            .set_motion_sequences(local_authored_motion_catalog(FIXTURE_MOTION_TABLE_ID));
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+        seed_test_self_movement_capabilities(&mut client);
+        seed_test_jump_authority(&mut client);
+        let body_id = holtburger_world::SpatialBodyId::LocalPlayer(guid);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(stable_dynamic_body_definition()),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let interest =
+            SimulationSceneInterest::prefetch_neighborhood(pose, CLIENT_COLLISION_OWNER_RADIUS)
+                .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        let mut now = Instant::now();
+        // Allow a full second for support settlement and each four-frame fixture sequence,
+        // independently of the simulation's configured tick cadence.
+        let observation_ticks = Duration::from_secs(1).as_nanos().div_ceil(dt.as_nanos());
+        for _ in 0..observation_ticks {
+            simulation::tick(
+                now,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            now += dt;
+        }
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().contact,
+            holtburger_world::ContactState::Grounded
+        );
+        for drive in [
+            movement_types::CharacterDrive::builder()
+                .run()
+                .forward()
+                .build(),
+            movement_types::CharacterDrive::default(),
+        ] {
+            if drive.is_stationary() {
+                // Manual idle must also retire a cursor retained by a prior visual controller.
+                client
+                    .world
+                    .present_character_locomotion(
+                        body_id,
+                        holtburger_world::motion::LocomotionPresentationSource::Command(
+                            holtburger_world::motion::MotionOrder {
+                                forward: Some((
+                                    holtburger_world::motion::MotionCommand::RUN_FORWARD,
+                                    1.0,
+                                )),
+                                ..Default::default()
+                            },
+                        ),
+                        holtburger_world::motion::CharacterMotionPresentation::Grounded,
+                        Duration::ZERO,
+                    )
+                    .unwrap();
+            }
+            client
+                .movement
+                .enqueue_drive_intent(movement_types::PlayerDriveIntent::ManualHeld(drive), now);
+            client
+                .movement
+                .tick(now, &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            let mut saw_stop = false;
+            let mut saw_idle = false;
+            let mut moving_idle_boundary = false;
+            for _ in 0..observation_ticks {
+                simulation::tick(
+                    now,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+                let runtime = client.world.motion_runtimes.get(guid).unwrap();
+                let holtburger_world::motion::AuthoredCollisionPose::Animation {
+                    animation_id: authored,
+                    ..
+                } = runtime.collision_pose()
+                else {
+                    panic!("fixture must retain authored animation");
+                };
+                assert_eq!(
+                    runtime.motion_presentation().unwrap().animation_id(),
+                    authored
+                );
+                saw_stop |= authored == STOP_FIXTURE_ANIMATION;
+                saw_idle |= authored == JUMP_FIXTURE_STAND_ANIMATION;
+                moving_idle_boundary |= authored == JUMP_FIXTURE_STAND_ANIMATION
+                    && runtime.tick().offset.translation.length_squared() > 0.0;
+                now += dt;
+            }
+            if drive.is_stationary() {
+                assert!(saw_stop, "release must play the authored stop transition");
+                assert!(saw_idle, "stop transition must complete into idle");
+                assert!(
+                    moving_idle_boundary,
+                    "the idle-entry tick must still contain stop displacement"
+                );
+            }
+        }
     }
 
     #[tokio::test]

@@ -185,7 +185,14 @@ fn world_creation_update_and_replacement_have_distinct_playback_lifetimes() {
     let ready = snapshot(InterpretedMotionCommand(3));
     let dead = snapshot(InterpretedMotionCommand::DEAD);
     let entity = |motion| {
-        let mut entity = Entity::new(guid, "Lifecycle fixture".into(), WorldPosition::default());
+        let mut entity = Entity::new(
+            guid,
+            "Lifecycle fixture".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
         entity.set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
         entity.network_motion = EntityNetworkMotion::Initialized(motion);
         entity
@@ -205,6 +212,39 @@ fn world_creation_update_and_replacement_have_distinct_playback_lifetimes() {
             .animation_id,
         HOOK_ANIM
     );
+    let parent = Guid(0x7000_0002);
+    world
+        .entities
+        .get_mut(guid)
+        .unwrap()
+        .set_attachment(Some(crate::PhysicsAttachment {
+            parent,
+            location: holtburger_common::ParentLocation::RightHand,
+            placement: holtburger_common::Placement::RightHandCombat,
+        }));
+    assert!(
+        world
+            .advance_authored_motion(Duration::from_millis(250))
+            .is_empty()
+    );
+    assert_eq!(
+        world
+            .motion_runtimes
+            .get(guid)
+            .unwrap()
+            .sequence()
+            .current_frame(),
+        0
+    );
+    world.add_entity(Entity::new(
+        parent,
+        "Parent".into(),
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    ));
+    world.tick();
     world.advance_authored_motion(Duration::from_millis(250));
     assert_eq!(
         world

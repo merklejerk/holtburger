@@ -443,12 +443,18 @@ impl ClientDynamicScaleCoordinator {
         now: Duration,
     ) -> Result<BTreeSet<Guid>> {
         let mut changed = BTreeSet::new();
-        for command in self.controller.advance_to(now)? {
+        // Retail stops UpdateScripts without a cell (acclient.c:311146), retaining absolute
+        // hook times for catch-up on admission (316431). SetScale starts a ramp when the hook
+        // executes, not at its overdue scheduled time (308862).
+        for command in self
+            .controller
+            .advance_to(now, |target| world.is_entity_world_participant(target.guid))?
+        {
             let update = world.apply_entity_script_scale(
                 command.target.guid,
                 command.scale.end,
                 command.scale.duration_seconds,
-                command.due_at.as_secs_f64(),
+                now.as_secs_f64(),
             )?;
             if update.effective_changed {
                 changed.insert(command.target.guid);
@@ -461,6 +467,9 @@ impl ClientDynamicScaleCoordinator {
         }
         let active = self.active_ramps.iter().copied().collect::<Vec<_>>();
         for guid in active {
+            if !world.is_entity_world_participant(guid) {
+                continue;
+            }
             let update = world.advance_entity_script_scale(guid, now.as_secs_f64())?;
             if update.effective_changed {
                 changed.insert(guid);
@@ -514,6 +523,9 @@ impl super::ClientRuntime {
     }
 
     pub(super) fn observe_dynamic_scale_entity(&mut self, guid: Guid) {
+        if !self.world.is_entity_world_participant(guid) {
+            return;
+        }
         if let Some(Err(error)) = self
             .dynamic_scale_coordinator
             .as_mut()
@@ -567,6 +579,74 @@ mod tests {
     use std::sync::Condvar;
 
     struct EmptySource;
+
+    #[test]
+    fn withdrawn_scale_waits_then_catches_up_without_backdating_new_ramps() {
+        let guid = Guid(1);
+        let mut world = holtburger_world::WorldState::synthetic();
+        world.add_entity(Entity::new(
+            guid,
+            "scripted".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        ));
+        let target = DynamicScaleTarget {
+            guid,
+            instance_sequence: world.entities.get(guid).unwrap().instance_sequence(),
+        };
+        let mut coordinator = ClientDynamicScaleCoordinator::new(Arc::new(EmptySource));
+        coordinator.controller.install_target(target);
+        let records = [(0, 3.0, 4.0), (5, 7.0, 2.0)]
+            .into_iter()
+            .enumerate()
+            .map(
+                |(order, (seconds, end, duration_seconds))| crate::PreparedScaleRecord {
+                    start_time: Duration::from_secs(seconds),
+                    authored_order: order,
+                    scale: holtburger_dat::file_type::setup_model::ScaleHookPayload {
+                        end,
+                        duration_seconds,
+                    },
+                },
+            )
+            .collect();
+        coordinator
+            .controller
+            .activate(
+                target,
+                Arc::new(PreparedDynamicScaleTimeline::new(records)),
+                Duration::ZERO,
+            )
+            .unwrap();
+        coordinator
+            .advance_world_to(&mut world, Duration::ZERO)
+            .unwrap();
+        world.entities.get_mut(guid).unwrap().set_attachment(None);
+        assert!(
+            coordinator
+                .advance_world_to(&mut world, Duration::from_secs(10))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(world.entities.get(guid).unwrap().scale.effective(), 1.0);
+
+        world.entities.get_mut(guid).unwrap().placement_intent =
+            holtburger_world::EntityPlacementIntent::Independent;
+        coordinator
+            .advance_world_to(&mut world, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(world.entities.get(guid).unwrap().scale.effective(), 3.0);
+        coordinator
+            .advance_world_to(&mut world, Duration::from_secs(11))
+            .unwrap();
+        assert_eq!(world.entities.get(guid).unwrap().scale.effective(), 5.0);
+        coordinator
+            .advance_world_to(&mut world, Duration::from_secs(12))
+            .unwrap();
+        assert_eq!(world.entities.get(guid).unwrap().scale.effective(), 7.0);
+    }
 
     impl ClientDynamicScaleSource for EmptySource {
         fn prepare_generation(

@@ -1,5 +1,4 @@
 use crate::WorldEvent;
-use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
 use crate::entity::Entity;
 use crate::state::WorldState;
@@ -40,22 +39,17 @@ pub(crate) fn handle_message(
             let sticky_target = entity.apply_description(data);
 
             let guid = entity.guid;
+            if state.entities.get(guid).is_some() {
+                state.withdraw_replaced_parent_children(guid, data.children.as_deref());
+            }
             let create_disposition = state.upsert_entity_from_create(entity, events);
             if create_disposition == EntityCreateDisposition::DeleteRequested {
                 state.update_player_inventory_recursive(guid, false);
                 return true;
             }
             state.admit_entity_sticky_target(guid, sticky_target);
-            state.retain_announced_children(guid, data.children.as_deref(), events);
-            state.resolve_pending_child_link(guid, data.animation_frame.unwrap_or(0), events);
-            if guid != state.player.guid
-                && state
-                    .entities
-                    .get(guid)
-                    .is_some_and(|entity| entity.attachment.is_some())
-            {
-                state.delegate_attached_entity_position(guid, events);
-            }
+            state.retain_announced_children(guid, data.children.as_deref());
+            state.resolve_announced_attachment(guid, data.animation_frame.unwrap_or(0));
             if state
                 .entities
                 .get(guid)
@@ -83,52 +77,21 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::ParentEvent(data) => {
-            let attachment = if data.parent_guid == Guid::NULL {
-                None
-            } else {
-                match PhysicsAttachment::from_wire(data.parent_guid, data.location, data.placement)
-                {
-                    Ok(attachment) => Some(attachment),
-                    Err(error) => {
-                        log::warn!(
-                            "ParentEvent for {:?} names an unusable attachment: {error}",
-                            data.child_guid
-                        );
-                        return false;
-                    }
-                }
-            };
-            if let Some(entity) = state.entities.get_mut(data.child_guid) {
-                entity.attachment = attachment;
-            } else {
-                return false;
-            }
-
-            // Attaching delegates the child's position to its parent rather than removing it from
-            // the world. The local player is never repositioned by an attachment it participates in.
-            if data.parent_guid != Guid::NULL && data.child_guid != state.player.guid {
-                state.delegate_attached_entity_position(data.child_guid, events);
-            }
-
-            let _ = state.reconcile_entity_retention(data.child_guid);
-
+            state.receive_placement_message(
+                crate::state::attachment_lifecycle::DeferredPlacementMessage::Parent(
+                    (**data).clone(),
+                ),
+                events,
+            );
             true
         }
         GameMessage::PickupEvent(data) => {
-            let guid = data.guid;
-            let had_entity = state.entities.get(guid).is_some();
-            if !had_entity {
-                return false;
-            }
-
-            if let Some(pos) = state.clear_entity_world_presence(guid) {
-                events.push(WorldEvent::EntityMoved { guid, pos });
-            }
-            let snapshot = state.reconcile_entity_retention(guid);
-            if snapshot.is_some_and(|retention| !retention.is_retained()) {
-                state.mark_entity_explicit_delete(guid);
-            }
-
+            state.receive_placement_message(
+                crate::state::attachment_lifecycle::DeferredPlacementMessage::Pickup(
+                    (**data).clone(),
+                ),
+                events,
+            );
             true
         }
         _ => false,

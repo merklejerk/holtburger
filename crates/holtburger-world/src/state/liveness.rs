@@ -11,7 +11,7 @@ use crate::context::WorldContextExt;
 use crate::entity::Entity;
 use crate::state::WorldState;
 
-const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
+pub(crate) const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
 const CONSERVATIVE_VISIBILITY_DISTANCE_M: f32 = 384.0;
 
 /// Server request that can retire every current incarnation or one exact instance sequence.
@@ -251,7 +251,10 @@ impl WorldState {
             .entities
             .iter()
             .filter(|entity| entity.guid != self.player.guid)
-            .filter(|entity| entity.position.landblock_id != Guid::NULL)
+            .filter(|entity| {
+                entity.position.landblock_id != Guid::NULL
+                    || entity.placement_intent != crate::EntityPlacementIntent::Independent
+            })
             .map(|entity| entity.guid)
             .collect();
 
@@ -410,18 +413,18 @@ impl WorldState {
         let lifecycle = self.entity_lifecycle.get(guid);
         let container_preview = lifecycle.is_some_and(|state| state.container_preview);
 
+        let in_world = self.is_entity_world_participant(guid);
+
         Some(EntityRetentionSnapshot {
-            in_world: entity.position.landblock_id != Guid::NULL,
+            in_world,
             held_by_player: self.is_in_player_inventory(guid),
             equipped_by_player: self.is_equipped_item(guid),
             inside_open_container: open_container,
             has_container_owner: container_id.is_some() && (!container_preview || open_container),
-            has_wielder_owner: entity
-                .wielder_id()
-                .is_some_and(|wielder| self.entities.get(wielder).is_some()),
-            has_parent_owner: entity
-                .attachment
-                .is_some_and(|attachment| self.entities.get(attachment.parent).is_some()),
+            has_wielder_owner: entity.wielder_id().is_some_and(|wielder| {
+                self.entities.get(wielder).is_some() && (entity.attachment().is_none() || in_world)
+            }),
+            has_parent_owner: entity.attachment().is_some_and(|_| in_world),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,
             current_instance_delete_requested: self.current_instance_delete_requested(guid),
@@ -506,8 +509,11 @@ impl WorldState {
     }
 
     pub fn is_entity_world_participant(&self, guid: Guid) -> bool {
-        self.get_visible_entity(guid)
-            .is_some_and(|entity| entity.position.landblock_id != Guid::NULL)
+        matches!(
+            self.resolve_scene_placement(guid),
+            Ok(crate::ResolvedScenePlacement::Independent
+                | crate::ResolvedScenePlacement::Attached { .. })
+        )
     }
 
     pub fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
@@ -538,9 +544,11 @@ impl WorldState {
     }
 
     pub fn tick(&mut self) -> Vec<WorldEvent> {
+        self.seed_scene_placements();
         let mut events = Vec::new();
         let now = self.current_server_time();
         self.sweep_eviction_queue(now, &mut events);
+        self.reconcile_scene_placements(&mut events);
         self.maintain_visibility_prune_deadlines(now);
 
         events

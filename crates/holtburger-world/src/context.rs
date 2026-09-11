@@ -1049,11 +1049,11 @@ mod tests {
         };
 
         let mut attached_item = entity(item_guid, "Attached Item");
-        attached_item.attachment = Some(PhysicsAttachment {
+        attached_item.set_attachment(Some(PhysicsAttachment {
             parent: Guid(0x7000_0001),
             location: ParentLocation::RightHand,
             placement: Placement::RightHandCombat,
-        });
+        }));
         attached_item
             .properties
             .ints

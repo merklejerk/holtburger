@@ -1571,6 +1571,7 @@ fn remote_force_position_sequence_has_no_independent_reconciliation_meaning() {
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
+    let instance_sequence = entity.instance_sequence();
     state.add_entity(entity);
 
     let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
@@ -1581,7 +1582,7 @@ fn remote_force_position_sequence_has_no_independent_reconciliation_meaning() {
                 coords: Vector3::new(10.0, 20.0, 0.5),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
-            instance_sequence: 8,
+            instance_sequence,
             position_sequence: 9,
             teleport_sequence: 30,
             force_position_sequence: 41,
@@ -1621,6 +1622,7 @@ fn remote_force_position_regression_does_not_reject_a_newer_contacted_position()
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
+    let instance_sequence = entity.instance_sequence();
     state.add_entity(entity);
 
     let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
@@ -1631,7 +1633,7 @@ fn remote_force_position_regression_does_not_reject_a_newer_contacted_position()
                 coords: Vector3::new(40.0, 50.0, 60.0),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
-            instance_sequence: 8,
+            instance_sequence,
             position_sequence: 9,
             teleport_sequence: 30,
             force_position_sequence: 39,
@@ -2506,7 +2508,7 @@ fn test_parent_event_does_not_null_player_landblock() {
         location: 1,
         placement: 1,
         parent_instance_sequence: 0,
-        child_position_sequence: 0,
+        child_position_sequence: 1,
     }));
 
     state.handle_message(&msg);
@@ -2985,7 +2987,8 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
 
     let msg = GameMessage::PickupEvent(Box::new(PickupEventData {
         guid,
-        success: true,
+        instance_sequence: 0,
+        position_sequence: 1,
     }));
 
     let events = state.handle_message(&msg);
@@ -5385,7 +5388,7 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
 }
 
 #[test]
-fn parent_event_resolves_one_typed_attachment_fact() {
+fn parent_event_waits_for_parent_before_applying_the_typed_attachment() {
     let mut state = WorldState::synthetic();
     let item_guid = Guid(0x8000_0001);
     state.entities.insert(Entity::new(
@@ -5404,11 +5407,28 @@ fn parent_event_resolves_one_typed_attachment_fact() {
         location: ParentLocation::LeftWeapon as u32,
         placement: Placement::RightHandNonCombat as u32,
         parent_instance_sequence: 0,
-        child_position_sequence: 0,
+        child_position_sequence: 1,
     })));
 
+    assert_eq!(state.entities.get(item_guid).unwrap().attachment(), None);
     assert_eq!(
-        state.entities.get(item_guid).unwrap().attachment,
+        state.entities.get(item_guid).unwrap().position_sequence(),
+        0
+    );
+    state.add_entity(placed_entity(
+        Guid(0x5000_0001),
+        "Wielder",
+        0xDA55_001C,
+        10.0,
+    ));
+    state.tick();
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().position_sequence(),
+        1
+    );
+
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().attachment(),
         Some(PhysicsAttachment {
             parent: Guid(0x5000_0001),
             location: ParentLocation::LeftWeapon,
@@ -5431,17 +5451,25 @@ fn parent_event_naming_an_unknown_location_leaves_the_entity_unattached() {
         },
     ));
 
+    // Resolve the parent prerequisite so this test reaches attach-point validation.
+    state.add_entity(placed_entity(
+        Guid(0x5000_0001),
+        "Wielder",
+        0xDA55_001C,
+        10.0,
+    ));
+
     let events = state.handle_message(&GameMessage::ParentEvent(Box::new(ParentEventData {
         parent_guid: Guid(0x5000_0001),
         child_guid: item_guid,
         location: 42,
         placement: Placement::Default as u32,
         parent_instance_sequence: 0,
-        child_position_sequence: 0,
+        child_position_sequence: 1,
     })));
 
     assert!(events.is_empty());
-    assert_eq!(state.entities.get(item_guid).unwrap().attachment, None);
+    assert_eq!(state.entities.get(item_guid).unwrap().attachment(), None);
     assert_eq!(
         state.entities.get(item_guid).unwrap().position.landblock_id,
         Guid(0xDA55_001C)
@@ -5468,7 +5496,7 @@ fn parent_event(parent: Guid, child: Guid, location: u32, placement: u32) -> Gam
         location,
         placement,
         parent_instance_sequence: 0,
-        child_position_sequence: 0,
+        child_position_sequence: if parent == Guid::NULL { 2 } else { 1 },
     }))
 }
 
@@ -5488,7 +5516,7 @@ fn attaching_delegates_the_child_position_instead_of_erasing_it() {
     ));
 
     let attached = state.entities.get(item).unwrap();
-    assert_eq!(attached.attachment.unwrap().parent, wielder);
+    assert_eq!(attached.attachment().unwrap().parent, wielder);
     assert_eq!(
         attached.position,
         state.entities.get(wielder).unwrap().position
@@ -5519,7 +5547,7 @@ fn detaching_leaves_the_entity_where_its_parent_left_it() {
     state.handle_message(&parent_event(Guid::NULL, item, 0, 0));
 
     let detached = state.entities.get(item).unwrap();
-    assert_eq!(detached.attachment, None);
+    assert_eq!(detached.attachment(), None);
     assert_eq!(detached.position.landblock_id, Guid(0xDA55_001C));
 }
 
@@ -5541,14 +5569,14 @@ fn a_parent_announcing_an_unarrived_child_attaches_it_on_arrival() {
     }]);
     state.handle_message(&GameMessage::ObjectCreate(Box::new(wielder_data)));
 
-    assert!(state.pending_child_links.contains_key(&item));
+    assert!(state.attachments.announcements.contains_key(&item));
 
     let mut item_data = ObjectDescriptionData::with_guid(item);
     item_data.animation_frame = Some(Placement::RightHandNonCombat as u32);
     state.handle_message(&GameMessage::ObjectCreate(Box::new(item_data)));
 
     assert_eq!(
-        state.entities.get(item).unwrap().attachment,
+        state.entities.get(item).unwrap().attachment(),
         Some(PhysicsAttachment {
             parent: wielder,
             location: ParentLocation::LeftWeapon,
@@ -5559,7 +5587,7 @@ fn a_parent_announcing_an_unarrived_child_attaches_it_on_arrival() {
         state.entities.get(item).unwrap().position.landblock_id,
         Guid(0xDA55_001C)
     );
-    assert!(state.pending_child_links.is_empty());
+    assert!(state.attachments.announcements.is_empty());
 }
 
 #[test]
@@ -5601,7 +5629,7 @@ fn a_child_that_arrives_first_is_delegated_once_its_parent_exists() {
 
     let attached = state.entities.get(item).unwrap();
     assert_eq!(
-        attached.attachment,
+        attached.attachment(),
         Some(PhysicsAttachment {
             parent: wielder,
             location: ParentLocation::LeftWeapon,
@@ -5627,18 +5655,19 @@ fn removing_a_parent_detaches_children_and_drops_its_pending_links() {
         ParentLocation::RightHand as u32,
         Placement::RightHandCombat as u32,
     ));
-    state.pending_child_links.insert(
+    state.attachments.announcements.insert(
         unarrived,
-        crate::state::types::PendingChildLink {
+        crate::state::attachment_lifecycle::AnnouncedAttachment {
             parent: wielder,
             location: ParentLocation::Shield,
+            deadline: state.current_server_time() + super::liveness::ACE_DESTRUCTION_TIMEOUT_SECS,
         },
     );
 
     state.remove_entity(wielder);
 
-    assert_eq!(state.entities.get(item).unwrap().attachment, None);
-    assert!(state.pending_child_links.is_empty());
+    assert_eq!(state.entities.get(item).unwrap().attachment(), None);
+    assert!(state.attachments.announcements.is_empty());
 }
 
 #[test]
@@ -5646,11 +5675,11 @@ fn an_attachment_whose_parent_is_gone_does_not_retain_the_child() {
     let mut state = WorldState::synthetic();
     let item = Guid(0x8000_0001);
     let mut orphan = placed_entity(item, "Sword", 0xDA55_001D, 99.0);
-    orphan.attachment = Some(PhysicsAttachment {
+    orphan.set_attachment(Some(PhysicsAttachment {
         parent: Guid(0x5000_0009),
         location: ParentLocation::RightHand,
         placement: Placement::RightHandCombat,
-    });
+    }));
     orphan.position.landblock_id = Guid::NULL;
     state.add_entity(orphan);
 

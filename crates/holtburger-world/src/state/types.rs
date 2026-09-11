@@ -1,9 +1,9 @@
 use crate::motion::MotionRuntimeRegistry;
+use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_common::{Guid, ParentLocation};
 use holtburger_content::{MotionSequenceCatalog, SoulEmoteCatalog};
 use holtburger_dat::file_type::{SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
@@ -25,16 +25,6 @@ use crate::{WorldBootstrap, WorldEvent};
 pub struct ServerTimeSync {
     pub server_time: f64,
     pub local_time: std::time::Instant,
-}
-
-/// A parent's announcement that some object hangs from one of its attach points.
-///
-/// The parent knows where the child hangs but not which pose the child adopts, so `placement`
-/// comes from the child's own description when it arrives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PendingChildLink {
-    pub(crate) parent: Guid,
-    pub(crate) location: ParentLocation,
 }
 
 /// The authoritative state of the game world.
@@ -75,13 +65,8 @@ pub struct WorldState {
     pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
-    /// Attachments a parent announced for children the client has not received yet, keyed by child.
-    ///
-    /// Object creation runs parent-first: retail's `CObjectMaint::SetChildren` makes placeholder
-    /// objects for children it has not seen (`acclient.c:~299700`). We keep the link instead and
-    /// apply it when the child hydrates. Bounded by entity lifecycle: an entry is consumed on the
-    /// child's arrival and dropped when its parent is removed.
-    pub(crate) pending_child_links: std::collections::HashMap<Guid, PendingChildLink>,
+    /// Attachment admission, pending dependencies and scene transition history.
+    pub(crate) attachments: super::attachment_lifecycle::AttachmentLifecycle,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
     pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
@@ -281,8 +266,11 @@ impl WorldState {
     /// Feature handlers own the orchestration order; this method preserves the external API while
     /// keeping routing separate from the state model itself.
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
+        self.expire_missing_placement_dependencies();
+        self.seed_scene_placements();
         let mut events = Vec::new();
         crate::handlers::handle_message(self, msg, &mut events);
+        self.reconcile_scene_placements(&mut events);
         events
     }
 
@@ -411,7 +399,7 @@ impl WorldState {
             fellowship: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
-            pending_child_links: std::collections::HashMap::new(),
+            attachments: super::attachment_lifecycle::AttachmentLifecycle::default(),
             entity_lifecycle: EntityLifecycleStore::default(),
             self_movement_capabilities_override: None,
         }
@@ -456,12 +444,14 @@ impl WorldState {
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
+            self.retire_attachment_endpoint(guid, entity.instance_sequence());
             self.motion_runtimes.forget(guid);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
             // Pending links live only as long as the entities at either end of them.
-            self.pending_child_links.remove(&guid);
-            self.pending_child_links
+            self.attachments.announcements.remove(&guid);
+            self.attachments
+                .announcements
                 .retain(|_, link| link.parent != guid);
 
             let dependent_guids: Vec<_> = self
@@ -471,7 +461,7 @@ impl WorldState {
                     dependent.container_id() == Some(guid)
                         || dependent.wielder_id() == Some(guid)
                         || dependent
-                            .attachment
+                            .attachment()
                             .is_some_and(|attachment| attachment.parent == guid)
                 })
                 .map(|dependent| dependent.guid)
@@ -498,10 +488,10 @@ impl WorldState {
                     }
 
                     if dependent
-                        .attachment
+                        .attachment()
                         .is_some_and(|attachment| attachment.parent == guid)
                     {
-                        dependent.attachment = None;
+                        dependent.set_attachment(None);
                         detached = true;
                     }
                 }
@@ -511,6 +501,7 @@ impl WorldState {
                 }
 
                 if detached {
+                    self.retire_authoritative_body_for_guid(dependent_guid);
                     self.sync_player_ownership_for_entity(dependent_guid);
                     let _ = self
                         .mark_entity_immediately_eligible_for_pruning_if_unretained(dependent_guid);

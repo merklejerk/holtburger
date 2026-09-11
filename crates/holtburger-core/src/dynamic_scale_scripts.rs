@@ -49,7 +49,6 @@ impl PreparedDynamicScaleTimeline {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DueDynamicScale {
     pub target: DynamicScaleTarget,
-    pub due_at: Duration,
     pub scale: ScaleHookPayload,
 }
 
@@ -184,10 +183,12 @@ impl DynamicScaleScriptController {
             .is_some_and(|entity| entity.target == target)
     }
 
-    /// Advances all current instances and returns direct scale records in deterministic due order.
+    /// Advances participating instances and returns direct scale records in deterministic due order.
+    /// Unavailable targets retain their cursor and original due times until they participate again.
     pub fn advance_to(
         &mut self,
         now: Duration,
+        participates: impl Fn(DynamicScaleTarget) -> bool,
     ) -> Result<Vec<DueDynamicScale>, DynamicScaleScriptError> {
         if now < self.advanced_to {
             return Err(DynamicScaleScriptError::ClockMovedBackwards);
@@ -195,6 +196,9 @@ impl DynamicScaleScriptController {
         self.advanced_to = now;
         let mut due = Vec::new();
         for entity in self.entities.values_mut() {
+            if !participates(entity.target) {
+                continue;
+            }
             for active in &mut entity.timelines {
                 while let Some(record) = active.timeline.records.get(active.next_record) {
                     let due_at = active.started_at.saturating_add(record.start_time);
@@ -208,7 +212,6 @@ impl DynamicScaleScriptController {
                         record.authored_order,
                         DueDynamicScale {
                             target: entity.target,
-                            due_at,
                             scale: record.scale,
                         },
                     ));
@@ -328,11 +331,13 @@ mod tests {
 
         assert!(
             controller
-                .advance_to(Duration::from_secs_f64(5.4))
+                .advance_to(Duration::from_secs_f64(5.4), |_| true)
                 .unwrap()
                 .is_empty()
         );
-        let due = controller.advance_to(Duration::from_secs(6)).unwrap();
+        let due = controller
+            .advance_to(Duration::from_secs(6), |_| true)
+            .unwrap();
         assert_eq!(
             due.iter()
                 .map(|command| command.scale.end)

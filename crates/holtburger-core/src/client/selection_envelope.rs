@@ -202,7 +202,7 @@ impl ClientSelectionEnvelopeCoordinator {
         if world
             .entities
             .get(guid)
-            .is_some_and(|entity| entity.attachment.is_some())
+            .is_some_and(|entity| entity.attachment().is_some())
         {
             // Attached candidates inherit their world ancestor's reached scope and bypass host
             // sphere testing; only the browser owns their animated attachment transform.
@@ -511,11 +511,11 @@ mod tests {
         let guid = Guid(0x7000_0001);
         let mut world = holtburger_world::WorldState::synthetic();
         let mut entity = setup_entity(guid);
-        entity.attachment = Some(holtburger_world::PhysicsAttachment {
+        entity.set_attachment(Some(holtburger_world::PhysicsAttachment {
             parent: Guid(0x7000_0002),
             location: ParentLocation::RightHand,
             placement: Placement::RightHandCombat,
-        });
+        }));
         world.entities.insert(entity);
         let preparations = Arc::new(AtomicUsize::new(0));
         let mut coordinator =

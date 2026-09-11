@@ -1,5 +1,4 @@
 use super::*;
-use crate::attachment::PhysicsAttachment;
 use crate::context::WorldContextExt;
 use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 use crate::spatial::{
@@ -8,15 +7,12 @@ use crate::spatial::{
     SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
     SpatialSamplingConfig,
 };
-use crate::state::types::PendingChildLink;
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_common::{ParentLocation, Placement};
 use holtburger_protocol::messages::movement::{
     PositionPack, PositionType, ServerAutonomousPositionData, UpdatePositionFlag,
 };
-use holtburger_protocol::messages::object::messages::description::PhysicsChildData;
 use std::time::Instant;
 
 impl WorldState {
@@ -59,6 +55,25 @@ impl WorldState {
         let Some(body_id) = self.authoritative_body_id_for_guid(guid) else {
             return false;
         };
+
+        // Retaining a child's last wire position does not authorize an independent body. This
+        // gate also covers vector-update recovery and replacement, which can initialize bodies.
+        if self.entities.get(guid).is_some_and(|entity| {
+            entity.placement_intent != crate::EntityPlacementIntent::Independent
+        }) {
+            match self.resolve_scene_placement(guid) {
+                Ok(crate::ResolvedScenePlacement::Attached { .. }) => {}
+                Ok(_) => {
+                    self.scene.retire_authoritative_body(body_id);
+                    return false;
+                }
+                Err(error) => {
+                    log::error!("Cannot establish entity body: {error}");
+                    self.scene.retire_authoritative_body(body_id);
+                    return false;
+                }
+            }
+        }
 
         if effect.pose().landblock_id == Guid::NULL {
             self.scene.retire_authoritative_body(body_id);
@@ -654,6 +669,7 @@ impl WorldState {
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.properties = properties;
             entity.position = bootstrap_position;
+            entity.placement_intent = crate::EntityPlacementIntent::Independent;
             entity.set_string_prop(PropertyString::Name, data.name.clone());
         } else {
             let mut entity =
@@ -727,19 +743,27 @@ impl WorldState {
             pos_pack.teleport_sequence,
             current_teleport_sequence,
         );
-        if !teleported && !pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT) {
-            self.entities
-                .get_mut(guid)
-                .expect("entity admitted from this world turn must remain present")
-                .apply_remote_position_sequence_only(pos_pack.position_sequence);
-            return true;
-        }
-
         let body_id = SpatialBodyId::Entity(guid);
         let missing_runtime_cell = self
             .scene
             .body(body_id)
             .is_none_or(|body| body.pose.landblock_id == Guid::NULL);
+        // Retail unparents after sequence admission, before deciding whether to interpolate.
+        // Missing-cell recovery applies even without contact (acclient.c:311475).
+        self.entities
+            .get_mut(guid)
+            .expect("admitted entity")
+            .placement_intent = crate::EntityPlacementIntent::Independent;
+        if !teleported
+            && !missing_runtime_cell
+            && !pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT)
+        {
+            self.entities
+                .get_mut(guid)
+                .expect("admitted entity")
+                .apply_remote_position_sequence_only(pos_pack.position_sequence);
+            return true;
+        }
         if missing_runtime_cell {
             self.ensure_runtime_body(body_id);
         }
@@ -1044,6 +1068,7 @@ impl WorldState {
             };
 
             entity.position = position;
+            entity.placement_intent = crate::EntityPlacementIntent::Independent;
             self.emit_entity_pose_effect(
                 guid,
                 AuthoritativePoseEffect::Confirm { pose: position },
@@ -1130,6 +1155,8 @@ impl WorldState {
 
     pub(crate) fn clear_entity_world_presence(&mut self, guid: Guid) -> Option<WorldPosition> {
         if let Some(entity) = self.entities.get_mut(guid) {
+            // Inventory/pickup authority withdraws any prior parent link as well as its body.
+            entity.placement_intent = crate::EntityPlacementIntent::Withdrawn;
             let old_lb = entity.position.landblock_id;
             if old_lb == Guid::NULL {
                 return None;
@@ -1142,147 +1169,6 @@ impl WorldState {
         } else {
             None
         }
-    }
-
-    /// Record the children a parent announced, applying each one that has already arrived.
-    ///
-    /// A parent may name children the client has not received yet. Retail answers that with
-    /// placeholder objects (`CObjectMaint::SetChildren`); we keep the link and apply it on arrival,
-    /// which avoids a second object lifetime authority alongside the entity store.
-    pub(crate) fn retain_announced_children(
-        &mut self,
-        parent: Guid,
-        children: Option<&[PhysicsChildData]>,
-        events: &mut Vec<WorldEvent>,
-    ) {
-        let Some(children) = children else {
-            return;
-        };
-        for child in children {
-            let Some(location) = ParentLocation::from_key(child.location_id) else {
-                log::warn!(
-                    "Object {parent:?} announced child {:?} at unknown attach point {}",
-                    child.guid,
-                    child.location_id
-                );
-                continue;
-            };
-            let link = PendingChildLink { parent, location };
-
-            // A child that has already arrived is attached now; one that has not keeps its link
-            // until it does. Its own description is the authority on which pose it holds, so an
-            // already-attached child keeps its reported placement.
-            let Some(existing) = self.entities.get(child.guid) else {
-                self.pending_child_links.insert(child.guid, link);
-                continue;
-            };
-            let placement = existing
-                .attachment
-                .map_or(Placement::Default, |attachment| attachment.placement);
-            self.attach_child_to(child.guid, link, placement, events);
-        }
-    }
-
-    /// Apply an announcement that arrived before its child did.
-    ///
-    /// The child's own description wins when it names an attachment: it carries both the attach
-    /// point and the pose, where the announcement carries only the attach point.
-    pub(crate) fn resolve_pending_child_link(
-        &mut self,
-        guid: Guid,
-        placement_key: u32,
-        events: &mut Vec<WorldEvent>,
-    ) {
-        let Some(link) = self.pending_child_links.remove(&guid) else {
-            return;
-        };
-        if self
-            .entities
-            .get(guid)
-            .is_none_or(|entity| entity.attachment.is_some())
-        {
-            return;
-        }
-        let Some(placement) = Placement::from_key(placement_key) else {
-            log::warn!("Child {guid:?} arrived with unknown placement {placement_key}");
-            return;
-        };
-        self.attach_child_to(guid, link, placement, events);
-    }
-
-    fn attach_child_to(
-        &mut self,
-        guid: Guid,
-        link: PendingChildLink,
-        placement: Placement,
-        events: &mut Vec<WorldEvent>,
-    ) {
-        let Some(entity) = self.entities.get_mut(guid) else {
-            return;
-        };
-        entity.attachment = Some(PhysicsAttachment {
-            parent: link.parent,
-            location: link.location,
-            placement,
-        });
-        if guid != self.player.guid {
-            self.delegate_attached_entity_position(guid, events);
-        }
-        let _ = self.reconcile_entity_retention(guid);
-    }
-
-    /// Give an attached entity the position of the object that owns it.
-    ///
-    /// Attachment delegates position; it does not erase an object from the world. Retail keeps an
-    /// attached child in the world and recomputes its frame from the parent
-    /// (`CPhysicsObj::UpdateChild`, `acclient.c:308302`), and ACE does the coarse equivalent by
-    /// assigning the wielder's location to the item (`Creature_Equipment.cs`, `TrySetChild`).
-    ///
-    /// World stores only that coarse result. Resolving the attach point to a part frame is the
-    /// renderer's job, which is why nothing here reads setup data.
-    ///
-    /// Returns false when the parent is not hydrated: there is no position to delegate yet, and
-    /// inventing one would be worse than leaving the child where it was.
-    pub(crate) fn delegate_attached_entity_position(
-        &mut self,
-        guid: Guid,
-        events: &mut Vec<WorldEvent>,
-    ) -> bool {
-        let Some(parent) = self
-            .entities
-            .get(guid)
-            .and_then(|entity| entity.attachment)
-            .map(|attachment| attachment.parent)
-        else {
-            return false;
-        };
-        let Some(parent_position) = self.entities.get(parent).map(|entity| entity.position) else {
-            return false;
-        };
-        let Some(entity) = self.entities.get_mut(guid) else {
-            return false;
-        };
-
-        entity.position = parent_position;
-        // An attached object retains a canonical pose body but does not carry independent physics.
-        self.initialize_authoritative_body(guid, parent_position, Vector3::zero(), Vector3::zero());
-        if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
-            let initial_cell = parent_position
-                .is_indoors()
-                .then_some(parent_position.landblock_id);
-            let _ = self.scene.set_dynamic_physical_body(
-                body_id,
-                None,
-                crate::PhysicalCollisionFilter::ALL,
-                initial_cell,
-            );
-            Self::emit_runtime_body_changed(events, body_id);
-        }
-        events.push(WorldEvent::EntityMoved {
-            guid,
-            pos: parent_position,
-        });
-        true
     }
 
     fn emit_entity_world_presence_cleared(&mut self, guid: Guid, events: &mut Vec<WorldEvent>) {
@@ -1494,7 +1380,7 @@ impl WorldState {
                 }
                 PropertyInstanceId::Wielder => {
                     if value == Guid::NULL {
-                        entity.attachment = None;
+                        entity.set_attachment(None);
                     }
 
                     if value != Guid::NULL && target_guid != self.player.guid {

@@ -700,7 +700,7 @@ impl WorldState {
             .entities
             .iter()
             .filter_map(|entity| {
-                if excluded == Some(entity.guid) {
+                if excluded == Some(entity.guid) || !self.is_entity_world_participant(entity.guid) {
                     return None;
                 }
                 let snapshot = entity.network_motion.snapshot()?;

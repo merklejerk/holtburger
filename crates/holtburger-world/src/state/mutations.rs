@@ -1,5 +1,4 @@
 use super::*;
-use crate::context::WorldContextExt;
 use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 use crate::spatial::{
     AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, ContactState,
@@ -351,37 +350,9 @@ impl WorldState {
             return false;
         }
 
-        self.player.inventory.iter().all(|guid| {
-            if self.entities.get(*guid).is_none() {
-                return false;
-            }
-
-            // Inventory is a flat authority-owned closure. Validate every explicit container or
-            // wielder reference as well, so a child cannot appear before its parent object.
-            let mut current = *guid;
-            let mut visited = std::collections::HashSet::new();
-            while current != player_guid {
-                if !visited.insert(current) {
-                    return false;
-                }
-                let Some(current_entity) = self.entities.get(current) else {
-                    return false;
-                };
-                let parent = current_entity
-                    .container_id()
-                    .or_else(|| current_entity.wielder_id());
-                let Some(parent) = parent.filter(|parent| *parent != Guid::NULL) else {
-                    // An inventory item without an owner is still a valid top-level item when
-                    // the server has already named it in the player's closure.
-                    break;
-                };
-                if self.entities.get(parent).is_none() {
-                    return false;
-                }
-                current = parent;
-            }
-            true
-        })
+        self.storage
+            .owned_items(player_guid)
+            .all(|guid| self.entities.get(guid).is_some())
     }
 
     pub fn apply_solved_body_kinematics(
@@ -599,31 +570,6 @@ impl WorldState {
         true
     }
 
-    pub(crate) fn sync_player_ownership_for_entity(&mut self, guid: Guid) {
-        let Some((container_id, wielder_id, equip_mask)) = self.entities.get(guid).map(|entity| {
-            (
-                entity.container_id(),
-                entity.wielder_id(),
-                entity.wield_location(),
-            )
-        }) else {
-            return;
-        };
-
-        let held_by_player = container_id.is_some_and(|owner_guid| {
-            owner_guid == self.player.guid || self.is_in_player_inventory(owner_guid)
-        });
-        let wielded_by_player = wielder_id == Some(self.player.guid);
-
-        self.update_player_inventory_recursive(guid, held_by_player || wielded_by_player);
-
-        if wielded_by_player {
-            self.player.wield_item(guid, equip_mask);
-        } else {
-            self.player.unwield_item(guid);
-        }
-    }
-
     pub(crate) fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
         events.push(WorldEvent::LevelInfoUpdated(self.get_level_info()));
     }
@@ -644,8 +590,12 @@ impl WorldState {
             resistances: self.player_resistances(),
             armor: self.player_armor(),
             vitae: self.player_vitae(),
-            inventory: self.player.inventory.clone(),
-            equipment: self.player.equipment.clone(),
+            inventory: self.storage.owned_items(self.player.guid).collect(),
+            equipment: self
+                .storage
+                .equipment(self.player.guid)
+                .filter_map(|(guid, mask)| mask.map(|mask| (guid, mask)))
+                .collect(),
         })));
     }
 
@@ -654,6 +604,10 @@ impl WorldState {
         data: &PlayerDescriptionEventData,
     ) -> Option<WorldPosition> {
         let guid = data.guid;
+        self.player.property_retention =
+            crate::player::property_retention::PlayerPropertyRetention::from_description(
+                &data.properties,
+            );
         let mut properties = data.properties.clone();
         properties
             .strings
@@ -690,27 +644,19 @@ impl WorldState {
         data: &PlayerDescriptionEventData,
         events: &mut Vec<WorldEvent>,
     ) {
+        self.storage.reset();
+        self.storage.replace_contents(data.guid, &data.inventory);
+        for (guid, mask, _) in &data.equipped_objects {
+            self.storage.equip(
+                *guid,
+                data.guid,
+                Some(EquipMask::from_bits(*mask).expect("invalid equipment mask in player roster")),
+            );
+        }
         self.bootstrap_player_entity_from_description(data);
 
         self.emit_player_info(events);
         self.emit_level_info(events);
-    }
-
-    pub(crate) fn update_player_inventory_recursive(&mut self, root: Guid, owned: bool) {
-        let mut stack = vec![root];
-        while let Some(current) = stack.pop() {
-            if owned {
-                self.player.add_to_inventory(current);
-            } else {
-                self.player.remove_from_inventory(current);
-            }
-
-            for (&guid, entity) in &self.entities.entities {
-                if entity.container_id() == Some(current) {
-                    stack.push(guid);
-                }
-            }
-        }
     }
 
     pub(crate) fn apply_entity_position_pack(
@@ -1212,7 +1158,6 @@ impl WorldState {
             self.emit_entity_world_presence_cleared(guid, events);
         }
 
-        self.sync_player_ownership_for_entity(guid);
         let _ = self.reconcile_entity_retention(guid);
 
         events.push(WorldEvent::PropertiesUpdated { guid, updates });
@@ -1224,6 +1169,7 @@ impl WorldState {
         container_guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.storage.announce_container(item_guid, container_guid);
         if !self.set_entity_inventory_location(
             item_guid,
             container_guid,
@@ -1255,6 +1201,7 @@ impl WorldState {
         guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.storage.withdraw(guid);
         if !self.set_entity_inventory_location(guid, Guid::NULL, Guid::NULL, EquipMask::NONE) {
             return false;
         }
@@ -1283,6 +1230,8 @@ impl WorldState {
         equip_mask: EquipMask,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.storage
+            .equip(object_guid, wielder_guid, Some(equip_mask));
         if !self.set_entity_inventory_location(object_guid, Guid::NULL, wielder_guid, equip_mask) {
             return false;
         }
@@ -1349,6 +1298,24 @@ impl WorldState {
         {
             item.set_property(update.clone());
         }
+        if let PropertyUpdate::Int(PropertyInt::CurrentWieldedLocation, mask) = update
+            && let Some(super::storage::StorageLocation::Equipped { wearer, .. }) =
+                self.storage.location(target_guid)
+        {
+            self.storage.equip(
+                target_guid,
+                wearer,
+                Some(EquipMask::from_bits(*mask as u32).expect("invalid accepted equipment mask")),
+            );
+        }
+        if matches!(update, PropertyUpdate::Int(PropertyInt::ItemsCapacity, _))
+            && self
+                .entities
+                .get(target_guid)
+                .is_some_and(|entity| entity.can_hold_items())
+        {
+            self.storage.establish_container(target_guid);
+        }
         if matches!(
             update,
             PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, _)
@@ -1405,7 +1372,23 @@ impl WorldState {
                     }
                 }
 
-                self.sync_player_ownership_for_entity(target_guid);
+                match property {
+                    PropertyInstanceId::Container => {
+                        self.storage.announce_container(target_guid, value)
+                    }
+                    PropertyInstanceId::Wielder if value != Guid::NULL => {
+                        self.storage.equip(target_guid, value, None)
+                    }
+                    PropertyInstanceId::Wielder
+                        if matches!(
+                            self.storage.location(target_guid),
+                            Some(super::storage::StorageLocation::Equipped { .. })
+                        ) =>
+                    {
+                        self.storage.withdraw(target_guid)
+                    }
+                    _ => {}
+                }
                 let _ = self.reconcile_entity_retention(target_guid);
             }
             _ => {}

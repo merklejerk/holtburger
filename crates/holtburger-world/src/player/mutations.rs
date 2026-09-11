@@ -412,18 +412,6 @@ impl PlayerState {
                 self.skills.insert(skill_type, skill_obj);
             }
         }
-
-        self.inventory.clear();
-        for (item_guid, _) in &data.inventory {
-            self.add_to_inventory(*item_guid);
-        }
-
-        self.equipment.clear();
-        for (item_guid, slot, _) in &data.equipped_objects {
-            if let Some(mask) = EquipMask::from_bits(*slot) {
-                self.wield_item(*item_guid, mask);
-            }
-        }
     }
 
     pub fn upsert_enchantment(

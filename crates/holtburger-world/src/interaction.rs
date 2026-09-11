@@ -92,6 +92,7 @@ mod tests {
     #[test]
     fn container_feedback_respects_openability_ownership_targeting_and_creature_exception() {
         let mut world = WorldState::synthetic();
+        world.player.guid = Guid(1);
         let guid = Guid(7);
         let mut entity = Entity::new(guid, "Chest".into(), WorldPosition::default());
         entity
@@ -109,7 +110,7 @@ mod tests {
                 locked_container: true
             })
         );
-        world.player.inventory.insert(guid);
+        world.storage.announce_container(guid, world.player.guid);
         assert_eq!(
             describe_entity_use(&world, guid),
             Some(EntityUseFeedback::Using {
@@ -117,7 +118,7 @@ mod tests {
                 locked_container: false
             })
         );
-        world.player.inventory.remove(&guid);
+        world.storage.withdraw(guid);
         entity.flags.insert(ObjectDescriptionFlag::OPENABLE);
         world.add_entity(entity.clone());
         assert_eq!(

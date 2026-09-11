@@ -256,7 +256,7 @@ export function createClientHudLayout(
 	return {
 		character: place(defaults.character),
 		chat: place(defaults.chat),
-		diagnostics: place(defaults.diagnostics),
+		floatingPanel: place(defaults.floatingPanel),
 		frameRate: place(defaults.frameRate),
 		jumpPower: place(defaults.jumpPower),
 		minimap: place({

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { clientSelectedEntity } from "../../client/client-selected-entity";
+	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
 	import { mapBlipFillStyle } from "../../lib/game/map/map-appearance";
 	import { probeBoomCameraCorrection } from "./boom-camera-probe";
@@ -132,7 +134,7 @@
 			);
 			const snapshot = panel?.querySelector<HTMLTextAreaElement>("textarea");
 			if (
-				!panel?.textContent?.includes("Selection Fixture") ||
+				!panel?.textContent?.includes("Drudge") ||
 				!panel.textContent.includes("42 (0x0000002a)") ||
 				snapshot === null ||
 				snapshot === undefined ||
@@ -167,8 +169,8 @@
 			await sample();
 			if (
 				!panel.textContent?.includes("0x00000008") ||
-				!panel.textContent.includes("Selected entity data is unavailable.") ||
-				panel.querySelector("textarea") !== null
+				!panel.textContent.includes("No scene presentation for this entity.") ||
+				!panel.querySelector("textarea")?.value.includes('"facts"')
 			) {
 				throw new Error(
 					"Unavailable selection retained stale diagnostic details.",
@@ -176,9 +178,7 @@
 			}
 			selection.select(null);
 			await sample();
-			if (
-				!panel.textContent?.includes("Select an entity in the world or minimap")
-			) {
+			if (panel.querySelector("dl, textarea") !== null) {
 				throw new Error("Cleared selection retained diagnostic details.");
 			}
 		} finally {
@@ -241,7 +241,22 @@
 			await uiThemes.replace(defaultUiThemeUrl, null);
 		}
 	}
+	const probeInventory = () =>
+		probeClientInventory({
+			emit: emitInteractionEvent,
+			selection,
+			commands: interactionCommands,
+			readSampleCount: () => inventorySampleCount,
+			readViewportInput: () => ({
+				clicks: viewportSelectionPoints.length,
+				orbits: orbitDeltas.length,
+				zooms: zoomDeltas.length,
+			}),
+		});
+
 	interface ClientHudHarnessApi {
+		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
+		readonly probeInventory: typeof probeInventory;
 		/** Verify style updates without replacing world presentation or HUD placement. */
 		readonly probeThemeApplication: typeof probeThemeApplication;
 		/** Verify sampled selected-entity identity and snapshot disclosure. */
@@ -306,6 +321,12 @@
 	let preciseJumpEnterCount = 0;
 	let preciseJumpActivationCount = 0;
 	let selectionMaintenanceCount = 0;
+	/** Counts mounted inventory pulls without publishing source facts reactively. */
+	let inventorySampleCount = 0;
+	function readInventoryEntities() {
+		inventorySampleCount += 1;
+		return interactionLifecycle.entities.read();
+	}
 	let preciseJumpActive = $state(false);
 	let cameraEnabled = $state(true);
 	let selectedGuid = $state<number | null>(null);
@@ -314,6 +335,50 @@
 		command: string;
 		args: Record<string, unknown> | undefined;
 	}[] = [];
+	/** Establish actual session facts for the mounted HUD and its interaction probes. */
+	function emitInteractionBaseline(): void {
+		emitInteractionEvent("client-current-state", {
+			lifecycle: { kind: "in-world" },
+			entityCollisionDisabled: false,
+			localPlayerGuid: 1,
+			serverTime: 10,
+			worldGeneration: 1,
+			worldName: "Fixture",
+			playerName: "Wayfarer",
+			vitals: [],
+			characterMotion: null,
+			activeConfirmation: null,
+			dynamic: { hostTime: { seconds: 10 }, entities: [] },
+			entities: {
+				entities: [1, 7, 8].map((guid) => ({
+					guid,
+					description: {
+						kind: "known",
+						name: guid === 1 ? "Wayfarer" : "Drudge",
+						healthQuery: "eligible",
+						itemType: 0,
+						objectFlags: 0,
+						wcid: guid === 7 ? 42 : null,
+						weenieType: null,
+						pyrealBalance: null,
+					},
+					location: { kind: "none" },
+					ownedByPlayer: false,
+					scenePlacement: "available",
+					storage:
+						guid === 1
+							? {
+									kind: "container",
+									roster: "announced",
+									packCapacity: 7,
+									itemCapacity: 24,
+								}
+							: { kind: "not-established" },
+				})),
+			},
+		});
+	}
+
 	const interactionLifecycle = new ClientLifecycleSession({
 		listen: async (event, handler) => {
 			interactionHandlers.set(event, handler);
@@ -323,8 +388,7 @@
 		},
 		invoke: async (command, args) => {
 			interactionCommands.push({ command, args });
-			if (command === "request_client_current_state")
-				emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
 	const selection = new ClientEntitySelection({
@@ -465,7 +529,7 @@
 			owner.destroy();
 			unsubscribe();
 			dialogOwner = null;
-			emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+			emitInteractionBaseline();
 			await tick();
 		}
 	}
@@ -611,6 +675,7 @@
 	let hoverHitEnabled = true;
 	let targetIndicatorFrame: ClientTargetIndicatorFrame | null = null;
 	const orbitDeltas: { x: number; y: number }[] = [];
+	const zoomDeltas: number[] = [];
 	const selectionEvents: (number | null)[] = [];
 	const viewportSelectionPoints: { x: number; y: number }[] = [];
 	const viewportHoverPoints: { x: number; y: number }[] = [];
@@ -618,7 +683,9 @@
 		orbit(deltaX: number, deltaY: number): void {
 			orbitDeltas.push({ x: deltaX, y: deltaY });
 		},
-		zoom(): void {},
+		zoom(delta: number): void {
+			zoomDeltas.push(delta);
+		},
 	};
 	/** Imperative fixture position, matching the production map frame's presentation-rate source. */
 	let minimapCategory: DynamicEntityMapBlipCategory = "mob";
@@ -870,16 +937,16 @@
 		};
 	}
 
+	function readSelectedEntity() {
+		return clientSelectedEntity(
+			selection.selectedGuid(),
+			interactionLifecycle.entities.read(),
+			[minimapEntity().view],
+		);
+	}
+
 	function readDiagnostics(): ClientPresentationDiagnostics | null {
-		const selectedGuid = selection.selectedGuid();
 		return {
-			selectedEntity:
-				selectedGuid === null
-					? null
-					: {
-							guid: selectedGuid,
-							view: selectedGuid === 7 ? minimapEntity().view : null,
-						},
 			renderer: null,
 			residentResources: null,
 			tickProfile: null,
@@ -1318,6 +1385,7 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeInventory,
 			probeThemeApplication,
 			probeSelectedDiagnostics,
 			probeInteractableMarker,
@@ -1394,12 +1462,12 @@
 	onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
 	{readMinimapFrame}
 	{readDiagnostics}
+	{readSelectedEntity}
 	{readFrameRates}
 	readTargetIndicatorFrame={() => targetIndicatorFrame}
-	readSelectedEntityDisplay={() => ({
-		name: selectedGuid === null ? null : "Drudge",
-		healthFraction: interactions.healthFraction(),
-	})}
+	readSelectedEntityDisplay={() => interactions.display()}
+	readEntities={readInventoryEntities}
+	onSelectInventoryItem={(guid) => selection.selectInventoryItem(guid)}
 	onInteractEntity={() => interactions.interact(unrestrictedUse)}
 	selectedEntityGuid={selectedGuid}
 	hoveredEntityGuid={hoveredGuid}

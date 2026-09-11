@@ -2,6 +2,20 @@ use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, FromRepr};
 
+/// Server-declared inventory ordering category, independent of storage capacity.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, FromRepr,
+)]
+#[repr(u32)]
+pub enum InventoryEntryKind {
+    /// Uses an ordinary item slot (ACE NonContainer).
+    Item = 0,
+    /// Uses a pack slot as a container.
+    Container = 1,
+    /// Uses a pack slot without implying storage capability.
+    Foci = 2,
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct ItemType: u32 {

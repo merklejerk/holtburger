@@ -13,7 +13,9 @@ pub use access::{
 pub use combat::{
     AttackType, CombatUse, DamageType, EnchantmentTypeFlags, ImbuedEffectType, WeaponType,
 };
-pub use inventory::{AttunedStatus, EquipMask, ItemType, MaterialType, PseudoEquipMask, Usable};
+pub use inventory::{
+    AttunedStatus, EquipMask, InventoryEntryKind, ItemType, MaterialType, PseudoEquipMask, Usable,
+};
 pub use object::{
     GfxObjFlags, IdentifyResponseFlags, ObjectDescriptionFlag, PhysicsDescriptionFlag,
     PhysicsState, WeenieHeaderFlag, WeenieHeaderFlag2, WeenieType,

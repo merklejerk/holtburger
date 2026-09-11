@@ -1186,11 +1186,9 @@ impl ClientRuntime {
         // Auto-unequip overlapping items
         let to_unequip: Vec<holtburger_common::Guid> = self
             .world
-            .player
-            .equipment
-            .iter()
-            .filter(|&(eq_guid, eq_mask)| eq_mask.intersects(unequip_mask) && *eq_guid != item)
-            .map(|(&eq_guid, _)| eq_guid)
+            .player_equipment()
+            .filter(|(eq_guid, eq_mask)| eq_mask.intersects(unequip_mask) && *eq_guid != item)
+            .map(|(eq_guid, _)| eq_guid)
             .collect();
 
         for guid in to_unequip {

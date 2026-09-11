@@ -240,6 +240,7 @@ async fn forward_client_events(
                 awaiting_snapshot = true;
                 if !snapshot_request_pending {
                     snapshot_request_pending = true;
+                    sink.publish_client_event(ClientHostEvent::StateResyncing)?;
                     if command_tx
                         .send(holtburger_core::ClientCommand::RequestCurrentApplicationState)
                         .is_err()
@@ -284,6 +285,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
+            entities: holtburger_core::ClientEntitySnapshot::default(),
             entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,
             local_player_guid: None,
@@ -380,6 +382,11 @@ mod tests {
             commands.recv().await,
             Some(holtburger_core::ClientCommand::RequestCurrentApplicationState)
         ));
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::StateResyncing)
+        ));
+        assert!(forwarded.try_recv().is_err());
         event_tx.send(snapshot_event()).unwrap();
         assert!(matches!(
             forwarded.recv().await,
@@ -645,6 +652,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            entities: holtburger_core::ClientEntitySnapshot::default(),
             entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,
             local_player_guid: Some(Guid(0x5000_0008)),

@@ -100,6 +100,7 @@ try {
 		report = {
 			clientHud: result.clientHud,
 			clientTheme: result.clientTheme,
+			clientInventory: result.clientInventory,
 			consoleMessages: result.consoleMessages,
 			viewport: result.state.viewport,
 		};
@@ -4550,6 +4551,25 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			);
 		}
 
+		const inventory = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInventory",
+			[],
+		);
+		if (options.screenshotPath) {
+			const shot = await client.send("Page.captureScreenshot", {
+				format: "png",
+				captureBeyondViewport: false,
+			});
+			await writeFile(
+				`${options.screenshotPath}.inventory.png`,
+				Buffer.from(shot.data, "base64"),
+			);
+		}
+		await evaluateExpression(
+			client,
+			`document.querySelector('button[aria-label="Close Inventory"]').click()`,
+		);
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,
@@ -4606,6 +4626,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		};
 		return {
 			clientTheme: theme,
+			clientInventory: inventory,
 			cameraSweepScreenshots: {
 				constrained: constrainedScreenshot.data,
 				narrow: narrowScreenshot.data,

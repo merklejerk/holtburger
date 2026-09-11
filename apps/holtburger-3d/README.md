@@ -234,3 +234,7 @@ Static/particle instancing remains separate. The authored portal-transition tunn
 ordinary per-part geometry under its own explicit resource lease.
 
 The previous implementation is retained in `../holtburger-3d-legacy` as a runnable reference. Do not import TypeScript from the legacy app into this source tree.
+
+## Item UI styling
+
+See [Item UI theme hooks](ITEM_UI_THEMING.md) for cell, selection, empty-slot, strip-arrow, and inventory layout properties.

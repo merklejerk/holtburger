@@ -378,6 +378,7 @@ impl ClientRuntime {
                         }
                     }
 
+                    self.publish_entity_facts();
                     self.publish_character_motion_capabilities_if_changed();
 
                     let dynamic_event = if !before_dynamic.is_empty() {

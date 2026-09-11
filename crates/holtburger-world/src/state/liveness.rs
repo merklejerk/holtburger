@@ -294,6 +294,8 @@ impl WorldState {
     }
 
     pub(crate) fn mark_entity_explicit_delete(&mut self, guid: Guid) {
+        // Accepted deletion retires storage immediately, before deferred scene eviction.
+        self.storage.retire(guid);
         self.entity_lifecycle
             .get_or_default_mut(guid)
             .delete_request = Some(EntityDeleteRequest::Unconditional);
@@ -335,6 +337,9 @@ impl WorldState {
             }
             Some(EntityDeleteRequest::Instance(_)) => {}
         }
+        if disposition == EntityInstanceDeleteDisposition::Applied {
+            self.storage.retire(guid);
+        }
         disposition
     }
 
@@ -361,6 +366,9 @@ impl WorldState {
             }
         }
         self.entity_lifecycle.compact(guid);
+        if applies_to_instance {
+            self.storage.retire(guid);
+        }
         applies_to_instance
     }
 
@@ -497,7 +505,7 @@ impl WorldState {
         self.entities.get(guid).is_some() && !self.current_instance_delete_requested(guid)
     }
 
-    fn current_instance_delete_requested(&self, guid: Guid) -> bool {
+    pub(super) fn current_instance_delete_requested(&self, guid: Guid) -> bool {
         let Some(instance_sequence) = self.entities.get(guid).map(Entity::instance_sequence) else {
             return false;
         };
@@ -561,6 +569,15 @@ impl WorldState {
     ) -> EntityCreateDisposition {
         let guid = entity.guid;
         self.reconcile_pending_visual_description_for_create(&mut entity);
+        // A public object description does not replace the local player's private qualities.
+        if guid == self.player.guid
+            && let Some(current) = self.entities.get(guid)
+        {
+            self.player
+                .property_retention
+                .retain_into(&current.properties, &mut entity.properties);
+        }
+
         let preserve_container_preview = entity
             .container_id()
             .is_some_and(|container| self.open_containers.contains(&container))

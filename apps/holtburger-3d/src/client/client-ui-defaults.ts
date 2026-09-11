@@ -20,7 +20,7 @@ export const CLIENT_UI_DEFAULTS = {
 		minSize: { width: 280, height: 240 },
 		resizable: true,
 	},
-	diagnostics: {
+	floatingPanel: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },
 		size: { width: 330, height: 310 },

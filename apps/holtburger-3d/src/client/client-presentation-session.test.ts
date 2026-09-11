@@ -1,3 +1,4 @@
+import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 
@@ -416,7 +417,7 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("joins the current selected display and bound to presentation-owned facts", async () => {
+	it("tracks the selected bound using presentation-owned facts", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -435,7 +436,6 @@ describe("ClientPresentationSession", () => {
 			display: { level: 6, name: "Drudge" },
 		});
 		presentation.setSelectedEntityGuid(7);
-		expect(presentation.readSelectedEntityName()).toBe("Drudge");
 		const primaryView = runtime.primaryViews.at(-1);
 		if (primaryView === undefined)
 			throw new Error("Fixture did not publish a primary view.");
@@ -482,7 +482,6 @@ describe("ClientPresentationSession", () => {
 			kind: "temporarily-unrealized",
 		});
 		runtime.removeDynamicEntity(7, 1);
-		expect(presentation.readSelectedEntityName()).toBeNull();
 		await presentation.destroy();
 	});
 
@@ -1413,10 +1412,6 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		);
 	}
 
-	dynamicEntityDisplay(guid: number): DynamicEntityView["display"] | null {
-		return this.#desired.get(guid)?.display ?? null;
-	}
-
 	withSpawnedEntitySelectionGeometry<T>(): T | null {
 		return null;
 	}
@@ -1602,6 +1597,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: playerGuid,
+		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 75,
 		worldGeneration: 1,
 		worldName: "Leafcull",

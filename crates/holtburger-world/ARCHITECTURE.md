@@ -491,6 +491,15 @@ type instead of open-coding the mutation logic again.
 
 That ordering avoids world helpers reading partially hydrated player state.
 
+Private player property provenance is retained separately from property values.
+`PlayerPropertyRetention` records keys supplied by `PlayerDescription` and subsequent
+private property updates. When a public object description recreates the local player,
+current private values omitted by that description survive; incoming public values
+win where supplied. Public-only properties retain replacement semantics. Values live
+only on the authoritative entity, and a fresh `PlayerDescription` resets provenance.
+This preserves login-only/private properties such as `CoinValue` without a second
+player property cache or special-case currency retention.
+
 ### Entity retention invariant
 
 Entity lifetime is not just spawn/despawn.

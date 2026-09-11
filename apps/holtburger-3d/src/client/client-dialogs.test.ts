@@ -1,3 +1,4 @@
+import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
 import { describe, expect, it, vi } from "vitest";
 import { ClientDialogs } from "./client-dialogs";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -36,6 +37,7 @@ async function fixture() {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
 			localPlayerGuid: 7,
+			entities: playerEntitySnapshot(7),
 			serverTime: 1,
 			worldGeneration: 1,
 			worldName: null,

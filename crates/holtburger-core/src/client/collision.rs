@@ -1777,65 +1777,87 @@ mod tests {
 
     #[tokio::test]
     async fn activation_waits_for_content_and_current_reveal_before_completing() {
-        let mut client = build_test_client(ClientState::EnteringWorld);
-        let guid = Guid(0x5000_0001);
-        client
-            .world
-            .seed_local_player_entity(guid, "Player", position(0x1234_0001));
-        facts(&mut client.world, guid);
-        client.requires_external_world_reveal = true;
-        client.collision_coordinator = Some(ClientCollisionCoordinator::new(Arc::new(
-            FakeSource::default(),
-        )));
-        client.start_world_activation(ClientWorldActivationState::Teleport, guid);
-        let retired_generation = client.activation.as_ref().unwrap().generation;
-        client.start_world_activation(ClientWorldActivationState::Teleport, guid);
-        client
-            .acknowledge_world_reveal(retired_generation)
-            .await
-            .unwrap();
-        client.activation.as_mut().unwrap().phase =
-            ClientWorldActivationPhase::TeleportDestinationInstalled;
-        client
-            .start_camera(ClientCameraStartRequest {
-                player_guid: guid,
-                entity_generation: u64::from(
-                    client.world.player_entity().unwrap().instance_sequence(),
-                ),
-                initial_reach: 4.5,
-                minimum_reach: 1.2,
-                maximum_reach: 8.0,
-                input_sequence: 0,
-                view_direction: [0.0, 0.0, -1.0],
-                cumulative_zoom_displacement: 0.0,
-                projection_revision: 1,
-                clearance_radius: 0.5,
+        for cause in [
+            ClientWorldActivationState::InitialEntry,
+            ClientWorldActivationState::Teleport,
+        ] {
+            let mut client = build_test_client(ClientState::EnteringWorld);
+            let guid = Guid(0x5000_0001);
+            client
+                .world
+                .seed_local_player_entity(guid, "Player", position(0x1234_0001));
+            facts(&mut client.world, guid);
+            client.requires_external_world_reveal = true;
+            client.collision_coordinator = Some(ClientCollisionCoordinator::new(Arc::new(
+                FakeSource::default(),
+            )));
+            client.start_world_activation(ClientWorldActivationState::Teleport, guid);
+            let retired_generation = client.activation.as_ref().unwrap().generation;
+            client.start_world_activation(cause, guid);
+            let mut events = client.subscribe_client_view_events();
+            client
+                .acknowledge_world_reveal(retired_generation)
+                .await
+                .unwrap();
+            if cause == ClientWorldActivationState::Teleport {
+                client.activation.as_mut().unwrap().phase =
+                    ClientWorldActivationPhase::TeleportDestinationInstalled;
+            }
+            client
+                .start_camera(ClientCameraStartRequest {
+                    player_guid: guid,
+                    entity_generation: u64::from(
+                        client.world.player_entity().unwrap().instance_sequence(),
+                    ),
+                    initial_reach: 4.5,
+                    minimum_reach: 1.2,
+                    maximum_reach: 8.0,
+                    input_sequence: 0,
+                    view_direction: [0.0, 0.0, -1.0],
+                    cumulative_zoom_displacement: 0.0,
+                    projection_revision: 1,
+                    clearance_radius: 0.5,
+                })
+                .unwrap();
+            client.try_complete_world_activation().await.unwrap();
+            assert!(client.activation.is_some());
+            assert_eq!(client.session.bytes_out, 0);
+            let coordinator = client.collision_coordinator.as_mut().unwrap();
+            coordinator.observe(&mut client.world);
+            wait_for_readiness(coordinator, &mut client.world, |ready| {
+                matches!(ready, ClientBodyReadiness::Ready { .. })
             })
-            .unwrap();
-        client.try_complete_world_activation().await.unwrap();
-        assert!(client.activation.is_some());
-        assert_eq!(client.session.bytes_out, 0);
-        let coordinator = client.collision_coordinator.as_mut().unwrap();
-        coordinator.observe(&mut client.world);
-        wait_for_readiness(coordinator, &mut client.world, |ready| {
-            matches!(ready, ClientBodyReadiness::Ready { .. })
-        })
-        .await;
-        wait_for_scene_revision(coordinator, &mut client.world, 1).await;
-        // Resident content permits camera settlement, but only the current reveal may activate.
-        client.try_complete_world_activation().await.unwrap();
-        assert!(client.activation.is_some());
-        let generation = client.activation.as_ref().unwrap().generation;
-        client
-            .acknowledge_world_reveal(retired_generation)
-            .await
-            .unwrap();
-        assert!(client.activation.is_some());
-        assert_eq!(client.session.bytes_out, 0);
-        client.acknowledge_world_reveal(generation).await.unwrap();
-        assert!(client.activation.is_none());
-        assert_eq!(client.state, ClientState::InWorld);
-        assert!(client.session.bytes_out > 0);
+            .await;
+            wait_for_scene_revision(coordinator, &mut client.world, 1).await;
+            // Resident content permits camera settlement, but only the current reveal may activate.
+            client.try_complete_world_activation().await.unwrap();
+            assert!(client.activation.is_some());
+            let generation = client.activation.as_ref().unwrap().generation;
+            client
+                .acknowledge_world_reveal(retired_generation)
+                .await
+                .unwrap();
+            assert!(client.activation.is_some());
+            assert_eq!(client.session.bytes_out, 0);
+            client.acknowledge_world_reveal(generation).await.unwrap();
+            assert!(client.activation.is_none());
+            assert_eq!(client.state, ClientState::InWorld);
+            assert!(client.session.bytes_out > 0);
+            let mut snapshots = Vec::new();
+            while let Ok(event) = events.try_recv() {
+                if let super::super::ClientViewEvent::ApplicationSnapshot(snapshot) = event {
+                    snapshots.push(snapshot);
+                }
+            }
+            if cause == ClientWorldActivationState::InitialEntry {
+                assert_eq!(snapshots.len(), 1);
+                assert_eq!(snapshots[0].local_player_guid, Some(guid));
+                assert_eq!(snapshots[0].entities.entities.len(), 1);
+                assert_eq!(snapshots[0].entities.entities[0].guid, guid);
+            } else {
+                assert!(snapshots.is_empty());
+            }
+        }
     }
 
     #[tokio::test]

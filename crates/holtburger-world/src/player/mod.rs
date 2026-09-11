@@ -1,6 +1,7 @@
 pub mod magic;
 pub mod movement;
 pub mod mutations;
+pub(crate) mod property_retention;
 pub mod stats_calc;
 pub mod types;
 

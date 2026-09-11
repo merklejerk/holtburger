@@ -34,11 +34,11 @@
 	interface Props {
 		/** The same visible list used to determine the initial dock width. */
 		readonly shortcuts: readonly ClientShortcut[];
-		readonly debugOpen: boolean;
-		readonly onDebug: () => void;
+		readonly activePanel: "inventory" | "debug" | null;
+		readonly onToggle: (panel: "inventory" | "debug") => void;
 	}
 
-	const { shortcuts, debugOpen, onDebug }: Props = $props();
+	const { shortcuts, activePanel, onToggle }: Props = $props();
 </script>
 
 <nav
@@ -50,13 +50,18 @@
 		<button
 			type="button"
 			class="ui-hud-button"
-			title={shortcut.icon === "debug"
-				? "Client diagnostics"
-				: `${shortcut.label} (stub)`}
+			title={shortcut.icon === "inventory"
+				? "Inventory"
+				: shortcut.icon === "debug"
+					? "Client diagnostics"
+					: `${shortcut.label} (stub)`}
 			aria-label={shortcut.label}
-			aria-pressed={shortcut.icon === "debug" ? debugOpen : undefined}
+			aria-pressed={shortcut.icon === "debug" || shortcut.icon === "inventory"
+				? activePanel === shortcut.icon
+				: undefined}
 			onclick={() => {
-				if (shortcut.icon === "debug") onDebug();
+				if (shortcut.icon === "debug" || shortcut.icon === "inventory")
+					onToggle(shortcut.icon);
 			}}
 		>
 			<ClientHudIcon name={shortcut.icon} />

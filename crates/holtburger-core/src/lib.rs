@@ -41,6 +41,7 @@ pub use client::dynamic_scale::{
     ClientDynamicScaleFacts, ClientDynamicScaleSource, ContentClientDynamicScaleSource,
     PreparedClientDynamicScale,
 };
+pub use client::entity_facts::{ClientEntityDelta, ClientEntitySnapshot};
 pub use client::precise_jump::{
     PreciseJumpCandidateBudget, PreciseJumpCandidateBudgetError, PreciseJumpCandidateRejection,
     PreciseJumpCandidateSet, PreciseJumpCapabilityEnvelope, PreciseJumpLandingTolerance,

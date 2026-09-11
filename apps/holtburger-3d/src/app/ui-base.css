@@ -455,3 +455,42 @@
 		}
 	}
 }
+
+/* Shared item presentation hooks. Geometry and scrolling remain component-owned. */
+@layer components {
+	.ui-theme .ui-item-cell {
+		background: var(--ui-item-cell-background, transparent);
+		border: var(--ui-item-cell-border, 0);
+		border-radius: var(--ui-item-cell-radius, 0);
+		color: var(--ui-item-cell-color, var(--ui-color-text));
+	}
+	.ui-theme .ui-item-cell:where(:hover:not(:disabled)) {
+		color: var(--ui-item-cell-hover-color, var(--ui-color-highlight));
+	}
+	.ui-theme .ui-item-cell[data-empty="true"] {
+		background: var(--ui-item-empty-background, transparent);
+		border: var(--ui-item-empty-border, var(--ui-item-cell-border, 0));
+		opacity: var(--ui-item-empty-opacity, 1);
+	}
+	.ui-theme .ui-item-selection[aria-pressed="true"] {
+		color: var(--ui-item-selection-color, var(--ui-color-active));
+		outline: var(--ui-item-selection-outline, 2px solid currentColor);
+		outline-offset: var(--ui-item-selection-outline-offset, -2px);
+		box-shadow: var(--ui-item-selection-shadow, none);
+		background: var(--ui-item-selection-background, transparent);
+	}
+	.ui-theme .ui-item-strip-arrow {
+		color: var(--ui-item-strip-arrow-color, var(--ui-color-text));
+		background: var(--ui-item-strip-arrow-background, transparent);
+		border: var(--ui-item-strip-arrow-border, 0);
+		border-radius: var(--ui-item-strip-arrow-radius, 0);
+	}
+	.ui-theme .ui-item-strip-arrow:where(:hover:not(:disabled)) {
+		color: var(--ui-item-strip-arrow-hover-color, var(--ui-color-highlight));
+	}
+	/* Keyboard focus remains distinct even when the theme replaces selection outlines. */
+	.ui-theme :is(.ui-item-selection, .ui-item-strip-arrow):focus-visible {
+		outline: 2px solid var(--ui-color-focus);
+		outline-offset: -2px;
+	}
+}

@@ -532,6 +532,14 @@ fn preferred_runtime_pose(position: Option<WorldPosition>) -> Option<WorldPositi
 }
 
 impl WorldContext for GameData {
+    fn container_parent(&self, guid: Guid) -> Option<Guid> {
+        self.entities.get(&guid)?.container_id()
+    }
+
+    fn equipment_mask(&self, guid: Guid) -> Option<EquipMask> {
+        self.equipment.get(&guid).copied()
+    }
+
     fn get_player_guid(&self) -> Option<Guid> {
         self.player_guid
     }

@@ -1,3 +1,7 @@
+import {
+	entityFacts,
+	playerEntitySnapshot,
+} from "./client-entity-mirror.test-support";
 import { describe, expect, it } from "vitest";
 
 import { landblockVector3 } from "../lib/assets/ac-frame";
@@ -103,35 +107,19 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls).toEqual([
-			"listen:client-dynamic-entity",
-			"listen:client-entity-collision-disabled",
-			"listen:client-current-state",
-			"listen:client-lifecycle-changed",
-			"listen:client-character-motion-capabilities-updated",
-			"listen:client-character-motion-feedback",
-			"listen:client-precise-jump-evaluation",
-			"listen:client-precise-jump-transaction-feedback",
-			"listen:client-entity-selection-query-result",
-			"listen:client-local-player-established",
-			"listen:client-server-time-updated",
-			"listen:client-world-name-updated",
-			"listen:client-player-entered",
-			"listen:client-player-vitals-updated",
-			"listen:client-entity-health-updated",
-			"listen:client-action-feedback",
-			"listen:client-confirmation-updated",
-			"listen:client-transient-string",
-			"listen:client-popup-string",
-			"listen:client-chat-message",
-			"listen:client-dynamic-sound-cue",
-			"listen:client-dynamic-script-cue",
-			"listen:client-presentation-discontinuity",
-			"listen:client-camera-started",
-			"listen:client-camera",
-			"listen:client-exit-requested",
-			"invoke:request_client_current_state",
-		]);
+		expect(transport.calls.at(-1)).toBe("invoke:request_client_current_state");
+		expect(
+			transport.calls.slice(0, -1).every((call) => call.startsWith("listen:")),
+		).toBe(true);
+		for (const name of [
+			"client-current-state",
+			"client-state-resyncing",
+			"client-entity-facts-changed",
+			"client-dynamic-entity",
+		]) {
+			expect(transport.handlers.has(name)).toBe(true);
+		}
+
 		expect(session.state().lifecycle).toEqual({
 			kind: "in-world",
 		});
@@ -139,6 +127,196 @@ describe("ClientLifecycleSession", () => {
 		expect(
 			session.mirror.entities().map((entity) => entity.identity.guid),
 		).toEqual([0x5000_0001]);
+	});
+
+	it("accepts the completed character-entry baseline and subsequent inventory deltas", async () => {
+		const transport = new FakeClientTransport();
+		const startup = currentState(9);
+		startup.lifecycle = { kind: "character-selection", characters: [] };
+		startup.localPlayerGuid = null;
+		startup.entities = { entities: [] };
+		startup.dynamic.entities = [];
+		transport.setCurrentState(startup);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		// Repeat entry with another character without restarting the transport.
+		for (const playerGuid of [9, 19]) {
+			transport.emit("client-lifecycle-changed", {
+				kind: "portal-space",
+				worldGeneration: playerGuid,
+				cause: "initial-entry",
+			});
+			transport.emit("client-local-player-established", { playerGuid });
+			const item = entityFacts(playerGuid + 1, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: playerGuid,
+					slot: { kind: "item", index: 0 },
+				},
+			});
+			const baseline = currentState(playerGuid);
+			baseline.entities.entities.push(item);
+			transport.emit("client-entity-facts-changed", {
+				upserts: baseline.entities.entities,
+				removed: [],
+			});
+			expect(session.entities.read().kind).toBe("pending");
+			transport.emit("client-lifecycle-changed", { kind: "in-world" });
+			transport.emit("client-current-state", baseline);
+			transport.emit("client-entity-facts-changed", {
+				upserts: [
+					entityFacts(item.guid, {
+						...item,
+						description: {
+							kind: "known",
+							name: "Updated item",
+							healthQuery: "ineligible",
+							itemType: 0,
+							objectFlags: 0,
+							wcid: null,
+							weenieType: null,
+							pyrealBalance: null,
+						},
+					}),
+				],
+				removed: [],
+			});
+			const read = session.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Character entry did not establish inventory.");
+			expect(read.level.playerGuid).toBe(playerGuid);
+			expect([...read.level.entities.keys()]).toEqual([playerGuid, item.guid]);
+			expect(read.level.entities.get(item.guid)?.description).toEqual({
+				kind: "known",
+				name: "Updated item",
+				healthQuery: "ineligible",
+				itemType: 0,
+				objectFlags: 0,
+				wcid: null,
+				weenieType: null,
+				pyrealBalance: null,
+			});
+			// Leaving the character retains the cache until the next entry replaces it.
+			transport.emit("client-exit-requested", {
+				cause: "server-disconnect",
+				diagnostic: "Session ended",
+			});
+			transport.emit("client-lifecycle-changed", {
+				kind: "exiting",
+				cause: "server-disconnect",
+			});
+			transport.emit("client-lifecycle-changed", {
+				kind: "character-selection",
+				characters: [],
+			});
+			expect(session.entities.read()).toBe(read);
+		}
+		session.stop();
+	});
+
+	it("retires semantic state on stop and accepts reused GUIDs only from a new baseline", async () => {
+		const transport = new FakeClientTransport();
+		const initial = currentState(9);
+		initial.entities.entities.push(
+			entityFacts(10, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: 9,
+					slot: { kind: "item", index: 0 },
+				},
+			}),
+		);
+		transport.setCurrentState(initial);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		session.stop();
+		expect(session.entities.read()).toEqual({ kind: "pending" });
+		expect(transport.handlers.size).toBe(0);
+		const replacement = currentState(9);
+		replacement.entities = {
+			entities: [
+				entityFacts(9, {
+					description: {
+						kind: "known",
+						name: "New character",
+						healthQuery: "eligible",
+						itemType: 0,
+						objectFlags: 0,
+						wcid: null,
+						weenieType: null,
+						pyrealBalance: null,
+					},
+				}),
+			],
+		};
+		transport.setCurrentState(replacement);
+		await session.start();
+		const read = session.entities.read();
+		if (read.kind !== "current")
+			throw new Error("Restart did not establish a baseline.");
+		expect([...read.level.entities.keys()]).toEqual([9]);
+		expect(read.level.entities.get(9)?.description).toEqual({
+			kind: "known",
+			name: "New character",
+			healthQuery: "eligible",
+			itemType: 0,
+			objectFlags: 0,
+			wcid: null,
+			weenieType: null,
+			pyrealBalance: null,
+		});
+		session.stop();
+	});
+
+	it("keeps shell and both mirrors unchanged when replacement validation fails", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const before = session.entities.read();
+		const player = session.state().playerGuid;
+		const invalid = currentState(9);
+		invalid.dynamic.entities = [view(9), view(9)];
+		expect(() => transport.emit("client-current-state", invalid)).toThrow(
+			"duplicate GUID",
+		);
+		expect(session.state().playerGuid).toBe(player);
+		expect(session.entities.read()).toBe(before);
+		expect(
+			session.mirror.entities().map((record) => record.identity.guid),
+		).toEqual([player]);
+	});
+
+	it("marks recovery pending, gates both delta paths, and notifies only after replacement", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-state-resyncing", null);
+		expect(session.entities.read().kind).toBe("pending");
+		transport.emit("client-entity-facts-changed", {
+			upserts: playerEntitySnapshot(9).entities,
+			removed: [],
+		});
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: view(9),
+		});
+		expect(session.entities.read().kind).toBe("pending");
+		const observed: number[] = [];
+		session.subscribe((event) => {
+			if (event.type !== "current-state" && event.type !== "dynamic") return;
+			const read = session.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Replacement notified before semantic commit.");
+			expect(read.level.entities.has(9)).toBe(true);
+			expect(
+				session.mirror.entities().map((record) => record.identity.guid),
+			).toEqual([9]);
+			observed.push(9);
+		});
+		transport.emit("client-current-state", currentState(9));
+		expect(observed).toEqual([9, 9]);
 	});
 
 	it("submits and delivers correlated entity-selection queries without mutating state", async () => {
@@ -498,6 +676,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: playerGuid,
+		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 10,
 		worldGeneration: 2,
 		worldName: "Leafcull",

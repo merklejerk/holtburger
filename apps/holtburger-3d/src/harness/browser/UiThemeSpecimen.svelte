@@ -43,7 +43,7 @@
 		name:
 			| "character"
 			| "chat"
-			| "diagnostics"
+			| "floatingPanel"
 			| "frameRate"
 			| "selectedEntity"
 			| "shortcuts"
@@ -275,7 +275,7 @@
 		</div>
 		<span class="ui-muted">Specimen controls · not saved</span>
 	</aside>
-	<section class="ui-panel hud controls" style={placement("diagnostics")}>
+	<section class="ui-panel hud controls" style={placement("floatingPanel")}>
 		<header class="ui-frame title-row">
 			<h3>Control states</h3>
 			<span class="ui-muted">Specimen</span>

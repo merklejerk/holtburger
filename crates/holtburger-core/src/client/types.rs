@@ -366,6 +366,8 @@ pub struct ClientApplicationSnapshot {
     pub active_confirmation: Option<ActiveCharacterConfirmation>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: DynamicEntitySnapshot,
+    /// Complete retained entity/storage facts for non-rendering consumers.
+    pub entities: super::entity_facts::ClientEntitySnapshot,
     /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.
     pub runtime_bodies: Arc<[RuntimeSpatialBodyView]>,
 }
@@ -552,6 +554,8 @@ pub enum ClientViewEvent {
     EntityCollisionDisabled(bool),
     /// Complete application-level replacement state for a shell remount or receiver recovery.
     ApplicationSnapshot(ClientApplicationSnapshot),
+    /// Accepted semantic record changes, independent of renderer residency.
+    EntityFactsChanged(super::entity_facts::ClientEntityDelta),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
     LifecycleChanged(ClientLifecycleState),
     /// Ordered jump gesture result used only to reconcile optimistic client presentation.

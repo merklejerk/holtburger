@@ -1,3 +1,4 @@
+import type { ClientEntityMirror } from "./client-entity-mirror";
 import type {
 	ClientEntitySelectionQueryRequest,
 	ClientEntitySelectionQueryResult,
@@ -10,6 +11,8 @@ import type { ClientSelectedEntityTrackingStatus } from "./client-selection-trac
 
 /** Transport-only authority port; selection state stays outside the lifecycle session. */
 export interface ClientEntitySelectionLifecyclePort {
+	/** Current world-derived identity facts, separate from renderer residency. */
+	readonly entities: Pick<ClientEntityMirror, "read">;
 	queryEntitySelectionCandidates(
 		request: ClientEntitySelectionQueryRequest,
 	): Promise<void>;
@@ -141,19 +144,38 @@ export class ClientEntitySelection {
 		this.#publish(selectedGuid);
 	}
 
-	/** Clear a selected identity that left frontend residency or the acquisition-distance leash. */
+	/** Check an inventory click against accepted facts, not the sampled cell. */
+	selectInventoryItem(guid: number): void {
+		if (this.#destroyed) return;
+		this.#pendingSelection = null;
+		const read = this.#lifecycle.entities.read();
+		if (read.kind === "pending") return;
+		const entity = read.level.entities.get(guid);
+		if (
+			entity?.description.kind === "known" &&
+			(entity.ownedByPlayer || guid === read.level.playerGuid)
+		)
+			this.#publish(guid);
+	}
+
+	/** Maintain identity from semantic facts; presentation contributes measured distance only. */
 	maintainSelection(): void {
 		if (this.#destroyed || this.#selectedGuid === null) return;
+		const read = this.#lifecycle.entities.read();
+		if (read.kind === "pending") return;
 		const guid = this.#selectedGuid;
+		const entity = read.level.entities.get(guid);
+		if (entity?.ownedByPlayer) return;
+		if (entity === undefined || entity.scenePlacement === "unavailable") {
+			this.#invalidateEntity(guid);
+			return;
+		}
 		const status = this.#presentation()?.selectedEntityTrackingStatus(guid);
 		if (
-			status === undefined ||
-			status.kind === "temporarily-unrealized" ||
-			(status.kind === "tracked" &&
-				status.distance <= OUTDOOR_LANDBLOCK_WORLD_SIZE)
+			status?.kind === "tracked" &&
+			status.distance > OUTDOOR_LANDBLOCK_WORLD_SIZE
 		)
-			return;
-		this.#invalidateEntity(guid);
+			this.#invalidateEntity(guid);
 	}
 
 	destroy(): void {
@@ -190,19 +212,20 @@ export class ClientEntitySelection {
 				this.#receiveHoverQueryResult(event.result);
 			return;
 		}
-		if (event.type !== "dynamic") return;
-		if (event.event.kind === "removed") {
-			this.#invalidateEntity(event.event.guid);
+		if (event.type === "resyncing") {
+			this.#pendingSelection = null;
+			this.#pendingHover = null;
+			this.#publishHover(null);
 			return;
 		}
-		if (
-			event.event.kind === "snapshot" &&
-			this.#selectedGuid !== null &&
-			!event.event.snapshot.entities.some(
-				(entity) => entity.identity.guid === this.#selectedGuid,
-			)
-		)
-			this.#invalidateEntity(this.#selectedGuid);
+		if (event.type === "entities" || event.type === "current-state")
+			this.maintainSelection();
+		if (event.type !== "dynamic") return;
+		if (event.event.kind === "removed") {
+			if (this.#hoveredGuid === event.event.guid) this.#publishHover(null);
+			return;
+		}
+
 		if (
 			event.event.kind === "snapshot" &&
 			this.#hoveredGuid !== null &&
@@ -210,7 +233,7 @@ export class ClientEntitySelection {
 				(entity) => entity.identity.guid === this.#hoveredGuid,
 			)
 		)
-			this.#invalidateEntity(this.#hoveredGuid);
+			this.#publishHover(null);
 	}
 
 	/** Clear only an invalid identity; independently ordered queries may still resolve. */

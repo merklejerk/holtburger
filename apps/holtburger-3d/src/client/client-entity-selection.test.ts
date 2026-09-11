@@ -1,3 +1,9 @@
+import {
+	ClientEntityMirror,
+	type ClientEntityFacts,
+} from "./client-entity-mirror";
+import { entityFacts } from "./client-entity-mirror.test-support";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
 import { describe, expect, it } from "vitest";
 import { landblockVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
@@ -160,7 +166,7 @@ describe("ClientEntitySelection", () => {
 		selection.destroy();
 	});
 
-	it("clears only on an accepted removal without cancelling an independent click", async () => {
+	it("clears on semantic removal without cancelling an independent click", async () => {
 		const lifecycle = new FakeLifecycle();
 		const selection = new ClientEntitySelection({
 			lifecycle,
@@ -175,10 +181,8 @@ describe("ClientEntitySelection", () => {
 			type: "dynamic",
 		});
 		expect(selection.selectedGuid()).toBe(12);
-		lifecycle.emit({
-			event: { generation: 3, guid: 12, kind: "removed" },
-			type: "dynamic",
-		});
+		lifecycle.update([], [12]);
+		expect(selection.selectedGuid()).toBeNull();
 		lifecycle.emit(available(pendingClickSequence, [9]));
 		expect(selection.selectedGuid()).toBe(9);
 		selection.destroy();
@@ -202,7 +206,7 @@ describe("ClientEntitySelection", () => {
 		selection.destroy();
 	});
 
-	it("clears selection and matching hover after frontend residency eviction without cancelling independent queries", async () => {
+	it("keeps semantic selection through frontend eviction while independent queries complete", async () => {
 		const lifecycle = new FakeLifecycle();
 		const presentation = new FakePresentation();
 		const selection = new ClientEntitySelection({
@@ -221,11 +225,142 @@ describe("ClientEntitySelection", () => {
 		presentation.trackingStatus = { kind: "frontend-evicted" };
 
 		selection.maintainSelection();
+		expect(selection.selectedGuid()).toBe(12);
 		lifecycle.emit(available(pendingHoverSequence, [9]));
 		lifecycle.emit(available(pendingClickSequence, [9]));
 
 		expect(selection.selectedGuid()).toBe(9);
 		expect(selection.hoveredGuid()).toBe(9);
+		selection.destroy();
+	});
+
+	it.each(["render-first", "facts-first"])(
+		"preserves pickup selection with %s delivery",
+		(order) => {
+			const lifecycle = new FakeLifecycle();
+			const presentation = new FakePresentation();
+			const selection = new ClientEntitySelection({
+				lifecycle,
+				presentation: () => presentation,
+			});
+			selection.select(12);
+			const facts = () =>
+				lifecycle.update(
+					[
+						entityFacts(12, {
+							ownedByPlayer: true,
+							scenePlacement: "unavailable",
+							location: {
+								kind: "contained",
+								parentGuid: 1,
+								slot: { kind: "item", index: 0 },
+							},
+						}),
+					],
+					[],
+				);
+			const render = () => {
+				lifecycle.emit({
+					type: "dynamic",
+					event: { kind: "removed", guid: 12, generation: 3 },
+				});
+				presentation.trackingStatus = { kind: "frontend-evicted" };
+				selection.maintainSelection();
+			};
+			if (order === "render-first") {
+				render();
+				facts();
+			} else {
+				facts();
+				render();
+			}
+			expect(selection.selectedGuid()).toBe(12);
+			lifecycle.update([], [12]);
+			expect(selection.selectedGuid()).toBeNull();
+			selection.destroy();
+		},
+	);
+
+	it("checks inventory acquisition against current hydration and recovery", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		const owned = entityFacts(12, {
+			ownedByPlayer: true,
+			scenePlacement: "unavailable",
+			location: { kind: "contained", parentGuid: 1, slot: { kind: "pending" } },
+		});
+		lifecycle.update([{ ...owned, description: { kind: "pending" } }], []);
+		selection.selectInventoryItem(12);
+		expect(selection.selectedGuid()).toBeNull();
+		lifecycle.update([owned], []);
+		selection.selectInventoryItem(12);
+		expect(selection.selectedGuid()).toBe(12);
+		lifecycle.entities.awaitSnapshot();
+		lifecycle.emit({ type: "resyncing" });
+		selection.maintainSelection();
+		selection.selectInventoryItem(7);
+		expect(selection.selectedGuid()).toBe(12);
+		selection.destroy();
+	});
+
+	it("preserves an owned selection across equipment and reordering, then clears a genuine unplaced gap", () => {
+		const lifecycle = new FakeLifecycle();
+		const presentation = new FakePresentation();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => presentation,
+		});
+		presentation.trackingStatus = {
+			kind: "tracked",
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE * 2,
+		};
+		lifecycle.update(
+			[
+				entityFacts(12, {
+					ownedByPlayer: true,
+					scenePlacement: "unavailable",
+					location: {
+						kind: "contained",
+						parentGuid: 1,
+						slot: { kind: "item", index: 0 },
+					},
+				}),
+			],
+			[],
+		);
+		selection.selectInventoryItem(12);
+		lifecycle.update(
+			[
+				entityFacts(12, {
+					ownedByPlayer: true,
+					scenePlacement: "available",
+					location: { kind: "equipped", wearerGuid: 1 },
+				}),
+			],
+			[],
+		);
+		selection.maintainSelection();
+		expect(selection.selectedGuid()).toBe(12);
+		lifecycle.update(
+			[
+				entityFacts(12, {
+					ownedByPlayer: true,
+					scenePlacement: "unavailable",
+					location: {
+						kind: "contained",
+						parentGuid: 1,
+						slot: { kind: "item", index: 3 },
+					},
+				}),
+			],
+			[],
+		);
+		expect(selection.selectedGuid()).toBe(12);
+		lifecycle.update([entityFacts(12, { scenePlacement: "unavailable" })], []);
+		expect(selection.selectedGuid()).toBeNull();
 		selection.destroy();
 	});
 
@@ -237,7 +372,10 @@ describe("ClientEntitySelection", () => {
 			presentation: () => presentation,
 		});
 		selection.select(12);
-		presentation.trackingStatus = { distance: 192, kind: "tracked" };
+		presentation.trackingStatus = {
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			kind: "tracked",
+		};
 		selection.maintainSelection();
 		expect(selection.selectedGuid()).toBe(12);
 
@@ -245,7 +383,10 @@ describe("ClientEntitySelection", () => {
 		selection.maintainSelection();
 		expect(selection.selectedGuid()).toBe(12);
 
-		presentation.trackingStatus = { distance: 192.01, kind: "tracked" };
+		presentation.trackingStatus = {
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE + 0.01,
+			kind: "tracked",
+		};
 		selection.maintainSelection();
 		expect(selection.selectedGuid()).toBeNull();
 		selection.destroy();
@@ -253,6 +394,21 @@ describe("ClientEntitySelection", () => {
 });
 
 class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
+	readonly entities = new ClientEntityMirror();
+	constructor() {
+		this.entities.commit(
+			this.entities.prepareSnapshot(
+				{ entities: [1, 4, 7, 8, 9, 12, 77].map((guid) => entityFacts(guid)) },
+				1,
+			),
+		);
+	}
+	update(upserts: ClientEntityFacts[], removed: number[]): void {
+		const prepared = this.entities.prepareDelta({ upserts, removed });
+		if (prepared === null) throw new Error("Fixture requires current state.");
+		this.entities.commit(prepared);
+		this.emit({ type: "entities" });
+	}
 	readonly requests: ClientEntitySelectionQueryRequest[] = [];
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	rejectNext = false;

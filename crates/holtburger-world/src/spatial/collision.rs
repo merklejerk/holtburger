@@ -1903,7 +1903,8 @@ impl CollisionScene {
         allow_zero_radius: bool,
     ) -> Result<Option<Guid>, CollisionQueryError> {
         let mut transition_count = 0;
-        let mut cursor = 0.0;
+        // No crossing has been consumed yet: a doorway at the segment start is eligible.
+        let mut cursor = None;
         while let Some(transition) =
             self.next_placement_transition(segment, cursor, current_cell)?
         {
@@ -1931,7 +1932,7 @@ impl CollisionScene {
                 },
             );
             current_cell = path.final_point().placement.committed_cell;
-            cursor = transition.fraction;
+            cursor = Some(transition.fraction);
         }
         Ok(current_cell)
     }
@@ -2142,7 +2143,7 @@ impl CollisionScene {
     fn next_placement_transition(
         &self,
         segment: PlacementMotionSegment<'_>,
-        cursor: f32,
+        cursor: Option<f32>,
         current_cell: Option<Guid>,
     ) -> Result<Option<PlacementTransition>, CollisionQueryError> {
         let segment_length = segment.start.distance(&segment.end);
@@ -2311,7 +2312,7 @@ impl CollisionScene {
                                                 portal.plane.distance_to_point(&local_start),
                                                 portal.plane.distance_to_point(&local_end),
                                                 !portal.positive_side,
-                                                0.0,
+                                                None,
                                                 0.0,
                                             )
                                             .is_some_and(|target_fraction| {
@@ -2946,7 +2947,7 @@ fn directed_plane_crossing_fraction(
     start_distance: f32,
     end_distance: f32,
     target_is_positive: bool,
-    cursor: f32,
+    cursor: Option<f32>,
     minimum_advance: f32,
 ) -> Option<f32> {
     let oriented_start = if target_is_positive {
@@ -2963,6 +2964,15 @@ fn directed_plane_crossing_fraction(
     if delta <= f32::EPSILON {
         return None;
     }
+    // Containment retains the source within this plane tolerance. When travel leaves that
+    // boundary into the target, consume the initial crossing even if transforms put it just
+    // behind the start. Subsequent crossings still require progress to prevent cycling.
+    if cursor.is_none()
+        && oriented_start.abs() <= CELL_PLANE_TOLERANCE
+        && oriented_end > CELL_PLANE_TOLERANCE
+    {
+        return Some((-oriented_start / delta).max(0.0));
+    }
     let mut fraction = -oriented_start / delta;
     if fraction > 1.0 {
         // A prior placement pass may emit this exact portal boundary as a waypoint. Transforming
@@ -2973,7 +2983,7 @@ fn directed_plane_crossing_fraction(
         }
         fraction = 1.0;
     }
-    if fraction <= cursor + minimum_advance {
+    if fraction <= cursor.unwrap_or(0.0) + minimum_advance {
         return None;
     }
     Some(fraction.clamp(0.0, 1.0))
@@ -4939,6 +4949,107 @@ mod tests {
                 selected_cell: None,
             })
         );
+    }
+
+    #[test]
+    fn initial_portal_crossings_require_directed_travel_and_cannot_repeat() {
+        let near = CELL_PLANE_TOLERANCE * 0.5;
+        for positive_side in [false, true] {
+            let sign = if positive_side { 1.0 } else { -1.0 };
+            let crossing = |start, end, cursor| {
+                directed_plane_crossing_fraction(
+                    start * sign,
+                    end * sign,
+                    positive_side,
+                    cursor,
+                    CELL_PLANE_TOLERANCE,
+                )
+            };
+            assert_eq!(crossing(0.0, 1.0, None), Some(0.0));
+            assert_eq!(crossing(near, 1.0, None), Some(0.0));
+            assert!(crossing(-near, 1.0, None).is_some());
+            assert_eq!(crossing(0.0, -1.0, None), None);
+            assert_eq!(crossing(near, near, None), None);
+            assert_eq!(crossing(0.0, 1.0, Some(0.0)), None);
+            assert_eq!(crossing(near, 1.0, Some(0.0)), None);
+            assert_eq!(crossing(-near, 1.0, Some(0.0)), None);
+        }
+    }
+
+    #[test]
+    fn doorway_start_follows_connected_cells_without_recovery() {
+        let portal = |normal, d, positive_side, target| CellCollisionPortal {
+            plane: Plane { normal, d },
+            positive_side,
+            target: CellCollisionPortalTarget::EnvCell(target),
+            outdoor_building: None,
+        };
+        let cell = |cell_selector, planes, portals| CellVolume {
+            cell_selector,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            planes,
+            portals,
+        };
+        // A -> B crosses x=0 at the start; B -> C crosses y=-1 later. The endpoint
+        // cannot be found by inspecting A's immediate neighbors alone.
+        let scene = placement_scene(vec![
+            cell(
+                0x100,
+                vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: 0.0,
+                }],
+                vec![portal(Vector3::new(1.0, 0.0, 0.0), 0.0, false, 0x101)],
+            ),
+            cell(
+                0x101,
+                vec![
+                    Plane {
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 0.0,
+                    },
+                    Plane {
+                        normal: Vector3::new(0.0, 1.0, 0.0),
+                        d: 1.0,
+                    },
+                ],
+                vec![
+                    portal(Vector3::new(1.0, 0.0, 0.0), 0.0, true, 0x100),
+                    portal(Vector3::new(0.0, 1.0, 0.0), 1.0, false, 0x102),
+                ],
+            ),
+            cell(
+                0x102,
+                vec![Plane {
+                    normal: Vector3::new(0.0, -1.0, 0.0),
+                    d: -1.0,
+                }],
+                vec![portal(Vector3::new(0.0, 1.0, 0.0), 1.0, true, 0x101)],
+            ),
+        ]);
+        for offset in [-4.0, -0.5, 0.0, 0.5, 4.0] {
+            let path = scene
+                .transit_motion_path(PlacedMotionPathRequest {
+                    previous_cell: Some(Guid(0xda55_0100)),
+                    anchor: Guid(0xda55_ffff),
+                    start: Vector3::new(offset * CELL_PLANE_TOLERANCE, -0.5, 1.0),
+                    radius: 0.1,
+                    waypoints: &[MotionWaypoint {
+                        center: Vector3::new(-1.0, -2.0, 1.0),
+                        end_fraction: 1.0,
+                        placement: MotionWaypointPlacement::Traverse,
+                    }],
+                })
+                .unwrap();
+            assert!(!path.has_recovery(), "offset={offset}: {path:?}");
+            assert_eq!(
+                path.final_point().placement().committed_cell(),
+                Some(Guid(0xda55_0102))
+            );
+        }
     }
 
     #[test]

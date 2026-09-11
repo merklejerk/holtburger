@@ -47,11 +47,24 @@ export function sortInventoryItems(
 		if (a.description.kind === "pending")
 			return b.description.kind === "pending" ? compareSlot(a, b) : 1;
 		if (b.description.kind === "pending") return -1;
-		if (
-			mode === "item-type" &&
-			a.description.itemType !== b.description.itemType
-		)
-			return a.description.itemType - b.description.itemType;
+		if (mode === "item-type") {
+			const left = a.description;
+			const right = b.description;
+			if (left.itemType !== right.itemType)
+				return left.itemType - right.itemType;
+			// Weenie types arrive as names; unknown classifications follow known ones.
+			if (left.weenieType !== right.weenieType) {
+				if (left.weenieType === null) return 1;
+				if (right.weenieType === null) return -1;
+				const typeOrder = itemNames.compare(left.weenieType, right.weenieType);
+				if (typeOrder !== 0) return typeOrder;
+			}
+			if (left.wcid !== right.wcid) {
+				if (left.wcid === null) return 1;
+				if (right.wcid === null) return -1;
+				return left.wcid - right.wcid;
+			}
+		}
 		return (
 			itemNames.compare(a.description.name, b.description.name) ||
 			compareSlot(a, b)

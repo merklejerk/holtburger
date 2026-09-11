@@ -53,7 +53,7 @@ const diagnosticsSchema = z
 		collisionProof: collisionProofSchema,
 		controlLegs: z.number().int().nonnegative().safe(),
 		clearanceSweeps: z.number().int().nonnegative().safe(),
-		transitSubsteps: z.number().int().nonnegative().safe(),
+		continuitySweeps: z.number().int().nonnegative().safe(),
 		contactPasses: z.number().int().nonnegative().safe(),
 	})
 	.strict();
@@ -74,6 +74,7 @@ const reseedReasonSchema = z.enum([
 	"initial-placement",
 	"placed-path",
 	"placement-recovery",
+	"obstructed-path",
 ]);
 const tickSchema = z.discriminatedUnion("kind", [
 	z

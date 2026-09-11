@@ -359,7 +359,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     };
     let overlap = crate::spatial::settle_free_sphere_with_policy(
         &moved_query,
-        config,
+        config.into(),
         FreeSphereState {
             pose: pose(Vector3::new(96.9, 96.0, 1.0)),
             cell: None,

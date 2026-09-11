@@ -25,6 +25,24 @@ pub struct FreeSphereConfig {
     pub separation_epsilon: f32,
 }
 
+/// Work and separation policy for a stationary sphere; no movement substeps are performed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FreeSphereSettleConfig {
+    /// Maximum contact-separation passes before returning the exhausted-budget outcome.
+    pub maximum_contact_passes: usize,
+    /// Outward displacement added after contact separation.
+    pub separation_epsilon: f32,
+}
+
+impl From<FreeSphereConfig> for FreeSphereSettleConfig {
+    fn from(config: FreeSphereConfig) -> Self {
+        Self {
+            maximum_contact_passes: config.maximum_contact_passes,
+            separation_epsilon: config.separation_epsilon,
+        }
+    }
+}
+
 /// One unregistered free sphere and its atomically committed cell context.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FreeSphereState {
@@ -323,7 +341,7 @@ impl<'a> FreeSphereMotion<'a> {
 /// already-committed collision envelope.
 pub fn settle_free_sphere(
     scene: &dyn SphereCollisionQuery,
-    config: FreeSphereConfig,
+    config: FreeSphereSettleConfig,
     body: FreeSphereState,
     filter: PhysicalCollisionFilter,
 ) -> Result<FreeSphereSettleOutcome> {
@@ -339,12 +357,12 @@ pub fn settle_free_sphere(
 /// Separates a stationary sphere under one explicit collision-coverage policy.
 pub fn settle_free_sphere_with_policy(
     scene: &dyn SphereCollisionQuery,
-    config: FreeSphereConfig,
+    config: FreeSphereSettleConfig,
     body: FreeSphereState,
     filter: PhysicalCollisionFilter,
     query_policy: CollisionQueryPolicy,
 ) -> Result<FreeSphereSettleOutcome> {
-    validate(config, body.radius, Vector3::zero())?;
+    validate_settlement(config, body.radius)?;
     let anchor = landblock_key(body.pose.landblock_id);
     let start = body.pose.coords;
     let mut center = start;
@@ -553,10 +571,7 @@ fn pose_for_commit(
 }
 
 fn validate(config: FreeSphereConfig, radius: f32, displacement: Vector3) -> Result<()> {
-    ensure!(
-        radius.is_finite() && radius > 0.0,
-        "physical-fly radius must be finite and positive"
-    );
+    validate_settlement(config.into(), radius)?;
     ensure!(
         displacement.x.is_finite() && displacement.y.is_finite() && displacement.z.is_finite(),
         "free-sphere displacement must be finite"
@@ -569,13 +584,21 @@ fn validate(config: FreeSphereConfig, radius: f32, displacement: Vector3) -> Res
         config.maximum_substeps > 0,
         "physical-fly requires at least one substep"
     );
+    Ok(())
+}
+
+fn validate_settlement(config: FreeSphereSettleConfig, radius: f32) -> Result<()> {
+    ensure!(
+        radius.is_finite() && radius > 0.0,
+        "free-sphere radius must be finite and positive"
+    );
     ensure!(
         config.maximum_contact_passes > 0,
-        "physical-fly requires at least one contact pass"
+        "free-sphere requires at least one contact pass"
     );
     ensure!(
         config.separation_epsilon.is_finite() && config.separation_epsilon > 0.0,
-        "physical-fly separation epsilon must be finite and positive"
+        "free-sphere separation epsilon must be finite and positive"
     );
     Ok(())
 }
@@ -889,7 +912,7 @@ mod tests {
         let original = body(Vector3::new(20.0, 20.0, 5.0));
         let outcome = settle_free_sphere(
             &scene(Vec::new()),
-            config(),
+            config().into(),
             original,
             PhysicalCollisionFilter::ALL,
         )
@@ -915,7 +938,7 @@ mod tests {
         let result = settled(
             settle_free_sphere(
                 &scene(vec![wall_x(10.0), wall_y]),
-                config(),
+                config().into(),
                 original,
                 PhysicalCollisionFilter::ALL,
             )
@@ -938,7 +961,7 @@ mod tests {
         );
         let outcome = settle_free_sphere(
             &scene(vec![west_wall, wall_x(10.0)]),
-            config(),
+            config().into(),
             body(Vector3::new(9.8, 20.0, 5.0)),
             PhysicalCollisionFilter::ALL,
         )

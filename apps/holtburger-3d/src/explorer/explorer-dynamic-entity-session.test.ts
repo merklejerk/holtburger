@@ -338,7 +338,7 @@ describe("ExplorerDynamicEntitySession", () => {
 					collisionProof: { status: "covered" },
 					controlLegs: 1,
 					clearanceSweeps: 1,
-					transitSubsteps: 1,
+					continuitySweeps: 0,
 					contactPasses: 0,
 				},
 			},

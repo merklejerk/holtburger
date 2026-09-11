@@ -3,13 +3,12 @@
 use crate::placed_motion::present_placed_motion_pose;
 use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Vector3};
 use holtburger_world::spatial::SphereCollisionQuery;
 use holtburger_world::{
-    CollisionQueryPolicy, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
-    FreeSphereSettleOutcome, FreeSphereState, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacedMotionPathRequest, StaticSphereSweepRequest,
-    UncoveredCollisionQuery, settle_free_sphere_with_policy, solve_free_sphere,
+    CollisionQueryPolicy, FreeSphereSettleConfig, FreeSphereSettleOutcome, FreeSphereState,
+    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PlacedMotionPath,
+    PlacedMotionPathRequest, StaticSphereSweepRequest, settle_free_sphere_with_policy,
 };
 use thiserror::Error;
 
@@ -59,7 +58,7 @@ pub struct KinematicBoomProfile {
     surface_clearance: f32,
     settled_position_tolerance: f32,
     settled_pivot_tolerance: f32,
-    transit: FreeSphereConfig,
+    placement: FreeSphereSettleConfig,
 }
 
 /// Unvalidated values used to construct one [`KinematicBoomProfile`].
@@ -67,7 +66,7 @@ pub struct KinematicBoomProfile {
 pub struct KinematicBoomProfileDefinition {
     /// Closest operator-requested reach in meters.
     pub minimum_reach: f32,
-    /// Farthest operator-requested radial target in meters; physical placement remains elastic.
+    /// Farthest operator-requested radial target in meters.
     pub maximum_reach: f32,
     /// Exponential half-life for target-induced vertical pivot motion.
     pub vertical_pivot_half_life: f32,
@@ -79,7 +78,7 @@ pub struct KinematicBoomProfileDefinition {
     pub clearance_hysteresis: f32,
     /// Maximum target/orbit travel represented by one internal control leg.
     pub maximum_control_leg_displacement: f32,
-    /// Maximum internal control legs admitted for one solve transaction.
+    /// Maximum internal control legs per envelope attempt; failed growth retries once.
     pub maximum_control_legs: usize,
     /// Distance retained before the first obstructing surface.
     pub surface_clearance: f32,
@@ -87,8 +86,8 @@ pub struct KinematicBoomProfileDefinition {
     pub settled_position_tolerance: f32,
     /// Maximum raw-to-filtered pivot error that still counts as settled.
     pub settled_pivot_tolerance: f32,
-    /// Sliding camera-transit work and separation policy.
-    pub transit: FreeSphereConfig,
+    /// Target-origin envelope settlement work and separation policy.
+    pub placement: FreeSphereSettleConfig,
 }
 
 /// Standard third-person boom policy shared by every client presentation authority.
@@ -109,9 +108,7 @@ pub fn standard_kinematic_boom_profile() -> Result<KinematicBoomProfile> {
         surface_clearance: 0.000_5,
         settled_position_tolerance: 0.001,
         settled_pivot_tolerance: 0.001,
-        transit: FreeSphereConfig {
-            maximum_substep_distance: 0.25,
-            maximum_substeps: 64,
+        placement: FreeSphereSettleConfig {
             maximum_contact_passes: 8,
             separation_epsilon: 0.000_5,
         },
@@ -277,7 +274,7 @@ impl KinematicBoomProfile {
             surface_clearance,
             settled_position_tolerance,
             settled_pivot_tolerance,
-            transit,
+            placement,
         } = definition;
         if !minimum_reach.is_finite() || minimum_reach < 0.0 {
             return Err(KinematicBoomProfileError::InvalidMinimumReach);
@@ -313,7 +310,7 @@ impl KinematicBoomProfile {
         if !settled_pivot_tolerance.is_finite() || settled_pivot_tolerance <= 0.0 {
             return Err(KinematicBoomProfileError::InvalidSettledPivotTolerance);
         }
-        validate_transit_config(transit)?;
+        validate_placement_config(placement)?;
         Ok(Self {
             minimum_reach,
             maximum_reach,
@@ -326,7 +323,7 @@ impl KinematicBoomProfile {
             surface_clearance,
             settled_position_tolerance,
             settled_pivot_tolerance,
-            transit,
+            placement,
         })
     }
 
@@ -348,7 +345,7 @@ impl KinematicBoomProfile {
             surface_clearance: self.surface_clearance,
             settled_position_tolerance: self.settled_position_tolerance,
             settled_pivot_tolerance: self.settled_pivot_tolerance,
-            transit: self.transit,
+            placement: self.placement,
         })
     }
 }
@@ -378,8 +375,10 @@ pub enum KinematicBoomProfileError {
     InvalidSettledPositionTolerance,
     #[error("kinematic boom settled pivot tolerance must be finite and positive")]
     InvalidSettledPivotTolerance,
-    #[error("kinematic boom free-sphere transit configuration is invalid")]
-    InvalidTransitConfig,
+    #[error("kinematic boom requires at least one placement contact pass")]
+    EmptyPlacementBudget,
+    #[error("kinematic boom placement separation epsilon must be finite and positive")]
+    InvalidPlacementSeparationEpsilon,
 }
 
 /// One position paired with host-authoritative interior residency.
@@ -464,12 +463,8 @@ pub enum KinematicBoomFailureReason {
     FreeSphereQuery,
 }
 
-/// Why a tick reset the camera discontinuously to a full-envelope-safe placement.
-///
-/// Every reset settles the camera onto the target seed, so the placement these carry is the body's
-/// own collision sphere rather than a boom placement: reach collapses and the camera can coincide
-/// with the visual pivot, which resolves from that same sphere, until the next tick sweeps it back
-/// out. Only [`Self::InitialPlacement`] is ordinary; the other two are recoveries from a failure.
+/// Why a tick published a safe camera placement without interpolating from its prior position.
+/// Initialization settles near the target; subsequent discontinuities retain the radial solve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KinematicBoomReseedReason {
     /// The generation's first tick, which proves projection clearance before any boom work.
@@ -477,8 +472,12 @@ pub enum KinematicBoomReseedReason {
     /// Not a recovery: it is reached exactly once per generation, because it is gated on a
     /// proven placement state that can only be unproven before initialization succeeds.
     InitialPlacement,
+    /// Indoor path traversal could not connect otherwise proven radial endpoints.
     PlacedPath,
+    /// Indoor path traversal required a discontinuous membership correction.
     PlacementRecovery,
+    /// Geometry blocks interpolation from the previous camera to the radial placement.
+    ObstructedPath,
 }
 
 /// Camera motion committed by one successful controller tick.
@@ -486,7 +485,7 @@ pub enum KinematicBoomReseedReason {
 pub enum KinematicBoomAdvance {
     /// Collision-safe motion connected continuously from the prior camera placement.
     Continuous { path: PlacedMotionPath },
-    /// Explicit discontinuity to a full-envelope-safe placement near the latest target seed.
+    /// Explicit discontinuity to a full-envelope-safe camera placement.
     Reseeded {
         placement: KinematicBoomPlacement,
         reason: KinematicBoomReseedReason,
@@ -532,10 +531,10 @@ pub struct KinematicBoomDiagnostics {
     pub collision_proof: KinematicBoomCollisionProof,
     /// Internal target/orbit control legs evaluated.
     pub control_legs: usize,
-    /// Continuous clearance sweeps evaluated; successful control legs currently use two.
+    /// Target-origin clearance sweeps executed; zero-length rays require no query.
     pub clearance_sweeps: usize,
-    /// Free-sphere anti-tunneling substeps evaluated.
-    pub transit_substeps: usize,
+    /// Sweeps proving whether radial endpoints may be interpolated continuously.
+    pub continuity_sweeps: usize,
     /// Free-sphere contact-separation passes evaluated.
     pub contact_passes: usize,
 }
@@ -585,14 +584,6 @@ enum KinematicBoomPlacementState {
         clearance: KinematicBoomClearance,
         rendered_reach: f32,
     },
-}
-
-/// Result of reconciling a larger requested projection envelope against proven camera state.
-enum KinematicBoomClearanceGrowth {
-    /// Ordinary boom motion may continue with this still-proven clearance.
-    Continue(KinematicBoomClearance),
-    /// Clearance growth already authored the complete tick outcome.
-    Published(KinematicBoomOutcome),
 }
 
 /// Coordinate frame shared by every waypoint and the starting placement of one boom tick.
@@ -745,35 +736,58 @@ impl KinematicBoomController {
         target_samples: &[KinematicBoomTargetSample],
     ) -> Result<KinematicBoomOutcome, KinematicBoomInputError> {
         validate_tick(duration_seconds, target_samples)?;
-        let (camera, current_clearance, rendered_reach) = match self.placement_state {
+        let Some(committed) = self.committed_clearance() else {
+            return self.initialize_clearance(scene, target_samples);
+        };
+        let attempted = self.advance_with_clearance(
+            scene,
+            duration_seconds,
+            target_samples,
+            self.requested_clearance,
+        )?;
+        // Admit a larger projection only after the complete sampled path succeeds. A target
+        // can enter a corridor during this tick even though the old target origin had room.
+        // Failed growth gets one bounded retry at the committed radius and remains pending.
+        if self.requested_clearance.radius > committed.radius
+            && let KinematicBoomOutcome::Held {
+                diagnostics: attempted_work,
+                ..
+            } = attempted
+        {
+            let mut retried =
+                self.advance_with_clearance(scene, duration_seconds, target_samples, committed)?;
+            let (KinematicBoomOutcome::Advanced { diagnostics, .. }
+            | KinematicBoomOutcome::Held { diagnostics, .. }
+            | KinematicBoomOutcome::Fallback { diagnostics, .. }) = &mut retried;
+            diagnostics.control_legs += attempted_work.control_legs;
+            diagnostics.clearance_sweeps += attempted_work.clearance_sweeps;
+            diagnostics.continuity_sweeps += attempted_work.continuity_sweeps;
+            diagnostics.contact_passes += attempted_work.contact_passes;
+            diagnostics
+                .collision_proof
+                .merge(attempted_work.collision_proof);
+            return Ok(retried);
+        }
+        Ok(attempted)
+    }
+
+    /// Attempts one envelope atomically, so failed growth cannot commit partial target progress.
+    fn advance_with_clearance(
+        &mut self,
+        scene: &dyn SphereCollisionQuery,
+        duration_seconds: f32,
+        target_samples: &[KinematicBoomTargetSample],
+        tick_clearance: KinematicBoomClearance,
+    ) -> Result<KinematicBoomOutcome, KinematicBoomInputError> {
+        let (camera, current_clearance) = match self.placement_state {
             KinematicBoomPlacementState::Unproven { .. } => {
                 return self.initialize_clearance(scene, target_samples);
             }
             KinematicBoomPlacementState::Proven {
                 placement,
                 clearance,
-                rendered_reach,
-            } => (placement, clearance, rendered_reach),
-        };
-        let mut collision_proof = KinematicBoomCollisionProof::Covered;
-        let tick_clearance = if self.requested_clearance.radius <= current_clearance.radius {
-            self.placement_state = KinematicBoomPlacementState::Proven {
-                placement: camera,
-                clearance: self.requested_clearance,
-                rendered_reach,
-            };
-            self.requested_clearance
-        } else {
-            match self.advance_clearance_growth(
-                scene,
-                &mut collision_proof,
-                camera,
-                current_clearance,
-                rendered_reach,
-            ) {
-                KinematicBoomClearanceGrowth::Continue(clearance) => clearance,
-                KinematicBoomClearanceGrowth::Published(outcome) => return Ok(outcome),
-            }
+                ..
+            } => (placement, clearance),
         };
         let mut staged = self.clone();
         let tick_anchor = owner(camera.pose.landblock_id);
@@ -783,11 +797,9 @@ impl KinematicBoomController {
         };
         let start_direction = self.sampled_view_direction;
         let mut waypoints = Vec::new();
-        let mut diagnostics = KinematicBoomDiagnostics {
-            collision_proof,
-            ..KinematicBoomDiagnostics::default()
-        };
+        let mut diagnostics = KinematicBoomDiagnostics::default();
         let mut segment_start_fraction = 0.0;
+        let mut obstructed_path = false;
 
         'samples: for sample in target_samples {
             let raw_start = staged.raw_visual_pivot;
@@ -839,30 +851,24 @@ impl KinematicBoomController {
                 staged.sampled_view_direction = direction;
                 diagnostics.control_legs += 1;
 
-                let result = staged.advance_control_leg(scene, direction, step_seconds);
-                let motion = match result {
-                    Ok(motion) => {
-                        let leg_diagnostics = motion.diagnostics;
-                        diagnostics.clearance_sweeps += leg_diagnostics.clearance_sweeps;
-                        diagnostics.transit_substeps += leg_diagnostics.transit_substeps;
-                        diagnostics.contact_passes += leg_diagnostics.contact_passes;
-                        diagnostics
-                            .collision_proof
-                            .merge(leg_diagnostics.collision_proof);
-                        motion
-                    }
+                let motion = match staged.advance_control_leg(
+                    scene,
+                    direction,
+                    step_seconds,
+                    tick_clearance,
+                    &mut diagnostics,
+                ) {
+                    Ok(motion) => motion,
                     Err(reason) => {
-                        return Ok(held(self.camera(), tick_clearance, reason, diagnostics));
+                        return Ok(held(self.camera(), current_clearance, reason, diagnostics));
                     }
                 };
-                append_reanchored_motion(
-                    &mut waypoints,
-                    motion.waypoints,
-                    motion.anchor,
-                    tick_anchor,
-                    segment_start_fraction + segment_fraction * (leg - 1) as f32 / legs as f32,
+                obstructed_path |= !motion.continuous;
+                waypoints.push(MotionWaypoint {
+                    center: reanchor(motion.placement.pose, tick_anchor)?.coords,
                     end_fraction,
-                )?;
+                    placement: MotionWaypointPlacement::Committed(motion.placement.cell),
+                });
             }
             if evaluated_legs < legs {
                 let staged_camera = staged.camera();
@@ -877,6 +883,14 @@ impl KinematicBoomController {
             segment_start_fraction = sample.end_fraction;
         }
 
+        if obstructed_path {
+            return Ok(self.commit_reseed(
+                staged,
+                KinematicBoomReseedReason::ObstructedPath,
+                tick_clearance,
+                diagnostics,
+            ));
+        }
         self.commit_staged_motion(
             scene,
             staged,
@@ -905,7 +919,7 @@ impl KinematicBoomController {
         let requested = self.requested_clearance;
         let outcome = settle_free_sphere_with_policy(
             scene,
-            self.profile.transit,
+            self.profile.placement,
             FreeSphereState {
                 pose: self.target_seed.placement.pose,
                 cell: self.target_seed.placement.cell,
@@ -934,7 +948,7 @@ impl KinematicBoomController {
                 self.camera(),
                 KinematicBoomFailureReason::FreeSphereQuery,
                 KinematicBoomDiagnostics {
-                    contact_passes: self.profile.transit.maximum_contact_passes,
+                    contact_passes: self.profile.placement.maximum_contact_passes,
                     ..KinematicBoomDiagnostics::default()
                 },
             ));
@@ -976,178 +990,6 @@ impl KinematicBoomController {
         })
     }
 
-    /// Advances one old-envelope-safe leg toward a placement that can admit a larger projection.
-    fn advance_clearance_growth(
-        &mut self,
-        scene: &dyn SphereCollisionQuery,
-        collision_proof: &mut KinematicBoomCollisionProof,
-        camera: KinematicBoomPlacement,
-        committed: KinematicBoomClearance,
-        rendered_reach: f32,
-    ) -> KinematicBoomClearanceGrowth {
-        let requested = self.requested_clearance;
-        let candidate = match settle_free_sphere_with_policy(
-            scene,
-            self.profile.transit,
-            FreeSphereState {
-                pose: camera.pose,
-                cell: camera.cell,
-                radius: requested.radius,
-            },
-            PhysicalCollisionFilter::ALL,
-            CollisionQueryPolicy::AllowUncoveredQuery,
-        ) {
-            Ok(FreeSphereSettleOutcome::Settled {
-                body,
-                separation,
-                unavailable_owner,
-                ..
-            }) => {
-                collision_proof.include(unavailable_owner);
-                if separation.length() <= f32::EPSILON {
-                    self.placement_state = KinematicBoomPlacementState::Proven {
-                        placement: camera,
-                        clearance: requested,
-                        rendered_reach,
-                    };
-                    return KinematicBoomClearanceGrowth::Continue(requested);
-                }
-                body
-            }
-            Ok(FreeSphereSettleOutcome::BudgetExceeded { .. }) => {
-                return KinematicBoomClearanceGrowth::Continue(committed);
-            }
-            Err(_) => {
-                return KinematicBoomClearanceGrowth::Published(held(
-                    camera,
-                    committed,
-                    KinematicBoomFailureReason::FreeSphereQuery,
-                    KinematicBoomDiagnostics::default(),
-                ));
-            }
-        };
-        let start = camera;
-        let displacement = match placement_displacement(start.pose, candidate.pose) {
-            Ok(displacement) => displacement,
-            Err(_) => {
-                return KinematicBoomClearanceGrowth::Published(held(
-                    camera,
-                    committed,
-                    KinematicBoomFailureReason::FreeSphereQuery,
-                    KinematicBoomDiagnostics::default(),
-                ));
-            }
-        };
-        let solve = match solve_free_sphere(
-            scene,
-            self.profile.transit,
-            FreeSphereRequest {
-                body: FreeSphereState {
-                    pose: start.pose,
-                    cell: start.cell,
-                    radius: committed.radius,
-                },
-                displacement,
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::AllowUncoveredQuery,
-            },
-        ) {
-            Ok(outcome) => outcome,
-            Err(_) => {
-                return KinematicBoomClearanceGrowth::Published(held(
-                    camera,
-                    committed,
-                    KinematicBoomFailureReason::FreeSphereQuery,
-                    KinematicBoomDiagnostics::default(),
-                ));
-            }
-        };
-        let (body, motion, substeps, contact_passes, unavailable_owner) = match solve {
-            FreeSphereOutcome::Solved {
-                body,
-                motion,
-                substeps,
-                contact_passes,
-                unavailable_owner,
-                ..
-            }
-            | FreeSphereOutcome::BudgetExceeded {
-                body,
-                motion,
-                substeps,
-                contact_passes,
-                unavailable_owner,
-                ..
-            } => (body, motion, substeps, contact_passes, unavailable_owner),
-        };
-        collision_proof.include(unavailable_owner);
-        let anchor = owner(start.pose.landblock_id);
-        let start_pose = match reanchor(start.pose, anchor) {
-            Ok(pose) => pose,
-            Err(_) => {
-                return KinematicBoomClearanceGrowth::Published(held(
-                    camera,
-                    committed,
-                    KinematicBoomFailureReason::FreeSphereQuery,
-                    KinematicBoomDiagnostics::default(),
-                ));
-            }
-        };
-        let path = match scene
-            .environment()
-            .transit_motion_path(PlacedMotionPathRequest {
-                previous_cell: start.cell,
-                anchor,
-                start: start_pose.coords,
-                radius: committed.radius,
-                waypoints: &motion,
-            }) {
-            Ok(path) if !path.has_recovery() => path,
-            _ => {
-                return KinematicBoomClearanceGrowth::Published(held(
-                    camera,
-                    committed,
-                    KinematicBoomFailureReason::FreeSphereQuery,
-                    KinematicBoomDiagnostics::default(),
-                ));
-            }
-        };
-        let mut staged = self.clone();
-        let placement = KinematicBoomPlacement {
-            pose: body.pose,
-            cell: body.cell,
-        };
-        let Ok(rendered_reach) = placement_distance(placement.pose, staged.filtered_visual_pivot)
-        else {
-            return KinematicBoomClearanceGrowth::Published(held(
-                camera,
-                committed,
-                KinematicBoomFailureReason::FreeSphereQuery,
-                KinematicBoomDiagnostics::default(),
-            ));
-        };
-        staged.placement_state = KinematicBoomPlacementState::Proven {
-            placement,
-            clearance: committed,
-            rendered_reach: rendered_reach.min(staged.profile.maximum_reach),
-        };
-        // This path was solved with the old envelope, so it must retain the old acknowledgement.
-        // The next tick observes that the requested sphere already fits at this endpoint, commits
-        // it before ordinary motion, and publishes only paths solved with the new radius.
-        *self = staged;
-        KinematicBoomClearanceGrowth::Published(KinematicBoomOutcome::Advanced {
-            advance: KinematicBoomAdvance::Continuous { path },
-            clearance: committed,
-            convergence: KinematicBoomConvergence::Converging,
-            diagnostics: KinematicBoomDiagnostics {
-                collision_proof: *collision_proof,
-                transit_substeps: substeps,
-                contact_passes,
-                ..KinematicBoomDiagnostics::default()
-            },
-        })
-    }
-
     /// Authors placement for one staged camera transaction and commits it atomically.
     fn commit_staged_motion(
         &mut self,
@@ -1171,7 +1013,6 @@ impl KinematicBoomController {
             Ok(path) if !path.has_recovery() => KinematicBoomAdvance::Continuous { path },
             Ok(_) => {
                 return Ok(self.commit_reseed(
-                    scene,
                     staged,
                     KinematicBoomReseedReason::PlacementRecovery,
                     clearance,
@@ -1180,7 +1021,6 @@ impl KinematicBoomController {
             }
             Err(_) => {
                 return Ok(self.commit_reseed(
-                    scene,
                     staged,
                     KinematicBoomReseedReason::PlacedPath,
                     clearance,
@@ -1199,58 +1039,16 @@ impl KinematicBoomController {
         })
     }
 
-    /// Recover a discontinuity only after proving the full camera envelope near the target seed.
+    /// A radial endpoint is already proven. Never force its correction through blocked space,
+    /// or reset it to the target and discard the reach that the radial solve just established.
     fn commit_reseed(
         &mut self,
-        scene: &dyn SphereCollisionQuery,
-        mut staged: Self,
+        staged: Self,
         reason: KinematicBoomReseedReason,
         clearance: KinematicBoomClearance,
-        mut diagnostics: KinematicBoomDiagnostics,
+        diagnostics: KinematicBoomDiagnostics,
     ) -> KinematicBoomOutcome {
-        let settled = settle_free_sphere_with_policy(
-            scene,
-            staged.profile.transit,
-            FreeSphereState {
-                pose: staged.target_seed.placement.pose,
-                cell: staged.target_seed.placement.cell,
-                radius: clearance.radius,
-            },
-            PhysicalCollisionFilter::ALL,
-            CollisionQueryPolicy::AllowUncoveredQuery,
-        );
-        let Ok(FreeSphereSettleOutcome::Settled {
-            body,
-            unavailable_owner,
-            ..
-        }) = settled
-        else {
-            return held(
-                self.camera(),
-                clearance,
-                KinematicBoomFailureReason::FreeSphereQuery,
-                diagnostics,
-            );
-        };
-        diagnostics.collision_proof.include(unavailable_owner);
-        let placement = KinematicBoomPlacement {
-            pose: body.pose,
-            cell: body.cell,
-        };
-        let Ok(rendered_reach) = placement_distance(placement.pose, staged.filtered_visual_pivot)
-        else {
-            return held(
-                self.camera(),
-                clearance,
-                KinematicBoomFailureReason::FreeSphereQuery,
-                diagnostics,
-            );
-        };
-        staged.placement_state = KinematicBoomPlacementState::Proven {
-            placement,
-            clearance,
-            rendered_reach: rendered_reach.min(staged.profile.maximum_reach),
-        };
+        let placement = staged.camera();
         *self = staged;
         KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Reseeded { placement, reason },
@@ -1297,24 +1095,64 @@ impl KinematicBoomController {
         scene: &dyn SphereCollisionQuery,
         direction: Vector3,
         delta_seconds: f32,
+        clearance: KinematicBoomClearance,
+        diagnostics: &mut KinematicBoomDiagnostics,
     ) -> Result<ControlLegMotion, KinematicBoomFailureReason> {
         let KinematicBoomPlacementState::Proven {
             placement: camera_start,
-            clearance: committed_clearance,
             mut rendered_reach,
+            ..
         } = self.placement_state
         else {
             return Err(KinematicBoomFailureReason::FreeSphereQuery);
         };
-        let clearance = self.cast_to_reach(
+        // The player's collision sphere can be smaller than the camera envelope (especially
+        // after a projection resize). Prove the cast origin for this envelope before tracing it.
+        let settled = settle_free_sphere_with_policy(
             scene,
+            self.profile.placement,
+            FreeSphereState {
+                pose: self.target_seed.placement.pose,
+                cell: self.target_seed.placement.cell,
+                radius: clearance.radius,
+            },
+            PhysicalCollisionFilter::ALL,
+            CollisionQueryPolicy::AllowUncoveredQuery,
+        )
+        .map_err(|_| KinematicBoomFailureReason::FreeSphereQuery)?;
+        let body = match settled {
+            FreeSphereSettleOutcome::Settled {
+                body,
+                contact_passes,
+                unavailable_owner,
+                ..
+            } => {
+                diagnostics.contact_passes += contact_passes;
+                diagnostics.collision_proof.include(unavailable_owner);
+                body
+            }
+            FreeSphereSettleOutcome::BudgetExceeded {
+                contact_passes,
+                unavailable_owner,
+            } => {
+                diagnostics.contact_passes += contact_passes;
+                diagnostics.collision_proof.include(unavailable_owner);
+                return Err(KinematicBoomFailureReason::FreeSphereQuery);
+            }
+        };
+        let cast_seed = KinematicBoomPlacement {
+            pose: body.pose,
+            cell: body.cell,
+        };
+        let maximum = self.cast_to_reach(
+            scene,
+            cast_seed,
             direction,
             self.desired_reach,
-            committed_clearance.radius,
+            clearance.radius,
+            diagnostics,
         )?;
-        let mut collision_proof = KinematicBoomCollisionProof::Covered;
-        collision_proof.include(clearance.unavailable_owner);
-        let clearance_reach = placement_distance(clearance.value.pose, self.filtered_visual_pivot)
+        let clearance_reach = placement_distance(maximum.pose, self.filtered_visual_pivot)
             .map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
         if clearance_reach < rendered_reach {
             rendered_reach = clearance_reach;
@@ -1327,80 +1165,69 @@ impl KinematicBoomController {
         }
         rendered_reach = rendered_reach.min(self.profile.maximum_reach);
 
-        let radial =
-            self.cast_to_reach(scene, direction, rendered_reach, committed_clearance.radius)?;
-        collision_proof.include(radial.unavailable_owner);
-        let displacement = placement_displacement(camera_start.pose, radial.value.pose)
-            .map_err(|_| KinematicBoomFailureReason::FreeSphereQuery)?;
-        let outcome = solve_free_sphere(
+        let radial = self.cast_to_reach(
             scene,
-            self.profile.transit,
-            FreeSphereRequest {
-                body: FreeSphereState {
-                    pose: camera_start.pose,
-                    cell: camera_start.cell,
-                    radius: committed_clearance.radius,
-                },
-                displacement,
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::AllowUncoveredQuery,
-            },
-        )
-        .map_err(|_| KinematicBoomFailureReason::FreeSphereQuery)?;
-        let (body, motion, substeps, contact_passes, unavailable_owner) = match outcome {
-            FreeSphereOutcome::Solved {
-                body,
-                motion,
-                substeps,
-                contact_passes,
-                unavailable_owner,
-                ..
+            cast_seed,
+            direction,
+            rendered_reach,
+            clearance.radius,
+            diagnostics,
+        )?;
+        let displacement = placement_displacement(camera_start.pose, radial.pose)
+            .map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
+        // The target-origin cast owns placement. This sweep only proves whether presentation
+        // can interpolate from the old camera; a blocked route must never retain that old body.
+        let mut continuous = true;
+        if displacement.length_squared() > 0.0 {
+            // Cast both ways: movement sweeps intentionally admit separation from initial
+            // overlap, but interpolation must not start inside a newly closed door either.
+            for (start, displacement) in
+                [(camera_start, displacement), (radial, displacement * -1.0)]
+            {
+                diagnostics.continuity_sweeps += 1;
+                let sweep = scene
+                    .sweep_sphere(
+                        StaticSphereSweepRequest {
+                            anchor: owner(start.pose.landblock_id),
+                            start: start.pose.coords,
+                            displacement,
+                            previous_cell: start.cell,
+                            radius: clearance.radius,
+                            filter: PhysicalCollisionFilter::ALL,
+                        },
+                        CollisionQueryPolicy::AllowUncoveredQuery,
+                    )
+                    .map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
+                diagnostics.collision_proof.include(sweep.unavailable_owner);
+                if sweep.value.is_some() {
+                    continuous = false;
+                    break;
+                }
             }
-            | FreeSphereOutcome::BudgetExceeded {
-                body,
-                motion,
-                substeps,
-                contact_passes,
-                unavailable_owner,
-                ..
-            } => (body, motion, substeps, contact_passes, unavailable_owner),
-        };
-        collision_proof.include(unavailable_owner);
-        {
-            let solve_anchor = owner(camera_start.pose.landblock_id);
-            let placement = KinematicBoomPlacement {
-                pose: body.pose,
-                cell: body.cell,
-            };
-            rendered_reach = placement_distance(body.pose, self.filtered_visual_pivot)
-                .map_err(|_| KinematicBoomFailureReason::FreeSphereQuery)?;
-            self.placement_state = KinematicBoomPlacementState::Proven {
-                placement,
-                clearance: committed_clearance,
-                rendered_reach,
-            };
-            Ok(ControlLegMotion {
-                anchor: solve_anchor,
-                waypoints: motion,
-                diagnostics: KinematicBoomDiagnostics {
-                    collision_proof,
-                    control_legs: 0,
-                    clearance_sweeps: 2,
-                    transit_substeps: substeps,
-                    contact_passes,
-                },
-            })
         }
+        let placement = radial;
+        rendered_reach = placement_distance(placement.pose, self.filtered_visual_pivot)
+            .map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
+        self.placement_state = KinematicBoomPlacementState::Proven {
+            placement,
+            clearance,
+            rendered_reach,
+        };
+        Ok(ControlLegMotion {
+            placement,
+            continuous,
+        })
     }
 
     fn cast_to_reach(
         &self,
         scene: &dyn SphereCollisionQuery,
+        seed: KinematicBoomPlacement,
         direction: Vector3,
         reach: f32,
         clearance_radius: f32,
-    ) -> Result<UncoveredCollisionQuery<KinematicBoomPlacement>, KinematicBoomFailureReason> {
-        let seed = self.target_seed.placement;
+        diagnostics: &mut KinematicBoomDiagnostics,
+    ) -> Result<KinematicBoomPlacement, KinematicBoomFailureReason> {
         let anchor = owner(seed.pose.landblock_id);
         let seed_pose =
             reanchor(seed.pose, anchor).map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
@@ -1409,11 +1236,9 @@ impl KinematicBoomController {
         let ray = pivot.coords + direction * reach - seed_pose.coords;
         let ray_length = ray.length();
         if ray_length <= DIRECTION_EPSILON {
-            return Ok(UncoveredCollisionQuery {
-                value: seed,
-                unavailable_owner: None,
-            });
+            return Ok(seed);
         }
+        diagnostics.clearance_sweeps += 1;
         let hit = scene
             .sweep_sphere(
                 StaticSphereSweepRequest {
@@ -1427,6 +1252,7 @@ impl KinematicBoomController {
                 CollisionQueryPolicy::AllowUncoveredQuery,
             )
             .map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
+        diagnostics.collision_proof.include(hit.unavailable_owner);
         let safe_distance = hit.value.map_or(ray_length, |hit| {
             (ray_length * hit.time_of_impact - self.profile.surface_clearance).max(0.0)
         });
@@ -1464,17 +1290,16 @@ impl KinematicBoomController {
                 .normalize_outdoor_landblock_frame()
                 .map_err(|_| KinematicBoomFailureReason::ClearanceSweep)?;
         }
-        Ok(UncoveredCollisionQuery {
-            value: KinematicBoomPlacement { pose, cell },
-            unavailable_owner: hit.unavailable_owner,
-        })
+        Ok(KinematicBoomPlacement { pose, cell })
     }
 }
 
+/// Authoritative radial placement and the independent proof of presentation continuity.
 struct ControlLegMotion {
-    anchor: Guid,
-    waypoints: Vec<MotionWaypoint>,
-    diagnostics: KinematicBoomDiagnostics,
+    /// Endpoint whose full sphere was cast from the target.
+    placement: KinematicBoomPlacement,
+    /// Whether geometry admits interpolation from the previous endpoint.
+    continuous: bool,
 }
 
 struct ControlLegSpan {
@@ -1504,30 +1329,6 @@ fn required_control_legs(span: ControlLegSpan) -> Result<usize, KinematicBoomInp
             .ceil()
             .max(1.0) as usize,
     )
-}
-
-fn append_reanchored_motion(
-    output: &mut Vec<MotionWaypoint>,
-    motion: Vec<MotionWaypoint>,
-    solve_anchor: Guid,
-    tick_anchor: Guid,
-    start_fraction: f32,
-    end_fraction: f32,
-) -> Result<(), KinematicBoomInputError> {
-    for waypoint in motion {
-        let pose = WorldPosition {
-            landblock_id: solve_anchor,
-            coords: waypoint.center,
-            rotation: Quaternion::identity(),
-        };
-        let reanchored = reanchor(pose, tick_anchor)?;
-        output.push(MotionWaypoint {
-            center: reanchored.coords,
-            end_fraction: start_fraction + (end_fraction - start_fraction) * waypoint.end_fraction,
-            placement: waypoint.placement,
-        });
-    }
-    Ok(())
 }
 
 fn validate_tick(
@@ -1592,15 +1393,14 @@ fn validate_direction(direction: Vector3) -> Result<Vector3, KinematicBoomInputE
     Ok(direction.normalize())
 }
 
-fn validate_transit_config(config: FreeSphereConfig) -> Result<(), KinematicBoomProfileError> {
-    if !config.maximum_substep_distance.is_finite()
-        || config.maximum_substep_distance <= 0.0
-        || config.maximum_substeps == 0
-        || config.maximum_contact_passes == 0
-        || !config.separation_epsilon.is_finite()
-        || config.separation_epsilon <= 0.0
-    {
-        return Err(KinematicBoomProfileError::InvalidTransitConfig);
+fn validate_placement_config(
+    config: FreeSphereSettleConfig,
+) -> Result<(), KinematicBoomProfileError> {
+    if config.maximum_contact_passes == 0 {
+        return Err(KinematicBoomProfileError::EmptyPlacementBudget);
+    }
+    if !config.separation_epsilon.is_finite() || config.separation_epsilon <= 0.0 {
+        return Err(KinematicBoomProfileError::InvalidPlacementSeparationEpsilon);
     }
     Ok(())
 }
@@ -1701,6 +1501,7 @@ fn fallback(
 
 #[cfg(test)]
 mod tests {
+    use holtburger_common::Quaternion;
     use holtburger_world::CollisionScene;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -1770,9 +1571,7 @@ mod tests {
             surface_clearance: 0.000_5,
             settled_position_tolerance: 0.001,
             settled_pivot_tolerance: 0.001,
-            transit: FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 64,
+            placement: FreeSphereSettleConfig {
                 maximum_contact_passes: 8,
                 separation_epsilon: 0.000_5,
             },
@@ -1937,6 +1736,26 @@ mod tests {
         .unwrap()
     }
 
+    /// Thin closed panel with opposing faces, so both target and camera sweeps encounter it.
+    fn two_sided_panel(x: f32) -> PlacedCollider {
+        let mut panel = wall_x(x);
+        let CollisionShape::Bsp(solid) = Arc::get_mut(&mut panel.geometry.shape).unwrap() else {
+            unreachable!()
+        };
+        let mut back = solid.polygons[&1].clone();
+        back.vertices.reverse();
+        back.normal = back.normal * -1.0;
+        back.d = -back.d;
+        solid.polygons.insert(2, back);
+        solid.bsp = BspNode::Leaf(BspLeaf {
+            index: 0,
+            solid: 0,
+            sphere: Some(solid.bounds),
+            poly_ids: vec![1, 2],
+        });
+        panel
+    }
+
     fn wall_scene() -> CollisionScene {
         collision_scene(vec![wall_x(10.0)])
     }
@@ -2044,29 +1863,108 @@ mod tests {
     }
 
     #[test]
-    fn newly_closed_obstruction_keeps_camera_on_target_side() {
+    fn closing_panel_reseeds_to_the_target_side_even_when_it_engulfs_the_camera() {
         let target = wall_sample();
-        let mut controller = wall_controller(Vector3::new(1.0, 0.0, 0.0));
-        settle_reach(&mut controller, &empty_scene(), target);
-        assert!(controller.camera().pose.coords.x > 10.0);
-        let mut panel = wall_x(10.0);
-        // A thin two-sided panel can appear between a valid camera and its target.
-        let CollisionShape::Bsp(solid) = Arc::get_mut(&mut panel.geometry.shape).unwrap() else {
-            unreachable!()
+        let open = empty_scene();
+        let mut initial = wall_controller(Vector3::new(1.0, 0.0, 0.0));
+        settle_reach(&mut initial, &open, target);
+        let camera_x = initial.camera().pose.coords.x;
+        let radius = initial.committed_clearance().unwrap().radius;
+        for panel_x in [
+            10.0,
+            camera_x,
+            camera_x - radius * 0.5,
+            camera_x + radius * 0.5,
+        ] {
+            for grow_projection in [false, true] {
+                let mut controller = initial.clone();
+                let envelope = if grow_projection {
+                    clearance(2, radius * 2.0)
+                } else {
+                    clearance(1, radius)
+                };
+                controller.request_clearance(envelope).unwrap();
+                let scene = collision_scene(vec![two_sided_panel(panel_x)]);
+                let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+                let KinematicBoomOutcome::Advanced {
+                    advance:
+                        KinematicBoomAdvance::Reseeded {
+                            placement,
+                            reason: KinematicBoomReseedReason::ObstructedPath,
+                        },
+                    clearance,
+                    ..
+                } = outcome
+                else {
+                    panic!("closed panel must interrupt interpolation: {outcome:?}")
+                };
+                assert_eq!(clearance, envelope);
+                assert!(placement.pose.coords.x < panel_x);
+                assert!(
+                    controller.rendered_reach() > 0.0,
+                    "correction must retain the solved boom reach"
+                );
+                assert_sphere_fits(&scene, placement, envelope.radius);
+                // Repeated stationary ticks cannot drift back through the closed panel.
+                settle_reach(&mut controller, &scene, target);
+                assert!(controller.camera().pose.coords.x < panel_x);
+                assert_sphere_fits(&scene, controller.camera(), envelope.radius);
+                let shortened = controller.rendered_reach();
+                let reopened = controller.advance(&open, 1.0 / 30.0, &[target]).unwrap();
+                assert_continuous_path_fits(&open, &reopened);
+                assert!(controller.rendered_reach() > shortened);
+                assert!(controller.rendered_reach() < controller.desired_reach());
+            }
+        }
+    }
+
+    /// Sample presentation chords independently with undirected full-envelope placement checks.
+    fn assert_continuous_path_fits(scene: &CollisionScene, outcome: &KinematicBoomOutcome) {
+        let KinematicBoomOutcome::Advanced {
+            advance: KinematicBoomAdvance::Continuous { path },
+            clearance,
+            ..
+        } = outcome
+        else {
+            panic!("expected ordinary continuous camera motion: {outcome:?}")
         };
-        solid.bsp = BspNode::Leaf(BspLeaf {
-            index: 0,
-            solid: 0,
-            sphere: Some(solid.bounds),
-            poly_ids: vec![1],
-        });
-        let scene = collision_scene(vec![panel]);
-        let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
-        assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+        let mut start = path.initial().center();
+        for leg in path.legs() {
+            for sample in 0..=16 {
+                let center = start + (leg.end().center() - start) * (sample as f32 / 16.0);
+                assert_sphere_fits(
+                    scene,
+                    KinematicBoomPlacement {
+                        pose: WorldPosition {
+                            landblock_id: path.anchor(),
+                            coords: center,
+                            rotation: Quaternion::identity(),
+                        },
+                        cell: leg.end().placement().committed_cell(),
+                    },
+                    clearance.radius,
+                );
+            }
+            start = leg.end().center();
+        }
+    }
+
+    fn assert_sphere_fits(scene: &CollisionScene, placement: KinematicBoomPlacement, radius: f32) {
+        let outcome = settle_free_sphere_with_policy(
+            scene,
+            profile(64).placement,
+            FreeSphereState {
+                pose: placement.pose,
+                cell: placement.cell,
+                radius,
+            },
+            PhysicalCollisionFilter::ALL,
+            CollisionQueryPolicy::AllowUncoveredQuery,
+        )
+        .unwrap();
         assert!(
-            controller.camera().pose.coords.x < 10.0,
-            "camera stayed beyond the closed panel: {:?}",
-            controller.camera()
+            matches!(outcome, FreeSphereSettleOutcome::Settled { separation, .. } if separation.length() == 0.0),
+            "camera envelope intersects geometry: {outcome:?}"
         );
     }
 
@@ -2178,14 +2076,53 @@ mod tests {
             let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
 
             assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
-            assert_eq!(controller.committed_clearance(), Some(clearance(1, 0.25)));
-            controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+
             assert_eq!(controller.committed_clearance(), Some(clearance(2, 1.0)));
             assert!(controller.camera().pose.coords.x <= 9.001);
             if center.y < 10.0 {
                 assert!(controller.camera().pose.coords.y <= 9.001);
             }
         }
+    }
+
+    #[test]
+    fn projection_growth_does_not_stall_a_target_entering_a_narrow_corridor() {
+        let mut panels = vec![two_sided_panel(9.6), two_sided_panel(10.0)];
+        for panel in &mut panels {
+            let CollisionShape::Bsp(solid) = Arc::get_mut(&mut panel.geometry.shape).unwrap()
+            else {
+                unreachable!()
+            };
+            for polygon in solid.polygons.values_mut() {
+                for vertex in &mut polygon.vertices {
+                    vertex.y = if vertex.y < 0.0 { 20.0 } else { 30.0 };
+                }
+            }
+        }
+        let scene = collision_scene(panels);
+        let start = stationary_sample(Vector3::new(9.8, 19.0, 5.0));
+        let destination = stationary_sample(Vector3::new(9.8, 23.0, 5.0));
+        let mut controller = stationary_controller(start.visual_pivot.coords, clearance(1, 0.1));
+        initialize(&mut controller, &scene, start);
+        controller.request_clearance(clearance(2, 0.3)).unwrap();
+        for _ in 0..2 {
+            let outcome = controller
+                .advance(&scene, 1.0 / 30.0, &[destination])
+                .unwrap();
+            assert!(
+                matches!(outcome, KinematicBoomOutcome::Advanced { .. }),
+                "{outcome:?}"
+            );
+            assert_eq!(controller.committed_clearance(), Some(clearance(1, 0.1)));
+            assert_eq!(
+                controller.camera().pose.coords.y,
+                destination.visual_pivot.coords.y
+            );
+        }
+        assert_eq!(controller.requested_clearance, clearance(2, 0.3));
+        controller.advance(&scene, 1.0 / 30.0, &[start]).unwrap();
+        controller.advance(&scene, 1.0 / 30.0, &[start]).unwrap();
+        assert_eq!(controller.committed_clearance(), Some(clearance(2, 0.3)));
     }
 
     #[test]
@@ -2232,7 +2169,7 @@ mod tests {
                 reason: KinematicBoomFailureReason::FreeSphereQuery,
                 placement: seed(initial_center).placement,
                 diagnostics: KinematicBoomDiagnostics {
-                    contact_passes: controller.profile.transit.maximum_contact_passes,
+                    contact_passes: controller.profile.placement.maximum_contact_passes,
                     ..KinematicBoomDiagnostics::default()
                 },
             }
@@ -2309,7 +2246,7 @@ mod tests {
         else {
             panic!("an established camera must hold instead of publishing fallback")
         };
-        assert_eq!(reason, KinematicBoomFailureReason::FreeSphereQuery);
+        assert_eq!(reason, KinematicBoomFailureReason::ClearanceSweep);
         assert_eq!(held, proven);
         assert_eq!(held_clearance, clearance(1, 0.25));
         assert_eq!(controller.camera(), proven);
@@ -2382,9 +2319,21 @@ mod tests {
                 KinematicBoomProfileError::InvalidSurfaceClearance,
                 |value| value.surface_clearance = 0.0,
             ),
-            (KinematicBoomProfileError::InvalidTransitConfig, |value| {
-                value.transit.maximum_contact_passes = 0
+            (KinematicBoomProfileError::EmptyPlacementBudget, |value| {
+                value.placement.maximum_contact_passes = 0
             }),
+            (
+                KinematicBoomProfileError::InvalidPlacementSeparationEpsilon,
+                |value| {
+                    value.placement.separation_epsilon = 0.0;
+                },
+            ),
+            (
+                KinematicBoomProfileError::InvalidPlacementSeparationEpsilon,
+                |value| {
+                    value.placement.separation_epsilon = f32::NAN;
+                },
+            ),
         ];
         for (expected, mutate) in cases {
             let mut definition = profile_definition(64);
@@ -2570,12 +2519,19 @@ mod tests {
         };
 
         let placement = controller
-            .cast_to_reach(&scene, Vector3::new(1.0, 0.0, 0.0), 1.0, 0.25)
+            .cast_to_reach(
+                &scene,
+                controller.target_seed.placement,
+                Vector3::new(1.0, 0.0, 0.0),
+                1.0,
+                0.25,
+                &mut KinematicBoomDiagnostics::default(),
+            )
             .unwrap();
 
-        assert_eq!(placement.value.cell, Some(cell));
-        assert_eq!(placement.value.pose.landblock_id, cell);
-        assert_eq!(placement.value.pose.coords, Vector3::new(201.0, -40.0, 2.0));
+        assert_eq!(placement.cell, Some(cell));
+        assert_eq!(placement.pose.landblock_id, cell);
+        assert_eq!(placement.pose.coords, Vector3::new(201.0, -40.0, 2.0));
     }
 
     #[test]
@@ -2652,7 +2608,7 @@ mod tests {
     }
 
     #[test]
-    fn maximum_reach_remains_elastic_while_the_target_moves_sideways() {
+    fn radial_reach_tracks_the_target_moving_sideways() {
         let mut definition = profile_definition(64);
         definition.maximum_reach = 32.0;
         let mut controller = KinematicBoomController::new(
@@ -2715,49 +2671,6 @@ mod tests {
     }
 
     #[test]
-    fn transit_budget_commits_safe_prefix_and_continues_next_tick() {
-        let mut definition = profile_definition(64);
-        definition.maximum_reach = 32.0;
-        definition.transit.maximum_substeps = 1;
-        let mut controller = KinematicBoomController::new(
-            KinematicBoomProfile::new(definition).unwrap(),
-            sample().visual_pivot,
-            sample().target_seed,
-            clearance(1, 0.25),
-            32.0,
-            KinematicBoomIntent {
-                sequence: 0,
-                view_direction: Vector3::new(1.0, 0.0, 0.0),
-                cumulative_zoom_displacement: 0.0,
-            },
-        )
-        .unwrap();
-        initialize(&mut controller, &empty_scene(), sample());
-        let initial = controller.camera().pose;
-
-        assert!(matches!(
-            controller
-                .advance(&empty_scene(), 1.0 / 30.0, &[sample()])
-                .unwrap(),
-            KinematicBoomOutcome::Advanced { .. }
-        ));
-        let first = controller.camera().pose;
-        let first_displacement = placement_distance(initial, first).unwrap();
-        assert!(first_displacement > 0.0);
-        assert!(first_displacement <= definition.transit.maximum_substep_distance + 1.0e-5);
-
-        assert!(matches!(
-            controller
-                .advance(&empty_scene(), 1.0 / 30.0, &[sample()])
-                .unwrap(),
-            KinematicBoomOutcome::Advanced { .. }
-        ));
-        assert!(
-            placement_distance(initial, controller.camera().pose).unwrap() > first_displacement
-        );
-    }
-
-    #[test]
     fn control_budget_commits_one_prefix_and_continues_next_tick() {
         let mut controller = controller(1);
         initialize(&mut controller, &empty_scene(), sample());
@@ -2785,6 +2698,34 @@ mod tests {
             .unwrap();
         assert!(matches!(second, KinematicBoomOutcome::Advanced { .. }));
         assert_eq!(controller.raw_visual_pivot.coords.x, 21.0);
+    }
+
+    #[test]
+    fn orbit_inside_a_corner_keeps_every_interpolated_envelope_clear() {
+        let scene = collision_scene(vec![
+            wall_x(10.0),
+            wall(Plane {
+                normal: Vector3::new(0.0, 1.0, 0.0),
+                d: -23.0,
+            }),
+        ]);
+        let target = wall_sample();
+        let mut controller = wall_controller(Vector3::new(1.0, 0.0, 0.0));
+        settle_reach(&mut controller, &scene, target);
+        controller
+            .accept_intent(KinematicBoomIntent {
+                sequence: 1,
+                view_direction: Vector3::new(0.0, 1.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            })
+            .unwrap();
+        let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+        assert_continuous_path_fits(&scene, &outcome);
+        assert_sphere_fits(
+            &scene,
+            controller.camera(),
+            controller.committed_clearance().unwrap().radius,
+        );
     }
 
     #[test]
@@ -2855,6 +2796,7 @@ mod tests {
         let outcome = controller
             .advance(&scene, 1.0 / 30.0, &[wall_sample()])
             .unwrap();
+        assert_continuous_path_fits(&scene, &outcome);
         let KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Continuous { path },
             diagnostics,

@@ -69,8 +69,8 @@ export type HostKinematicBoomStatus =
 			 * How the latest tick placed the camera, or null when it moved continuously.
 			 *
 			 * Not a fault indicator: a `reseeded` outcome covers the generation's ordinary first
-			 * tick as well as the two recoveries, so its reason is what says whether anything went
-			 * wrong. Held and fallback outcomes follow failures, but only held retains a proven
+			 * tick as well as obstruction and residency corrections; its reason identifies the
+			 * discontinuity. Held and fallback outcomes follow failures, but only held retains a proven
 			 * placement and projection envelope.
 			 */
 			readonly placementOutcome:

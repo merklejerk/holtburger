@@ -41,7 +41,7 @@ function advanced() {
 			collisionProof: { status: "covered" },
 			controlLegs: 1,
 			clearanceSweeps: 1,
-			transitSubsteps: 2,
+			continuitySweeps: 0,
 			contactPasses: 0,
 		},
 	} as const;
@@ -159,7 +159,7 @@ describe("host kinematic boom path", () => {
 		).toThrow("must remain at its initial placement");
 	});
 
-	it("accepts a recoverable stationary hold with actual elastic reach", () => {
+	it("accepts a recoverable stationary hold with the retained camera reach", () => {
 		const stationary = point(0xda550178, 12, 18);
 		const tick = decodeHostKinematicBoomTick(
 			{

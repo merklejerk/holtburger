@@ -235,8 +235,8 @@ pub struct HostKinematicBoomDiagnostics {
     pub control_legs: usize,
     /// Number of continuous pivot-ray clearance sweeps performed.
     pub clearance_sweeps: usize,
-    /// Number of free-sphere transit substeps performed.
-    pub transit_substeps: usize,
+    /// Number of sweeps checking camera interpolation continuity.
+    pub continuity_sweeps: usize,
     /// Number of free-sphere contact-resolution passes performed.
     pub contact_passes: usize,
 }
@@ -247,7 +247,7 @@ impl From<KinematicBoomDiagnostics> for HostKinematicBoomDiagnostics {
             collision_proof: value.collision_proof.into(),
             control_legs: value.control_legs,
             clearance_sweeps: value.clearance_sweeps,
-            transit_substeps: value.transit_substeps,
+            continuity_sweeps: value.continuity_sweeps,
             contact_passes: value.contact_passes,
         }
     }
@@ -273,16 +273,16 @@ impl From<KinematicBoomFailureReason> for HostKinematicBoomFailureReason {
     }
 }
 
-/// Why a tick reset the camera discontinuously onto the target seed.
-///
-/// The placement such a tick carries is the possessed body's own collision sphere, so its camera
-/// coincides with its visual pivot. `InitialPlacement` is ordinary; the rest are recoveries.
+/// Why a tick published a safe camera placement discontinuously.
+/// Initial placement settles at the target; later corrections retain the solved boom endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostKinematicBoomReseedReason {
     InitialPlacement,
     PlacedPath,
     PlacementRecovery,
+    /// Geometry blocked interpolation to the target-origin camera placement.
+    ObstructedPath,
 }
 
 impl From<KinematicBoomReseedReason> for HostKinematicBoomReseedReason {
@@ -291,6 +291,7 @@ impl From<KinematicBoomReseedReason> for HostKinematicBoomReseedReason {
             KinematicBoomReseedReason::InitialPlacement => Self::InitialPlacement,
             KinematicBoomReseedReason::PlacedPath => Self::PlacedPath,
             KinematicBoomReseedReason::PlacementRecovery => Self::PlacementRecovery,
+            KinematicBoomReseedReason::ObstructedPath => Self::ObstructedPath,
         }
     }
 }

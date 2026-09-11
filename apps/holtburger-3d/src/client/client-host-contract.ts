@@ -367,7 +367,7 @@ const cameraDiagnosticsSchema = z
 		collisionProof: cameraCollisionProofSchema,
 		controlLegs: z.number().int().nonnegative().safe(),
 		clearanceSweeps: z.number().int().nonnegative().safe(),
-		transitSubsteps: z.number().int().nonnegative().safe(),
+		continuitySweeps: z.number().int().nonnegative().safe(),
 		contactPasses: z.number().int().nonnegative().safe(),
 	})
 	.strict();
@@ -410,6 +410,7 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 				"initial-placement",
 				"placed-path",
 				"placement-recovery",
+				"obstructed-path",
 			]),
 			diagnostics: cameraDiagnosticsSchema,
 			convergence: cameraConvergenceSchema,

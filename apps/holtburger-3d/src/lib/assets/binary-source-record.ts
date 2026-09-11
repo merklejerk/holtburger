@@ -95,13 +95,15 @@ export function readBinarySectionSlice<TArray extends BinaryArray>(
 		),
 	);
 	const result = new ArrayType(copied.buffer, 0, elementCount);
-	if (
-		entry.scalarType === "f32" &&
-		Array.from(result).some((value) => !Number.isFinite(value))
-	) {
-		throw new Error(
-			`${recordLabel} ${entry.name} section contains non-finite values.`,
-		);
+	if (entry.scalarType === "f32") {
+		// Validate the owned typed slice without allocating a boxed copy of every float.
+		for (let index = 0; index < result.length; index += 1) {
+			if (!Number.isFinite(result[index])) {
+				throw new Error(
+					`${recordLabel} ${entry.name} section contains non-finite values.`,
+				);
+			}
+		}
 	}
 	return result;
 }

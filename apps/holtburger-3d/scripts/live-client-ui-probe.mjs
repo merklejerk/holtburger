@@ -5,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
+import { runClientStreamingProbe } from "./client-streaming-probe.mjs";
 import { createCdpClient } from "./cdp-client.mjs";
 import { stringifyRedactedProbeReport } from "./live-client-probe-report.mjs";
 
@@ -38,11 +39,40 @@ const timeoutMs = Number(process.env.HOLTBURGER_PROBE_TIMEOUT_MS ?? "45000");
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
 	throw new Error("HOLTBURGER_PROBE_TIMEOUT_MS must be a positive integer.");
 }
+// Resolve streaming configuration before launching or moving a live character.
+const streamingOptions =
+	mode === "streaming"
+		? {
+				startCommand:
+					process.env.HOLTBURGER_STREAMING_START ?? "@tele 33.17s 72.85e",
+				startLandblock:
+					process.env.HOLTBURGER_STREAMING_START_LANDBLOCK ?? "0xda55ffff",
+				destination:
+					process.env.HOLTBURGER_STREAMING_DESTINATION ?? "0xda56ffff",
+				trials: Number(process.env.HOLTBURGER_STREAMING_TRIALS ?? "1"),
+				settleMs: 10000,
+				moveMs: 2000,
+				drainMs: 4000,
+				timeoutMs,
+				profile: performanceInstrumentationEnabled,
+				outputPrefix: requiredEnvironment("HOLTBURGER_STREAMING_OUTPUT"),
+				reportPath: requiredEnvironment("HOLTBURGER_PROBE_REPORT"),
+			}
+		: null;
+if (
+	streamingOptions !== null &&
+	(!Number.isSafeInteger(streamingOptions.trials) ||
+		streamingOptions.trials < 1)
+) {
+	throw new Error(
+		"HOLTBURGER_STREAMING_TRIALS must be a positive safe integer.",
+	);
+}
 const child = spawn(
 	process.platform === "win32" ? "npm.cmd" : "npm",
 	[
 		"run",
-		"dev:client",
+		mode === "streaming" ? "dev:client:release" : "dev:client",
 		"--",
 		"--vite-port",
 		"0",
@@ -50,7 +80,7 @@ const child = spawn(
 		account,
 		"--password",
 		password,
-		`--debug=${mode !== "profile" || performanceInstrumentationEnabled}`,
+		`--debug=${(mode !== "profile" && mode !== "streaming") || performanceInstrumentationEnabled}`,
 	],
 	{
 		cwd: appRoot,
@@ -127,7 +157,28 @@ try {
 		throw new Error("Initial world entry did not produce a destination frame.");
 	}
 
-	if (mode === "profile") {
+	if (streamingOptions !== null) {
+		const result = await runClientStreamingProbe(
+			client,
+			{ evaluate, submitChat, waitForReady, pageState },
+			streamingOptions,
+		);
+		await writeFile(
+			streamingOptions.reportPath,
+			stringifyRedactedProbeReport(
+				{
+					...result,
+					selectedCharacter,
+					consoleMessages: [...consoleMessages.values()],
+					page: await pageState(client),
+					hostOutput: redact(output).slice(-30000),
+				},
+				{ account, password },
+			),
+		);
+		printReport({ ok: result.ok, trials: result.trials.length });
+		process.exitCode = result.ok ? 0 : 1;
+	} else if (mode === "profile") {
 		const instrumentationEnabled = performanceInstrumentationEnabled;
 		await waitFor(
 			client,
@@ -366,7 +417,7 @@ function requiredEnvironment(name) {
 function probeMode(value) {
 	if (value === undefined) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, precise-jump, or profile.",
+			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, precise-jump, profile, or streaming.",
 		);
 	}
 	const mode = value;
@@ -374,10 +425,11 @@ function probeMode(value) {
 		mode !== "teleport" &&
 		mode !== "passive-camera" &&
 		mode !== "precise-jump" &&
-		mode !== "profile"
+		mode !== "profile" &&
+		mode !== "streaming"
 	) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, precise-jump, or profile.",
+			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, precise-jump, profile, or streaming.",
 		);
 	}
 	return mode;

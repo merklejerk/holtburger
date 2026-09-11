@@ -1,4 +1,8 @@
 import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
+import type {
+	ResolvedMaterial,
+	ResolvedObjectPart,
+} from "../resolution/presentation";
 import { planObjectMaterial } from "../resolution/object-material-planner";
 import { staticObjectDetailRoleForSource } from "../resolution/static-detail-role";
 import { type AssetTextureFact, TextureWrapMode } from "../textures/types";
@@ -10,20 +14,14 @@ export function collectStaticObjectTextureDependencies(
 ): readonly AssetTextureFact[] {
 	const dependencies: AssetTextureFact[] = [];
 	const detailRole = staticObjectDetailRoleForSource(source);
-	collectResidentDependencies(dependencies, source.staticResidents, detailRole);
-	return mergeAssetTextureFacts(dependencies, "Authored object source");
-}
-
-function collectResidentDependencies(
-	dependencies: AssetTextureFact[],
-	residents: readonly {
-		readonly identity: { readonly sourceId: string };
-		readonly presentation: ResolvedStaticObjectLayerSource["staticResidents"][number]["presentation"];
-	}[],
-	detailRole: ReturnType<typeof staticObjectDetailRoleForSource>,
-): void {
-	for (const resident of residents) {
+	// Decoded definitions share parts and materials across placements. Keep identity reuse local:
+	// geometry alone can have different material closures, and IDs are not global source identities.
+	const visitedParts = new Set<ResolvedObjectPart>();
+	const visitedMaterials = new Set<ResolvedMaterial>();
+	for (const resident of source.staticResidents) {
 		for (const part of resident.presentation.parts) {
+			if (visitedParts.has(part)) continue;
+			visitedParts.add(part);
 			for (const [
 				triangle,
 				slot,
@@ -34,6 +32,10 @@ function collectResidentDependencies(
 						`Authored resident ${resident.identity.sourceId} part ${part.partIndex} triangle ${triangle} has no material slot ${slot}.`,
 					);
 				}
+				if (visitedMaterials.has(material)) continue;
+				visitedMaterials.add(material);
+				// Wrap and detail affect draw bindings, but not the material's pixel dependencies.
+				// Only plan the first referenced use; unused slots remain outside this owner's demand.
 				const plan = planObjectMaterial(
 					material,
 					part.geometry.materialWrapModes[triangle] === 1
@@ -45,4 +47,5 @@ function collectResidentDependencies(
 			}
 		}
 	}
+	return mergeAssetTextureFacts(dependencies, "Authored object source");
 }

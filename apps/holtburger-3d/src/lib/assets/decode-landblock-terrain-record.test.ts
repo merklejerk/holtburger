@@ -56,6 +56,25 @@ const ACTIVE_REGION: ActiveRegionSource = {
 };
 
 describe("decodeLandblockTerrainRecord", () => {
+	it("owns decoded data independently of an unaligned record view", () => {
+		const bytes = terrainResponse();
+		const backing = new ArrayBuffer(bytes.length + 3);
+		const response = new Uint8Array(backing, 3);
+		response.set(bytes);
+		const expected = decodeLandblockTerrainRecord(
+			bytes,
+			LANDBLOCK_ID,
+			ACTIVE_REGION,
+		);
+		const actual = decodeLandblockTerrainRecord(
+			response,
+			LANDBLOCK_ID,
+			ACTIVE_REGION,
+		);
+		structuredClone(backing, { transfer: [backing] });
+		expect(actual).toEqual(expected);
+	});
+
 	it("consumes content-resolved heights and active-region presentation", () => {
 		const source = decodeLandblockTerrainRecord(
 			terrainResponse(),

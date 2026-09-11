@@ -1,22 +1,45 @@
 import type { ClientEntitySelection } from "./client-entity-selection";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 
-/** App-local selected-target display facts, sampled together at the HUD's display cadence. */
+/** Applicable health is distinct from absent identity/description or a non-creature. */
+type ClientSelectedHealth =
+	| { readonly kind: "unavailable" }
+	| { readonly kind: "not-applicable" }
+	| { readonly kind: "awaiting-response" }
+	| { readonly kind: "known"; readonly fraction: number };
+
+/** Selected HUD facts sampled from the semantic mirror and the effective subscription. */
 export interface ClientSelectedEntityDisplay {
-	/** Current presentation name, absent while the selected entity is unrealized. */
+	/** Current accepted name, absent until description is known. */
 	readonly name: string | null;
-	/** Server-reported health, absent until an update arrives for this selection. */
-	readonly healthFraction: number | null;
+	/** World eligibility plus the latest matching server health response. */
+	readonly health: ClientSelectedHealth;
+	/** First-cut use remains available for known non-owned targets only. */
+	readonly canInteract: boolean;
 }
 
-/** Session-owned health subscription and use intent; HUD lifetime never owns network work. */
+/** Initial/pending HUD display without a synthetic name or unknown-health meter. */
+export const EMPTY_CLIENT_SELECTED_DISPLAY: ClientSelectedEntityDisplay = {
+	name: null,
+	health: { kind: "unavailable" },
+	canInteract: false,
+};
+
+type InteractionLifecycle = Pick<
+	ClientLifecycleSession,
+	"state" | "subscribe" | "queryEntityHealth" | "useEntity" | "entities"
+>;
+type InteractionSelection = Pick<
+	ClientEntitySelection,
+	"selectedGuid" | "subscribe"
+>;
+
+/** Existing session-owned interaction controller; selection and network target are different facts. */
 export class ClientEntityInteractions {
-	readonly #lifecycle: Pick<
-		ClientLifecycleSession,
-		"state" | "subscribe" | "queryEntityHealth" | "useEntity"
-	>;
+	readonly #lifecycle: InteractionLifecycle;
+	readonly #selection: InteractionSelection;
 	readonly #unsubscribeSelection: () => void;
-	readonly #unsubscribeHealth: () => void;
+	readonly #unsubscribeLifecycle: () => void;
 	readonly #onFailure: (error: unknown) => void;
 	#target: {
 		readonly guid: number;
@@ -25,22 +48,17 @@ export class ClientEntityInteractions {
 	#destroyed = false;
 
 	constructor(options: {
-		readonly selection: Pick<
-			ClientEntitySelection,
-			"selectedGuid" | "subscribe"
-		>;
-		readonly lifecycle: Pick<
-			ClientLifecycleSession,
-			"state" | "subscribe" | "queryEntityHealth" | "useEntity"
-		>;
+		readonly selection: InteractionSelection;
+		readonly lifecycle: InteractionLifecycle;
 		readonly onFailure: (error: unknown) => void;
 	}) {
+		this.#selection = options.selection;
 		this.#lifecycle = options.lifecycle;
 		this.#onFailure = options.onFailure;
-		this.#unsubscribeSelection = options.selection.subscribe((guid) =>
-			this.#select(guid),
+		this.#unsubscribeSelection = options.selection.subscribe(() =>
+			this.#reconcile(),
 		);
-		this.#unsubscribeHealth = options.lifecycle.subscribe((event) => {
+		this.#unsubscribeLifecycle = options.lifecycle.subscribe((event) => {
 			if (
 				event.type === "entity-health" &&
 				this.#target?.guid === event.health.guid
@@ -49,47 +67,78 @@ export class ClientEntityInteractions {
 					guid: event.health.guid,
 					healthFraction: event.health.healthFraction,
 				};
+			} else if (
+				event.type === "entities" ||
+				event.type === "current-state" ||
+				event.type === "lifecycle" ||
+				event.type === "resyncing"
+			) {
+				this.#reconcile();
 			}
 		});
-		this.#select(options.selection.selectedGuid());
+		this.#reconcile();
 	}
 
-	/** Unknown and zero health remain distinct; no world-state cache is maintained here. */
-	healthFraction(): number | null {
-		return this.#target === null ? null : this.#target.healthFraction;
+	/** One coherent bounded HUD read; no fallback to differently aged rendered names. */
+	display(): ClientSelectedEntityDisplay {
+		const guid = this.#selection.selectedGuid();
+		const read = this.#lifecycle.entities.read();
+		if (this.#destroyed || guid === null || read.kind === "pending")
+			return EMPTY_CLIENT_SELECTED_DISPLAY;
+		const record = read.level.entities.get(guid);
+		if (record === undefined || record.description.kind === "pending")
+			return EMPTY_CLIENT_SELECTED_DISPLAY;
+		const fraction =
+			this.#target?.guid === guid ? this.#target.healthFraction : null;
+		return {
+			name: record.description.name,
+			canInteract:
+				!record.ownedByPlayer &&
+				this.#lifecycle.state().lifecycle?.kind === "in-world",
+			health:
+				record.description.healthQuery === "ineligible"
+					? { kind: "not-applicable" }
+					: fraction === null
+						? { kind: "awaiting-response" }
+						: { kind: "known", fraction },
+		};
 	}
 
-	/** Capture the current selected identity at the interaction edge. Core owns use/busy semantics. */
+	/** Use reads selected identity, independently of whether it supports creature health. */
 	interact(unrestricted: boolean): void {
-		if (
-			this.#destroyed ||
-			this.#target === null ||
-			this.#lifecycle.state().lifecycle?.kind !== "in-world"
-		)
-			return;
-		void this.#lifecycle
-			.useEntity(this.#target.guid, unrestricted)
-			.catch(this.#onFailure);
+		const guid = this.#selection.selectedGuid();
+		if (this.#destroyed || guid === null || !this.display().canInteract) return;
+		void this.#lifecycle.useEntity(guid, unrestricted).catch(this.#onFailure);
 	}
 
-	/** Release the server subscription before the surrounding client transport is torn down. */
+	/** Cancel once while transport is still alive, then retire both listeners. */
 	destroy(): void {
 		if (this.#destroyed) return;
-		this.#select(null);
+		this.#replaceTarget(null);
 		this.#destroyed = true;
 		this.#unsubscribeSelection();
-		this.#unsubscribeHealth();
+		this.#unsubscribeLifecycle();
 	}
 
-	#select(guid: number | null): void {
-		if (
-			this.#destroyed ||
-			guid === (this.#target === null ? null : this.#target.guid)
-		)
-			return;
+	#reconcile(): void {
+		if (this.#destroyed) return;
+		const guid = this.#selection.selectedGuid();
+		const read = this.#lifecycle.entities.read();
+		const record =
+			guid !== null && read.kind === "current"
+				? read.level.entities.get(guid)
+				: undefined;
+		const eligible =
+			this.#lifecycle.state().lifecycle?.kind === "in-world" &&
+			record?.description.kind === "known" &&
+			record.description.healthQuery === "eligible";
+		this.#replaceTarget(eligible ? guid : null);
+	}
+
+	#replaceTarget(guid: number | null): void {
+		if (guid === (this.#target?.guid ?? null)) return;
 		this.#target = guid === null ? null : { guid, healthFraction: null };
 		const phase = this.#lifecycle.state().lifecycle?.kind;
-		// Portal entry still has a live connection on which to cancel the old target.
 		if (phase === "in-world" || (phase === "portal-space" && guid === null)) {
 			void this.#lifecycle.queryEntityHealth(guid).catch(this.#onFailure);
 		}

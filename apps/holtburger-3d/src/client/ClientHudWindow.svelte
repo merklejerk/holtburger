@@ -36,6 +36,16 @@
 		resolveClientHudPlacement(placement, viewport, minimum),
 	);
 	let cancelPointerGesture: (() => void) | null = null;
+	let windowElement = $state<HTMLElement | null>(null);
+	$effect(() => {
+		const element = windowElement;
+		if (element === null) return;
+		// Keep native controls usable without forwarding their key presses to global game input.
+		// Key releases still reach the app so previously held movement can finish.
+		const containKeydown = (event: KeyboardEvent) => event.stopPropagation();
+		element.addEventListener("keydown", containKeydown);
+		return () => element.removeEventListener("keydown", containKeydown);
+	});
 	onDestroy(() => cancelPointerGesture?.());
 	const resizeHandles: readonly {
 		readonly name: string;
@@ -124,6 +134,7 @@
 </script>
 
 <section
+	bind:this={windowElement}
 	class="hud-window ui-panel"
 	style:left={`${resolved.left}px`}
 	style:top={`${resolved.top}px`}

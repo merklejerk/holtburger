@@ -261,6 +261,8 @@ pub struct ClientCurrentState {
     pub active_confirmation: Option<ClientConfirmation>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: holtburger_core::DynamicEntitySnapshot,
+    /// Complete retained entity/storage baseline for inventory and selection.
+    pub entities: holtburger_core::ClientEntitySnapshot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -581,6 +583,10 @@ pub struct ClientExitRequested {
 pub enum ClientHostEvent {
     EntityCollisionDisabled(bool),
     CurrentState(ClientCurrentState),
+    /// The receiver lost events and is awaiting the existing application replacement.
+    StateResyncing,
+    /// Narrow accepted entity/storage changes.
+    EntityFactsChanged(holtburger_core::ClientEntityDelta),
     LifecycleChanged(ClientLifecycleWire),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
@@ -778,6 +784,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             character_motion: snapshot.character_motion.map(Into::into),
             active_confirmation: snapshot.active_confirmation.as_ref().map(Into::into),
             dynamic: snapshot.dynamic.clone(),
+            entities: snapshot.entities.clone(),
         }
     }
 }
@@ -785,6 +792,9 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::EntityFactsChanged(delta) => {
+            Some(ClientHostEvent::EntityFactsChanged(delta))
+        }
         ClientViewEvent::EntityCollisionDisabled(disabled) => {
             Some(ClientHostEvent::EntityCollisionDisabled(disabled))
         }

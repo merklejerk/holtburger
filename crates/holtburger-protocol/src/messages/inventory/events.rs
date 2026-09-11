@@ -2,13 +2,14 @@ use super::types::EquipMask;
 use crate::errors::WeenieError;
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::Guid;
+use holtburger_common::{Guid, properties::InventoryEntryKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewContentsEventItem {
     pub guid: Guid,
-    pub container_type: u32,
+    /// Server category determines the independent item or pack ordering domain.
+    pub container_type: InventoryEntryKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +32,8 @@ impl ProtocolUnpack for ViewContentsEventData {
             if *offset + 4 > data.len() {
                 return None;
             }
-            let container_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            let container_type =
+                InventoryEntryKind::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
             *offset += 4;
             items.push(ViewContentsEventItem {
                 guid,
@@ -49,7 +51,8 @@ impl ProtocolPack for ViewContentsEventData {
             .unwrap();
         for item in &self.items {
             item.guid.pack(buf);
-            buf.write_u32::<LittleEndian>(item.container_type).unwrap();
+            buf.write_u32::<LittleEndian>(item.container_type as u32)
+                .unwrap();
         }
     }
 }
@@ -59,7 +62,8 @@ pub struct InventoryPutObjInContainerEventData {
     pub item_guid: Guid,
     pub container_guid: Guid,
     pub slot: u32,
-    pub container_type: u32,
+    /// Server category determines the independent item or pack ordering domain.
+    pub container_type: InventoryEntryKind,
 }
 
 impl ProtocolUnpack for InventoryPutObjInContainerEventData {
@@ -70,7 +74,8 @@ impl ProtocolUnpack for InventoryPutObjInContainerEventData {
             return None;
         }
         let slot = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let container_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let container_type =
+            InventoryEntryKind::from_repr(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]))?;
         *offset += 8;
         Some(InventoryPutObjInContainerEventData {
             item_guid,
@@ -86,7 +91,8 @@ impl ProtocolPack for InventoryPutObjInContainerEventData {
         self.item_guid.pack(buf);
         self.container_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.slot).unwrap();
-        buf.write_u32::<LittleEndian>(self.container_type).unwrap();
+        buf.write_u32::<LittleEndian>(self.container_type as u32)
+            .unwrap();
     }
 }
 
@@ -182,7 +188,6 @@ impl ProtocolPack for CloseGroundContainerEventData {
     }
 }
 
-// #[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,17 +197,54 @@ mod tests {
     use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]
+    fn inventory_categories_round_trip_and_reject_unknown_values() {
+        for kind in [
+            InventoryEntryKind::Item,
+            InventoryEntryKind::Container,
+            InventoryEntryKind::Foci,
+        ] {
+            let containment = InventoryPutObjInContainerEventData {
+                item_guid: Guid(1),
+                container_guid: Guid(2),
+                slot: 0,
+                container_type: kind,
+            };
+            let mut bytes = Vec::new();
+            containment.pack(&mut bytes);
+            assert_eq!(
+                InventoryPutObjInContainerEventData::unpack(&bytes, &mut 0),
+                Some(containment)
+            );
+            bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert!(InventoryPutObjInContainerEventData::unpack(&bytes, &mut 0).is_none());
+
+            let roster = ViewContentsEventData {
+                container: Guid(2),
+                items: vec![ViewContentsEventItem {
+                    guid: Guid(1),
+                    container_type: kind,
+                }],
+            };
+            let mut bytes = Vec::new();
+            roster.pack(&mut bytes);
+            assert_eq!(ViewContentsEventData::unpack(&bytes, &mut 0), Some(roster));
+            bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert!(ViewContentsEventData::unpack(&bytes, &mut 0).is_none());
+        }
+    }
+
+    #[test]
     fn test_view_contents_fixture() {
         let expected = ViewContentsEventData {
             container: Guid(0x11111111),
             items: vec![
                 ViewContentsEventItem {
                     guid: Guid(0x22222222),
-                    container_type: 1,
+                    container_type: InventoryEntryKind::Container,
                 },
                 ViewContentsEventItem {
                     guid: Guid(0x33333333),
-                    container_type: 0,
+                    container_type: InventoryEntryKind::Item,
                 },
             ],
         };
@@ -224,7 +266,7 @@ mod tests {
                     item_guid: Guid(0x80000001),
                     container_guid: Guid(0x80000002),
                     slot: 3,
-                    container_type: 1,
+                    container_type: InventoryEntryKind::Container,
                 },
             )),
         }));

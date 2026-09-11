@@ -2,7 +2,7 @@ use crate::WorldEvent;
 use crate::book::BookData;
 use crate::entity::Entity;
 use crate::state::WorldState;
-use crate::state::liveness::{EntityCreateDisposition, EntityInstanceDeleteDisposition};
+use crate::state::liveness::EntityCreateDisposition;
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::{
@@ -44,7 +44,6 @@ pub(crate) fn handle_message(
             }
             let create_disposition = state.upsert_entity_from_create(entity, events);
             if create_disposition == EntityCreateDisposition::DeleteRequested {
-                state.update_player_inventory_recursive(guid, false);
                 return true;
             }
             state.admit_entity_sticky_target(guid, sticky_target);
@@ -58,21 +57,29 @@ pub(crate) fn handle_message(
             {
                 state.mark_container_preview(guid);
             }
-            state.sync_player_ownership_for_entity(guid);
+            if state
+                .entities
+                .get(guid)
+                .is_some_and(|entity| entity.can_hold_items())
+            {
+                state.storage.establish_container(guid);
+            }
+            // Containment accepted before a late description still withdraws its old world pose.
+            if matches!(
+                state.storage_location(guid),
+                Some(crate::state::storage::StorageLocation::Contained { .. })
+            ) {
+                state.clear_entity_world_presence(guid);
+            }
             let _ = state.reconcile_entity_retention(guid);
 
             true
         }
         GameMessage::ObjectDelete(data) => {
-            if state.request_entity_instance_delete(data.guid, data.instance_sequence)
-                == EntityInstanceDeleteDisposition::Applied
-            {
-                state.update_player_inventory_recursive(data.guid, false);
-            }
+            state.request_entity_instance_delete(data.guid, data.instance_sequence);
             true
         }
         GameMessage::InventoryRemoveObject(data) => {
-            state.update_player_inventory_recursive(data.object_guid, false);
             state.mark_entity_explicit_delete(data.object_guid);
             true
         }
@@ -105,12 +112,23 @@ pub(crate) fn handle_event(
 ) -> bool {
     match &event.event {
         GameEvent::InventoryPutObjInContainer(data) => {
+            state.storage.place(
+                data.item_guid,
+                data.container_guid,
+                crate::state::storage::StorageSlot::from_entry(data.container_type, data.slot),
+            );
             state.move_entity_into_container(data.item_guid, data.container_guid, events)
         }
         GameEvent::InventoryPutObjectIn3D(data) => {
             state.move_entity_into_world(data.object_guid, events)
         }
         GameEvent::ViewContents(data) => {
+            let entries: Vec<_> = data
+                .items
+                .iter()
+                .map(|item| (item.guid, item.container_type))
+                .collect();
+            state.storage.replace_contents(data.container, &entries);
             state.open_containers.insert(data.container);
             events.push(WorldEvent::ContainerOpened(data.container));
 
@@ -136,7 +154,6 @@ pub(crate) fn handle_event(
                     }
 
                     state.mark_container_preview(guid);
-                    state.sync_player_ownership_for_entity(guid);
                     let _ = state.reconcile_entity_retention(guid);
                 }
             }

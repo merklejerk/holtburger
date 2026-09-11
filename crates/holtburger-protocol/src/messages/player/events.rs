@@ -7,7 +7,7 @@ use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{PropertyString, WorldObjectProperties};
+use holtburger_common::properties::{InventoryEntryKind, PropertyString, WorldObjectProperties};
 use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
 use std::collections::BTreeMap;
 
@@ -131,13 +131,13 @@ pub struct PlayerDescriptionEventData {
     pub spellbook_filters: u32,
     /// Encapsulated gameplay options (e.g. CombatMode, AutoDecay).
     pub gameplay_options: Vec<u8>,
-    /// Complete list of items in the player's inventory (GUID + Weenie ID).
-    pub inventory: Vec<(Guid, u32)>,
+    /// Complete list of items in the player's inventory (GUID + server slot category).
+    pub inventory: Vec<(Guid, InventoryEntryKind)>,
     /// Detailed mapping of equipped items to slots and layering priority.
     pub equipped_objects: Vec<(Guid, u32, u32)>,
 }
 
-type InventoryVec = Vec<(Guid, u32)>;
+type InventoryVec = Vec<(Guid, InventoryEntryKind)>;
 type EquippedVec = Vec<(Guid, u32, u32)>;
 
 fn unpack_inventory_and_equipped_strict(
@@ -159,13 +159,10 @@ fn unpack_inventory_and_equipped_strict(
         if *offset + 4 > data.len() {
             return None;
         }
-        let wtype = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let kind =
+            InventoryEntryKind::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
         *offset += 4;
-        // ACE writes a ContainerType enum here: NonContainer=0, Container=1, Foci=2
-        if wtype > 2 {
-            return None;
-        }
-        inventory.push((guid, wtype));
+        inventory.push((guid, kind));
     }
 
     if *offset + 4 > data.len() {
@@ -891,9 +888,9 @@ impl ProtocolPack for PlayerDescriptionEventData {
 
         buf.write_u32::<LittleEndian>(self.inventory.len() as u32)
             .unwrap();
-        for (guid, wtype) in &self.inventory {
+        for (guid, kind) in &self.inventory {
             guid.pack(buf);
-            buf.write_u32::<LittleEndian>(*wtype).unwrap();
+            buf.write_u32::<LittleEndian>(*kind as u32).unwrap();
         }
         buf.write_u32::<LittleEndian>(self.equipped_objects.len() as u32)
             .unwrap();

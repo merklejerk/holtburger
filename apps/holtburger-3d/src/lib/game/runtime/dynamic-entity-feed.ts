@@ -372,26 +372,35 @@ export class DynamicEntityMirror {
 		this.#lastTickHostSeconds = null;
 	}
 
+	/** Validate and prepare replacement without changing the current mirror. */
+	prepareSnapshot(snapshot: DynamicEntitySnapshot): () => void {
+		const replacement = new Map<number, DynamicEntityView>();
+		for (const entity of snapshot.entities) {
+			const entityGuid = entity.identity.guid;
+			if (replacement.has(entityGuid)) {
+				throw new Error(
+					`Dynamic-entity snapshot contains duplicate GUID 0x${entityGuid.toString(16).padStart(8, "0")}.`,
+				);
+			}
+			replacement.set(entityGuid, entity);
+		}
+
+		const timeline = {
+			hostSeconds: snapshot.hostTime.seconds,
+			frontendSeconds: this.#nowSeconds(),
+		};
+		return () => {
+			this.#entities = replacement;
+			this.#timeline = timeline;
+			this.#lastTickHostSeconds = snapshot.hostTime.seconds;
+			this.#awaitingSnapshot = false;
+		};
+	}
+
 	/** Apply one validated snapshot or ordered live mutation and report whether current state changed. */
 	apply(event: DynamicEntityEvent): boolean {
 		if (event.kind === "snapshot") {
-			const replacement = new Map<number, DynamicEntityView>();
-			for (const entity of event.snapshot.entities) {
-				const entityGuid = entity.identity.guid;
-				if (replacement.has(entityGuid)) {
-					throw new Error(
-						`Dynamic-entity snapshot contains duplicate GUID 0x${entityGuid.toString(16).padStart(8, "0")}.`,
-					);
-				}
-				replacement.set(entityGuid, entity);
-			}
-			this.#entities = replacement;
-			this.#timeline = {
-				hostSeconds: event.snapshot.hostTime.seconds,
-				frontendSeconds: this.#nowSeconds(),
-			};
-			this.#lastTickHostSeconds = event.snapshot.hostTime.seconds;
-			this.#awaitingSnapshot = false;
+			this.prepareSnapshot(event.snapshot)();
 			return true;
 		}
 

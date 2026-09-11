@@ -1,10 +1,9 @@
 use crate::stats;
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 pub struct SkillBase {
@@ -203,7 +202,7 @@ fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
 
 /// Session-local player model and derived player-facing state.
 ///
-/// `PlayerState` owns player-specific data such as attributes, vitals, spells, inventory, and
+/// `PlayerState` owns player-specific data such as attributes, vitals, spells, and
 /// protocol sequence tracking. It is intentionally **not** a second world object: authoritative
 /// entity/object state lives on the player `Entity`, while `PlayerState` retains only local-player
 /// overlays and session sequencing. Feature handlers under `crate::handlers` orchestrate message
@@ -213,6 +212,8 @@ fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
 pub struct PlayerState {
     /// Unique identifier for the player's character.
     pub guid: Guid,
+    /// Private-feed property provenance; values live only on the authoritative player entity.
+    pub(crate) property_retention: super::property_retention::PlayerPropertyRetention,
     /// Computed attribute values (Strength, Endurance, etc.) including buffs.
     pub attributes: HashMap<stats::AttributeType, stats::Attribute>,
     /// Computed vital values (Health, Stamina, Mana) including current/max/buffed states.
@@ -263,11 +264,6 @@ pub struct PlayerState {
     /// Opaque gameplay options blob retained from PlayerDescription.
     pub gameplay_options: Vec<u8>,
 
-    /// Flat set of all item GUIDs currently owned by the player (in pack or containers).
-    pub inventory: HashSet<Guid>,
-    /// Items currently equipped, mapped by their primary slot mask.
-    pub equipment: HashMap<Guid, EquipMask>,
-
     /// Dirty tracking for emitted derived-stat snapshots.
     pub(crate) last_emitted_derived_stats: Option<LastSentStats>,
 }
@@ -282,6 +278,7 @@ impl PlayerState {
     pub fn new() -> Self {
         Self {
             guid: Guid::NULL,
+            property_retention: Default::default(),
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             vital_bases: HashMap::new(),
@@ -306,8 +303,6 @@ impl PlayerState {
             desired_comps: Vec::new(),
             spellbook_filters: 0,
             gameplay_options: Vec::new(),
-            inventory: HashSet::new(),
-            equipment: HashMap::new(),
             last_emitted_derived_stats: None,
         }
     }
@@ -333,28 +328,6 @@ impl PlayerState {
 }
 
 impl PlayerState {
-    /// Adds an item to the player's inventory tracking.
-    pub fn add_to_inventory(&mut self, item: Guid) {
-        self.inventory.insert(item);
-    }
-
-    /// Removes an item from the player's inventory tracking and equipment.
-    pub fn remove_from_inventory(&mut self, item: Guid) {
-        self.inventory.remove(&item);
-        self.equipment.remove(&item);
-    }
-
-    /// Marks an item as equipped.
-    pub fn wield_item(&mut self, item: Guid, slot: EquipMask) {
-        self.inventory.insert(item);
-        self.equipment.insert(item, slot);
-    }
-
-    /// Marks an item as unequipped.
-    pub fn unwield_item(&mut self, item: Guid) {
-        self.equipment.remove(&item);
-    }
-
     pub fn attribute_snapshot(&self) -> Vec<stats::Attribute> {
         let mut attr_objs: Vec<_> = self.attributes.values().cloned().collect();
         attr_objs.sort_by_key(|a| a.attr_type as u32);

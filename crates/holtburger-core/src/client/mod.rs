@@ -23,6 +23,7 @@ mod commands;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
+pub mod entity_facts;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -82,6 +83,8 @@ pub struct ClientRuntime {
     pub session: Session,
     pub world: WorldState,
     active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Cached narrow entity records and pending semantic invalidation.
+    entity_facts: entity_facts::EntityFactsPublication,
     active_busy_operation: Option<PendingBusyOperation>,
     state: ClientState,
     /// Distinguishes the initial connected socket from a login request in flight.
@@ -232,6 +235,8 @@ impl ClientRuntime {
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),
             ),
+            entities: entity_facts::ClientEntitySnapshot::from_world(&self.world)
+                .expect("accepted world relationships must produce an entity baseline"),
             runtime_bodies: self.world.runtime_body_views().into(),
         }
     }
@@ -442,9 +447,15 @@ impl ClientRuntime {
         }
 
         self.send_login_complete().await?;
+        let initial_entry = activation.phase == ClientWorldActivationPhase::InitialEntry;
         self.activation = None;
         self.state = ClientState::InWorld;
         self.send_status_event();
+        if initial_entry {
+            // Character entry retires the frontend's previous semantic baseline. Publish the
+            // established player and inventory together before resuming ordinary deltas.
+            self.emit_current_application_snapshot();
+        }
         Ok(())
     }
 
@@ -610,6 +621,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn emit_current_application_snapshot(&mut self) {
+        self.publish_entity_facts();
         self.emit_fellowship_state_updated();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
@@ -664,9 +676,11 @@ impl ClientRuntime {
 
     pub fn handle_world_event(&mut self, event: &WorldEvent) {
         self.emit_world_view_projection(event);
+        self.publish_entity_facts();
     }
 
     fn emit_world_view_projection(&mut self, event: &WorldEvent) {
+        self.entity_facts.observe(event);
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 let _ =

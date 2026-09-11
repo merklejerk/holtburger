@@ -1,4 +1,8 @@
 import {
+	ClientEntityMirror,
+	clientEntityDeltaSchema,
+} from "./client-entity-mirror";
+import {
 	decodeClientCurrentState,
 	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
@@ -97,6 +101,8 @@ type ClientCommandName = Extract<
 type ClientEventName = Extract<
 	HostEventName,
 	| "client-current-state"
+	| "client-state-resyncing"
+	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
 	| "client-lifecycle-changed"
 	| "client-character-motion-capabilities-updated"
@@ -159,6 +165,8 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "confirmation";
 			readonly confirmation: ClientConfirmation | null;
 	  }
+	| { readonly type: "entities" }
+	| { readonly type: "resyncing" }
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
 	| { readonly type: "lifecycle"; readonly lifecycle: ClientLifecycle }
 	| {
@@ -227,6 +235,8 @@ export class ClientLifecycleSession {
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ClientLifecycleTransport;
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
+	/** Shared semantic source for inventory, selection, and selected display. */
+	readonly entities = new ClientEntityMirror();
 	readonly #dynamicSession: DynamicEntitySession;
 	#unlisten: readonly (() => void)[] | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
@@ -278,6 +288,7 @@ export class ClientLifecycleSession {
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
 		this.#dynamicSession.stop();
+		this.entities.awaitSnapshot();
 		this.#entryRequestGuid = null;
 	}
 
@@ -447,6 +458,28 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-state-resyncing", (payload) => {
+					if (payload !== null)
+						throw new Error("Invalid client resync notification.");
+					this.entities.awaitSnapshot();
+					this.mirror.awaitSnapshot();
+					this.#emit({ type: "resyncing" });
+				}),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-entity-facts-changed",
+					(payload) => {
+						const prepared = this.entities.prepareDelta(
+							clientEntityDeltaSchema.parse(payload),
+						);
+						if (prepared === null) return;
+						this.entities.commit(prepared);
+						this.#emit({ type: "entities" });
+					},
+				),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
 				),
@@ -602,6 +635,11 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		const semantic = this.entities.prepareSnapshot(
+			state.entities,
+			state.localPlayerGuid,
+		);
+		const commitDynamic = this.mirror.prepareSnapshot(state.dynamic);
 		if (state.lifecycle.kind !== "entering-world") {
 			this.#entryRequestGuid = null;
 		}
@@ -622,11 +660,8 @@ export class ClientLifecycleSession {
 			kind: "snapshot",
 			snapshot: state.dynamic,
 		};
-		if (!this.mirror.apply(dynamic)) {
-			throw new Error(
-				"Client current-state snapshot was rejected by the dynamic mirror.",
-			);
-		}
+		this.entities.commit(semantic);
+		commitDynamic();
 		this.#emit({ type: "current-state", state });
 		this.#emit({ type: "dynamic", event: dynamic });
 	}
@@ -651,6 +686,13 @@ export class ClientLifecycleSession {
 					? lifecycle.worldGeneration
 					: this.#state.worldGeneration,
 		};
+		// Initial activation may arrive as portal-space without a separate entering-world event.
+		// Its completion supplies the new character baseline; teleports retain the current one.
+		if (
+			lifecycle.kind === "entering-world" ||
+			(lifecycle.kind === "portal-space" && lifecycle.cause === "initial-entry")
+		)
+			this.entities.awaitSnapshot();
 		this.#emit({ type: "lifecycle", lifecycle });
 	}
 

@@ -83,6 +83,8 @@ export interface ClientTuning {
 		};
 	};
 	/** Selected-entity HUD display policy. */
+	/** Mounted inventory display sampling policy. */
+	readonly inventory: { readonly displayIntervalMs: number };
 	readonly selectedEntityHud: {
 		/** Bounded cadence for refreshing selected-entity display text. */
 		readonly displayIntervalMs: number;

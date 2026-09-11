@@ -85,6 +85,10 @@ impl<'de> Deserialize<'de> for HostCommand {
 pub enum HostEvent {
     ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
     ClientCurrentState(crate::client_projection::ClientCurrentState),
+    /// Marks the cached application state stale until the replacement arrives.
+    ClientStateResyncing(()),
+    /// Semantic entity records, independent of dynamic renderer events.
+    ClientEntityFactsChanged(holtburger_core::ClientEntityDelta),
     ClientEntityCollisionDisabled(bool),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
     ClientCharacterMotionCapabilitiesUpdated(
@@ -418,6 +422,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::ChatMessage(message) => {
                 HostEvent::ClientChatMessage(message)
+            }
+            crate::client_projection::ClientHostEvent::StateResyncing => {
+                HostEvent::ClientStateResyncing(())
+            }
+            crate::client_projection::ClientHostEvent::EntityFactsChanged(delta) => {
+                HostEvent::ClientEntityFactsChanged(delta)
             }
             crate::client_projection::ClientHostEvent::DynamicEntity(event) => {
                 HostEvent::ClientDynamicEntity(event)

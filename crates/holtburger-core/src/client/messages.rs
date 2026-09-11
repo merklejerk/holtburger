@@ -105,6 +105,7 @@ impl ClientRuntime {
         }
         self.state = ClientState::InWorld;
         self.send_status_event();
+        self.emit_current_application_snapshot();
         Ok(())
     }
 
@@ -773,6 +774,7 @@ impl ClientRuntime {
             _ => Ok(()),
         }?;
 
+        self.publish_entity_facts();
         Ok(world_events)
     }
 

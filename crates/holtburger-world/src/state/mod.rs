@@ -7,6 +7,7 @@ pub mod mutations;
 mod scene_placement;
 mod selection;
 pub mod self_movement;
+pub mod storage;
 #[cfg(test)]
 pub mod tests;
 pub mod trade;

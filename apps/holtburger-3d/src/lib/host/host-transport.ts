@@ -1,3 +1,4 @@
+import type { ClientEntityDelta } from "../../client/client-entity-mirror";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
 import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
 import type { PossessionEventOutcome } from "../../explorer/explorer-entity-possession";
@@ -132,6 +133,8 @@ const EXPLORER_HOST_EVENT_NAMES = [
 /** Client lifecycle, focused presentation, and terminal events. */
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
+	"client-state-resyncing",
+	"client-entity-facts-changed",
 	"client-entity-collision-disabled",
 	"client-lifecycle-changed",
 	"client-character-motion-capabilities-updated",
@@ -203,6 +206,8 @@ export interface HostEventPayloadMap {
 	"explorer-physical-fly-motion": HostPhysicalFlyPath;
 	"explorer-physical-fly-failure": HostPhysicalFlyFailure;
 	"client-current-state": ClientCurrentState;
+	"client-state-resyncing": null;
+	"client-entity-facts-changed": ClientEntityDelta;
 	"client-entity-collision-disabled": boolean;
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;

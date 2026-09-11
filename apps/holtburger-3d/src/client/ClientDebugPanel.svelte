@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { formatItemType, formatObjectFlags } from "./client-entity-labels";
+	import type { ClientSelectedEntity } from "./client-selected-entity";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { onMount } from "svelte";
 	import type {
@@ -11,6 +13,8 @@
 		/** Startup catalog availability for switch classification diagnostics. */
 		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
+		/** Selection is resolved in the client layer, independently of scene residency. */
+		readonly readSelectedEntity: () => ClientSelectedEntity | null;
 		/** Runtime-confirmed local player response override. */
 		readonly entityCollisionDisabled: boolean;
 		readonly onEntityCollisionDisabledChange: (disabled: boolean) => void;
@@ -24,6 +28,7 @@
 	const {
 		entityMetadata,
 		readDiagnostics,
+		readSelectedEntity,
 		entityCollisionDisabled,
 		onEntityCollisionDisabledChange,
 		unrestrictedUse,
@@ -32,11 +37,12 @@
 		onShowRetailHiddenGeometryChange,
 	}: Props = $props();
 	let diagnostics = $state<ClientPresentationDiagnostics | null>(null);
-	const selected = $derived(diagnostics?.selectedEntity ?? null);
+	let selected = $state<ClientSelectedEntity | null>(null);
 
 	onMount(() => {
 		const sample = (): void => {
 			diagnostics = readDiagnostics();
+			selected = readSelectedEntity();
 		};
 		sample();
 		const interval = window.setInterval(sample, 250);
@@ -78,18 +84,59 @@
 	<section class="selected-details" aria-label="Selected entity details">
 		<strong>Selected entity</strong>
 		{#if selected === null}
-			<p class="ui-muted">
-				Select an entity in the world or minimap to inspect it.
-			</p>
+			<p class="ui-muted">Select an entity to inspect it.</p>
 		{:else}
 			<dl class="ui-well">
 				{@render diagnosticRow("GUID", formatGuid(selected.guid))}
-				{#if selected.view !== null}
-					{@const entity = selected.view}
-					{@render diagnosticRow("Name", entity.display.name)}
+				{#if selected.facts !== null}
+					{@const facts = selected.facts}
+					{#if facts.description.kind === "known"}
+						{@render diagnosticRow("Name", facts.description.name)}
+						{@render diagnosticRow(
+							"WCID",
+							facts.description.wcid === null
+								? "unavailable"
+								: `${facts.description.wcid} (${formatGuid(facts.description.wcid)})`,
+						)}
+						{@render diagnosticRow(
+							"Item type",
+							formatItemType(facts.description.itemType),
+						)}
+						{@render diagnosticRow(
+							"Object flags",
+							formatObjectFlags(facts.description.objectFlags),
+						)}
+						{@render diagnosticRow(
+							"Weenie type (catalog)",
+							facts.description.weenieType === null
+								? "unavailable"
+								: facts.description.weenieType.replace(
+										/([a-z0-9])([A-Z])/g,
+										"$1 $2",
+									),
+						)}
+					{:else}
+						{@render diagnosticRow("Description", "Loading…")}
+					{/if}
 					{@render diagnosticRow(
-						"WCID",
-						`${entity.identity.wcid} (${formatGuid(entity.identity.wcid)})`,
+						"Owned by player",
+						facts.ownedByPlayer ? "Yes" : "No",
+					)}
+					{@render diagnosticRow("Location", facts.location.kind)}
+					{#if facts.location.kind === "contained"}
+						{@render diagnosticRow(
+							"Container",
+							formatGuid(facts.location.parentGuid),
+						)}
+					{:else if facts.location.kind === "equipped"}
+						{@render diagnosticRow(
+							"Wearer",
+							formatGuid(facts.location.wearerGuid),
+						)}
+					{/if}
+				{/if}
+				{#if selected.presentation !== null}
+					{@const entity = selected.presentation}
 					)}
 					{@render diagnosticRow(
 						"Presentation class",
@@ -113,17 +160,21 @@
 					)}
 				{/if}
 			</dl>
-			{#if selected.view === null}
-				<p class="ui-muted">Selected entity data is unavailable.</p>
-			{:else}
+			{#if selected.facts === null}<p class="ui-muted">
+					Shared entity facts are unavailable.
+				</p>{/if}
+			{#if selected.presentation === null}<p class="ui-muted">
+					No scene presentation for this entity.
+				</p>{/if}
+			{#if selected.facts !== null || selected.presentation !== null}
 				<details>
-					<summary>Received entity snapshot (JSON)</summary>
+					<summary>Selected entity facts and presentation (JSON)</summary>
 					<textarea
 						class="ui-mono"
 						aria-label="Selected entity JSON"
 						readonly
 						rows="12"
-						value={JSON.stringify(selected.view, null, 2)}
+						value={JSON.stringify(selected, null, 2)}
 					></textarea>
 				</details>
 			{/if}

@@ -79,6 +79,12 @@ pub trait WorldContext {
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
     fn is_open_container(&self, guid: Guid) -> bool;
 
+    /// Direct accepted storage parent; read models supply the relationships they retain.
+    fn container_parent(&self, guid: Guid) -> Option<Guid>;
+
+    /// Accepted equipment mask, absent while a wearer announcement awaits its slot data.
+    fn equipment_mask(&self, guid: Guid) -> Option<EquipMask>;
+
     fn get_player_attribute_current(&self, _attr: AttributeType) -> Option<u32> {
         None
     }
@@ -93,6 +99,20 @@ pub trait WorldContext {
 }
 
 impl WorldContext for WorldState {
+    fn container_parent(&self, guid: Guid) -> Option<Guid> {
+        match self.storage_location(guid) {
+            Some(crate::state::storage::StorageLocation::Contained { parent, .. }) => Some(parent),
+            _ => None,
+        }
+    }
+
+    fn equipment_mask(&self, guid: Guid) -> Option<EquipMask> {
+        match self.storage_location(guid) {
+            Some(crate::state::storage::StorageLocation::Equipped { mask, .. }) => mask,
+            _ => None,
+        }
+    }
+
     fn get_player_guid(&self) -> Option<Guid> {
         (self.player.guid != Guid::NULL).then_some(self.player.guid)
     }
@@ -102,11 +122,13 @@ impl WorldContext for WorldState {
     }
 
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_ {
-        self.player.inventory.iter().copied()
+        self.storage.owned_items(self.player.guid)
     }
 
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_ {
-        self.player.equipment.keys().copied()
+        self.storage
+            .equipment(self.player.guid)
+            .map(|(guid, _)| guid)
     }
 
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
@@ -158,7 +180,7 @@ pub trait WorldContextExt: WorldContext {
         for guid in self.iter_inventory() {
             let item = self.get_entity(guid)?;
 
-            if let Some(container_id) = item.container_id()
+            if let Some(container_id) = self.container_parent(guid)
                 && self.is_in_player_inventory(container_id)
                 && container_id != player_guid
             {
@@ -255,8 +277,8 @@ pub trait WorldContextExt: WorldContext {
             available |= Usable::WIELDED;
         }
 
-        if entity
-            .container_id()
+        if self
+            .container_parent(guid)
             .is_some_and(|container_guid| self.is_open_container(container_guid))
         {
             available |= Usable::VIEWED;
@@ -340,7 +362,7 @@ pub trait WorldContextExt: WorldContext {
     fn get_container_counts(&self) -> std::collections::HashMap<Guid, u32> {
         let mut counts = std::collections::HashMap::new();
         for e in self.iter_entities() {
-            if let Some(cid) = e.container_id() {
+            if let Some(cid) = self.container_parent(e.guid) {
                 *counts.entry(cid).or_default() += 1;
             }
         }
@@ -368,7 +390,7 @@ pub trait WorldContextExt: WorldContext {
         };
 
         for child in self.iter_entities() {
-            if child.container_id() != Some(container_id) {
+            if self.container_parent(child.guid) != Some(container_id) {
                 continue;
             }
 
@@ -410,7 +432,7 @@ pub trait WorldContextExt: WorldContext {
 
     fn is_in_main_pack(&self, guid: Guid) -> bool {
         if let Some(player_guid) = self.get_player_guid() {
-            self.get_entity(guid).and_then(|e| e.container_id()) == Some(player_guid)
+            self.container_parent(guid) == Some(player_guid)
         } else {
             false
         }
@@ -430,8 +452,7 @@ pub trait WorldContextExt: WorldContext {
 
         // Recursive case: check all items contained within this one
         for other_guid in self.iter_inventory() {
-            if let Some(other) = self.get_entity(other_guid)
-                && other.container_id() == Some(guid)
+            if self.container_parent(other_guid) == Some(guid)
                 && self.is_attuned_sticky_recursive(other_guid)
             {
                 return true;
@@ -498,8 +519,7 @@ pub trait WorldContextExt: WorldContext {
     fn get_suggested_combat_mode(&self) -> CombatMode {
         let mut best = CombatMode::Melee;
         for guid in self.iter_equipment() {
-            if let Some(entity) = self.get_entity(guid) {
-                let wield_location = entity.wield_location();
+            if let Some(wield_location) = self.equipment_mask(guid) {
                 if wield_location.intersects(EquipMask::CASTER) {
                     return CombatMode::Magic;
                 }
@@ -657,7 +677,7 @@ mod tests {
     use crate::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use crate::stats::{AttributeType, SkillType};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::EquipMask;
+    use holtburger_common::properties::{EquipMask, WorldObjectExt};
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, Usable,
     };
@@ -678,6 +698,16 @@ mod tests {
     }
 
     impl WorldContext for TestWorld {
+        fn container_parent(&self, guid: Guid) -> Option<Guid> {
+            self.entities.get(&guid)?.container_id()
+        }
+
+        fn equipment_mask(&self, guid: Guid) -> Option<EquipMask> {
+            self.entities
+                .get(&guid)
+                .map(|entity| entity.wield_location())
+        }
+
         fn get_player_guid(&self) -> Option<Guid> {
             self.player_guid
         }

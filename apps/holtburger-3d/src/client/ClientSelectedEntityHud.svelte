@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 
-	import type { ClientSelectedEntityDisplay } from "./client-entity-interactions";
+	import {
+		EMPTY_CLIENT_SELECTED_DISPLAY,
+		type ClientSelectedEntityDisplay,
+	} from "./client-entity-interactions";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import { CLIENT_TUNING } from "./client-tuning";
 
@@ -15,15 +18,14 @@
 	}
 
 	const { selectedGuid, readSelectedDisplay, onInteract }: Props = $props();
-	let display = $state<ClientSelectedEntityDisplay>({
-		name: null,
-		healthFraction: null,
-	});
+	let display = $state<ClientSelectedEntityDisplay>(
+		EMPTY_CLIENT_SELECTED_DISPLAY,
+	);
 	const displayName = $derived(display.name ?? "Selected Entity");
 	const healthPercent = $derived(
-		display.healthFraction === null
+		display.health.kind !== "known"
 			? null
-			: Math.max(0, Math.min(100, display.healthFraction * 100)),
+			: Math.max(0, Math.min(100, display.health.fraction * 100)),
 	);
 
 	$effect(() => {
@@ -31,9 +33,7 @@
 		// Selection identity is cold UI state; the runtime lookup must not own this effect's lifecycle.
 		untrack(() => {
 			display =
-				guid === null
-					? { name: null, healthFraction: null }
-					: readSelectedDisplay();
+				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
 		});
 	});
 
@@ -41,7 +41,7 @@
 		const sample = (): void => {
 			display =
 				selectedGuid === null
-					? { name: null, healthFraction: null }
+					? EMPTY_CLIENT_SELECTED_DISPLAY
 					: readSelectedDisplay();
 		};
 		const interval = window.setInterval(
@@ -57,7 +57,7 @@
 		<button
 			class="ui-hud-button"
 			type="button"
-			disabled={selectedGuid === null}
+			disabled={!display.canInteract}
 			onclick={onInteract}
 			aria-label="Interact"
 		>
@@ -73,22 +73,24 @@
 			<ClientHudIcon name="examine" />
 		</button>
 	</div>
-	<div
-		class="selected-entity__health ui-hud-surface"
-		role="meter"
-		aria-label="Selected entity health"
-		aria-valuemin="0"
-		aria-valuemax="100"
-		aria-valuenow={healthPercent ?? undefined}
-		aria-valuetext={healthPercent === null
-			? "Unknown"
-			: `${Math.round(healthPercent)}%`}
-	>
-		{#if healthPercent !== null}<div
-				class="selected-entity__health-fill"
-				style:width={`${healthPercent}%`}
-			></div>{/if}
-	</div>
+	{#if display.health.kind === "known" || display.health.kind === "awaiting-response"}
+		<div
+			class="selected-entity__health ui-hud-surface"
+			role="meter"
+			aria-label="Selected entity health"
+			aria-valuemin="0"
+			aria-valuemax="100"
+			aria-valuenow={healthPercent ?? undefined}
+			aria-valuetext={healthPercent === null
+				? "Unknown"
+				: `${Math.round(healthPercent)}%`}
+		>
+			{#if healthPercent !== null}<div
+					class="selected-entity__health-fill"
+					style:width={`${healthPercent}%`}
+				></div>{/if}
+		</div>
+	{/if}
 </section>
 
 <style>

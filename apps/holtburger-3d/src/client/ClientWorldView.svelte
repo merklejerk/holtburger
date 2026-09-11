@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientSelectedEntity } from "./client-selected-entity";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useViewportInputGate } from "../lib/input/viewport-input-context";
 	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
@@ -13,6 +14,8 @@
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
+	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
+	import type { ClientEntityRead } from "./client-entity-mirror";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
@@ -50,7 +53,12 @@
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
+		/** Client-owned selected facts with optional presentation details. */
+		readonly readSelectedEntity: () => ClientSelectedEntity | null;
 		readonly readFrameRates: () => FrameRates | null;
+		/** Pull accepted inventory facts without reactive producer publication. */
+		readonly readEntities: () => ClientEntityRead;
+		readonly onSelectInventoryItem: (guid: number) => void;
 		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
 		/** Use the currently selected entity through the session-owned interaction controller. */
 		readonly onInteractEntity: () => void;
@@ -90,8 +98,11 @@
 		debugEnabled,
 		readMinimapFrame,
 		readDiagnostics,
+		readSelectedEntity,
 		readFrameRates,
 		readSelectedEntityDisplay,
+		readEntities,
+		onSelectInventoryItem,
 		onInteractEntity,
 		readTargetIndicatorFrame,
 		selectedEntityGuid,
@@ -133,7 +144,7 @@
 	/** Cold client presentation policy: runtime visibility or explicit HUD layout editing. */
 	type ClientHudMode = "runtime" | "layout";
 	let hudMode = $state<ClientHudMode>("runtime");
-	let debugOpen = $state(false);
+	let activePanel = $state<"inventory" | "debug" | null>(null);
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
@@ -487,31 +498,40 @@
 	>
 		<ClientShortcutDock
 			{shortcuts}
-			{debugOpen}
-			onDebug={() => (debugOpen = !debugOpen)}
+			{activePanel}
+			onToggle={(panel) => (activePanel = activePanel === panel ? null : panel)}
 		/>
 	</ClientHudPanel>
-	{#if debugEnabled && debugOpen}
+	{#if activePanel !== null}
 		<ClientHudWindow
-			title="Client diagnostics"
-			placement={hudLayout.diagnostics}
-			minWidth={CLIENT_UI_DEFAULTS.diagnostics.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.diagnostics.minSize.height}
+			title={activePanel === "inventory" ? "Inventory" : "Client diagnostics"}
+			placement={hudLayout.floatingPanel}
+			minWidth={CLIENT_UI_DEFAULTS.floatingPanel.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.floatingPanel.minSize.height}
 			{viewport}
-			onClose={() => (debugOpen = false)}
-			onPlacementChange={(diagnostics) =>
-				(hudLayout = { ...hudLayout, diagnostics })}
+			onClose={() => (activePanel = null)}
+			onPlacementChange={(floatingPanel) =>
+				(hudLayout = { ...hudLayout, floatingPanel })}
 		>
-			<ClientDebugPanel
-				{entityMetadata}
-				{readDiagnostics}
-				{entityCollisionDisabled}
-				{onEntityCollisionDisabledChange}
-				{unrestrictedUse}
-				{onUnrestrictedUseChange}
-				{showRetailHiddenGeometry}
-				{onShowRetailHiddenGeometryChange}
-			/>
+			{#if activePanel === "inventory"}
+				<ClientInventoryPanel
+					{readEntities}
+					selectedGuid={selectedEntityGuid}
+					onSelectItem={onSelectInventoryItem}
+				/>
+			{:else}
+				<ClientDebugPanel
+					{entityMetadata}
+					{readDiagnostics}
+					{readSelectedEntity}
+					{entityCollisionDisabled}
+					{onEntityCollisionDisabledChange}
+					{unrestrictedUse}
+					{onUnrestrictedUseChange}
+					{showRetailHiddenGeometry}
+					{onShowRetailHiddenGeometryChange}
+				/>
+			{/if}
 		</ClientHudWindow>
 	{/if}
 </main>

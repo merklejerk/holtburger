@@ -1,3 +1,4 @@
+import { playerEntitySnapshot } from "../../../client/client-entity-mirror.test-support";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -205,6 +206,7 @@ function currentState(): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: PLAYER_GUID,
+		entities: playerEntitySnapshot(PLAYER_GUID),
 		serverTime: 10,
 		worldGeneration: 1,
 		worldName: "Leafcull",

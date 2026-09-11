@@ -35,7 +35,8 @@ pub struct ServerTimeSync {
 ///
 /// NOTE: The player `Entity` is the authoritative holder of player world/object state.
 /// `self.player` only owns local-player/session overlays such as sequencing, stat caches,
-/// enchantments, inventory/equipment indices, and related derived-state bookkeeping.
+/// enchantments and related derived-state bookkeeping; storage relationships belong
+/// to WorldState.
 /// Live local runtime motion is world-owned through `SpatialScene`, which composes
 /// shared body-sampling state without exposing it as an app-facing projection surface.
 ///
@@ -49,6 +50,8 @@ pub struct WorldState {
     pub weenie_types: Option<Arc<holtburger_content::WeenieTypeIndex>>,
     pub entities: EntityManager,
     pub player: PlayerState,
+    /// Accepted containment/equipment declarations, independent of descriptions.
+    pub(crate) storage: super::storage::StorageState,
     pub server_time: Option<ServerTimeSync>,
     pub xp_table: Arc<XpTable>,
     pub skill_table: Arc<SkillTable>,
@@ -387,6 +390,7 @@ impl WorldState {
             weenie_types: bootstrap.weenie_types.clone(),
             entities: EntityManager::new(),
             player: PlayerState::new(),
+            storage: super::storage::StorageState::default(),
             server_time: None,
             xp_table: Arc::clone(&bootstrap.xp_table),
             skill_table: Arc::clone(&bootstrap.skill_table),
@@ -443,11 +447,17 @@ impl WorldState {
 
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
         let guid = guid.into();
+        let deletion_already_retired_storage = self.current_instance_delete_requested(guid);
         if let Some(entity) = self.entities.remove(guid) {
             self.retire_attachment_endpoint(guid, entity.instance_sequence());
             self.motion_runtimes.forget(guid);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
+            // Accepted deletion already retired the old relationships. Later declarations must
+            // survive eviction of that description and await their own hydration.
+            if !deletion_already_retired_storage {
+                self.storage.retire(guid);
+            }
             // Pending links live only as long as the entities at either end of them.
             self.attachments.announcements.remove(&guid);
             self.attachments
@@ -502,7 +512,7 @@ impl WorldState {
 
                 if detached {
                     self.retire_authoritative_body_for_guid(dependent_guid);
-                    self.sync_player_ownership_for_entity(dependent_guid);
+
                     let _ = self
                         .mark_entity_immediately_eligible_for_pruning_if_unretained(dependent_guid);
                 }

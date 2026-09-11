@@ -86,6 +86,10 @@ export const CLIENT_TUNING = {
 			glowBlurCssPixels: 8,
 		},
 	},
+	inventory: {
+		/** Mounted inventory display cadence, independent of host publication. */
+		displayIntervalMs: 250,
+	},
 	selectedEntityHud: {
 		/** Names change rarely and do not need to follow pointer sampling cadence. */
 		displayIntervalMs: 250,

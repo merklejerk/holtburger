@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		clientSelectedEntity,
+		type ClientSelectedEntity,
+	} from "./client-selected-entity";
 	import { z } from "zod";
 	import {
 		weenieCatalogCapabilitySchema,
@@ -44,6 +48,7 @@
 	import {
 		ClientEntityInteractions,
 		type ClientSelectedEntityDisplay,
+		EMPTY_CLIENT_SELECTED_DISPLAY,
 	} from "./client-entity-interactions";
 	import ClientWorldView from "./ClientWorldView.svelte";
 	import type { MinimapFrame } from "../app/minimap-frame";
@@ -483,6 +488,16 @@
 		);
 	}
 
+	function readSelectedEntity(): ClientSelectedEntity | null {
+		return session === null
+			? null
+			: clientSelectedEntity(
+					entitySelection?.selectedGuid() ?? null,
+					session.entities.read(),
+					session.mirror.entities(),
+				);
+	}
+
 	function readDiagnostics(): ClientPresentationDiagnostics | null {
 		return presentationSession?.readDiagnostics() ?? null;
 	}
@@ -496,10 +511,7 @@
 	}
 
 	function readSelectedEntityDisplay(): ClientSelectedEntityDisplay {
-		return {
-			name: presentationSession?.readSelectedEntityName() ?? null,
-			healthFraction: entityInteractions?.healthFraction() ?? null,
-		};
+		return entityInteractions?.display() ?? EMPTY_CLIENT_SELECTED_DISPLAY;
 	}
 
 	async function setEntityCollisionDisabled(disabled: boolean): Promise<void> {
@@ -821,9 +833,13 @@
 		{debugEnabled}
 		{readMinimapFrame}
 		{readDiagnostics}
+		{readSelectedEntity}
 		{readFrameRates}
 		{readTargetIndicatorFrame}
 		{readSelectedEntityDisplay}
+		readEntities={() =>
+			session === null ? { kind: "pending" } : session.entities.read()}
+		onSelectInventoryItem={(guid) => entitySelection?.selectInventoryItem(guid)}
 		onInteractEntity={() => entityInteractions?.interact(unrestrictedUse)}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}

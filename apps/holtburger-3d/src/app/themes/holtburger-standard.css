@@ -12,6 +12,11 @@
 		--ui-color-shadow: #0d0806;
 		--ui-color-accent: #e6cd8b;
 		--ui-color-active: #c2ffd9;
+		/* Inventory headers and shared item cells use a warm glow for selection. */
+		--ui-item-selection-color: #ffe2a0;
+		--ui-item-selection-outline: none;
+		--ui-item-selection-shadow: inset 0 0 9px #eab94a99, 0 0 6px #eab94a99;
+		--ui-item-selection-background: #ad751622;
 		--ui-color-focus: #fff1cc;
 		--ui-color-danger: #ffac9c;
 		--ui-color-warning: #efc46f;

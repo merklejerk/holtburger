@@ -38,7 +38,7 @@
 	let adjustments = $state<Partial<ClientHudLayout>>({});
 	const shortcuts = createClientShortcuts(true);
 	/** Production HUD surfaces whose component inputs do not require a GPU owner. */
-	type HudSurface = Exclude<keyof ClientHudLayout, "minimap" | "diagnostics">;
+	type HudSurface = Exclude<keyof ClientHudLayout, "minimap" | "floatingPanel">;
 	const layout = $derived.by(() => {
 		const width = (stageWidth - 16 * (columns + 1)) / columns;
 		const right = columns === 2 ? width + 32 : 16;
@@ -61,7 +61,7 @@
 			jumpPower: place(width - 22, 310, 38, 132),
 			toast: place(16, 370, width - 70, 64),
 			chat: place(right, columns === 2 ? 16 : 470, width, 264),
-			diagnostics: place(
+			floatingPanel: place(
 				right,
 				columns === 2 ? 304 : 758,
 				width,
@@ -341,7 +341,8 @@
 					selectedGuid={1}
 					readSelectedDisplay={() => ({
 						name: "Drudge Prowler",
-						healthFraction: 0.68,
+						health: { kind: "known", fraction: 0.68 },
+						canInteract: true,
 					})}
 					onInteract={() => {}}
 				/>{/snippet}
@@ -367,8 +368,8 @@
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
 					{shortcuts}
-					debugOpen={windowOpen}
-					onDebug={() => (windowOpen = !windowOpen)}
+					activePanel={windowOpen ? "debug" : null}
+					onToggle={() => (windowOpen = !windowOpen)}
 				/>{/snippet}
 			{@render hud("character", character)}
 			{@render hud("selectedEntity", target)}
@@ -381,13 +382,13 @@
 			{#if windowOpen}
 				<ClientHudWindow
 					title="Component showcase"
-					placement={layout.diagnostics}
+					placement={layout.floatingPanel}
 					{viewport}
-					minWidth={CLIENT_UI_DEFAULTS.diagnostics.minSize.width}
-					minHeight={CLIENT_UI_DEFAULTS.diagnostics.minSize.height}
+					minWidth={CLIENT_UI_DEFAULTS.floatingPanel.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.floatingPanel.minSize.height}
 					onClose={() => (windowOpen = false)}
 					onPlacementChange={(placement) =>
-						(adjustments = { ...adjustments, diagnostics: placement })}
+						(adjustments = { ...adjustments, floatingPanel: placement })}
 				>
 					<div class="showcase-window-body ui-body">
 						<nav class="ui-tabs" aria-label="Showcase pages">
@@ -419,6 +420,7 @@
 									recordCount: 1,
 								}}
 								readDiagnostics={() => null}
+								readSelectedEntity={() => null}
 								entityCollisionDisabled={false}
 								onEntityCollisionDisabledChange={() => {}}
 								{unrestrictedUse}

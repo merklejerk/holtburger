@@ -1209,8 +1209,10 @@ fn player_contained_object_readiness_requires_the_recursive_authority_closure() 
     let mut container = Entity::new(container_guid, "Pack".to_string(), WorldPosition::default());
     container.set_container_id(Some(player_guid));
     state.add_entity(container);
-    state.player.add_to_inventory(container_guid);
-    state.player.add_to_inventory(item_guid);
+    state
+        .storage
+        .announce_container(container_guid, state.player.guid);
+    state.storage.announce_container(item_guid, container_guid);
 
     assert!(!state.all_player_contained_objects_exist());
 
@@ -1219,11 +1221,8 @@ fn player_contained_object_readiness_requires_the_recursive_authority_closure() 
     state.add_entity(item);
     assert!(state.all_player_contained_objects_exist());
 
-    state
-        .entities
-        .get_mut(container_guid)
-        .expect("container should exist")
-        .set_container_id(Some(item_guid));
+    // A declared ancestor whose description is missing also blocks readiness.
+    state.entities.remove(container_guid);
     assert!(!state.all_player_contained_objects_exist());
 }
 
@@ -2193,7 +2192,7 @@ fn test_inventory_put_obj_in_container() {
         item_guid,
         container_guid,
         slot: 0,
-        container_type: 0,
+        container_type: holtburger_common::properties::InventoryEntryKind::Item,
     };
     let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
@@ -2283,7 +2282,7 @@ fn test_inventory_put_obj_in_container_emits_entity_moved_when_item_leaves_world
         item_guid,
         container_guid,
         slot: 0,
-        container_type: 0,
+        container_type: holtburger_common::properties::InventoryEntryKind::Item,
     };
     let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
@@ -2724,6 +2723,8 @@ fn test_self_object_create_bootstraps_player_position() {
         coords: Vector3::new(1.0, 2.0, 3.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
+    let mut private_properties = WorldObjectProperties::default();
+    private_properties.set_int_prop(PropertyInt::CoinValue, 12345);
     let player_description = GameMessage::GameEvent(Box::new(GameEventMessage {
         target: player_guid,
         sequence: 1,
@@ -2733,7 +2734,7 @@ fn test_self_object_create_bootstraps_player_position() {
             name: "Player".to_string(),
             wee_type: 1,
             pos: Some(initial_pos),
-            properties: WorldObjectProperties::default(),
+            properties: private_properties,
             positions: std::collections::BTreeMap::new(),
             attributes: std::collections::BTreeMap::new(),
             skills: std::collections::BTreeMap::new(),
@@ -2799,6 +2800,39 @@ fn test_self_object_create_bootstraps_player_position() {
     );
     assert!(state.entity_lifecycle_state(player_guid).is_none());
     assert!(!events.is_empty());
+    assert_eq!(
+        state.player_int_property(PropertyInt::CoinValue),
+        Some(12345)
+    );
+    // A private update after login must survive another public recreation, including zero.
+    let update = GameMessage::PrivateUpdatePropertyInt(Box::new(
+        holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt {
+            sequence: 1,
+            guid: Guid::NULL,
+            property: PropertyInt::CoinValue as u32,
+            value: 0,
+        },
+    ));
+    state.handle_message(&update);
+    state.handle_message(&msg);
+    assert_eq!(state.player_int_property(PropertyInt::CoinValue), Some(0));
+    // Public-only values must still disappear when omitted by a replacement description.
+    state
+        .player_entity_mut()
+        .unwrap()
+        .set_int_prop(PropertyInt::StackSize, 7);
+    state.handle_message(&msg);
+    assert_eq!(state.player_int_property(PropertyInt::StackSize), None);
+    // A fresh login baseline cannot inherit private values from the old one.
+    let mut fresh_description = player_description;
+    if let GameMessage::GameEvent(event) = &mut fresh_description
+        && let GameEvent::PlayerDescription(data) = &mut event.event
+    {
+        data.properties.ints.0.remove(&PropertyInt::CoinValue);
+    }
+    state.handle_message(&fresh_description);
+    state.handle_message(&msg);
+    assert_eq!(state.player_int_property(PropertyInt::CoinValue), None);
 }
 
 fn spawn_invalid_motion_data(
@@ -2837,8 +2871,8 @@ fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
     entity.set_container_id(Some(player_guid));
     state.player.guid = player_guid;
     state.entities.insert(entity);
-    state.sync_player_ownership_for_entity(guid);
-    assert!(state.player.inventory.contains(&guid));
+    state.storage.announce_container(guid, player_guid);
+    assert!(state.storage.owned_by(guid, state.player.guid));
 
     let msg = GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
         guid,
@@ -2848,7 +2882,7 @@ fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
     let events = state.handle_message(&msg);
 
     assert!(state.entities.get(guid).is_some());
-    assert!(!state.player.inventory.contains(&guid));
+    assert!(!state.storage.owned_by(guid, state.player.guid));
     assert!(
         state
             .entity_lifecycle_state(guid)
@@ -2870,8 +2904,8 @@ fn test_stale_object_delete_does_not_retire_newer_instance() {
     entity.set_container_id(Some(player_guid));
     state.player.guid = player_guid;
     state.add_entity(entity);
-    state.sync_player_ownership_for_entity(guid);
-    assert!(state.player.inventory.contains(&guid));
+    state.storage.announce_container(guid, player_guid);
+    assert!(state.storage.owned_by(guid, state.player.guid));
 
     let events = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
         guid,
@@ -2880,7 +2914,7 @@ fn test_stale_object_delete_does_not_retire_newer_instance() {
 
     assert!(events.is_empty());
     assert!(state.is_entity_client_visible(guid));
-    assert!(state.player.inventory.contains(&guid));
+    assert!(state.storage.owned_by(guid, state.player.guid));
     assert!(state.entity_lifecycle_state(guid).is_none());
 }
 
@@ -2963,7 +2997,7 @@ fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
 
     let _ = state.handle_message(&msg);
 
-    assert!(state.player.inventory.contains(&guid));
+    assert!(state.storage.owned_by(guid, state.player.guid));
     assert!(state.entity_lifecycle_state(guid).is_none());
     assert_eq!(
         state.entities.get(guid).unwrap().position.landblock_id,
@@ -4450,7 +4484,9 @@ fn test_add_to_trade_marks_preview_only_for_non_authoritative_entities() {
         "Owned".to_string(),
         WorldPosition::default(),
     ));
-    state.player.add_to_inventory(owned_guid);
+    state
+        .storage
+        .announce_container(owned_guid, state.player.guid);
 
     state.add_trade_item(0x02, preview_guid, &mut Vec::new());
     state.add_trade_item(0x01, owned_guid, &mut Vec::new());
@@ -4657,7 +4693,9 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     owned_entity.position.landblock_id = Guid::NULL;
     state.entities.insert(owned_entity);
     state.mark_trade_preview(owned_guid);
-    state.player.add_to_inventory(owned_guid);
+    state
+        .storage
+        .announce_container(owned_guid, state.player.guid);
 
     if let Some(trade) = state.trade.as_mut() {
         trade.self_side.items.push(owned_guid);
@@ -4710,7 +4748,7 @@ fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
             container: container_guid,
             items: vec![ViewContentsEventItem {
                 guid: item_guid,
-                container_type: 0,
+                container_type: holtburger_common::properties::InventoryEntryKind::Item,
             }],
         })),
     }));
@@ -4747,7 +4785,7 @@ fn test_view_contents_marks_existing_entity_as_container_preview() {
             container: container_guid,
             items: vec![ViewContentsEventItem {
                 guid: item_guid,
-                container_type: 0,
+                container_type: holtburger_common::properties::InventoryEntryKind::Item,
             }],
         })),
     }));
@@ -4892,7 +4930,7 @@ fn test_reopening_container_does_not_reactivate_stale_preview_contents() {
             container: container_guid,
             items: vec![ViewContentsEventItem {
                 guid: new_item_guid,
-                container_type: 0,
+                container_type: holtburger_common::properties::InventoryEntryKind::Item,
             }],
         })),
     }));
@@ -5048,7 +5086,9 @@ fn test_close_ground_container_preserves_entity_with_other_retention() {
     entity.position.landblock_id = Guid::NULL;
     state.entities.insert(entity);
     state.mark_container_preview(item_guid);
-    state.player.add_to_inventory(item_guid);
+    state
+        .storage
+        .announce_container(item_guid, state.player.guid);
 
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
         target: Guid::NULL,
@@ -5062,7 +5102,7 @@ fn test_close_ground_container_preserves_entity_with_other_retention() {
 
     assert!(state.entities.get(item_guid).is_some());
     assert!(state.entity_lifecycle_state(item_guid).is_none());
-    assert!(state.player.inventory.contains(&item_guid));
+    assert!(state.storage.owned_by(item_guid, state.player.guid));
     assert!(!events.iter().any(
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
     ));
@@ -5098,7 +5138,9 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     inventory_entity.position.landblock_id = Guid::NULL;
     inventory_entity.set_container_id(Some(player_guid));
     state.add_entity(inventory_entity);
-    state.player.add_to_inventory(inventory_guid);
+    state
+        .storage
+        .announce_container(inventory_guid, state.player.guid);
 
     let mut equipped_entity = Entity::new(
         equipped_guid,
@@ -5109,8 +5151,8 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     equipped_entity.set_wielder_id(Some(player_guid));
     state.add_entity(equipped_entity);
     state
-        .player
-        .wield_item(equipped_guid, EquipMask::MELEE_WEAPON);
+        .storage
+        .equip(equipped_guid, player_guid, Some(EquipMask::MELEE_WEAPON));
 
     let mut preview_entity = Entity::new(
         preview_guid,

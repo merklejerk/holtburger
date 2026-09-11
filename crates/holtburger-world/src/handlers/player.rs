@@ -1,5 +1,4 @@
 use crate::WorldEvent;
-use crate::context::{WorldContext, WorldContextExt};
 use crate::entity::EntityMotionSnapshot;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::spatial::RuntimeBodyResetCause;
@@ -200,10 +199,6 @@ pub(crate) fn handle_message(
             state.player.update_vital_current(*vital, *current, events);
             true
         }
-        GameMessage::InventoryRemoveObject(data) => {
-            state.player.remove_from_inventory(data.object_guid);
-            false
-        }
         GameMessage::GameEvent(_) => false,
         _ => false,
     }
@@ -308,24 +303,6 @@ pub(crate) fn handle_event(
         }
         GameEvent::UpdateHealth(data) => {
             state.update_health_fraction(data.target, data.health, events)
-        }
-        GameEvent::InventoryPutObjInContainer(data) => {
-            if state.get_player_guid() == Some(data.container_guid)
-                || state.is_in_player_inventory(data.container_guid)
-            {
-                state.player.add_to_inventory(data.item_guid);
-            }
-            false
-        }
-        GameEvent::InventoryPutObjectIn3D(data) => {
-            state.player.remove_from_inventory(data.object_guid);
-            false
-        }
-        GameEvent::WieldObject(data) => {
-            if event.target == state.player.guid {
-                state.player.wield_item(data.object_guid, data.equip_mask);
-            }
-            false
         }
         _ => false,
     }

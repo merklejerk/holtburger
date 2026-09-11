@@ -16,6 +16,7 @@ pub mod crafting;
 pub mod damage;
 pub mod entity;
 pub mod entity_appearance;
+pub mod entity_facts;
 pub mod entity_physics;
 pub mod entity_scale;
 pub mod events;

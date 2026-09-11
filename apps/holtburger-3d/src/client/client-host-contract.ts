@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { clientEntitySnapshotSchema } from "./client-entity-mirror";
 import {
 	decodeDynamicEntitySnapshot,
 	type DynamicEntitySnapshot,
@@ -231,6 +232,7 @@ const currentStateSchema = z
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),
 		dynamic: z.unknown(),
+		entities: clientEntitySnapshotSchema,
 	})
 	.strict();
 

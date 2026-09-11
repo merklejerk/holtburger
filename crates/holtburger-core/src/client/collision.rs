@@ -1103,7 +1103,7 @@ fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRem
     let entity = world.entities.get(guid)?;
     let body_id = SpatialBodyId::Entity(guid);
     if guid == world.player.guid
-        || entity.attachment.is_some()
+        || entity.attachment().is_some()
         || !entity.physics.effective().supports_local_simulation()
     {
         return None;
@@ -2451,7 +2451,8 @@ mod tests {
         assert!(!world.set_local_player_runtime_pose(destination).is_empty());
         let projected =
             crate::client::dynamic_entity_view::project_client_dynamic_entity(&world, guid)
-                .unwrap();
+                .unwrap()
+                .expect("placed player");
         let crate::DynamicEntityPlacementView::World {
             pose,
             spatial_membership,

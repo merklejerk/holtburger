@@ -180,6 +180,8 @@ Signals that an object has been picked up from the world. Typically triggers a d
 | Type | Name | Description |
 | :--- | :--- | :--- |
 | `uint32` | `GUID` | The object being picked up. |
+| `uint16` | `InstanceSeq` | Object incarnation. |
+| `uint16` | `PositionSeq` | Position timestamp shared with attachment updates. |
 
 ### `0xF749` ParentEvent (S2C)
 Signals that an object has been physically linked to another object. This primary affects the object's physics and coordinate system (making its position relative to the parent).
@@ -354,6 +356,8 @@ Used to update the `PhysicsState` bitmask of an object (e.g., hiding/revealing a
 ### `0xF74A` PickupEvent (S2C)
 Signals that an object has been picked up from the world. Typically triggers a despawn in the client.
 - `uint32` `GUID`
+- `uint16` `InstanceSeq`
+- `uint16` `PositionSeq`
 
 ### `0xF749` ParentEvent (S2C)
 Signals that an object has been physically linked to another object. This primary affects the object's physics and coordinate system (making its position relative to the parent).

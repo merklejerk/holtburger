@@ -962,6 +962,29 @@ impl ClientRuntime {
                     self.emit_dynamic_entity_upsert(guid);
                 }
             }
+            WorldEvent::EntityScenePlacementChanged {
+                guid,
+                generation,
+                previous_generation,
+                placement,
+            } => {
+                if generation != previous_generation {
+                    self.remove_dynamic_scale_entity(crate::DynamicScaleTarget {
+                        guid: *guid,
+                        instance_sequence: *previous_generation,
+                    });
+                }
+                match placement {
+                    holtburger_world::ResolvedScenePlacement::Unresolved(_) => {
+                        self.emit_dynamic_entity_removed(*guid, u64::from(*previous_generation))
+                    }
+                    _ => {
+                        self.emit_dynamic_entity_upsert(*guid);
+                        self.observe_dynamic_scale_entity(*guid);
+                        self.observe_selection_envelope_entity(*guid);
+                    }
+                }
+            }
             WorldEvent::RuntimeBodyAdvanced { .. } => {}
             WorldEvent::RuntimeBodyRemoved { body_id } => {
                 let _ = self
@@ -1096,15 +1119,15 @@ mod tests {
         Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
     };
     use holtburger_world::{
-        AuthoritativeBodyVectors, CollisionScene, DynamicBodyCollisionDefinition,
-        DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
-        EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
-        FreeSphereConfig, GroundedConfig, LocalIntegrationDemand, LocalPhysicalDemand,
-        LocalTargetDemand, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
-        PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, PlayerMotionTableSource,
-        PreparedEntityTargetGeometry, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
-        RETAIL_WALKABLE_NORMAL_Z, SelfMovementCapabilities, SelfMovementKinematics,
+        CollisionScene, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+        DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
+        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, FreeSphereConfig,
+        GroundedConfig, LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
+        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, PlayerMotionTableSource, PreparedEntityTargetGeometry,
+        RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+        SelfMovementCapabilities, SelfMovementKinematics,
     };
 
     const JUMP_FIXTURE_STAND_ANIMATION: u32 = 0x0300_1001;
@@ -2335,7 +2358,14 @@ mod tests {
         let motion_table_id = 0x0900_0040;
         world.set_motion_sequences(jump_presentation_motion_catalog(motion_table_id));
 
-        let mut remote = Entity::new(remote_guid, "Remote".to_owned(), WorldPosition::default());
+        let mut remote = Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
         remote
             .properties
             .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
@@ -2467,7 +2497,14 @@ mod tests {
         client
             .world
             .set_motion_sequences(jump_presentation_motion_catalog(motion_table_id));
-        let mut remote = Entity::new(remote_guid, "Remote".to_owned(), WorldPosition::default());
+        let mut remote = Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
         remote.wcid = Some(42);
         remote
             .properties
@@ -2481,18 +2518,6 @@ mod tests {
                 PhysicsState::GRAVITY,
             ));
         client.world.add_entity(remote);
-        client.world.scene.apply_authoritative_body_effect(
-            holtburger_world::SpatialBodyId::Entity(remote_guid),
-            holtburger_world::AuthoritativePoseEffect::Initialize {
-                pose: WorldPosition::default(),
-            },
-            AuthoritativeBodyVectors {
-                velocity: Vector3::zero(),
-                acceleration: Vector3::zero(),
-                omega: Vector3::zero(),
-            },
-            Instant::now(),
-        );
 
         client
             .world

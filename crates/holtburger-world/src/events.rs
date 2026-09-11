@@ -51,6 +51,17 @@ pub enum FellowshipActivity {
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
+    /// Data lifetime is unchanged; scene consumers must admit or withdraw this incarnation.
+    EntityScenePlacementChanged {
+        /// Retained entity whose placement changed.
+        guid: Guid,
+        /// Server incarnation; scene admission does not manufacture a new generation.
+        generation: u16,
+        /// Prior scene incarnation to withdraw when replacement cannot yet be admitted.
+        previous_generation: u16,
+        /// Complete world-owned placement decision for consumers.
+        placement: crate::ResolvedScenePlacement,
+    },
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
     /// An accepted health observation, including unchanged responses to a fresh health query.

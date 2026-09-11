@@ -1,4 +1,4 @@
-use crate::attachment::PhysicsAttachment;
+use crate::attachment::{EntityPlacementIntent, PhysicsAttachment};
 use crate::book::BookData;
 use crate::entity_appearance::EntityAppearance;
 use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_physics_state};
@@ -1161,8 +1161,8 @@ pub struct Entity {
     pub selection_envelope: Option<crate::SelectionEnvelope>,
     /// Lossless ordered visual substitutions normalized from the producer's source format.
     pub appearance: EntityAppearance,
-    /// Set while another object owns this entity's position. See [`PhysicsAttachment`].
-    pub attachment: Option<PhysicsAttachment>,
+    /// Received placement authority; retained coordinates alone cannot override withdrawal.
+    pub placement_intent: EntityPlacementIntent,
     pub autonomous_movement: bool,
     /// Retained steady-state movement supplied by this entity's current network generation.
     pub network_motion: EntityNetworkMotion,
@@ -1227,6 +1227,19 @@ impl HasPropertiesMut for Entity {
 }
 
 impl Entity {
+    /// Received attachment intent, which may still be waiting for a usable parent.
+    pub const fn attachment(&self) -> Option<PhysicsAttachment> {
+        self.placement_intent.attachment()
+    }
+
+    /// Apply an attachment or withdraw placement without promoting retained coordinates.
+    pub fn set_attachment(&mut self, attachment: Option<PhysicsAttachment>) {
+        self.placement_intent = match attachment {
+            Some(attachment) => EntityPlacementIntent::Attached(attachment),
+            None => EntityPlacementIntent::Withdrawn,
+        };
+    }
+
     /// Current server instance sequence used as the client composition's realization generation.
     pub const fn instance_sequence(&self) -> u16 {
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX]
@@ -1470,6 +1483,7 @@ impl Entity {
         teleport_sequence: u16,
     ) {
         self.position = position;
+        self.placement_intent = EntityPlacementIntent::Independent;
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
         self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
         self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
@@ -1596,7 +1610,7 @@ impl Entity {
         self.appearance = EntityAppearance::from(&data.model_data);
         // The wire carries placement in the ANIMFRAME slot, defaulting to 0 when the flag is
         // absent, exactly as `PhysicsDesc` initializes `animframe_id` (`acclient.c:318475`).
-        self.attachment = data.parent.and_then(|parent| {
+        let attachment = data.parent.and_then(|parent| {
             PhysicsAttachment::from_wire(
                 parent.id,
                 parent.location_id,
@@ -1610,6 +1624,11 @@ impl Entity {
             })
             .ok()
         });
+
+        self.placement_intent = match attachment {
+            Some(attachment) => EntityPlacementIntent::Attached(attachment),
+            None => EntityPlacementIntent::Independent,
+        };
 
         if let Some(v) = data.velocity {
             self.velocity = v;
@@ -1684,7 +1703,7 @@ impl Entity {
             scale: EntityScaleState::default(),
             selection_envelope: None,
             appearance: EntityAppearance::default(),
-            attachment: None,
+            placement_intent: EntityPlacementIntent::Independent,
             autonomous_movement: false,
             network_motion: EntityNetworkMotion::Uninitialized,
             server_action_sequence: 0,

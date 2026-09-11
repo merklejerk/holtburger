@@ -313,9 +313,14 @@ Dynamic entities extend the same scene without a second store or solver:
   `SpatialBody::physical` is optional collision/physics state, and `set_dynamic_physical_body`
   adds, removes, or reconfigures it reversibly. Removing physical allocation never retires the
   pose body, and compatible movement geometry preserves contact/placement response memory.
-- Attachments delegate independent placement and collision authority to the parent. The client
-  keeps a parent-derived canonical pose record for shared world consumers, while
-  `delegate_attached_entity_position` removes independent dynamic physics. Presentation retains
+- Entity data can remain retained without usable scene placement. `EntityPlacementIntent` separates
+  independent position authority, received attachment intent and explicit withdrawal;
+  `WorldState::resolve_scene_placement` resolves ancestor readiness without requiring loaded assets
+  or a runtime body. Missing prerequisites are ordinary unresolved state; cycles are errors.
+- Attachments delegate independent placement and collision authority to the parent. World attachment
+  reconciliation maintains a parent-derived canonical pose record and removes independent dynamic
+  physics. Unresolved descendants have no participating body, selection candidate or dynamic view;
+  ordinary updates still reach retained data. Presentation retains
   `EntityPlacement::Attached(PhysicsAttachment)` with parent GUID, holding location, and local
   placement for part-hierarchy composition. An attached pose record is not an independent mover
   or collision target.

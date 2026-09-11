@@ -190,14 +190,23 @@ impl ClientRuntime {
 
             for event in &pending_events {
                 self.handle_runtime_world_event_with_context(event, teleport_batch);
-                let created_guid = match event {
+                let admitted_guid = match event {
                     WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
                         Some(entity.guid)
                     }
                     WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
+                    WorldEvent::EntityScenePlacementChanged {
+                        guid, placement, ..
+                    } if !matches!(
+                        placement,
+                        holtburger_world::ResolvedScenePlacement::Unresolved(_)
+                    ) =>
+                    {
+                        Some(*guid)
+                    }
                     _ => None,
                 };
-                if let Some(guid) = created_guid {
+                if let Some(guid) = admitted_guid {
                     self.replay_entity_cues(guid)?;
                 }
             }

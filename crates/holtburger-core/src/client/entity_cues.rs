@@ -27,7 +27,7 @@ struct PendingEntityCues {
     cues: VecDeque<PendingEntityCue>,
 }
 
-/// Raw pre-entity cues shared by the simulation and presentation dispatch paths.
+/// Raw cues waiting for scene admission, shared by simulation and presentation dispatch.
 #[derive(Debug, Default)]
 pub(super) struct ClientEntityCueInbox {
     by_guid: HashMap<Guid, PendingEntityCues>,
@@ -67,9 +67,12 @@ impl ClientEntityCueInbox {
 }
 
 impl ClientRuntime {
-    /// Routes one cue immediately when its entity exists, or retains the raw cue until creation.
+    /// Routes one cue when its entity has usable scene placement, or retains it until admission.
     pub(super) fn route_entity_cue(&mut self, guid: Guid, cue: PendingEntityCue) -> Result<()> {
-        if self.world.entities.get(guid).is_none() {
+        if matches!(
+            self.world.resolve_scene_placement(guid)?,
+            holtburger_world::ResolvedScenePlacement::Unresolved(_)
+        ) {
             self.entity_cue_inbox.queue(guid, cue, Instant::now());
             return Ok(());
         }
@@ -78,6 +81,12 @@ impl ClientRuntime {
 
     /// Replays valid early cues in wire order after the entity's runtime consumers are registered.
     pub(super) fn replay_entity_cues(&mut self, guid: Guid) -> Result<()> {
+        if matches!(
+            self.world.resolve_scene_placement(guid)?,
+            holtburger_world::ResolvedScenePlacement::Unresolved(_)
+        ) {
+            return Ok(());
+        }
         let pending = self.entity_cue_inbox.take(guid, Instant::now());
         for cue in pending {
             self.dispatch_entity_cue(guid, cue)?;
@@ -150,9 +159,14 @@ mod tests {
         client.handle_message(&bytes).await.unwrap();
         client.handle_message(&bytes).await.unwrap();
         assert!(events.try_recv().is_err());
-        client
-            .world
-            .add_entity(Entity::new(guid, "Chest".into(), WorldPosition::default()));
+        client.world.add_entity(Entity::new(
+            guid,
+            "Chest".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        ));
         client.replay_entity_cues(guid).unwrap();
         for _ in 0..2 {
             assert!(
@@ -269,7 +283,10 @@ mod tests {
         client.world.add_entity(Entity::new(
             guid,
             "Early target".to_owned(),
-            WorldPosition::default(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
         ));
         client.replay_entity_cues(guid).unwrap();
 

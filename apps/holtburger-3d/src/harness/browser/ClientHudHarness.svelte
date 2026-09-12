@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
 	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
@@ -10,7 +11,7 @@
 		ClientDialogs,
 		type ClientDialogPresentation,
 	} from "../../client/client-dialogs";
-	import { provideViewportInputGate } from "../../lib/input/viewport-input-context";
+	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { probeBrowserInput } from "./input-browser-probe";
 	import { onMount, tick } from "svelte";
 	import { ClientEntityInteractions } from "../../client/client-entity-interactions";
@@ -47,7 +48,7 @@
 		type ClientToast,
 	} from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
-	const inputGate = provideViewportInputGate();
+	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 
 	interface ClientHudHarnessRectangle {
 		readonly height: number;
@@ -261,7 +262,15 @@
 			}),
 		});
 
+	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
+		null;
 	interface ClientHudHarnessApi {
+		/** Install a real DOM fixture for CDP keyboard and pointer events. */
+		readonly beginKeyboardProbe: () => void;
+		/** Read the currently installed keyboard fixture. */
+		readonly keyboardProbe: () => ReturnType<
+			typeof installKeyboardPolicyFixture
+		>;
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
 		/** Verify style updates without replacing world presentation or HUD placement. */
@@ -451,7 +460,7 @@
 		const canvas = document.querySelector<HTMLCanvasElement>(".client-canvas");
 		if (canvas === null)
 			throw new Error("Dialog probe requires the viewport canvas.");
-		canvas.focus();
+		keyboard.returnToGame();
 		const previousFocus = document.activeElement;
 		const startCommands = interactionCommands.length;
 		const longMessage = Array.from(
@@ -1344,8 +1353,10 @@
 		try {
 			chat.focus();
 			closeModal();
-			if (inputGate.allowed)
-				throw new Error("Closing a modal released chat's input blocker.");
+			if (keyboard.gameActive || !inputGate.allowed)
+				throw new Error(
+					"Chat must own keyboard input while leaving viewport gestures available.",
+				);
 			canvas.dispatchEvent(
 				new PointerEvent("pointermove", {
 					clientX: 700,
@@ -1353,12 +1364,12 @@
 					pointerId: 1,
 				}),
 			);
-			canvas.focus();
+			keyboard.returnToGame();
 			if (!inputGate.allowed)
-				throw new Error("Leaving chat retained its input blocker.");
+				throw new Error("Returning to the game retained a viewport blocker.");
 		} finally {
 			closeModal();
-			canvas.focus();
+			keyboard.returnToGame();
 		}
 	}
 
@@ -1441,7 +1452,7 @@
 			icons,
 		);
 		inventory = inventoryOwner;
-		probeBrowserInput();
+		probeBrowserInput(keyboard, inputGate);
 		void interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
@@ -1449,6 +1460,14 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			beginKeyboardProbe: () => {
+				keyboardFixture = installKeyboardPolicyFixture(keyboard, inputGate);
+			},
+			keyboardProbe: () => {
+				if (keyboardFixture === null)
+					throw new Error("Keyboard fixture has not been installed.");
+				return keyboardFixture;
+			},
 			probeInventory,
 			probeThemeApplication,
 			probeSelectedDiagnostics,
@@ -1475,6 +1494,7 @@
 			toggleMode,
 		};
 		return () => {
+			keyboardFixture?.dispose();
 			inventoryOwner.destroy();
 			inventory = null;
 			icons.dispose();

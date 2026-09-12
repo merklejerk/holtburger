@@ -106,17 +106,55 @@ export async function probeClientTheme(
 	await read(() => {
 		const option = document.querySelector('[role="option"]');
 		option.click();
-		option.focus();
 	});
 	await read(() => new Promise((resolve) => requestAnimationFrame(resolve)));
 	await capture("characters");
+	for (const [key, windowsVirtualKeyCode, index] of [
+		["End", 35, -1],
+		["Home", 36, 0],
+	]) {
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key,
+			code: key,
+			windowsVirtualKeyCode,
+		});
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			key,
+			code: key,
+			windowsVirtualKeyCode,
+		});
+		const valid = await evaluateExpression(
+			client,
+			`(() => {
+			const options = [...document.querySelectorAll('.client-character')];
+			return options.at(${index}).getAttribute('aria-selected') === 'true' &&
+				document.activeElement.classList.contains('client-character-list');
+		})()`,
+		);
+		if (!valid)
+			throw new Error(
+				`Character selection did not handle ${key} in its keyboard scope.`,
+			);
+	}
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Enter",
+		code: "Enter",
+		windowsVirtualKeyCode: 13,
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Enter",
+		code: "Enter",
+		windowsVirtualKeyCode: 13,
+	});
 	await read(async () => {
 		const enter = [...document.querySelectorAll(".client-action")].find(
-			(button) => button.textContent.trim() === "Enter World",
+			(button) => button.textContent.trim().startsWith("Enter"),
 		);
-		if (!enter || enter.disabled)
-			throw new Error("Character selection did not enable explicit entry.");
-		enter.click();
+		if (!enter) throw new Error("Character entry control is absent.");
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		if (!enter.disabled || !enter.textContent.includes("Entering"))
 			throw new Error("Character entry did not publish its pending state.");

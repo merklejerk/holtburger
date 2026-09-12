@@ -24,17 +24,44 @@ button numbers: primary `0`, middle `1`, secondary `2`.
 
 `APP_INPUT` is the shared configuration entry point for both modes. Its `InputContext` resolves
 presses to semantic actions, suppresses repeat, and retains physical-key ownership until release.
-Each mounted frontend owns its action context. A per-app `ViewportInputGate`, provided through
-Svelte context, coordinates cancellation across keyboard controllers and pointer gestures.
-Chat focus, Explorer texture modals, and scene/lifecycle transitions hold independent blockers;
-releasing one cannot release another. Blocking cancels current input, and unblocking never resumes
-held actions. Window/viewport focus loss cancels input without adding a persistent blocker.
+Each mounted frontend owns its action context. `provideAppInputPolicy()` installs one keyboard
+router and one `ViewportInputGate` for the app; descendants access them with `useAppInputPolicy()`.
 
-Participants attach a cancellation callback and detach it on disposal. Event handlers consult
-`allowed` before starting viewport actions and continue processing releases/cancellation. Ordinary
-DOM controls keep their native event delivery. Precise jump remains a client-owned interaction
-within the viewport; it does not block the whole viewport. Cancellation drops held input without
-releasing a charged jump. Host movement contracts do not contain browser bindings.
+Keyboard ownership defaults to the game. Ordinary HUD buttons, toggles, inventory controls, and
+panel gestures do not acquire it. Text/number editors, editable content, and native selects acquire
+it through focus. Tab and Shift+Tab never traverse the interface, including within dialogs;
+`tabindex="-1"` still permits intentional programmatic focus. Clicking a `data-game-viewport`
+surface or leaving an editor returns keyboard ownership to the game. Mouse gestures remain local.
+
+Components with keyboard behavior declare it with `use:keyboard.scope={{ keydown: handleKeydown }}`.
+Registration does not activate a scope. Native editor focus activates editing automatically;
+custom surfaces use `keyboard.activate(element)` or declare an `activation` key matcher in the
+scope. Chat demonstrates command activation, and character selection demonstrates explicit screen
+activation. Custom scopes can also provide `keyup` and `cancel` when they maintain held actions.
+Do not add component-level global keyboard listeners or blanket key propagation suppression.
+
+The pointer-over-text toggle enables mouse selection and native copying in chat history. Clicking
+interactive history activates its keyboard scope; Escape returns to the game without disabling the
+toggle. New messages preserve the scroll position while interaction is enabled; disabling it resumes
+following the newest messages.
+
+Dialogs use `use:keyboard.modal` on a `<dialog tabindex="-1">`. The action owns opening, world-input
+blocking, cleanup, and restoration of the previous valid editor or scope. A modal's contents receive
+keyboard input without forwarding to scopes outside it. Native dialog cancellation and the
+component's confirmation/submission behavior stay local. Escape goes to the active scope first;
+outside a modal, an unconsumed Escape returns to the game. The active scope handles keys before
+another scope can activate. Activation shortcuts are suppressed while editing or in a modal.
+A scope's unhandled keys never fall through to game bindings.
+
+`ViewportInputGate` handles scene/lifecycle availability and world gesture cancellation. Modal and
+scene blockers are independent; releasing one cannot release another. Editing suspends game keys
+without blocking mouse gestures. Keyboard ownership changes, window blur, visibility loss, and
+world blocking cancel held actions without releasing charged jumps. Repeats and releases from a
+cancelled press cannot activate the replacement owner. Precise jump remains a client-owned
+interaction within the viewport. Host movement contracts do not contain browser bindings.
+
+The asset-free `npm run harness:browser -- --client-hud` suite drives real browser keyboard and
+pointer events through the policy, production Explorer controls, chat, and modal integration.
 
 An `AppInput` accepts a complete `InputConfiguration`, allowing future installation settings to
 resolve defaults and overrides at startup. Persistence, live rebinding, and a binding editor are

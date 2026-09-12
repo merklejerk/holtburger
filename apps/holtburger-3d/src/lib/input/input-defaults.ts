@@ -52,7 +52,7 @@ export const INPUT_DEFAULTS = {
 		cancel: [{ key: "Escape" }],
 		/** Submit the selected character before entering gameplay. */
 		enterWorld: [{ key: "Enter" }],
-		/** Focus chat while the game canvas owns focus. */
+		/** Activate chat while the game owns the keyboard. */
 		chat: [{ key: "Enter" }],
 		/** Scroll toward earlier messages while chat owns focus. */
 		chatPreviousPage: [{ key: "PageUp" }],

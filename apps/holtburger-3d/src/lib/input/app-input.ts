@@ -44,13 +44,3 @@ export class AppInput {
 
 /** One configuration entry point for both app modes; no storage or settings UI policy lives here. */
 export const APP_INPUT = new AppInput(INPUT_DEFAULTS);
-
-/** Editable controls retain native keyboard behavior instead of initiating viewport actions. */
-export function isEditingInput(target: EventTarget | null): boolean {
-	return (
-		target instanceof Element &&
-		target.closest(
-			"input, textarea, select, [contenteditable]:not([contenteditable='false'])",
-		) !== null
-	);
-}

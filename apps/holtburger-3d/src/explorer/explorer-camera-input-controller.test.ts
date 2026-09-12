@@ -1,3 +1,4 @@
+import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { AppInput } from "../lib/input/app-input";
 import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
 import { ViewportInputGate } from "../lib/input/viewport-input-gate";
@@ -38,12 +39,14 @@ function controllerHarness(
 	} as unknown as HTMLCanvasElement;
 	const changes = vi.fn();
 	const inputGate = new ViewportInputGate();
+	const keyboard = new KeyboardInputPolicy(inputGate);
 	const physicalWheel = vi.fn();
 	const characterInput = vi.fn();
 	const possessionOrbit = vi.fn();
 	const possessionWheel = vi.fn();
 	const controller = new ExplorerCameraInputController({
 		inputGate,
+		keyboard,
 		input: new AppInput({
 			...INPUT_DEFAULTS,
 			character: {
@@ -88,12 +91,19 @@ function controllerHarness(
 		cancelAnimationFrame: vi.fn(),
 	});
 	const dispatch = (type: string, event: object): void => {
-		listeners.get(type)?.({
+		(type === "keydown"
+			? keyboard.keydown
+			: type === "keyup"
+				? keyboard.keyup
+				: type === "blur"
+					? () => inputGate.cancel()
+					: listeners.get(type))?.({
+			stopImmediatePropagation: vi.fn(),
 			preventDefault: vi.fn(),
 			getModifierState: (key: string) =>
 				key === "Shift" && "shiftKey" in event && event.shiftKey === true,
 			...event,
-		} as unknown as Event);
+		} as unknown as KeyboardEvent);
 	};
 	return {
 		inputGate,

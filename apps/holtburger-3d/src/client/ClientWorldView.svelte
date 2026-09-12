@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { ClientSelectedEntity } from "./client-selected-entity";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
-	import { useViewportInputGate } from "../lib/input/viewport-input-context";
-	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+
 	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount, untrack } from "svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
@@ -131,12 +131,9 @@
 		onSendChat,
 		onCanvas,
 	}: Props = $props();
-	const inputGate = useViewportInputGate();
+	const { viewport: inputGate } = useAppInputPolicy();
 	onMount(() => inputGate.attach(cancelViewportGesture));
-	$effect(() => {
-		if (canvasElement === null) return;
-		return observeViewportWindowFocus(inputGate, canvasElement.ownerDocument);
-	});
+
 	const initialViewport: ClientHudViewport = {
 		width: window.innerWidth,
 		height: window.innerHeight,
@@ -241,7 +238,6 @@
 		if (!inputGate.allowed) return;
 		if (preciseJumpActive && APP_INPUT.pointer("preciseJumpActivate", event)) {
 			event.preventDefault();
-			canvasElement?.focus();
 			onPreciseJumpActivate();
 			return;
 		}
@@ -258,7 +254,6 @@
 		);
 		pointerX = event.clientX;
 		pointerY = event.clientY;
-		canvasElement?.focus();
 		canvasElement?.setPointerCapture(event.pointerId);
 	}
 
@@ -345,8 +340,8 @@
 		class="client-canvas"
 		class:client-canvas-entity-hovered={hoveredEntityGuid !== null}
 		aria-label="Game world"
-		tabindex="0"
-		onblur={() => inputGate.cancel()}
+		tabindex="-1"
+		data-game-viewport
 		onpointerdown={handlePointerDown}
 		onpointerenter={handlePointerEnter}
 		onpointerleave={handlePointerLeave}
@@ -446,11 +441,7 @@
 		{viewport}
 		onPlacementChange={(chat) => (hudLayout = { ...hudLayout, chat })}
 	>
-		<ClientChat
-			gameCanvas={canvasElement}
-			messages={chatMessages}
-			onSend={onSendChat}
-		/>
+		<ClientChat messages={chatMessages} onSend={onSendChat} />
 	</ClientHudPanel>
 	<ClientHudPanel
 		label="Frame rate"

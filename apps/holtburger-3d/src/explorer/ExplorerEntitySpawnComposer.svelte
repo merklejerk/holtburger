@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import {
 		EXPLORER_SPAWN_DISTANCE,
 		EXPLORER_WEENIE_SEARCH_RESULT_LIMIT,
@@ -13,6 +14,8 @@
 		settleExplorerWeenieSearch,
 		type ExplorerWeeniePickerState,
 	} from "./explorer-weenie-picker-state";
+
+	const { keyboard } = useAppInputPolicy();
 
 	const SEARCH_DELAY_MS = 160;
 	const LISTBOX_ID = "explorer-weenie-results";
@@ -199,7 +202,7 @@
 						? resultId(highlightedIndex)
 						: undefined}
 					oninput={(event) => editInput(event.currentTarget.value)}
-					onkeydown={handleKeydown}
+					use:keyboard.scope={{ keydown: handleKeydown }}
 					onfocus={() => (resultsVisible = results.length > 0)}
 					onblur={() => (resultsVisible = false)}
 				/>

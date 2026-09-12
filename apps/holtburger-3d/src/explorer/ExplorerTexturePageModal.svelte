@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { useViewportInputGate } from "../lib/input/viewport-input-context";
 	import { onMount } from "svelte";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type {
 		TextureAtlasPageDiagnostics,
@@ -17,17 +17,8 @@
 	}
 
 	let { page, preview, onClose }: Props = $props();
-	const inputGate = useViewportInputGate();
-	let dialogElement: HTMLDialogElement;
-	onMount(() => {
-		// The top layer escapes backdrop-filter containing blocks and provides modal focus handling.
-		dialogElement.showModal();
-		const unblock = inputGate.block();
-		return () => {
-			dialogElement.close();
-			unblock();
-		};
-	});
+	const { keyboard } = useAppInputPolicy();
+
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let sourceCanvas: HTMLCanvasElement | null = $state(null);
@@ -316,7 +307,8 @@
 </script>
 
 <dialog
-	bind:this={dialogElement}
+	tabindex="-1"
+	use:keyboard.modal
 	class="texture-page-modal ui-panel"
 	data-browser-display-modal
 	aria-labelledby="texture-page-modal-title"
@@ -331,7 +323,7 @@
 			type="button"
 			class="ui-button"
 			aria-label="Close texture page"
-			onclick={() => dialogElement.close()}>✕</button
+			onclick={onClose}>✕</button
 		>
 	</header>
 

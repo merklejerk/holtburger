@@ -215,12 +215,11 @@ fn main() -> Result<()> {
             .sum::<usize>()
     );
     println!(
-        "artifact terrain_cells={} terrain_triangles={} placed_colliders={} cell_volumes={} terrain_max_slope_ratio={:.3}",
+        "artifact terrain_cells={} terrain_triangles={} placed_colliders={} cell_volumes={}",
         collision.terrain.cells.len(),
         collision.terrain.cells.len() * 2,
         collision.static_geometry.colliders.len(),
-        collision.static_geometry.cell_volumes().len(),
-        collision.terrain.maximum_planar_shift_ratio
+        collision.static_geometry.cell_volumes().len()
     );
     let cell_slope = |cell: &holtburger_content::TerrainCollisionCell| {
         cell.triangles

@@ -73,7 +73,10 @@ describe("clientInventorySections", () => {
 		).toEqual([[40, 30], [], [50]]);
 		expect(
 			sections.map((section) => section.packs.map((item) => item.guid)),
-		).toEqual([[20], [], []]);
+		).toEqual([[], [], []]);
+		expect(
+			clientInventoryPackSlots(membership).map((item) => item?.guid ?? null),
+		).toEqual([1, 10, 20]);
 		expect(
 			sections.map((section) => section.unslotted.map((item) => item.guid)),
 		).toEqual([[60], [], []]);
@@ -116,7 +119,10 @@ describe("clientInventorySections", () => {
 		expect(sections.map((section) => section.container.guid)).toEqual([
 			1, 3, 4,
 		]);
-		expect(sections[0]?.packs).toEqual([pending]);
+		expect(sections[0]?.packs).toEqual([]);
+		expect(
+			clientInventoryPackSlots(clientInventoryMembership(prepared.level)),
+		).toContain(pending);
 		expect(sections[1]?.container.storage).toEqual({
 			kind: "container",
 			roster: "awaiting",
@@ -128,7 +134,7 @@ describe("clientInventorySections", () => {
 });
 
 describe("clientInventoryPackSlots", () => {
-	it("preserves server slot positions, includes foci, and leaves free capacity empty", () => {
+	it("keeps Main Pack first, sorts occupants by capacity, and leaves free capacity last", () => {
 		const root = entityFacts(1, {
 			storage: {
 				kind: "container",
@@ -154,7 +160,7 @@ describe("clientInventoryPackSlots", () => {
 			clientInventoryPackSlots(clientInventoryMembership(level)).map(
 				(item) => item?.guid ?? null,
 			),
-		).toEqual([1, 3, null, 2, null]);
+		).toEqual([1, 2, 3, null, null]);
 		const unknown = {
 			...root,
 			storage: {
@@ -169,7 +175,39 @@ describe("clientInventoryPackSlots", () => {
 			clientInventoryPackSlots(clientInventoryMembership(pending.level)).map(
 				(item) => item?.guid ?? null,
 			),
-		).toEqual([1, null, null, 2]);
+		).toEqual([1, 2, null, null]);
+	});
+
+	it("orders larger packs first and breaks equal or unknown capacities by server slot", () => {
+		const pack = (guid: number, index: number, itemCapacity: number | null) =>
+			entityFacts(guid, {
+				...child(guid, 1, { kind: "pack", index, entryKind: "container" }),
+				storage: {
+					kind: "container",
+					roster: "announced",
+					itemCapacity,
+					packCapacity: 0,
+				},
+			});
+		const mirror = new ClientEntityMirror();
+		const { level } = mirror.prepareSnapshot(
+			{
+				entities: [
+					entityFacts(1),
+					pack(2, 3, 24),
+					pack(3, 2, 48),
+					pack(4, 1, 24),
+					pack(5, 4, null),
+					child(6, 1, { kind: "pack", index: 5, entryKind: "foci" }),
+				],
+			},
+			1,
+		);
+		expect(
+			clientInventoryPackSlots(clientInventoryMembership(level)).map(
+				(item) => item?.guid ?? null,
+			),
+		).toEqual([1, 3, 4, 2, 5, 6, null]);
 	});
 });
 

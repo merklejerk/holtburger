@@ -165,7 +165,7 @@ export async function probeClientInventory(options: {
 				parentGuid: 1,
 				slot: {
 					kind: "pack" as const,
-					index: 0,
+					index: 1,
 					entryKind: "container" as const,
 				},
 			},
@@ -181,7 +181,7 @@ export async function probeClientInventory(options: {
 			location: {
 				kind: "contained" as const,
 				parentGuid: 1,
-				slot: { kind: "pack" as const, index: 1, entryKind: "foci" as const },
+				slot: { kind: "pack" as const, index: 0, entryKind: "foci" as const },
 			},
 		},
 		{ ...owned(32, 30, 0), description: { kind: "pending" as const } },
@@ -316,6 +316,12 @@ export async function probeClientInventory(options: {
 	);
 	if (contents === null || bagSection === null)
 		throw new Error("Inventory contents sections are missing.");
+	if (contents.querySelector('[data-item-guid="31"]') !== null)
+		throw new Error("A focus was duplicated in the inventory contents.");
+	if (stripCells[2]?.getAttribute("data-item-guid") !== "31")
+		throw new Error(
+			"The focus did not sort after the container in the pack strip.",
+		);
 	const bagTarget = Math.min(
 		contents.scrollHeight - contents.clientHeight,
 		contents.scrollTop +
@@ -325,7 +331,7 @@ export async function probeClientInventory(options: {
 			Number.parseFloat(getComputedStyle(contents).paddingTop),
 	);
 	stripCells[1]?.click();
-	if (Math.abs(contents.scrollTop - bagTarget) > 1 || contents.scrollTop === 0)
+	if (Math.abs(contents.scrollTop - bagTarget) > 1)
 		throw new Error(
 			"Pack selection did not scroll to its clamped section position.",
 		);
@@ -713,11 +719,11 @@ export async function probeClientInventory(options: {
 			),
 		];
 		if (
-			packBadges.length !== 2 ||
+			packBadges.length !== 1 ||
 			packBadges.some((element) => element.textContent?.trim() !== "2K")
 		)
 			throw new Error(
-				"Pack-slot quantity did not match its contents-grid quantity.",
+				"Pack-slot quantity was missing, duplicated, or formatted incorrectly.",
 			);
 		const countElement = badge(22);
 		if (countElement === null) throw new Error("Count element missing.");

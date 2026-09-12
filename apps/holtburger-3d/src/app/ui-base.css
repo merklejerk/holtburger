@@ -73,6 +73,9 @@
 		--ui-item-strip-up-glyph: "▲";
 		--ui-item-strip-down-glyph: "▼";
 		--ui-inventory-padding: 10px;
+		--ui-inventory-equipment-slot-icon-size: 20px;
+		--ui-inventory-equipment-slot-icon-color: var(--ui-color-text);
+		--ui-inventory-equipment-slot-gap: 6px;
 		/* Currency artwork sizing, independent of footer text and inventory cells. */
 		--ui-inventory-pyreal-icon-size: 20px;
 		/* CSS image-rendering values, selected by display size relative to native 32px art. */
@@ -517,6 +520,9 @@
 		outline-offset: var(--ui-item-selection-outline-offset, -2px);
 		box-shadow: var(--ui-item-selection-shadow, none);
 		background: var(--ui-item-selection-background, transparent);
+	}
+	.ui-theme .ui-item-cell[data-dimmed="true"] {
+		opacity: var(--ui-item-dimmed-opacity, 0.3);
 	}
 	/* Draw selection above opaque artwork as well as on the cell itself. */
 	.ui-theme .ui-item-cell[aria-pressed="true"]::after {

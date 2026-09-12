@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
+	import { formatItemQuantity } from "../app/item-quantity";
+	import { itemStructureDisplay } from "../app/item-structure";
 
 	import {
 		EMPTY_CLIENT_SELECTED_DISPLAY,
@@ -21,7 +23,14 @@
 	let display = $state<ClientSelectedEntityDisplay>(
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	);
-	const displayName = $derived(display.name ?? "Selected Entity");
+	const structureDisplay = $derived(itemStructureDisplay(display.structure));
+	const displayName = $derived(
+		(display.name ?? "Selected Entity") +
+			(display.stackCount !== null && display.stackCount > 1
+				? ` (${formatItemQuantity(display.stackCount)})`
+				: "") +
+			(structureDisplay === null ? "" : ` ${structureDisplay.label}`),
+	);
 	const healthPercent = $derived(
 		display.health.kind !== "known"
 			? null

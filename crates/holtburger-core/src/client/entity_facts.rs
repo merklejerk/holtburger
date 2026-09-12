@@ -199,6 +199,50 @@ mod tests {
     }
 
     #[test]
+    fn structure_updates_preserve_independent_properties_in_snapshots() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::PublicUpdatePropertyIntData;
+        use holtburger_world::entity_facts::{EntityDescription, EntityStructure};
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Uses".into());
+        description.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.structure = Some(32);
+        let update = |property: PropertyInt, value| {
+            GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                sequence: 1,
+                guid: ITEM,
+                property: property as u32,
+                value,
+            }))
+        };
+        for (message, current, max) in [
+            (
+                GameMessage::ObjectCreate(Box::new(description)),
+                Some(32),
+                None,
+            ),
+            (update(PropertyInt::MaxStructure, 50), Some(32), Some(50)),
+            (update(PropertyInt::Structure, 0), Some(0), Some(50)),
+            (update(PropertyInt::Structure, 50), Some(50), Some(50)),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { ref structure, .. } = mirror[&ITEM].description else {
+                panic!("known structure item");
+            };
+            assert_eq!(*structure, EntityStructure { current, max });
+        }
+    }
+
+    #[test]
     fn stack_count_updates_and_late_stackability_reconstruct_inventory_snapshots() {
         use holtburger_common::properties::{ItemType, PropertyInt};
         use holtburger_protocol::messages::{

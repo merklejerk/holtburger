@@ -1,4 +1,5 @@
 import { tick } from "svelte";
+import type { ItemStructure } from "../../app/item-structure";
 import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import type { ClientEntitySelection } from "../../client/client-entity-selection";
 import { CLIENT_TUNING } from "../../client/client-tuning";
@@ -20,6 +21,7 @@ function item(
 			weenieType: null,
 			pyrealBalance: null,
 			stackCount: null,
+			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 		location: { kind: "none" },
@@ -130,6 +132,7 @@ export async function probeClientInventory(options: {
 				weenieType: null,
 				pyrealBalance: 12345,
 				stackCount: null,
+				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 			storage: {
@@ -150,6 +153,7 @@ export async function probeClientInventory(options: {
 				weenieType: null,
 				pyrealBalance: null,
 				stackCount: null,
+				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 		}),
@@ -215,6 +219,7 @@ export async function probeClientInventory(options: {
 			weenieType: null,
 			pyrealBalance: null,
 			stackCount: null,
+			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
@@ -230,6 +235,7 @@ export async function probeClientInventory(options: {
 			weenieType: "Food",
 			pyrealBalance: null,
 			stackCount: null,
+			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
@@ -514,6 +520,7 @@ export async function probeClientInventory(options: {
 			weenieType: null,
 			pyrealBalance: null,
 			stackCount: null,
+			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
@@ -606,6 +613,7 @@ export async function probeClientInventory(options: {
 			weenieType: null,
 			pyrealBalance: null,
 			stackCount: null,
+			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},
 	});
@@ -679,13 +687,13 @@ export async function probeClientInventory(options: {
 			);
 		const beforeCounts = options.readPreparedIconCount();
 		quantity(20, 2);
-		quantity(22, 2000);
+		quantity(22, 20_100);
 		quantity(31, 2000);
 		quantity(1, 99); // Main Pack is a role, never a stack badge for the player.
 		await sample();
 		if (
-			badge(20)?.textContent !== "2" ||
-			badge(22)?.textContent !== "2.0K" ||
+			badge(20)?.textContent?.trim() !== "2" ||
+			badge(22)?.textContent?.trim() !== "20K" ||
 			document.querySelector('[data-item-guid="1"] .item-grid-cell-count') !==
 				null
 		)
@@ -694,7 +702,7 @@ export async function probeClientInventory(options: {
 			);
 		if (
 			!cell(20).getAttribute("aria-label")?.includes("quantity: 2") ||
-			!cell(22).title.includes("2000")
+			!cell(22).title.includes("20,100")
 		)
 			throw new Error(
 				"Stack quantity is missing from accessible labels/tooltips.",
@@ -706,13 +714,31 @@ export async function probeClientInventory(options: {
 		];
 		if (
 			packBadges.length !== 2 ||
-			packBadges.some((element) => element.textContent !== "2.0K")
+			packBadges.some((element) => element.textContent?.trim() !== "2K")
 		)
 			throw new Error(
 				"Pack-slot quantity did not match its contents-grid quantity.",
 			);
 		const countElement = badge(22);
 		if (countElement === null) throw new Error("Count element missing.");
+		const suffix = countElement.querySelector<HTMLElement>(
+			".item-grid-cell-count-suffix",
+		);
+		if (suffix === null) throw new Error("Compact count suffix missing.");
+		const originalCountStyle = countElement.style.cssText;
+		try {
+			countElement.style.setProperty("--ui-item-count-suffix-font-size", "50%");
+			if (
+				getComputedStyle(suffix).display !== "inline" ||
+				Number.parseFloat(getComputedStyle(suffix).fontSize) !==
+					Number.parseFloat(getComputedStyle(countElement).fontSize) * 0.5
+			)
+				throw new Error(
+					"Compact suffix did not use the configured font scale.",
+				);
+		} finally {
+			countElement.style.cssText = originalCountStyle;
+		}
 		const countRect = countElement.getBoundingClientRect();
 		const itemRect = cell(22).getBoundingClientRect();
 		if (
@@ -721,6 +747,90 @@ export async function probeClientInventory(options: {
 			getComputedStyle(countElement).pointerEvents !== "none"
 		)
 			throw new Error("Count overlay escaped its cell or intercepted input.");
+		cell(22).click();
+		await sample();
+		const selectedHeading = () =>
+			document.querySelector(".selected-entity__heading strong");
+		if (selectedHeading()?.textContent !== "Inventory item 22 (20,100)")
+			throw new Error("Selected stack name omitted its grouped quantity.");
+		quantity(22, 1);
+		await sample();
+		if (selectedHeading()?.textContent !== "Inventory item 22")
+			throw new Error("Selected stack name retained its previous quantity.");
+		quantity(22, 20_100);
+		const setStructure = (structure: ItemStructure) => {
+			const record = records.find((record) => record.guid === 22);
+			if (record === undefined || record.description.kind !== "known")
+				throw new Error("Known structure fixture required.");
+			update({ ...record, description: { ...record.description, structure } });
+		};
+		for (const current of [40, 10, 0]) {
+			setStructure({ current, max: 50 });
+			await sample();
+			const label = `[${current}/50]`;
+			if (
+				cell(22).title !== `Inventory item 22 (quantity: 20,100) ${label}` ||
+				selectedHeading()?.textContent !== `Inventory item 22 (20,100) ${label}`
+			)
+				throw new Error("Structure values did not reach both item labels.");
+			const track = cell(22).querySelector<HTMLElement>(
+				".item-grid-cell-structure",
+			);
+			const fill = cell(22).querySelector<HTMLElement>(
+				".item-grid-cell-structure-fill",
+			);
+			if (track === null || fill === null)
+				throw new Error("Structure bar missing.");
+			const trackRect = track.getBoundingClientRect();
+			const fillRect = fill.getBoundingClientRect();
+			const box = cell(22).getBoundingClientRect();
+			const count = badge(22);
+			if (
+				count === null ||
+				count.getBoundingClientRect().right > trackRect.left
+			)
+				throw new Error(
+					"Stack count is missing or overlaps the structure bar.",
+				);
+			if (
+				Math.abs(fillRect.height - (trackRect.height * current) / 50) > 1 ||
+				Math.abs(fillRect.bottom - trackRect.bottom) > 1 ||
+				trackRect.right > box.right ||
+				trackRect.left < box.left + box.width / 2 ||
+				getComputedStyle(track).pointerEvents !== "none"
+			)
+				throw new Error(
+					"Structure bar geometry or input ownership is incorrect.",
+				);
+			const color = getComputedStyle(fill)
+				.backgroundColor.match(/\d+/g)
+				?.map(Number);
+			if (
+				color === undefined ||
+				color[0] === undefined ||
+				color[1] === undefined
+			)
+				throw new Error("Structure fill has no RGB color.");
+			if (
+				(current === 40 && color[1] <= color[0]) ||
+				(current === 10 && color[0] <= color[1])
+			)
+				throw new Error("Structure fill did not shift from green toward red.");
+		}
+		for (const structure of [
+			{ current: 50, max: 50 },
+			{ current: null, max: 50 },
+			{ current: 20, max: null },
+		]) {
+			setStructure(structure);
+			await sample();
+			if (
+				cell(22).querySelector(".item-grid-cell-structure") !== null ||
+				cell(22).title !== "Inventory item 22 (quantity: 20,100)" ||
+				selectedHeading()?.textContent !== "Inventory item 22 (20,100)"
+			)
+				throw new Error("Full or incomplete structure retained its indicator.");
+		}
 		quantity(20, 1);
 		await sample();
 		if (badge(20) !== null) throw new Error("A count of one retained a badge.");

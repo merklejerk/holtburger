@@ -35,6 +35,11 @@ const clientEntityFactsSchema = z
 					name: z.string(),
 					/** Quantity only when world facts establish a stackable entity. */
 					stackCount: guid.nullable(),
+					/** Structure properties retain independent absence from server updates. */
+					structure: z
+						.object({ current: guid.nullable(), max: guid.nullable() })
+						.strict()
+						.readonly(),
 					/** Server icon inputs, independent of scene residency or asset readiness. */
 					icon: z
 						.object({

@@ -43,6 +43,15 @@ pub struct EntityIconAppearance {
     pub ui_effects: u32,
 }
 
+/// Independently optional server structure properties, consumed by item and selected-entity UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityStructure {
+    /// Remaining uses/structure; absence is distinct from an exhausted item.
+    pub current: Option<u32>,
+    /// Full capacity, which the server may publish independently of the current value.
+    pub max: Option<u32>,
+}
+
 /// Display facts become known independently of storage announcements.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -56,6 +65,8 @@ pub enum EntityDescription {
         /// Current quantity when MaxStackSize establishes stackability; consumed by item cells.
         #[serde(rename = "stackCount")]
         stack_count: Option<u32>,
+        /// Lossless structure properties for item indicators and selected-entity labels.
+        structure: EntityStructure,
         /// Consumed by inventory and other UI item-image presentation.
         icon: EntityIconAppearance,
         /// Public item classification consumed by frontend inventory type sorting.
@@ -192,6 +203,10 @@ impl WorldState {
             Some((entity, name, item_type)) => EntityDescription::Known {
                 name: name.to_owned(),
                 stack_count: entity.is_stackable().then(|| entity.stack_size()),
+                structure: EntityStructure {
+                    current: entity.structure(),
+                    max: entity.max_structure(),
+                },
                 icon: EntityIconAppearance {
                     base: entity.get_data_prop(PropertyDataId::Icon).map(|id| id.0),
                     overlay: entity
@@ -391,6 +406,10 @@ mod tests {
             EntityDescription::Known {
                 name: "Sword".into(),
                 stack_count: None,
+                structure: EntityStructure {
+                    current: None,
+                    max: None
+                },
                 icon: EntityIconAppearance {
                     base: None,
                     overlay: None,
@@ -432,6 +451,10 @@ mod tests {
             EntityDescription::Known {
                 name: "Creature".into(),
                 stack_count: None,
+                structure: EntityStructure {
+                    current: None,
+                    max: None
+                },
                 icon: EntityIconAppearance {
                     base: None,
                     overlay: None,

@@ -341,6 +341,8 @@
 					selectedGuid={1}
 					readSelectedDisplay={() => ({
 						name: "Drudge Prowler",
+						stackCount: null,
+						structure: { current: null, max: null },
 						health: { kind: "known", fraction: 0.68 },
 						canInteract: true,
 					})}

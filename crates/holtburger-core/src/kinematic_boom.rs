@@ -1828,6 +1828,77 @@ mod tests {
         }
     }
 
+    /// Captured canyon floor, camera pivot, and distant slope from 0x4830; no DAT dependency.
+    #[test]
+    fn canyon_boom_stays_near_target_and_rotates_past_distant_slope() {
+        let center = Vector3::new(41.050262, 188.6869, 59.355);
+        let mut terrain = flat_terrain(LANDBLOCK);
+        for cell in &mut terrain.cells {
+            for triangle in &mut cell.triangles {
+                for vertex in &mut triangle.vertices {
+                    vertex.z = 58.0;
+                }
+            }
+        }
+        let slope = holtburger_content::TerrainCollisionTriangle {
+            vertices: [
+                Vector3::new(24.0, 48.0, 68.0),
+                Vector3::new(48.0, 72.0, 122.0),
+                Vector3::new(24.0, 72.0, 120.0),
+            ],
+            normal: Vector3::new(-0.03490024, -0.9074063, 0.41880292),
+        };
+        // A synthetic subset uses exhaustive selection, exercising the narrow phase too.
+        terrain
+            .cells
+            .push(holtburger_content::TerrainCollisionCell {
+                triangles: [slope.clone(), slope],
+            });
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: LANDBLOCK,
+                terrain,
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+        let reach = 4.5;
+        let mut camera = KinematicBoomController::new(
+            profile(64),
+            pose(center),
+            seed(center),
+            clearance(1, 0.17573209),
+            reach,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap();
+        let target = stationary_sample(center);
+        settle_reach(&mut camera, &scene, target);
+        assert!(
+            (camera.camera().pose.coords - (center + Vector3::new(reach, 0.0, 0.0))).length()
+                < 0.01
+        );
+        camera
+            .accept_intent(KinematicBoomIntent {
+                sequence: 1,
+                view_direction: Vector3::new(-1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            })
+            .unwrap();
+        for _ in 0..60 {
+            camera.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+            assert!(camera.rendered_reach() <= reach + 0.01);
+        }
+        assert!(
+            (camera.camera().pose.coords - (center - Vector3::new(reach, 0.0, 0.0))).length()
+                < 0.01
+        );
+    }
+
     #[test]
     fn initial_placement_is_presentable_but_stationary_solves_own_settlement() {
         let scene = empty_scene();

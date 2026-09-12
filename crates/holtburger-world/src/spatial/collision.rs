@@ -34,7 +34,8 @@ use holtburger_content::{
 use thiserror::Error;
 
 use super::bsp_query::{
-    placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts, support_on_polygon,
+    placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts,
+    polygon_sphere_contact, support_on_polygon,
 };
 use super::cell_index::{GlobalCellRange, OUTDOOR_CELL_METERS};
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
@@ -1281,11 +1282,12 @@ impl CollisionScene {
                     for triangle in &cell.triangles {
                         if let Some(contact) =
                             terrain_contact(triangle, local_center, request.sweep.radius)
-                            && movement.dot(&contact.normal) <= 0.0
+                            && movement.dot(&triangle.normal) <= 0.0
                         {
+                            // Edges separate radially, but the terrain face still owns slope response.
                             contacts.push(GroundedObstruction {
                                 separation_normal: contact.normal,
-                                response_normal: contact.normal,
+                                response_normal: triangle.normal,
                                 depth: contact.depth,
                             });
                         }
@@ -2836,18 +2838,11 @@ fn volume_obstruction(contact: super::bsp_query::ShapeContact) -> GroundedObstru
 ///
 /// `TerrainCollisionSurface.cells` is row-major over the authored 8x8 grid (row = Y cell,
 /// column = X cell), so overlap resolves to direct index arithmetic instead of a scan.
-///
-/// `terrain_contact` projects a center below a triangle's plane back along the normal, so a
-/// buried body reaches triangles horizontally offset by up to its vertical burial times the
-/// surface's steepest planar-shift ratio. The planar reach grows by that provable bound, keeping
-/// buried-body recovery contacts identical to an exhaustive scan.
 fn overlapped_terrain_cells(
     terrain: &holtburger_content::TerrainCollisionSurface,
     center: Vector3,
     reach: f32,
 ) -> impl Iterator<Item = &holtburger_content::TerrainCollisionCell> {
-    let burial = (terrain.maximum_height - (center.z - reach)).max(0.0);
-    let reach = reach + (burial + reach) * terrain.maximum_planar_shift_ratio;
     let side = holtburger_content::TERRAIN_GRID_CELLS as i32;
     let clamped_range = move |minimum: f32, maximum: f32| {
         let low = (minimum / OUTDOOR_CELL_METERS).floor().max(0.0) as i32;
@@ -2883,29 +2878,14 @@ fn terrain_contact(
     radius: f32,
 ) -> Option<StaticContact> {
     let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
-    let distance = triangle.normal.dot(&center) + plane_d;
-    // Use the same authored-contact tolerance as polygon queries. A support probe followed by
-    // placement confirmation can differ by a few float ULPs at exact tangency; reporting that as
-    // penetration prevents an otherwise valid grounded pose from committing.
-    if distance >= radius - CELL_PLANE_TOLERANCE {
-        return None;
-    }
-    let projected = center - triangle.normal * distance;
-    if !point_in_triangle(projected, triangle.vertices, triangle.normal) {
-        return None;
-    }
-    Some(StaticContact {
-        normal: triangle.normal,
-        depth: radius - distance,
-    })
-}
-
-fn point_in_triangle(point: Vector3, vertices: [Vector3; 3], normal: Vector3) -> bool {
-    (0..3).all(|index| {
-        let start = vertices[index];
-        let end = vertices[(index + 1) % 3];
-        (point - start).dot(&normal.cross(&(end - start))) >= -CELL_PLANE_TOLERANCE
-    })
+    polygon_sphere_contact(&triangle.vertices, triangle.normal, plane_d, center, radius)
+        // Terrain is an upward-facing surface, like the one-sided authored BSP contacts.
+        // Plane sidedness selects facing only; finite overlap establishes penetration.
+        .filter(|contact| triangle.normal.dot(&contact.normal) > 0.0)
+        .map(|contact| StaticContact {
+            normal: contact.normal,
+            depth: contact.depth,
+        })
 }
 
 fn volume_reaches(
@@ -3848,8 +3828,6 @@ mod tests {
                 terrain: TerrainCollisionSurface {
                     cells: Vec::new(),
                     entirely_water: true,
-                    maximum_height: f32::NEG_INFINITY,
-                    maximum_planar_shift_ratio: 0.0,
                 },
                 static_geometry: LandblockColliders::default(),
             })
@@ -3941,10 +3919,9 @@ mod tests {
         contacts
     }
 
-    /// Buried centers reach horizontally offset sloped triangles through the projection in
-    /// `terrain_contact`; indexed terrain selection must reproduce that recovery surface exactly.
+    /// Indexed selection must retain finite contacts at cell interiors and shared seams.
     #[test]
-    fn indexed_terrain_selection_reproduces_full_scan_contacts_for_buried_centers() {
+    fn indexed_terrain_selection_reproduces_finite_contacts() {
         let owner = Guid(0xda55_ffff);
         // A steep west-to-east ramp: heights rise 4m per 24m column.
         let heights: Vec<f32> = (0..81).map(|index| (index / 9) as f32 * 4.0).collect();
@@ -3972,10 +3949,10 @@ mod tests {
         let placement = SpatialMembership::outdoor();
         let mut total_contacts = 0usize;
         for (x, y, z) in [
-            (96.0, 96.0, -20.0),
-            (150.0, 40.0, 0.0),
-            (60.0, 120.0, 5.0),
-            (180.0, 96.0, -5.0),
+            (96.0, 96.0, 16.25),
+            (150.0, 40.0, 25.25),
+            (60.0, 120.0, 10.25),
+            (180.0, 96.0, 30.25),
         ] {
             let center = Vector3::new(x, y, z);
             let mut indexed: Vec<_> = scene
@@ -3993,13 +3970,13 @@ mod tests {
             let full = full_scan_contacts(&scene, owner, center, 0.5, &placement);
             assert_eq!(
                 indexed, full,
-                "buried terrain selection diverged at ({x}, {y}, {z})"
+                "finite terrain selection diverged at ({x}, {y}, {z})"
             );
             total_contacts += indexed.len();
         }
         assert!(
             total_contacts >= 4,
-            "buried parity ran vacuously: {total_contacts} contacts"
+            "finite contact parity ran vacuously: {total_contacts} contacts"
         );
     }
 
@@ -4275,6 +4252,37 @@ mod tests {
                 collider_index,
             })
             .collect()
+    }
+
+    #[test]
+    fn terrain_contacts_resolve_finite_faces_edges_and_vertices() {
+        let triangle = TerrainCollisionTriangle {
+            vertices: [
+                Vector3::zero(),
+                Vector3::new(4.0, 0.0, 0.0),
+                Vector3::new(0.0, 4.0, 0.0),
+            ],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+        };
+        let radius = 0.5;
+        for (center, closest) in [
+            (Vector3::new(1.0, 1.0, 0.25), Vector3::new(1.0, 1.0, 0.0)),
+            (Vector3::new(1.0, -0.2, 0.25), Vector3::new(1.0, 0.0, 0.0)),
+            (Vector3::new(-0.2, -0.2, 0.25), Vector3::zero()),
+        ] {
+            let contact = terrain_contact(&triangle, center, radius).unwrap();
+            let delta = center - closest;
+            assert!((contact.depth - (radius - delta.length())).abs() < CELL_PLANE_TOLERANCE);
+            assert!((contact.normal - delta / delta.length()).length() < CELL_PLANE_TOLERANCE);
+        }
+        for center in [
+            Vector3::new(1.0, 1.0, radius),
+            Vector3::new(1.0, -1.0, 0.25),
+            Vector3::new(1.0, 1.0, -10.0),
+            Vector3::new(1.0, 1.0, -0.25),
+        ] {
+            assert!(terrain_contact(&triangle, center, radius).is_none());
+        }
     }
 
     #[test]

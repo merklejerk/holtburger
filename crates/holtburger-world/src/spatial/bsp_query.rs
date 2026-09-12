@@ -376,7 +376,9 @@ fn transform_plane(plane: Plane, collider: &PlacedCollisionShape) -> Plane {
     }
 }
 
-fn polygon_sphere_contact(
+/// Two-sided finite face, edge, or vertex overlap shared by authored polygons and terrain.
+/// Callers own facing policy; the contact normal points from the surface toward the sphere.
+pub(super) fn polygon_sphere_contact(
     vertices: &[Vector3],
     normal: Vector3,
     plane_d: f32,

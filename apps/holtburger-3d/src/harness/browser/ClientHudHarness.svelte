@@ -395,6 +395,7 @@
 						weenieType: null,
 						pyrealBalance: null,
 						stackCount: null,
+						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 					},
 					location: { kind: "none" },

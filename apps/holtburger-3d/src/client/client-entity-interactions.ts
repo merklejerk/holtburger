@@ -1,3 +1,4 @@
+import type { ItemStructure } from "../app/item-structure";
 import type { ClientEntitySelection } from "./client-entity-selection";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 
@@ -12,6 +13,10 @@ type ClientSelectedHealth =
 export interface ClientSelectedEntityDisplay {
 	/** Current accepted name, absent until description is known. */
 	readonly name: string | null;
+	/** Current stack quantity, absent when the selected description has none. */
+	readonly stackCount: number | null;
+	/** Raw structure properties sampled together with the selected name and quantity. */
+	readonly structure: ItemStructure;
 	/** World eligibility plus the latest matching server health response. */
 	readonly health: ClientSelectedHealth;
 	/** First-cut use remains available for known non-owned targets only. */
@@ -21,6 +26,8 @@ export interface ClientSelectedEntityDisplay {
 /** Initial/pending HUD display without a synthetic name or unknown-health meter. */
 export const EMPTY_CLIENT_SELECTED_DISPLAY: ClientSelectedEntityDisplay = {
 	name: null,
+	stackCount: null,
+	structure: { current: null, max: null },
 	health: { kind: "unavailable" },
 	canInteract: false,
 };
@@ -92,6 +99,8 @@ export class ClientEntityInteractions {
 			this.#target?.guid === guid ? this.#target.healthFraction : null;
 		return {
 			name: record.description.name,
+			stackCount: record.description.stackCount,
+			structure: record.description.structure,
 			canInteract:
 				!record.ownedByPlayer &&
 				this.#lifecycle.state().lifecycle?.kind === "in-world",

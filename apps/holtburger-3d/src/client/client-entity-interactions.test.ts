@@ -62,6 +62,7 @@ async function fixture() {
 							weenieType: null,
 							pyrealBalance: null,
 							stackCount: null,
+							structure: { current: null, max: null },
 							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 						},
 					}),
@@ -149,6 +150,8 @@ describe("ClientEntityInteractions", () => {
 		f.selection.selectInventoryItem(9);
 		expect(f.interactions.display()).toEqual({
 			name: "Item 9",
+			stackCount: null,
+			structure: { current: null, max: null },
 			health: { kind: "not-applicable" },
 			canInteract: false,
 		});
@@ -182,6 +185,7 @@ describe("ClientEntityInteractions", () => {
 				weenieType: null,
 				pyrealBalance: null,
 				stackCount: null,
+				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 		});
@@ -202,6 +206,7 @@ describe("ClientEntityInteractions", () => {
 						weenieType: null,
 						pyrealBalance: null,
 						stackCount: null,
+						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 					},
 				},
@@ -210,6 +215,8 @@ describe("ClientEntityInteractions", () => {
 		});
 		expect(f.interactions.display()).toEqual({
 			name: "Renamed",
+			stackCount: null,
+			structure: { current: null, max: null },
 			health: { kind: "known", fraction: 0.5 },
 			canInteract: true,
 		});

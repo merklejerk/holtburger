@@ -128,6 +128,9 @@
 			<ItemGridCell
 				itemGuid={item.guid}
 				label={itemName(item)}
+				structure={item.description.kind === "known"
+					? item.description.structure
+					: null}
 				count={item.description.kind === "known"
 					? item.description.stackCount
 					: null}
@@ -231,6 +234,9 @@
 			{#each packSlots as item, index (index)}
 				<ItemGridCell
 					itemGuid={item?.guid ?? null}
+					structure={index !== 0 && item?.description.kind === "known"
+						? item.description.structure
+						: null}
 					count={index !== 0 && item?.description.kind === "known"
 						? item.description.stackCount
 						: null}

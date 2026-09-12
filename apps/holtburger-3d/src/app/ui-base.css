@@ -56,12 +56,18 @@
 		--ui-item-grid-gap: 5px;
 		--ui-item-icon-rendering: pixelated;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
-		--ui-item-count-font: bold 20px / 1 Arial, Helvetica, sans-serif;
+		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;
+		/* Compact suffix size relative to the quantity's font size. */
+		--ui-item-count-suffix-font-size: 75%;
 		--ui-item-count-color: #fff;
 		--ui-item-count-shadow:
 			-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
 		--ui-item-count-background: transparent;
 		--ui-item-count-inset: 1px;
+		/* Remaining structure is a slim, bottom-filled track along the icon's right edge. */
+		--ui-item-structure-width: 3px;
+		--ui-item-structure-inset: 1px;
+		--ui-item-structure-background: #000b;
 		--ui-item-strip-inset: 5px;
 		--ui-item-strip-arrow-height: 18px;
 		--ui-item-strip-up-glyph: "▲";

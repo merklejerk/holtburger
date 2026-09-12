@@ -29,8 +29,13 @@ pub fn compose(layers: IconLayers<'_>) -> Result<Vec<u8>> {
         blend(&mut work, &canvas(overlay)?, true);
     }
     let effects = canvas(layers.effects)?;
-    for (pixel, effect) in work.chunks_exact_mut(4).zip(effects.chunks_exact(4)) {
-        if pixel == [255, 255, 255, 255] {
+    for (pixel, effect) in work
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(effects.as_chunks::<4>().0)
+    {
+        if *pixel == [255, 255, 255, 255] {
             pixel.copy_from_slice(effect);
         }
     }
@@ -42,7 +47,8 @@ pub fn compose(layers: IconLayers<'_>) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-fn canvas(image: &UiImage) -> Result<Vec<u8>> {
+/// Preserve authored RGBA while clipping/padding a standalone graphic to native icon size.
+pub(super) fn canvas(image: &UiImage) -> Result<Vec<u8>> {
     let width = usize::try_from(image.width)?;
     let height = usize::try_from(image.height)?;
     ensure!(width > 0 && height > 0, "empty icon source extent");
@@ -70,7 +76,12 @@ fn blend(destination: &mut [u8], source: &[u8], four_channels: bool) {
     // Replacing it with ordinary source-over changes authored edge pixels: census
     // of 273 partial-alpha 32x32 surfaces found 14,604 differing pixels, max delta 2.
     // The SSE partial/partial variant (:612546) is not claimed to be pixel-identical.
-    for (d, s) in destination.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+    for (d, s) in destination
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(source.as_chunks::<4>().0)
+    {
         let alpha = i32::from(s[3]);
         if alpha == 0 {
             continue;

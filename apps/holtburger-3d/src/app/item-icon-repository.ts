@@ -51,6 +51,7 @@ const loading: ItemIconDisplay = Object.freeze({ kind: "loading" });
 
 /** Canonical complete-input identity. Retail mask interpretation stays in the host. */
 function itemIconKey(spec: ItemIconSpec): string {
+	if (spec.kind === "base") return JSON.stringify([spec.kind, spec.base]);
 	return JSON.stringify([
 		spec.kind,
 		spec.kind === "item" ? spec.base : null,

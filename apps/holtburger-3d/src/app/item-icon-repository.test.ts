@@ -57,6 +57,25 @@ function fixture() {
 }
 
 describe("ItemIconRepository", () => {
+	it("keeps standalone graphics distinct from composed artwork of the same asset", async () => {
+		const f = fixture();
+		const baseSpec = { kind: "base", base: 1 } as const;
+		const baseKey = f.repository.retain(f.owner, baseSpec);
+		const itemKey = f.repository.retain(f.owner, spec(baseSpec.base));
+		expect(baseKey).not.toBe(itemKey);
+		expect(f.repository.retain(f.owner, baseSpec)).toBe(baseKey);
+		const work = await f.next();
+		expect(work.requests).toEqual([
+			{ key: baseKey, spec: baseSpec },
+			{ key: itemKey, spec: spec(baseSpec.base) },
+		]);
+		f.ready(work);
+		await vi.waitFor(() =>
+			expect(f.services.createImage).toHaveBeenCalledTimes(2),
+		);
+		expect(f.repository.read(baseKey)).not.toEqual(f.repository.read(itemKey));
+		f.repository.dispose();
+	});
 	it("shares one preparation and URL across persistent owners and display uses", async () => {
 		const f = fixture();
 		const second = f.repository.createOwner("persistent");

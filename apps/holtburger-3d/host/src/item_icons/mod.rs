@@ -38,6 +38,11 @@ const CONTAINER_ENTRY: u32 = 10;
     deny_unknown_fields
 )]
 pub enum ItemIconSpec {
+    /// Standalone authored graphic, without category backing or item effects.
+    Base {
+        /// Required RenderSurface identity, independent of a live item.
+        base: NonZeroU32,
+    },
     Item {
         /// Nonzero server base DID, absent before one is assigned.
         base: Option<NonZeroU32>,
@@ -143,21 +148,33 @@ pub struct PreparedItemIcon {
 
 /// Resolved artwork identity, independent of raw masks and per-request degradation reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Recipe {
-    base: u32,
-    background: u32,
-    effects: u32,
-    overlay: Option<u32>,
-    underlay: Option<u32>,
+enum Recipe {
+    Base(u32),
+    Composed {
+        base: u32,
+        background: u32,
+        effects: u32,
+        overlay: Option<u32>,
+        underlay: Option<u32>,
+    },
 }
 
-struct ResolvedLayers {
+/// Resolved cache identity and the artwork required to prepare it.
+struct ResolvedIcon {
     recipe: Recipe,
-    base: Arc<UiImage>,
-    background: Arc<UiImage>,
-    effects: Arc<UiImage>,
-    overlay: Option<Arc<UiImage>>,
-    underlay: Option<Arc<UiImage>>,
+    artwork: ResolvedArtwork,
+}
+
+/// Base-only requests never resolve or require decorative layers.
+enum ResolvedArtwork {
+    Base(Arc<UiImage>),
+    Composed {
+        base: Arc<UiImage>,
+        background: Arc<UiImage>,
+        effects: Arc<UiImage>,
+        overlay: Option<Arc<UiImage>>,
+        underlay: Option<Arc<UiImage>>,
+    },
 }
 
 impl PrepareItemIconsRequest {
@@ -222,21 +239,30 @@ fn prepare_with_assets(
     let mut output = Vec::with_capacity(request.icons.len());
     for request in &request.icons {
         let mut issues = Vec::new();
-        let prepared = resolve(assets, &request.spec, &mut issues).and_then(|layers| {
-            if let Some(image) = images.get(&layers.recipe) {
+        let prepared = resolve(assets, &request.spec, &mut issues).and_then(|resolved| {
+            if let Some(image) = images.get(&resolved.recipe) {
                 return Ok(image.clone());
             }
-            let pixels = compose(IconLayers {
-                base: &layers.base,
-                background: &layers.background,
-                effects: &layers.effects,
-                overlay: layers.overlay.as_deref(),
-                underlay: layers.underlay.as_deref(),
-            })
+            let pixels = match &resolved.artwork {
+                ResolvedArtwork::Base(base) => compositor::canvas(base),
+                ResolvedArtwork::Composed {
+                    base,
+                    background,
+                    effects,
+                    overlay,
+                    underlay,
+                } => compose(IconLayers {
+                    base,
+                    background,
+                    effects,
+                    overlay: overlay.as_deref(),
+                    underlay: underlay.as_deref(),
+                }),
+            }
             .map_err(|e| issue(IconLayer::Composition, IconIssueCode::Composition, None, e))?;
             let image = encode_png(&pixels)
                 .map_err(|e| issue(IconLayer::Composition, IconIssueCode::Composition, None, e))?;
-            images.insert(layers.recipe, image.clone());
+            images.insert(resolved.recipe, image.clone());
             Ok(image)
         });
         let result = match prepared {
@@ -264,8 +290,18 @@ fn resolve(
     assets: &mut impl UiAssets,
     spec: &ItemIconSpec,
     issues: &mut Vec<IconIssue>,
-) -> Result<ResolvedLayers, IconIssue> {
+) -> Result<ResolvedIcon, IconIssue> {
     let (base_id, background_entry, overlay, underlay, effects) = match *spec {
+        ItemIconSpec::Base { base } => {
+            return Ok(ResolvedIcon {
+                recipe: Recipe::Base(base.get()),
+                artwork: ResolvedArtwork::Base(
+                    assets
+                        .image(base.get())
+                        .map_err(|e| asset_issue(IconLayer::Base, e))?,
+                ),
+            });
+        }
         ItemIconSpec::Item {
             base,
             item_type,
@@ -324,19 +360,21 @@ fn resolve(
     };
     let overlay = optional_image(assets, overlay, IconLayer::Overlay, issues);
     let underlay = optional_image(assets, underlay, IconLayer::Underlay, issues);
-    Ok(ResolvedLayers {
-        recipe: Recipe {
+    Ok(ResolvedIcon {
+        recipe: Recipe::Composed {
             base: base_id,
             background: background_id,
             effects: effects_id,
             overlay: overlay.as_ref().map(|(id, _)| *id),
             underlay: underlay.as_ref().map(|(id, _)| *id),
         },
-        base,
-        background,
-        effects,
-        overlay: overlay.map(|(_, image)| image),
-        underlay: underlay.map(|(_, image)| image),
+        artwork: ResolvedArtwork::Composed {
+            base,
+            background,
+            effects,
+            overlay: overlay.map(|(_, image)| image),
+            underlay: underlay.map(|(_, image)| image),
+        },
     })
 }
 

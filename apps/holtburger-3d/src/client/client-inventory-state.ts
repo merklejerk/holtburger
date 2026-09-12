@@ -18,6 +18,19 @@ import {
 } from "./client-inventory-sections";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import { CLIENT_TUNING } from "./client-tuning";
+import { PYREAL_ICON_SPEC } from "./client-inventory-art";
+import {
+	inventoryCurrencyTotals,
+	type InventoryCurrencyTotal,
+} from "./client-inventory-currencies";
+
+/** Prepared aggregate with a repository-owned graphic reference. */
+export interface InventoryCurrencyRow extends Omit<
+	InventoryCurrencyTotal,
+	"base"
+> {
+	readonly iconKey: string;
+}
 
 /** Existing lifecycle facts and semantic mirror; the model does not subscribe to raw properties. */
 export interface InventoryLifecycle {
@@ -28,6 +41,8 @@ export interface InventoryLifecycle {
 
 /** Cached membership and reference indices derived together from one accepted revision. */
 interface InventoryBaseline {
+	readonly currencies: readonly InventoryCurrencyRow[];
+	readonly currenciesPending: boolean;
 	readonly worldRevision: number;
 	readonly playerGuid: number | null;
 	readonly membership: ClientInventoryMembership | null;
@@ -37,6 +52,9 @@ interface InventoryBaseline {
 
 /** Lazy, consumer-facing layout. Authoritative entities remain immutable mirror references. */
 export interface ClientInventoryView {
+	/** Ambient balances across all carried packs; pending prevents partial totals appearing final. */
+	readonly currencies: readonly InventoryCurrencyRow[];
+	readonly currenciesPending: boolean;
 	readonly pending: boolean;
 	readonly sortMode: InventorySortMode;
 	readonly sections: readonly ClientInventorySection[];
@@ -47,6 +65,8 @@ export interface ClientInventoryView {
 /** Session-owned preferences and icon references, independent of the active floating panel. */
 export class ClientInventoryState {
 	readonly icons: ItemIconRepository;
+	/** Static footer artwork retained across panel closure and inventory resynchronization. */
+	readonly pyrealIconKey: string;
 	readonly #lifecycle: InventoryLifecycle;
 	readonly #owner: ItemIconOwner;
 	readonly #unsubscribe: () => void;
@@ -61,6 +81,7 @@ export class ClientInventoryState {
 		this.#lifecycle = lifecycle;
 		this.icons = icons;
 		this.#owner = icons.createOwner("persistent");
+		this.pyrealIconKey = icons.retain(this.#owner, PYREAL_ICON_SPEC);
 		this.#unsubscribe = lifecycle.subscribe((event) => {
 			const state =
 				event.type === "lifecycle"
@@ -88,6 +109,9 @@ export class ClientInventoryState {
 			unslotted: sortInventoryItems(section.unslotted, this.#sortMode),
 		}));
 		this.#view = Object.freeze({
+			currencies: this.#baseline?.currencies ?? [],
+			currenciesPending:
+				this.#pending || (this.#baseline?.currenciesPending ?? true),
 			pending: this.#pending,
 			sortMode: this.#sortMode,
 			sections,
@@ -146,6 +170,15 @@ export class ClientInventoryState {
 		const membership = clientInventoryMembership(level);
 		const iconKeys = new Map<number, string>();
 		const retainedKeys = new Set<string>();
+		const currencyTotals = inventoryCurrencyTotals(level);
+		const currencies = currencyTotals.totals.map(({ base, ...total }) => {
+			const iconKey = this.icons.retain(this.#owner, {
+				kind: "base",
+				base,
+			});
+			retainedKeys.add(iconKey);
+			return { ...total, iconKey };
+		});
 		for (const entity of membership?.members ?? []) {
 			const description = entity.description;
 			if (description.kind !== "known") continue;
@@ -170,6 +203,8 @@ export class ClientInventoryState {
 			if (!retainedKeys.has(key)) this.icons.release(this.#owner, key);
 		}
 		this.#baseline = {
+			currencies,
+			currenciesPending: currencyTotals.pending,
 			worldRevision: level.revision,
 			playerGuid: level.playerGuid,
 			membership,

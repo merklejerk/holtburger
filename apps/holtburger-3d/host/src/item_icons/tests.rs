@@ -106,8 +106,44 @@ fn main_pack_overrides_base_and_background_without_changing_other_player_icons()
         &mut Vec::new(),
     )
     .unwrap();
-    assert_eq!((regular.recipe.base, regular.recipe.background), (1, 2));
-    assert_eq!((main.recipe.base, main.recipe.background), (7, 5));
+    assert!(matches!(
+        regular.recipe,
+        Recipe::Composed {
+            base: 1,
+            background: 2,
+            ..
+        }
+    ));
+    assert!(matches!(
+        main.recipe,
+        Recipe::Composed {
+            base: 7,
+            background: 5,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn base_art_preserves_alpha_and_white_without_requiring_decorations() {
+    let mut assets = Assets::default();
+    let mut pixels = [255, 255, 255, 255].repeat(ICON_SIZE * ICON_SIZE);
+    pixels[..4].copy_from_slice(&[12, 34, 56, 0]);
+    pixels[4..8].copy_from_slice(&[78, 90, 12, 128]);
+    assets.images.insert(
+        1,
+        Arc::new(UiImage {
+            width: ICON_SIZE as u32,
+            height: ICON_SIZE as u32,
+            pixels: pixels.clone(),
+        }),
+    );
+    let base = ItemIconSpec::Base {
+        base: NonZeroU32::new(1).unwrap(),
+    };
+    let results = prepare_with_assets(&mut assets, &request(vec![base])).unwrap();
+    assert!(matches!(results[0].result, ItemIconResult::Ready { .. }));
+    assert_eq!(rgba(&results[0].result), pixels);
 }
 
 #[test]

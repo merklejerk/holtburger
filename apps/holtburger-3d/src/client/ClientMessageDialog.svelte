@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { onMount } from "svelte";
-	import { useViewportInputGate } from "../lib/input/viewport-input-context";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { ClientDialogPresentation } from "./client-dialogs";
 
 	interface Props {
@@ -10,27 +9,11 @@
 		readonly onRespond: (requestId: string, accepted: boolean) => void;
 	}
 	const { presentation, onDismiss, onRespond }: Props = $props();
-	const inputGate = useViewportInputGate();
-	let dialog: HTMLDialogElement;
+	const { keyboard } = useAppInputPolicy();
 	const submitting = $derived(
 		presentation.kind === "confirmation" &&
 			presentation.submission.kind === "submitting",
 	);
-
-	onMount(() => {
-		const previousFocus = document.activeElement;
-		const release = inputGate.block();
-		dialog.showModal();
-		// Focus the text surface, so showing a question does not preselect acceptance.
-		dialog.focus();
-		return () => {
-			dialog.close();
-			release();
-			// Svelte may detach the dialog before cleanup; native close then cannot restore focus.
-			if (previousFocus instanceof HTMLElement && previousFocus.isConnected)
-				previousFocus.focus({ preventScroll: true });
-		};
-	});
 
 	function cancel(event: Event): void {
 		event.preventDefault();
@@ -40,7 +23,7 @@
 </script>
 
 <dialog
-	bind:this={dialog}
+	use:keyboard.modal
 	class="client-message-dialog ui-panel"
 	tabindex="-1"
 	aria-labelledby="client-message-title"

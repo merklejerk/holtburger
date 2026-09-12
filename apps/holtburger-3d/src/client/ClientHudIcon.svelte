@@ -16,6 +16,8 @@
 		| "precise-jump"
 		| "interact"
 		| "examine"
+		/** Pointer over text for enabling chat-history selection. */
+		| "select-text"
 		| "locked"
 		| "unlocked";
 
@@ -69,6 +71,8 @@
 		/>
 	{:else if name === "examine"}
 		<circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.3 15.3 5 5" />
+	{:else if name === "select-text"}
+		<path d="M3 5h15M3 10h6M3 15h5m4-6 9 7-5 1-2 5Z" />
 	{:else if name === "locked"}
 		<rect x="5" y="10" width="14" height="11" rx="2" /><path
 			d="M8 10V7a4 4 0 0 1 8 0v3"

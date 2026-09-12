@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 
-	import { provideViewportInputGate } from "../lib/input/viewport-input-context";
-	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
+	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount } from "svelte";
 	import FrameMetricsOverlay, {
@@ -154,7 +153,7 @@
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
-	const inputGate = provideViewportInputGate();
+	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 	/** Scene activation owns one blocker independently of modal/UI blockers. */
 	let releaseSceneInput: (() => void) | null = null;
 	function setSceneInputBlocked(blocked: boolean): void {
@@ -1770,10 +1769,6 @@
 			return;
 		}
 
-		const stopObservingInputFocus = observeViewportWindowFocus(
-			inputGate,
-			canvas.ownerDocument,
-		);
 		let destroyed = false;
 		let teardown: Promise<void> | undefined;
 
@@ -1892,6 +1887,7 @@
 				if (destroyed) return;
 				cameraController = new ExplorerCameraInputController({
 					inputGate,
+					keyboard,
 					input: APP_INPUT,
 					canvas,
 					keyboardYawRadiansPerSecond(precisionActive) {
@@ -2049,7 +2045,6 @@
 
 		return () => {
 			destroyed = true;
-			stopObservingInputFocus();
 			clearInterval(clockTimer);
 			clockTimer = undefined;
 			void startup
@@ -2066,7 +2061,8 @@
 		bind:this={canvasElement}
 		class="explorer-canvas"
 		aria-label="Explorer render viewport"
-		tabindex="0"
+		tabindex="-1"
+		data-game-viewport
 	></canvas>
 
 	<div class="explorer-overlay">

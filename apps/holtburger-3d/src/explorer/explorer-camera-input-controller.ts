@@ -3,6 +3,7 @@ import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
 import { Vec3 } from "../lib/game/math/types";
 import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
 import { CameraLookController } from "../lib/game/controls/camera-look-controller";
+import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import type { InputContext } from "../lib/input/input-context";
 import type { AppInput } from "../lib/input/app-input";
 import type { ViewportInputGate } from "../lib/input/viewport-input-gate";
@@ -52,6 +53,8 @@ export interface ExplorerCameraInputControllerOptions {
 	readonly input: AppInput;
 	/** Shared viewport availability and cancellation boundary for this mounted app. */
 	readonly inputGate: ViewportInputGate;
+	/** App-owned keyboard routing, independent of canvas focus. */
+	readonly keyboard: KeyboardInputPolicy;
 	readonly onChange: (state: FreeFlyCameraState) => void;
 	/** Sends wheel translation to the current host-owned camera policy. */
 	readonly onPhysicalWheel: (localUpDistance: number) => void;
@@ -92,8 +95,10 @@ export class ExplorerCameraInputController {
 	readonly #input: AppInput;
 	/** All keyboard and pointer actions consult the app-owned gate. */
 	readonly #inputGate: ViewportInputGate;
-	/** Unregister this controller and cancel its input on disposal. */
-	readonly #detachInput: () => void;
+	/** Unregister and cancel this controller's pointer gestures on disposal. */
+	readonly #detachGestures: () => void;
+	/** Release the registered keyboard consumer with this controller. */
+	readonly #detachKeyboard: () => void;
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onChange: (state: FreeFlyCameraState) => void;
 	readonly #onPhysicalWheel: (localUpDistance: number) => void;
@@ -160,10 +165,15 @@ export class ExplorerCameraInputController {
 		this.#canvas.addEventListener("wheel", this.#handleWheel, {
 			passive: false,
 		});
-		this.#canvas.addEventListener("keydown", this.#handleKeyDown);
-		this.#canvas.addEventListener("keyup", this.#handleKeyUp);
-		this.#canvas.addEventListener("blur", this.#handleBlur);
-		this.#detachInput = this.#inputGate.attach(this.#cancelInput);
+		this.#detachGestures = this.#inputGate.attach(() => {
+			if (this.#activeDrag !== null)
+				this.#finishDrag(this.#activeDrag.pointerId);
+		});
+		this.#detachKeyboard = options.keyboard.bindGame({
+			keydown: this.#handleKeyDown,
+			keyup: this.#handleKeyUp,
+			cancel: this.#cancelKeyboard,
+		});
 	}
 
 	/** Replace the pose for automatic focus without marking it as user-controlled. */
@@ -221,7 +231,8 @@ export class ExplorerCameraInputController {
 	}
 
 	dispose(): void {
-		this.#detachInput();
+		this.#detachKeyboard();
+		this.#detachGestures();
 		this.#canvas.removeEventListener("pointerdown", this.#handlePointerDown);
 		this.#canvas.removeEventListener("pointermove", this.#handlePointerMove);
 		this.#canvas.removeEventListener("pointerup", this.#handlePointerUp);
@@ -230,9 +241,6 @@ export class ExplorerCameraInputController {
 			this.#handlePointerCancel,
 		);
 		this.#canvas.removeEventListener("wheel", this.#handleWheel);
-		this.#canvas.removeEventListener("keydown", this.#handleKeyDown);
-		this.#canvas.removeEventListener("keyup", this.#handleKeyUp);
-		this.#canvas.removeEventListener("blur", this.#handleBlur);
 	}
 
 	readonly #handlePointerDown = (event: PointerEvent): void => {
@@ -244,7 +252,6 @@ export class ExplorerCameraInputController {
 		const pan =
 			!this.#isCharacterScheme() && this.#input.pointer("flyPan", event);
 		if (!rotate && !pan) return;
-		this.#canvas.focus();
 		this.#canvas.setPointerCapture(event.pointerId);
 		this.#activeDrag = {
 			lastX: event.clientX,
@@ -351,7 +358,6 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handleKeyDown = (event: KeyboardEvent): void => {
-		if (!this.#inputGate.allowed) return;
 		if (this.#activeInput().apply(event, true)) event.preventDefault();
 	};
 
@@ -363,15 +369,10 @@ export class ExplorerCameraInputController {
 		return this.#isCharacterScheme() ? this.#characterInput : this.#flyInput;
 	}
 
-	readonly #handleBlur = (): void => {
-		this.#inputGate.cancel();
-	};
-
-	readonly #cancelInput = (): void => {
+	readonly #cancelKeyboard = (): void => {
 		this.#characterInput.reset();
 		this.#flyInput.reset();
 		this.#precisionActive = false;
-		if (this.#activeDrag !== null) this.#finishDrag(this.#activeDrag.pointerId);
 		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
 		this.#stopMovement();
 		if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);

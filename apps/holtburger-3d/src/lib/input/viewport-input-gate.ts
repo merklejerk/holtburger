@@ -52,24 +52,3 @@ export class ViewportInputGate {
 			throw new AggregateError(errors, "Viewport input cancellation failed.");
 	}
 }
-
-/** Cancel on window focus/visibility loss; the viewport keeps its own element blur listener. */
-export function observeViewportWindowFocus(
-	gate: ViewportInputGate,
-	document: Document,
-): () => void {
-	const window = document.defaultView;
-	if (window === null)
-		throw new Error("Viewport input requires a document with a window.");
-	const cancel = () => gate.cancel();
-	const visibilityChanged = () => {
-		if (document.hidden) gate.cancel();
-	};
-	window.addEventListener("blur", cancel);
-	document.addEventListener("visibilitychange", visibilityChanged);
-	return () => {
-		window.removeEventListener("blur", cancel);
-		document.removeEventListener("visibilitychange", visibilityChanged);
-		gate.cancel();
-	};
-}

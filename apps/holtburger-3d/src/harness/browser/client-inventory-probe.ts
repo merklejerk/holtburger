@@ -431,11 +431,13 @@ export async function probeClientInventory(options: {
 			new KeyboardEvent("keyup", { bubbles: true, key: "w", code: "KeyW" }),
 		);
 		if (
-			globalKeys.length !== 0 ||
+			globalKeys.join() !== "w" ||
 			JSON.stringify(options.readViewportInput()) !==
 				JSON.stringify(inputBefore)
 		)
-			throw new Error("Inventory control input reached the viewport.");
+			throw new Error(
+				"Inventory should preserve keyboard routing and contain pointer gestures.",
+			);
 	} finally {
 		window.removeEventListener("keydown", receiveKey);
 	}
@@ -816,7 +818,7 @@ export async function probeClientInventory(options: {
 		recovered: true,
 		selectionRemoved: true,
 		reopenedCurrent: true,
-		inputIsolated: true,
+		pointerContainedKeyboardPreserved: true,
 		persistentMaintenanceWhileHidden: true,
 		sharedDecodedArtwork: true,
 		retirementAfterDomCommit: true,

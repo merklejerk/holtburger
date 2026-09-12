@@ -1,21 +1,26 @@
+import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 import {
 	ExplorerCameraInputController,
 	type CharacterActionInput,
 } from "../../explorer/explorer-camera-input-controller";
 import { AppInput } from "../../lib/input/app-input";
 import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
-import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
+import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 
 /** Exercise configured Explorer input and DOM focus cancellation without runtime assets. */
-export function probeBrowserInput(): void {
+export function probeBrowserInput(
+	keyboard: KeyboardInputPolicy,
+	inputGate: ViewportInputGate,
+): void {
 	const canvas = document.createElement("canvas");
-	canvas.tabIndex = 0;
+	canvas.tabIndex = -1;
+	canvas.dataset.gameViewport = "";
 	const editor = document.createElement("input");
 	document.body.append(canvas, editor);
 	const actions: CharacterActionInput[] = [];
-	const inputGate = new ViewportInputGate();
 	const controller = new ExplorerCameraInputController({
 		inputGate,
+		keyboard,
 		canvas,
 		input: new AppInput({
 			...INPUT_DEFAULTS,
@@ -40,7 +45,7 @@ export function probeBrowserInput(): void {
 		);
 	};
 	try {
-		canvas.focus();
+		keyboard.returnToGame();
 		controller.setControlScheme({ kind: "physical-fly" });
 		dispatch("F9", true);
 		dispatch("F10", true);
@@ -50,7 +55,7 @@ export function probeBrowserInput(): void {
 		editor.focus();
 		if (controller.physicalFlyInput().movement.up !== 0)
 			throw new Error("DOM focus loss retained fly input.");
-		canvas.focus();
+		keyboard.returnToGame();
 		dispatch("F10", true, true);
 		if (controller.physicalFlyInput().movement.up !== 0)
 			throw new Error("Repeat resurrected cancelled fly input.");

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { findAvailablePort, parseVitePort } from "./dev-port.mjs";
 import { probeUiShowcase } from "./ui-showcase-probe.mjs";
 import { probeUiTheme } from "./ui-theme-probe.mjs";
+import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
 import { probeClientTheme } from "./client-theme-probe.mjs";
 
 const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
@@ -101,6 +102,7 @@ try {
 			clientHud: result.clientHud,
 			clientTheme: result.clientTheme,
 			clientInventory: result.clientInventory,
+			keyboardPolicy: result.keyboardPolicy,
 			consoleMessages: result.consoleMessages,
 			viewport: result.state.viewport,
 		};
@@ -3932,6 +3934,10 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			return { uiShowcase, screenshot, consoleMessages };
 		}
 		await waitForClientHudHarnessApi(client);
+		const keyboardPolicy = await probeKeyboardPolicy(
+			client,
+			evaluateExpression,
+		);
 		const capture = () =>
 			evaluate(
 				client,
@@ -4627,6 +4633,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		return {
 			clientTheme: theme,
 			clientInventory: inventory,
+			keyboardPolicy,
 			cameraSweepScreenshots: {
 				constrained: constrainedScreenshot.data,
 				narrow: narrowScreenshot.data,

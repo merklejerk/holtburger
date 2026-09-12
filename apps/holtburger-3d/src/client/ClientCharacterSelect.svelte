@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { tick } from "svelte";
+	import { onMount, tick } from "svelte";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import { APP_INPUT } from "../lib/input/app-input";
 	import type { ClientLifecycleUiState } from "./client-lifecycle-state";
 
 	/** The authority-owned character roster and current frontend selection. */
@@ -25,13 +27,20 @@
 	let { state, entryPending, onChoose, onEnter, onDisconnect }: Props =
 		$props();
 
+	const { keyboard } = useAppInputPolicy();
+	let listElement: HTMLDivElement;
+	onMount(() => keyboard.activate(listElement));
+
 	/** Keystrokes within this interval form a name prefix; repeated letters cycle matches. */
 	const TYPEAHEAD_INTERVAL_MS = 500;
 	let search = { prefix: "", time: 0 };
 
-	function handleKeydown(
-		event: KeyboardEvent & { currentTarget: HTMLDivElement },
-	): void {
+	function handleKeydown(event: KeyboardEvent): void {
+		// Selection has no game surface to return to; its explicit exit is Disconnect.
+		if (APP_INPUT.shortcut("cancel", event)) {
+			event.preventDefault();
+			return;
+		}
 		if (
 			entryPending ||
 			event.altKey ||
@@ -40,14 +49,18 @@
 			event.isComposing
 		)
 			return;
-		const list = event.currentTarget.parentElement;
-		if (list === null) return;
+		if (APP_INPUT.shortcut("enterWorld", event)) {
+			event.preventDefault();
+			if (!event.repeat && state.selectedGuid !== null) void onEnter();
+			return;
+		}
+		const list = listElement;
 		const options = Array.from(
 			list.querySelectorAll<HTMLElement>('[role="option"]'),
 		);
 		if (options.length === 0) return;
-		const current = options.findIndex(
-			(option) => option === document.activeElement,
+		const current = state.characters.findIndex(
+			(character) => character.guid === state.selectedGuid,
 		);
 		let next: number;
 		switch (event.key) {
@@ -95,7 +108,7 @@
 		event.preventDefault();
 		const option = options[next];
 		if (option) {
-			option.focus();
+			onChoose(state.characters[next].guid);
 			option.scrollIntoView({ block: "nearest" });
 		}
 		if (event.key.length !== 1) search = { prefix: "", time: 0 };
@@ -119,32 +132,39 @@
 	class="client-character-list"
 	role="listbox"
 	aria-label="Characters"
+	aria-activedescendant={state.selectedGuid === null
+		? undefined
+		: `client-character-${state.selectedGuid}`}
 	aria-disabled={entryPending}
-	tabindex={state.characters.length === 0 ? 0 : -1}
+	tabindex="-1"
+	bind:this={listElement}
+	use:keyboard.scope={{
+		keydown: handleKeydown,
+		cancel: () => {
+			search = { prefix: "", time: 0 };
+		},
+	}}
 >
-	{#each state.characters as character, index (character.guid)}
-		<div
+	{#each state.characters as character (character.guid)}
+		<button
+			type="button"
+			tabindex="-1"
+			id={`client-character-${character.guid}`}
 			class="client-character ui-option"
 			role="option"
 			aria-selected={state.selectedGuid === character.guid}
-			aria-disabled={entryPending}
-			tabindex={!entryPending &&
-			(state.selectedGuid === character.guid ||
-				(state.selectedGuid === null && index === 0))
-				? 0
-				: -1}
-			onkeydown={handleKeydown}
-			onfocus={() => {
-				if (!entryPending) onChoose(character.guid);
-			}}
-			onclick={(event) => {
-				if (!entryPending) event.currentTarget.focus();
+			disabled={entryPending}
+			onclick={() => {
+				if (!entryPending) {
+					onChoose(character.guid);
+					keyboard.activate(listElement);
+				}
 			}}
 			ondblclick={() => void enterCharacter(character.guid)}
 		>
 			<strong>{character.name}</strong>
 			<span>Slot {character.slot + 1}</span>
-		</div>
+		</button>
 	{/each}
 </div>
 
@@ -187,12 +207,14 @@
 			min-height: 32px;
 			padding: 4px 8px;
 			text-align: left;
+			font: inherit;
+			border: 0;
 			border-bottom: 1px solid
 				var(--ui-option-border-color, var(--ui-color-border));
 			cursor: pointer;
 			user-select: none;
 		}
-		.client-character[aria-disabled="true"] {
+		.client-character:disabled {
 			cursor: not-allowed;
 		}
 		.client-character span {

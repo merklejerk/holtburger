@@ -17,8 +17,8 @@
 		ClientDialogs,
 		type ClientDialogPresentation,
 	} from "./client-dialogs";
-	import { provideViewportInputGate } from "../lib/input/viewport-input-context";
-	import { APP_INPUT, isEditingInput } from "../lib/input/app-input";
+	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
@@ -141,7 +141,7 @@
 		...CLIENT_TUNING.frameSettings,
 	});
 	let inputController: CharacterInputController | null = null;
-	const inputGate = provideViewportInputGate();
+	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 	let inputArbiter: ClientInputArbiter | null = null;
 	const characterInput = APP_INPUT.characterContext((action, pressed) => {
 		if (
@@ -395,18 +395,8 @@
 		await session.sendChat(message);
 	}
 
-	function handleWindowKeydown(event: KeyboardEvent): void {
+	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		if (isEditingInput(event.target)) return;
-		if (
-			lifecycle.kind === "character-selection" &&
-			APP_INPUT.shortcut("enterWorld", event)
-		) {
-			event.preventDefault();
-			void enterWorld();
-			return;
-		}
-		if (!worldInputEnabled || !inputGate.allowed) return;
 		if (
 			APP_INPUT.shortcut("cancel", event) &&
 			inputArbiter?.applyCancel(true, event.repeat)
@@ -434,7 +424,7 @@
 			event.preventDefault();
 	}
 
-	function handleWindowKeyup(event: KeyboardEvent): void {
+	function handleGameKeyup(event: KeyboardEvent): void {
 		if (characterInput.apply(event, false)) event.preventDefault();
 	}
 
@@ -711,23 +701,26 @@
 		});
 		inputArbiter = arbiter;
 
-		// Attaching while blocked may cancel immediately; those callbacks must not own this effect.
-		const detachInput = untrack(() =>
-			inputGate.attach(() => {
-				characterInput.reset();
-				arbiter.reset();
-			}),
-		);
-
 		return () => {
 			cancelled = true;
 			activeJumpBeginSequence = null;
-			detachInput();
+			keyboard.cancel();
 			controller.releaseOwnership();
 			if (inputArbiter === arbiter) inputArbiter = null;
 			if (inputController === controller) inputController = null;
 		};
 	});
+
+	onMount(() =>
+		keyboard.bindGame({
+			keydown: handleGameKeydown,
+			keyup: handleGameKeyup,
+			cancel: () => {
+				characterInput.reset();
+				inputArbiter?.reset();
+			},
+		}),
+	);
 
 	/** One startup result consumed only by the diagnostics panel. */
 	let entityMetadata = $state<WeenieCatalogCapability | null>(null);
@@ -822,8 +815,6 @@
 		};
 	});
 </script>
-
-<svelte:window onkeydown={handleWindowKeydown} onkeyup={handleWindowKeyup} />
 
 {#if dialogPresentation !== null}
 	<ClientMessageDialog

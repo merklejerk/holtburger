@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import { provideViewportInputGate } from "../../lib/input/viewport-input-context";
+	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { uiThemes } from "../../app/mount";
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
@@ -26,7 +26,7 @@
 	import type { ClientChatLine } from "../../client/client-chat-policy";
 	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
 
-	provideViewportInputGate();
+	provideAppInputPolicy();
 	/** Showcase geometry follows the available stage, independently of client placement defaults. */
 	let stageWidth = $state(960);
 	let windowHeight = $state(720);
@@ -346,11 +346,7 @@
 					})}
 					onInteract={() => {}}
 				/>{/snippet}
-			{#snippet chat()}<ClientChat
-					gameCanvas={null}
-					{messages}
-					onSend={send}
-				/>{/snippet}
+			{#snippet chat()}<ClientChat {messages} onSend={send} />{/snippet}
 			{#snippet fps()}<ClientFpsCounter
 					readFrameRates={() => ({ capped: 60, uncapped: 120 })}
 				/>{/snippet}

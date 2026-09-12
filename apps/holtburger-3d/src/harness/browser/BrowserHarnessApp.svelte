@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 	import { APP_INPUT } from "../../lib/input/app-input";
 	import { onMount, tick as svelteTick } from "svelte";
@@ -2565,16 +2566,23 @@
 			removeEventListener() {},
 			setPointerCapture() {},
 		} as unknown as HTMLCanvasElement;
+		const inputGate = new ViewportInputGate();
+		const keyboard = new KeyboardInputPolicy(inputGate);
 		const dispatch = (type: string, event: object) =>
-			listeners.get(type)?.(
+			(type === "keydown"
+				? keyboard.keydown
+				: type === "keyup"
+					? keyboard.keyup
+					: listeners.get(type))?.(
 				Object.assign(
-					new Event(type, { cancelable: true }),
+					new KeyboardEvent(type, { cancelable: true }),
 					{ getModifierState: () => false },
 					event,
 				),
 			);
 		const controller = new ExplorerCameraInputController({
-			inputGate: new ViewportInputGate(),
+			inputGate,
+			keyboard,
 			input: APP_INPUT,
 			canvas,
 			onChange() {},

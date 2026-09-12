@@ -60,10 +60,11 @@ export type TextureArrayKey = `texture-array:${TexturePurpose}:${string}` & {
 	readonly [textureArrayKeyBrand]: true;
 };
 
-/** Stable generated pcode field for one landblock and mesh stride. */
-export type TerrainSurfaceTextureKey = `terrain-surface:${LandblockOwnerId}` & {
-	readonly [terrainSurfaceTextureKeyBrand]: true;
-};
+/** Stable generated pcode field for an authored landblock or the reusable ocean surface. */
+export type TerrainSurfaceTextureKey =
+	`terrain-surface:${LandblockOwnerId | "ocean-backdrop"}` & {
+		readonly [terrainSurfaceTextureKeyBrand]: true;
+	};
 
 /** Stable generated terrain-composition lookup table for one installed active region. */
 export type TerrainCompositionTextureKey = `terrain-composition:${string}` & {
@@ -298,11 +299,11 @@ export function createTextureArrayKey(
 	return `texture-array:${purpose}:${setId}` as TextureArrayKey;
 }
 
-/** Build the canonical generated pcode-field identity for one landblock. */
+/** Build a pcode-field identity for authored terrain or the reusable ocean surface. */
 export function createTerrainSurfaceTextureKey(
-	landblockId: LandblockOwnerId,
+	source: LandblockOwnerId | "ocean-backdrop",
 ): TerrainSurfaceTextureKey {
-	return `terrain-surface:${landblockId}` as TerrainSurfaceTextureKey;
+	return `terrain-surface:${source}` as TerrainSurfaceTextureKey;
 }
 
 /** Build the canonical generated terrain-composition identity for one installed active region. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	packTerrainPcode,
 	ROAD_TERRAIN_TYPE,
 	TERRAIN_COLOR_CODES,
 	TERRAIN_MATERIAL_CODES,
@@ -14,6 +15,26 @@ import {
 } from "./pcode";
 
 describe("terrain pcode", () => {
+	it("packs authored corners without leaking their scene classification bits", () => {
+		const pcode = packTerrainPcode([
+			(11 << 11) | (4 << 2) | 1,
+			(12 << 11) | (5 << 2) | 2,
+			(13 << 11) | (6 << 2) | 3,
+			(14 << 11) | (7 << 2),
+		]);
+		const corners = [
+			"southwest",
+			"southeast",
+			"northeast",
+			"northwest",
+		] as const;
+		expect(corners.map((corner) => terrainCodeAt(pcode, corner))).toEqual([
+			4, 5, 6, 7,
+		]);
+		expect(corners.map((corner) => roadCodeAt(pcode, corner))).toEqual([
+			1, 2, 3, 0,
+		]);
+	});
 	it("enumerates the complete color and road material domains", () => {
 		expect(TERRAIN_COLOR_CODES).toEqual(
 			Array.from({ length: TERRAIN_TYPE_COUNT }, (_, code) => code),

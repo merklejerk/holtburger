@@ -217,10 +217,10 @@ describe("resolveSceneInterestRequest", () => {
 		).toEqual(["0x0000ffff", "0x0100ffff", "0x0001ffff", "0x0101ffff"]);
 		expect(
 			enumerateAmbientEnvCellOwners(
-				{ kind: "outdoor", landblockId: "0xffffffff" },
+				{ kind: "outdoor", landblockId: "0xfefeffff" },
 				{ ...TEST_RADII, envCellRadius: 1 },
 			),
-		).toEqual(["0xfefeffff", "0xfffeffff", "0xfeffffff", "0xffffffff"]);
+		).toEqual(["0xfdfdffff", "0xfefdffff", "0xfdfeffff", "0xfefeffff"]);
 	});
 });
 

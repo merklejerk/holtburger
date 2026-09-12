@@ -236,6 +236,7 @@ export class TerrainSystem<
 		source: ResolvedTerrainSource<TOwnerId>,
 	): TerrainDrawUnit {
 		return {
+			kind: "landblock",
 			composition: source.generatedTextures.composition,
 			coordinates: getLandblockCoordinates(landblockId),
 			geometry: source.geometry,
@@ -427,7 +428,8 @@ export class TerrainSystem<
 	}
 }
 
-function createTerrainSurfaceUpload(
+/** Device upload shared by authored terrain and the ocean backdrop. */
+export function createTerrainSurfaceUpload(
 	field: TerrainGenerationResult["surfaceField"],
 ): Texture2DUpload {
 	return {
@@ -439,7 +441,8 @@ function createTerrainSurfaceUpload(
 	};
 }
 
-function createTerrainCompositionUpload(
+/** Regional composition upload shared by every terrain shader source. */
+export function createTerrainCompositionUpload(
 	table: TerrainCompositionTable,
 ): Texture2DUpload {
 	if (!Number.isInteger(table.width) || table.width <= 0) {

@@ -40,6 +40,8 @@ export type DynamicPresentationResourceOwnerId =
 
 /** Any runtime owner admitted by geometry and texture resource managers. */
 export type ResourceOwnerId =
+	/** Presentation-only ocean geometry and regional material leases. */
+	| "ocean-backdrop"
 	| OwnerId
 	| TerrainResourceOwnerId
 	| ActiveRegionResourceOwnerId

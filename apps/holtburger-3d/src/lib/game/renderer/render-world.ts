@@ -13,7 +13,7 @@ import type {
 	SceneCullingGroupFilter,
 } from "../scene";
 import type { AABB3 } from "../math/types";
-import type { TerrainDrawUnit } from "../terrain/types";
+import type { OceanBackdropDrawUnit, TerrainDrawUnit } from "../terrain/types";
 import type { VisibleDynamicPresentation } from "../systems/components";
 import type {
 	EnvCellRenderable,
@@ -45,6 +45,7 @@ import type { NameplateSourceVisual } from "./nameplate-policy";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
+	readonly oceanBackdrop: { readDrawUnits(): readonly OceanBackdropDrawUnit[] };
 	readonly staticDetails: {
 		getBinding(
 			role: StaticDetailRole,
@@ -267,6 +268,11 @@ export class RenderWorld {
 	getRenderScopeKey(nodeId: SceneNodeId): string | null {
 		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
 		return placement ? scopeKey(placement.scope) : null;
+	}
+
+	/** Visual ocean has no scene-node or DAT identity; the renderer routes it through outdoor visibility. */
+	readOceanBackdropDrawUnits(): readonly OceanBackdropDrawUnit[] {
+		return this.#systems.oceanBackdrop.readDrawUnits();
 	}
 
 	resolveTerrainDrawUnit(nodeId: SceneNodeId): TerrainDrawUnit | null {

@@ -1,4 +1,4 @@
-import { getContext, onMount, setContext } from "svelte";
+import { getContext, setContext } from "svelte";
 import { KeyboardInputPolicy } from "./keyboard-input-policy";
 import { ViewportInputGate } from "./viewport-input-gate";
 
@@ -12,13 +12,11 @@ interface AppInputPolicy {
 
 const APP_INPUT_POLICY = Symbol("app-input-policy");
 
-/** Install shared frontend policy once at the app composition root. */
+/** Provide shared policy; the gameplay surface owns mounting its DOM listeners. */
 export function provideAppInputPolicy(): AppInputPolicy {
 	const viewport = new ViewportInputGate();
 	const keyboard = new KeyboardInputPolicy(viewport);
-	const policy = setContext(APP_INPUT_POLICY, { viewport, keyboard });
-	onMount(() => keyboard.mount(document));
-	return policy;
+	return setContext(APP_INPUT_POLICY, { viewport, keyboard });
 }
 
 /** Descendants declare participation without threading policy through unrelated panels. */

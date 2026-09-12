@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
-	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { APP_INPUT } from "../lib/input/app-input";
 	import type { ClientLifecycleUiState } from "./client-lifecycle-state";
 
@@ -27,20 +26,14 @@
 	let { state, entryPending, onChoose, onEnter, onDisconnect }: Props =
 		$props();
 
-	const { keyboard } = useAppInputPolicy();
 	let listElement: HTMLDivElement;
-	onMount(() => keyboard.activate(listElement));
+	onMount(() => listElement.focus({ preventScroll: true }));
 
 	/** Keystrokes within this interval form a name prefix; repeated letters cycle matches. */
 	const TYPEAHEAD_INTERVAL_MS = 500;
 	let search = { prefix: "", time: 0 };
 
 	function handleKeydown(event: KeyboardEvent): void {
-		// Selection has no game surface to return to; its explicit exit is Disconnect.
-		if (APP_INPUT.shortcut("cancel", event)) {
-			event.preventDefault();
-			return;
-		}
 		if (
 			entryPending ||
 			event.altKey ||
@@ -136,13 +129,11 @@
 		? undefined
 		: `client-character-${state.selectedGuid}`}
 	aria-disabled={entryPending}
-	tabindex="-1"
+	tabindex="0"
 	bind:this={listElement}
-	use:keyboard.scope={{
-		keydown: handleKeydown,
-		cancel: () => {
-			search = { prefix: "", time: 0 };
-		},
+	onkeydown={handleKeydown}
+	onblur={() => {
+		search = { prefix: "", time: 0 };
 	}}
 >
 	{#each state.characters as character (character.guid)}
@@ -157,7 +148,7 @@
 			onclick={() => {
 				if (!entryPending) {
 					onChoose(character.guid);
-					keyboard.activate(listElement);
+					listElement.focus({ preventScroll: true });
 				}
 			}}
 			ondblclick={() => void enterCharacter(character.guid)}

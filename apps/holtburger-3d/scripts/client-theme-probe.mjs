@@ -135,14 +135,34 @@ export async function probeClientTheme(
 		);
 		if (!valid)
 			throw new Error(
-				`Character selection did not handle ${key} in its keyboard scope.`,
+				`Character selection did not handle ${key} with its local keyboard handler.`,
 			);
 	}
+	// Character selection is an ordinary page: Tab reaches its native action buttons.
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Tab",
+		code: "Tab",
+		windowsVirtualKeyCode: 9,
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Tab",
+		code: "Tab",
+		windowsVirtualKeyCode: 9,
+	});
+	await read(() => {
+		if (!document.activeElement?.classList.contains("client-action"))
+			throw new Error(
+				"Character selection did not allow native Tab navigation.",
+			);
+	});
 	await client.send("Input.dispatchKeyEvent", {
 		type: "keyDown",
 		key: "Enter",
 		code: "Enter",
 		windowsVirtualKeyCode: 13,
+		text: "\r",
 	});
 	await client.send("Input.dispatchKeyEvent", {
 		type: "keyUp",

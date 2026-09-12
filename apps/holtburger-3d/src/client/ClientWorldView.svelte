@@ -131,7 +131,8 @@
 		onSendChat,
 		onCanvas,
 	}: Props = $props();
-	const { viewport: inputGate } = useAppInputPolicy();
+	const { viewport: inputGate, keyboard } = useAppInputPolicy();
+	onMount(() => keyboard.mount(document));
 	onMount(() => inputGate.attach(cancelViewportGesture));
 
 	const initialViewport: ClientHudViewport = {

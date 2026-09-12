@@ -112,6 +112,8 @@ export class KeyboardInputPolicy {
 			document.removeEventListener("focusout", this.#focusOut);
 			document.removeEventListener("pointerdown", this.#pointerDown, true);
 			this.cancel();
+			this.#owner = null;
+			this.#presses.clear();
 			observer.disconnect();
 			this.#document = null;
 		};

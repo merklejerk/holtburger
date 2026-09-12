@@ -32,8 +32,10 @@ button numbers: primary `0`, middle `1`, secondary `2`.
 
 `APP_INPUT` is the shared configuration entry point for both modes. Its `InputContext` resolves
 presses to semantic actions, suppresses repeat, and retains physical-key ownership until release.
-Each mounted frontend owns its action context. `provideAppInputPolicy()` installs one keyboard
-router and one `ViewportInputGate` for the app; descendants access them with `useAppInputPolicy()`.
+Each mounted frontend owns its action context. `provideAppInputPolicy()` provides one keyboard
+router and one `ViewportInputGate`; descendants access them with `useAppInputPolicy()`.
+Only `ClientWorldView` and `ExplorerApp` mount the game keyboard policy. Connection, character
+selection, and error screens retain normal browser focus and Tab navigation.
 
 Keyboard ownership defaults to the game. Ordinary HUD buttons, toggles, inventory controls, and
 panel gestures do not acquire it. Text/number editors, editable content, and native selects acquire
@@ -44,8 +46,8 @@ surface or leaving an editor returns keyboard ownership to the game. Mouse gestu
 Components with keyboard behavior declare it with `use:keyboard.scope={{ keydown: handleKeydown }}`.
 Registration does not activate a scope. Native editor focus activates editing automatically;
 custom surfaces use `keyboard.activate(element)` or declare an `activation` key matcher in the
-scope. Chat demonstrates command activation, and character selection demonstrates explicit screen
-activation. Custom scopes can also provide `keyup` and `cancel` when they maintain held actions.
+scope. Chat demonstrates command activation. Custom scopes can also provide `keyup` and `cancel`
+when they maintain held actions.
 Do not add component-level global keyboard listeners or blanket key propagation suppression.
 
 The pointer-over-text toggle enables mouse selection and native copying in chat history. Clicking

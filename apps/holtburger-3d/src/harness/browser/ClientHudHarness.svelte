@@ -1519,62 +1519,67 @@
 	/>
 {/if}
 
-<ClientWorldView
-	entityMetadata={{ status: "available", path: "fixture.hwc", recordCount: 1 }}
-	entityCollisionDisabled={false}
-	onEntityCollisionDisabledChange={() => {}}
-	cameraController={cameraEnabled ? cameraController : null}
-	{preciseJumpActive}
-	onPreciseJumpAim={() => undefined}
-	onPreciseJumpActivate={() => {
-		preciseJumpActivationCount += 1;
-	}}
-	onPreciseJumpEnter={() => {
-		preciseJumpEnterCount += 1;
-	}}
-	onViewportSelect={(x, y) => {
-		viewportSelectionPoints.push({ x, y });
-		selectEntity(7);
-	}}
-	onViewportHover={(x, y) => {
-		viewportHoverPoints.push({ x, y });
-		hoveredGuid = hoverHitEnabled ? 7 : null;
-	}}
-	onMaintainEntitySelection={() => {
-		selectionMaintenanceCount += 1;
-	}}
-	onSelectEntity={selectEntity}
-	debugEnabled={true}
-	{unrestrictedUse}
-	onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-	{readMinimapFrame}
-	{readDiagnostics}
-	{readSelectedEntity}
-	{readFrameRates}
-	readTargetIndicatorFrame={() => targetIndicatorFrame}
-	readSelectedEntityDisplay={() => interactions.display()}
-	{inventory}
-	onSelectInventoryItem={(guid) => selection.selectInventoryItem(guid)}
-	onInteractEntity={() => interactions.interact(unrestrictedUse)}
-	selectedEntityGuid={selectedGuid}
-	hoveredEntityGuid={hoveredGuid}
-	showRetailHiddenGeometry={false}
-	onShowRetailHiddenGeometryChange={() => undefined}
-	playerName="Alice"
-	worldName="ACE Emulator"
-	vitals={[
-		{ kind: "health", current: 555, maximum: 555 },
-		{ kind: "stamina", current: 210, maximum: 245 },
-		{ kind: "mana", current: 302, maximum: 410 },
-	]}
-	{jumpChargeActive}
-	readJumpExtent={() => jumpExtent}
-	{toast}
-	chatMessages={messages}
-	onSendChat={async () => {}}
-	onCanvas={() => {}}
-/>
-
+{#if !previewCharacters}
+	<ClientWorldView
+		entityMetadata={{
+			status: "available",
+			path: "fixture.hwc",
+			recordCount: 1,
+		}}
+		entityCollisionDisabled={false}
+		onEntityCollisionDisabledChange={() => {}}
+		cameraController={cameraEnabled ? cameraController : null}
+		{preciseJumpActive}
+		onPreciseJumpAim={() => undefined}
+		onPreciseJumpActivate={() => {
+			preciseJumpActivationCount += 1;
+		}}
+		onPreciseJumpEnter={() => {
+			preciseJumpEnterCount += 1;
+		}}
+		onViewportSelect={(x, y) => {
+			viewportSelectionPoints.push({ x, y });
+			selectEntity(7);
+		}}
+		onViewportHover={(x, y) => {
+			viewportHoverPoints.push({ x, y });
+			hoveredGuid = hoverHitEnabled ? 7 : null;
+		}}
+		onMaintainEntitySelection={() => {
+			selectionMaintenanceCount += 1;
+		}}
+		onSelectEntity={selectEntity}
+		debugEnabled={true}
+		{unrestrictedUse}
+		onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
+		{readMinimapFrame}
+		{readDiagnostics}
+		{readSelectedEntity}
+		{readFrameRates}
+		readTargetIndicatorFrame={() => targetIndicatorFrame}
+		readSelectedEntityDisplay={() => interactions.display()}
+		{inventory}
+		onSelectInventoryItem={(guid) => selection.selectInventoryItem(guid)}
+		onInteractEntity={() => interactions.interact(unrestrictedUse)}
+		selectedEntityGuid={selectedGuid}
+		hoveredEntityGuid={hoveredGuid}
+		showRetailHiddenGeometry={false}
+		onShowRetailHiddenGeometryChange={() => undefined}
+		playerName="Alice"
+		worldName="ACE Emulator"
+		vitals={[
+			{ kind: "health", current: 555, maximum: 555 },
+			{ kind: "stamina", current: 210, maximum: 245 },
+			{ kind: "mana", current: 302, maximum: 410 },
+		]}
+		{jumpChargeActive}
+		readJumpExtent={() => jumpExtent}
+		{toast}
+		chatMessages={messages}
+		onSendChat={async () => {}}
+		onCanvas={() => {}}
+	/>
+{/if}
 {#if previewCharacters}
 	<div class="character-preview ui-theme">
 		<section class="ui-panel">

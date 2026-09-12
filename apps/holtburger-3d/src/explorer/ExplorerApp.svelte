@@ -154,6 +154,7 @@
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
+	onMount(() => keyboard.mount(document));
 	/** Scene activation owns one blocker independently of modal/UI blockers. */
 	let releaseSceneInput: (() => void) | null = null;
 	function setSceneInputBlocked(blocked: boolean): void {

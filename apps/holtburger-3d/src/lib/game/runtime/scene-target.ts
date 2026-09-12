@@ -2,6 +2,7 @@ import type { LandblockProfileSource } from "../../assets/landblock-profile-sour
 import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import {
 	getLandblockCoordinates,
+	isOutdoorLandblock,
 	normalizeLandblockOwner,
 } from "../landblocks";
 import type { SceneInterestRadii } from "./types";
@@ -71,7 +72,7 @@ export function enumerateAmbientEnvCellOwners(
 			x <= anchor.x + radii.envCellRadius;
 			x += 1
 		) {
-			if (x < 0 || x > 0xff || y < 0 || y > 0xff) continue;
+			if (!isOutdoorLandblock(x, y)) continue;
 			owners.push(
 				`0x${x.toString(16).padStart(2, "0")}${y
 					.toString(16)

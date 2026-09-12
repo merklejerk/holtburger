@@ -41,7 +41,7 @@ export interface TerrainProgramInput {
 export function assertSharedTerrainRegion(
 	expected: TerrainProgramInput,
 	actual: TerrainProgramInput,
-	landblockId: LandblockOwnerId,
+	source: LandblockOwnerId | "ocean-backdrop",
 ): void {
 	if (
 		expected.composition !== actual.composition ||
@@ -54,7 +54,7 @@ export function assertSharedTerrainRegion(
 		expected.textures.detail !== actual.textures.detail
 	) {
 		throw new Error(
-			`Terrain landblock ${landblockId} resolves a different active region than its pass bound (${actual.composition} vs ${expected.composition}).`,
+			`Terrain source ${source} resolves a different active region than its pass bound (${actual.composition} vs ${expected.composition}).`,
 		);
 	}
 }

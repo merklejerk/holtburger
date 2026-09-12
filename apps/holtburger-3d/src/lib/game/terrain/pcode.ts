@@ -1,3 +1,4 @@
+import { roadCodeOf, terrainCodeOf } from "./terrain-sample";
 import type { TerrainAlphaMap, TerrainRoadAlphaMap } from "./types";
 
 /** Every five-bit authored terrain color code in canonical numeric order. */
@@ -237,4 +238,24 @@ function cornerIndex(corner: TerrainPcodeCorner): number {
 	const index = CORNERS.indexOf(corner);
 	if (index < 0) throw new Error(`Unknown terrain pcode corner ${corner}.`);
 	return index;
+}
+
+/** Pack SW, SE, NE, NW authored samples into the terrain shader's closed four-corner code. */
+export function packTerrainPcode(
+	samples: readonly [number, number, number, number],
+): number {
+	const terrainCodes = samples.map(terrainCodeOf);
+	const roadCodes = samples.map(roadCodeOf);
+	return (
+		(0x10000000 |
+			(roadCodes[0] << 26) |
+			(roadCodes[1] << 24) |
+			(roadCodes[2] << 22) |
+			(roadCodes[3] << 20) |
+			(terrainCodes[0] << 15) |
+			(terrainCodes[1] << 10) |
+			(terrainCodes[2] << 5) |
+			terrainCodes[3]) >>>
+		0
+	);
 }

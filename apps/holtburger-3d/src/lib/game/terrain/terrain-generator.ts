@@ -1,6 +1,7 @@
+import { packTerrainPcode } from "./pcode";
 import { AABB3, Vec3 } from "../math/types";
 import { getLandblockCoordinates } from "../landblocks";
-import { roadCodeOf, terrainCodeOf } from "./terrain-sample";
+import { terrainCodeOf } from "./terrain-sample";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import {
 	TERRAIN_GRID_CELLS,
@@ -125,25 +126,6 @@ function generateSurfaceField(
 		height: TERRAIN_GRID_CELLS,
 		width: TERRAIN_GRID_CELLS,
 	};
-}
-
-function packTerrainPcode(samples: readonly number[]): number {
-	if (samples.length !== 4)
-		throw new Error("Terrain pcode requires four source samples.");
-	const terrainCodes = samples.map(terrainCodeOf);
-	const roadCodes = samples.map(roadCodeOf);
-	return (
-		(0x10000000 |
-			(roadCodes[0] << 26) |
-			(roadCodes[1] << 24) |
-			(roadCodes[2] << 22) |
-			(roadCodes[3] << 20) |
-			(terrainCodes[0] << 15) |
-			(terrainCodes[1] << 10) |
-			(terrainCodes[2] << 5) |
-			terrainCodes[3]) >>>
-		0
-	);
 }
 
 function calculateNormals(

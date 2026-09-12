@@ -1,6 +1,19 @@
 import type { LandblockOwnerId } from "./game-types";
 import { Vec3 } from "./math/types";
 
+/** Retail outdoor coordinates are 0..254: acclient.c:117515 bounds 2040 cells / 8. */
+export const OUTDOOR_LANDBLOCK_COUNT = 255;
+
+/** Whether a grid placement names authored outdoor terrain rather than the backdrop. */
+export function isOutdoorLandblock(x: number, y: number): boolean {
+	return (
+		x >= 0 &&
+		y >= 0 &&
+		x < OUTDOOR_LANDBLOCK_COUNT &&
+		y < OUTDOOR_LANDBLOCK_COUNT
+	);
+}
+
 /** Width and depth of one outdoor landblock in AC world units. */
 export const OUTDOOR_LANDBLOCK_WORLD_SIZE = 192;
 /** Number of authored terrain cells along either axis of an outdoor landblock. */
@@ -118,7 +131,7 @@ export function createLandblockWorldOrigin(
 export function landblockAtWorldPoint(point: Vec3): LandblockOwnerId | null {
 	const x = Math.floor(point.x / OUTDOOR_LANDBLOCK_WORLD_SIZE);
 	const y = Math.floor(-point.z / OUTDOOR_LANDBLOCK_WORLD_SIZE);
-	if (x < 0 || x > 0xff || y < 0 || y > 0xff) return null;
+	if (!isOutdoorLandblock(x, y)) return null;
 	return `0x${x.toString(16).padStart(2, "0")}${y
 		.toString(16)
 		.padStart(2, "0")}ffff`;

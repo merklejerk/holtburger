@@ -1,3 +1,5 @@
+import { OceanBackdrop } from "./ocean-backdrop";
+import type { ResourceOwnerId } from "../runtime/owner-ids";
 import { describe, expect, it, vi } from "vitest";
 import type { RenderGeometryData } from "../renderer/geometry";
 import { GeometryManager } from "../geometry/geometry-manager";
@@ -18,7 +20,11 @@ import type {
 	PreparedTextureSource,
 	TexturePreparer,
 } from "../textures/texture-preparer";
-import { TexturePurpose, type TextureFact } from "../textures/types";
+import {
+	createTerrainCompositionTextureKey,
+	TexturePurpose,
+	type TextureFact,
+} from "../textures/types";
 import type { TerrainGenerator } from "./terrain-generator";
 import type { ClosedWorkerPoolDiagnostics } from "../workers/closed-worker";
 import { TerrainSystem } from "./terrain-system";
@@ -47,6 +53,7 @@ describe("TerrainSystem", () => {
 		await Promise.resolve();
 
 		expect(terrain.getDrawUnit(nodeId)).toMatchObject({
+			kind: "landblock",
 			composition: "terrain-composition:test-region",
 			geometry: "terrain-geometry:0x1111ffff",
 			landblockId: "0x1111ffff",
@@ -236,6 +243,162 @@ describe("TerrainSystem", () => {
 		).toEqual([]);
 		expect(reportError).not.toHaveBeenCalled();
 		reportError.mockRestore();
+	});
+});
+
+const oceanInterest = (landblockId: "0x0000ffff" | "0xfefeffff") =>
+	({
+		target: {
+			kind: "outdoor",
+			requested: { kind: "outdoor", landblockId },
+		},
+		ambientOutdoorEnvCellOwners: new Set<never>(),
+		radii: {
+			terrainRadius: 2,
+			buildingRadius: null,
+			envCellRadius: null,
+			explicitObjectRadius: null,
+			generatedObjectRadius: null,
+		},
+	}) as const;
+
+describe("OceanBackdrop resource lifetime", () => {
+	it("preserves regional resources still retained by authored terrain", async () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = new TextureManager<ResourceOwnerId>(
+			resources,
+			new FixtureTexturePreparer(),
+		);
+		const geometry = new GeometryManager<ResourceOwnerId>(resources);
+		const ocean = new OceanBackdrop(geometry, textures);
+		const presentation = createInstallation().presentation;
+		const terrainOwner = "terrain-resource:0x0000ffff";
+		const composition = createTerrainCompositionTextureKey(
+			presentation.composition.activeRegionKey,
+		);
+		const material = Object.values(presentation.textures);
+		ocean.setInterest(oceanInterest("0x0000ffff"));
+		ocean.setPresentation(presentation);
+		await vi.waitFor(() =>
+			expect(ocean.readDrawUnits().length).toBeGreaterThan(0),
+		);
+		textures.reserveKeys(terrainOwner, [composition]);
+		await textures.retain(terrainOwner, material);
+		ocean.destroy();
+		expect(geometry.getResourceCount()).toBe(0);
+		expect(textures.hasTexture(composition)).toBe(true);
+		expect(material.every((fact) => textures.hasTexture(fact.key))).toBe(true);
+		textures.dropOwner(terrainOwner);
+		expect(new Set(resources.released)).toEqual(new Set(resources.created));
+		expect(resources.released).toHaveLength(resources.created.length);
+	});
+
+	it("rolls back geometry if generated texture publication fails", async () => {
+		const resources = new FakeRendererResourceManager();
+		resources.failTexture2DCreationAt = 0;
+		const geometry = new GeometryManager<ResourceOwnerId>(resources);
+		const ocean = new OceanBackdrop(
+			geometry,
+			new TextureManager<ResourceOwnerId>(
+				resources,
+				new FixtureTexturePreparer(),
+			),
+		);
+		ocean.setInterest(oceanInterest("0x0000ffff"));
+		ocean.setPresentation(createInstallation().presentation);
+		await vi.waitFor(() =>
+			expect(() => ocean.readDrawUnits()).toThrow(
+				"Synthetic generated texture upload failure",
+			),
+		);
+		expect(geometry.getResourceCount()).toBe(0);
+		expect(new Set(resources.released)).toEqual(new Set(resources.created));
+		ocean.destroy();
+	});
+
+	it("discards delayed material completion after teardown", async () => {
+		const resources = new FakeRendererResourceManager();
+		const preparer = new DeferredTerrainTexturePreparer();
+		const ocean = new OceanBackdrop(
+			new GeometryManager<ResourceOwnerId>(resources),
+			new TextureManager<ResourceOwnerId>(resources, preparer),
+		);
+		ocean.setPresentation(createInstallation().presentation);
+		ocean.setInterest(oceanInterest("0x0000ffff"));
+		expect(ocean.readDrawUnits()).toEqual([]);
+		ocean.destroy();
+		preparer.resolveConventionalTextures();
+		preparer.resolveTerrainColor();
+		// Drain the completed preparation promises and their publication continuations.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(ocean.readDrawUnits()).toEqual([]);
+		expect(new Set(resources.released)).toEqual(new Set(resources.created));
+		expect(resources.released).toHaveLength(resources.created.length);
+	});
+
+	it("surfaces a material failure and releases partially realized resources", async () => {
+		const resources = new FakeRendererResourceManager();
+		const preparer = new FixtureTexturePreparer();
+		vi.spyOn(preparer, "prepare").mockRejectedValue(
+			new Error("unavailable test texture"),
+		);
+		const report = vi.spyOn(console, "error").mockImplementation(() => {});
+		const ocean = new OceanBackdrop(
+			new GeometryManager<ResourceOwnerId>(resources),
+			new TextureManager<ResourceOwnerId>(resources, preparer),
+		);
+		try {
+			ocean.setInterest(oceanInterest("0x0000ffff"));
+			ocean.setPresentation(createInstallation().presentation);
+			await vi.waitFor(() =>
+				expect(() => ocean.readDrawUnits()).toThrow(
+					"Ocean backdrop material failed to become resident.",
+				),
+			);
+			expect(new Set(resources.released)).toEqual(new Set(resources.created));
+			expect(resources.released).toHaveLength(resources.created.length);
+		} finally {
+			ocean.destroy();
+			report.mockRestore();
+		}
+	});
+
+	it("shares one mesh across tiles and relocation, then releases every resource", async () => {
+		const resources = new FakeRendererResourceManager();
+		const geometry = new GeometryManager<ResourceOwnerId>(resources);
+		const textures = new TextureManager<ResourceOwnerId>(
+			resources,
+			new FixtureTexturePreparer(),
+		);
+		const ocean = new OceanBackdrop(geometry, textures);
+
+		ocean.setInterest(oceanInterest("0x0000ffff"));
+		ocean.setPresentation(createInstallation().presentation);
+		await vi.waitFor(() =>
+			expect(ocean.readDrawUnits().length).toBeGreaterThan(1),
+		);
+		const first = ocean.readDrawUnits();
+		expect(new Set(first.map((unit) => unit.geometry)).size).toBe(1);
+		const resourceCount = resources.created.length;
+		ocean.setInterest(oceanInterest("0xfefeffff"));
+		expect(ocean.readDrawUnits().length).toBe(first.length);
+		expect(resources.created).toHaveLength(resourceCount);
+		ocean.setInterest({
+			...oceanInterest("0x0000ffff"),
+			target: {
+				kind: "dungeon",
+				requested: { kind: "automatic-landblock", landblockId: "0x0005ffff" },
+			},
+		});
+		expect(ocean.readDrawUnits()).toEqual([]);
+		ocean.setInterest(oceanInterest("0x0000ffff"));
+		expect(ocean.readDrawUnits().length).toBe(first.length);
+		expect(resources.created).toHaveLength(resourceCount);
+		ocean.setInterest(null);
+		expect(ocean.readDrawUnits()).toEqual([]);
+		ocean.destroy();
+		expect(new Set(resources.released)).toEqual(new Set(resources.created));
+		expect(resources.released).toHaveLength(resources.created.length);
 	});
 });
 

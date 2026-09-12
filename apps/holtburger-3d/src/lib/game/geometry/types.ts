@@ -6,10 +6,11 @@ declare const terrainGeometryKeyBrand: unique symbol;
 declare const objectGeometryKeyBrand: unique symbol;
 declare const portalGeometryKeyBrand: unique symbol;
 
-/** Stable geometry resource containing every generated terrain variant for one landblock. */
-export type TerrainGeometryKey = `terrain-geometry:${LandblockOwnerId}` & {
-	readonly [terrainGeometryKeyBrand]: true;
-};
+/** Stable geometry resource for authored landblock terrain or the reusable ocean surface. */
+export type TerrainGeometryKey =
+	`terrain-geometry:${LandblockOwnerId | "ocean-backdrop"}` & {
+		readonly [terrainGeometryKeyBrand]: true;
+	};
 
 export type { StaticGeometryKey } from "../systems/static-resources";
 
@@ -36,11 +37,11 @@ export interface GeometrySource {
 	readonly geometry: RenderGeometryData;
 }
 
-/** Build the canonical generated terrain-geometry identity for one landblock. */
+/** Build a terrain geometry identity without encoding backdrop placement as a DAT ID. */
 export function createTerrainGeometryKey(
-	landblockId: LandblockOwnerId,
+	source: LandblockOwnerId | "ocean-backdrop",
 ): TerrainGeometryKey {
-	return `terrain-geometry:${landblockId}` as TerrainGeometryKey;
+	return `terrain-geometry:${source}` as TerrainGeometryKey;
 }
 
 /** Build a globally semantic object geometry identity from resolved source facts. */

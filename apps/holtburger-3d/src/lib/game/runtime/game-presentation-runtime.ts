@@ -1,3 +1,4 @@
+import { OceanBackdrop } from "../terrain/ocean-backdrop";
 import type { SetupSidewaysSpan } from "../resolution/presentation";
 import { createLandblockWorldOrigin } from "../landblocks";
 import {
@@ -1084,6 +1085,8 @@ export class GamePresentationRuntime {
 	>();
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
+	/** Visual-only ocean shares the runtime lifetime without entering authored terrain state. */
+	readonly #oceanBackdrop: OceanBackdrop;
 	/**
 	 * Derived overhead-map geometry, installed and evicted with the layers it comes from.
 	 *
@@ -1541,7 +1544,9 @@ export class GamePresentationRuntime {
 			this.#textures,
 			terrainSourceToOwnerId,
 		);
+		this.#oceanBackdrop = new OceanBackdrop(this.#geometry, this.#textures);
 		this.#renderWorld = new RenderWorld({
+			oceanBackdrop: this.#oceanBackdrop,
 			dynamics: this.#dynamics,
 			envCells: this.#envCells,
 			geometry: this.#geometry,
@@ -2217,6 +2222,7 @@ export class GamePresentationRuntime {
 		if (this.#destroyed)
 			throw new Error("Cannot activate a scene after runtime shutdown.");
 		const transition = this.#renderSceneInterest.replace(request.target);
+		this.#oceanBackdrop.setInterest(request.target);
 		this.#withdrawOutOfScopeDynamicEntities();
 		const interest = this.#applySceneInterest(transition.effectiveInterest);
 		const receipt: SceneActivationReceipt = {
@@ -2675,6 +2681,7 @@ export class GamePresentationRuntime {
 	/** Replace profile-resolved static content demand without moving the camera. */
 	updateSceneInterest(request: SceneInterestRequest): SceneInterestReceipt {
 		const transition = this.#renderSceneInterest.follow(request);
+		this.#oceanBackdrop.setInterest(request);
 		this.#withdrawOutOfScopeDynamicEntities();
 		return this.#applySceneInterest(transition.effectiveInterest);
 	}
@@ -2682,6 +2689,7 @@ export class GamePresentationRuntime {
 	/** Evict every requested static layer without moving the camera. */
 	clearSceneInterest(): SceneInterestReceipt {
 		const transition = this.#renderSceneInterest.clear();
+		this.#oceanBackdrop.setInterest(null);
 		this.#sceneActivation = null;
 		this.#withdrawOutOfScopeDynamicEntities();
 		return this.#applySceneInterest(transition.effectiveInterest);
@@ -3853,6 +3861,7 @@ export class GamePresentationRuntime {
 		this.#targetSoundTables.clear();
 		this.#physicsScripts.destroy();
 		this.#envCells.destroy();
+		this.#oceanBackdrop.destroy();
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
 		this.#residentAtlas.destroy();
@@ -3924,6 +3933,7 @@ export class GamePresentationRuntime {
 			}
 		>,
 	): void {
+		this.#oceanBackdrop.setPresentation(artifact.commit.presentation);
 		this.#terrain.install(terrainSourceToOwnerId(artifact.landblockId), {
 			localBounds: TERRAIN_ROOT_BOUNDS,
 			placement: createLandblockPlacement(artifact.landblockId),

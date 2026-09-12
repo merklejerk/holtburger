@@ -165,6 +165,8 @@ export interface RealizedTerrainResources {
 
 /** One selected terrain submission ready for renderer resource resolution and drawing. */
 export interface TerrainDrawUnit {
+	/** Authored draws participate in DAT-indexed lighting and shadow queries. */
+	readonly kind: "landblock";
 	/** Landblock containing this intrinsically landblock-local terrain geometry. */
 	readonly landblockId: LandblockOwnerId;
 	readonly coordinates: LandblockCoordinates;
@@ -174,6 +176,18 @@ export interface TerrainDrawUnit {
 	/** Stable regional lookup texture interpreted by the terrain fragment program. */
 	readonly composition: TerrainCompositionTextureKey;
 }
+
+/** Ocean tiles carry placement and rendering resources without an authored landblock identity. */
+export interface OceanBackdropDrawUnit extends Omit<
+	TerrainDrawUnit,
+	"kind" | "landblockId"
+> {
+	/** Backdrop draws carry no authored-world lighting or shadow identity. */
+	readonly kind: "ocean";
+}
+
+/** Terrain shader submissions may originate from authored ground or the ocean backdrop. */
+export type TerrainSurfaceDrawUnit = TerrainDrawUnit | OceanBackdropDrawUnit;
 
 /** Create deterministic texture facts from one source-proven regional composition table. */
 export function resolveTerrainTextureFacts(

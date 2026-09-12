@@ -1,6 +1,7 @@
 import type { LandblockOwnerId } from "../game-types";
 import {
 	getLandblockCoordinates,
+	isOutdoorLandblock,
 	normalizeLandblockOwner,
 } from "../landblocks";
 import type { ResolvedSceneInterestTarget } from "./scene-target";
@@ -118,7 +119,7 @@ export function computeOutdoorSceneInterest(
 			x <= anchor.x + config.terrainRadius;
 			x += 1
 		) {
-			if (x < 0 || x > 0xff || y < 0 || y > 0xff) continue;
+			if (!isOutdoorLandblock(x, y)) continue;
 			const distance = Math.max(Math.abs(x - anchor.x), Math.abs(y - anchor.y));
 			const layers = new Set<LandblockLayerKind>([LandblockLayerKind.Terrain]);
 			if (config.buildingRadius !== null && distance <= config.buildingRadius)

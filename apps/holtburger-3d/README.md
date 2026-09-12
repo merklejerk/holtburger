@@ -15,6 +15,14 @@ catalog and returns bounded ranked identity results to the Entities picker. The 
 exact WCID and the existing numeric spawn path remains the sole mutation contract; neither complete
 catalog records nor fuzzy scores cross the adapter.
 
+Outdoor content requests stop at the retail map boundary (landblock coordinates 0–254).
+The 3D runtime fills the portion of the current terrain viewing window beyond that boundary with
+an ocean backdrop at sea level, using the active region's deep-sea material. All backdrop tiles
+share one mesh and resource lease; they have no DAT identities, collision surfaces, map entries,
+or ambient spawns. Terrain shading, fog, layer visibility, and outdoor portal masking apply to
+the backdrop. Missing content inside the map remains an error. Boundary seam matching and an
+infinite ocean horizon are outside this presentation's scope.
+
 ## Input configuration
 
 `src/lib/input/input-defaults.ts` owns the default character, Explorer fly, client shortcut, and

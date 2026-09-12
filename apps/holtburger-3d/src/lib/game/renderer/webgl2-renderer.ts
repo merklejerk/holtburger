@@ -1,3 +1,5 @@
+import { OCEAN_BACKDROP_BOUNDS } from "../terrain/ocean-backdrop";
+import { frustumIntersectsAABB } from "../math/frustum";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import {
 	createLandblockOffset,
@@ -24,7 +26,7 @@ import {
 } from "../scene";
 import { scopeFor, scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
-import type { TerrainDrawUnit } from "../terrain/types";
+import type { TerrainSurfaceDrawUnit } from "../terrain/types";
 import type {
 	ObjectMaterialBinding,
 	StaticObjectDrawUnit,
@@ -463,8 +465,8 @@ const PORTAL_TRANSITION_CAMERA: Camera = {
 };
 
 interface TerrainFrameInput {
-	/** Logical geometry and texture identities for one landblock's terrain. */
-	readonly drawUnit: TerrainDrawUnit;
+	/** Logical resources and placement for authored terrain or an ocean backdrop tile. */
+	readonly drawUnit: TerrainSurfaceDrawUnit;
 	/** Device resources resolved by this renderer for the terrain shader contract. */
 	readonly program: TerrainProgramInput;
 }
@@ -964,9 +966,9 @@ export class WebGL2Renderer implements Renderer {
 		CompiledStaticNodeSubmissions,
 		PreparedObjectDrawCompatibility
 	>();
-	/** Terrain programs resolved once per realized landblock; see #resolveTerrainFrameInput. */
+	/** Terrain programs resolved once per stable surface draw; see #resolveTerrainFrameInput. */
 	readonly #terrainFrameInputs = new WeakMap<
-		TerrainDrawUnit,
+		TerrainSurfaceDrawUnit,
 		TerrainFrameInput
 	>();
 	/** Frame settings that select compiled facts, retained to detect a change between frames. */
@@ -2806,6 +2808,31 @@ export class WebGL2Renderer implements Renderer {
 			terrain.push(this.#resolveTerrainFrameInput(contribution.drawUnit));
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
+		if (
+			frameSettings.layerVisibility.terrain &&
+			(portalVisibility === null ||
+				portalVisibility.selectedRenderDomainOrdinal("outdoor") !== null)
+		) {
+			for (const drawUnit of this.#world.readOceanBackdropDrawUnits()) {
+				const offset = createLandblockOffset(
+					drawUnit.coordinates,
+					prepared.anchorCoordinates,
+					this.#offsetScratch,
+				);
+				if (
+					!frustumIntersectsAABB(
+						prepared.frustum,
+						OCEAN_BACKDROP_BOUNDS,
+						offset.x,
+						offset.y,
+						offset.z,
+					)
+				)
+					continue;
+				terrain.push(this.#resolveTerrainFrameInput(drawUnit));
+				this.#frameSelectionMetrics.terrainFrameInputs += 1;
+			}
+		}
 		let outdoorDirectionalEnabled = false;
 		if (entityShadowsEnabled) {
 			const cameraPosition = new Vec3(
@@ -2845,6 +2872,7 @@ export class WebGL2Renderer implements Renderer {
 			if (this.#outdoorDirectionalCasters.length > 0) {
 				let outdoorSelectionIndex = 0;
 				for (const terrainInput of terrain) {
+					if (terrainInput.drawUnit.kind !== "landblock") continue;
 					const landblock = createOutdoorDirectionalShadowTerrain(
 						terrainInput.drawUnit.landblockId,
 					);
@@ -2949,14 +2977,16 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	/**
-	 * Resolve one landblock's terrain program once, against the draw unit that owns it.
+	 * Resolve a terrain surface program once, against the draw unit that owns it.
 	 *
 	 * Terrain draw units are built when their landblock realizes and live until it is removed, and
 	 * every resource they name is immutable for its key: texture arrays are created once per key
 	 * and generated surfaces once per source. There is therefore no invalidation event to ride —
 	 * an entry simply becomes collectable with the installation that produced its draw unit.
 	 */
-	#resolveTerrainFrameInput(drawUnit: TerrainDrawUnit): TerrainFrameInput {
+	#resolveTerrainFrameInput(
+		drawUnit: TerrainSurfaceDrawUnit,
+	): TerrainFrameInput {
 		const existing = this.#terrainFrameInputs.get(drawUnit);
 		if (existing !== undefined) return existing;
 		const resolved: TerrainFrameInput = {
@@ -4313,7 +4343,9 @@ export class WebGL2Renderer implements Renderer {
 			assertSharedTerrainRegion(
 				passResources.program,
 				terrain.program,
-				terrain.drawUnit.landblockId,
+				terrain.drawUnit.kind === "landblock"
+					? terrain.drawUnit.landblockId
+					: "ocean-backdrop",
 			);
 			if (this.#isFarTerrain(terrain, view, farCutoff)) farCount += 1;
 			else {
@@ -4528,9 +4560,10 @@ export class WebGL2Renderer implements Renderer {
 				this.#offsetScratch,
 			);
 			this.#bindTerrainSurfaceField(terrain, program);
-			const landblockLights = shading.staticLights(
-				terrain.drawUnit.landblockId,
-			);
+			const landblockLights =
+				terrain.drawUnit.kind === "landblock"
+					? shading.staticLights(terrain.drawUnit.landblockId)
+					: EMPTY_LANDBLOCK_LIGHTS;
 			bindWebGL2StaticLights(
 				this.#gl,
 				program.uniforms,
@@ -4557,6 +4590,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 	): boolean {
 		return (
+			terrain.drawUnit.kind === "landblock" &&
 			(view.entityAnalyticShadows?.outdoorByLandblockId.get(
 				terrain.drawUnit.landblockId,
 			)?.count ?? 0) > 0
@@ -4586,9 +4620,11 @@ export class WebGL2Renderer implements Renderer {
 		farCutoff: number | null,
 	): boolean {
 		const outdoorDirectional =
-			view.entityAnalyticShadows?.outdoorByLandblockId.get(
-				terrain.drawUnit.landblockId,
-			);
+			terrain.drawUnit.kind === "landblock"
+				? view.entityAnalyticShadows?.outdoorByLandblockId.get(
+						terrain.drawUnit.landblockId,
+					)
+				: undefined;
 		if (outdoorDirectional && outdoorDirectional.count > 0) return false;
 		if (
 			this.#activeOutdoorPssmFrame &&
@@ -4618,6 +4654,8 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const uniforms = program.outdoorDirectionalShadowUniforms;
 		const active = view.entityAnalyticShadows;
+		if (terrain.drawUnit.kind !== "landblock")
+			throw new Error("Ocean backdrop cannot receive authored entity shadows.");
 		const selection = active?.outdoorByLandblockId.get(
 			terrain.drawUnit.landblockId,
 		);

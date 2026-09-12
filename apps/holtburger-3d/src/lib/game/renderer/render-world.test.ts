@@ -95,6 +95,7 @@ describe("RenderWorld", () => {
 		let selectedStaticRenderable: StaticObjectRenderable | null = null;
 		let staticCullingGroup = "buildings";
 		const world = new RenderWorld({
+			oceanBackdrop: { readDrawUnits: () => [] },
 			geometry: {
 				getResource: () => {
 					calls.push("geometry");

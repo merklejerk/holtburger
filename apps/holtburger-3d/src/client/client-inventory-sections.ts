@@ -11,7 +11,7 @@ export interface ClientInventorySection {
 	readonly mainPack: boolean;
 	/** Ordinary inventory slots, in received order. */
 	readonly items: readonly ClientEntityFacts[];
-	/** Pack-slot entries without their own visible storage section. */
+	/** Nested pack-slot entries; root pack slots are displayed exclusively in the strip. */
 	readonly packs: readonly ClientEntityFacts[];
 	/** Accepted children whose ordered placement has not arrived yet. */
 	readonly unslotted: readonly ClientEntityFacts[];
@@ -140,7 +140,6 @@ export function clientInventorySections(
 	if (membership === null) return [];
 	const { root, children } = membership;
 	const carriedStorage = [...membership.carriedStorage].sort(compareSlot);
-	const sectionGuids = new Set(carriedStorage.map((entity) => entity.guid));
 	return [root, ...carriedStorage].map((container) => {
 		const items: ClientEntityFacts[] = [];
 		const packs: ClientEntityFacts[] = [];
@@ -153,7 +152,8 @@ export function clientInventorySections(
 					items.push(child);
 					break;
 				case "pack":
-					if (!sectionGuids.has(child.guid)) packs.push(child);
+					// The strip owns all root pack slots, including non-container occupants.
+					if (container.guid !== root.guid) packs.push(child);
 					break;
 				case "pending":
 					unslotted.push(child);
@@ -170,7 +170,7 @@ export function clientInventorySections(
 	});
 }
 
-/** Main Pack followed by server-indexed pack slots, including foci and empty capacity. */
+/** Main Pack, then occupants by descending item capacity, then empty pack capacity. */
 export function clientInventoryPackSlots(
 	membership: ClientInventoryMembership | null,
 ): readonly (ClientEntityFacts | null)[] {
@@ -188,6 +188,19 @@ export function clientInventoryPackSlots(
 	}
 	return [
 		root,
-		...Array.from({ length }, (_, index) => packs.get(index) ?? null),
+		...Array.from({ length }, (_, index) => packs.get(index) ?? null).sort(
+			(a, b) => {
+				if (a === null) return b === null ? 0 : 1;
+				if (b === null) return -1;
+				return packItemCapacity(b) - packItemCapacity(a) || compareSlot(a, b);
+			},
+		),
 	];
+}
+
+/** Unestablished capacity sorts as zero until hydration; foci have no storage capacity. */
+function packItemCapacity(entity: ClientEntityFacts): number {
+	return entity.storage.kind === "container"
+		? (entity.storage.itemCapacity ?? 0)
+		: 0;
 }

@@ -54,7 +54,7 @@ describe("clientInventorySections", () => {
 					child(60, 1, { kind: "pending" }),
 					entityFacts(70, {
 						ownedByPlayer: true,
-						location: { kind: "equipped", wearerGuid: 1 },
+						location: { kind: "equipped", wearerGuid: 1, mask: null },
 					}),
 				],
 			},
@@ -224,6 +224,7 @@ describe("sortInventoryItems", () => {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				equipLocations: null,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },

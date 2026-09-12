@@ -4,6 +4,7 @@ import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import type { ClientEntitySelection } from "../../client/client-entity-selection";
 import { CLIENT_TUNING } from "../../client/client-tuning";
 import { INVENTORY_CURRENCIES } from "../../client/client-inventory-currencies";
+import { EQUIPMENT_SLOTS } from "../../client/client-inventory-equipment";
 
 /** Browser-only fixture record; wire delivery still passes through the real session decoder. */
 function item(
@@ -21,6 +22,7 @@ function item(
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -132,6 +134,7 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: 12345,
+				equipLocations: null,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -153,6 +156,7 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				equipLocations: null,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -219,6 +223,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -235,6 +240,7 @@ export async function probeClientInventory(options: {
 			wcid: 123,
 			weenieType: "Food",
 			pyrealBalance: null,
+			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -357,7 +363,7 @@ export async function probeClientInventory(options: {
 		throw new Error("Main Pack did not select the local player.");
 	selection.select(7);
 	const strip = document.querySelector<HTMLElement>(
-		".item-grid-strip-viewport",
+		".inventory-pack-strip .item-grid-strip-viewport",
 	);
 	if (strip === null) throw new Error("Inventory container strip is missing.");
 	const footer = document.querySelector<HTMLElement>(".inventory-bottom-bar");
@@ -478,7 +484,15 @@ export async function probeClientInventory(options: {
 	);
 	if (nextDown === undefined)
 		throw new Error("Pack strip has no next clipped cell.");
-	button("Scroll items down").click();
+	const packArrow = (direction: "up" | "down") => {
+		const arrow = document.querySelector<HTMLButtonElement>(
+			`.inventory-pack-strip button[aria-label="Scroll items ${direction}"]`,
+		);
+		if (arrow === null)
+			throw new Error(`Pack strip ${direction} arrow missing`);
+		return arrow;
+	};
+	packArrow("down").click();
 	if (Math.abs(nextDown.getBoundingClientRect().bottom - viewportBottom) > 1)
 		throw new Error("Down arrow did not align the next cell bottom.");
 	await tick();
@@ -488,7 +502,7 @@ export async function probeClientInventory(options: {
 		.find((cell) => cell.getBoundingClientRect().top < viewportTop - 1);
 	if (nextUp === undefined)
 		throw new Error("Pack strip has no preceding clipped cell.");
-	button("Scroll items up").click();
+	packArrow("up").click();
 	if (Math.abs(nextUp.getBoundingClientRect().top - viewportTop) > 1)
 		throw new Error("Up arrow did not align the next cell top.");
 	strip.scrollTop = strip.scrollHeight;
@@ -605,6 +619,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -698,6 +713,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -1060,7 +1076,160 @@ export async function probeClientInventory(options: {
 		throw new Error("Currency overlay retained a removed balance");
 	window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 	summaryTrigger.blur();
+	// Equipment references one identity in several independently labeled rows.
+	const armor = owned(91, 1, 0);
+	const armorSlots = EQUIPMENT_SLOTS.filter((slot) =>
+		["Chest armor", "Upper arm armor"].includes(slot.label),
+	);
+	const armorMask = armorSlots.reduce((mask, slot) => mask | slot.mask, 0);
+	records = [
+		root,
+		{
+			...armor,
+			location: { kind: "equipped", wearerGuid: 1, mask: armorMask },
+		},
+		// Shirt and pants can share the abdomen bit without competing for a slot.
+		{
+			...owned(92, 1, 0),
+			location: { kind: "equipped", wearerGuid: 1, mask: 0x1e },
+		},
+		{
+			...owned(93, 1, 0),
+			location: { kind: "equipped", wearerGuid: 1, mask: 0xc4 },
+		},
+	];
+	baseline();
+	await sample();
+	const equipment = document.querySelector<HTMLElement>(
+		".inventory-equipment-strip",
+	);
+	if (equipment === null) throw new Error("Equipment strip missing");
+	for (const [label, guid] of [
+		["Shirt", 92],
+		["Pants", 93],
+	] as const) {
+		if (
+			equipment.querySelector(
+				`.item-grid-cell[data-item-guid="${guid}"][aria-label^="${label}:"]`,
+			) === null
+		)
+			throw new Error(
+				`Overlapping clothing masks did not resolve the ${label} slot`,
+			);
+	}
+	const equipmentCells = () => [
+		...equipment.querySelectorAll<HTMLButtonElement>(
+			'.item-grid-cell[data-item-guid="91"]',
+		),
+	];
+	const equippedCells = equipmentCells();
+	if (
+		equippedCells.length !== armorSlots.length ||
+		equipment.querySelectorAll(".equipment-row").length !==
+			EQUIPMENT_SLOTS.length
+	)
+		throw new Error(
+			"Equipment strip did not preserve slots and repeat coverage",
+		);
+	if (
+		document.querySelector('.inventory-sections [data-item-guid="91"]') !== null
+	)
+		throw new Error("Equipped item still occupies inventory contents");
+	const equipmentUrls = equippedCells.map(
+		(cell) => cell.querySelector("img")?.src,
+	);
+	if (!equipmentUrls[0] || new Set(equipmentUrls).size !== 1)
+		throw new Error("Repeated equipment cells did not share artwork");
+	equippedCells[0]?.click();
+	await sample();
+	if (
+		equipmentCells().some(
+			(cell) => cell.getAttribute("aria-pressed") !== "true",
+		)
+	)
+		throw new Error("Equipment selection did not follow the shared identity");
+	const equipmentViewport = equipment.querySelector<HTMLElement>(
+		".item-grid-strip-viewport",
+	);
+	if (
+		equipmentViewport === null ||
+		equipmentViewport.scrollWidth > equipmentViewport.clientWidth ||
+		equipmentViewport.scrollHeight <= equipmentViewport.clientHeight
+	)
+		throw new Error(
+			"Equipment strip must scroll vertically without horizontal overflow",
+		);
+	const down = equipment.querySelector<HTMLButtonElement>(
+		'[aria-label="Scroll items down"]',
+	);
+	if (down === null) throw new Error("Equipment scroll arrow missing");
+	down.click();
+	if (equipmentViewport.scrollTop === 0)
+		throw new Error("Equipment rows did not scroll");
+	records = [root, armor];
+	baseline();
+	await sample();
+	if (
+		equipmentCells().length !== 0 ||
+		document.querySelector('.inventory-sections [data-item-guid="91"]') === null
+	)
+		throw new Error("Unequipped item did not move back into contents");
+	records = [
+		root,
+		{ ...armor, location: { kind: "equipped", wearerGuid: 1, mask: null } },
+	];
+	baseline();
+	await sample();
+	if (
+		equipment.querySelector('.equipment-strip[aria-busy="true"]') === null ||
+		equipment.querySelector('[aria-label$=": Empty"]') !== null
+	)
+		throw new Error("Unknown equipment locations were represented as empty");
+	// Hover compatibility remains separate from selection and follows sampled facts.
+	if (armor.description.kind !== "known")
+		throw new Error("Known armor fixture required");
+	const compatibleArmor = {
+		...armor,
+		description: { ...armor.description, equipLocations: armorMask },
+	};
+	records = [root, compatibleArmor, owned(94, 1, 1)];
+	baseline();
+	await sample();
+	const row = equipment.querySelector<HTMLElement>(
+		`[data-equipment-slot="${armorSlots[0]?.mask}"]`,
+	);
+	if (row === null) throw new Error("Armor hover row missing");
+	const dimmed = () =>
+		[
+			...document.querySelectorAll<HTMLElement>(
+				'.inventory-sections .item-grid-cell[data-dimmed="true"]',
+			),
+		].map((cell) => cell.dataset.itemGuid);
+	const selectedBeforeHover = selection.selectedGuid();
+	row.dispatchEvent(new PointerEvent("pointerenter"));
+	await tick();
+	if (dimmed().join() !== "94")
+		throw new Error(
+			"Row hover did not dim only the incompatible inventory item",
+		);
+	if (selection.selectedGuid() !== selectedBeforeHover)
+		throw new Error("Row hover changed selection");
+	row.dispatchEvent(new PointerEvent("pointerleave"));
+	await tick();
+	if (dimmed().length !== 0)
+		throw new Error("Equipment hover dimming did not clear");
+	row.dispatchEvent(new PointerEvent("pointerenter"));
+	records = [root, armor];
+	baseline();
+	await sample();
+	if (dimmed().join() !== String(armor.guid))
+		throw new Error(
+			"Hover retained outdated compatibility after inventory update",
+		);
+	row.dispatchEvent(new PointerEvent("pointerleave"));
 	return {
+		equipmentHover: true,
+		equipmentStrip: true,
 		ambientCurrencyOverlay: true,
 		initial,
 		wide,

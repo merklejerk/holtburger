@@ -4,6 +4,7 @@
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
 	import ItemIcon from "../app/ItemIcon.svelte";
 	import InventoryCurrencyOverlay from "./InventoryCurrencyOverlay.svelte";
+	import InventoryEquipmentStrip from "./InventoryEquipmentStrip.svelte";
 	import type { ItemIconDisplay } from "../app/item-icon-repository";
 	import type { ClientEntityFacts } from "./client-entity-mirror";
 	import type {
@@ -21,6 +22,8 @@
 	}
 	const { inventory, selectedGuid, onSelectItem }: Props = $props();
 	let view = $state<ClientInventoryView | null>(null);
+	/** Row hover is local UI state; compatible locations come from sampled world facts. */
+	let hoveredEquipmentSlot = $state<number | null>(null);
 	let displays = $state<ReadonlyMap<string, ItemIconDisplay>>(new Map());
 	/** Footer artwork follows the same bounded display sampling as the inventory cells. */
 	const pyrealDisplay = $derived(displays.get(inventory.pyrealIconKey));
@@ -144,6 +147,13 @@
 					? item.description.stackCount
 					: null}
 				selected={selectedGuid === item.guid}
+				dimmed={!pending &&
+					hoveredEquipmentSlot !== null &&
+					!(
+						item.description.kind === "known" &&
+						item.description.equipLocations !== null &&
+						(item.description.equipLocations & hoveredEquipmentSlot) !== 0
+					)}
 				disabled={pending || item.description.kind === "pending"}
 				onselect={() => onSelectItem(item.guid)}
 			>
@@ -162,6 +172,18 @@
 	aria-label="Inventory contents"
 	aria-busy={pending}
 >
+	<aside class="inventory-equipment-strip" aria-label="Equipped items">
+		<InventoryEquipmentStrip
+			equipment={view?.equipment ?? { rows: [], pending: true }}
+			{pending}
+			{iconFor}
+			{selectedGuid}
+			{onSelectItem}
+			onHoverSlot={(mask) => {
+				hoveredEquipmentSlot = mask;
+			}}
+		/>
+	</aside>
 	<div class="inventory-sections" bind:this={contents}>
 		{#if pending}<p role="status">Updating inventory…</p>{/if}
 		{#each sections as section (section.container.guid)}
@@ -302,13 +324,13 @@
 		.client-inventory {
 			display: grid;
 			grid-template-rows: minmax(0, 1fr) auto;
-			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-columns: auto minmax(0, 1fr) auto;
 			height: 100%;
 			min-height: 0;
 			overflow: hidden;
 		}
 		.inventory-bottom-bar {
-			grid-column: 1;
+			grid-column: 2;
 			grid-row: 2;
 			display: flex;
 			align-items: center;
@@ -345,15 +367,23 @@
 			height: 18px;
 		}
 		.inventory-sections {
+			grid-column: 2;
+			grid-row: 1;
 			min-width: 0;
 			overflow-y: auto;
 			padding: var(--ui-inventory-padding);
 		}
 		.inventory-pack-strip {
-			grid-column: 2;
+			grid-column: 3;
 			grid-row: 1 / -1;
 			min-height: 0;
 			border-left: var(--ui-inventory-divider);
+		}
+		.inventory-equipment-strip {
+			grid-column: 1;
+			grid-row: 1 / -1;
+			min-height: 0;
+			border-right: var(--ui-inventory-divider);
 		}
 
 		section + section {

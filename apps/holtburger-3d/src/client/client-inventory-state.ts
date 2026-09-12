@@ -20,6 +20,10 @@ import type { ClientEntityFacts } from "./client-entity-mirror";
 import { CLIENT_TUNING } from "./client-tuning";
 import { PYREAL_ICON_SPEC } from "./client-inventory-art";
 import {
+	inventoryEquipment,
+	type InventoryEquipment,
+} from "./client-inventory-equipment";
+import {
 	inventoryCurrencyTotals,
 	type InventoryCurrencyTotal,
 } from "./client-inventory-currencies";
@@ -41,6 +45,7 @@ export interface InventoryLifecycle {
 
 /** Cached membership and reference indices derived together from one accepted revision. */
 interface InventoryBaseline {
+	readonly equipment: InventoryEquipment;
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
 	readonly worldRevision: number;
@@ -52,6 +57,8 @@ interface InventoryBaseline {
 
 /** Lazy, consumer-facing layout. Authoritative entities remain immutable mirror references. */
 export interface ClientInventoryView {
+	/** Fixed slot rows, independent of container capacity and contents sorting. */
+	readonly equipment: InventoryEquipment;
 	/** Ambient balances across all carried packs; pending prevents partial totals appearing final. */
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
@@ -109,6 +116,7 @@ export class ClientInventoryState {
 			unslotted: sortInventoryItems(section.unslotted, this.#sortMode),
 		}));
 		this.#view = Object.freeze({
+			equipment: this.#baseline?.equipment ?? { rows: [], pending: true },
 			currencies: this.#baseline?.currencies ?? [],
 			currenciesPending:
 				this.#pending || (this.#baseline?.currenciesPending ?? true),
@@ -168,6 +176,7 @@ export class ClientInventoryState {
 		)
 			this.#reset();
 		const membership = clientInventoryMembership(level);
+		const equipment = inventoryEquipment(level);
 		const iconKeys = new Map<number, string>();
 		const retainedKeys = new Set<string>();
 		const currencyTotals = inventoryCurrencyTotals(level);
@@ -179,7 +188,12 @@ export class ClientInventoryState {
 			retainedKeys.add(iconKey);
 			return { ...total, iconKey };
 		});
-		for (const entity of membership?.members ?? []) {
+		const visibleEntities = new Map(
+			(membership?.members ?? []).map((entity) => [entity.guid, entity]),
+		);
+		for (const { item } of equipment.rows)
+			if (item !== null) visibleEntities.set(item.guid, item);
+		for (const entity of visibleEntities.values()) {
 			const description = entity.description;
 			if (description.kind !== "known") continue;
 			const { overlay, underlay, uiEffects, base } = description.icon;
@@ -203,6 +217,7 @@ export class ClientInventoryState {
 			if (!retainedKeys.has(key)) this.icons.release(this.#owner, key);
 		}
 		this.#baseline = {
+			equipment,
 			currencies,
 			currenciesPending: currencyTotals.pending,
 			worldRevision: level.revision,

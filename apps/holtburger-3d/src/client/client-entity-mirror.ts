@@ -52,6 +52,8 @@ const clientEntityFactsSchema = z
 						.readonly(),
 					/** Public classification for inventory type sorting. */
 					itemType: guid,
+					/** World-derived slot compatibility; not a wield-requirements verdict. */
+					equipLocations: guid.nullable(),
 					/** Public description flags for selected-entity diagnostics. */
 					objectFlags: guid,
 					/** Server template identity, independent of scene residency. */
@@ -79,7 +81,12 @@ const clientEntityFactsSchema = z
 				.strict()
 				.readonly(),
 			z
-				.object({ kind: z.literal("equipped"), wearerGuid: guid })
+				.object({
+					kind: z.literal("equipped"),
+					wearerGuid: guid,
+					// Accepted current locations, independent of description hydration.
+					mask: guid.nullable(),
+				})
 				.strict()
 				.readonly(),
 		]),

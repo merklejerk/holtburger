@@ -394,6 +394,7 @@
 						wcid: guid === 7 ? 42 : null,
 						weenieType: null,
 						pyrealBalance: null,
+						equipLocations: null,
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },

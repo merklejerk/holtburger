@@ -56,7 +56,10 @@ describe("ambient currency balances", () => {
 			carried(3, 7, 20),
 			carried(4, null),
 			{ ...excluded, ownedByPlayer: false },
-			{ ...carried(6, 100), location: { kind: "equipped", wearerGuid: 1 } },
+			{
+				...carried(6, 100),
+				location: { kind: "equipped", wearerGuid: 1, mask: null },
+			},
 		);
 		expect(result).toEqual({
 			pending: false,

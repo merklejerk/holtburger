@@ -23,6 +23,8 @@
 		readonly itemGuid: number | null;
 		/** Selection and admission are controlled by the consuming UI. */
 		readonly selected: boolean;
+		/** Contextual dimming supplied by the consumer, independent of selection. */
+		readonly dimmed?: boolean;
 		readonly disabled: boolean;
 		/** Consumer-owned action for an occupied cell. */
 		readonly onselect: () => void;
@@ -31,6 +33,7 @@
 		label,
 		itemGuid,
 		selected,
+		dimmed = false,
 		disabled,
 		onselect,
 		visual,
@@ -69,6 +72,7 @@
 	class="item-grid-cell ui-item-cell ui-item-selection ui-hud-button"
 	class:has-structure={structureDisplay !== null}
 	data-empty={itemGuid === null}
+	data-dimmed={dimmed}
 	data-item-guid={itemGuid}
 	title={accessibleLabel}
 	aria-label={accessibleLabel}

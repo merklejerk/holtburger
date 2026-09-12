@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientInventoryState } from "./client-inventory-state";
-import { ClientEntityMirror } from "./client-entity-mirror";
+import {
+	ClientEntityMirror,
+	type ClientEntityFacts,
+} from "./client-entity-mirror";
+import { EQUIPMENT_SLOTS } from "./client-inventory-equipment";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import { CLIENT_TUNING } from "./client-tuning";
 import { INVENTORY_CURRENCIES } from "./client-inventory-currencies";
@@ -33,7 +37,7 @@ function fixture(
 	initialLifecycle: ClientLifecycle | null = { kind: "in-world" },
 ) {
 	const mirror = new ClientEntityMirror();
-	const baseline = (items: ReturnType<typeof item>[], player = 1) =>
+	const baseline = (items: ClientEntityFacts[], player = 1) =>
 		mirror.commit(
 			mirror.prepareSnapshot(
 				{
@@ -106,6 +110,44 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("persistent inventory state", () => {
+	it("moves shared artwork between contents and repeated equipment rows without eviction", async () => {
+		const f = fixture();
+		const armor = item(2, 10);
+		const slots = EQUIPMENT_SLOTS.filter((slot) =>
+			["Chest armor", "Upper arm armor"].includes(slot.label),
+		);
+		await sample();
+		const key = f.model.read().iconKeys.get(armor.guid);
+		f.baseline([
+			{
+				...armor,
+				location: {
+					kind: "equipped",
+					wearerGuid: 1,
+					mask: slots.reduce((mask, slot) => mask | slot.mask, 0),
+				},
+			},
+		]);
+		await sample();
+		expect(
+			f.model
+				.read()
+				.equipment.rows.filter((row) => row.item?.guid === armor.guid),
+		).toHaveLength(2);
+		expect(f.model.read().sections[0]?.items).toEqual([]);
+		expect(f.model.read().iconKeys.get(armor.guid)).toBe(key);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.baseline([armor]);
+		await sample();
+		expect(
+			f.model.read().equipment.rows.every((row) => row.item === null),
+		).toBe(true);
+		expect(f.model.read().sections[0]?.items.map((item) => item.guid)).toEqual([
+			armor.guid,
+		]);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.destroy();
+	});
 	it("refreshes ambient balances and retires currency artwork when the last item leaves", async () => {
 		const f = fixture();
 		const [wcid] = INVENTORY_CURRENCIES[0];

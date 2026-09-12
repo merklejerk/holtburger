@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use holtburger_common::{
     Guid,
     properties::{
-        PropertyDataId, PropertyInt, PropertyString, WeenieType, WorldObjectExt,
+        EquipMask, PropertyDataId, PropertyInt, PropertyString, WeenieType, WorldObjectExt,
         WorldObjectPropertyAccessors,
     },
 };
@@ -72,6 +72,10 @@ pub enum EntityDescription {
         /// Public item classification consumed by frontend inventory type sorting.
         #[serde(rename = "itemType")]
         item_type: u32,
+        /// Slot compatibility for inventory hover presentation, including off-hand melee use.
+        /// Does not establish skill/level admission; absent before valid locations arrive.
+        #[serde(rename = "equipLocations")]
+        equip_locations: Option<u32>,
         /// Public object-description flags consumed by selected-entity diagnostics.
         #[serde(rename = "objectFlags")]
         object_flags: u32,
@@ -89,7 +93,7 @@ pub enum EntityDescription {
     },
 }
 
-/// Storage relationship exposed to identity and inventory consumers without equipment masks.
+/// Accepted storage relationship exposed to identity and inventory consumers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum EntityStorageLocation {
@@ -108,6 +112,8 @@ pub enum EntityStorageLocation {
         /// Creature wearing the item, not implicitly the current player.
         #[serde(rename = "wearerGuid")]
         wearer_guid: Guid,
+        /// Accepted current equipment locations; absent until the slot declaration arrives.
+        mask: Option<u32>,
     },
 }
 
@@ -218,6 +224,18 @@ impl WorldState {
                     ui_effects: entity.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
                 },
                 item_type: item_type.bits(),
+                equip_locations: entity
+                    .get_int_prop(PropertyInt::ValidLocations)
+                    .map(|mask| {
+                        let mask = mask as u32;
+                        // ACE Player_Inventory.cs:DoHandleActionGetAndWieldItem allows
+                        // exactly MeleeWeapon in the Shield location for dual wielding.
+                        if mask == EquipMask::MELEE_WEAPON.bits() {
+                            mask | EquipMask::SHIELD.bits()
+                        } else {
+                            mask
+                        }
+                    }),
                 object_flags: entity.flags.bits(),
                 wcid: entity.wcid,
                 weenie_type: entity
@@ -241,8 +259,9 @@ impl WorldState {
                 parent_guid: parent,
                 slot,
             },
-            Some(StorageLocation::Equipped { wearer, .. }) => EntityStorageLocation::Equipped {
+            Some(StorageLocation::Equipped { wearer, mask }) => EntityStorageLocation::Equipped {
                 wearer_guid: wearer,
+                mask: mask.map(|mask| mask.bits()),
             },
             None => EntityStorageLocation::None,
         };
@@ -287,6 +306,46 @@ mod tests {
         ParentLocation, Placement,
         properties::{EquipMask, ItemType, PropertyInt, WorldObjectPropertyAccessorsMut},
     };
+
+    #[test]
+    fn equipment_slot_compatibility_preserves_unknown_and_allows_off_hand_melee() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(2);
+        let mut entity = Entity::new(guid, "Weapon".into(), Default::default());
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+        world.entities.insert(entity);
+        let locations = |world: &WorldState| match world
+            .client_entity_facts(guid)
+            .unwrap()
+            .unwrap()
+            .description
+        {
+            EntityDescription::Known {
+                equip_locations, ..
+            } => equip_locations,
+            EntityDescription::Pending => panic!("fixture must be hydrated"),
+        };
+        assert_eq!(locations(&world), None);
+        for (valid, expected) in [
+            (
+                EquipMask::MELEE_WEAPON,
+                EquipMask::MELEE_WEAPON | EquipMask::SHIELD,
+            ),
+            (EquipMask::TWO_HANDED, EquipMask::TWO_HANDED),
+            (
+                EquipMask::CHEST_ARMOR | EquipMask::UPPER_ARM_ARMOR,
+                EquipMask::CHEST_ARMOR | EquipMask::UPPER_ARM_ARMOR,
+            ),
+            (EquipMask::NONE, EquipMask::NONE),
+        ] {
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_int_prop(PropertyInt::ValidLocations, valid.bits() as i32);
+            assert_eq!(locations(&world), Some(expected.bits()));
+        }
+    }
 
     #[test]
     fn player_coin_total_is_unknown_until_the_server_supplies_it() {
@@ -383,6 +442,13 @@ mod tests {
             .equip(sword, player, Some(EquipMask::MELEE_WEAPON));
         let pending = world.client_entity_facts(sword).unwrap().unwrap();
         assert_eq!(pending.description, EntityDescription::Pending);
+        assert_eq!(
+            pending.location,
+            EntityStorageLocation::Equipped {
+                wearer_guid: player,
+                mask: Some(EquipMask::MELEE_WEAPON.bits()),
+            }
+        );
         assert!(pending.owned_by_player);
         assert_eq!(pending.scene_placement, SceneAvailability::Unavailable);
         assert_eq!(world.client_entity_guids(), BTreeSet::from([player, sword]));
@@ -417,6 +483,7 @@ mod tests {
                     ui_effects: 0
                 },
                 item_type: ItemType::MELEE_WEAPON.bits(),
+                equip_locations: None,
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
                 wcid: Some(123),
@@ -462,6 +529,7 @@ mod tests {
                     ui_effects: 0
                 },
                 item_type: ItemType::CREATURE.bits(),
+                equip_locations: None,
                 object_flags: 0,
                 wcid: None,
                 weenie_type: None,

@@ -2,7 +2,7 @@
 	import { onMount, type Snippet } from "svelte";
 
 	interface Props {
-		/** Square grid cells supplied by the consuming UI. */
+		/** Rows supplied by the consuming UI; scrolling advances by one row. */
 		readonly children: Snippet;
 	}
 	const { children }: Props = $props();
@@ -87,8 +87,9 @@
 		.item-grid-strip {
 			position: relative;
 			/* Share the grid cell basis; the owning panel adds its own divider. */
-			width: calc(
-				var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
+			width: var(
+				--ui-item-strip-width,
+				calc(var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset))
 			);
 			height: 100%;
 			min-height: 0;

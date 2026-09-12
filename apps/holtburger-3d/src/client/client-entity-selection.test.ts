@@ -337,7 +337,7 @@ describe("ClientEntitySelection", () => {
 				entityFacts(12, {
 					ownedByPlayer: true,
 					scenePlacement: "available",
-					location: { kind: "equipped", wearerGuid: 1 },
+					location: { kind: "equipped", wearerGuid: 1, mask: null },
 				}),
 			],
 			[],

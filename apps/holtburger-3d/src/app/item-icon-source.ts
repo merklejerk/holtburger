@@ -11,18 +11,25 @@ const ITEM_ICON_SIZE = 32;
 const uint = z.number().int().nonnegative().max(0xffff_ffff);
 const did = uint.positive().nullable();
 /** Complete visual inputs. Item identity, selection, sorting and display size are excluded. */
-export type ItemIconSpec = {
-	readonly overlay: number | null;
-	readonly underlay: number | null;
-	readonly uiEffects: number;
-} & (
+export type ItemIconSpec =
 	| {
-			readonly kind: "item";
-			readonly base: number | null;
-			readonly itemType: number;
+			/** Standalone authored graphic without item decorations. */
+			readonly kind: "base";
+			/** Required RenderSurface identity, independent of inventory membership. */
+			readonly base: number;
 	  }
-	| { readonly kind: "main-pack" }
-);
+	| ({
+			readonly overlay: number | null;
+			readonly underlay: number | null;
+			readonly uiEffects: number;
+	  } & (
+			| {
+					readonly kind: "item";
+					readonly base: number | null;
+					readonly itemType: number;
+			  }
+			| { readonly kind: "main-pack" }
+	  ));
 
 /** Keyed specifications sent to the host's shared-content capability. */
 export interface ItemIconRequest {

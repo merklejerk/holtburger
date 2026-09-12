@@ -3,6 +3,7 @@
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
 	import ItemIcon from "../app/ItemIcon.svelte";
+	import InventoryCurrencyOverlay from "./InventoryCurrencyOverlay.svelte";
 	import type { ItemIconDisplay } from "../app/item-icon-repository";
 	import type { ClientEntityFacts } from "./client-entity-mirror";
 	import type {
@@ -21,6 +22,8 @@
 	const { inventory, selectedGuid, onSelectItem }: Props = $props();
 	let view = $state<ClientInventoryView | null>(null);
 	let displays = $state<ReadonlyMap<string, ItemIconDisplay>>(new Map());
+	/** Footer artwork follows the same bounded display sampling as the inventory cells. */
+	const pyrealDisplay = $derived(displays.get(inventory.pyrealIconKey));
 	const sections = $derived(view?.sections ?? []);
 	const packSlots = $derived(view?.packSlots ?? []);
 	const pending = $derived(view?.pending ?? true);
@@ -28,6 +31,9 @@
 	const rootDescription = $derived(sections[0]?.container.description);
 	const pyreals = $derived(
 		rootDescription?.kind === "known" ? rootDescription.pyrealBalance : null,
+	);
+	const pyrealText = $derived(
+		pending || pyreals === null ? "…" : pyreals.toLocaleString(),
 	);
 	const sortLabels = {
 		native: "Native (slot index)",
@@ -40,6 +46,7 @@
 	onMount(() => {
 		const repository = inventory.icons;
 		const owner = repository.createOwner("display");
+		const pyrealKey = inventory.pyrealIconKey;
 		let lastView: ClientInventoryView | null = null;
 		let lastRevision = -1;
 		let displayedKeys = new Set<string>();
@@ -60,6 +67,8 @@
 					const revision = repository.revision;
 					if (next === lastView && revision === lastRevision) break;
 					const keys = new Set(next.iconKeys.values());
+					for (const row of next.currencies) keys.add(row.iconKey);
+					keys.add(pyrealKey);
 					for (const key of keys) repository.retainKey(owner, key);
 					const images = new Map(
 						[...keys].map((key) => [key, repository.read(key)]),
@@ -197,11 +206,29 @@
 		{/each}
 	</div>
 	<div class="inventory-bottom-bar" aria-label="Inventory summary">
-		<span aria-label="Total pyreals"
-			>Pyreals: {pending || pyreals === null
-				? "…"
-				: pyreals.toLocaleString()}</span
+		<InventoryCurrencyOverlay
+			label={`Total pyreals: ${pyrealText}`}
+			rows={view?.currencies ?? []}
+			pending={view?.currenciesPending ?? true}
+			{displays}
 		>
+			{#if pyrealDisplay?.kind === "ready" || pyrealDisplay?.kind === "degraded"}
+				<span class="inventory-currency-icon"
+					><ItemIcon
+						display={pyrealDisplay}
+						name="Pyreals"
+						tooltipLabel="Pyreals"
+					/></span
+				>
+			{:else}
+				<ItemIcon
+					display={pyrealDisplay}
+					name="Pyreals:"
+					tooltipLabel="Pyreals"
+				/>
+			{/if}
+			<span>{pyrealText}</span>
+		</InventoryCurrencyOverlay>
 		<button
 			type="button"
 			class="ui-hud-button inventory-sort"
@@ -295,6 +322,23 @@
 			display: flex;
 			align-items: center;
 			gap: 3px;
+		}
+		.inventory-currency-icon {
+			container: inventory-pyreal-icon / inline-size;
+			width: var(--ui-inventory-pyreal-icon-size);
+			height: var(--ui-inventory-pyreal-icon-size);
+			flex: none;
+		}
+		.inventory-currency-icon :global(.item-icon) {
+			--ui-item-icon-rendering: var(--ui-inventory-pyreal-icon-upsample-filter);
+		}
+		/* PreparedItemIcon PNGs have a fixed 32px native extent; this compares CSS display sizes. */
+		@container inventory-pyreal-icon (width < 32px) {
+			.inventory-currency-icon :global(.item-icon) {
+				--ui-item-icon-rendering: var(
+					--ui-inventory-pyreal-icon-downsample-filter
+				);
+			}
 		}
 		.inventory-sort svg {
 			width: 18px;

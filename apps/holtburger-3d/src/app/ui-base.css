@@ -73,6 +73,19 @@
 		--ui-item-strip-up-glyph: "▲";
 		--ui-item-strip-down-glyph: "▼";
 		--ui-inventory-padding: 10px;
+		/* Currency artwork sizing, independent of footer text and inventory cells. */
+		--ui-inventory-pyreal-icon-size: 20px;
+		/* CSS image-rendering values, selected by display size relative to native 32px art. */
+		--ui-inventory-pyreal-icon-upsample-filter: pixelated;
+		--ui-inventory-pyreal-icon-downsample-filter: auto;
+		/* Currency-summary graphics can be tuned independently of the footer. */
+		--ui-inventory-currency-icon-size: var(--ui-inventory-pyreal-icon-size);
+		--ui-inventory-currency-icon-upsample-filter: var(
+			--ui-inventory-pyreal-icon-upsample-filter
+		);
+		--ui-inventory-currency-icon-downsample-filter: var(
+			--ui-inventory-pyreal-icon-downsample-filter
+		);
 		--ui-inventory-section-gap: 14px;
 		--ui-inventory-divider: 1px solid currentColor;
 	}

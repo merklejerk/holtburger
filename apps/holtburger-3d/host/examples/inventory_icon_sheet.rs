@@ -22,6 +22,10 @@ fn main() -> Result<()> {
         underlay: NonZeroU32::new(underlay),
     };
     let specs = vec![
+        // ACE World WCID 273 (coinstack), PropertyDataId.Icon (8).
+        ItemIconSpec::Base {
+            base: NonZeroU32::new(0x0600229f).context("pyreal icon ID")?,
+        },
         ItemIconSpec::MainPack {
             overlay: None,
             underlay: None,

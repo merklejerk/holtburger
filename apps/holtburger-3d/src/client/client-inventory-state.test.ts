@@ -3,6 +3,7 @@ import { ClientInventoryState } from "./client-inventory-state";
 import { ClientEntityMirror } from "./client-entity-mirror";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import { CLIENT_TUNING } from "./client-tuning";
+import { INVENTORY_CURRENCIES } from "./client-inventory-currencies";
 import type { ClientLifecycle } from "./client-host-contract";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import {
@@ -35,7 +36,19 @@ function fixture(
 	const baseline = (items: ReturnType<typeof item>[], player = 1) =>
 		mirror.commit(
 			mirror.prepareSnapshot(
-				{ entities: [entityFacts(player), ...items] },
+				{
+					entities: [
+						entityFacts(player, {
+							storage: {
+								kind: "container",
+								roster: "announced",
+								itemCapacity: 24,
+								packCapacity: 7,
+							},
+						}),
+						...items,
+					],
+				},
 				player,
 			),
 		);
@@ -93,6 +106,39 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("persistent inventory state", () => {
+	it("refreshes ambient balances and retires currency artwork when the last item leaves", async () => {
+		const f = fixture();
+		const [wcid] = INVENTORY_CURRENCIES[0];
+		const record = item(2, 10);
+		const coin = (guid: number, count: number | null) => ({
+			...record,
+			guid,
+			description: { ...record.description, wcid, stackCount: count },
+		});
+		f.baseline([coin(2, 5), coin(3, null)]);
+		await sample();
+		const row = f.model.read().currencies[0];
+		if (row === undefined) throw new Error("Expected currency row");
+		expect(row.count).toBe(6);
+		expect(f.model.read().currenciesPending).toBe(false);
+		const display = f.icons.read(row.iconKey);
+		if (display.kind !== "ready")
+			throw new Error("Expected prepared currency image");
+		f.mirror.awaitSnapshot();
+		await sample();
+		expect(f.model.read().currenciesPending).toBe(true);
+		f.baseline([coin(3, 2)]);
+		await sample();
+		expect(f.model.read().currencies[0]).toMatchObject({
+			count: 2,
+			iconKey: row.iconKey,
+		});
+		f.baseline([]);
+		await sample();
+		expect(f.model.read().currencies).toEqual([]);
+		expect(f.services.revokeImage).toHaveBeenCalledWith(display.url);
+		f.destroy();
+	});
 	it("updates stack quantities through recovery without touching shared artwork", async () => {
 		const f = fixture();
 		await sample();
@@ -116,7 +162,7 @@ describe("persistent inventory state", () => {
 			expect(f.model.read().iconKeys).toEqual(originalKeys);
 		}
 		expect(f.services.prepare).toHaveBeenCalledTimes(1);
-		expect(f.services.createImage).toHaveBeenCalledTimes(2);
+		expect(f.services.createImage).toHaveBeenCalledTimes(3);
 		expect(f.services.revokeImage).not.toHaveBeenCalled();
 		f.destroy();
 	});
@@ -125,22 +171,23 @@ describe("persistent inventory state", () => {
 		const f = fixture(null);
 		await sample();
 		expect(f.model.read().pending).toBe(true);
-		expect(f.services.prepare).not.toHaveBeenCalled();
+		expect(f.icons.read(f.model.pyrealIconKey).kind).toBe("ready");
+		expect(f.model.read().iconKeys.size).toBe(0);
 		f.changeLifecycle({ kind: "in-world" });
 		await sample();
 		expect(f.model.read().pending).toBe(false);
-		expect(f.services.createImage).toHaveBeenCalledTimes(2);
+		expect(f.services.createImage).toHaveBeenCalledTimes(3);
 		f.destroy();
 	});
 
 	it("prepares before first display, reconciles hidden changes and keeps sort across entry", async () => {
 		const f = fixture();
 		await sample();
-		expect(f.services.createImage).toHaveBeenCalledTimes(2);
+		expect(f.services.createImage).toHaveBeenCalledTimes(3);
 		f.model.cycleSort();
 		f.baseline([item(3, 11)]);
 		await sample();
-		expect(f.services.createImage).toHaveBeenCalledTimes(3);
+		expect(f.services.createImage).toHaveBeenCalledTimes(4);
 		expect(f.services.revokeImage).toHaveBeenCalledTimes(1);
 		expect(f.model.read().sections[0]?.items.map((item) => item.guid)).toEqual([
 			3,

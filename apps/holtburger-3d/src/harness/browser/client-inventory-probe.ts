@@ -3,6 +3,7 @@ import type { ItemStructure } from "../../app/item-structure";
 import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import type { ClientEntitySelection } from "../../client/client-entity-selection";
 import { CLIENT_TUNING } from "../../client/client-tuning";
+import { INVENTORY_CURRENCIES } from "../../client/client-inventory-currencies";
 
 /** Browser-only fixture record; wire delivery still passes through the real session decoder. */
 function item(
@@ -252,10 +253,89 @@ export async function probeClientInventory(options: {
 			?.getAttribute("data-item-guid");
 	if (
 		!document
-			.querySelector('[aria-label="Total pyreals"]')
+			.querySelector(".inventory-currency")
 			?.textContent?.includes("12,345")
 	)
 		throw new Error("Inventory footer did not show the server coin total.");
+	const currency = document.querySelector<HTMLElement>(".inventory-currency");
+	if (currency === null) throw new Error("Currency trigger missing");
+	currency.focus();
+	await tick();
+	const popup = document.querySelector<HTMLElement>(
+		".inventory-currency-overlay",
+	);
+	if (popup === null || !popup.matches(":popover-open"))
+		throw new Error("Currency overlay did not open on keyboard focus");
+	const popupRect = popup.getBoundingClientRect();
+	if (
+		popupRect.top < 0 ||
+		popupRect.right > window.innerWidth ||
+		popupRect.bottom > window.innerHeight
+	)
+		throw new Error("Currency overlay escaped the viewport");
+	window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+	if (popup.matches(":popover-open"))
+		throw new Error("Currency overlay ignored Escape");
+	currency.blur();
+	currency.dispatchEvent(new PointerEvent("pointerenter"));
+	if (!popup.matches(":popover-open"))
+		throw new Error("Currency hover did not open overlay");
+	currency.dispatchEvent(new PointerEvent("pointerleave"));
+	await new Promise((resolve) => window.setTimeout(resolve, 200));
+	if (popup.matches(":popover-open"))
+		throw new Error("Currency overlay remained after pointer departure");
+	const currencyImage = currency?.querySelector<HTMLImageElement>("img");
+	if (
+		currency === null ||
+		currencyImage === null ||
+		currencyImage === undefined
+	)
+		throw new Error(
+			"Inventory footer did not load its independent currency graphic.",
+		);
+	const currencyStyle = currency.style.cssText;
+	const currencyFontSize = getComputedStyle(currency).fontSize;
+	try {
+		// Exercise inherited theme sizing with relative units, independent of the default.
+		currency.style.setProperty("--ui-inventory-pyreal-icon-size", "2em");
+		const currencySize = currencyImage.getBoundingClientRect();
+		const expectedSize = 2 * Number.parseFloat(currencyFontSize);
+		if (
+			Math.abs(currencySize.width - expectedSize) > 0.1 ||
+			Math.abs(currencySize.height - expectedSize) > 0.1
+		)
+			throw new Error("Currency graphic did not follow its theme size.");
+		if (getComputedStyle(currency).fontSize !== currencyFontSize)
+			throw new Error("Currency icon sizing changed the footer font size.");
+		// Reverse the defaults to prove each theme override is selected independently.
+		currency.style.setProperty(
+			"--ui-inventory-pyreal-icon-upsample-filter",
+			"auto",
+		);
+		currency.style.setProperty(
+			"--ui-inventory-pyreal-icon-downsample-filter",
+			"pixelated",
+		);
+		for (const [scale, filter] of [
+			[0.5, "pixelated"],
+			[1, "auto"],
+			[2, "auto"],
+		] as const) {
+			currency.style.setProperty(
+				"--ui-inventory-pyreal-icon-size",
+				`${currencyImage.naturalWidth * scale}px`,
+			);
+			if (getComputedStyle(currencyImage).imageRendering !== filter)
+				throw new Error(
+					`Currency sampling filter did not follow its theme at scale ${scale}.`,
+				);
+		}
+	} finally {
+		currency.style.cssText = currencyStyle;
+	}
+	if (currency.textContent?.includes("Pyreals:"))
+		throw new Error("Loaded currency artwork retained the visible text label.");
+	const currencyUrl = currencyImage.src;
 	button("Sort inventory: Native (slot index)").click();
 	await sample();
 	if (firstMainItem() !== "21")
@@ -920,6 +1000,13 @@ export async function probeClientInventory(options: {
 		if (options.readPreparedIconCount() !== afterFailure)
 			throw new Error("A retained missing image retried on the next sample.");
 		artwork(22);
+		if (
+			document.querySelector<HTMLImageElement>(".inventory-currency img")
+				?.src !== currencyUrl
+		)
+			throw new Error(
+				"Panel reopening did not reuse retained currency artwork.",
+			);
 		if (retiredUrls.length === 0 || retiredWhileDisplayed)
 			throw new Error(
 				"Icon URLs were not retired strictly after their DOM consumers released them.",
@@ -927,7 +1014,54 @@ export async function probeClientInventory(options: {
 	} finally {
 		URL.revokeObjectURL = revokeObjectURL;
 	}
+	// Isolate a complete currency roster after the grid and icon-lifetime scenarios.
+	const root = records.find((record) => record.guid === 1);
+	if (root === undefined) throw new Error("Missing inventory root");
+	const [currencyWcid, currencyName] = INVENTORY_CURRENCIES[0];
+	const currencyRecord = owned(90, 1, 0);
+	if (currencyRecord.description.kind !== "known")
+		throw new Error("Expected known currency fixture");
+	records = [
+		root,
+		{
+			...currencyRecord,
+			description: {
+				...currencyRecord.description,
+				wcid: currencyWcid,
+				stackCount: 1234,
+			},
+		},
+	];
+	baseline();
+	await sample();
+	const summaryTrigger = document.querySelector<HTMLButtonElement>(
+		".inventory-currency",
+	);
+	if (summaryTrigger === null) throw new Error("Currency trigger missing");
+	summaryTrigger.dispatchEvent(new PointerEvent("pointerenter"));
+	await tick();
+	const summary = document.querySelector<HTMLElement>(
+		".inventory-currency-overlay",
+	);
+	if (
+		summary === null ||
+		!summary.matches(":popover-open") ||
+		!summary.textContent?.includes(currencyName) ||
+		!summary.textContent.includes("1,234") ||
+		summary.querySelector("img") === null
+	)
+		throw new Error(
+			`Currency overlay did not render the carried balance and graphic: ${summary?.outerHTML}`,
+		);
+	records = [root];
+	baseline();
+	await sample();
+	if (!summary.textContent?.includes("No alternate currencies carried."))
+		throw new Error("Currency overlay retained a removed balance");
+	window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+	summaryTrigger.blur();
 	return {
+		ambientCurrencyOverlay: true,
 		initial,
 		wide,
 		narrow,

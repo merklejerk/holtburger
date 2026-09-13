@@ -38,7 +38,10 @@
 	let adjustments = $state<Partial<ClientHudLayout>>({});
 	const shortcuts = createClientShortcuts(true);
 	/** Production HUD surfaces whose component inputs do not require a GPU owner. */
-	type HudSurface = Exclude<keyof ClientHudLayout, "minimap" | "floatingPanel">;
+	type HudSurface = Exclude<
+		keyof ClientHudLayout,
+		"minimap" | "inventory" | "debug"
+	>;
 	const layout = $derived.by(() => {
 		const width = (stageWidth - 16 * (columns + 1)) / columns;
 		const right = columns === 2 ? width + 32 : 16;
@@ -61,7 +64,7 @@
 			jumpPower: place(width - 22, 310, 38, 132),
 			toast: place(16, 370, width - 70, 64),
 			chat: place(right, columns === 2 ? 16 : 470, width, 264),
-			floatingPanel: place(
+			debug: place(
 				right,
 				columns === 2 ? 304 : 758,
 				width,
@@ -379,14 +382,15 @@
 
 			{#if windowOpen}
 				<ClientHudWindow
+					icon="debug"
 					title="Component showcase"
-					placement={layout.floatingPanel}
+					placement={layout.debug}
 					{viewport}
-					minWidth={CLIENT_UI_DEFAULTS.floatingPanel.minSize.width}
-					minHeight={CLIENT_UI_DEFAULTS.floatingPanel.minSize.height}
+					minWidth={CLIENT_UI_DEFAULTS.debug.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.debug.minSize.height}
 					onClose={() => (windowOpen = false)}
 					onPlacementChange={(placement) =>
-						(adjustments = { ...adjustments, floatingPanel: placement })}
+						(adjustments = { ...adjustments, debug: placement })}
 				>
 					<div class="showcase-window-body ui-body">
 						<nav class="ui-tabs" aria-label="Showcase pages">

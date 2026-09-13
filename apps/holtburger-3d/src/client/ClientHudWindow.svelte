@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onDestroy, type Snippet } from "svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
+	import ClientHudIcon, {
+		type ClientHudIconName,
+	} from "./ClientHudIcon.svelte";
 	import {
 		anchorClientHudPlacement,
 		resizeClientPanelRectangle,
@@ -16,6 +19,8 @@
 		readonly minWidth: number;
 		readonly placement: ClientHudPlacement;
 		readonly title: string;
+		/** Same glyph used by the panel's launcher in the system shortcut dock. */
+		readonly icon: ClientHudIconName;
 		readonly viewport: ClientHudViewport;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
@@ -27,6 +32,7 @@
 		minWidth,
 		placement,
 		title,
+		icon,
 		viewport,
 		onClose,
 		onPlacementChange,
@@ -137,7 +143,10 @@
 		aria-label={`${title} window controls`}
 		onpointerdown={beginDrag}
 	>
-		<span>{title}</span>
+		<span class="hud-window-title"
+			><span class="hud-window-icon"><ClientHudIcon name={icon} /></span
+			>{title}</span
+		>
 		<button
 			type="button"
 			class="ui-button hud-window-close"
@@ -177,6 +186,16 @@
 
 		.hud-window-titlebar:active {
 			cursor: grabbing;
+		}
+		.hud-window-title {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+		}
+		.hud-window-icon {
+			width: 1em;
+			height: 1em;
+			flex: none;
 		}
 
 		.hud-window-close {

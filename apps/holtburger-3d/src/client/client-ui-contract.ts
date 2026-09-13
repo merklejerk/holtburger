@@ -47,8 +47,10 @@ export interface ClientUiDefaults {
 	readonly character: ClientUiPanel;
 	/** Chat history and command input. */
 	readonly chat: ClientUiPanel;
-	/** Shared mutually exclusive game window; window borders always support resizing. */
-	readonly floatingPanel: Omit<ClientUiPanel, "resizable">;
+	/** Inventory window with independently retained geometry; borders always resize. */
+	readonly inventory: Omit<ClientUiPanel, "resizable">;
+	/** Diagnostics window with independently retained geometry; borders always resize. */
+	readonly debug: Omit<ClientUiPanel, "resizable">;
 	/** Frame-rate readout. */
 	readonly frameRate: ClientUiPanel;
 	/** Conditional jump-charge control. */

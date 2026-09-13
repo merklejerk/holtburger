@@ -204,7 +204,8 @@ pub trait WorldContextExt: WorldContext {
         let num_augs = self
             .get_player_int_property(PropertyInt::AugmentationIncreasedCarryingCapacity)
             .unwrap_or(0)
-            .max(0) as f32;
+            // ACE EncumbranceSystem.EncumbranceCapacity caps the bonus at 150 * Strength.
+            .clamp(0, 5) as f32;
         Some((150.0 * strength) + (num_augs * 30.0 * strength))
     }
 
@@ -812,6 +813,28 @@ mod tests {
             world.player_run_rate(),
             Some(run_rate_from_skill_and_burden(300.0, expected_burden))
         );
+    }
+
+    #[test]
+    fn burden_capacity_clamps_augmentation_bonus_to_ace_limits() {
+        let mut world = TestWorld {
+            player_guid: Some(Guid(1)),
+            player_attributes: HashMap::from([(AttributeType::StrengthAttr, 100)]),
+            ..Default::default()
+        };
+        for (augmentations, capacity) in [
+            (-1, 15000.0),
+            (0, 15000.0),
+            (1, 18000.0),
+            (5, 30000.0),
+            (6, 30000.0),
+        ] {
+            world.player_int_properties = vec![(
+                PropertyInt::AugmentationIncreasedCarryingCapacity,
+                augmentations,
+            )];
+            assert_eq!(world.player_capacity(), Some(capacity));
+        }
     }
 
     #[test]

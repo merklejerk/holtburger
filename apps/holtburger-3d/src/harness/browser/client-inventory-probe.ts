@@ -3,6 +3,7 @@ import type { ItemStructure } from "../../app/item-structure";
 import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import type { ClientEntitySelection } from "../../client/client-entity-selection";
 import { CLIENT_TUNING } from "../../client/client-tuning";
+import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 import { INVENTORY_CURRENCIES } from "../../client/client-inventory-currencies";
 import { EQUIPMENT_SLOTS } from "../../client/client-inventory-equipment";
 
@@ -22,6 +23,7 @@ function item(
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			burden: null,
 			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -88,7 +90,7 @@ export async function probeClientInventory(options: {
 	const windowRect = () => {
 		const windows = document.querySelectorAll(".hud-window");
 		if (windows.length !== 1)
-			throw new Error("Inventory and Debug must share exactly one window.");
+			throw new Error("Exactly one system panel must be open.");
 		const rect = windows[0]?.getBoundingClientRect();
 		if (rect === undefined) throw new Error("Floating window is missing.");
 		return {
@@ -134,6 +136,7 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: 12345,
+				burden: null,
 				equipLocations: null,
 				stackCount: null,
 				structure: { current: null, max: null },
@@ -156,6 +159,7 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				burden: null,
 				equipLocations: null,
 				stackCount: null,
 				structure: { current: null, max: null },
@@ -223,6 +227,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			burden: null,
 			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -240,6 +245,7 @@ export async function probeClientInventory(options: {
 			wcid: 123,
 			weenieType: "Food",
 			pyrealBalance: null,
+			burden: null,
 			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -251,6 +257,53 @@ export async function probeClientInventory(options: {
 	if (button("Inventory").getAttribute("aria-pressed") !== "true")
 		button("Inventory").click();
 	await sample();
+	const burdenIndicator =
+		document.querySelector<HTMLElement>(".inventory-burden");
+	if (burdenIndicator === null)
+		throw new Error("Inventory burden indicator missing.");
+	const playerRecord = records.find((record) => record.guid === 1);
+	if (playerRecord?.description.kind !== "known")
+		throw new Error("Inventory burden probe requires a known player.");
+	for (const [burden, level, label] of [
+		[null, "pending", "…"],
+		[0, "normal", "0%"],
+		[0.73, "normal", "73%"],
+		[1, "burdened", "100%"],
+		[1.5, "burdened", "150%"],
+		[2, "overburdened", "200%"],
+		[3, "overburdened", "300%"],
+		[null, "pending", "…"],
+	] as const) {
+		update({
+			...playerRecord,
+			description: { ...playerRecord.description, burden },
+		});
+		await sample();
+		if (
+			burdenIndicator.dataset.level !== level ||
+			burdenIndicator.textContent?.trim() !== label ||
+			burdenIndicator.getAttribute("aria-label") !==
+				`Burden: ${burden === null ? "Loading" : label}`
+		)
+			throw new Error(`Inventory burden did not display ${level}: ${label}.`);
+		if (level !== "pending") {
+			const knob =
+				level === "normal"
+					? "normal"
+					: level === "burdened"
+						? "warning"
+						: "danger";
+			burdenIndicator.style.setProperty(
+				`--ui-inventory-burden-${knob}-color`,
+				"rgb(1, 2, 3)",
+			);
+			if (getComputedStyle(burdenIndicator).color !== "rgb(1, 2, 3)")
+				throw new Error(`Inventory burden ${knob} color is not themeable.`);
+			burdenIndicator.style.removeProperty(
+				`--ui-inventory-burden-${knob}-color`,
+			);
+		}
+	}
 	const firstMainItem = () =>
 		document
 			.querySelector(
@@ -366,11 +419,32 @@ export async function probeClientInventory(options: {
 		".inventory-pack-strip .item-grid-strip-viewport",
 	);
 	if (strip === null) throw new Error("Inventory container strip is missing.");
+	const stripRoot = strip.closest<HTMLElement>(".item-grid-strip");
+	if (stripRoot === null) throw new Error("Inventory strip root is missing.");
+	const checkStripSpacing = () => {
+		const bounds = stripRoot.getBoundingClientRect();
+		const viewport = strip.getBoundingClientRect();
+		const style = getComputedStyle(stripRoot);
+		if (
+			Math.abs(
+				viewport.top - bounds.top - Number.parseFloat(style.paddingTop),
+			) > 1 ||
+			Math.abs(
+				bounds.bottom -
+					viewport.bottom -
+					Number.parseFloat(style.paddingBottom),
+			) > 1
+		)
+			throw new Error(
+				"Strip end spacing must remain outside the scroll viewport.",
+			);
+	};
+	checkStripSpacing();
 	const footer = document.querySelector<HTMLElement>(".inventory-bottom-bar");
 	if (
 		footer === null ||
 		Math.abs(
-			strip.getBoundingClientRect().bottom -
+			stripRoot.getBoundingClientRect().bottom -
 				footer.getBoundingClientRect().bottom,
 		) > 1
 	)
@@ -433,15 +507,6 @@ export async function probeClientInventory(options: {
 		throw new Error("Container strip did not select the player.");
 	await tick();
 	const selectedPackSurfaces = [cell(1), stripCells[0]];
-	for (const surface of selectedPackSurfaces) {
-		if (surface === undefined)
-			throw new Error("Selected pack surface is missing.");
-		const style = getComputedStyle(surface);
-		if (style.outlineStyle !== "none" || style.boxShadow === "none")
-			throw new Error(
-				"Standard theme did not replace pack selection outlines with a glow.",
-			);
-	}
 	const themeRoot = document.documentElement;
 	const previousOutline = themeRoot.style.getPropertyValue(
 		"--ui-item-selection-outline",
@@ -450,6 +515,18 @@ export async function probeClientInventory(options: {
 		"--ui-item-selection-shadow",
 	);
 	try {
+		themeRoot.style.setProperty("--ui-item-selection-outline", "none");
+		themeRoot.style.setProperty(
+			"--ui-item-selection-shadow",
+			"inset 0 0 9px gold",
+		);
+		for (const surface of selectedPackSurfaces) {
+			if (surface === undefined)
+				throw new Error("Selected pack surface is missing.");
+			const style = getComputedStyle(surface);
+			if (style.outlineStyle !== "none" || style.boxShadow === "none")
+				throw new Error("Selection styling did not apply the configured glow.");
+		}
 		// CSS-wide initial invalidates the optional token and exercises the base recipe fallback.
 		themeRoot.style.setProperty("--ui-item-selection-outline", "initial");
 		themeRoot.style.setProperty("--ui-item-selection-shadow", "initial");
@@ -507,6 +584,7 @@ export async function probeClientInventory(options: {
 		throw new Error("Up arrow did not align the next cell top.");
 	strip.scrollTop = strip.scrollHeight;
 	if (strip.scrollTop === 0) throw new Error("Container strip cannot scroll.");
+	checkStripSpacing();
 	strip.scrollTop = 0;
 	selection.select(7);
 	const initial = squares();
@@ -555,13 +633,13 @@ export async function probeClientInventory(options: {
 		throw new Error(
 			"Hidden inventory stopped maintaining its persistent state.",
 		);
-	if (
-		document.querySelector(".client-inventory") !== null ||
-		JSON.stringify(windowRect()) !== JSON.stringify(placement)
-	)
-		throw new Error("Panel switch did not preserve the shared placement.");
+	if (document.querySelector(".client-inventory") !== null)
+		throw new Error("Switching to Debug did not unmount Inventory.");
 	button("Inventory").click();
 	await sample();
+	// Switching panels must restore this panel's independently retained geometry.
+	if (JSON.stringify(windowRect()) !== JSON.stringify(placement))
+		throw new Error("Panel round trip did not preserve inventory placement.");
 
 	const samplesBeforeBurst = options.readSampleCount();
 	for (let index = 0; index < 20; index++) update(owned(20, 1, 0));
@@ -619,6 +697,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			burden: null,
 			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -645,8 +724,7 @@ export async function probeClientInventory(options: {
 	const resize = async (width: number) => {
 		const rect = windowRect();
 		const handle = document.querySelector(".hud-window-resize-left");
-		if (handle === null)
-			throw new Error("Shared window resize handle is missing.");
+		if (handle === null) throw new Error("Panel resize handle is missing.");
 		handle.dispatchEvent(
 			new PointerEvent("pointerdown", {
 				pointerId: 50,
@@ -665,18 +743,100 @@ export async function probeClientInventory(options: {
 		);
 		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 50 }));
 		await sample();
-		return {
-			...squares(),
-			window: windowRect(),
-			viewportWidth: window.innerWidth,
-		};
+		return windowRect();
 	};
-	const wide = await resize(600);
-	const narrow = await resize(280);
+	const wide = {
+		window: await resize(CLIENT_UI_DEFAULTS.inventory.minSize.width + 200),
+		...squares(),
+	};
+	const narrow = {
+		window: await resize(CLIENT_UI_DEFAULTS.inventory.minSize.width / 2),
+		...squares(),
+	};
+	if (narrow.window.width < CLIENT_UI_DEFAULTS.inventory.minSize.width)
+		throw new Error("Inventory window resized below its minimum width.");
+	const footerPlayer = records.find((record) => record.guid === 1);
+	if (footerPlayer?.description.kind !== "known")
+		throw new Error("Footer overflow probe requires a known player.");
+	update({
+		...footerPlayer,
+		description: {
+			...footerPlayer.description,
+			pyrealBalance: 0xffff_ffff,
+			burden: 3,
+		},
+	});
+	await sample();
+	const minimumWidthFooter = document.querySelector<HTMLElement>(
+		".inventory-bottom-bar",
+	);
+	if (minimumWidthFooter === null)
+		throw new Error("Inventory footer is missing after reopening.");
+	const footerBounds = minimumWidthFooter.getBoundingClientRect();
+	if (
+		Array.from(minimumWidthFooter.children).some(
+			(child) => child.getBoundingClientRect().right > footerBounds.right,
+		)
+	)
+		throw new Error(
+			"Inventory footer contents overflow at minimum window width.",
+		);
+	update(footerPlayer);
+	await sample();
 	if (wide.columns <= narrow.columns)
 		throw new Error(
 			`Inventory grid did not flow with window width: ${JSON.stringify({ wide, narrow })}`,
 		);
+
+	const savedInventory = windowRect();
+	button("Debug").click();
+	await sample();
+	const resizedDebug = await resize(
+		CLIENT_UI_DEFAULTS.debug.minSize.width + 200,
+	);
+	const titlebar = document.querySelector(".hud-window-titlebar");
+	if (titlebar === null) throw new Error("Diagnostics titlebar missing.");
+	const start = titlebar.getBoundingClientRect();
+	titlebar.dispatchEvent(
+		new PointerEvent("pointerdown", {
+			pointerId: 51,
+			bubbles: true,
+			button: 0,
+			clientX: start.left + 20,
+			clientY: start.top + 10,
+		}),
+	);
+	window.dispatchEvent(
+		new PointerEvent("pointermove", {
+			pointerId: 51,
+			clientX: start.left - 40,
+			clientY: start.top - 30,
+		}),
+	);
+	window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 51 }));
+	await sample();
+	const savedDebug = windowRect();
+	if (
+		savedDebug.left === resizedDebug.left &&
+		savedDebug.top === resizedDebug.top
+	)
+		throw new Error("Diagnostics drag did not move the panel.");
+	button("Inventory").click();
+	await sample();
+	if (JSON.stringify(windowRect()) !== JSON.stringify(savedInventory))
+		throw new Error("Editing Diagnostics changed Inventory geometry.");
+	button("Debug").click();
+	await sample();
+	if (JSON.stringify(windowRect()) !== JSON.stringify(savedDebug))
+		throw new Error("Diagnostics did not retain its own geometry.");
+	button("Debug").click();
+	await sample();
+	button("Debug").click();
+	await sample();
+	if (JSON.stringify(windowRect()) !== JSON.stringify(savedDebug))
+		throw new Error("Closing Diagnostics discarded its geometry.");
+	button("Inventory").click();
+	await sample();
 
 	emit("client-state-resyncing", null);
 	await sample();
@@ -713,6 +873,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			burden: null,
 			equipLocations: null,
 			stackCount: null,
 			structure: { current: null, max: null },

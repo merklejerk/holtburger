@@ -495,40 +495,44 @@
 		/>
 	</ClientHudPanel>
 	{#if activePanel !== null}
-		<ClientHudWindow
-			title={activePanel === "inventory" ? "Inventory" : "Client diagnostics"}
-			placement={hudLayout.floatingPanel}
-			minWidth={CLIENT_UI_DEFAULTS.floatingPanel.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.floatingPanel.minSize.height}
-			{viewport}
-			onClose={() => (activePanel = null)}
-			onPlacementChange={(floatingPanel) =>
-				(hudLayout = { ...hudLayout, floatingPanel })}
-		>
-			{#if activePanel === "inventory"}
-				{#if inventory !== null}
-					{#key inventory}
-						<ClientInventoryPanel
-							{inventory}
-							selectedGuid={selectedEntityGuid}
-							onSelectItem={onSelectInventoryItem}
-						/>
-					{/key}
+		{@const panel = activePanel}
+		{#key panel}
+			<ClientHudWindow
+				icon={panel}
+				title={panel === "inventory" ? "Inventory" : "Client diagnostics"}
+				placement={hudLayout[panel]}
+				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
+				{viewport}
+				onClose={() => (activePanel = null)}
+				onPlacementChange={(placement) =>
+					(hudLayout = { ...hudLayout, [panel]: placement })}
+			>
+				{#if panel === "inventory"}
+					{#if inventory !== null}
+						{#key inventory}
+							<ClientInventoryPanel
+								{inventory}
+								selectedGuid={selectedEntityGuid}
+								onSelectItem={onSelectInventoryItem}
+							/>
+						{/key}
+					{/if}
+				{:else}
+					<ClientDebugPanel
+						{entityMetadata}
+						{readDiagnostics}
+						{readSelectedEntity}
+						{entityCollisionDisabled}
+						{onEntityCollisionDisabledChange}
+						{unrestrictedUse}
+						{onUnrestrictedUseChange}
+						{showRetailHiddenGeometry}
+						{onShowRetailHiddenGeometryChange}
+					/>
 				{/if}
-			{:else}
-				<ClientDebugPanel
-					{entityMetadata}
-					{readDiagnostics}
-					{readSelectedEntity}
-					{entityCollisionDisabled}
-					{onEntityCollisionDisabledChange}
-					{unrestrictedUse}
-					{onUnrestrictedUseChange}
-					{showRetailHiddenGeometry}
-					{onShowRetailHiddenGeometryChange}
-				/>
-			{/if}
-		</ClientHudWindow>
+			</ClientHudWindow>
+		{/key}
 	{/if}
 </main>
 

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     WorldState,
+    context::WorldContextExt,
     state::{
         ScenePlacementError,
         storage::{RosterCoverage, StorageLocation, StorageSlot},
@@ -53,7 +54,7 @@ pub struct EntityStructure {
 }
 
 /// Display facts become known independently of storage announcements.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum EntityDescription {
     /// Identity exists but its public name/type are not yet known.
@@ -87,6 +88,9 @@ pub enum EntityDescription {
         /// Server-maintained coin total across the player's packs, unknown before receipt.
         #[serde(rename = "pyrealBalance")]
         pyreal_balance: Option<u32>,
+        /// Local player's encumbrance/capacity ratio for inventory presentation; absent until
+        /// the root roster and required world inputs arrive, and on non-player entities.
+        burden: Option<f32>,
         /// Consumed by the effective health subscription controller.
         #[serde(rename = "healthQuery")]
         health_query: HealthQueryEligibility,
@@ -157,7 +161,7 @@ pub enum SceneAvailability {
 }
 
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientEntityFacts {
     /// Stable key shared with selection and rendering.
@@ -244,6 +248,13 @@ impl WorldState {
                 pyreal_balance: entity
                     .get_int_prop(PropertyInt::CoinValue)
                     .map(|value| u32::try_from(value).expect("coin balance must be non-negative")),
+                burden: if guid == self.player.guid
+                    && self.storage_coverage(guid) == Some(RosterCoverage::Announced)
+                {
+                    self.player_burden()
+                } else {
+                    None
+                },
                 health_query: if item_type
                     .contains(holtburger_common::properties::ItemType::CREATURE)
                 {
@@ -366,6 +377,7 @@ mod tests {
                 wcid: None,
                 weenie_type: None,
                 pyreal_balance: None,
+                burden: None,
                 ..
             }
         ));
@@ -489,6 +501,7 @@ mod tests {
                 wcid: Some(123),
                 weenie_type: None,
                 pyreal_balance: None,
+                burden: None,
                 health_query: HealthQueryEligibility::Ineligible,
             }
         );
@@ -534,6 +547,7 @@ mod tests {
                 wcid: None,
                 weenie_type: None,
                 pyreal_balance: None,
+                burden: None,
                 health_query: HealthQueryEligibility::Eligible,
             }
         );

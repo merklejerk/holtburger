@@ -38,6 +38,14 @@
 	const pyrealText = $derived(
 		pending || pyreals === null ? "…" : pyreals.toLocaleString(),
 	);
+	const burden = $derived(
+		!pending && rootDescription?.kind === "known"
+			? rootDescription.burden
+			: null,
+	);
+	const burdenText = $derived(
+		burden === null ? "…" : `${Math.round(burden * 100)}%`,
+	);
 	const sortLabels = {
 		native: "Native (slot index)",
 		alphabetical: "Alphabetical",
@@ -251,6 +259,25 @@
 			{/if}
 			<span>{pyrealText}</span>
 		</InventoryCurrencyOverlay>
+		<span
+			class="inventory-burden"
+			role="img"
+			aria-label={`Burden: ${burden === null ? "Loading" : burdenText}`}
+			title="Burden"
+			data-level={burden === null
+				? "pending"
+				: burden >= 2
+					? "overburdened"
+					: burden >= 1
+						? "burdened"
+						: "normal"}
+		>
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<circle cx="12" cy="5" r="3" />
+				<path d="M7 8h10l4 13H3Z" />
+			</svg>
+			<span>{burdenText}</span>
+		</span>
 		<button
 			type="button"
 			class="ui-hud-button inventory-sort"
@@ -333,6 +360,8 @@
 			grid-column: 2;
 			grid-row: 2;
 			display: flex;
+			/* Large balances must still fit when the window or theme leaves less room. */
+			flex-wrap: wrap;
 			align-items: center;
 			justify-content: space-between;
 			gap: 8px;
@@ -344,6 +373,27 @@
 			display: flex;
 			align-items: center;
 			gap: 3px;
+		}
+		.inventory-burden {
+			display: inline-flex;
+			align-items: center;
+			gap: 3px;
+			color: var(--ui-inventory-burden-normal-color);
+		}
+		.inventory-burden svg {
+			width: 1em;
+			height: 1em;
+			flex: none;
+			fill: none;
+			stroke: currentColor;
+			stroke-width: 2;
+			stroke-linejoin: round;
+		}
+		.inventory-burden[data-level="burdened"] {
+			color: var(--ui-inventory-burden-warning-color);
+		}
+		.inventory-burden[data-level="overburdened"] {
+			color: var(--ui-inventory-burden-danger-color);
 		}
 		.inventory-currency-icon {
 			container: inventory-pyreal-icon / inline-size;

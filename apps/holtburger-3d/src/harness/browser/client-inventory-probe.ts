@@ -31,6 +31,7 @@ function item(
 		},
 		location: { kind: "none" },
 		ownedByPlayer: false,
+		targeting: "non-creature",
 		scenePlacement: "available",
 		storage: { kind: "not-established" },
 		...overrides,
@@ -123,6 +124,7 @@ export async function probeClientInventory(options: {
 				parentGuid,
 				slot: { kind: "item", index },
 			},
+			targeting: "ineligible",
 			scenePlacement: "unavailable",
 		});
 	let records = [

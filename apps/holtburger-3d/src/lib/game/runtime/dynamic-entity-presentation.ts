@@ -1,7 +1,14 @@
-import { acFrameTransform } from "../../assets/ac-frame";
+import {
+	acFrameTransform,
+	sceneVec3,
+	type SceneVec3,
+} from "../../assets/ac-frame";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type { DatAssetId, EnvCellId, LandblockOwnerId } from "../game-types";
-import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
+import {
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	createLandblockWorldOrigin,
+} from "../landblocks";
 import { Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
@@ -109,6 +116,20 @@ function withPhysicsScriptTableOverride(
 		};
 	}
 	return { ...behavior, physicsScriptTableId: override };
+}
+
+/** Accepted root origin in canonical scene space; no EnvCell topology or mesh is required. */
+export function dynamicEntityWorldOrigin(
+	placement: DynamicEntityWorldPlacement,
+): SceneVec3 {
+	const { pose } = placement;
+	const origin = createLandblockWorldOrigin(
+		landblockCoordinates(pose.landblockId),
+	);
+	// Same AC Z-up to scene Y-up conversion as acFrameTransform, without building a matrix.
+	return sceneVec3(
+		new Vec3(origin.x + pose.coords.x, pose.coords.z, origin.z - pose.coords.y),
+	);
 }
 
 /** Convert one host-accepted AC pose without re-resolving portal residency in the frontend. */

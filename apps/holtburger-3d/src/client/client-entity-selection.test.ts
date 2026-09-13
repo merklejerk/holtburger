@@ -1,4 +1,8 @@
 import {
+	ClientPointerSelectionController,
+	type ClientPointerSelectionPresentationPort,
+} from "./client-pointer-selection-controller";
+import {
 	ClientEntityMirror,
 	type ClientEntityFacts,
 } from "./client-entity-mirror";
@@ -24,10 +28,18 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => presentation,
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => presentation,
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 		const changes: Array<number | null> = [];
 		selection.subscribe((guid) => changes.push(guid));
 
-		selection.acquireViewportPoint(40, 20);
+		pointer.acquireViewportPoint(40, 20);
 		await Promise.resolve();
 		expect(lifecycle.requests).toHaveLength(1);
 		lifecycle.emit(available(lifecycle.requests[0]!.sequence, [8, 4]));
@@ -35,6 +47,7 @@ describe("ClientEntitySelection", () => {
 		expect(selection.selectedGuid()).toBe(4);
 		expect(changes).toEqual([4]);
 		expect(presentation.refinedCandidates).toEqual([[8, 4]]);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -44,14 +57,23 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => new FakePresentation(),
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 
-		selection.acquireViewportPoint(1, 2);
+		pointer.acquireViewportPoint(1, 2);
 		await Promise.resolve();
 		const oldSequence = lifecycle.requests[0]!.sequence;
 		selection.select(77);
 		lifecycle.emit(available(oldSequence, [4]));
 
 		expect(selection.selectedGuid()).toBe(77);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -61,11 +83,16 @@ describe("ClientEntitySelection", () => {
 		const selection = new ClientEntitySelection({
 			lifecycle,
 			presentation: () => new FakePresentation(),
+		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
 			onSelectionSubmissionFailed: (error) => failures.push(error),
 		});
 		selection.select(12);
 
-		selection.acquireViewportPoint(1, 2);
+		pointer.acquireViewportPoint(1, 2);
 		await Promise.resolve();
 		lifecycle.emit({
 			result: {
@@ -76,11 +103,12 @@ describe("ClientEntitySelection", () => {
 			type: "entity-selection-query-result",
 		});
 		lifecycle.rejectNext = true;
-		selection.acquireViewportPoint(1, 2);
+		pointer.acquireViewportPoint(1, 2);
 		await Promise.resolve();
 
 		expect(selection.selectedGuid()).toBe(12);
 		expect(failures).toEqual([expect.any(Error)]);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -90,25 +118,34 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => new FakePresentation(),
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 		const hoverChanges: Array<number | null> = [];
-		selection.subscribeHovered((guid) => hoverChanges.push(guid));
+		pointer.subscribeHovered((guid) => hoverChanges.push(guid));
 
-		selection.acquireViewportHover(1, 2);
-		selection.acquireViewportHover(3, 4);
+		pointer.acquireViewportHover(1, 2);
+		pointer.acquireViewportHover(3, 4);
 		await Promise.resolve();
 		expect(lifecycle.requests).toHaveLength(1);
 		lifecycle.emit(available(lifecycle.requests[0]!.sequence, [8, 4]));
 
-		expect(selection.hoveredGuid()).toBe(4);
+		expect(pointer.hoveredGuid()).toBe(4);
 		expect(selection.selectedGuid()).toBeNull();
 		expect(hoverChanges).toEqual([4]);
 
-		selection.acquireViewportHover(3, 4);
+		pointer.acquireViewportHover(3, 4);
 		await Promise.resolve();
 		expect(lifecycle.requests).toHaveLength(2);
 		lifecycle.emit(available(lifecycle.requests[1]!.sequence, []));
-		expect(selection.hoveredGuid()).toBeNull();
+		expect(pointer.hoveredGuid()).toBeNull();
 		expect(hoverChanges).toEqual([4, null]);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -118,9 +155,17 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => new FakePresentation(),
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 
-		selection.acquireViewportHover(1, 2);
-		selection.acquireViewportPoint(3, 4);
+		pointer.acquireViewportHover(1, 2);
+		pointer.acquireViewportPoint(3, 4);
 		await Promise.resolve();
 		const hoverSequence = lifecycle.requests[0]!.sequence;
 		const clickSequence = lifecycle.requests[1]!.sequence;
@@ -128,15 +173,16 @@ describe("ClientEntitySelection", () => {
 		lifecycle.emit(available(hoverSequence, [9]));
 
 		expect(selection.selectedGuid()).toBe(7);
-		expect(selection.hoveredGuid()).toBe(9);
-		selection.acquireViewportHover(5, 6);
+		expect(pointer.hoveredGuid()).toBe(9);
+		pointer.acquireViewportHover(5, 6);
 		await Promise.resolve();
 		lifecycle.emit(available(hoverSequence, [3]));
-		expect(selection.hoveredGuid()).toBe(9);
+		expect(pointer.hoveredGuid()).toBe(9);
 		expect(selection.selectedGuid()).toBe(7);
 		lifecycle.emit(available(lifecycle.requests[2]!.sequence, [5]));
-		expect(selection.hoveredGuid()).toBe(5);
+		expect(pointer.hoveredGuid()).toBe(5);
 		expect(selection.selectedGuid()).toBe(7);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -146,11 +192,19 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => new FakePresentation(),
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 		selection.select(12);
-		selection.acquireViewportHover(1, 2);
+		pointer.acquireViewportHover(1, 2);
 		await Promise.resolve();
 		lifecycle.emit(available(lifecycle.requests[0]!.sequence, [4]));
-		selection.acquireViewportHover(1, 2);
+		pointer.acquireViewportHover(1, 2);
 		await Promise.resolve();
 		lifecycle.emit({
 			result: {
@@ -161,8 +215,9 @@ describe("ClientEntitySelection", () => {
 			type: "entity-selection-query-result",
 		});
 
-		expect(selection.hoveredGuid()).toBeNull();
+		expect(pointer.hoveredGuid()).toBeNull();
 		expect(selection.selectedGuid()).toBe(12);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -172,8 +227,16 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => new FakePresentation(),
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 		selection.select(12);
-		selection.acquireViewportPoint(1, 2);
+		pointer.acquireViewportPoint(1, 2);
 		await Promise.resolve();
 		const pendingClickSequence = lifecycle.requests[0]!.sequence;
 		lifecycle.emit({
@@ -185,6 +248,7 @@ describe("ClientEntitySelection", () => {
 		expect(selection.selectedGuid()).toBeNull();
 		lifecycle.emit(available(pendingClickSequence, [9]));
 		expect(selection.selectedGuid()).toBe(9);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -194,7 +258,15 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => new FakePresentation(),
 		});
-		selection.acquireViewportHover(1, 2);
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => new FakePresentation(),
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
+		pointer.acquireViewportHover(1, 2);
 		await Promise.resolve();
 		lifecycle.emit(available(lifecycle.requests[0]!.sequence, [12]));
 		lifecycle.emit({
@@ -202,7 +274,8 @@ describe("ClientEntitySelection", () => {
 			type: "dynamic",
 		});
 
-		expect(selection.hoveredGuid()).toBeNull();
+		expect(pointer.hoveredGuid()).toBeNull();
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -213,12 +286,20 @@ describe("ClientEntitySelection", () => {
 			lifecycle,
 			presentation: () => presentation,
 		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => presentation,
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
 		selection.select(12);
-		selection.acquireViewportHover(1, 2);
+		pointer.acquireViewportHover(1, 2);
 		await Promise.resolve();
 		lifecycle.emit(available(lifecycle.requests[0]!.sequence, [12]));
-		selection.acquireViewportHover(1, 2);
-		selection.acquireViewportPoint(3, 4);
+		pointer.acquireViewportHover(1, 2);
+		pointer.acquireViewportPoint(3, 4);
 		await Promise.resolve();
 		const pendingHoverSequence = lifecycle.requests[1]!.sequence;
 		const pendingClickSequence = lifecycle.requests[2]!.sequence;
@@ -230,7 +311,8 @@ describe("ClientEntitySelection", () => {
 		lifecycle.emit(available(pendingClickSequence, [9]));
 
 		expect(selection.selectedGuid()).toBe(9);
-		expect(selection.hoveredGuid()).toBe(9);
+		expect(pointer.hoveredGuid()).toBe(9);
+		pointer.destroy();
 		selection.destroy();
 	});
 
@@ -368,6 +450,24 @@ describe("ClientEntitySelection", () => {
 		selection.destroy();
 	});
 
+	it("supersedes unchanged selections and retires acquisition tokens during recovery", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		selection.select(12);
+		const pending = selection.beginAcquisition("external");
+		selection.select(12);
+		selection.commitAcquisition(pending, 7);
+		expect(selection.selectedGuid()).toBe(12);
+		const recovering = selection.beginAcquisition("cycle");
+		lifecycle.emit({ type: "resyncing" });
+		selection.commitAcquisition(recovering, 7);
+		expect(selection.selectedGuid()).toBe(12);
+		selection.destroy();
+	});
+
 	it("applies the one-landblock range leash without treating transient gaps as eviction", () => {
 		const lifecycle = new FakeLifecycle();
 		const presentation = new FakePresentation();
@@ -439,7 +539,11 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 	}
 }
 
-class FakePresentation implements ClientEntitySelectionPresentationPort {
+class FakePresentation
+	implements
+		ClientEntitySelectionPresentationPort,
+		ClientPointerSelectionPresentationPort
+{
 	readonly refinedCandidates: number[][] = [];
 	trackingStatus: ClientSelectedEntityTrackingStatus = {
 		distance: 1,

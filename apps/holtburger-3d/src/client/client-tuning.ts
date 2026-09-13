@@ -73,6 +73,10 @@ export const CLIENT_TUNING = {
 		markerRadius: 0.65,
 	},
 	entitySelection: {
+		/** Hold any cycle binding to acquire the nearest target once. */
+		holdDelayMs: 500,
+		/** Input-only candidate admission and ordering. */
+		cycle: { radiusMeters: 75, idleResetMs: 300, viewMarginMeters: 2 },
 		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
 		sampleIntervalMs: 1_000 / 15,
 		offscreenIndicator: {

@@ -21,6 +21,7 @@ function child(
 	return entityFacts(guid, {
 		ownedByPlayer: true,
 		location: { kind: "contained", parentGuid, slot },
+		targeting: "ineligible",
 		scenePlacement: "unavailable",
 		storage: storage
 			? {

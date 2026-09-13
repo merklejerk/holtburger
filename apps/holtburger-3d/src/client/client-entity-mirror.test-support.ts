@@ -32,6 +32,7 @@ export function entityFacts(
 		},
 		location: { kind: "none" },
 		ownedByPlayer: false,
+		targeting: "non-creature",
 		scenePlacement: "available",
 		storage: { kind: "not-established" },
 		...overrides,

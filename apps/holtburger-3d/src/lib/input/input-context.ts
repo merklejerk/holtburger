@@ -12,7 +12,10 @@ export function matchesKey(
 	return bindings.some(
 		(binding) =>
 			binding.key.toLowerCase() === event.key.toLowerCase() &&
-			(binding.shift === undefined || binding.shift === event.shiftKey),
+			(binding.shift === undefined || binding.shift === event.shiftKey) &&
+			(binding.ctrl === undefined || binding.ctrl === Boolean(event.ctrlKey)) &&
+			(binding.alt === undefined || binding.alt === Boolean(event.altKey)) &&
+			(binding.meta === undefined || binding.meta === Boolean(event.metaKey)),
 	);
 }
 
@@ -31,9 +34,12 @@ export class InputContext<Action extends string> {
 						bindings[other].some(
 							(candidate) =>
 								binding.key.toLowerCase() === candidate.key.toLowerCase() &&
-								(binding.shift === undefined ||
-									candidate.shift === undefined ||
-									binding.shift === candidate.shift),
+								(["shift", "ctrl", "alt", "meta"] as const).every(
+									(modifier) =>
+										binding[modifier] === undefined ||
+										candidate[modifier] === undefined ||
+										binding[modifier] === candidate[modifier],
+								),
 						),
 					)
 				)

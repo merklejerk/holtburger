@@ -44,11 +44,29 @@ export const INPUT_DEFAULTS = {
 	},
 	/** Contextual client and chat commands. */
 	client: {
+		/** Select the authoritative local player identity. */
+		selectSelf: [{ key: "x", ctrl: false, alt: false, meta: false }],
+		/** Stable forward creature traversal. */
+		nextCreature: [
+			{ key: "Tab", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Stable reverse creature traversal. */
+		previousCreature: [
+			{ key: "Tab", shift: true, ctrl: false, alt: false, meta: false },
+		],
+		/** World objects can be acquired behind the camera. */
+		nextNonCreature: [
+			{ key: "Tab", shift: false, ctrl: true, alt: false, meta: false },
+		],
+		/** Stable reverse world-object traversal, including behind the camera. */
+		previousNonCreature: [
+			{ key: "Tab", shift: true, ctrl: true, alt: false, meta: false },
+		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r" }],
 		/** Enter the aimed jump interaction. */
 		preciseJump: [{ key: "j", shift: true }],
-		/** Cancel precise jump or return from chat to the viewport. */
+		/** Cancel the active context, then clear selection when gameplay owns Escape. */
 		cancel: [{ key: "Escape" }],
 		/** Submit the selected character before entering gameplay. */
 		enterWorld: [{ key: "Enter" }],

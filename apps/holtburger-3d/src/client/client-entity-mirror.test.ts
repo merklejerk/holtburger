@@ -14,6 +14,7 @@ const item = 3;
 const owned = (guid: number, parent: number) =>
 	entityFacts(guid, {
 		ownedByPlayer: true,
+		targeting: "ineligible",
 		scenePlacement: "unavailable",
 		location: {
 			kind: "contained",

@@ -77,6 +77,7 @@ async function fixture() {
 							parentGuid: 1,
 							slot: { kind: "item", index },
 						},
+						targeting: "ineligible",
 						scenePlacement: "unavailable",
 					}),
 				),

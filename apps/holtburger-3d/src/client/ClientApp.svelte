@@ -78,6 +78,12 @@
 	import { ClientInputArbiter } from "./client-input-arbiter";
 	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
 	import { ClientEntitySelection } from "./client-entity-selection";
+	import { ClientPointerSelectionController } from "./client-pointer-selection-controller";
+	import {
+		ClientCycleSelectionController,
+		sampleCycleCandidates,
+	} from "./client-cycle-selection-controller";
+	import { ClientSelectionInput } from "./client-selection-input";
 	import {
 		CLIENT_TOAST_DURATION_MS,
 		ClientToastCenter,
@@ -158,6 +164,8 @@
 	});
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
 	let entitySelection: ClientEntitySelection | null = null;
+	let pointerSelection: ClientPointerSelectionController | null = null;
+	let selectionInput: ClientSelectionInput | null = null;
 	let entityInteractions: ClientEntityInteractions | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
 	/** Session-local diagnostic policy; each use captures the current value. */
@@ -401,9 +409,11 @@
 			APP_INPUT.shortcut("cancel", event) &&
 			inputArbiter?.applyCancel(true, event.repeat)
 		) {
+			selectionInput?.cancel();
 			event.preventDefault();
 			return;
 		}
+		if (selectionInput?.keydown(event, performance.now())) return;
 		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
 			if (!event.repeat) inputArbiter.enterPrecise();
@@ -425,6 +435,7 @@
 	}
 
 	function handleGameKeyup(event: KeyboardEvent): void {
+		selectionInput?.keyup(event, performance.now());
 		if (characterInput.apply(event, false)) event.preventDefault();
 	}
 
@@ -690,6 +701,7 @@
 		const arbiter = new ClientInputArbiter({
 			ordinary: controller,
 			onEnter: () => {
+				selectionInput?.cancel();
 				preciseJumpSession?.enter();
 				toastCenter.publish({
 					message: "Precise jump enabled",
@@ -716,6 +728,7 @@
 			keydown: handleGameKeydown,
 			keyup: handleGameKeyup,
 			cancel: () => {
+				selectionInput?.cancel();
 				characterInput.reset();
 				inputArbiter?.reset();
 			},
@@ -764,9 +777,33 @@
 		const selection = new ClientEntitySelection({
 			lifecycle: owner,
 			presentation: () => presentationSession,
-			onSelectionSubmissionFailed: appendChatError,
 		});
 		entitySelection = selection;
+		const pointer = new ClientPointerSelectionController({
+			selection,
+			lifecycle: owner,
+			presentation: () => presentationSession,
+			onSelectionSubmissionFailed: appendChatError,
+		});
+		pointerSelection = pointer;
+		const cycle = new ClientCycleSelectionController({
+			selection,
+			policy: CLIENT_TUNING.entitySelection.cycle,
+			sample: (category) =>
+				sampleCycleCandidates(
+					owner.entities,
+					owner.mirror,
+					presentationSession?.targetingView() ?? null,
+					category,
+					CLIENT_TUNING.entitySelection.cycle,
+				),
+		});
+		const input = new ClientSelectionInput({
+			selection,
+			cycle,
+			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
+		});
+		selectionInput = input;
 		const interactions = new ClientEntityInteractions({
 			selection,
 			lifecycle: owner,
@@ -778,7 +815,7 @@
 			selectedEntityGuid = guid;
 			presentationSession?.setSelectedEntityGuid(guid);
 		});
-		const unsubscribeHover = selection.subscribeHovered(
+		const unsubscribeHover = pointer.subscribeHovered(
 			(guid) => (hoveredEntityGuid = guid),
 		);
 		const unsubscribePrecise = precise.subscribe((snapshot) => {
@@ -806,6 +843,11 @@
 			unsubscribeHover();
 			interactions.destroy();
 			if (entityInteractions === interactions) entityInteractions = null;
+			input.destroy();
+			cycle.destroy();
+			pointer.destroy();
+			if (selectionInput === input) selectionInput = null;
+			if (pointerSelection === pointer) pointerSelection = null;
 			selection.destroy();
 			if (entitySelection === selection) entitySelection = null;
 			precise.destroy();
@@ -864,9 +906,9 @@
 		onPreciseJumpActivate={activatePreciseJump}
 		onPreciseJumpEnter={enterPreciseJump}
 		onViewportSelect={(clientX, clientY) =>
-			entitySelection?.acquireViewportPoint(clientX, clientY)}
+			pointerSelection?.acquireViewportPoint(clientX, clientY)}
 		onViewportHover={(clientX, clientY) =>
-			entitySelection?.acquireViewportHover(clientX, clientY)}
+			pointerSelection?.acquireViewportHover(clientX, clientY)}
 		onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
 		onSelectEntity={(guid) => entitySelection?.select(guid)}
 		{chatMessages}

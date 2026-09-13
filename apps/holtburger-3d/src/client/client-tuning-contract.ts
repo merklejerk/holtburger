@@ -1,3 +1,4 @@
+import type { CycleSelectionPolicy } from "./client-cycle-selection-controller";
 import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { HexRgbaColor } from "../lib/frontend-color";
 import type {
@@ -62,6 +63,10 @@ export interface ClientTuning {
 	};
 	/** Client-local entity acquisition feedback policy. */
 	readonly entitySelection: {
+		/** One-shot nearest acquisition threshold for all held Tab chords. */
+		readonly holdDelayMs: number;
+		/** Keyboard acquisition range, stable traversal, and approximate view policy. */
+		readonly cycle: CycleSelectionPolicy;
 		/** Maximum cadence for hover acquisition and selected-target validity sampling. */
 		readonly sampleIntervalMs: number;
 		/** App-local offscreen selected-target arrow appearance. */

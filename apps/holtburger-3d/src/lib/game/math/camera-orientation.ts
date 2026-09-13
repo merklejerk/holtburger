@@ -145,3 +145,22 @@ function assertFiniteCameraAngles(yaw: number, pitch: number): void {
 		throw new Error("Camera yaw and pitch must be finite.");
 	}
 }
+
+/** Rotate a vector by a validated normalized camera orientation. */
+export function rotateRenderVector(vector: Vec3, rotation: Quat): Vec3 {
+	const length = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
+	if (!Number.isFinite(length) || length <= Number.EPSILON)
+		throw new Error("Client camera rotation must be finite and non-zero.");
+	const w = rotation.w / length;
+	const x = rotation.x / length;
+	const y = rotation.y / length;
+	const z = rotation.z / length;
+	const tx = 2 * (y * vector.z - z * vector.y);
+	const ty = 2 * (z * vector.x - x * vector.z);
+	const tz = 2 * (x * vector.y - y * vector.x);
+	return new Vec3(
+		vector.x + w * tx + (y * tz - z * ty),
+		vector.y + w * ty + (z * tx - x * tz),
+		vector.z + w * tz + (x * ty - y * tx),
+	);
+}

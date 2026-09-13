@@ -94,6 +94,8 @@ const clientEntityFactsSchema = z
 		]),
 		ownedByPlayer: z.boolean(),
 		scenePlacement: z.enum(["available", "unavailable"]),
+		/** World-owned acquisition category, independent of rendering and disposition. */
+		targeting: z.enum(["ineligible", "creature", "non-creature"]),
 		storage: z.discriminatedUnion("kind", [
 			z
 				.object({ kind: z.literal("not-established") })

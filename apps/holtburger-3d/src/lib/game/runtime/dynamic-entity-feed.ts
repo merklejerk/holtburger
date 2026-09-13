@@ -470,6 +470,11 @@ export class DynamicEntityMirror {
 		);
 	}
 
+	/** Borrow accepted records without sorting; callers must reject awaiting-snapshot state. */
+	currentEntities(): Iterable<DynamicEntityView> {
+		return this.#entities.values();
+	}
+
 	/** Read one exact current generation without sorting or allocating the whole population. */
 	entity(guid: number, generation: number): DynamicEntityView | null {
 		const current = this.#entities.get(guid);

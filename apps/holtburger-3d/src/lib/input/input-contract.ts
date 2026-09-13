@@ -4,6 +4,12 @@ export interface KeyBinding {
 	readonly key: string;
 	/** When supplied, require this Shift state; omission permits either state. */
 	readonly shift?: boolean;
+	/** Optional exact Control constraint. */
+	readonly ctrl?: boolean;
+	/** Optional exact Alt constraint. */
+	readonly alt?: boolean;
+	/** Optional exact Meta constraint. */
+	readonly meta?: boolean;
 }
 
 /** Serializable action bindings, suitable for supplying resolved installation preferences. */
@@ -19,6 +25,12 @@ export interface InputKeyEvent {
 	readonly code?: string;
 	/** Current Shift state for chord matching. */
 	readonly shiftKey: boolean;
+	/** Current Control state; absent on modifier-free synthetic events. */
+	readonly ctrlKey?: boolean;
+	/** Current Alt state; absent on modifier-free synthetic events. */
+	readonly altKey?: boolean;
+	/** Current Meta state; absent on modifier-free synthetic events. */
+	readonly metaKey?: boolean;
 	/** Browser auto-repeat, absent on synthetic one-shot events. */
 	readonly repeat?: boolean;
 }
@@ -43,6 +55,11 @@ export type FlyAction =
 
 /** Client commands whose bindings are resolved by their active UI owner. */
 type ClientShortcut =
+	| "selectSelf"
+	| "nextCreature"
+	| "previousCreature"
+	| "nextNonCreature"
+	| "previousNonCreature"
 	| "interact"
 	| "preciseJump"
 	| "cancel"

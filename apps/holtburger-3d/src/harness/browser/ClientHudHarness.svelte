@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { probeClientTargeting } from "./client-targeting-probe";
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
@@ -266,6 +267,8 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Verify keyboard acquisition through the real browser input boundary. */
+		readonly probeTargeting: () => ReturnType<typeof probeClientTargeting>;
 		/** Install a real DOM fixture for CDP keyboard and pointer events. */
 		readonly beginKeyboardProbe: () => void;
 		/** Read the currently installed keyboard fixture. */
@@ -415,6 +418,7 @@
 					},
 					location: { kind: "none" },
 					ownedByPlayer: false,
+					targeting: "non-creature",
 					scenePlacement: "available",
 					storage:
 						guid === 1
@@ -1497,6 +1501,7 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeTargeting: () => probeClientTargeting(keyboard),
 			beginKeyboardProbe: () => {
 				keyboardFixture = installKeyboardPolicyFixture(keyboard, inputGate);
 			},

@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use holtburger_common::{
     Guid,
     properties::{
-        EquipMask, PropertyDataId, PropertyInt, PropertyString, WeenieType, WorldObjectExt,
-        WorldObjectPropertyAccessors,
+        EquipMask, PropertyBool, PropertyDataId, PropertyInt, PropertyString, WeenieType,
+        WorldObjectExt, WorldObjectPropertyAccessors,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -160,6 +160,18 @@ pub enum SceneAvailability {
     Unavailable,
 }
 
+/// World-owned category for direct world-entity acquisition, independent of draw visibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntityTargetingCategory {
+    /// Missing public type, hidden identity, or no independent world placement.
+    Ineligible,
+    /// Public ItemType::CREATURE, including players and friendly creatures.
+    Creature,
+    /// An eligible world entity without the creature item-type bit.
+    NonCreature,
+}
+
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +186,8 @@ pub struct ClientEntityFacts {
     pub owned_by_player: bool,
     /// Scene capability independent of loaded renderer assets.
     pub scene_placement: SceneAvailability,
+    /// Consumed by keyboard acquisition; not a renderer visibility decision.
+    pub targeting: EntityTargetingCategory,
     /// Section existence and loading state.
     pub storage: StorageCoverage,
 }
@@ -205,6 +219,9 @@ impl WorldState {
         {
             return Ok(None);
         }
+        let creature = entity
+            .and_then(|entity| entity.item_type())
+            .map(|kind| kind.contains(holtburger_common::properties::ItemType::CREATURE));
         let description = match entity.and_then(|entity| {
             let name = entity.get_string_prop(PropertyString::Name)?;
             let item_type = entity.item_type()?;
@@ -255,9 +272,7 @@ impl WorldState {
                 } else {
                     None
                 },
-                health_query: if item_type
-                    .contains(holtburger_common::properties::ItemType::CREATURE)
-                {
+                health_query: if creature == Some(true) {
                     HealthQueryEligibility::Eligible
                 } else {
                     HealthQueryEligibility::Ineligible
@@ -294,9 +309,26 @@ impl WorldState {
             }
             None => StorageCoverage::NotEstablished,
         };
-        let scene_placement = match self.resolve_scene_placement(guid)? {
+        let resolved = self.resolve_scene_placement(guid)?;
+        let scene_placement = match resolved {
             crate::ResolvedScenePlacement::Unresolved(_) => SceneAvailability::Unavailable,
             _ => SceneAvailability::Available,
+        };
+        // ACE.Entity/Enum/ItemType.cs defines Creature = 0x10; disposition is independent.
+        // Selection rays also reject UiHidden. Storage/attachments are not independent targets.
+        let targeting = match entity.zip(creature) {
+            Some((entity, is_creature))
+                if !entity.get_bool_prop(PropertyBool::UiHidden)
+                    && matches!(location, EntityStorageLocation::None)
+                    && matches!(resolved, crate::ResolvedScenePlacement::Independent) =>
+            {
+                if is_creature {
+                    EntityTargetingCategory::Creature
+                } else {
+                    EntityTargetingCategory::NonCreature
+                }
+            }
+            _ => EntityTargetingCategory::Ineligible,
         };
         Ok(Some(ClientEntityFacts {
             guid,
@@ -304,6 +336,7 @@ impl WorldState {
             location,
             owned_by_player,
             scene_placement,
+            targeting,
             storage,
         }))
     }
@@ -317,6 +350,50 @@ mod tests {
         ParentLocation, Placement,
         properties::{EquipMask, ItemType, PropertyInt, WorldObjectPropertyAccessorsMut},
     };
+
+    #[test]
+    fn targeting_uses_public_creature_type_and_independent_nonhidden_placement() {
+        let mut world = WorldState::synthetic();
+        for (id, item_type, expected) in [
+            (1, ItemType::CREATURE, EntityTargetingCategory::Creature),
+            (
+                2,
+                ItemType::MELEE_WEAPON,
+                EntityTargetingCategory::NonCreature,
+            ),
+        ] {
+            let guid = Guid(id);
+            let mut entity = Entity::new(guid, "Target".into(), Default::default());
+            entity.position.landblock_id = Guid(0xda55_0100 + id);
+            entity.set_int_prop(PropertyInt::ItemType, item_type.bits() as i32);
+            world.entities.insert(entity);
+            assert_eq!(
+                world.client_entity_facts(guid).unwrap().unwrap().targeting,
+                expected
+            );
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_bool_prop(PropertyBool::UiHidden, true);
+            assert_eq!(
+                world.client_entity_facts(guid).unwrap().unwrap().targeting,
+                EntityTargetingCategory::Ineligible
+            );
+        }
+        let unknown = Guid(3);
+        let mut entity = Entity::new(unknown, "Unknown".into(), Default::default());
+        entity.position.landblock_id = Guid(0xda55_0103);
+        world.entities.insert(entity);
+        assert_eq!(
+            world
+                .client_entity_facts(unknown)
+                .unwrap()
+                .unwrap()
+                .targeting,
+            EntityTargetingCategory::Ineligible
+        );
+    }
 
     #[test]
     fn equipment_slot_compatibility_preserves_unknown_and_allows_off_hand_melee() {
@@ -505,6 +582,7 @@ mod tests {
                 health_query: HealthQueryEligibility::Ineligible,
             }
         );
+        assert_eq!(hydrated.targeting, EntityTargetingCategory::Ineligible);
         assert!(hydrated.owned_by_player);
         assert_eq!(hydrated.scene_placement, SceneAvailability::Available);
         world.mark_entity_explicit_delete(sword);

@@ -101,6 +101,7 @@ try {
 	} else if (options.clientHud) {
 		report = {
 			clientHud: result.clientHud,
+			clientTargeting: result.clientTargeting,
 			clientTheme: result.clientTheme,
 			clientInventory: result.clientInventory,
 			keyboardPolicy: result.keyboardPolicy,
@@ -117,6 +118,7 @@ try {
 		report = {
 			glRenderer: result.glRenderer,
 			clientHud: result.clientHud,
+			clientTargeting: result.clientTargeting,
 			buildingRadius: options.buildingRadius,
 			camera: result.state.camera,
 			envCellRadius: options.envCellRadius,
@@ -3935,6 +3937,13 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			return { uiShowcase, screenshot, consoleMessages };
 		}
 		await waitForClientHudHarnessApi(client);
+		const targeting = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTargeting",
+			[],
+		);
+		if (!targeting?.passed)
+			throw new Error("Client targeting probe did not pass.");
 		const keyboardPolicy = await probeKeyboardPolicy(
 			client,
 			evaluateExpression,
@@ -4634,6 +4643,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		};
 		return {
 			clientTheme: theme,
+			clientTargeting: targeting,
 			clientInventory: inventory,
 			keyboardPolicy,
 			cameraSweepScreenshots: {

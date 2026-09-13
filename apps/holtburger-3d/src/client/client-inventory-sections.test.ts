@@ -224,6 +224,7 @@ describe("sortInventoryItems", () => {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				burden: null,
 				equipLocations: null,
 				stackCount: null,
 				structure: { current: null, max: null },

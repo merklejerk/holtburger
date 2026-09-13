@@ -20,7 +20,13 @@ export const CLIENT_UI_DEFAULTS = {
 		minSize: { width: 280, height: 240 },
 		resizable: true,
 	},
-	floatingPanel: {
+	inventory: {
+		anchor: "top-right",
+		offset: { x: 16, y: 260 },
+		size: { width: 350, height: 310 },
+		minSize: { width: 350, height: 220 },
+	},
+	debug: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },
 		size: { width: 330, height: 310 },

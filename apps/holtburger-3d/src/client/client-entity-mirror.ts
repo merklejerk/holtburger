@@ -62,6 +62,8 @@ const clientEntityFactsSchema = z
 					weenieType: z.string().nullable(),
 					/** Server aggregate across packs; null until received. */
 					pyrealBalance: guid.nullable(),
+					/** World-owned local-player burden ratio, unknown before hydration. */
+					burden: z.number().finite().nonnegative().nullable(),
 					healthQuery: z.enum(["eligible", "ineligible"]),
 				})
 				.strict()

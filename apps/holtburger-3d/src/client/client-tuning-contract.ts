@@ -82,9 +82,9 @@ export interface ClientTuning {
 			readonly glowBlurCssPixels: number;
 		};
 	};
-	/** Selected-entity HUD display policy. */
 	/** Mounted inventory display sampling policy. */
 	readonly inventory: { readonly displayIntervalMs: number };
+	/** Selected-entity HUD display policy. */
 	readonly selectedEntityHud: {
 		/** Bounded cadence for refreshing selected-entity display text. */
 		readonly displayIntervalMs: number;

@@ -86,6 +86,7 @@
 	@layer components {
 		.item-grid-strip {
 			position: relative;
+			box-sizing: border-box;
 			/* Share the grid cell basis; the owning panel adds its own divider. */
 			width: var(
 				--ui-item-strip-width,
@@ -93,6 +94,8 @@
 			);
 			height: 100%;
 			min-height: 0;
+			/* Outside the scroll viewport so the end spacing survives scrolling. */
+			padding-block: var(--ui-item-strip-block-inset);
 		}
 		.item-grid-strip-viewport {
 			height: 100%;
@@ -125,10 +128,10 @@
 			content: var(--ui-item-strip-down-glyph);
 		}
 		.strip-arrow-up {
-			top: 0;
+			top: var(--ui-item-strip-block-inset);
 		}
 		.strip-arrow-down {
-			bottom: 0;
+			bottom: var(--ui-item-strip-block-inset);
 		}
 	}
 </style>

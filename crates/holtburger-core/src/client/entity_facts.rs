@@ -9,7 +9,7 @@ use holtburger_world::{
 use serde::{Deserialize, Serialize};
 
 /// Complete retained semantic baseline used by initial connection and recovery.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClientEntitySnapshot {
     /// Deterministically GUID-ordered entity records, including pending owned identities.
     pub entities: Vec<ClientEntityFacts>,
@@ -29,7 +29,7 @@ impl ClientEntitySnapshot {
 }
 
 /// One change to the semantic mirror, never a transaction across separate server messages.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClientEntityDelta {
     /// Complete replacement records, applied together before observers run.
     pub upserts: Vec<ClientEntityFacts>,
@@ -47,6 +47,15 @@ pub(super) struct EntityFactsPublication {
 
 impl EntityFactsPublication {
     pub(super) fn observe(&mut self, event: &WorldEvent) {
+        // Strength and enchantments change burden without changing an owned item.
+        // Before the first collection, owner establishment already prepares the player.
+        if matches!(
+            event,
+            WorldEvent::AttributeUpdated(_) | WorldEvent::PlayerEnchantmentsUpdated { .. }
+        ) && let Some(owner) = self.owner
+        {
+            self.dirty.insert(owner);
+        }
         let guid = match event {
             WorldEvent::EntitySpawned(entity)
             | WorldEvent::EntityReplaced(entity)
@@ -91,6 +100,22 @@ impl EntityFactsPublication {
         for guid in &self.dirty {
             prepared.push((*guid, world.client_entity_facts(*guid)?));
         }
+        // Reuse projected ownership to invalidate burden, including items just transferred out.
+        // The player may already be prepared through an ordinary property/storage update.
+        if !self.dirty.contains(&world.player.guid)
+            && prepared.iter().any(|(guid, record)| {
+                record.as_ref().is_some_and(|record| record.owned_by_player)
+                    || self
+                        .records
+                        .get(guid)
+                        .is_some_and(|record| record.owned_by_player)
+            })
+        {
+            prepared.push((
+                world.player.guid,
+                world.client_entity_facts(world.player.guid)?,
+            ));
+        }
         for (guid, record) in prepared {
             match record {
                 Some(record) if self.records.get(&guid) != Some(&record) => {
@@ -124,12 +149,18 @@ impl super::ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::properties::{EquipMask, InventoryEntryKind};
+    use holtburger_common::{
+        properties::{EquipMask, InventoryEntryKind, PropertyInt},
+        stats::AttributeType,
+    };
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, InventoryPutObjInContainerEventData,
         InventoryRemoveObjectData, ObjectDescriptionData, PlayerDescriptionEventData,
-        ViewContentsEventData, WieldObjectEventData,
+        PrivateUpdatePropertyIntData, PublicUpdatePropertyIntData, ViewContentsEventData,
+        WieldObjectEventData,
     };
+    use holtburger_world::entity_facts::EntityDescription;
+    use holtburger_world::stats::Attribute;
 
     const PLAYER: Guid = Guid(1);
     const PACK: Guid = Guid(2);
@@ -196,6 +227,102 @@ mod tests {
         }
         let fresh = ClientEntitySnapshot::from_world(world).unwrap();
         assert_eq!(mirror.values().cloned().collect::<Vec<_>>(), fresh.entities);
+    }
+
+    #[test]
+    fn player_burden_republishes_when_inventory_strength_or_augmentations_change() {
+        let mut world = WorldState::synthetic();
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        for event in world.handle_message(&player_baseline()) {
+            publisher.observe(&event);
+        }
+        let mut player_description = ObjectDescriptionData::with_guid(PLAYER);
+        player_description.public_weenie_desc.name = Some("Player".into());
+        player_description.public_weenie_desc.item_type =
+            holtburger_common::properties::ItemType::CREATURE.bits();
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(player_description)))
+        {
+            publisher.observe(&event);
+        }
+        let burden = |mirror: &BTreeMap<Guid, ClientEntityFacts>| {
+            let EntityDescription::Known { burden, .. } = mirror[&PLAYER].description else {
+                panic!("player description must be known");
+            };
+            burden
+        };
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), None);
+
+        let mut strength = Attribute {
+            attr_type: AttributeType::StrengthAttr,
+            ranks: 0,
+            start: 100,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: 100,
+            current: 100,
+        };
+        world
+            .player
+            .attributes
+            .insert(strength.attr_type, strength.clone());
+        publisher.observe(&WorldEvent::AttributeUpdated(strength.clone()));
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), Some(0.0));
+
+        for event in world.handle_message(&place(ITEM, PLAYER, InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), None);
+
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Heavy item".into());
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.burden = Some(15000);
+        for (message, expected) in [
+            (GameMessage::ObjectCreate(Box::new(description)), 1.0),
+            (
+                GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyInt::EncumbranceVal as u32,
+                    value: 30000,
+                })),
+                2.0,
+            ),
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AugmentationIncreasedCarryingCapacity as u32,
+                    value: 5,
+                })),
+                1.0,
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(burden(&mirror), Some(expected), "after {message:?}");
+        }
+        strength.current = 200;
+        world
+            .player
+            .attributes
+            .insert(strength.attr_type, strength.clone());
+        publisher.observe(&WorldEvent::AttributeUpdated(strength));
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), Some(0.5));
+
+        for event in world.handle_message(&place(ITEM, Guid(99), InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), Some(0.0));
+        assert!(publisher.collect(&mut world).unwrap().upserts.is_empty());
     }
 
     #[test]

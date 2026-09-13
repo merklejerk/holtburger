@@ -505,6 +505,7 @@
 /* Shared item presentation hooks. Geometry and scrolling remain component-owned. */
 @layer components {
 	.ui-theme .ui-item-cell {
+		transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
 		background: var(--ui-item-cell-background, transparent);
 		border: var(--ui-item-cell-border, 0);
 		border-radius: var(--ui-item-cell-radius, 0);
@@ -525,8 +526,14 @@
 		box-shadow: var(--ui-item-selection-shadow, none);
 		background: var(--ui-item-selection-background, transparent);
 	}
-	.ui-theme .ui-item-cell[data-dimmed="true"] {
+	.ui-theme .ui-item-cell[data-dimmed="true"],
+	.ui-theme .ui-item-cell[data-inventory-dimmed="true"] {
 		opacity: var(--ui-item-dimmed-opacity, 0.3);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-theme .ui-item-cell {
+			transition: none;
+		}
 	}
 	/* Draw selection above opaque artwork as well as on the cell itself. */
 	.ui-theme .ui-item-cell[aria-pressed="true"]::after {

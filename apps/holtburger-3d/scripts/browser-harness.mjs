@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
@@ -4562,6 +4563,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInventory",
 			[],
 		);
+		inventory.drag = await probeInventoryDrag(client, evaluateExpression);
 		if (options.screenshotPath) {
 			const shot = await client.send("Page.captureScreenshot", {
 				format: "png",

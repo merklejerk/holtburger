@@ -19,6 +19,7 @@ pub mod entity_appearance;
 pub mod entity_facts;
 pub mod entity_physics;
 pub mod entity_scale;
+pub mod equipment;
 pub mod events;
 pub mod handlers;
 pub mod hydration;

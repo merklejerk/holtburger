@@ -79,13 +79,22 @@
 					var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
 			);
 		}
+		.equipment-row:global([data-inventory-dimmed="true"]) {
+			opacity: var(--ui-item-dimmed-opacity, 0.3);
+		}
 		.equipment-row {
+			transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
 			display: grid;
 			grid-template-columns:
 				var(--ui-inventory-equipment-slot-icon-size)
 				minmax(0, 1fr);
 			align-items: center;
 			gap: var(--ui-inventory-equipment-slot-gap);
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.equipment-row {
+				transition: none;
+			}
 		}
 	}
 </style>

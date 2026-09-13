@@ -1,5 +1,4 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
-import type { MenuItemConstructorOptions } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -279,27 +278,18 @@ function createWindow(entry: {
 			}
 		},
 	);
-	window.webContents.on("context-menu", (_event, params) => {
-		const template: MenuItemConstructorOptions[] = [];
-		if (params.isEditable) {
-			template.push(
-				{ role: "undo" },
-				{ role: "redo" },
-				{ type: "separator" },
-				{ role: "cut" },
-				{ role: "copy" },
-				{ role: "paste" },
-				{ role: "selectAll" },
-			);
-		} else if (params.selectionText.length > 0) {
-			template.push({ role: "copy" });
+	window.webContents.on("before-input-event", (event, input) => {
+		if (
+			input.control &&
+			input.shift &&
+			!input.alt &&
+			!input.meta &&
+			input.key.toLowerCase() === "i"
+		) {
+			event.preventDefault();
+			if (input.type === "keyDown" && !input.isAutoRepeat)
+				window.webContents.toggleDevTools();
 		}
-		if (template.length > 0) template.push({ type: "separator" });
-		template.push({
-			label: "Inspect Element",
-			click: () => window.webContents.inspectElement(params.x, params.y),
-		});
-		Menu.buildFromTemplate(template).popup({ window });
 	});
 	window.webContents.on("will-navigate", (event, targetUrl) => {
 		if (

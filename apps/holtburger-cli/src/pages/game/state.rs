@@ -23,7 +23,6 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
-use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
 use crate::state::{EventContext, QueuedScriptStartup, TickContext};
 use crate::types::{
     AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
@@ -326,7 +325,6 @@ struct GamePageRuntimeState {
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,
     combat_drive: Option<CombatDriveRuntime>,
-    weapon_swap: WeaponSwapState,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,
 }

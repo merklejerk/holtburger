@@ -1111,6 +1111,7 @@ export async function probeClientInventory(options: {
 			throw new Error(
 				"Hidden count updates changed artwork ownership or failed to refresh.",
 			);
+		selection.select(null);
 		cell(20).click();
 		if (selection.selectedGuid() !== 20)
 			throw new Error("Count decoration blocked selection.");
@@ -1170,6 +1171,7 @@ export async function probeClientInventory(options: {
 			cell(20).disabled
 		)
 			throw new Error("Missing artwork blocked its named fallback.");
+		selection.select(null);
 		cell(20).click();
 		if (selection.selectedGuid() !== 20)
 			throw new Error("Missing artwork prevented inventory selection.");
@@ -1388,6 +1390,25 @@ export async function probeClientInventory(options: {
 			"Hover retained outdated compatibility after inventory update",
 		);
 	row.dispatchEvent(new PointerEvent("pointerleave"));
+	// Leave stable contents and multi-row equipment for the CDP-driven drag probe.
+	const splitStack = owned(94, 1, 1);
+	if (splitStack.description.kind !== "known")
+		throw new Error("Known split fixture required");
+	records = [
+		root,
+		compatibleArmor,
+		{
+			...splitStack,
+			description: { ...splitStack.description, stackCount: 20 },
+		},
+		{
+			...compatibleArmor,
+			guid: 95,
+			location: { kind: "equipped", wearerGuid: 1, mask: armorMask },
+		},
+	];
+	baseline();
+	await sample();
 	return {
 		equipmentHover: true,
 		equipmentStrip: true,

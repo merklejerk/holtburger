@@ -170,37 +170,31 @@ export function clientInventorySections(
 	});
 }
 
-/** Main Pack, then occupants by descending item capacity, then empty pack capacity. */
+/** Main Pack, native-order containers, native-order foci, then unused capacity. */
 export function clientInventoryPackSlots(
 	membership: ClientInventoryMembership | null,
 ): readonly (ClientEntityFacts | null)[] {
 	if (membership === null) return [];
 	const { root, children } = membership;
-	const packs = new Map<number, ClientEntityFacts>();
+	const containers: ClientEntityFacts[] = [];
+	const foci: ClientEntityFacts[] = [];
 	let length =
 		root.storage.kind === "container" ? (root.storage.packCapacity ?? 0) : 0;
 	for (const entity of children.get(root.guid) ?? []) {
-		if (entity.location.slot.kind !== "pack") continue;
-		const index = entity.location.slot.index;
-		packs.set(index, entity);
-		// Retain announced occupants even while capacity hydration is outstanding.
-		length = Math.max(length, index + 1);
+		const slot = entity.location.slot;
+		if (slot.kind !== "pack") continue;
+		// Sparse native indices survive grouping. Unknown capacity must not hide
+		// an announced occupant or turn a focus into a storage container.
+		length = Math.max(length, slot.index + 1);
+		if (slot.entryKind === "container") containers.push(entity);
+		else foci.push(entity);
 	}
 	return [
 		root,
-		...Array.from({ length }, (_, index) => packs.get(index) ?? null).sort(
-			(a, b) => {
-				if (a === null) return b === null ? 0 : 1;
-				if (b === null) return -1;
-				return packItemCapacity(b) - packItemCapacity(a) || compareSlot(a, b);
-			},
-		),
+		...containers.sort(compareSlot),
+		...foci.sort(compareSlot),
+		...Array<ClientEntityFacts | null>(
+			Math.max(0, length - containers.length - foci.length),
+		).fill(null),
 	];
-}
-
-/** Unestablished capacity sorts as zero until hydration; foci have no storage capacity. */
-function packItemCapacity(entity: ClientEntityFacts): number {
-	return entity.storage.kind === "container"
-		? (entity.storage.itemCapacity ?? 0)
-		: 0;
 }

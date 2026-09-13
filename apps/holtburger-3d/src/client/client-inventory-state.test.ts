@@ -76,6 +76,8 @@ function fixture(
 	const model = new ClientInventoryState(
 		{
 			entities: mirror,
+			previewInventory: vi.fn(async () => {}),
+			submitInventory: vi.fn(async () => {}),
 			state: () => ({ lifecycle }),
 			subscribe: (listener) => {
 				listeners.add(listener);
@@ -85,6 +87,7 @@ function fixture(
 			},
 		},
 		icons,
+		vi.fn(),
 	);
 	const changeLifecycle = (value: ClientLifecycle) => {
 		lifecycle = value;

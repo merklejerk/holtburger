@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
 	import { probeClientInventory } from "./client-inventory-probe";
@@ -273,6 +274,16 @@
 		>;
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
+		/** Inspect real session requests while CDP drives production inventory pointers. */
+		readonly inventoryDragCommands: () => typeof interactionCommands;
+		/** Delay one submission acknowledgement to test gesture lifetime independence. */
+		readonly deferNextInventorySubmission: () => void;
+		/** Reject the delayed acknowledgement through the real session promise. */
+		readonly rejectDeferredInventorySubmission: () => void;
+		/** Deliver a controlled authority response through the production session decoder. */
+		readonly replyInventoryPreview: (
+			result: ClientInventoryPreviewResult,
+		) => void;
 		/** Verify style updates without replacing world presentation or HUD placement. */
 		readonly probeThemeApplication: typeof probeThemeApplication;
 		/** Verify sampled selected-entity identity and snapshot disclosure. */
@@ -364,6 +375,8 @@
 	let cameraEnabled = $state(true);
 	let selectedGuid = $state<number | null>(null);
 	const interactionHandlers = new Map<string, (payload: unknown) => void>();
+	let deferInventorySubmission = false;
+	let rejectInventorySubmission: ((error: Error) => void) | null = null;
 	const interactionCommands: {
 		command: string;
 		args: Record<string, unknown> | undefined;
@@ -426,6 +439,12 @@
 		},
 		invoke: async (command, args) => {
 			interactionCommands.push({ command, args });
+			if (command === "submit_client_inventory" && deferInventorySubmission) {
+				deferInventorySubmission = false;
+				await new Promise<void>((_resolve, reject) => {
+					rejectInventorySubmission = reject;
+				});
+			}
 			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
@@ -1446,13 +1465,28 @@
 					: { kind: "ready" as const, key, image },
 			);
 		});
+		const inventoryToasts = new ClientToastCenter({
+			durationMs: CLIENT_TOAST_DURATION_MS,
+			scheduler: {
+				cancel: (handle) => window.clearTimeout(handle),
+				schedule: (callback, delay) => window.setTimeout(callback, delay),
+			},
+		});
+		const unsubscribeInventoryToasts = inventoryToasts.subscribe((next) => {
+			toast = next;
+		});
 		const inventoryOwner = new ClientInventoryState(
 			{
 				entities: { read: readInventoryEntities },
+				previewInventory: (request) =>
+					interactionLifecycle.previewInventory(request),
+				submitInventory: (intent) =>
+					interactionLifecycle.submitInventory(intent),
 				state: () => interactionLifecycle.state(),
 				subscribe: (listener) => interactionLifecycle.subscribe(listener),
 			},
 			icons,
+			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		inventory = inventoryOwner;
 		probeBrowserInput(keyboard, inputGate);
@@ -1472,6 +1506,20 @@
 				return keyboardFixture;
 			},
 			probeInventory,
+			inventoryDragCommands: () => interactionCommands,
+			deferNextInventorySubmission: () => {
+				deferInventorySubmission = true;
+			},
+			rejectDeferredInventorySubmission: () => {
+				if (rejectInventorySubmission === null)
+					throw new Error("No deferred inventory submission");
+				rejectInventorySubmission(
+					new Error("Injected late submission failure"),
+				);
+				rejectInventorySubmission = null;
+			},
+			replyInventoryPreview: (result) =>
+				emitInteractionEvent("client-inventory-preview", result),
 			probeThemeApplication,
 			probeSelectedDiagnostics,
 			probeInteractableMarker,
@@ -1499,6 +1547,8 @@
 		return () => {
 			keyboardFixture?.dispose();
 			inventoryOwner.destroy();
+			unsubscribeInventoryToasts();
+			inventoryToasts.destroy();
 			inventory = null;
 			icons.dispose();
 			interactions.destroy();

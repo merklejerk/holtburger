@@ -517,6 +517,8 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::InventoryServerSaveFailed(data) => {
+                    self.reject_equipment_item(data.item_guid);
+                    self.reject_inventory_item(data.item_guid);
                     self.emit_action_result(
                         ActionResultSource::Wire,
                         ActionResultReason::InventoryServerSaveFailed {

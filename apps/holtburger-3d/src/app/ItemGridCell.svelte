@@ -108,6 +108,7 @@
 <style>
 	@layer components {
 		.item-grid-cell {
+			user-select: none;
 			position: relative;
 			aspect-ratio: 1;
 			width: 100%;

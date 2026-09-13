@@ -19,10 +19,6 @@ pub(super) fn apply_queued_ui_action(state: &mut GameState, action: AppUiAction)
     result
 }
 
-pub(super) fn is_weapon_swap_active(state: &GameState) -> bool {
-    state.runtime.weapon_swap.is_active()
-}
-
 pub(super) fn has_active_approach(state: &GameState) -> bool {
     matches!(
         state.runtime.navigation.navigation_mode(),

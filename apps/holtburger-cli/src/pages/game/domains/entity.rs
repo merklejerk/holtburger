@@ -1,11 +1,7 @@
 use super::inventory;
 use super::*;
 
-pub(super) fn reduce_view_event(
-    state: &mut GameState,
-    event: &ClientViewEvent,
-    now: Instant,
-) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match event {
@@ -39,7 +35,6 @@ pub(super) fn reduce_view_event(
                     .commands
                     .push(ClientCommand::QueryHealth(entity_ref.guid));
             }
-            inventory::sync_weapon_swap_controller(state, now, &mut result);
             if !was_ready && state.player_entity_is_ready() {
                 result.actions.push(AppAction::Notification {
                     notification: AppNotification::PlayerEntityReady {
@@ -78,7 +73,6 @@ pub(super) fn reduce_view_event(
                 if inventory::update_inventory_and_equipment(state, &entity) {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-                inventory::sync_weapon_swap_controller(state, now, &mut result);
             }
         }
         ClientViewEvent::EntityMoved { guid, pos } => {
@@ -132,7 +126,6 @@ pub(super) fn reduce_view_event(
                 result.request_redraw(RedrawPriority::Immediate);
             }
             inventory::handle_entity_identified(state, entity_ref);
-            inventory::sync_weapon_swap_controller(state, now, &mut result);
             if !was_ready && state.player_entity_is_ready() {
                 result.actions.push(AppAction::Notification {
                     notification: AppNotification::PlayerEntityReady {
@@ -164,7 +157,6 @@ mod tests {
     use holtburger_core::ClientCommand;
     use holtburger_core::ClientViewEvent;
     use holtburger_world::entity::Entity;
-    use std::time::Instant;
 
     #[test]
     fn entity_spawn_emits_player_ready_notification_when_player_appears() {
@@ -180,7 +172,6 @@ mod tests {
                     WorldPosition::default(),
                 )),
             },
-            Instant::now(),
         );
 
         assert!(matches!(
@@ -208,7 +199,6 @@ mod tests {
                     WorldPosition::default(),
                 )),
             },
-            Instant::now(),
         );
 
         assert!(result.commands.iter().any(|command| {
@@ -232,7 +222,6 @@ mod tests {
                     WorldPosition::default(),
                 )),
             },
-            Instant::now(),
         );
 
         assert!(result.commands.iter().any(|command| {

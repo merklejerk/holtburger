@@ -298,6 +298,10 @@ describe("ClientEntitySelection", () => {
 		lifecycle.update([owned], []);
 		selection.selectInventoryItem(12);
 		expect(selection.selectedGuid()).toBe(12);
+		selection.selectInventoryItem(12);
+		expect(selection.selectedGuid()).toBeNull();
+		selection.selectInventoryItem(12);
+		expect(selection.selectedGuid()).toBe(12);
 		lifecycle.entities.awaitSnapshot();
 		lifecycle.emit({ type: "resyncing" });
 		selection.maintainSelection();

@@ -747,7 +747,9 @@
 		const icons = browserItemIconRepository((requests) =>
 			prepareItemIcons(transport, requests),
 		);
-		const inventoryOwner = new ClientInventoryState(owner, icons);
+		const inventoryOwner = new ClientInventoryState(owner, icons, (message) =>
+			toastCenter.publish({ message, tone: "warning" }),
+		);
 		inventory = inventoryOwner;
 		const dialogOwner = new ClientDialogs(owner);
 		dialogs = dialogOwner;

@@ -87,6 +87,8 @@ export const CLIENT_TUNING = {
 		},
 	},
 	inventory: {
+		/** Pointer travel that distinguishes inventory selection from dragging. */
+		dragThresholdCssPixels: 6,
 		/** Mounted inventory display cadence, independent of host publication. */
 		displayIntervalMs: 250,
 	},

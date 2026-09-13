@@ -134,7 +134,7 @@ describe("clientInventorySections", () => {
 });
 
 describe("clientInventoryPackSlots", () => {
-	it("keeps Main Pack first, sorts occupants by capacity, and leaves free capacity last", () => {
+	it("keeps Main Pack first, groups foci after containers, and leaves free capacity last", () => {
 		const root = entityFacts(1, {
 			storage: {
 				kind: "container",
@@ -178,7 +178,7 @@ describe("clientInventoryPackSlots", () => {
 		).toEqual([1, 2, null, null]);
 	});
 
-	it("orders larger packs first and breaks equal or unknown capacities by server slot", () => {
+	it("orders containers by their native indices independently of capacity", () => {
 		const pack = (guid: number, index: number, itemCapacity: number | null) =>
 			entityFacts(guid, {
 				...child(guid, 1, { kind: "pack", index, entryKind: "container" }),
@@ -207,7 +207,7 @@ describe("clientInventoryPackSlots", () => {
 			clientInventoryPackSlots(clientInventoryMembership(level)).map(
 				(item) => item?.guid ?? null,
 			),
-		).toEqual([1, 3, 4, 2, 5, 6, null]);
+		).toEqual([1, 4, 3, 2, 5, 6, null]);
 	});
 });
 

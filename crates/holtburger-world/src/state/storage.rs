@@ -342,6 +342,24 @@ impl super::WorldState {
         self.storage.location(guid)
     }
 
+    /// Direct accepted occupants, including declarations whose slot is still pending.
+    /// Inventory planners use the complete roster rather than rendered or hydrated children.
+    pub fn container_contents(
+        &self,
+        parent: Guid,
+    ) -> impl Iterator<Item = (Guid, StorageSlot)> + '_ {
+        self.storage
+            .locations
+            .iter()
+            .filter_map(move |(guid, location)| match location {
+                StorageLocation::Contained {
+                    parent: owner,
+                    slot,
+                } if *owner == parent => Some((*guid, *slot)),
+                _ => None,
+            })
+    }
+
     /// Current accepted player equipment, excluding masks which have not been announced yet.
     pub fn player_equipment(&self) -> impl Iterator<Item = (Guid, EquipMask)> + '_ {
         self.storage
@@ -486,6 +504,63 @@ mod tests {
                 slot: StorageSlot::Item { index: 0 }
             })
         );
+    }
+
+    #[test]
+    fn two_pack_moves_exchange_indices_without_moving_intervening_foci() {
+        // ACE Container.cs removes before inserting. Exercise both directions and
+        // actual holes, not just gaps caused by filtering foci out of the UI.
+        const OTHER_PACK: Guid = Guid(5);
+        for indices in [[0, 1, 2], [0, 2, 5], [2, 4, 7]] {
+            let [first, focus, last] = indices;
+            for (source, destination, source_index, destination_index) in [
+                (PACK, OTHER_PACK, first, last),
+                (OTHER_PACK, PACK, last, first),
+            ] {
+                let mut state = StorageState::default();
+                for (guid, index, kind) in [
+                    (PACK, first, PackEntryKind::Container),
+                    (FOCUS, focus, PackEntryKind::Foci),
+                    (OTHER_PACK, last, PackEntryKind::Container),
+                ] {
+                    state.place(guid, PLAYER, StorageSlot::Pack { index, kind });
+                }
+                state.place(ITEM, PLAYER, StorageSlot::Item { index: 0 });
+                let before = state.locations.clone();
+                for (guid, index) in [(source, destination_index), (destination, source_index)] {
+                    state.place(
+                        guid,
+                        PLAYER,
+                        StorageSlot::Pack {
+                            index,
+                            kind: PackEntryKind::Container,
+                        },
+                    );
+                }
+                let mut expected = before;
+                expected.insert(
+                    source,
+                    StorageLocation::Contained {
+                        parent: PLAYER,
+                        slot: StorageSlot::Pack {
+                            index: destination_index,
+                            kind: PackEntryKind::Container,
+                        },
+                    },
+                );
+                expected.insert(
+                    destination,
+                    StorageLocation::Contained {
+                        parent: PLAYER,
+                        slot: StorageSlot::Pack {
+                            index: source_index,
+                            kind: PackEntryKind::Container,
+                        },
+                    },
+                );
+                assert_eq!(state.locations, expected);
+            }
+        }
     }
 
     #[test]

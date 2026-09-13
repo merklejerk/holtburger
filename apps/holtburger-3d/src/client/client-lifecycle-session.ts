@@ -1,4 +1,12 @@
 import {
+	inventoryIntentSchema,
+	type ClientInventoryIntent,
+	inventoryPreviewRequestSchema,
+	inventoryPreviewResultSchema,
+	type ClientInventoryPreviewRequest,
+	type ClientInventoryPreviewResult,
+} from "./client-inventory-contract";
+import {
 	ClientEntityMirror,
 	clientEntityDeltaSchema,
 } from "./client-entity-mirror";
@@ -85,6 +93,8 @@ type ClientCommandName = Extract<
 	| "send_client_chat"
 	| "query_client_entity_health"
 	| "use_client_entity"
+	| "preview_client_inventory"
+	| "submit_client_inventory"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
 	| "set_client_camera_intent"
@@ -101,6 +111,7 @@ type ClientCommandName = Extract<
 type ClientEventName = Extract<
 	HostEventName,
 	| "client-current-state"
+	| "client-inventory-preview"
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
@@ -159,6 +170,10 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| {
+			readonly type: "inventory-preview";
+			readonly result: ClientInventoryPreviewResult;
+	  }
 	| { readonly type: "entity-collision-disabled"; readonly disabled: boolean }
 	| { readonly type: "dynamic-sound-cue"; readonly cue: ClientDynamicSoundCue }
 	| {
@@ -359,6 +374,22 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Request shared drop semantics; results carry the caller's gesture sequence. */
+	async previewInventory(
+		request: ClientInventoryPreviewRequest,
+	): Promise<void> {
+		await this.#transport.invoke("preview_client_inventory", {
+			request: inventoryPreviewRequestSchema.parse(request),
+		});
+	}
+
+	/** Submission is re-evaluated by core; an earlier preview is not an authorization token. */
+	async submitInventory(intent: ClientInventoryIntent): Promise<void> {
+		await this.#transport.invoke("submit_client_inventory", {
+			intent: inventoryIntentSchema.parse(intent),
+		});
+	}
+
 	/** Use one selected entity through core's existing interaction command. */
 	async useEntity(guid: number, unrestricted: boolean): Promise<void> {
 		await this.#transport.invoke("use_client_entity", { guid, unrestricted });
@@ -512,6 +543,14 @@ export class ClientLifecycleSession {
 					"client-precise-jump-transaction-feedback",
 					(payload) => this.#receivePreciseJumpTransactionFeedback(payload),
 				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-inventory-preview", (payload) => {
+					this.#emit({
+						type: "inventory-preview",
+						result: inventoryPreviewResultSchema.parse(payload),
+					});
+				}),
 			);
 			unlisteners.push(
 				await this.#transport.listen(

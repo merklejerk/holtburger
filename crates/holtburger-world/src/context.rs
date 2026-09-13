@@ -597,23 +597,33 @@ pub trait WorldContextExt: WorldContext {
         None
     }
 
-    // Find the effective stack count that can be merged from src_guid into dst_guid.
+    /// Quantity transferable between established stacks; zero retains compatibility
+    /// for a full target so callers can apply their merge-only or movement policy.
     fn resolve_merge_stack_amount(
         &self,
         src_guid: Guid,
         dst_guid: Guid,
         max_src_amount: Option<u32>,
     ) -> Option<u32> {
+        if src_guid == dst_guid {
+            return None;
+        }
         let src = self.get_entity(src_guid)?;
         let dst = self.get_entity(dst_guid)?;
 
-        if src.wcid != dst.wcid {
+        if src.wcid? != dst.wcid? || !src.is_stackable() || !dst.is_stackable() {
             return None;
         }
 
         let max_stack_size = dst.max_stack_size()?;
-        let src_count = src.stack_size().min(max_src_amount.unwrap_or(u32::MAX));
-        let dst_count = dst.stack_size();
+        // ACE rejects absent/empty quantities. The display accessor's default of
+        // one must not turn an incomplete description into a merge request.
+        let src_count = u32::try_from(src.get_int_prop(PropertyInt::StackSize)?).ok()?;
+        let dst_count = u32::try_from(dst.get_int_prop(PropertyInt::StackSize)?).ok()?;
+        if src_count == 0 || dst_count == 0 {
+            return None;
+        }
+        let src_count = max_src_amount.map_or(src_count, |limit| src_count.min(limit));
         Some(src_count.min(max_stack_size.saturating_sub(dst_count)))
     }
 
@@ -1156,6 +1166,61 @@ mod tests {
             );
 
         assert!(world.can_begin_use_with(item_guid));
+    }
+
+    #[test]
+    fn merge_amount_preserves_full_target_and_requires_established_stacks() {
+        const SOURCE: Guid = Guid(1);
+        const TARGET: Guid = Guid(2);
+        const MAXIMUM: i32 = 100;
+        let make_stack = |guid, count| {
+            let mut item = entity(guid, "Stack");
+            item.wcid = Some(1);
+            item.properties.ints.insert(PropertyInt::StackSize, count);
+            item.properties
+                .ints
+                .insert(PropertyInt::MaxStackSize, MAXIMUM);
+            item
+        };
+        let mut world = TestWorld {
+            entities: HashMap::from([
+                (SOURCE, make_stack(SOURCE, MAXIMUM)),
+                (TARGET, make_stack(TARGET, MAXIMUM - 1)),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            world.resolve_merge_stack_amount(SOURCE, TARGET, None),
+            Some(1)
+        );
+        assert_eq!(world.resolve_merge_stack_amount(SOURCE, SOURCE, None), None);
+        world.entities.insert(TARGET, make_stack(TARGET, MAXIMUM));
+        assert_eq!(
+            world.resolve_merge_stack_amount(SOURCE, TARGET, None),
+            Some(0)
+        );
+        world.entities.insert(TARGET, make_stack(TARGET, 1));
+        assert_eq!(
+            world.resolve_merge_stack_amount(SOURCE, TARGET, Some(2)),
+            Some(2)
+        );
+
+        for property in [PropertyInt::StackSize, PropertyInt::MaxStackSize] {
+            let mut incomplete = make_stack(SOURCE, 1);
+            incomplete.properties.ints.0.remove(&property);
+            world.entities.insert(SOURCE, incomplete);
+            assert_eq!(world.resolve_merge_stack_amount(SOURCE, TARGET, None), None);
+        }
+        for count in [0, -1] {
+            world.entities.insert(SOURCE, make_stack(SOURCE, count));
+            assert_eq!(world.resolve_merge_stack_amount(SOURCE, TARGET, None), None);
+        }
+        for guid in [SOURCE, TARGET] {
+            let mut unknown = make_stack(guid, 1);
+            unknown.wcid = None;
+            world.entities.insert(guid, unknown);
+        }
+        assert_eq!(world.resolve_merge_stack_amount(SOURCE, TARGET, None), None);
     }
 
     #[test]

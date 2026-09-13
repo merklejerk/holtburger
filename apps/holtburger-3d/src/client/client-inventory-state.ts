@@ -5,7 +5,7 @@ import type {
 import type { ItemIconSpec } from "../app/item-icon-source";
 import type { ClientEntityRead } from "./client-entity-mirror";
 import type { ClientLifecycle } from "./client-host-contract";
-import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
+import type { ClientLifecycleSession } from "./client-lifecycle-session";
 import {
 	clientInventoryMembership,
 	clientInventorySections,
@@ -36,11 +36,16 @@ export interface InventoryCurrencyRow extends Omit<
 	readonly iconKey: string;
 }
 
+/** Session commands and results used by the mounted inventory drag owner. */
+export type InventoryInteractionSession = Pick<
+	ClientLifecycleSession,
+	"previewInventory" | "submitInventory" | "subscribe"
+>;
+
 /** Existing lifecycle facts and semantic mirror; the model does not subscribe to raw properties. */
-export interface InventoryLifecycle {
+export interface InventoryLifecycle extends InventoryInteractionSession {
 	readonly entities: { read(): ClientEntityRead };
 	state(): { readonly lifecycle: ClientLifecycle | null };
-	subscribe(listener: (event: ClientLifecycleSessionEvent) => void): () => void;
 }
 
 /** Cached membership and reference indices derived together from one accepted revision. */
@@ -72,6 +77,10 @@ export interface ClientInventoryView {
 /** Session-owned preferences and icon references, independent of the active floating panel. */
 export class ClientInventoryState {
 	readonly icons: ItemIconRepository;
+	/** App-owned toast delivery for rejected gestures and transport failures. */
+	readonly reportFailure: (message: string) => void;
+	/** Session capability consumed by the mounted imperative drag owner. */
+	readonly interactions: InventoryInteractionSession;
 	/** Static footer artwork retained across panel closure and inventory resynchronization. */
 	readonly pyrealIconKey: string;
 	readonly #lifecycle: InventoryLifecycle;
@@ -84,8 +93,14 @@ export class ClientInventoryState {
 	#view: ClientInventoryView | null = null;
 	#disposed = false;
 
-	constructor(lifecycle: InventoryLifecycle, icons: ItemIconRepository) {
+	constructor(
+		lifecycle: InventoryLifecycle,
+		icons: ItemIconRepository,
+		reportFailure: (message: string) => void,
+	) {
+		this.reportFailure = reportFailure;
 		this.#lifecycle = lifecycle;
+		this.interactions = lifecycle;
 		this.icons = icons;
 		this.#owner = icons.createOwner("persistent");
 		this.pyrealIconKey = icons.retain(this.#owner, PYREAL_ICON_SPEC);

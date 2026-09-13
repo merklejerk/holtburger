@@ -24,6 +24,11 @@ mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
 pub mod entity_facts;
+pub mod equipment_plan;
+mod equipment_runtime;
+pub mod inventory_plan;
+mod inventory_runtime;
+pub mod inventory_storage;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -86,6 +91,10 @@ pub struct ClientRuntime {
     /// Cached narrow entity records and pending semantic invalidation.
     entity_facts: entity_facts::EntityFactsPublication,
     active_busy_operation: Option<PendingBusyOperation>,
+    /// Single owner of equipment mutations and their authoritative confirmations.
+    equipment_operation: Option<equipment_runtime::EquipmentOperation>,
+    /// Pending native inventory move, merge, split, or pack exchange.
+    inventory_operation: Option<inventory_runtime::InventoryOperation>,
     state: ClientState,
     /// Distinguishes the initial connected socket from a login request in flight.
     authenticating: bool,
@@ -273,6 +282,8 @@ impl ClientRuntime {
     }
 
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
+        self.stop_inventory_change("World lifecycle changed; the last request may still complete");
+        self.stop_equipment_change("Client is exiting; the last request may still complete");
         self.exit_cause = Some(cause);
     }
 
@@ -290,6 +301,8 @@ impl ClientRuntime {
         cause: ClientWorldActivationState,
         player_guid: Guid,
     ) {
+        self.stop_inventory_change("World lifecycle changed; the last request may still complete");
+        self.stop_equipment_change("World lifecycle changed; the last request may still complete");
         let generation = self.bump_world_generation();
         let phase = match cause {
             ClientWorldActivationState::InitialEntry => ClientWorldActivationPhase::InitialEntry,

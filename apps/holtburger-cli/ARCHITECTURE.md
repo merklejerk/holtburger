@@ -16,7 +16,7 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
     - `world.rs`: Routes incoming network messages into frontend state updates.
 - **`src/pages/`**: High-level screen abstractions and page-specific reducers.
     - `selection/`: Character selection and creation screen state, input, and rendering.
-    - `game/`: The main game interface, split into `state.rs`, `render.rs`, `data.rs`, `layout.rs`, `combat.rs`, `input.rs`, `input/commands.rs`, `hud/`, `panels/`, `domains/`, `weapon_swap.rs`, and `salvaging.rs`.
+    - `game/`: The main game interface, split into `state.rs`, `render.rs`, `data.rs`, `layout.rs`, `combat.rs`, `input.rs`, `input/commands.rs`, `hud/`, `panels/`, `domains/`, and `salvaging.rs`.
 - **`src/components/`**: Reusable UI widgets such as modal overlays and scroll state logic.
 - **`src/theme.rs`**, **`src/types.rs`**, **`src/utils.rs`**, **`src/version.rs`**: Global definitions for styling, CLI-specific types (`UpdateResult`, `AppAction`), layout helpers, and build/version metadata.
 
@@ -134,3 +134,5 @@ For script or other external integration layers, compile external intents into `
 - Render and layout support remain presentation concerns; they should not become alternative state-transition pathways.
 
 If a new behavior cannot be described cleanly as input handling, an `AppAction`, an `AppUiAction`, a `ClientViewEvent`, or a tick update, revisit the design before adding another direct mutator path.
+
+Equipment requests are delegated to core’s equipment planner and executor. The TUI does not stage combat-mode changes or emit conflict-clearing unequips; core owns capacity preflight, sequencing, and server-confirmed completion.

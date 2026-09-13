@@ -1,13 +1,12 @@
 use crate::client::types::{
     ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, ClientExitCause,
-    ClientViewEvent, TargetSlot,
+    ClientViewEvent,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
 use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
-use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
@@ -108,7 +107,43 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        if (self.equipment_operation.is_some() || self.inventory_operation.is_some())
+            && matches!(
+                cmd,
+                ClientCommand::Drop(_)
+                    | ClientCommand::Get(_)
+                    | ClientCommand::Stack { .. }
+                    | ClientCommand::Split { .. }
+                    | ClientCommand::MoveItem { .. }
+                    | ClientCommand::Use { .. }
+                    | ClientCommand::UseWithTarget { .. }
+                    | ClientCommand::SalvageItemsWith { .. }
+                    | ClientCommand::GiveObjectRequest { .. }
+                    | ClientCommand::Buy { .. }
+                    | ClientCommand::Sell { .. }
+                    | ClientCommand::OpenTrade(_)
+                    | ClientCommand::AcceptTrade
+                    | ClientCommand::AddToTrade { .. }
+                    // ACE missile attacks consume ammo; spellcasting consumes components.
+                    // Combat actions also compete with equipment peace/wield transitions.
+                    | ClientCommand::CastTargetedSpell { .. }
+                    | ClientCommand::CastUntargetedSpell { .. }
+                    | ClientCommand::TargetedMeleeAttack { .. }
+                    | ClientCommand::TargetedMissileAttack { .. }
+            )
+        {
+            self.emit_action_result(
+                ActionResultSource::Client,
+                ActionResultReason::General("An inventory change is still pending".into()),
+            );
+            return Ok(());
+        }
         match cmd {
+            ClientCommand::SubmitInventory(intent) => self.submit_inventory_intent(intent).await,
+            ClientCommand::PreviewInventory(request) => {
+                self.preview_inventory_intent(request);
+                Ok(())
+            }
             ClientCommand::SetEntityCollisionDisabled(disabled) => {
                 let coordinator = self.collision_coordinator.as_mut().ok_or_else(|| {
                     anyhow::anyhow!("entity collision override requires client collision")
@@ -273,7 +308,7 @@ impl ClientRuntime {
         Ok(())
     }
 
-    async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
+    pub(super) async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
         self.session.send_action(action).await
     }
 
@@ -881,41 +916,10 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::GetAndWield { item, slot } => {
-                let (target_mask, resolved_slot) = self.resolve_and_clear_slots(item, slot).await?;
-
-                log::info!(
-                    ">>> Getting and wielding item 0x{:08X} in slot {:?}",
-                    item,
-                    resolved_slot,
-                );
-
-                // Sequencing is handled automatically by the send_game_action helper.
-                self.send_game_action(GameAction::GetAndWieldItem(Box::new(
-                    GetAndWieldItemActionData {
-                        item_guid: item,
-                        equip_mask: target_mask,
-                    },
-                )))
-                .await
+                self.start_equipment_change(item, slot, None).await
             }
             ClientCommand::SplitToWield { item, slot, amount } => {
-                let (target_mask, resolved_slot) = self.resolve_and_clear_slots(item, slot).await?;
-
-                log::info!(
-                    ">>> Splitting 0x{:08X} ({}x) to wield in {:?}",
-                    item,
-                    amount,
-                    resolved_slot,
-                );
-
-                self.send_game_action(GameAction::StackableSplitToWield(Box::new(
-                    StackableSplitToWieldActionData {
-                        stack_guid: item,
-                        amount: amount as i32,
-                        equip_mask: target_mask,
-                    },
-                )))
-                .await
+                self.start_equipment_change(item, slot, Some(amount)).await
             }
             _ => unreachable!(),
         }
@@ -1054,6 +1058,9 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::SetCombatMode(mode) => {
+                self.stop_equipment_change(
+                    "Combat mode changed by another command; the last request may still complete",
+                );
                 log::info!(">>> Changing combat mode to: {:?}", mode);
                 self.send_game_action(GameAction::ChangeCombatMode(Box::new(
                     ChangeCombatModeActionData { mode },
@@ -1139,70 +1146,6 @@ impl ClientRuntime {
                 .await
             }
         }
-    }
-
-    async fn resolve_and_clear_slots(
-        &mut self,
-        item: Guid,
-        slot: Option<TargetSlot>,
-    ) -> Result<(EquipMask, TargetSlot)> {
-        let item_mask = self
-            .world
-            .entities
-            .get(item)
-            .map(|e| e.valid_locations())
-            .unwrap_or(EquipMask::NONE);
-
-        let resolved_slot = slot.unwrap_or(TargetSlot::EquipMask(item_mask));
-
-        let (target_mask, unequip_mask) = match resolved_slot {
-            TargetSlot::EquipMask(m) => (m, get_equip_unequip_mask(item_mask, Some(resolved_slot))),
-            TargetSlot::MainHand => {
-                let tm = if item_mask.intersects(EquipMask::MELEE_WEAPON) {
-                    EquipMask::MELEE_WEAPON
-                } else if item_mask.intersects(EquipMask::MISSILE_WEAPON) {
-                    EquipMask::MISSILE_WEAPON
-                } else if item_mask.intersects(EquipMask::CASTER) {
-                    EquipMask::CASTER
-                } else {
-                    item_mask
-                };
-                (tm, get_equip_unequip_mask(item_mask, Some(resolved_slot)))
-            }
-            TargetSlot::OffHand => (
-                EquipMask::SHIELD,
-                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
-            ),
-            TargetSlot::TopClothes => (
-                PseudoEquipMask::TOP_CLOTHES.into(),
-                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
-            ),
-            TargetSlot::BottomClothes => (
-                PseudoEquipMask::BOTTOM_CLOTHES.into(),
-                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
-            ),
-        };
-
-        // Auto-unequip overlapping items
-        let to_unequip: Vec<holtburger_common::Guid> = self
-            .world
-            .player_equipment()
-            .filter(|(eq_guid, eq_mask)| eq_mask.intersects(unequip_mask) && *eq_guid != item)
-            .map(|(eq_guid, _)| eq_guid)
-            .collect();
-
-        for guid in to_unequip {
-            self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                PutItemInContainerActionData {
-                    item_guid: guid,
-                    container_guid: self.world.player.guid,
-                    placement: 0,
-                },
-            )))
-            .await?;
-        }
-
-        Ok((target_mask, resolved_slot))
     }
 
     async fn handle_social_command(&mut self, cmd: ClientCommand) -> Result<()> {
@@ -1369,52 +1312,6 @@ impl ClientRuntime {
 
 fn on_off(value: bool) -> &'static str {
     if value { "on" } else { "off" }
-}
-
-/// Pure/stateless function to determine the unequip mask for a given target slot and item.
-///
-/// Returns an `EquipMask` of all potential overlapping slots that must be cleared
-/// to make room for the new item at the specified `target`.
-fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> EquipMask {
-    log::info!(
-        "Resolving equip/unequip masks for item_mask={:?}, target={:?}",
-        item_mask,
-        target
-    );
-    let target_mask = target.unwrap_or(TargetSlot::EquipMask(item_mask));
-    match target_mask {
-        TargetSlot::EquipMask(m) => {
-            let mut unequip = m;
-            // If we're equipping something that's a main hand exclusive (like a 2H weapon),
-            // we must also clear the offhand slot.
-            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
-                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
-            }
-            // Equipping in offhand must unequip anything in main hand that blocks it (2H).
-            if item_mask.intersects(PseudoEquipMask::OFF_HAND_SLOT.into()) {
-                unequip |= PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into();
-            }
-            unequip
-        }
-        TargetSlot::MainHand => {
-            // If the item is a main hand exclusive, we must also clear the offhand slot.
-            let mut unequip = PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
-            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
-                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
-            }
-            unequip
-        }
-        TargetSlot::OffHand => {
-            let mut unequip = PseudoEquipMask::OFF_HAND_SLOT.into();
-            // If the item is a main hand exclusive, we must also clear the main hand slot.
-            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
-                unequip |= PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
-            }
-            unequip
-        }
-        TargetSlot::TopClothes => PseudoEquipMask::TOP_CLOTHES.into(),
-        TargetSlot::BottomClothes => PseudoEquipMask::BOTTOM_CLOTHES.into(),
-    }
 }
 
 #[cfg(test)]

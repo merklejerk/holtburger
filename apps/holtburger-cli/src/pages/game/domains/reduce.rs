@@ -8,7 +8,7 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     result.merge(combat::reduce_view_event(state, event));
     result.merge(lifecycle::reduce_view_event(state, event));
     result.merge(player::reduce_view_event(state, event));
-    result.merge(entity::reduce_view_event(state, event, now));
+    result.merge(entity::reduce_view_event(state, event));
     result.merge(navigation::reduce_view_event(state, event));
     result.merge(party::reduce_view_event(state, event));
     result.merge(trade_vendor::reduce_view_event(state, event));
@@ -60,7 +60,7 @@ pub(crate) fn reduce_tick(state: &mut GameState, elapsed: f64) -> UpdateResult {
     let mut result = UpdateResult::new();
     let now = Instant::now();
 
-    inventory::apply_tick(state, now, &mut result);
+    inventory::apply_tick(state, now);
     player::apply_tick(state, elapsed, &mut result);
     combat::apply_tick(state, now, &mut result);
     navigation::apply_tick(state, now, elapsed, &mut result);

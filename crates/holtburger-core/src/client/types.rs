@@ -550,6 +550,8 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Shared inventory interpretation for one frontend drag target.
+    InventoryPreview(super::inventory_plan::InventoryPreviewResult),
     /// Acknowledges the accepted local-player entity response policy.
     EntityCollisionDisabled(bool),
     /// Complete application-level replacement state for a shell remount or receiver recovery.
@@ -797,6 +799,10 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Evaluate the current drag target without issuing inventory mutations.
+    PreviewInventory(super::inventory_plan::InventoryPreviewRequest),
+    /// Re-evaluate and execute an identity-based inventory gesture.
+    SubmitInventory(super::inventory_plan::InventoryIntent),
     /// Changes only the local player's response to peer entities.
     SetEntityCollisionDisabled(bool),
     Login(String),

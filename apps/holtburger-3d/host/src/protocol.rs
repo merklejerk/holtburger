@@ -99,6 +99,7 @@ pub enum HostEvent {
     ClientPreciseJumpTransactionFeedback(
         crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
     ),
+    ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     ClientEntitySelectionQueryResult(
         crate::client_projection::ClientEntitySelectionQueryResultWire,
     ),
@@ -382,6 +383,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::PreciseJumpTransactionFeedback(feedback) => {
                 HostEvent::ClientPreciseJumpTransactionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::InventoryPreview(result) => {
+                HostEvent::ClientInventoryPreview(result)
             }
             crate::client_projection::ClientHostEvent::EntitySelectionQueryResult(result) => {
                 HostEvent::ClientEntitySelectionQueryResult(result)

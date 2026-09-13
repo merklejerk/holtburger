@@ -83,7 +83,11 @@ export interface ClientTuning {
 		};
 	};
 	/** Mounted inventory display sampling policy. */
-	readonly inventory: { readonly displayIntervalMs: number };
+	readonly inventory: {
+		/** Pointer travel required before an inventory selection becomes a drag. */
+		readonly dragThresholdCssPixels: number;
+		readonly displayIntervalMs: number;
+	};
 	/** Selected-entity HUD display policy. */
 	readonly selectedEntityHud: {
 		/** Bounded cadence for refreshing selected-entity display text. */

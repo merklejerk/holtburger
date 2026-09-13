@@ -581,6 +581,8 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Core-derived inventory preview, correlated with the active gesture.
+    InventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     EntityCollisionDisabled(bool),
     CurrentState(ClientCurrentState),
     /// The receiver lost events and is awaiting the existing application replacement.
@@ -792,6 +794,9 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::InventoryPreview(result) => {
+            Some(ClientHostEvent::InventoryPreview(result))
+        }
         ClientViewEvent::EntityFactsChanged(delta) => {
             Some(ClientHostEvent::EntityFactsChanged(delta))
         }

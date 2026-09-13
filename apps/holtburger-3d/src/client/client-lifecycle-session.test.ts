@@ -66,6 +66,41 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("routes correlated inventory previews and submits semantic identities", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const results: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "inventory-preview") results.push(event.result);
+		});
+		await session.start();
+		const intent = { item: 3, target: { kind: "item" as const, guid: 7 } };
+		await session.previewInventory({ sequence: 8, intent });
+		transport.emit("client-inventory-preview", {
+			sequence: 8,
+			preview: { kind: "merge", amount: 10 },
+		});
+		expect(results).toEqual([
+			{ sequence: 8, preview: { kind: "merge", amount: 10 } },
+		]);
+		await session.submitInventory(intent);
+		expect(transport.invocations.slice(-2)).toEqual([
+			{
+				command: "preview_client_inventory",
+				args: { request: { sequence: 8, intent } },
+			},
+			{ command: "submit_client_inventory", args: { intent } },
+		]);
+		expect(() =>
+			transport.emit("client-inventory-preview", {
+				sequence: 8,
+				preview: { kind: "merge", amount: 0 },
+			}),
+		).toThrow();
+		await session.stop();
+		expect(transport.handlers.has("client-inventory-preview")).toBe(false);
+	});
+
 	it("delivers validated action feedback and detaches its listener on stop", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

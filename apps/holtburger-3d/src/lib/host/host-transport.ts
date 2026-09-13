@@ -1,3 +1,4 @@
+import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 import type { ClientEntityDelta } from "../../client/client-entity-mirror";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
 import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
@@ -83,6 +84,8 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"send_client_chat",
 	"query_client_entity_health",
 	"use_client_entity",
+	"preview_client_inventory",
+	"submit_client_inventory",
 	"respond_to_client_confirmation",
 	"start_client_camera",
 	"set_client_camera_intent",
@@ -134,6 +137,7 @@ const EXPLORER_HOST_EVENT_NAMES = [
 /** Client lifecycle, focused presentation, and terminal events. */
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
+	"client-inventory-preview",
 	"client-state-resyncing",
 	"client-entity-facts-changed",
 	"client-entity-collision-disabled",
@@ -201,6 +205,7 @@ export function hostEventNamesForMode(
 
 /** Payload map kept at the shell boundary so listeners cannot silently accept arbitrary events. */
 export interface HostEventPayloadMap {
+	"client-inventory-preview": ClientInventoryPreviewResult;
 	"explorer-dynamic-entity": DynamicEntityEvent;
 	"explorer-fixed-tick": ExplorerFixedTickEnvelope;
 	"explorer-possession-event-outcomes": readonly PossessionEventOutcome[];

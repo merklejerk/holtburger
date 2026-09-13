@@ -1,4 +1,3 @@
-use super::inventory;
 use super::*;
 
 fn log_busy_operation_result(
@@ -105,7 +104,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         _ => {}
     }
 
-    inventory::sync_weapon_swap_controller(state, Instant::now(), &mut result);
     if handled {
         result.request_redraw(RedrawPriority::Immediate);
     }

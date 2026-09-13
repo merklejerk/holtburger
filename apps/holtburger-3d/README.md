@@ -96,6 +96,26 @@ visibility. Diagnostics windows retain their normal border resizing. Internal co
 and the layout-lock button remain CSS-owned. Layout edits are not persisted yet.
 Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
 
+## Inventory interactions
+
+Drag contents cells onto another cell to merge compatible stacks or insert before
+that item when the target cannot accept a merge. Inventory-to-inventory movement
+and header appends require Native sorting. Sorted views allow merges and equipping;
+unequipping into sorted contents appends to the selected container. Drag onto an
+equipment row to equip, or from equipment to a contents cell/header to unequip. Core preflights displaced equipment storage and
+sequences the server requests. Failures use existing action feedback.
+
+Right-click a stack to choose a split amount with a number field or slider. The
+inventory-local dialog opens only after capacity preflight. Splits prefer the
+source pack, then main pack and remaining packs in native order; selecting the
+whole quantity is a no-op. Ctrl+Shift+I toggles Electron DevTools; game interactions
+own right-click globally.
+
+Real pack cells exchange native positions. Main Pack stays first, foci stay last,
+and neither is a reorder target. The panel sends semantic intent and renders
+accepted host state; it has no operation-progress subscription or optimistic
+inventory model. See [inventory ownership and protocol semantics](../../docs/inventory.md).
+
 ## Inventory artwork
 
 The recoverable entity-facts stream carries base/overlay/underlay DIDs and effects

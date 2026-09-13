@@ -130,6 +130,14 @@ pub struct ClientPreciseJumpCancelRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Execute a semantic inventory gesture against the latest authoritative world.
+    SubmitClientInventory {
+        intent: holtburger_core::client::inventory_plan::InventoryIntent,
+    },
+    /// Shared, mutation-free evaluation of an inventory target.
+    PreviewClientInventory {
+        request: holtburger_core::client::inventory_plan::InventoryPreviewRequest,
+    },
     /// Private Electron-main launch command; renderers never receive this inventory entry.
     StartClient {
         startup: ClientLaunchConfiguration,
@@ -201,6 +209,8 @@ pub enum ClientHostCommand {
 
 /// Exact wire names owned by the client dispatcher.
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
+    "preview_client_inventory",
+    "submit_client_inventory",
     "start_client",
     "request_client_current_state",
     "select_client_character",
@@ -543,6 +553,16 @@ pub async fn dispatch_client(
             .map_err(application_error),
         QueueClientCharacterMotionEvent { request } => runtime
             .queue_character_motion_event(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientInventory { intent } => runtime
+            .send_command(ClientCommand::SubmitInventory(intent))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientInventory { request } => runtime
+            .send_command(ClientCommand::PreviewInventory(request))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

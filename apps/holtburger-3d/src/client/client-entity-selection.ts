@@ -155,7 +155,7 @@ export class ClientEntitySelection {
 			entity?.description.kind === "known" &&
 			(entity.ownedByPlayer || guid === read.level.playerGuid)
 		)
-			this.#publish(guid);
+			this.#publish(this.#selectedGuid === guid ? null : guid);
 	}
 
 	/** Maintain identity from semantic facts; presentation contributes measured distance only. */

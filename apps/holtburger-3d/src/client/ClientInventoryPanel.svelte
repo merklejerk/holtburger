@@ -1,5 +1,11 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
+	import InventorySplitDialog from "./InventorySplitDialog.svelte";
+	import {
+		ClientInventorySplit,
+		type InventorySplitRequest,
+	} from "./client-inventory-split";
+	import { ClientInventoryDrag } from "./client-inventory-drag";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
 	import ItemIcon from "../app/ItemIcon.svelte";
@@ -51,10 +57,19 @@
 		alphabetical: "Alphabetical",
 		"item-type": "Item type",
 	};
+	let panel: HTMLDivElement;
 	let contents = $state<HTMLDivElement | null>(null);
 	let sampleNow: (() => void) | null = null;
+	/** Cold dialog state only; execution remains owned by core. */
+	let splitRequest = $state<InventorySplitRequest | null>(null);
+	let splitOwner: ClientInventorySplit | null = null;
 
 	onMount(() => {
+		const drag = new ClientInventoryDrag(panel, inventory);
+		const split = new ClientInventorySplit(panel, inventory, (request) => {
+			splitRequest = request;
+		});
+		splitOwner = split;
 		const repository = inventory.icons;
 		const owner = repository.createOwner("display");
 		const pyrealKey = inventory.pyrealIconKey;
@@ -107,6 +122,9 @@
 			CLIENT_TUNING.inventory.displayIntervalMs,
 		);
 		return () => {
+			drag.destroy();
+			split.destroy();
+			splitOwner = null;
 			disposed = true;
 			sampleNow = null;
 			window.clearInterval(timer);
@@ -176,179 +194,220 @@
 {/snippet}
 
 <div
+	bind:this={panel}
 	class="client-inventory"
 	aria-label="Inventory contents"
 	aria-busy={pending}
 >
-	<aside class="inventory-equipment-strip" aria-label="Equipped items">
-		<InventoryEquipmentStrip
-			equipment={view?.equipment ?? { rows: [], pending: true }}
-			{pending}
-			{iconFor}
-			{selectedGuid}
-			{onSelectItem}
-			onHoverSlot={(mask) => {
-				hoveredEquipmentSlot = mask;
-			}}
-		/>
-	</aside>
-	<div class="inventory-sections" bind:this={contents}>
-		{#if pending}<p role="status">Updating inventory…</p>{/if}
-		{#each sections as section (section.container.guid)}
-			<section
-				data-container-guid={section.container.guid}
-				aria-label={section.mainPack
-					? "Main Pack"
-					: itemName(section.container)}
-			>
-				<h3>
-					<button
-						type="button"
-						class="inventory-header ui-item-selection ui-hud-button"
-						data-item-guid={section.container.guid}
-						aria-pressed={selectedGuid === section.container.guid}
-						disabled={pending ||
-							section.container.description.kind === "pending"}
-						onclick={() => onSelectItem(section.container.guid)}
-					>
-						{section.mainPack ? "Main Pack" : itemName(section.container)}
-						({section.items.length} / {section.container.storage.kind ===
-						"container"
-							? (section.container.storage.itemCapacity ?? "?")
-							: "?"})
-					</button>
-				</h3>
-				{@render cells(section.items)}
-				{#if section.packs.length > 0}
-					<h4>Pack slots</h4>
-					{@render cells(section.packs)}
-				{/if}
-				{#if section.unslotted.length > 0}
-					<h4>Awaiting placement</h4>
-					{@render cells(section.unslotted)}
-				{/if}
-				{#if section.container.storage.kind === "container" && section.container.storage.roster === "awaiting"}
-					<p>Loading contents…</p>
-				{:else if section.items.length + section.packs.length + section.unslotted.length === 0}
-					<p>Empty</p>
-				{/if}
-			</section>
-		{/each}
-	</div>
-	<div class="inventory-bottom-bar" aria-label="Inventory summary">
-		<InventoryCurrencyOverlay
-			label={`Total pyreals: ${pyrealText}`}
-			rows={view?.currencies ?? []}
-			pending={view?.currenciesPending ?? true}
-			{displays}
-		>
-			{#if pyrealDisplay?.kind === "ready" || pyrealDisplay?.kind === "degraded"}
-				<span class="inventory-currency-icon"
-					><ItemIcon
-						display={pyrealDisplay}
-						name="Pyreals"
-						tooltipLabel="Pyreals"
-					/></span
-				>
-			{:else}
-				<ItemIcon
-					display={pyrealDisplay}
-					name="Pyreals:"
-					tooltipLabel="Pyreals"
-				/>
-			{/if}
-			<span>{pyrealText}</span>
-		</InventoryCurrencyOverlay>
-		<span
-			class="inventory-burden"
-			role="img"
-			aria-label={`Burden: ${burden === null ? "Loading" : burdenText}`}
-			title="Burden"
-			data-level={burden === null
-				? "pending"
-				: burden >= 2
-					? "overburdened"
-					: burden >= 1
-						? "burdened"
-						: "normal"}
-		>
-			<svg viewBox="0 0 24 24" aria-hidden="true">
-				<circle cx="12" cy="5" r="3" />
-				<path d="M7 8h10l4 13H3Z" />
-			</svg>
-			<span>{burdenText}</span>
-		</span>
-		<button
-			type="button"
-			class="ui-hud-button inventory-sort"
-			aria-label={`Sort inventory: ${sortLabels[sortMode]}`}
-			title={`Sort: ${sortLabels[sortMode]}. Click for ${sortLabels[nextInventorySortMode(sortMode)]}.`}
-			onclick={() => {
-				inventory.cycleSort();
-				sampleNow?.();
-			}}
-		>
-			<svg viewBox="0 0 24 24" aria-hidden="true"
-				><path
-					d="M5 4v16m-3-3 3 3 3-3M11 5h10M11 10h7M11 15h4"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-				/></svg
-			>
-			<span aria-hidden="true"
-				>{sortMode === "native"
-					? "#"
-					: sortMode === "alphabetical"
-						? "A"
-						: "T"}</span
-			>
-		</button>
-	</div>
-	<aside class="inventory-pack-strip" aria-label="Inventory containers">
-		<ItemGridStrip>
-			{#each packSlots as item, index (index)}
-				<ItemGridCell
-					itemGuid={item?.guid ?? null}
-					structure={index !== 0 && item?.description.kind === "known"
-						? item.description.structure
-						: null}
-					count={index !== 0 && item?.description.kind === "known"
-						? item.description.stackCount
-						: null}
-					label={index === 0
+	<div class="inventory-layout" inert={splitRequest !== null}>
+		<aside class="inventory-equipment-strip" aria-label="Equipped items">
+			<InventoryEquipmentStrip
+				equipment={view?.equipment ?? { rows: [], pending: true }}
+				{pending}
+				{iconFor}
+				{selectedGuid}
+				{onSelectItem}
+				onHoverSlot={(mask) => {
+					hoveredEquipmentSlot = mask;
+				}}
+			/>
+		</aside>
+		<div class="inventory-sections" bind:this={contents}>
+			{#if pending}<p role="status">Updating inventory…</p>{/if}
+			{#each sections as section (section.container.guid)}
+				<section
+					data-container-guid={section.container.guid}
+					aria-label={section.mainPack
 						? "Main Pack"
-						: item === null
-							? "Empty pack slot"
-							: itemName(item)}
-					selected={item !== null && selectedGuid === item.guid}
-					disabled={pending ||
-						item === null ||
-						item.description.kind === "pending"}
-					onselect={() => {
-						if (item !== null) selectPack(item.guid);
-					}}
+						: itemName(section.container)}
 				>
-					{#snippet visual(tooltipLabel: string)}
-						<ItemIcon
-							{tooltipLabel}
-							display={item === null ? undefined : iconFor(item.guid)}
-							name={index === 0
-								? "Main Pack"
-								: item === null
-									? ""
-									: itemName(item)}
-						/>
-					{/snippet}
-				</ItemGridCell>
+					<h3>
+						<button
+							type="button"
+							class="inventory-header ui-item-selection ui-hud-button"
+							data-item-guid={section.container.guid}
+							aria-pressed={selectedGuid === section.container.guid}
+							disabled={pending ||
+								section.container.description.kind === "pending"}
+							onclick={() => onSelectItem(section.container.guid)}
+						>
+							{section.mainPack ? "Main Pack" : itemName(section.container)}
+							({section.items.length} / {section.container.storage.kind ===
+							"container"
+								? (section.container.storage.itemCapacity ?? "?")
+								: "?"})
+						</button>
+					</h3>
+					{@render cells(section.items)}
+					{#if section.packs.length > 0}
+						<h4>Pack slots</h4>
+						{@render cells(section.packs)}
+					{/if}
+					{#if section.unslotted.length > 0}
+						<h4>Awaiting placement</h4>
+						{@render cells(section.unslotted)}
+					{/if}
+					{#if section.container.storage.kind === "container" && section.container.storage.roster === "awaiting"}
+						<p>Loading contents…</p>
+					{:else if section.items.length + section.packs.length + section.unslotted.length === 0}
+						<p>Empty</p>
+					{/if}
+				</section>
 			{/each}
-		</ItemGridStrip>
-	</aside>
+		</div>
+		<div class="inventory-bottom-bar" aria-label="Inventory summary">
+			<InventoryCurrencyOverlay
+				label={`Total pyreals: ${pyrealText}`}
+				rows={view?.currencies ?? []}
+				pending={view?.currenciesPending ?? true}
+				{displays}
+			>
+				{#if pyrealDisplay?.kind === "ready" || pyrealDisplay?.kind === "degraded"}
+					<span class="inventory-currency-icon"
+						><ItemIcon
+							display={pyrealDisplay}
+							name="Pyreals"
+							tooltipLabel="Pyreals"
+						/></span
+					>
+				{:else}
+					<ItemIcon
+						display={pyrealDisplay}
+						name="Pyreals:"
+						tooltipLabel="Pyreals"
+					/>
+				{/if}
+				<span>{pyrealText}</span>
+			</InventoryCurrencyOverlay>
+			<span
+				class="inventory-burden"
+				role="img"
+				aria-label={`Burden: ${burden === null ? "Loading" : burdenText}`}
+				title="Burden"
+				data-level={burden === null
+					? "pending"
+					: burden >= 2
+						? "overburdened"
+						: burden >= 1
+							? "burdened"
+							: "normal"}
+			>
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<circle cx="12" cy="5" r="3" />
+					<path d="M7 8h10l4 13H3Z" />
+				</svg>
+				<span>{burdenText}</span>
+			</span>
+			<button
+				type="button"
+				class="ui-hud-button inventory-sort"
+				aria-label={`Sort inventory: ${sortLabels[sortMode]}`}
+				title={`Sort: ${sortLabels[sortMode]}. Click for ${sortLabels[nextInventorySortMode(sortMode)]}.`}
+				onclick={() => {
+					inventory.cycleSort();
+					sampleNow?.();
+				}}
+			>
+				<svg viewBox="0 0 24 24" aria-hidden="true"
+					><path
+						d="M5 4v16m-3-3 3 3 3-3M11 5h10M11 10h7M11 15h4"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+					/></svg
+				>
+				<span aria-hidden="true"
+					>{sortMode === "native"
+						? "#"
+						: sortMode === "alphabetical"
+							? "A"
+							: "T"}</span
+				>
+			</button>
+		</div>
+		<aside class="inventory-pack-strip" aria-label="Inventory containers">
+			<ItemGridStrip>
+				{#each packSlots as item, index (index)}
+					<ItemGridCell
+						itemGuid={item?.guid ?? null}
+						structure={index !== 0 && item?.description.kind === "known"
+							? item.description.structure
+							: null}
+						count={index !== 0 && item?.description.kind === "known"
+							? item.description.stackCount
+							: null}
+						label={index === 0
+							? "Main Pack"
+							: item === null
+								? "Empty pack slot"
+								: itemName(item)}
+						selected={item !== null && selectedGuid === item.guid}
+						disabled={pending ||
+							item === null ||
+							item.description.kind === "pending"}
+						onselect={() => {
+							if (item !== null) selectPack(item.guid);
+						}}
+					>
+						{#snippet visual(tooltipLabel: string)}
+							<ItemIcon
+								{tooltipLabel}
+								display={item === null ? undefined : iconFor(item.guid)}
+								name={index === 0
+									? "Main Pack"
+									: item === null
+										? ""
+										: itemName(item)}
+							/>
+						{/snippet}
+					</ItemGridCell>
+				{/each}
+			</ItemGridStrip>
+		</aside>
+	</div>
+	{#if splitRequest !== null}
+		<InventorySplitDialog
+			request={splitRequest}
+			onSubmit={(amount) => splitOwner?.submit(amount)}
+			onCancel={() => splitOwner?.close()}
+		/>
+	{/if}
 </div>
 
 <style>
 	@layer components {
+		:global(.inventory-drag-ghost) {
+			position: fixed;
+			inset: 0 auto auto 0;
+			z-index: 10000;
+			pointer-events: none;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			background: transparent;
+			opacity: 0.8;
+			color: var(--ui-color-text);
+		}
+		:global([data-inventory-drop="pending"]) {
+			outline: 2px dashed var(--ui-color-muted);
+		}
+		:global([data-inventory-drop="accepted"]) {
+			outline: 2px solid var(--ui-color-success);
+		}
+		:global([data-inventory-drop="rejected"]) {
+			outline: 2px solid var(--ui-color-danger);
+		}
+		:global([data-inventory-displaced]) {
+			outline: 2px solid var(--ui-color-warning);
+		}
+		:global([data-inventory-dragging]) {
+			user-select: none;
+		}
+		.inventory-layout {
+			display: contents;
+		}
 		.client-inventory {
+			position: relative;
 			display: grid;
 			grid-template-rows: minmax(0, 1fr) auto;
 			grid-template-columns: auto minmax(0, 1fr) auto;

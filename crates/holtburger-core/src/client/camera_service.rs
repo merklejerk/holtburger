@@ -1,21 +1,17 @@
-//! Independent camera servicing over immutable simulation publications.
+//! Physics-tick camera servicing with a direct, generation-checked input endpoint.
 
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use holtburger_world::WorldState;
-use tokio::sync::{broadcast, mpsc as async_mpsc};
+use tokio::sync::broadcast;
 
 use super::camera::{ClientCameraRuntime, ClientCameraSceneInput, ClientCameraSettlement};
 use super::{
     ClientCameraClearanceRequest, ClientCameraIdentity, ClientCameraIntentRequest,
     ClientCameraStartReceipt, ClientCameraStartRequest, ClientCameraUpdateReceipt, ClientViewEvent,
 };
-
-/// Camera cadence is independent of the simulation's admitted time and crowd work.
-const CAMERA_INTERVAL: Duration = Duration::from_millis(16);
 
 /// The single camera controller and its explicit world-owned servicing state.
 struct CameraState {
@@ -24,15 +20,12 @@ struct CameraState {
     /// World-owned permission, independent of whether query input has arrived. Activation
     /// settlement remains an explicit lifecycle operation while ordinary servicing is disabled.
     ordinary_input_allowed: bool,
-    /// Latest coherent query input; absence delays solving but does not deny commands.
-    input: Option<ClientCameraSceneInput>,
 }
 
 impl CameraState {
-    /// Retires placement, registration, query input, and ordinary input permission together.
+    /// Retires placement, registration, and ordinary input permission together.
     fn reset(&mut self) {
         self.ordinary_input_allowed = false;
-        self.input = None;
         self.controller.reset();
     }
 }
@@ -70,9 +63,9 @@ impl ClientCameraInputHandle {
     }
 }
 
-/// World-owned lifecycle facade for one independently serviced camera.
+/// World-owned lifecycle facade for one physics-tick camera.
 pub(super) struct ClientCameraService {
-    /// The same state is shared with the worker and direct input endpoint.
+    /// The same state is shared with physics-tick solving and the direct input endpoint.
     state: Arc<Mutex<CameraState>>,
 }
 
@@ -82,7 +75,6 @@ impl ClientCameraService {
             state: Arc::new(Mutex::new(CameraState {
                 controller: ClientCameraRuntime::new()?,
                 ordinary_input_allowed: false,
-                input: None,
             })),
         })
     }
@@ -111,7 +103,6 @@ impl ClientCameraService {
         let mut state = self.state.lock().expect("camera state poisoned");
         let receipt = state.controller.start(request, world)?;
         state.ordinary_input_allowed = active_world;
-        state.input = None;
         let _ = events.send(ClientViewEvent::CameraStarted(receipt));
         Ok(receipt)
     }
@@ -128,12 +119,20 @@ impl ClientCameraService {
         self.state.lock().expect("camera state poisoned").reset();
     }
 
-    /// Publishes an active-world tick and explicitly resumes ordinary camera servicing.
-    pub(super) fn publish_active_world(&self, input: ClientCameraSceneInput) {
+    /// Solve exactly the accepted physics interval, including stationary camera input.
+    pub(super) fn advance_world(
+        &self,
+        input: &ClientCameraSceneInput,
+        duration: Duration,
+    ) -> Result<Option<super::ClientCameraTick>> {
         let mut state = self.state.lock().expect("camera state poisoned");
         state.ordinary_input_allowed = true;
-        state.controller.observe_target(&input);
-        state.input = Some(input);
+        state.controller.advance(input, duration)
+    }
+
+    /// Retire direct input handles when the client run ends, including cancellation.
+    pub(super) fn run_scope(&self) -> CameraRunScope {
+        CameraRunScope(Arc::clone(&self.state))
     }
 
     pub(super) fn settle_for_activation(
@@ -146,97 +145,17 @@ impl ClientCameraService {
             .controller
             .settle_for_activation(input)
     }
-
-    /// A dedicated worker cannot be starved by synchronous physics on an executor thread.
-    pub(super) fn spawn(
-        &self,
-        events: broadcast::Sender<ClientViewEvent>,
-    ) -> Result<ClientCameraWorker> {
-        let state = Arc::clone(&self.state);
-        let (stop, stopped) = mpsc::channel();
-        let (failed, failures) = async_mpsc::unbounded_channel();
-        let thread = thread::Builder::new()
-            .name("client-camera".into())
-            .spawn(move || {
-                let mut previous = Instant::now();
-                loop {
-                    let wait = CAMERA_INTERVAL.saturating_sub(previous.elapsed());
-                    match stopped.recv_timeout(wait) {
-                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                        Err(mpsc::RecvTimeoutError::Timeout) => {}
-                    }
-                    let now = Instant::now();
-                    let duration = now.duration_since(previous);
-                    previous = now;
-                    let mut state = state.lock().expect("camera state poisoned");
-                    let CameraState {
-                        controller,
-                        ordinary_input_allowed,
-                        input,
-                    } = &mut *state;
-                    if !*ordinary_input_allowed {
-                        continue;
-                    }
-                    let Some(input) = input.as_ref() else {
-                        continue;
-                    };
-                    match controller.advance(input, duration) {
-                        // Publish under the lifecycle lock: once reset returns, no old tick can follow.
-                        Ok(Some(tick)) => {
-                            let _ = events.send(ClientViewEvent::Camera(tick));
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            let _ = failed.send(error);
-                            break;
-                        }
-                    }
-                }
-            })
-            .context("starting client camera worker")?;
-        Ok(ClientCameraWorker {
-            stop,
-            thread: Some(thread),
-            failures,
-            state: Arc::clone(&self.state),
-        })
-    }
 }
 
-/// Scoped worker lifetime, including failure delivery and cancellation-safe shutdown.
-pub(super) struct ClientCameraWorker {
-    /// Wakes the worker immediately on runtime cancellation or normal exit.
-    stop: mpsc::Sender<()>,
-    /// Joined before the client runtime leaves its run scope.
-    thread: Option<JoinHandle<()>>,
-    /// A solver failure or unexpected worker exit is a client runtime failure.
-    failures: async_mpsc::UnboundedReceiver<anyhow::Error>,
-    /// Retires direct handles when the owning runtime stops, including cancellation.
-    state: Arc<Mutex<CameraState>>,
-}
+/// Cancellation-safe lifecycle guard; owns no thread or scheduling state.
+pub(super) struct CameraRunScope(Arc<Mutex<CameraState>>);
 
-impl ClientCameraWorker {
-    pub(super) async fn failure(&mut self) -> anyhow::Error {
-        self.failures
-            .recv()
-            .await
-            .unwrap_or_else(|| anyhow::anyhow!("client camera worker exited unexpectedly"))
-    }
-}
-
-impl Drop for ClientCameraWorker {
+impl Drop for CameraRunScope {
     fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
-            log::error!("client camera worker panicked");
-        }
-        // Teardown must also invalidate handles after a worker panic; no solving resumes here.
-        let mut state = self
-            .state
+        // Cleanup may run while unwinding a failed solve; retire handles even after poisoning.
+        self.0
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        state.reset();
+            .unwrap_or_else(|poison| poison.into_inner())
+            .reset();
     }
 }

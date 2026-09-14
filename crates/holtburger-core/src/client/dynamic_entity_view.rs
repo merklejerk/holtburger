@@ -217,14 +217,14 @@ impl ClientRuntime {
     ///
     /// This intentionally accepts captured views rather than sampling `WorldState` from an app
     /// host. The runtime owns both boundaries and publishes at most one batch for the turn.
-    pub(super) fn dynamic_entity_tick_event(
+    pub(super) fn dynamic_entity_tick_batch(
         &self,
         before: Vec<crate::DynamicEntityView>,
         after: Vec<crate::DynamicEntityView>,
         host_time: DynamicEntityHostTime,
         duration_ms: f64,
         body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
-    ) -> anyhow::Result<Option<DynamicEntityEvent>> {
+    ) -> anyhow::Result<Option<DynamicEntityTickBatch>> {
         let before_by_guid = before
             .into_iter()
             .map(|entity| (entity.identity.guid, entity))
@@ -320,10 +320,12 @@ impl ClientRuntime {
         } else {
             duration_ms
         };
-        Ok(
-            DynamicEntityTickBatch::new(host_time, duration_ms, advances, updates)
-                .map(|batch| DynamicEntityEvent::Ticked { batch }),
-        )
+        Ok(DynamicEntityTickBatch::new(
+            host_time,
+            duration_ms,
+            advances,
+            updates,
+        ))
     }
 }
 
@@ -930,7 +932,7 @@ mod tests {
         let _ = client.world.set_local_player_runtime_pose(end);
         let after = client.current_dynamic_entity_views();
         let missing = client
-            .dynamic_entity_tick_event(
+            .dynamic_entity_tick_batch(
                 before.clone(),
                 after.clone(),
                 DynamicEntityHostTime::new(12.5).unwrap(),
@@ -939,8 +941,8 @@ mod tests {
             )
             .unwrap_err();
         assert!(missing.to_string().contains("no simulation outcome"));
-        let event = client
-            .dynamic_entity_tick_event(
+        let batch = client
+            .dynamic_entity_tick_batch(
                 before,
                 after,
                 DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
@@ -950,9 +952,6 @@ mod tests {
             .unwrap()
             .expect("changed world placement should produce one advance");
 
-        let DynamicEntityEvent::Ticked { batch } = event else {
-            panic!("expected a tick event");
-        };
         assert_eq!(batch.host_time.seconds, 12.5);
         assert_eq!(batch.duration_ms, 30.0);
         assert_eq!(batch.advances.len(), 1);
@@ -1045,8 +1044,8 @@ mod tests {
         client.world.set_local_player_runtime_pose(end);
         let kinds = std::collections::HashMap::from([(guid, ClientBodyMotion::CorrectionSnap)]);
 
-        let event = client
-            .dynamic_entity_tick_event(
+        let batch = client
+            .dynamic_entity_tick_batch(
                 before,
                 client.current_dynamic_entity_views(),
                 DynamicEntityHostTime::new(12.75).expect("test host time is valid"),
@@ -1055,9 +1054,6 @@ mod tests {
             )
             .unwrap()
             .expect("correction snap should produce one advance");
-        let DynamicEntityEvent::Ticked { batch } = event else {
-            panic!("expected a tick event");
-        };
         assert_eq!(batch.duration_ms, 0.0);
         assert_eq!(
             batch.advances[0].kind,
@@ -1084,8 +1080,8 @@ mod tests {
                 ContactState::Grounded,
             )
         );
-        let event = client
-            .dynamic_entity_tick_event(
+        let batch = client
+            .dynamic_entity_tick_batch(
                 before,
                 client.current_dynamic_entity_views(),
                 DynamicEntityHostTime::new(13.0).expect("test host time is valid"),
@@ -1095,9 +1091,6 @@ mod tests {
             .unwrap()
             .expect("path-stable contact change should produce one update");
 
-        let DynamicEntityEvent::Ticked { batch } = event else {
-            panic!("expected a tick event");
-        };
         assert!(batch.advances.is_empty());
         assert_eq!(batch.updates.len(), 1);
         assert_eq!(batch.updates[0].identity.guid, guid);
@@ -1121,7 +1114,7 @@ mod tests {
 
         assert!(
             client
-                .dynamic_entity_tick_event(
+                .dynamic_entity_tick_batch(
                     before.clone(),
                     before,
                     DynamicEntityHostTime::new(14.0).expect("test host time is valid"),

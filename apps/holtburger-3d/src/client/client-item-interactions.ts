@@ -14,7 +14,7 @@ interface ItemUseQuestion {
 	readonly id: string;
 	readonly text: string;
 }
-/** Cold state consumed by the combine prompt and local dialog. */
+/** Cold state consumed by Notifications guidance and the local confirmation dialog. */
 export type ItemInteractionState =
 	| { readonly kind: "idle" }
 	| {

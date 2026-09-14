@@ -97,28 +97,7 @@ pub fn plan_equipment_change(
         .collect::<Result<Vec<_>, EquipmentPlanError>>()?;
     let automatic = matches!(slot, None | Some(TargetSlot::PreferredSide { .. }));
     let requested = match slot {
-        Some(TargetSlot::PreferredSide { alternate }) => {
-            match incoming.resolve_location(MAIN_HAND_LOCATIONS) {
-                Some(main) => {
-                    if alternate {
-                        incoming.resolve_location(EquipMask::SHIELD).unwrap_or(main)
-                    } else {
-                        main
-                    }
-                }
-                None => {
-                    let right = incoming.valid_locations
-                        & (EquipMask::WRIST_WEAR_RIGHT | EquipMask::FINGER_WEAR_RIGHT);
-                    if alternate {
-                        incoming
-                            .resolve_location(right)
-                            .unwrap_or(incoming.valid_locations)
-                    } else {
-                        incoming.valid_locations
-                    }
-                }
-            }
-        }
+        Some(TargetSlot::PreferredSide { alternate }) => incoming.preferred_side_request(alternate),
         Some(TargetSlot::EquipMask(mask)) => mask,
         Some(TargetSlot::MainHand) => MAIN_HAND_LOCATIONS,
         Some(TargetSlot::OffHand) => EquipMask::SHIELD,

@@ -71,6 +71,17 @@ export async function probeItemUse(client, evaluateExpression) {
 		await reply({ kind: "executed" });
 		await click(tool, true);
 		assert.equal((await state()).kind, "acquiring");
+		await read(`(async () => {
+            const expected = 'Use ' + ${api}.itemUseProbe().snapshot().name + ' on… (Escape to cancel)';
+            const deadline = performance.now() + 5000;
+            while (performance.now() < deadline) {
+                const notification = document.querySelector('[aria-label="Notifications"] .client-toast[role="status"]');
+                if (notification?.textContent.trim() === expected) return;
+                await new Promise(requestAnimationFrame);
+            }
+            throw new Error('Target acquisition guidance did not appear in the existing toast surface');
+        })()`);
+
 		const hover = async (selector, eligible) => {
 			await client.send("Input.dispatchMouseEvent", {
 				type: "mouseMoved",
@@ -160,6 +171,16 @@ export async function probeItemUse(client, evaluateExpression) {
 			code: "Escape",
 		});
 		assert.equal((await state()).kind, "idle");
+		await read(`(async () => {
+            const deadline = performance.now() + 1000;
+            while (performance.now() < deadline) {
+                const notifications = Array.from(document.querySelectorAll('.client-toast'));
+                if (!notifications.some(node => node.textContent.includes('Escape to cancel'))) return;
+                await new Promise(requestAnimationFrame);
+            }
+            throw new Error('Cancelled target acquisition retained its toast guidance');
+        })()`);
+
 		await read(api + ".itemUseProbe().select(91)");
 		const binding = await read(api + ".itemUseProbe().interactBinding");
 		assert.ok(binding, "An interact shortcut is configured");

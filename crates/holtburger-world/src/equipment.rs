@@ -107,6 +107,29 @@ impl EquipmentFacts {
         (allowed.bits().count_ones() == 1).then_some(allowed)
     }
 
+    /// Preferred-side request shared by equipment execution and alternate-side UI availability.
+    /// Ordinary jewelry keeps both candidates so conflict planning can choose a free side.
+    pub fn preferred_side_request(self, alternate: bool) -> EquipMask {
+        match self.resolve_location(MAIN_HAND_LOCATIONS) {
+            Some(main) => {
+                if alternate {
+                    self.resolve_location(EquipMask::SHIELD).unwrap_or(main)
+                } else {
+                    main
+                }
+            }
+            None => {
+                let right = self.valid_locations
+                    & (EquipMask::WRIST_WEAR_RIGHT | EquipMask::FINGER_WEAR_RIGHT);
+                if alternate {
+                    self.resolve_location(right).unwrap_or(self.valid_locations)
+                } else {
+                    self.valid_locations
+                }
+            }
+        }
+    }
+
     /// Whether an existing equipped item must leave before this assignment.
     /// Callers deduplicate by item identity and exclude the incoming item itself.
     pub fn conflicts_with(self, target: EquipMask, existing: Self, current: EquipMask) -> bool {
@@ -151,6 +174,43 @@ mod tests {
             entity.properties.ints.insert(property, value as i32);
         }
         EquipmentFacts::from_entity(&entity).expect("complete public equipment facts")
+    }
+
+    #[test]
+    fn alternate_side_requires_a_distinct_equipment_request() {
+        for (locations, kind, combat, expected) in [
+            (
+                EquipMask::MELEE_WEAPON,
+                ItemType::MELEE_WEAPON,
+                CombatUse::Melee,
+                true,
+            ),
+            (
+                EquipMask::MELEE_WEAPON,
+                ItemType::MELEE_WEAPON,
+                CombatUse::TwoHanded,
+                false,
+            ),
+            (EquipMask::SHIELD, ItemType::ARMOR, CombatUse::Shield, false),
+            (
+                EquipMask::FINGER_WEAR_LEFT | EquipMask::FINGER_WEAR_RIGHT,
+                ItemType::JEWELRY,
+                CombatUse::None,
+                true,
+            ),
+            (
+                EquipMask::FINGER_WEAR_RIGHT,
+                ItemType::JEWELRY,
+                CombatUse::None,
+                false,
+            ),
+        ] {
+            let item = facts(locations, kind, combat, 0);
+            assert_eq!(
+                item.preferred_side_request(false) != item.preferred_side_request(true),
+                expected
+            );
+        }
     }
 
     #[test]

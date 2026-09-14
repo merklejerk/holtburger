@@ -369,7 +369,7 @@
 				/>{/snippet}
 			{#snippet toast()}<ClientToastOverlay
 					toast={null}
-					previewMessage={toastMessage}
+					persistentMessage={{ kind: "preview", message: toastMessage }}
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
 					{shortcuts}

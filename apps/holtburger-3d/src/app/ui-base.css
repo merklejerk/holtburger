@@ -58,6 +58,17 @@
 		--ui-action-bar-strip-gap: 4px;
 		/* Background opacity leaves the numbered strip label fully legible. */
 		--ui-action-bar-strip-background-opacity: 70%;
+		/* Floating alternate-action graphic: CSS dimensions and distance from its cell. */
+		--ui-action-alternate-width: 36px;
+		--ui-action-alternate-height: 30px;
+		--ui-action-alternate-gap: 4px;
+		/* Stroke widths use SVG viewBox units; the outline width includes the foreground stroke. */
+		--ui-action-alternate-stroke-width: 3;
+		--ui-action-alternate-outline-width: 6;
+		--ui-action-alternate-outline-color: #111;
+		/* Use none to disable the shadow, or supply another CSS filter. */
+		--ui-action-alternate-filter: drop-shadow(0 2px 3px #000a);
+		/* Optional --ui-action-alternate-color resolves to the active warning palette at the cell. */
 		/* Shared popup-menu surface and command-row density. */
 		--ui-menu-min-width: 140px;
 		--ui-menu-padding: 4px;

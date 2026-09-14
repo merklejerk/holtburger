@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 
 /** Real pointer/key events cover local binding edits and the typed equipment boundary. */
-export async function probeActionBars(client, evaluateExpression) {
+export async function probeActionBars(
+	client,
+	evaluateExpression,
+	screenshotPath,
+) {
 	const read = (expression) => evaluateExpression(client, expression);
 	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
 	// Stable identities belong to mounted bars, not their sequence labels or prior sessions.
@@ -374,7 +379,134 @@ export async function probeActionBars(client, evaluateExpression) {
 		});
 	}
 	assert.equal(await equipCount(), modifierCommands + 4);
+	// A targeted stack has an alternate target; the armor in slot 6 and empty cells do not.
+	await drag(
+		'.inventory-sections .item-grid-cell[data-item-guid="94"]',
+		cell(1, 3),
+	);
+	await read(`(async () => {
+        const deadline = performance.now() + 5000;
+        while (performance.now() < deadline) {
+            const cell = document.querySelector(${JSON.stringify(cell(1, 3))});
+            if (cell.dataset.actionItem === '94' && cell.dataset.dimmed === 'false') return;
+            await new Promise(requestAnimationFrame);
+        }
+        throw new Error('Alternate-action binding did not become available');
+    })()`);
+	const alternateHints = () =>
+		read(`Array.from(document.querySelectorAll('.action-alternate')).map(marker => ({
+        digit: marker.closest('.action-cell').dataset.actionCell,
+        label: marker.closest('.action-cell').getAttribute('aria-label'),
+        visible: marker.matches(':popover-open') && marker.getBoundingClientRect().width > 0,
+        above: marker.getBoundingClientRect().bottom <= marker.closest('.action-cell').getBoundingClientRect().top
+    }))`);
+	const shift = (down) =>
+		client.send("Input.dispatchKeyEvent", {
+			type: down ? "keyDown" : "keyUp",
+			key: "Shift",
+			code: "ShiftLeft",
+			modifiers: down ? 8 : 0,
+		});
+	await key("1", "Digit1", 2);
+	assert.deepEqual(await alternateHints(), []);
+	await shift(true);
+	assert.deepEqual(
+		(await alternateHints()).map((hint) => hint.digit),
+		["3"],
+	);
+	assert.equal((await alternateHints())[0].visible, true);
+	assert.equal(
+		(await alternateHints())[0].above,
+		true,
+		"Graphic floats above the cell outside scroll clipping",
+	);
+	if (screenshotPath) {
+		const shot = await client.send("Page.captureScreenshot", {
+			format: "png",
+			captureBeyondViewport: false,
+		});
+		await writeFile(
+			`${screenshotPath}.action-alternate.png`,
+			Buffer.from(shot.data, "base64"),
+		);
+	}
+	assert.ok(
+		(await alternateHints())[0].label.includes("Use on selected target"),
+	);
+	// Top-layer graphics still inherit theme tokens from the client UI subtree.
+	const themed = await read(`(async () => {
+        const root = document.querySelector('.client-world');
+        const marker = document.querySelector('.action-alternate');
+        const measure = () => {
+            const style = getComputedStyle(marker);
+            const foreground = getComputedStyle(marker.querySelector('path:last-child'));
+            const outline = getComputedStyle(marker.querySelector('.alternate-outline'));
+            const rect = marker.getBoundingClientRect();
+            const cell = marker.closest('.action-cell').getBoundingClientRect();
+            return { width: rect.width, height: rect.height, gap: cell.top - rect.bottom,
+                color: foreground.stroke, stroke: foreground.strokeWidth,
+                outlineColor: outline.stroke, outline: outline.strokeWidth, filter: style.filter };
+        };
+        const overrides = {
+            '--ui-action-alternate-width': '48px',
+            '--ui-action-alternate-height': '40px',
+            '--ui-action-alternate-gap': '8px',
+            '--ui-action-alternate-color': '#00ff00',
+            '--ui-action-alternate-stroke-width': '2',
+            '--ui-action-alternate-outline-width': '5',
+            '--ui-action-alternate-outline-color': '#0000ff',
+            '--ui-action-alternate-filter': 'none',
+        };
+        const baseline = measure();
+        const previous = Object.keys(overrides).map(key => [key, root.style.getPropertyValue(key), root.style.getPropertyPriority(key)]);
+        let overridden;
+        try {
+            for (const [key, value] of Object.entries(overrides)) root.style.setProperty(key, value);
+            await new Promise(requestAnimationFrame);
+            overridden = measure();
+        } finally {
+            for (const [key, value, priority] of previous) {
+                if (value) root.style.setProperty(key, value, priority);
+                else root.style.removeProperty(key);
+            }
+        }
+        await new Promise(requestAnimationFrame);
+        return { baseline, overridden, restored: measure() };
+    })()`);
+	assert.deepEqual(themed.overridden, {
+		width: 48,
+		height: 40,
+		gap: 8,
+		color: "rgb(0, 255, 0)",
+		stroke: "2px",
+		outlineColor: "rgb(0, 0, 255)",
+		outline: "5px",
+		filter: "none",
+	});
+	assert.deepEqual(
+		themed.restored,
+		themed.baseline,
+		"Removing theme overrides restores the marker",
+	);
+	await shift(false);
+	assert.deepEqual(
+		await alternateHints(),
+		[],
+		"Passthrough modifier release clears the hint",
+	);
+	await shift(true);
+	await key("Escape", "Escape", 8);
+	assert.deepEqual(
+		await alternateHints(),
+		[],
+		"Leaving the bar clears modifier hints",
+	);
+	await shift(false);
+	assert.deepEqual(await alternateHints(), []);
+	await key("Escape", "Escape");
+	await drag(cell(1, 3), { x: 500, y: 300 });
 	return {
+		alternateHints: true,
 		clonePlacement: true,
 		menuStrip: true,
 		binding: true,

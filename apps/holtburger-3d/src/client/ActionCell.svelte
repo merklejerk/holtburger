@@ -24,6 +24,8 @@
 		equipped: boolean;
 		/** Keyboard selection, independent of entity selection. */
 		selected: boolean;
+		/** Alternate behavior to advertise while this bar owns focus and its modifier is held. */
+		alternateLabel: string | null;
 		/** Execute content through the collection's session capability. */
 		onactivate: (alternate: boolean) => void;
 	}
@@ -37,8 +39,16 @@
 		available,
 		equipped,
 		selected,
+		alternateLabel,
 		onactivate,
 	}: Props = $props();
+	// Both strokes share geometry so theme outline changes cannot reveal a mismatched silhouette.
+	const alternateArrowPath = "M6 10h24m-6-6 6 6-6 6M30 20H6m6-6-6 6 6 6";
+	const anchorName = $derived(`--action-cell-${bar}-${digit}`);
+	function showAlternateMarker(element: HTMLElement): void {
+		// The top layer escapes the bar's scroll clipping; removing the marker closes its popover.
+		element.showPopover();
+	}
 	const visibleCount = $derived(
 		content !== null && count !== null && count > 1 ? count : null,
 	);
@@ -47,8 +57,14 @@
 			? label
 			: `${label} (quantity: ${formatItemQuantity(visibleCount)})`,
 	);
-	const statusLabel = $derived(
+	const activeAlternate = $derived(available ? alternateLabel : null);
+	const equipmentLabel = $derived(
 		equipped ? `${quantityLabel} (Equipped)` : quantityLabel,
+	);
+	const statusLabel = $derived(
+		activeAlternate === null
+			? equipmentLabel
+			: `${equipmentLabel} (${activeAlternate})`,
 	);
 </script>
 
@@ -57,6 +73,7 @@
 	class="action-cell ui-item-cell ui-item-selection ui-hud-button"
 	data-action-bar={bar}
 	data-action-cell={digit}
+	style:anchor-name={anchorName}
 	data-action-item={content?.item}
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}
@@ -75,6 +92,23 @@
 			class:above-count={visibleCount !== null}
 			aria-hidden="true">✓</span
 		>{/if}
+	{#if activeAlternate !== null}<span
+			class="action-alternate"
+			popover="manual"
+			style:position-anchor={anchorName}
+			use:showAlternateMarker
+			aria-hidden="true"
+		>
+			<svg
+				viewBox="0 0 36 30"
+				fill="none"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			>
+				<path class="alternate-outline" d={alternateArrowPath} />
+				<path d={alternateArrowPath} />
+			</svg>
+		</span>{/if}
 	<ItemCountOverlay count={visibleCount} besideStructure={false} />
 	<span class="action-digit" aria-hidden="true">{digit}</span>
 </button>
@@ -106,6 +140,37 @@
 		.action-equipped.above-count {
 			top: 1px;
 			bottom: auto;
+		}
+		.action-alternate {
+			position: fixed;
+			position-area: top;
+			position-try-fallbacks: flip-block;
+			position-visibility: anchors-visible;
+			inset: auto;
+			margin: 0 0 var(--ui-action-alternate-gap);
+			padding: 0;
+			width: var(--ui-action-alternate-width);
+			height: var(--ui-action-alternate-height);
+			border: 0;
+			overflow: visible;
+			background: transparent;
+			color: var(--ui-action-alternate-color, var(--ui-color-warning));
+			pointer-events: none;
+			filter: var(--ui-action-alternate-filter);
+		}
+		.action-alternate::backdrop {
+			display: none;
+		}
+		.action-alternate svg {
+			display: block;
+			width: 100%;
+			height: 100%;
+			stroke: currentColor;
+			stroke-width: var(--ui-action-alternate-stroke-width);
+		}
+		.action-alternate .alternate-outline {
+			stroke: var(--ui-action-alternate-outline-color);
+			stroke-width: var(--ui-action-alternate-outline-width);
 		}
 		.action-digit {
 			position: absolute;

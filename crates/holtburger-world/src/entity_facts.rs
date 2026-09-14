@@ -83,6 +83,9 @@ pub enum EntityDescription {
         /// Does not establish skill/level admission; absent before valid locations arrive.
         #[serde(rename = "equipLocations")]
         equip_locations: Option<u32>,
+        /// Whether known equipment facts offer a distinct alternate-side request for action cells.
+        #[serde(rename = "hasAlternateEquipSide")]
+        has_alternate_equip_side: bool,
         /// Authored use shape consumed by inventory and action interaction entry points.
         #[serde(rename = "useCapability")]
         use_capability: crate::item_use::ItemUseCapability,
@@ -266,6 +269,11 @@ impl WorldState {
                         entity.usable_flags(),
                     ),
                     item_type: item_type.bits(),
+                    has_alternate_equip_side: crate::equipment::EquipmentFacts::from_entity(entity)
+                        .is_ok_and(|facts| {
+                            facts.preferred_side_request(false)
+                                != facts.preferred_side_request(true)
+                        }),
                     use_capability: crate::item_use::item_use_capability(entity),
                     consumable: crate::item_use::consumable_facts(entity),
                     equip_locations: entity
@@ -634,6 +642,7 @@ mod tests {
                 item_type: ItemType::MELEE_WEAPON.bits(),
                 map_category: DynamicEntityMapBlipCategory::Other,
                 equip_locations: None,
+                has_alternate_equip_side: false,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
                 consumable: None,
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
@@ -685,6 +694,7 @@ mod tests {
                 item_type: ItemType::CREATURE.bits(),
                 map_category: DynamicEntityMapBlipCategory::Npc,
                 equip_locations: None,
+                has_alternate_equip_side: false,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
                 consumable: None,
                 object_flags: 0,

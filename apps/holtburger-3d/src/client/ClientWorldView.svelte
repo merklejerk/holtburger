@@ -421,11 +421,7 @@
 	>
 		<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
 	</button>
-	{#if itemInteraction.kind === "acquiring"}
-		<div class="combine-prompt" role="status">
-			Use {itemInteraction.name} on… (Escape to cancel)
-		</div>
-	{/if}
+
 	<Minimap
 		readFrame={readMinimapFrame}
 		viewState={minimap}
@@ -489,7 +485,7 @@
 			/>
 		</ClientHudPanel>
 	{/if}
-	{#if toast !== null || hudMode === "layout"}
+	{#if toast !== null || combining || hudMode === "layout"}
 		<ClientHudPanel
 			label="Notifications"
 			placement={hudLayout.toast}
@@ -504,9 +500,14 @@
 		>
 			<ClientToastOverlay
 				{toast}
-				previewMessage={hudMode === "layout" && toast === null
-					? HUD_PREVIEW_TOAST_MESSAGE
-					: null}
+				persistentMessage={itemInteraction.kind === "acquiring"
+					? {
+							kind: "status",
+							message: `Use ${itemInteraction.name} on… (Escape to cancel)`,
+						}
+					: hudMode === "layout"
+						? { kind: "preview", message: HUD_PREVIEW_TOAST_MESSAGE }
+						: null}
 			/>
 		</ClientHudPanel>
 	{/if}
@@ -637,16 +638,6 @@
 		.client-world.combining :global(.item-grid-cell),
 		.client-world.combining [data-combine-self] {
 			cursor: var(--combine-cursor);
-		}
-		.combine-prompt {
-			position: absolute;
-			top: 1rem;
-			left: 50%;
-			transform: translateX(-50%);
-			pointer-events: none;
-			z-index: 10;
-			background: var(--ui-color-control);
-			padding: 0.5rem 1rem;
 		}
 	}
 	@layer components {

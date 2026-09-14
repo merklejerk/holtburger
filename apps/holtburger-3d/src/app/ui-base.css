@@ -54,6 +54,14 @@
 		--ui-item-cell-min-size: 36px;
 		--ui-item-cell-padding: 1px;
 		--ui-item-grid-gap: 5px;
+		/* Space between an action bar's numbered menu strip and its cells. */
+		--ui-action-bar-strip-gap: 4px;
+		/* Background opacity leaves the numbered strip label fully legible. */
+		--ui-action-bar-strip-background-opacity: 70%;
+		/* Shared popup-menu surface and command-row density. */
+		--ui-menu-min-width: 140px;
+		--ui-menu-padding: 4px;
+		--ui-menu-item-padding: 5px 12px;
 		--ui-item-icon-rendering: pixelated;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
 		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;

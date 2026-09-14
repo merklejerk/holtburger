@@ -1,3 +1,13 @@
+<script lang="ts" module>
+	/** Space reserved for an interactive header before the layout move handle. */
+	export interface LayoutMoveInset {
+		/** Reserved horizontal extent in CSS pixels. */
+		readonly left: number;
+		/** Reserved vertical extent in CSS pixels. */
+		readonly top: number;
+	}
+</script>
+
 <script lang="ts">
 	import LayoutHandleIcon from "./LayoutHandleIcon.svelte";
 
@@ -5,6 +15,8 @@
 	interface Props {
 		/** Accessible name of the surface being edited. */
 		label: string;
+		/** Optional content inset keeps the move handle clear of an interactive header. */
+		moveInset?: LayoutMoveInset;
 		/** Whether this surface allows resizing. */
 		resizable: boolean;
 		/** Starts the owning surface's move gesture. */
@@ -12,12 +24,14 @@
 		/** Starts the owning surface's resize gesture. */
 		onresize: (event: PointerEvent) => void;
 	}
-	let { label, resizable, onmove, onresize }: Props = $props();
+	let { label, resizable, onmove, onresize, moveInset }: Props = $props();
 </script>
 
 <button
 	type="button"
 	class="ui-button ui-icon-button layout-handle layout-move"
+	style:left={moveInset === undefined ? undefined : `${moveInset.left + 2}px`}
+	style:top={moveInset === undefined ? undefined : `${moveInset.top + 2}px`}
 	onpointerdown={onmove}
 	aria-label={`Move ${label}`}><LayoutHandleIcon action="move" /></button
 >

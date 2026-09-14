@@ -86,6 +86,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"use_client_entity",
 	"preview_client_inventory",
 	"submit_client_inventory",
+	"equip_client_item",
 	"respond_to_client_confirmation",
 	"start_client_camera",
 	"set_client_camera_intent",

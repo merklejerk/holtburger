@@ -11,12 +11,22 @@ export function matchesKey(
 ): boolean {
 	return bindings.some(
 		(binding) =>
-			binding.key.toLowerCase() === event.key.toLowerCase() &&
+			(binding.key !== undefined
+				? binding.key.toLowerCase() === event.key.toLowerCase()
+				: binding.code === event.code) &&
 			(binding.shift === undefined || binding.shift === event.shiftKey) &&
 			(binding.ctrl === undefined || binding.ctrl === Boolean(event.ctrlKey)) &&
 			(binding.alt === undefined || binding.alt === Boolean(event.altKey)) &&
 			(binding.meta === undefined || binding.meta === Boolean(event.metaKey)),
 	);
+}
+
+/** Only identical key or code bindings prove a configuration-time conflict; mixed identities depend on layout. */
+function bindingIdentitiesOverlap(a: KeyBinding, b: KeyBinding): boolean {
+	if (a.key !== undefined && b.key !== undefined)
+		return a.key.toLowerCase() === b.key.toLowerCase();
+	if (a.code !== undefined && b.code !== undefined) return a.code === b.code;
+	return false;
 }
 
 /** Owns physical-key lifetimes for one active context and emits semantic action edges. */
@@ -33,7 +43,7 @@ export class InputContext<Action extends string> {
 					bindings[action].some((binding) =>
 						bindings[other].some(
 							(candidate) =>
-								binding.key.toLowerCase() === candidate.key.toLowerCase() &&
+								bindingIdentitiesOverlap(binding, candidate) &&
 								(["shift", "ctrl", "alt", "meta"] as const).every(
 									(modifier) =>
 										binding[modifier] === undefined ||
@@ -59,9 +69,15 @@ export class InputContext<Action extends string> {
 			return true;
 		}
 		if (held !== undefined) return true;
-		const action = (Object.keys(this.bindings) as Action[]).find((candidate) =>
-			matchesKey(event, this.bindings[candidate]),
+		const matches = (Object.keys(this.bindings) as Action[]).filter(
+			(candidate) => matchesKey(event, this.bindings[candidate]),
 		);
+		// A real event supplies the layout relationship that mixed key/code bindings cannot prove statically.
+		if (matches.length > 1)
+			throw new Error(
+				`Input event matches multiple actions: ${matches.join(", ")}.`,
+			);
+		const action = matches[0];
 		if (action === undefined) return false;
 		// A repeat after focus/context loss must not resurrect an outgoing press.
 		if (event.repeat) return true;

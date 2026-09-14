@@ -66,6 +66,21 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it.each([false, true])(
+		"submits equipment identity and off-side preference %s",
+		async (alternate) => {
+			const transport = new FakeClientTransport();
+			const session = new ClientLifecycleSession(transport);
+			await session.equipItem(91, alternate);
+			expect(transport.invocations).toEqual([
+				{
+					command: "equip_client_item",
+					args: { guid: 91, alternate: alternate },
+				},
+			]);
+		},
+	);
+
 	it("routes correlated inventory previews and submits semantic identities", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

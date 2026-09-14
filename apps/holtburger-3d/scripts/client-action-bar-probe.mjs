@@ -1,0 +1,393 @@
+import assert from "node:assert/strict";
+
+/** Real pointer/key events cover local binding edits and the typed equipment boundary. */
+export async function probeActionBars(client, evaluateExpression) {
+	const read = (expression) => evaluateExpression(client, expression);
+	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
+	// Stable identities belong to mounted bars, not their sequence labels or prior sessions.
+	const barIds = [
+		await read(
+			`document.querySelector('[data-action-bar-surface]').dataset.actionBarSurface`,
+		),
+	];
+	const cell = (bar, digit) => {
+		const id = barIds[bar - 1];
+		assert.notEqual(id, undefined, "Probe bar has not been created");
+		return `[data-action-bar="${id}"][data-action-cell="${digit}"]`;
+	};
+	const item = (bar, digit) =>
+		read(
+			`document.querySelector(${JSON.stringify(cell(bar, digit))}).dataset.actionItem ?? null`,
+		);
+	const commands = () => read(`${api}.inventoryDragCommands()`);
+	const equipCount = async () =>
+		(await commands()).filter((entry) => entry.command === "equip_client_item")
+			.length;
+	const point = (selector) =>
+		read(`(() => {
+  const element = document.querySelector(${JSON.stringify(selector)});
+  if (!element) throw new Error('Missing action probe element: ' + ${JSON.stringify(selector)});
+  element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  const r = element.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+ })()`);
+	const mouse = (type, p, buttons) =>
+		client.send("Input.dispatchMouseEvent", {
+			type,
+			...p,
+			button: "left",
+			buttons,
+			clickCount: 1,
+		});
+	const key = async (key, code, modifiers = 0) => {
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key,
+			code,
+			modifiers,
+		});
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			key,
+			code,
+			modifiers,
+		});
+	};
+	const drag = async (from, to, cancel = false) => {
+		const start = await point(from);
+		const end = typeof to === "string" ? await point(to) : to;
+		await mouse("mousePressed", start, 1);
+		await mouse("mouseMoved", end, 1);
+		if (cancel) await key("Escape", "Escape");
+		await mouse("mouseReleased", end, 0);
+	};
+
+	const click = async (position) => {
+		await mouse("mousePressed", position, 1);
+		await mouse("mouseReleased", position, 0);
+	};
+	const menu = async (sequence, operation) => {
+		await click(
+			await point(`button[aria-label="Action bar ${sequence} menu"]`),
+		);
+		const position = await read(`(() => {
+   const menu = document.querySelector('[role="menu"]:popover-open');
+   if (!menu) throw new Error('Action menu did not open');
+   const button = Array.from(menu.querySelectorAll('button')).find((button) => button.textContent === ${JSON.stringify(operation)});
+   const r = button.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+		await click(position);
+	};
+
+	const selected = () =>
+		read(
+			`document.querySelector('.action-cell[aria-pressed="true"]')?.dataset.actionCell ?? null`,
+		);
+
+	const assertStrip = async (orientation) => {
+		const geometry = await read(`(() => {
+   const bar = document.querySelector('[data-action-bar-surface="${barIds[0]}"]');
+   const bounds = (element) => { const r = element.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+   const strip = bar.querySelector('.action-menu-strip');
+   return { gap: Number.parseFloat(getComputedStyle(bar).gap), strip: bounds(strip), grid: bounds(bar.querySelector('.action-grid')), label: strip.textContent.trim() };
+  })()`);
+		assert.equal(geometry.label, "1");
+		if (orientation === "horizontal") {
+			assert.equal(geometry.strip.right + geometry.gap, geometry.grid.left);
+			assert.equal(geometry.strip.top, geometry.grid.top);
+			assert.equal(geometry.strip.height, geometry.grid.height);
+		} else {
+			assert.equal(geometry.strip.bottom + geometry.gap, geometry.grid.top);
+			assert.equal(geometry.strip.left, geometry.grid.left);
+			assert.equal(geometry.strip.width, geometry.grid.width);
+		}
+	};
+
+	const assertThemeGap = async (orientation) => {
+		const dimensions = () =>
+			read(`(() => {
+   const bar = document.querySelector('[data-action-bar-surface="${barIds[0]}"]');
+   const r = bar.getBoundingClientRect();
+   return { width: r.width, height: r.height, gap: Number.parseFloat(getComputedStyle(bar).gap) };
+  })()`);
+		const before = await dimensions();
+		const theme = (value) =>
+			read(`(async () => {
+   const root = document.querySelector('.client-world');
+   const value = ${JSON.stringify(value)};
+   if (value === null) root.style.removeProperty('--ui-action-bar-strip-gap');
+   else root.style.setProperty('--ui-action-bar-strip-gap', value);
+   for (let frame = 0; frame < 3; frame++) await new Promise(requestAnimationFrame);
+  })()`);
+		await theme(`calc(${before.gap}px + 0.5rem)`);
+		try {
+			const after = await dimensions();
+			assert.ok(
+				after.gap > before.gap,
+				"Theme CSS controls the live strip gap",
+			);
+			const axis = orientation === "horizontal" ? "width" : "height";
+			assert.equal(
+				after[axis] - before[axis],
+				after.gap - before.gap,
+				"Anchored extent follows resolved CSS spacing",
+			);
+			await assertStrip(orientation);
+		} finally {
+			await theme(null);
+		}
+	};
+	await assertThemeGap("horizontal");
+	const openMenu = () =>
+		read(`document.querySelector('[role="menu"]:popover-open') !== null`);
+	const activeCommand = () =>
+		read(`(() => {
+  const menu = document.querySelector('[role="menu"]:popover-open');
+  return document.getElementById(menu.getAttribute('aria-activedescendant')).textContent;
+ })()`);
+	const trigger = await point('button[aria-label="Action bar 1 menu"]');
+	await click(trigger);
+	assert.equal(await openMenu(), true);
+	assert.equal(await activeCommand(), "Clone");
+	await key("ArrowDown", "ArrowDown");
+	assert.equal(await activeCommand(), "Clone");
+	await key("ArrowDown", "ArrowDown");
+	assert.equal(await activeCommand(), "Clone");
+	await key("Escape", "Escape");
+	assert.equal(await openMenu(), false);
+	await click(trigger);
+	await click(trigger);
+	assert.equal(await openMenu(), false);
+	await click(trigger);
+	await click({ x: 1, y: 1 });
+	assert.equal(await openMenu(), false);
+
+	await assertStrip("horizontal");
+	const source = '.inventory-sections .item-grid-cell[data-item-guid="91"]';
+	const mutations = async () =>
+		(await commands()).filter((entry) =>
+			["submit_client_inventory", "equip_client_item"].includes(entry.command),
+		).length;
+	const before = await mutations();
+	await drag(source, cell(1, 3));
+	assert.equal(await item(1, 3), "91", "Inventory drag binds equipment");
+	assert.equal(
+		await mutations(),
+		before,
+		"Binding sends no inventory or equipment command",
+	);
+	const assertEquipped = async (expected) => {
+		const marked = await read(`(async () => {
+   const deadline = performance.now() + 5000;
+   while (performance.now() < deadline) {
+    const cell = document.querySelector(${JSON.stringify(cell(1, 0))});
+    const marked = cell.querySelector('.action-equipped') !== null;
+    if (marked === ${expected}) return { marked, label: cell.getAttribute('aria-label') };
+    await new Promise(requestAnimationFrame);
+   }
+   throw new Error('Equipped action indicator did not update');
+  })()`);
+		assert.equal(marked.marked, expected);
+		assert.equal(marked.label.includes("(Equipped)"), expected);
+	};
+	await drag(
+		'.equipment-row[aria-label="Chest armor"] .item-grid-cell[data-item-guid="95"]',
+		cell(1, 0),
+	);
+	await assertEquipped(true);
+	await drag(source, cell(1, 0));
+	await assertEquipped(false);
+	await drag(cell(1, 0), { x: 500, y: 300 });
+	const count = await equipCount();
+	await key("1", "Digit1", 2);
+	assert.equal(await selected(), "1", "Focus begins at the first empty slot");
+	await key("3", "Digit3");
+	assert.equal(await selected(), null);
+	assert.equal(await equipCount(), count + 1);
+	assert.deepEqual((await commands()).at(-1), {
+		command: "equip_client_item",
+		args: { guid: 91, alternate: false },
+	});
+	await drag(cell(1, 3), cell(1, 6));
+	assert.equal(await item(1, 3), null);
+	assert.equal(await item(1, 6), "91");
+	await key("1", "Digit1", 2);
+	await drag(cell(1, 6), { x: 500, y: 300 }, true);
+	assert.equal(await item(1, 6), "91", "Escape preserves the binding");
+	const bounds = () =>
+		read(`Array.from(document.querySelectorAll('[data-action-bar-surface]'), (element) => {
+  const r = element.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+ })`);
+	const assertNoOverlap = (rectangles) => {
+		for (const [index, a] of rectangles.entries())
+			for (const b of rectangles.slice(index + 1))
+				assert.ok(
+					a.right <= b.left ||
+						b.right <= a.left ||
+						a.bottom <= b.top ||
+						b.bottom <= a.top,
+					"Clones must not overlap existing bars",
+				);
+	};
+	await menu(1, "Clone");
+	barIds.push(
+		await read(
+			`document.querySelectorAll("[data-action-bar-surface]")[1].dataset.actionBarSurface`,
+		),
+	);
+	await key("1", "Digit1", 2);
+	await key("2", "Digit2", 2);
+	assert.equal(
+		await read(`document.activeElement.dataset.actionBarSurface`),
+		barIds[1],
+		"Focus chords switch bars without activating a cell",
+	);
+	await key("Escape", "Escape");
+	const horizontalClones = await bounds();
+	assert.equal(horizontalClones[0].left, horizontalClones[1].left);
+	assert.ok(
+		horizontalClones[1].bottom < horizontalClones[0].top,
+		"Horizontal clone stacks above source",
+	);
+	assertNoOverlap(horizontalClones);
+	assert.equal(await item(2, 6), "91");
+	await drag(cell(1, 6), cell(2, 3));
+	assert.equal(await item(1, 6), null);
+	assert.equal(await item(2, 3), "91");
+	await drag(cell(2, 3), source);
+	assert.equal(
+		await item(2, 3),
+		null,
+		"Release over inventory clears rather than moving an item",
+	);
+	assert.equal(await item(2, 6), "91", "Sparse slots retain their addresses");
+	await menu(2, "Cycle");
+	await key("1", "Digit1", 2);
+	assert.equal(
+		await read(`document.activeElement.dataset.actionBarSurface`),
+		barIds[1],
+		"Cycling changes hotkeys without identity churn",
+	);
+	await key("Escape", "Escape");
+	await menu(1, "Delete");
+	assert.equal(
+		await read(`document.querySelectorAll('[data-action-bar-surface]').length`),
+		1,
+	);
+	await menu(1, "Delete");
+	assert.equal(
+		await read(`document.querySelectorAll('[data-action-bar-surface]').length`),
+		1,
+	);
+	// Disabled deletion leaves the menu open.
+	await key("Escape", "Escape");
+	await read(
+		`document.querySelector('button[aria-label="Unlock UI layout"]').click()`,
+	);
+	const cellExtent = await read(
+		`document.querySelector(".action-cell").getBoundingClientRect().width`,
+	);
+	const resize = await point('button[aria-label="Resize action bar 1"]');
+	await mouse("mousePressed", resize, 1);
+	await mouse("mouseMoved", { x: resize.x, y: resize.y - cellExtent }, 1);
+	await mouse("mouseReleased", { x: resize.x, y: resize.y - cellExtent }, 0);
+	const positions = () =>
+		read(
+			`Array.from(document.querySelectorAll('.action-cell'), (element) => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y }; })`,
+		);
+	await assertStrip("horizontal");
+	let grid = await positions();
+	assert.equal(grid[0].x, grid[5].x);
+	assert.ok(
+		grid[5].y > grid[0].y,
+		"Double horizontal shape has two five-cell rows",
+	);
+	await key("1", "Digit1", 2);
+	await key("ArrowUp", "ArrowUp");
+	assert.equal(await selected(), "6");
+	await key("Enter", "Enter");
+	await menu(1, "Rotate");
+	await assertStrip("vertical");
+	await assertThemeGap("vertical");
+	grid = await positions();
+	assert.equal(grid[0].y, grid[5].y);
+	assert.ok(
+		grid[5].x > grid[0].x,
+		"Double vertical shape has two five-cell columns",
+	);
+	await key("1", "Digit1", 2);
+	await key("ArrowLeft", "ArrowLeft");
+	assert.equal(await selected(), "6");
+	await read(`window.dispatchEvent(new Event('blur'))`);
+	assert.equal(await selected(), null);
+	await key("6", "Digit6");
+	assert.equal(
+		await equipCount(),
+		count + 1,
+		"Blur relinquishes one-shot command ownership",
+	);
+	await read(
+		`document.querySelector('button[aria-label="Lock UI layout"]').click()`,
+	);
+	await menu(1, "Clone");
+	const verticalClones = await bounds();
+	assert.equal(verticalClones[0].top, verticalClones[1].top);
+	assertNoOverlap(verticalClones);
+	await menu(1, "Clone");
+	assertNoOverlap(await bounds());
+	await menu(2, "Delete");
+	await menu(2, "Delete");
+	// Earlier swap coverage emptied the surviving bar; bind a fresh activation target.
+	await drag(source, cell(1, 6));
+	const modifierCommands = await equipCount();
+	await key("1", "Digit1", 2);
+	await key("^", "Digit6", 8);
+	assert.deepEqual((await commands()).at(-1), {
+		command: "equip_client_item",
+		args: { guid: 91, alternate: true },
+	});
+	assert.equal(await selected(), null);
+	await key("1", "Digit1", 2);
+	// Move from the first slot to the populated sixth slot in the double vertical grid.
+	await key("ArrowLeft", "ArrowLeft");
+	await key("Enter", "Enter", 8);
+	assert.deepEqual((await commands()).at(-1), {
+		command: "equip_client_item",
+		args: { guid: 91, alternate: true },
+	});
+	const actionPoint = await point(cell(1, 6));
+	for (const modifiers of [8, 0]) {
+		for (const [type, buttons] of [
+			["mousePressed", 1],
+			["mouseReleased", 0],
+		])
+			await client.send("Input.dispatchMouseEvent", {
+				type,
+				...actionPoint,
+				button: "left",
+				buttons,
+				clickCount: 1,
+				modifiers,
+			});
+		assert.deepEqual((await commands()).at(-1), {
+			command: "equip_client_item",
+			args: { guid: 91, alternate: modifiers === 8 },
+		});
+	}
+	assert.equal(await equipCount(), modifierCommands + 4);
+	return {
+		clonePlacement: true,
+		menuStrip: true,
+		binding: true,
+		typedEquipmentActivation: true,
+		sparseTransfer: true,
+		crossBarSwap: true,
+		outsideClear: true,
+		cancellation: true,
+		sequencing: true,
+		mandatoryBar: true,
+		discreteResize: true,
+		rotation: true,
+		gridNavigation: true,
+		blurCancellation: true,
+	};
+}

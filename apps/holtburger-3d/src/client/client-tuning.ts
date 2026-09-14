@@ -110,3 +110,15 @@ export const CLIENT_TUNING = {
 	/** Client-owned starting display policy. */
 	frameSettings: CLIENT_FRAME_SETTINGS,
 } as const satisfies ClientTuning;
+
+/** App-local action-bar gesture and placement tuning. */
+export const CLIENT_ACTION_BAR_TUNING = {
+	/** Thickness of the numbered menu strip beside the action cells. */
+	menuStripSize: 24,
+	/** Initial CSS basis before the mounted bar measures the active inventory theme. */
+	initialCellSize: 36,
+	/** Minimum spacing between a new clone and existing action bars. */
+	cloneGap: 4,
+	/** Midpoint between one and two strips used by the snapping resize gesture. */
+	doubleStripThreshold: 1.5,
+} as const;

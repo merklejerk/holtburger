@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onDestroy, type Snippet } from "svelte";
-	import LayoutControls from "../app/LayoutControls.svelte";
+	import LayoutControls, {
+		type LayoutMoveInset,
+	} from "../app/LayoutControls.svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import {
 		anchorClientHudPlacement,
@@ -14,6 +16,8 @@
 		readonly children: Snippet;
 		readonly editable: boolean;
 		readonly label: string;
+		/** Reserved header space before the unlocked move handle. */
+		readonly moveInset?: LayoutMoveInset;
 		readonly minHeight: number;
 		readonly minWidth: number;
 		readonly placement: ClientHudPlacement;
@@ -29,6 +33,7 @@
 		children,
 		editable,
 		label,
+		moveInset,
 		minHeight,
 		minWidth,
 		placement,
@@ -126,6 +131,7 @@
 	</div>
 	{#if editable}
 		<LayoutControls
+			{moveInset}
 			{label}
 			{resizable}
 			onmove={beginDrag}

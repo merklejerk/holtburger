@@ -12,6 +12,8 @@ export interface KeyboardConsumer {
 
 /** An explicitly activatable UI surface, also used by editors nested within it. */
 export interface KeyboardScope {
+	/** One-shot command scopes end on cancellation and are not restored after modals. */
+	readonly transient?: boolean;
 	/** Optional command that enters this scope from the game or another explicit scope. */
 	readonly activation?: (event: KeyboardEvent) => boolean;
 	/** Scope-local behavior runs before native editing. */
@@ -61,6 +63,8 @@ export class KeyboardInputPolicy {
 	readonly #presses = new Map<string, "active" | "cancelled">();
 	/** Focused editor or intentional UI surface; null selects the game. */
 	#owner: HTMLElement | null = null;
+	/** A pointer gesture must see Escape before a focused scope consumes it. */
+	#escapeCancellation: (() => boolean) | null = null;
 	/** One mode-specific controller, independent of pointer handlers. */
 	#game: KeyboardConsumer | null = null;
 	/** The DOM boundary exists only during the mounted app lifetime. */
@@ -132,6 +136,16 @@ export class KeyboardInputPolicy {
 		};
 	}
 
+	/** Register the app item-gesture cancellation edge; true means a gesture was cancelled. */
+	bindEscapeCancellation(cancel: () => boolean): () => void {
+		if (this.#escapeCancellation !== null)
+			throw new Error("Escape cancellation is already registered.");
+		this.#escapeCancellation = cancel;
+		return () => {
+			if (this.#escapeCancellation === cancel) this.#escapeCancellation = null;
+		};
+	}
+
 	/** Svelte action: registration alone does not activate a keyboard scope. */
 	readonly scope = (
 		element: HTMLElement,
@@ -158,7 +172,14 @@ export class KeyboardInputPolicy {
 
 	/** Svelte action: acquire modality, open safely, and restore the prior valid interaction. */
 	readonly modal = (element: HTMLDialogElement): { destroy: () => void } => {
-		const entry = { element, previous: this.#owner };
+		const previous = this.#owner;
+		const entry = {
+			element,
+			previous:
+				previous !== null && this.#scopeFor(previous)?.transient
+					? null
+					: previous,
+		};
 		// An existing blocker leaves UI scopes active; nested modality must cancel them too.
 		if (!this.viewport.allowed) this.cancel();
 		const release = this.viewport.block();
@@ -208,7 +229,15 @@ export class KeyboardInputPolicy {
 	cancel(): void {
 		for (const key of this.#presses.keys()) this.#presses.set(key, "cancelled");
 		if (this.#owner === null) this.#game?.cancel();
-		else this.#scopeFor(this.#owner)?.cancel?.();
+		else {
+			const owner = this.#owner;
+			const scope = this.#scopeFor(owner);
+			scope?.cancel?.();
+			if (scope?.transient) {
+				this.#owner = null;
+				if (this.#document?.activeElement === owner) owner.blur();
+			}
+		}
 	}
 
 	/** Capture routing also prevents native button activation from competing with game commands. */
@@ -229,6 +258,12 @@ export class KeyboardInputPolicy {
 			event.stopImmediatePropagation();
 			return;
 		}
+		if (event.key === "Escape" && this.#escapeCancellation?.()) {
+			this.returnToGame();
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			return;
+		}
 		const owner = this.#owner;
 		const editor = owner !== null && isEditor(owner);
 		// The active interaction gets first refusal before another scope’s activation command.
@@ -242,7 +277,7 @@ export class KeyboardInputPolicy {
 			fresh
 		) {
 			for (const [element, scope] of this.#scopes) {
-				if (scope.activation?.(event) && this.#eligible(element)) {
+				if (this.#eligible(element) && scope.activation?.(event)) {
 					this.activate(element);
 					event.preventDefault();
 					event.stopImmediatePropagation();

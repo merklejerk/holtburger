@@ -1,6 +1,8 @@
 import { INPUT_DEFAULTS } from "./input-defaults";
 import { InputContext, matchesKey } from "./input-context";
 import type {
+	ActionBarDirection,
+	InputDigitIndex,
 	CharacterAction,
 	FlyAction,
 	InputConfiguration,
@@ -31,6 +33,42 @@ export class AppInput {
 		event: InputKeyEvent,
 	): boolean {
 		return matchesKey(event, this.configuration.client[action]);
+	}
+
+	/** Resolve a numbered bar's focus chord using the shared installation configuration. */
+	actionBarFocus(index: InputDigitIndex, event: InputKeyEvent): boolean {
+		return matchesKey(event, this.configuration.actionBars.focus[index]);
+	}
+	/** Resolve direct activation of a cell within the currently focused bar. */
+	actionBarCell(index: InputDigitIndex, event: InputKeyEvent): boolean {
+		return matchesKey(event, this.configuration.actionBars.cells[index]);
+	}
+	/** Resolve scoped command intent without assigning keyboard ownership. */
+	actionBarCommand(
+		action: keyof InputConfiguration["actionBars"]["commands"],
+		event: InputKeyEvent,
+	): boolean {
+		return matchesKey(event, this.configuration.actionBars.commands[action]);
+	}
+	/** Return spatial navigation intent, independent of browser key names. */
+	actionBarDirection(event: InputKeyEvent): ActionBarDirection | null {
+		return (
+			(["up", "down", "left", "right"] as const).find((direction) =>
+				this.actionBarCommand(direction, event),
+			) ?? null
+		);
+	}
+	/** Both keyboard and pointer activation read the same configured modifier state. */
+	actionBarAlternate(
+		event: Pick<InputKeyEvent, "shiftKey" | "ctrlKey" | "altKey" | "metaKey">,
+	): boolean {
+		const fields = {
+			shift: "shiftKey",
+			ctrl: "ctrlKey",
+			alt: "altKey",
+			meta: "metaKey",
+		} as const;
+		return Boolean(event[fields[this.configuration.actionBars.alternate]]);
 	}
 
 	/** Resolve gesture activation without imposing click/drag interpretation on the viewport. */

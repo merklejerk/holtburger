@@ -95,6 +95,7 @@ type ClientCommandName = Extract<
 	| "use_client_entity"
 	| "preview_client_inventory"
 	| "submit_client_inventory"
+	| "equip_client_item"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
 	| "set_client_camera_intent"
@@ -387,6 +388,14 @@ export class ClientLifecycleSession {
 	async submitInventory(intent: ClientInventoryIntent): Promise<void> {
 		await this.#transport.invoke("submit_client_inventory", {
 			intent: inventoryIntentSchema.parse(intent),
+		});
+	}
+
+	/** Equip one owned item through core’s equipment replacement policy with a side preference. */
+	async equipItem(guid: number, alternate: boolean): Promise<void> {
+		await this.#transport.invoke("equip_client_item", {
+			guid,
+			alternate,
 		});
 	}
 

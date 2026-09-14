@@ -95,7 +95,30 @@ pub fn plan_equipment_change(
             Ok((guid, mask, facts))
         })
         .collect::<Result<Vec<_>, EquipmentPlanError>>()?;
+    let automatic = matches!(slot, None | Some(TargetSlot::PreferredSide { .. }));
     let requested = match slot {
+        Some(TargetSlot::PreferredSide { alternate }) => {
+            match incoming.resolve_location(MAIN_HAND_LOCATIONS) {
+                Some(main) => {
+                    if alternate {
+                        incoming.resolve_location(EquipMask::SHIELD).unwrap_or(main)
+                    } else {
+                        main
+                    }
+                }
+                None => {
+                    let right = incoming.valid_locations
+                        & (EquipMask::WRIST_WEAR_RIGHT | EquipMask::FINGER_WEAR_RIGHT);
+                    if alternate {
+                        incoming
+                            .resolve_location(right)
+                            .unwrap_or(incoming.valid_locations)
+                    } else {
+                        incoming.valid_locations
+                    }
+                }
+            }
+        }
         Some(TargetSlot::EquipMask(mask)) => mask,
         Some(TargetSlot::MainHand) => MAIN_HAND_LOCATIONS,
         Some(TargetSlot::OffHand) => EquipMask::SHIELD,
@@ -108,7 +131,7 @@ pub fn plan_equipment_change(
         .or_else(|| {
             // Default jewelry use chooses a free side first, then the first allowed
             // side. An explicit multi-side request remains invalid.
-            if slot.is_some() {
+            if !automatic {
                 return None;
             }
             let candidates = incoming.valid_locations;
@@ -181,8 +204,8 @@ pub(super) mod tests {
     use super::*;
     use holtburger_common::properties::{InventoryEntryKind, ItemType, PropertyInt};
     use holtburger_protocol::messages::{
-        GameEvent, GameEventMessage, GameMessage, ViewContentsEventData, ViewContentsEventItem,
-        WieldObjectEventData,
+        GameEvent, GameEventMessage, GameMessage, InventoryPutObjInContainerEventData,
+        ViewContentsEventData, ViewContentsEventItem, WieldObjectEventData,
     };
     use holtburger_world::entity::Entity;
 
@@ -262,6 +285,157 @@ pub(super) mod tests {
             );
         }
         world
+    }
+
+    #[test]
+    fn preferred_hand_respects_eligibility_and_other_equipment_defaults() {
+        for (locations, item_type, off_target) in [
+            (
+                EquipMask::MELEE_WEAPON,
+                ItemType::MELEE_WEAPON,
+                EquipMask::SHIELD,
+            ),
+            (
+                EquipMask::CASTER | EquipMask::SHIELD,
+                ItemType::CASTER,
+                EquipMask::SHIELD,
+            ),
+            (EquipMask::CASTER, ItemType::CASTER, EquipMask::CASTER),
+            (
+                EquipMask::TWO_HANDED,
+                ItemType::MELEE_WEAPON,
+                EquipMask::TWO_HANDED,
+            ),
+            (EquipMask::SHIELD, ItemType::ARMOR, EquipMask::SHIELD),
+        ] {
+            let mut world = outfit(10, 10);
+            let item = world.entities.get_mut(INCOMING).expect("incoming");
+            item.properties
+                .ints
+                .insert(PropertyInt::ValidLocations, locations.bits() as i32);
+            item.properties
+                .ints
+                .insert(PropertyInt::ItemType, item_type.bits() as i32);
+            for alternate in [false, true] {
+                let plan = plan_equipment_change(
+                    &world,
+                    INCOMING,
+                    Some(TargetSlot::PreferredSide { alternate }),
+                )
+                .expect("valid preference");
+                let main = locations & MAIN_HAND_LOCATIONS;
+                let expected = if !alternate && !main.is_empty() {
+                    main
+                } else {
+                    off_target
+                };
+                assert_eq!(plan.target, expected);
+            }
+            event(
+                &mut world,
+                GameEvent::WieldObject(Box::new(WieldObjectEventData {
+                    object_guid: INCOMING,
+                    equip_mask: off_target,
+                })),
+            );
+            let moved = plan_equipment_change(
+                &world,
+                INCOMING,
+                Some(TargetSlot::PreferredSide { alternate: false }),
+            )
+            .expect("already worn item remains movable");
+            let main = locations & MAIN_HAND_LOCATIONS;
+            assert_eq!(
+                moved.target,
+                if main.is_empty() { off_target } else { main }
+            );
+        }
+    }
+
+    #[test]
+    fn jewelry_side_policy_reapplies_current_occupancy_with_shift_override() {
+        for (left, right) in [
+            (EquipMask::FINGER_WEAR_LEFT, EquipMask::FINGER_WEAR_RIGHT),
+            (EquipMask::WRIST_WEAR_LEFT, EquipMask::WRIST_WEAR_RIGHT),
+        ] {
+            // Incoming may be carried or already on either side. Other occupants
+            // remain real blockers, including when Shift replaces an occupied right side.
+            for incoming_side in [None, Some(left), Some(right)] {
+                for occupied in [EquipMask::NONE, left, right, left | right] {
+                    if incoming_side.is_some_and(|side| occupied.intersects(side)) {
+                        continue;
+                    }
+                    let mut world = outfit(10, 10);
+                    for guid in [INCOMING, CHEST, ARMS] {
+                        let item = world.entities.get_mut(guid).expect("jewelry fixture");
+                        item.properties
+                            .ints
+                            .insert(PropertyInt::ValidLocations, (left | right).bits() as i32);
+                        item.properties
+                            .ints
+                            .insert(PropertyInt::ItemType, ItemType::JEWELRY.bits() as i32);
+                    }
+                    for (guid, side) in [(CHEST, left), (ARMS, right)] {
+                        if occupied.intersects(side) {
+                            event(
+                                &mut world,
+                                GameEvent::WieldObject(Box::new(WieldObjectEventData {
+                                    object_guid: guid,
+                                    equip_mask: side,
+                                })),
+                            );
+                        } else {
+                            // Remove the fixture's initial armor equipment through the world event path.
+                            event(
+                                &mut world,
+                                GameEvent::InventoryPutObjInContainer(Box::new(
+                                    InventoryPutObjInContainerEventData {
+                                        item_guid: guid,
+                                        container_guid: PACK,
+                                        slot: 0,
+                                        container_type: InventoryEntryKind::Item,
+                                    },
+                                )),
+                            );
+                        }
+                    }
+                    if let Some(side) = incoming_side {
+                        event(
+                            &mut world,
+                            GameEvent::WieldObject(Box::new(WieldObjectEventData {
+                                object_guid: INCOMING,
+                                equip_mask: side,
+                            })),
+                        );
+                    }
+                    let all_occupied = occupied | incoming_side.unwrap_or(EquipMask::NONE);
+                    for alternate in [false, true] {
+                        let expected = if alternate
+                            || (all_occupied.contains(left) && !all_occupied.contains(right))
+                        {
+                            right
+                        } else {
+                            left
+                        };
+                        let plan = plan_equipment_change(
+                            &world,
+                            INCOMING,
+                            Some(TargetSlot::PreferredSide { alternate }),
+                        )
+                        .expect("jewelry plan");
+                        assert_eq!(plan.target, expected);
+                        let displaced: Vec<_> =
+                            plan.unequips.iter().map(|item| item.item).collect();
+                        let expected_displaced = if occupied.intersects(expected) {
+                            vec![if expected == left { CHEST } else { ARMS }]
+                        } else {
+                            vec![]
+                        };
+                        assert_eq!(displaced, expected_displaced);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

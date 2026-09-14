@@ -1,3 +1,5 @@
+import { isBindingEquipment } from "./client-action-equipment";
+import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { nextInventoryPreviewSequence } from "./client-inventory-contract";
 import type { ClientInventoryState } from "./client-inventory-state";
 import type {
@@ -6,17 +8,42 @@ import type {
 } from "./client-inventory-contract";
 import { CLIENT_TUNING } from "./client-tuning";
 
+import type {
+	ActionCellAddress,
+	ActionContent,
+} from "./client-action-bar-state";
+import { actionDigitIndex } from "./client-action-bar-state";
+
+/** Local binding edits supplied by the action-bar collection owner. */
+export interface ActionDragBindings {
+	readonly read: (cell: ActionCellAddress) => ActionContent | null;
+	readonly bind: (cell: ActionCellAddress, content: ActionContent) => void;
+	readonly transfer: (
+		source: ActionCellAddress,
+		target: ActionCellAddress | null,
+	) => void;
+}
+
 interface DragSource {
 	readonly item: number;
 	/** Gesture origin is fixed even if authoritative rendering moves or detaches the cell. */
-	readonly origin: "contents" | "equipment" | "pack";
+	readonly origin: "contents" | "equipment" | "pack" | ActionCellAddress;
 	readonly element: HTMLElement;
 }
-interface DragTarget {
+interface InventoryDragTarget {
+	readonly kind: "inventory";
 	readonly element: HTMLElement;
 	readonly intent: ClientInventoryIntent;
 	readonly sequence: number;
 }
+type DragTarget =
+	| InventoryDragTarget
+	| {
+			readonly kind: "action";
+			readonly element: HTMLElement;
+			readonly cell: ActionCellAddress;
+	  };
+
 type Gesture =
 	| {
 			kind: "pressed";
@@ -34,27 +61,33 @@ type Gesture =
 	| { kind: "released"; source: DragSource; target: DragTarget };
 
 /** Imperative pointer owner: only semantic target changes cross the host boundary. */
-export class ClientInventoryDrag {
+export class ClientItemDrag {
 	readonly #root: HTMLElement;
 	readonly #inventory: ClientInventoryState;
 	readonly #ghost: HTMLElement;
 	readonly #abort = new AbortController();
 	readonly #unsubscribe: () => void;
+	readonly #releaseEscape: () => void;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#gesture: Gesture | null = null;
 	#cursor = { x: 0, y: 0 };
-	#view: ReturnType<ClientInventoryState["read"]>;
+	/** Last active gesture view; idle world clicks do not prepare inventory sections. */
+	#view: ReturnType<ClientInventoryState["read"]> | null = null;
 	/** Current host-owned merge eligibility queries, retired on view changes or drag end. */
 	readonly #mergeHints = new Map<number, HTMLElement>();
 	#suppressClick = false;
 	#suppressDoubleClickUntil = 0;
 
-	constructor(root: HTMLElement, inventory: ClientInventoryState) {
+	constructor(
+		root: HTMLElement,
+		inventory: ClientInventoryState,
+		private readonly bindings: ActionDragBindings,
+		keyboard: KeyboardInputPolicy,
+	) {
 		this.#root = root;
 		this.#inventory = inventory;
-		this.#view = inventory.read();
 		this.#ghost = document.createElement("div");
-		this.#ghost.className = "inventory-drag-ghost";
+		this.#ghost.className = "item-drag-ghost";
 		// The top layer escapes panel backdrop-filter containing blocks and clipping.
 		this.#ghost.popover = "manual";
 		this.#ghost.setAttribute("aria-hidden", "true");
@@ -66,9 +99,10 @@ export class ClientInventoryDrag {
 		window.addEventListener("pointerup", this.#up, options);
 		window.addEventListener("pointercancel", this.#cancelPointer, options);
 		window.addEventListener("blur", this.#cancel, options);
-		window.addEventListener("keydown", this.#key, {
-			...options,
-			capture: true,
+		this.#releaseEscape = keyboard.bindEscapeCancellation(() => {
+			if (this.#gesture === null) return false;
+			this.#cancel();
+			return true;
 		});
 		root.addEventListener("click", this.#click, { ...options, capture: true });
 		root.addEventListener("dblclick", this.#doubleClick, {
@@ -77,7 +111,13 @@ export class ClientInventoryDrag {
 		});
 		root.addEventListener(
 			"dragstart",
-			(event) => event.preventDefault(),
+			(event) => {
+				if (
+					event.target instanceof Element &&
+					event.target.closest(".item-grid-cell, [data-action-cell]")
+				)
+					event.preventDefault();
+			},
 			options,
 		);
 		this.#unsubscribe = inventory.interactions.subscribe((event) => {
@@ -90,8 +130,12 @@ export class ClientInventoryDrag {
 				this.#cancel();
 		});
 		this.#timer = setInterval(() => {
+			if (this.#gesture === null) return;
 			const view = inventory.read();
-			if (view.pending || this.#root.dataset.inventoryModal === "true") {
+			if (
+				view.pending ||
+				this.#root.querySelector('[data-inventory-modal="true"]') !== null
+			) {
 				this.#cancel();
 				return;
 			}
@@ -107,32 +151,40 @@ export class ClientInventoryDrag {
 		this.#cancel();
 		this.#abort.abort();
 		this.#unsubscribe();
+		this.#releaseEscape();
 		clearInterval(this.#timer);
 		this.#ghost.remove();
 	}
 
 	#down = (event: PointerEvent): void => {
+		// Suppression belongs to the completed gesture, never a later independent click.
+		this.#suppressClick = false;
 		if (
 			event.button !== 0 ||
 			!event.isPrimary ||
-			this.#root.dataset.inventoryModal === "true" ||
-			this.#inventory.read().pending
+			this.#root.querySelector('[data-inventory-modal="true"]') !== null
 		)
 			return;
 		const element =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>(
-						".item-grid-cell[data-item-guid]:not(:disabled)",
+						".item-grid-cell[data-item-guid]:not(:disabled), [data-action-cell][data-action-item]",
 					)
 				: null;
 		if (element === null || !this.#root.contains(element)) return;
-		const item = Number(element.dataset.itemGuid);
+		if (this.#inventory.read().pending) return;
+		const actionCell = this.#actionCell(element);
+		const bound = actionCell === null ? null : this.bindings.read(actionCell);
+		if (actionCell !== null && bound === null) return;
+		const item = bound === null ? Number(element.dataset.itemGuid) : bound.item;
 		const origin =
-			element.closest(".inventory-pack-strip") !== null
-				? "pack"
-				: element.closest(".equipment-row") !== null
-					? "equipment"
-					: "contents";
+			actionCell !== null
+				? actionCell
+				: element.closest(".inventory-pack-strip") !== null
+					? "pack"
+					: element.closest(".equipment-row") !== null
+						? "equipment"
+						: "contents";
 		if (origin === "pack") {
 			const facts = this.#inventory
 				.read()
@@ -188,7 +240,9 @@ export class ClientInventoryDrag {
 			);
 			this.#ghost.hidden = false;
 			this.#ghost.showPopover();
-			this.#root.dataset.inventoryDragging = "true";
+			this.#root.dataset.itemDragging = "true";
+			// Initial hints already describe this view; the timer must not retire them as stale.
+			this.#view = this.#inventory.read();
 			this.#dimDropCandidates();
 		}
 		event.preventDefault();
@@ -200,7 +254,11 @@ export class ClientInventoryDrag {
 	/** Dim blocked contents targets and mirror the equipment location-mask hint. */
 	#dimDropCandidates(): void {
 		const gesture = this.#gesture;
-		if (gesture?.kind !== "dragging") return;
+		if (
+			gesture?.kind !== "dragging" ||
+			typeof gesture.source.origin !== "string"
+		)
+			return;
 		const blocksContents =
 			this.#inventory.read().sortMode !== "native" &&
 			gesture.source.origin === "contents";
@@ -257,7 +315,42 @@ export class ClientInventoryDrag {
 	#target(force: boolean): void {
 		const gesture = this.#gesture;
 		if (gesture?.kind !== "dragging") return;
+		// Removing the source bar cancels rather than committing a stale address.
+		if (
+			typeof gesture.source.origin !== "string" &&
+			!gesture.source.element.isConnected
+		) {
+			this.#cancel();
+			return;
+		}
 		const hit = document.elementFromPoint(this.#cursor.x, this.#cursor.y);
+
+		const actionElement = hit?.closest<HTMLElement>("[data-action-cell]");
+		const cell =
+			actionElement === undefined ||
+			actionElement === null ||
+			!this.#root.contains(actionElement)
+				? null
+				: this.#actionCell(actionElement);
+		if (
+			cell !== null &&
+			actionElement !== undefined &&
+			actionElement !== null
+		) {
+			this.#clearHighlight();
+			gesture.target = { kind: "action", element: actionElement, cell };
+			actionElement.dataset.inventoryDrop =
+				typeof gesture.source.origin !== "string" ||
+				this.#equippable(gesture.source.item)
+					? "accepted"
+					: "rejected";
+			return;
+		}
+		if (typeof gesture.source.origin !== "string") {
+			this.#clearHighlight();
+			gesture.target = null;
+			return;
+		}
 		let element: HTMLElement | null = null;
 		let target: ClientInventoryIntent["target"] | null = null;
 		if (hit !== null && this.#root.contains(hit)) {
@@ -302,7 +395,8 @@ export class ClientInventoryDrag {
 		}
 		if (
 			!force &&
-			gesture.target?.element === element &&
+			gesture.target?.kind === "inventory" &&
+			gesture.target.element === element &&
 			JSON.stringify(gesture.target.intent.target) === JSON.stringify(target)
 		)
 			return;
@@ -317,8 +411,12 @@ export class ClientInventoryDrag {
 		});
 	}
 
-	#request(element: HTMLElement, intent: ClientInventoryIntent): DragTarget {
-		const target = {
+	#request(
+		element: HTMLElement,
+		intent: ClientInventoryIntent,
+	): InventoryDragTarget {
+		const target: InventoryDragTarget = {
+			kind: "inventory",
 			element,
 			intent,
 			sequence: nextInventoryPreviewSequence(),
@@ -331,7 +429,8 @@ export class ClientInventoryDrag {
 				if (
 					gesture !== null &&
 					gesture.kind !== "pressed" &&
-					gesture.target?.sequence === target.sequence
+					gesture.target?.kind === "inventory" &&
+					gesture.target.sequence === target.sequence
 				)
 					this.#failure(error);
 			});
@@ -349,7 +448,8 @@ export class ClientInventoryDrag {
 		if (
 			gesture === null ||
 			gesture.kind === "pressed" ||
-			gesture.target?.sequence !== result.sequence
+			gesture.target?.kind !== "inventory" ||
+			gesture.target.sequence !== result.sequence
 		)
 			return;
 		const target = gesture.target;
@@ -415,6 +515,28 @@ export class ClientInventoryDrag {
 		this.#clearDimming();
 		this.#cursor = { x: event.clientX, y: event.clientY };
 		this.#target(true);
+		if (this.#gesture !== gesture) return;
+
+		if (typeof gesture.source.origin !== "string") {
+			const target =
+				gesture.target?.kind === "action" ? gesture.target.cell : null;
+			const source = gesture.source.origin;
+			this.#finishGesture();
+			this.bindings.transfer(source, target);
+			return;
+		}
+		if (gesture.target?.kind === "action") {
+			const target = gesture.target.cell;
+			const item = gesture.source.item;
+			this.#finishGesture();
+			if (this.#equippable(item))
+				this.bindings.bind(target, { kind: "equipment", item });
+			else
+				this.#inventory.reportFailure(
+					"Only owned equipment can be bound to an action cell.",
+				);
+			return;
+		}
 		if (gesture.target === null) {
 			this.#cancel();
 			return;
@@ -425,6 +547,19 @@ export class ClientInventoryDrag {
 			target: gesture.target,
 		};
 	};
+
+	/** DOM labels carry stable cell addresses independently of remappable key bindings. */
+	#actionCell(element: HTMLElement): ActionCellAddress | null {
+		if (!element.hasAttribute("data-action-cell")) return null;
+		const slot = actionDigitIndex(element.dataset.actionCell ?? "");
+		const bar = Number(element.dataset.actionBar);
+		if (slot === null || !Number.isSafeInteger(bar))
+			throw new Error("Invalid action cell address");
+		return { bar, slot };
+	}
+	#equippable(item: number): boolean {
+		return isBindingEquipment(this.#inventory.readItem(item));
+	}
 
 	#clearHighlight(): void {
 		for (const element of this.#root.querySelectorAll<HTMLElement>(
@@ -437,9 +572,10 @@ export class ClientInventoryDrag {
 	#finishGesture(): void {
 		this.#clearDimming();
 		this.#gesture = null;
+		this.#view = null;
 		this.#ghost.hidden = true;
 		this.#ghost.hidePopover();
-		delete this.#root.dataset.inventoryDragging;
+		delete this.#root.dataset.itemDragging;
 		this.#clearHighlight();
 	}
 	#cancel = (): void => {
@@ -459,13 +595,6 @@ export class ClientInventoryDrag {
 			this.#gesture?.pointer === event.pointerId
 		)
 			this.#cancel();
-	};
-	#key = (event: KeyboardEvent): void => {
-		if (event.key === "Escape" && this.#gesture !== null) {
-			event.stopImmediatePropagation();
-			event.preventDefault();
-			this.#cancel();
-		}
 	};
 	#click = (event: MouseEvent): void => {
 		if (this.#suppressClick) {

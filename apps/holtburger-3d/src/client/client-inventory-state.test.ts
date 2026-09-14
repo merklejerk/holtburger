@@ -78,6 +78,7 @@ function fixture(
 			entities: mirror,
 			previewInventory: vi.fn(async () => {}),
 			submitInventory: vi.fn(async () => {}),
+			equipItem: vi.fn(async () => {}),
 			state: () => ({ lifecycle }),
 			subscribe: (listener) => {
 				listeners.add(listener);
@@ -291,6 +292,11 @@ describe("persistent inventory state", () => {
 		await sample();
 		expect(f.services.revokeImage).toHaveBeenCalledTimes(2);
 		expect(f.model.read().sections[0]?.container.guid).toBe(4);
+		const items = f.model.readItems();
+		expect(items.playerGuid).toBe(4);
+		expect(items.items.get(5)).toEqual(f.model.readItem(5));
+		expect(items.items.has(3)).toBe(false);
+		expect(items.iconKeys.get(5)).toBe(f.model.read().iconKeys.get(5));
 		f.model.destroy();
 		const count = vi.mocked(f.services.prepare).mock.calls.length;
 		f.baseline([item(6, 13, 4)], 4);

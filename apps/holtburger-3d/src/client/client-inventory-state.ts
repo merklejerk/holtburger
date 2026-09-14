@@ -39,7 +39,7 @@ export interface InventoryCurrencyRow extends Omit<
 /** Session commands and results used by the mounted inventory drag owner. */
 export type InventoryInteractionSession = Pick<
 	ClientLifecycleSession,
-	"previewInventory" | "submitInventory" | "subscribe"
+	"previewInventory" | "submitInventory" | "equipItem" | "subscribe"
 >;
 
 /** Existing lifecycle facts and semantic mirror; the model does not subscribe to raw properties. */
@@ -48,8 +48,20 @@ export interface InventoryLifecycle extends InventoryInteractionSession {
 	state(): { readonly lifecycle: ClientLifecycle | null };
 }
 
+/** Coherent owned item/artwork lookup without sorting inventory presentation. */
+interface ClientInventoryItems {
+	/** Confirmed character identity lets session-local bindings retire on replacement snapshots. */
+	readonly playerGuid: number | null;
+	/** Only currently usable owned items; bindings keep missing identities themselves. */
+	readonly items: ReadonlyMap<number, ClientEntityFacts>;
+	/** Prepared persistent artwork belonging to the same accepted baseline. */
+	readonly iconKeys: ReadonlyMap<number, string>;
+}
+
 /** Cached membership and reference indices derived together from one accepted revision. */
 interface InventoryBaseline {
+	/** Owned item lookup shared by inventory and action binding consumers. */
+	readonly items: ReadonlyMap<number, ClientEntityFacts>;
 	readonly equipment: InventoryEquipment;
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
@@ -144,6 +156,20 @@ export class ClientInventoryState {
 		return this.#view;
 	}
 
+	/** Action bars consume item facts without building hidden inventory sections. */
+	readItems(): ClientInventoryItems {
+		this.#refresh();
+		if (this.#pending || this.#baseline === null)
+			return { playerGuid: null, items: new Map(), iconKeys: new Map() };
+		return this.#baseline;
+	}
+
+	/** Current owned item facts, independent of panel visibility and sorting. */
+	readItem(guid: number): ClientEntityFacts | undefined {
+		this.#refresh();
+		return this.#pending ? undefined : this.#baseline?.items.get(guid);
+	}
+
 	cycleSort(): void {
 		this.#sortMode = nextInventorySortMode(this.#sortMode);
 		this.#view = null;
@@ -232,6 +258,7 @@ export class ClientInventoryState {
 			if (!retainedKeys.has(key)) this.icons.release(this.#owner, key);
 		}
 		this.#baseline = {
+			items: visibleEntities,
 			equipment,
 			currencies,
 			currenciesPending: currencyTotals.pending,

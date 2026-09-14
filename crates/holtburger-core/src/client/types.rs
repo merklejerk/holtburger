@@ -228,6 +228,11 @@ fn chat_kind_from_turbine(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetSlot {
+    /// Select the main/off hand or left/right jewelry side using current equipment facts.
+    PreferredSide {
+        /// Prefer off hand when valid, or force right-side jewelry; false uses normal selection.
+        alternate: bool,
+    },
     EquipMask(EquipMask),
     MainHand,
     OffHand,

@@ -1,7 +1,22 @@
-/** A keyboard binding uses browser key names; modifiers are optional constraints. */
-export interface KeyBinding {
-	/** Case-insensitive browser key value, including a literal space for the space bar. */
-	readonly key: string;
+/** A binding selects either a layout-resolved key or a physical code, plus modifier constraints. */
+export type KeyBinding = KeyModifiers &
+	(
+		| {
+				/** Case-insensitive layout-resolved key, including a literal space. */
+				readonly key: string;
+				/** Key and code selectors are mutually exclusive. */
+				readonly code?: never;
+		  }
+		| {
+				/** Exact physical code, unaffected by Shift or keyboard layout. */
+				readonly code: string;
+				/** Key and code selectors are mutually exclusive. */
+				readonly key?: never;
+		  }
+	);
+
+/** Optional exact modifier constraints; omitted modifiers permit either state. */
+interface KeyModifiers {
 	/** When supplied, require this Shift state; omission permits either state. */
 	readonly shift?: boolean;
 	/** Optional exact Control constraint. */
@@ -84,6 +99,28 @@ export interface InputConfiguration {
 	readonly fly: InputBindings<FlyAction>;
 	/** Client and chat shortcuts, interpreted within their UI context. */
 	readonly client: InputBindings<ClientShortcut>;
+	/** Numbered bar/cell bindings and their scoped navigation and modifier policy. */
+	readonly actionBars: ActionBarInputConfiguration;
 	/** Browser pointer buttons assigned to each viewport gesture. */
 	readonly pointer: Readonly<Record<ViewportPointerAction, readonly number[]>>;
+}
+
+/** Zero-based positions of the ten numbered bars and cells. */
+export type InputDigitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+/** Each numbered position accepts any number of alternative bindings, including none. */
+type NumberedInputBindings = Readonly<
+	Record<InputDigitIndex, readonly KeyBinding[]>
+>;
+/** Spatial intent independent of the physical navigation keys. */
+export type ActionBarDirection = "up" | "down" | "left" | "right";
+/** Bindings interpreted only by a focused action bar, except focus acquisition. */
+interface ActionBarInputConfiguration {
+	/** Position order is 1–9, then 0; these acquire the bar's keyboard scope. */
+	readonly focus: NumberedInputBindings;
+	/** Position order is 1–9, then 0; these immediately activate a cell. */
+	readonly cells: NumberedInputBindings;
+	/** Navigation, execution, and dismissal within the focused bar. */
+	readonly commands: InputBindings<ActionBarDirection | "confirm" | "cancel">;
+	/** Held modifier selecting the alternate equipment side for both keys and clicks. */
+	readonly alternate: "shift" | "ctrl" | "alt" | "meta";
 }

@@ -85,7 +85,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		assert.equal(state.movement.forward, 0);
 		await press("Tab", "Tab", 9);
 		assert.equal((await capture()).focused, "keyboard-editor");
-		await press("1", "Digit1", 49, { modifiers: 2 });
+		await press("F8", "F8", 119, { modifiers: 2 });
 		assert.equal(
 			(await capture()).focused,
 			"keyboard-editor",
@@ -113,7 +113,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		assert.equal(state.pointerAllowed, true);
 
 		await click("#keyboard-viewport");
-		await press("1", "Digit1", 49, { modifiers: 2 });
+		await press("F8", "F8", 119, { modifiers: 2 });
 		assert.equal((await capture()).focused, "keyboard-bar");
 		await press("w", "KeyW", 87);
 		assert.equal(
@@ -131,7 +131,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		await press("Escape", "Escape", 27);
 		assert.equal((await capture()).gameActive, true);
 
-		await press("1", "Digit1", 49, { modifiers: 2 });
+		await press("F8", "F8", 119, { modifiers: 2 });
 		await invoke("openModal");
 		await invoke("unregisterScope");
 		await press("Escape", "Escape", 27);

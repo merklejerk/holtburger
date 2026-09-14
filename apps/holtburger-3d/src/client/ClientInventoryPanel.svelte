@@ -5,7 +5,6 @@
 		ClientInventorySplit,
 		type InventorySplitRequest,
 	} from "./client-inventory-split";
-	import { ClientInventoryDrag } from "./client-inventory-drag";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
 	import ItemIcon from "../app/ItemIcon.svelte";
@@ -65,7 +64,6 @@
 	let splitOwner: ClientInventorySplit | null = null;
 
 	onMount(() => {
-		const drag = new ClientInventoryDrag(panel, inventory);
 		const split = new ClientInventorySplit(panel, inventory, (request) => {
 			splitRequest = request;
 		});
@@ -122,7 +120,6 @@
 			CLIENT_TUNING.inventory.displayIntervalMs,
 		);
 		return () => {
-			drag.destroy();
 			split.destroy();
 			splitOwner = null;
 			disposed = true;
@@ -376,33 +373,6 @@
 
 <style>
 	@layer components {
-		:global(.inventory-drag-ghost) {
-			position: fixed;
-			inset: 0 auto auto 0;
-			z-index: 10000;
-			pointer-events: none;
-			margin: 0;
-			padding: 0;
-			border: 0;
-			background: transparent;
-			opacity: 0.8;
-			color: var(--ui-color-text);
-		}
-		:global([data-inventory-drop="pending"]) {
-			outline: 2px dashed var(--ui-color-muted);
-		}
-		:global([data-inventory-drop="accepted"]) {
-			outline: 2px solid var(--ui-color-success);
-		}
-		:global([data-inventory-drop="rejected"]) {
-			outline: 2px solid var(--ui-color-danger);
-		}
-		:global([data-inventory-displaced]) {
-			outline: 2px solid var(--ui-color-warning);
-		}
-		:global([data-inventory-dragging]) {
-			user-select: none;
-		}
 		.inventory-layout {
 			display: contents;
 		}

@@ -21,6 +21,32 @@ function fixture() {
 }
 
 describe("game keyboard routing", () => {
+	it("does not prepare activation state for a detached scope", () => {
+		const { keyboard } = fixture();
+		const activation = vi.fn(() => true);
+		const scope = keyboard.scope({ isConnected: false } as HTMLElement, {
+			activation,
+			keydown: vi.fn(),
+		});
+		keyboard.keydown(keyEvent("F8"));
+		expect(activation).not.toHaveBeenCalled();
+		scope.destroy();
+	});
+
+	it("offers Escape to the active item gesture before game commands", () => {
+		const { keyboard, game } = fixture();
+		const cancel = vi.fn(() => true);
+		const release = keyboard.bindEscapeCancellation(cancel);
+		const event = keyEvent("Escape");
+		keyboard.keydown(event);
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(event.defaultPrevented).toBe(true);
+		expect(game.keydown).not.toHaveBeenCalled();
+		release();
+		keyboard.keydown(keyEvent("Escape"));
+		expect(game.keydown).toHaveBeenCalledOnce();
+	});
+
 	it("cancels without release actions and rejects repeats across scene availability", () => {
 		const { viewport, keyboard, game } = fixture();
 		keyboard.keydown(keyEvent("Space"));

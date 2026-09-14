@@ -130,6 +130,12 @@ pub struct ClientPreciseJumpCancelRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Equip an owned item using shared side preference and replacement planning.
+    EquipClientItem {
+        guid: holtburger_common::Guid,
+        /// Prefer the off hand when supported, or the right side for paired jewelry.
+        alternate: bool,
+    },
     /// Execute a semantic inventory gesture against the latest authoritative world.
     SubmitClientInventory {
         intent: holtburger_core::client::inventory_plan::InventoryIntent,
@@ -211,6 +217,7 @@ pub enum ClientHostCommand {
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "preview_client_inventory",
     "submit_client_inventory",
+    "equip_client_item",
     "start_client",
     "request_client_current_state",
     "select_client_character",
@@ -553,6 +560,14 @@ pub async fn dispatch_client(
             .map_err(application_error),
         QueueClientCharacterMotionEvent { request } => runtime
             .queue_character_motion_event(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        EquipClientItem { guid, alternate } => runtime
+            .send_command(ClientCommand::GetAndWield {
+                item: guid,
+                slot: Some(holtburger_core::client::types::TargetSlot::PreferredSide { alternate }),
+            })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

@@ -45,7 +45,7 @@ export function installKeyboardPolicyFixture(
 	let releases = 0;
 	let cancels = 0;
 	const scope = keyboard.scope(bar, {
-		activation: (event) => event.ctrlKey && event.key === "1",
+		activation: (event) => event.ctrlKey && event.key === "F8",
 		keydown: (event) => {
 			if (event.key !== "x") return;
 			presses += 1;

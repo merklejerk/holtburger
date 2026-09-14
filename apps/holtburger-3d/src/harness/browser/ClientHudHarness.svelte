@@ -488,6 +488,11 @@
 			throw new Error("Dialog probe requires the viewport canvas.");
 		keyboard.returnToGame();
 		const previousFocus = document.activeElement;
+		const previousActionBar = document.querySelector(
+			"[data-action-bar-surface]",
+		);
+		if (previousActionBar === null)
+			throw new Error("Dialog probe requires a mounted action bar.");
 		const startCommands = interactionCommands.length;
 		const longMessage = Array.from(
 			{ length: 120 },
@@ -500,6 +505,10 @@
 			});
 			emitInteractionEvent("client-popup-string", { message: longMessage });
 			await tick();
+			if (previousActionBar.isConnected)
+				throw new Error(
+					"Character reset retained the outgoing action bar's mounted interaction state.",
+				);
 			const modal = document.querySelector<HTMLDialogElement>(
 				".client-message-dialog",
 			);
@@ -1484,6 +1493,8 @@
 				entities: { read: readInventoryEntities },
 				previewInventory: (request) =>
 					interactionLifecycle.previewInventory(request),
+				equipItem: (guid, alternate) =>
+					interactionLifecycle.equipItem(guid, alternate),
 				submitInventory: (intent) =>
 					interactionLifecycle.submitInventory(intent),
 				state: () => interactionLifecycle.state(),

@@ -14,6 +14,7 @@
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
+	import ClientActionBars from "./ClientActionBars.svelte";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
@@ -375,6 +376,17 @@
 		onStateChange={updateMinimap}
 		{onSelectEntity}
 	/>
+	{#if inventory !== null && worldElement !== null}
+		{#key inventory}
+			<ClientActionBars
+				root={worldElement}
+				{inventory}
+				{viewport}
+				editable={hudMode === "layout"}
+			/>
+		{/key}
+	{/if}
+
 	<ClientHudPanel
 		label="Character HUD"
 		placement={hudLayout.character}

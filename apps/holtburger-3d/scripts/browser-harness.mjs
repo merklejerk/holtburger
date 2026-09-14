@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -4573,6 +4574,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			[],
 		);
 		inventory.drag = await probeInventoryDrag(client, evaluateExpression);
+		inventory.actionBars = await probeActionBars(client, evaluateExpression);
 		if (options.screenshotPath) {
 			const shot = await client.send("Page.captureScreenshot", {
 				format: "png",
@@ -4669,6 +4671,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 
 function assertClientHudHarness(evidence) {
 	const runtimeLabels = [
+		"Action bar 1",
 		"Character HUD",
 		"Chat",
 		"Frame rate",

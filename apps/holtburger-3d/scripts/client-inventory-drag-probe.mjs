@@ -58,7 +58,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	const selectedBefore = await read(`${api}.capture().selectedGuid`);
 	const position = await begin(source, target);
 	const ghost = await read(`(() => {
-		const ghost = document.querySelector('.inventory-drag-ghost');
+		const ghost = document.querySelector('.item-drag-ghost');
 		const rect = ghost.getBoundingClientRect();
 		return { x: rect.x, y: rect.y, visible: ghost.checkVisibility(), art: ghost.querySelector('.item-icon, .item-icon-fallback') !== null };
 	})()`);
@@ -112,7 +112,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	const sortedPosition = await begin(source, target);
 	if (
 		await read(
-			`document.querySelector('[data-inventory-dragging]') === null || !document.querySelector('.inventory-drag-ghost').checkVisibility()`,
+			`document.querySelector('[data-item-dragging]') === null || !document.querySelector('.item-drag-ghost').checkVisibility()`,
 		)
 	)
 		throw new Error(
@@ -180,9 +180,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	await reply(cancelled.sequence, { kind: "merge", amount: 10 });
 	if ((await submissions()).length !== countBefore + 1)
 		throw new Error("Cancelled gesture submitted a late preview");
-	if (
-		await read(`document.querySelector('[data-inventory-dragging]') !== null`)
-	)
+	if (await read(`document.querySelector('[data-item-dragging]') !== null`))
 		throw new Error("Cancelled drag retained pointer visuals");
 	const header = '.inventory-header[data-item-guid="1"]';
 	const headerPosition = await begin(source, header);
@@ -356,11 +354,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	await reply((await lastPreview()).sequence, { kind: "equip", displaced: [] });
 	const nextPosition = await begin(source, target);
 	await read(`${api}.rejectDeferredInventorySubmission()`);
-	if (
-		!(await read(
-			`document.querySelector('[data-inventory-dragging]') !== null`,
-		))
-	)
+	if (!(await read(`document.querySelector('[data-item-dragging]') !== null`)))
 		throw new Error("Late submission failure cancelled a newer drag");
 	await client.send("Input.dispatchKeyEvent", {
 		type: "keyDown",

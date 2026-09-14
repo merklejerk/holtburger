@@ -808,6 +808,29 @@ mod tests {
     }
 
     #[test]
+    fn equipment_identity_decodes_through_the_client_command_boundary() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 1,
+            "command": { "command": "equip_client_item", "guid": 91, "alternate": true },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(ClientHostCommand::EquipClientItem {
+                    guid,
+                    alternate: true,
+                }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("equipment request did not decode into the client command");
+        };
+        assert_eq!(guid, holtburger_common::Guid(91));
+    }
+
+    #[test]
     fn messagepack_requests_decode_into_their_mode_owned_inventory() {
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request",

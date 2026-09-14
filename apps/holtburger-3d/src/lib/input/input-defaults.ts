@@ -77,6 +77,65 @@ export const INPUT_DEFAULTS = {
 		/** Scroll toward later messages while chat owns focus. */
 		chatNextPage: [{ key: "PageDown" }],
 	},
+	/** Action bar shortcuts. Numbered entries use zero-based positions (0 is bar/cell 1, 9 is 0).
+	 * Physical codes keep digits addressable while Shift changes their printed characters.
+	 * Cell/confirm bindings allow modifiers so the alternate-side modifier can be remapped freely.
+	 */
+	actionBars: {
+		focus: {
+			0: [
+				{ code: "Digit1", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			1: [
+				{ code: "Digit2", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			2: [
+				{ code: "Digit3", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			3: [
+				{ code: "Digit4", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			4: [
+				{ code: "Digit5", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			5: [
+				{ code: "Digit6", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			6: [
+				{ code: "Digit7", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			7: [
+				{ code: "Digit8", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			8: [
+				{ code: "Digit9", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			9: [
+				{ code: "Digit0", ctrl: true, shift: false, alt: false, meta: false },
+			],
+		},
+		cells: {
+			0: [{ code: "Digit1" }],
+			1: [{ code: "Digit2" }],
+			2: [{ code: "Digit3" }],
+			3: [{ code: "Digit4" }],
+			4: [{ code: "Digit5" }],
+			5: [{ code: "Digit6" }],
+			6: [{ code: "Digit7" }],
+			7: [{ code: "Digit8" }],
+			8: [{ code: "Digit9" }],
+			9: [{ code: "Digit0" }],
+		},
+		commands: {
+			up: [{ key: "ArrowUp" }],
+			down: [{ key: "ArrowDown" }],
+			left: [{ key: "ArrowLeft" }],
+			right: [{ key: "ArrowRight" }],
+			confirm: [{ key: "Enter" }],
+			cancel: [{ key: "Escape" }],
+		},
+		alternate: "shift",
+	},
 	/** Viewport gesture activation buttons. */
 	pointer: {
 		/** Client click selection and drag orbit share one gesture. */

@@ -1118,7 +1118,7 @@ mod tests {
     };
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PhysicsState, PropertyDataId, WorldObjectPropertyAccessorsMut,
+        ItemType, PhysicsState, PropertyDataId, PropertyInt, WorldObjectPropertyAccessorsMut,
     };
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_content::{
@@ -1708,6 +1708,13 @@ mod tests {
     }
 
     fn seed_test_jump_authority(client: &mut ClientRuntime) {
+        let player = client.world.player_entity_mut().unwrap();
+        player.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        player
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
         client.world.player.attributes.insert(
             AttributeType::StrengthAttr,
             Attribute {
@@ -2799,6 +2806,12 @@ mod tests {
             .seed_local_player_entity(player_guid, "Player", player_pose);
 
         let mut remote = Entity::new(remote_guid, "Remote".to_string(), remote_pose);
+        remote.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        remote
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
         remote
             .properties
             .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));

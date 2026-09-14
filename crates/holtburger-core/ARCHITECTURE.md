@@ -336,15 +336,17 @@ character-only preparation and do not acquire motion-table/run-stat requirements
 
 `client/equipment_plan.rs` resolves a single requested assignment through world-owned public equipment facts and allocates every displaced item before mutation. Source-pack storage is preferred, then the main pack and carried packs in native order. The incoming item’s future free slot is not credited.
 
-`client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the final wire request may still complete. Frontends submit equipment intent and do not maintain a second equipment executor.
+`client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor.
 
 `client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,
-append, merge-only targets, splits, equipment targets, and native pack exchanges.
-`inventory_storage.rs` shares current-capacity allocation between splits and
-equipment replacement; neither credits a slot that a later action might free.
-`inventory_runtime.rs` confirms native moves, both sides of merges, and new split
-identities with source remainders, and sequences
-pack exchanges. Equipment and native inventory operations exclude competing local
-inventory/combat requests. Frontend sort policy selects the semantic intent; core
+append, merge-only targets, splits, equipment targets, pickup, ground drop, and
+native pack exchanges. Pickup admission comes from world's `pickup_candidate`;
+ground drop supports owned carried and equipped sources. `inventory_storage.rs`
+shares current-capacity allocation between pickup, splits, and equipment
+replacement; none credits a slot that a later action might free.
+`inventory_runtime.rs` sends standalone requests without a completion-wait lock.
+Only dependent pack exchanges and equipment sequences exclude competing local
+inventory/combat requests until their final request is sent. Pack exchange confirms
+its first move and revalidates the target before sending the second. Frontend sort policy selects the semantic intent; core
 has no knowledge of display sorting or pointer gestures. Existing action feedback
 reports failures, while accepted world state drives frontend contents and equipment.

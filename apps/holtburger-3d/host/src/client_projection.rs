@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use holtburger_common::{Guid, stats::VitalType};
 use holtburger_core::client::types::{ChatChannelKind, ChatSpeakerKind, CombatFeedback};
 use holtburger_core::errors::{
-    format_action_result_message, format_entity_use_feedback, is_actually_weenie_error,
+    format_action_result_message, format_entity_use_feedback, format_weenie_error,
+    is_actually_weenie_error,
 };
 use holtburger_core::{ActionResultReason, BusyOperationKind, BusyOperationResult};
 use holtburger_core::{
@@ -862,6 +863,17 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             })
         }
         ClientViewEvent::ActionResult { reason, .. } => {
+            // ACE uses this packet for ordinary inventory refusals. A reasonless
+            // packet also follows separate feedback (Player_Inventory.cs:1371-1399);
+            // it is a rollback signal, not an additional player-facing error.
+            if let ActionResultReason::InventoryServerSaveFailed { error, .. } = &reason {
+                return (*error != WeenieError::None).then(|| {
+                    ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                        message: format_weenie_error(*error, None),
+                        tone: ClientActionFeedbackTone::Status,
+                    })
+                });
+            }
             if matches!(reason, ActionResultReason::Weenie(WeenieError::None, _)) {
                 return None;
             }
@@ -1182,6 +1194,35 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn inventory_refusals_are_plain_status_notices() {
+        for error in [WeenieError::AttunedItem, WeenieError::FullInventoryLocation] {
+            let Some(ClientHostEvent::ActionFeedback(feedback)) =
+                project_client_event(ClientViewEvent::ActionResult {
+                    source: holtburger_core::ActionResultSource::Wire,
+                    reason: ActionResultReason::InventoryServerSaveFailed {
+                        item_guid: Guid(0x4000_0001),
+                        error,
+                    },
+                })
+            else {
+                panic!("inventory refusal must reach the renderer");
+            };
+            assert_eq!(feedback.message, format_weenie_error(error, None));
+            assert!(matches!(feedback.tone, ClientActionFeedbackTone::Status));
+        }
+        assert!(
+            project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason: ActionResultReason::InventoryServerSaveFailed {
+                    item_guid: Guid(0x4000_0001),
+                    error: WeenieError::None,
+                },
+            })
+            .is_none()
+        );
     }
 
     #[test]

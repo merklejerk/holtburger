@@ -59,11 +59,21 @@ export async function probeActionBars(
 	};
 	const drag = async (from, to, cancel = false) => {
 		const start = await point(from);
+		const selectionBefore = await read(`${api}.capture().selectedGuid`);
+		const bindingSource = await read(
+			`document.querySelector(${JSON.stringify(from)}).matches("[data-action-cell]")`,
+		);
 		const end = typeof to === "string" ? await point(to) : to;
 		await mouse("mousePressed", start, 1);
 		await mouse("mouseMoved", end, 1);
 		if (cancel) await key("Escape", "Escape");
 		await mouse("mouseReleased", end, 0);
+		if (bindingSource)
+			assert.equal(
+				await read(`${api}.capture().selectedGuid`),
+				selectionBefore,
+				"Binding drag changed entity selection",
+			);
 	};
 
 	const click = async (position) => {

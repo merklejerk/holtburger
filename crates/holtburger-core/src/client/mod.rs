@@ -94,8 +94,8 @@ pub struct ClientRuntime {
     active_busy_operation: Option<PendingBusyOperation>,
     /// Single owner of equipment mutations and their authoritative confirmations.
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
-    /// Pending native inventory move, merge, split, or pack exchange.
-    inventory_operation: Option<inventory_runtime::InventoryOperation>,
+    /// Dependent pack exchange waiting to send its second insertion.
+    pack_exchange: Option<inventory_runtime::PackExchange>,
     state: ClientState,
     /// Distinguishes the initial connected socket from a login request in flight.
     authenticating: bool,
@@ -283,7 +283,7 @@ impl ClientRuntime {
     }
 
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
-        self.stop_inventory_change("World lifecycle changed; the last request may still complete");
+        self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("Client is exiting; the last request may still complete");
         self.exit_cause = Some(cause);
     }
@@ -302,7 +302,7 @@ impl ClientRuntime {
         cause: ClientWorldActivationState,
         player_guid: Guid,
     ) {
-        self.stop_inventory_change("World lifecycle changed; the last request may still complete");
+        self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("World lifecycle changed; the last request may still complete");
         let generation = self.bump_world_generation();
         let phase = match cause {

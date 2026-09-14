@@ -65,7 +65,10 @@
 		readonly inventory: ClientInventoryState | null;
 		/** Shared use/combining owner for all mounted entry points. */
 		readonly itemInteractions: ClientItemInteractions | null;
-		readonly onSelectInventoryItem: (guid: number) => void;
+		readonly onSelectInventoryItem: (
+			guid: number,
+			mode: "toggle" | "select",
+		) => void;
 		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
 		/** Use the currently selected entity through the session-owned interaction controller. */
 		readonly onInteractEntity: () => void;
@@ -435,6 +438,7 @@
 		{#key inventory}
 			<ClientActionBars
 				interactions={itemInteractions}
+				onSelectDragItem={(guid) => onSelectInventoryItem(guid, "select")}
 				root={worldElement}
 				{inventory}
 				{viewport}
@@ -601,7 +605,7 @@
 								interactions={itemInteractions}
 								{inventory}
 								selectedGuid={selectedEntityGuid}
-								onSelectItem={onSelectInventoryItem}
+								onSelectItem={(guid) => onSelectInventoryItem(guid, "toggle")}
 							/>
 						{/key}
 					{/if}

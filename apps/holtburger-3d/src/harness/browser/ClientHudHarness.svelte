@@ -595,6 +595,7 @@
 					},
 					location: { kind: "none" },
 					ownedByPlayer: false,
+					canPickUp: false,
 					targeting: "non-creature",
 					scenePlacement: "available",
 					storage:
@@ -829,6 +830,21 @@
 					throw new Error("Action feedback did not reach the warning toast.");
 				}
 			}
+			emitInteractionEvent("client-action-feedback", {
+				message: "Attuned item.",
+				tone: "status",
+			});
+			await tick();
+			const refusal = Array.from(
+				document.querySelectorAll(".client-toast"),
+			).find((element) => element.textContent?.trim() === "Attuned item.");
+			if (
+				refusal?.getAttribute("role") !== "status" ||
+				refusal.classList.contains("client-toast-warning")
+			)
+				throw new Error(
+					"Inventory refusal did not reach the neutral notice surface.",
+				);
 			emitInteractionEvent("client-transient-string", {
 				message: "The door is locked!",
 			});
@@ -1822,7 +1838,8 @@
 		readTargetIndicatorFrame={() => targetIndicatorFrame}
 		readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
 		{inventory}
-		onSelectInventoryItem={(guid) => selection.selectInventoryItem(guid)}
+		onSelectInventoryItem={(guid, mode) =>
+			selection.selectInventoryItem(guid, mode)}
 		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}
 		selectedEntityGuid={selectedGuid}
 		hoveredEntityGuid={hoveredGuid}

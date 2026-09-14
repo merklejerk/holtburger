@@ -32,6 +32,8 @@
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	interface Props {
+		/** Select an inventory source once a real drag begins. */
+		onSelectDragItem: (guid: number) => void;
 		/** Common DOM boundary for inventory and action-cell gestures. */
 		root: HTMLElement;
 		/** Session-owned retained items and interaction capability. */
@@ -42,7 +44,14 @@
 		editable: boolean;
 		viewport: ClientHudViewport;
 	}
-	let { root, inventory, interactions, editable, viewport }: Props = $props();
+	let {
+		root,
+		inventory,
+		interactions,
+		editable,
+		viewport,
+		onSelectDragItem,
+	}: Props = $props();
 	let bars = $state<readonly ClientActionBar[]>([initialActionBar()]);
 	let nextId = 2;
 	// Readers belong to mounted surfaces; cloning pulls geometry once at the user action.
@@ -151,6 +160,7 @@
 			},
 			keyboard,
 			() => interactions.cancel(),
+			onSelectDragItem,
 		);
 		const repository = inventory.icons;
 		const owner = repository.createOwner("display");
@@ -292,6 +302,9 @@
 		}
 		:global([data-inventory-drop="rejected"]) {
 			outline: 2px solid var(--ui-color-danger);
+		}
+		:global([data-game-viewport][data-inventory-drop]) {
+			outline-offset: -2px;
 		}
 		:global([data-inventory-displaced]) {
 			outline: 2px solid var(--ui-color-warning);

@@ -403,6 +403,55 @@ describe("ClientEntitySelection", () => {
 		},
 	);
 
+	it.each(["contained", "equipped"] as const)(
+		"preserves a selected %s item through separately delivered drop updates",
+		(origin) => {
+			const lifecycle = new FakeLifecycle();
+			const presentation = new FakePresentation();
+			const selection = new ClientEntitySelection({
+				lifecycle,
+				presentation: () => presentation,
+			});
+			lifecycle.update(
+				[
+					entityFacts(12, {
+						ownedByPlayer: true,
+						scenePlacement: "unavailable",
+						location:
+							origin === "contained"
+								? {
+										kind: "contained",
+										parentGuid: 1,
+										slot: { kind: "item", index: 0 },
+									}
+								: { kind: "equipped", wearerGuid: 1, mask: null },
+					}),
+				],
+				[],
+			);
+			const changes: Array<number | null> = [];
+			selection.subscribe((guid) => changes.push(guid));
+			selection.selectInventoryItem(12, "toggle");
+			lifecycle.update(
+				[entityFacts(12, { scenePlacement: "unavailable" })],
+				[],
+			);
+			presentation.trackingStatus = { kind: "frontend-evicted" };
+			selection.maintainSelection();
+			expect(selection.selectedGuid()).toBe(12);
+			lifecycle.update([entityFacts(12, { canPickUp: true })], []);
+			expect(selection.selectedGuid()).toBe(12);
+			expect(changes).toEqual([12]);
+			presentation.trackingStatus = {
+				kind: "tracked",
+				distance: OUTDOOR_LANDBLOCK_WORLD_SIZE * 2,
+			};
+			selection.maintainSelection();
+			expect(selection.selectedGuid()).toBeNull();
+			selection.destroy();
+		},
+	);
+
 	it("checks inventory acquisition against current hydration and recovery", () => {
 		const lifecycle = new FakeLifecycle();
 		const selection = new ClientEntitySelection({
@@ -415,24 +464,26 @@ describe("ClientEntitySelection", () => {
 			location: { kind: "contained", parentGuid: 1, slot: { kind: "pending" } },
 		});
 		lifecycle.update([{ ...owned, description: { kind: "pending" } }], []);
-		selection.selectInventoryItem(12);
+		selection.selectInventoryItem(12, "toggle");
 		expect(selection.selectedGuid()).toBeNull();
 		lifecycle.update([owned], []);
-		selection.selectInventoryItem(12);
+		selection.selectInventoryItem(12, "select");
 		expect(selection.selectedGuid()).toBe(12);
-		selection.selectInventoryItem(12);
+		selection.selectInventoryItem(12, "select");
+		expect(selection.selectedGuid()).toBe(12);
+		selection.selectInventoryItem(12, "toggle");
 		expect(selection.selectedGuid()).toBeNull();
-		selection.selectInventoryItem(12);
+		selection.selectInventoryItem(12, "toggle");
 		expect(selection.selectedGuid()).toBe(12);
 		lifecycle.entities.awaitSnapshot();
 		lifecycle.emit({ type: "resyncing" });
 		selection.maintainSelection();
-		selection.selectInventoryItem(7);
+		selection.selectInventoryItem(7, "toggle");
 		expect(selection.selectedGuid()).toBe(12);
 		selection.destroy();
 	});
 
-	it("preserves an owned selection across equipment and reordering, then clears a genuine unplaced gap", () => {
+	it("preserves selection across equipment, reordering, and a drop placement gap", () => {
 		const lifecycle = new FakeLifecycle();
 		const presentation = new FakePresentation();
 		const selection = new ClientEntitySelection({
@@ -457,7 +508,7 @@ describe("ClientEntitySelection", () => {
 			],
 			[],
 		);
-		selection.selectInventoryItem(12);
+		selection.selectInventoryItem(12, "toggle");
 		lifecycle.update(
 			[
 				entityFacts(12, {
@@ -486,6 +537,14 @@ describe("ClientEntitySelection", () => {
 		);
 		expect(selection.selectedGuid()).toBe(12);
 		lifecycle.update([entityFacts(12, { scenePlacement: "unavailable" })], []);
+		expect(selection.selectedGuid()).toBe(12);
+		presentation.trackingStatus = {
+			kind: "tracked",
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+		};
+		lifecycle.update([entityFacts(12)], []);
+		expect(selection.selectedGuid()).toBe(12);
+		lifecycle.update([], [12]);
 		expect(selection.selectedGuid()).toBeNull();
 		selection.destroy();
 	});

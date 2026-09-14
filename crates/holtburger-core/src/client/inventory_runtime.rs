@@ -1,4 +1,4 @@
-//! Serializes native inventory requests and waits for their authoritative consequences.
+//! Sends standalone inventory requests and sequences dependent pack exchanges.
 
 use super::{
     ClientRuntime,
@@ -6,55 +6,35 @@ use super::{
     types::{ActionResultReason, ActionResultSource},
 };
 use anyhow::Result;
-use holtburger_common::{Guid, properties::WorldObjectExt};
+use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::{
-    GameAction, PutItemInContainerActionData, StackableMergeActionData,
+    DropItemActionData, GameAction, PutItemInContainerActionData, StackableMergeActionData,
     StackableSplitToContainerActionData,
 };
-use holtburger_world::{
-    WorldState,
-    state::storage::{StorageLocation, StorageSlot},
-};
+use holtburger_world::state::storage::{StorageLocation, StorageSlot};
 use std::time::{Duration, Instant};
 
-/// Each request gets its own deadline; a timeout cannot prove that the server rejected it.
-const INVENTORY_STEP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Abandons the unsent continuation; the first request can still complete later.
+const PACK_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The exact fact which acknowledges the one request currently in flight.
-#[derive(Debug)]
-enum InventoryConfirmation {
-    Move(InventoryMove),
-    Split {
-        step: InventoryMove,
-        amount: u32,
-        source_remaining: u32,
-        wcid: u32,
-        previous_items: Vec<Guid>,
-    },
-    Merge {
-        source: Guid,
-        destination: Guid,
-        source_remaining: u32,
-        destination_quantity: u32,
-    },
-}
-
-/// Only pack exchanges have a second native request.
+/// Second insertion and the target location required before sending it.
 #[derive(Debug)]
 struct RemainingPackMove {
+    /// Exact second insertion resolved by the planner.
     step: InventoryMove,
-    /// Expected target position after the first insertion removes and shifts its source.
+    /// Target position after the first insertion shifts native indices.
     expected_location: StorageLocation,
 }
 
-/// One admitted move/merge/split/exchange, mutually exclusive with equipment orchestration.
+/// Only a dependent pack exchange owns an inventory interaction lock.
 #[derive(Debug)]
-pub(super) struct InventoryOperation {
-    awaiting: InventoryConfirmation,
-    remaining: Option<RemainingPackMove>,
+pub(super) struct PackExchange {
+    /// First insertion whose authoritative result permits the second request.
+    awaiting: InventoryMove,
+    /// Unsent insertion, revalidated after the first completes.
+    remaining: RemainingPackMove,
+    /// Deadline for abandoning the continuation without canceling server work.
     deadline: Instant,
-    /// Report partial pack exchanges honestly on cancellation or rejection.
-    completed: usize,
 }
 
 fn move_action(step: InventoryMove) -> GameAction {
@@ -65,71 +45,23 @@ fn move_action(step: InventoryMove) -> GameAction {
     }))
 }
 
-impl InventoryConfirmation {
-    fn item(&self) -> Guid {
-        match self {
-            Self::Move(step) | Self::Split { step, .. } => step.item,
-            Self::Merge { source, .. } => *source,
-        }
-    }
-
-    fn confirmed(&self, world: &WorldState) -> bool {
-        match self {
-            Self::Split { step, amount, source_remaining, wcid, previous_items } => {
-                world.entities.get(step.item).is_some_and(|entity| entity.stack_size() == *source_remaining)
-                    && world.container_contents(step.container).any(|(guid, slot)| {
-                        guid != step.item && !previous_items.contains(&guid)
-                            && matches!(slot, StorageSlot::Item { index } | StorageSlot::Pack { index, .. } if index == step.placement)
-                            && world.entities.get(guid).is_some_and(|entity| entity.wcid == Some(*wcid) && entity.stack_size() == *amount)
-                    })
-            }
-            Self::Move(step) => matches!(world.storage_location(step.item),
-                Some(StorageLocation::Contained { parent, slot: StorageSlot::Item { index } | StorageSlot::Pack { index, .. } })
-                if parent == step.container && index == step.placement),
-            Self::Merge {
-                source,
-                destination,
-                source_remaining,
-                destination_quantity,
-            } => {
-                let source_confirmed = if *source_remaining == 0 {
-                    world.storage_location(*source).is_none()
-                } else {
-                    world
-                        .entities
-                        .get(*source)
-                        .is_some_and(|entity| entity.stack_size() == *source_remaining)
-                };
-                source_confirmed
-                    && world
-                        .entities
-                        .get(*destination)
-                        .is_some_and(|entity| entity.stack_size() == *destination_quantity)
-            }
-        }
-    }
-}
-
 impl ClientRuntime {
-    pub(super) fn stop_inventory_change(&mut self, reason: &str) {
-        if let Some(operation) = self.inventory_operation.take() {
+    pub(super) fn stop_pack_exchange(&mut self, reason: &str) {
+        if self.pack_exchange.take().is_some() {
             self.emit_action_result(
                 ActionResultSource::Client,
-                ActionResultReason::General(format!(
-                    "Inventory change stopped after {} confirmed step(s): {reason}",
-                    operation.completed
-                )),
+                ActionResultReason::General(format!("Pack exchange stopped: {reason}")),
             );
         }
     }
 
-    pub(super) fn reject_inventory_item(&mut self, item: Guid) {
+    pub(super) fn reject_pack_exchange_item(&mut self, item: Guid) {
         if self
-            .inventory_operation
+            .pack_exchange
             .as_ref()
-            .is_some_and(|operation| operation.awaiting.item() == item)
+            .is_some_and(|operation| operation.awaiting.item == item)
         {
-            self.stop_inventory_change("Server rejected the inventory request");
+            self.stop_pack_exchange("Server rejected the first pack move");
         }
     }
 
@@ -144,70 +76,32 @@ impl ClientRuntime {
                 return Ok(());
             }
         };
-        let (action, awaiting, remaining) = match plan {
-            InventoryPlan::Split {
-                step,
-                amount,
-                source_remaining,
-                wcid,
-                ..
-            } => (
-                GameAction::StackableSplitToContainer(Box::new(
-                    StackableSplitToContainerActionData {
-                        stack_guid: step.item,
-                        container_guid: step.container,
-                        place: step.placement as i32,
-                        amount: amount as i32,
-                    },
-                )),
-                InventoryConfirmation::Split {
-                    step,
-                    amount,
-                    source_remaining,
-                    wcid,
-                    previous_items: self
-                        .world
-                        .container_contents(step.container)
-                        .map(|(guid, _)| guid)
-                        .collect(),
-                },
-                None,
+        let action = match plan {
+            InventoryPlan::Split { step, amount, .. } => GameAction::StackableSplitToContainer(
+                Box::new(StackableSplitToContainerActionData {
+                    stack_guid: step.item,
+                    container_guid: step.container,
+                    place: step.placement as i32,
+                    amount: amount as i32,
+                }),
             ),
             InventoryPlan::Noop => return Ok(()),
             InventoryPlan::Equip(plan) => {
                 return self.start_planned_equipment_change(plan, None).await;
             }
-            InventoryPlan::Move(step) => {
-                (move_action(step), InventoryConfirmation::Move(step), None)
+            InventoryPlan::Move(step) => move_action(step),
+            InventoryPlan::Drop { item } => {
+                GameAction::DropItem(Box::new(DropItemActionData { item_guid: item }))
             }
             InventoryPlan::Merge {
                 source,
                 destination,
                 amount,
-            } => {
-                let quantities = self
-                    .world
-                    .entities
-                    .get(source)
-                    .zip(self.world.entities.get(destination));
-                let Some((source_entity, destination_entity)) = quantities else {
-                    anyhow::bail!("Resolved merge entities disappeared without a world mutation");
-                };
-                (
-                    GameAction::StackableMerge(Box::new(StackableMergeActionData {
-                        merge_from_guid: source,
-                        merge_to_guid: destination,
-                        amount: amount as i32,
-                    })),
-                    InventoryConfirmation::Merge {
-                        source,
-                        destination,
-                        source_remaining: source_entity.stack_size() - amount,
-                        destination_quantity: destination_entity.stack_size() + amount,
-                    },
-                    None,
-                )
-            }
+            } => GameAction::StackableMerge(Box::new(StackableMergeActionData {
+                merge_from_guid: source,
+                merge_to_guid: destination,
+                amount: amount as i32,
+            })),
             InventoryPlan::Swap { first, second } => {
                 let Some(StorageLocation::Contained {
                     parent,
@@ -221,10 +115,9 @@ impl ClientRuntime {
                 } else {
                     index + 1
                 };
-                (
-                    move_action(first),
-                    InventoryConfirmation::Move(first),
-                    Some(RemainingPackMove {
+                self.pack_exchange = Some(PackExchange {
+                    awaiting: first,
+                    remaining: RemainingPackMove {
                         step: second,
                         expected_location: StorageLocation::Contained {
                             parent,
@@ -233,47 +126,39 @@ impl ClientRuntime {
                                 kind,
                             },
                         },
-                    }),
-                )
+                    },
+                    deadline: Instant::now() + PACK_EXCHANGE_TIMEOUT,
+                });
+                move_action(first)
             }
         };
-        self.inventory_operation = Some(InventoryOperation {
-            awaiting,
-            remaining,
-            deadline: Instant::now() + INVENTORY_STEP_TIMEOUT,
-            completed: 0,
-        });
         self.send_game_action(action).await
     }
 
-    pub(super) async fn advance_inventory_change(&mut self, now: Instant) -> Result<()> {
-        let Some(operation) = self.inventory_operation.as_mut() else {
+    pub(super) async fn advance_pack_exchange(&mut self, now: Instant) -> Result<()> {
+        let Some(operation) = self.pack_exchange.as_ref() else {
             return Ok(());
         };
-        if !operation.awaiting.confirmed(&self.world) {
+        let step = operation.awaiting;
+        let confirmed = matches!(self.world.storage_location(step.item), Some(StorageLocation::Contained { parent, slot: StorageSlot::Pack { index, .. } }) if parent == step.container && index == step.placement);
+        if !confirmed {
             if now >= operation.deadline {
-                self.stop_inventory_change(
-                    "Timed out waiting for the server; the last request may still complete",
+                self.stop_pack_exchange(
+                    "Timed out waiting for the server; the first request may still complete",
                 );
             }
             return Ok(());
         }
-        operation.completed += 1;
-        let Some(remaining) = operation.remaining.take() else {
-            self.inventory_operation = None;
-            self.emit_action_result(
-                ActionResultSource::Client,
-                ActionResultReason::General("Inventory change completed".into()),
-            );
-            return Ok(());
-        };
-        if self.world.storage_location(remaining.step.item) != Some(remaining.expected_location) {
-            self.stop_inventory_change("Pack positions changed during the exchange");
+        if self.world.storage_location(operation.remaining.step.item)
+            != Some(operation.remaining.expected_location)
+        {
+            self.stop_pack_exchange("Pack positions changed during the exchange");
             return Ok(());
         }
-        operation.awaiting = InventoryConfirmation::Move(remaining.step);
-        operation.deadline = now + INVENTORY_STEP_TIMEOUT;
-        self.send_game_action(move_action(remaining.step)).await
+        let action = move_action(operation.remaining.step);
+        // Nothing depends on acknowledgment of the final request.
+        self.pack_exchange = None;
+        self.send_game_action(action).await
     }
 }
 
@@ -287,6 +172,7 @@ mod tests {
     use super::*;
     use holtburger_common::properties::InventoryEntryKind;
     use holtburger_protocol::messages::{GameEvent, InventoryPutObjInContainerEventData};
+    use holtburger_world::{WorldState, context::WorldContext};
 
     const PLAYER: Guid = Guid(1);
     const SOURCE: Guid = Guid(2);
@@ -307,13 +193,13 @@ mod tests {
     fn pending_swap(client: &mut ClientRuntime, now: Instant) {
         client.world = outfit(2, 1);
         place(&mut client.world, TARGET, 4);
-        client.inventory_operation = Some(InventoryOperation {
-            awaiting: InventoryConfirmation::Move(InventoryMove {
+        client.pack_exchange = Some(PackExchange {
+            awaiting: InventoryMove {
                 item: SOURCE,
                 container: PLAYER,
                 placement: 4,
-            }),
-            remaining: Some(RemainingPackMove {
+            },
+            remaining: RemainingPackMove {
                 step: InventoryMove {
                     item: TARGET,
                     container: PLAYER,
@@ -326,58 +212,155 @@ mod tests {
                         kind: holtburger_world::state::storage::PackEntryKind::Container,
                     },
                 },
-            }),
-            deadline: now + INVENTORY_STEP_TIMEOUT,
-            completed: 0,
+            },
+            deadline: now + PACK_EXCHANGE_TIMEOUT,
         });
     }
 
     #[tokio::test]
-    async fn pack_exchange_waits_and_timeout_does_not_release_its_second_move() {
+    async fn pickup_and_equipped_drop_emit_the_exact_native_actions() {
+        use super::super::inventory_plan::InventoryTarget;
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::{
+            messages::{GameMessage, transport},
+            traits::ProtocolUnpack,
+        };
+        use std::io::{Cursor, Read};
         let mut client = build_test_client(ClientState::InWorld);
-        let now = Instant::now();
-        pending_swap(&mut client, now);
-        client.advance_inventory_change(now).await.expect("waiting");
-        let pending = client.inventory_operation.as_ref().expect("still waiting");
-        assert_eq!(pending.completed, 0);
-        assert!(pending.remaining.is_some());
+        client.world = outfit(0, 2);
+        let ground = Guid(0x8000_0042);
+        let mut entity =
+            holtburger_world::entity::Entity::new(ground, "Loose item".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        client.world.add_entity(entity);
+        let equipped = client.world.player_equipment().next().expect("armor").0;
+        let capture = tempfile::NamedTempFile::new().expect("capture file");
         client
-            .advance_inventory_change(now + INVENTORY_STEP_TIMEOUT)
+            .session
+            .set_capture(capture.path().to_str().expect("capture path"))
+            .expect("capture");
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: ground,
+                target: InventoryTarget::Pickup,
+            })
             .await
-            .expect("timeout");
-        assert!(client.inventory_operation.is_none());
+            .expect("pickup");
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: equipped,
+                target: InventoryTarget::Ground,
+            })
+            .await
+            .expect("drop equipped");
+        let bytes = std::fs::read(capture.path()).expect("captured packets");
+        let mut reader = Cursor::new(bytes.as_slice());
+        let mut actions = Vec::new();
+        while (reader.position() as usize) < bytes.len() {
+            assert_eq!(
+                reader.read_u8().expect("direction"),
+                holtburger_session::capture::Direction::Outbound as u8
+            );
+            let _timestamp = reader.read_u64::<LittleEndian>().expect("timestamp");
+            let address_length = reader.read_u16::<LittleEndian>().expect("address length");
+            let mut address = vec![0; usize::from(address_length)];
+            reader.read_exact(&mut address).expect("address");
+            let packet_length = reader.read_u32::<LittleEndian>().expect("packet length");
+            let mut packet = vec![0; packet_length as usize];
+            reader.read_exact(&mut packet).expect("packet");
+            let mut offset = transport::HEADER_SIZE + transport::FRAGMENT_HEADER_SIZE;
+            let Some(GameMessage::GameAction(message)) = GameMessage::unpack(&packet, &mut offset)
+            else {
+                panic!("expected action packet");
+            };
+            assert_eq!(offset, packet.len());
+            actions.push(message.action);
+        }
+        assert_eq!(actions.len(), 2);
+        assert!(
+            matches!(&actions[0], GameAction::PutItemInContainer(data) if data.item_guid == ground && data.container_guid == Guid(2) && data.placement == 1)
+        );
+        assert!(matches!(&actions[1], GameAction::DropItem(data) if data.item_guid == equipped));
+        assert!(client.pack_exchange.is_none());
+        assert!(client.equipment_operation.is_none());
     }
 
     #[tokio::test]
-    async fn pack_exchange_confirms_both_moves_and_ignores_duplicate_first_confirmation() {
+    async fn standalone_drop_and_move_send_once_without_blocking_next_request() {
+        use super::super::{inventory_plan::InventoryTarget, types::ClientCommand};
+        let mut client = build_test_client(ClientState::InWorld);
+        client.world = outfit(2, 2);
+        let equipped = client.world.player_equipment().next().expect("armor").0;
+        let before = client.session.game_action_sequence;
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: equipped,
+                target: InventoryTarget::Ground,
+            })
+            .await
+            .expect("drop");
+        assert_eq!(client.session.game_action_sequence, before + 1);
+        assert!(client.pack_exchange.is_none());
+        assert!(
+            client.world.equipment_mask(equipped).is_some(),
+            "no optimistic removal"
+        );
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: Guid(3),
+                target: InventoryTarget::Container { guid: PLAYER },
+            })
+            .await
+            .expect("move");
+        assert_eq!(client.session.game_action_sequence, before + 2);
+        assert!(client.pack_exchange.is_none());
+        client
+            .handle_command(ClientCommand::Use {
+                guid: Guid(3),
+                unrestricted: true,
+            })
+            .await
+            .expect("use");
+        assert_eq!(client.session.game_action_sequence, before + 3);
+    }
+
+    #[tokio::test]
+    async fn exchange_waits_for_first_move_then_releases_after_sending_second() {
         let mut client = build_test_client(ClientState::InWorld);
         let now = Instant::now();
         pending_swap(&mut client, now);
+        client.advance_pack_exchange(now).await.expect("waiting");
+        assert!(client.pack_exchange.is_some());
         place(&mut client.world, SOURCE, 4);
         client
-            .advance_inventory_change(now)
+            .advance_pack_exchange(now)
             .await
             .expect("second request");
-        assert_eq!(
-            client
-                .inventory_operation
-                .as_ref()
-                .expect("second move pending")
-                .completed,
-            1
-        );
+        assert!(client.pack_exchange.is_none());
+        assert_eq!(client.session.game_action_sequence, 1);
+    }
+
+    #[tokio::test]
+    async fn timeout_retires_unsent_continuation_but_late_updates_still_apply() {
+        let mut client = build_test_client(ClientState::InWorld);
+        let now = Instant::now();
+        pending_swap(&mut client, now);
+        client
+            .advance_pack_exchange(now + PACK_EXCHANGE_TIMEOUT)
+            .await
+            .expect("timeout");
+        assert!(client.pack_exchange.is_none());
+        assert_eq!(client.session.game_action_sequence, 0);
         place(&mut client.world, SOURCE, 4);
         client
-            .advance_inventory_change(now)
+            .advance_pack_exchange(now + PACK_EXCHANGE_TIMEOUT)
             .await
-            .expect("duplicate update");
-        assert!(client.inventory_operation.is_some());
-        place(&mut client.world, TARGET, 0);
-        client
-            .advance_inventory_change(now)
-            .await
-            .expect("exchange complete");
-        assert!(client.inventory_operation.is_none());
+            .expect("late update");
         assert!(matches!(
             client.world.storage_location(SOURCE),
             Some(StorageLocation::Contained {
@@ -385,136 +368,45 @@ mod tests {
                 ..
             })
         ));
-        assert!(matches!(
-            client.world.storage_location(TARGET),
-            Some(StorageLocation::Contained {
-                slot: StorageSlot::Pack { index: 0, .. },
-                ..
-            })
-        ));
     }
 
     #[tokio::test]
-    async fn changed_pack_target_stops_after_first_confirmed_move() {
+    async fn exchange_protects_its_continuation_and_server_rejection_retires_it() {
+        use super::super::types::ClientCommand;
+        let mut client = build_test_client(ClientState::InWorld);
+        let now = Instant::now();
+        pending_swap(&mut client, now);
+        client
+            .handle_command(ClientCommand::Use {
+                guid: Guid(3),
+                unrestricted: true,
+            })
+            .await
+            .expect("blocked use");
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert!(client.pack_exchange.is_some());
+        client.reject_pack_exchange_item(SOURCE);
+        place(&mut client.world, SOURCE, 4);
+        client
+            .advance_pack_exchange(now)
+            .await
+            .expect("late first move");
+        assert!(client.pack_exchange.is_none());
+        assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[tokio::test]
+    async fn changed_target_retires_exchange_without_second_move() {
         let mut client = build_test_client(ClientState::InWorld);
         let now = Instant::now();
         pending_swap(&mut client, now);
         place(&mut client.world, SOURCE, 4);
-        // A different actor moves the target after the first request succeeded.
         place(&mut client.world, TARGET, 1);
         client
-            .advance_inventory_change(now)
+            .advance_pack_exchange(now)
             .await
-            .expect("local rejection");
-        assert!(client.inventory_operation.is_none());
-    }
-
-    #[test]
-    fn moving_the_original_half_stack_cannot_confirm_a_new_split_identity() {
-        use holtburger_common::properties::PropertyInt;
-        let mut world = outfit(2, 1);
-        let source = world.entities.get_mut(Guid(3)).expect("source");
-        source.wcid = Some(99);
-        source.properties.ints.insert(PropertyInt::StackSize, 7);
-        let confirmation = InventoryConfirmation::Split {
-            step: InventoryMove {
-                item: Guid(3),
-                container: PLAYER,
-                placement: 0,
-            },
-            amount: 7,
-            source_remaining: 7,
-            wcid: 99,
-            previous_items: Vec::new(),
-        };
-        event(
-            &mut world,
-            GameEvent::InventoryPutObjInContainer(Box::new(InventoryPutObjInContainerEventData {
-                item_guid: Guid(3),
-                container_guid: PLAYER,
-                slot: 0,
-                container_type: InventoryEntryKind::Item,
-            })),
-        );
-        assert!(!confirmation.confirmed(&world));
-    }
-
-    #[test]
-    fn split_confirmation_requires_new_identity_and_source_remainder() {
-        use holtburger_common::properties::PropertyInt;
-        let mut world = outfit(2, 1);
-        let step = InventoryMove {
-            item: Guid(3),
-            container: PLAYER,
-            placement: 0,
-        };
-        let confirmation = InventoryConfirmation::Split {
-            step,
-            amount: 7,
-            source_remaining: 13,
-            wcid: 99,
-            previous_items: vec![Guid(4)],
-        };
-        let mut new_stack =
-            holtburger_world::entity::Entity::new(Guid(99), "New stack".into(), Default::default());
-        new_stack.wcid = Some(99);
-        new_stack.properties.ints.insert(PropertyInt::StackSize, 7);
-        world.entities.insert(new_stack);
-        event(
-            &mut world,
-            GameEvent::InventoryPutObjInContainer(Box::new(InventoryPutObjInContainerEventData {
-                item_guid: Guid(99),
-                container_guid: PLAYER,
-                slot: 0,
-                container_type: InventoryEntryKind::Item,
-            })),
-        );
-        assert!(!confirmation.confirmed(&world));
-        world
-            .entities
-            .get_mut(Guid(3))
-            .expect("source")
-            .properties
-            .ints
-            .insert(PropertyInt::StackSize, 13);
-        assert!(confirmation.confirmed(&world));
-        let old_identity = InventoryConfirmation::Split {
-            step,
-            amount: 7,
-            source_remaining: 13,
-            wcid: 99,
-            previous_items: vec![Guid(99)],
-        };
-        assert!(!old_identity.confirmed(&world));
-    }
-
-    #[test]
-    fn merge_confirmation_requires_both_quantity_consequences() {
-        use holtburger_common::properties::PropertyInt;
-        let mut world = outfit(2, 1);
-        const STACK: Guid = Guid(3);
-        const DESTINATION: Guid = Guid(4);
-        let confirmation = InventoryConfirmation::Merge {
-            source: STACK,
-            destination: DESTINATION,
-            source_remaining: 5,
-            destination_quantity: 100,
-        };
-        world
-            .entities
-            .get_mut(DESTINATION)
-            .expect("destination")
-            .properties
-            .ints
-            .insert(PropertyInt::StackSize, 100);
-        assert!(!confirmation.confirmed(&world));
-        world
-            .entities
-            .get_mut(STACK)
-            .expect("source")
-            .properties
-            .ints
-            .insert(PropertyInt::StackSize, 5);
-        assert!(confirmation.confirmed(&world));
+            .expect("changed target");
+        assert!(client.pack_exchange.is_none());
+        assert_eq!(client.session.game_action_sequence, 0);
     }
 }

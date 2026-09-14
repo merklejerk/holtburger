@@ -24,12 +24,22 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		if (!cell) throw new Error('Missing drag fixture cell');
 		cell.scrollIntoView({ block: 'nearest' });
 		const box = cell.getBoundingClientRect();
-		return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        if (cell.matches('[data-game-viewport]')) {
+            for (let y = box.top + 20; y < box.bottom; y += 30) {
+                for (let x = box.left + 20; x < box.right; x += 30) {
+                    if (document.elementFromPoint(x, y) === cell) return { x, y };
+                }
+            }
+            throw new Error('No uncovered viewport point');
+        }
+        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
 	})()`);
 	const source = '.inventory-sections .item-grid-cell[data-item-guid="91"]';
 	const target = '.inventory-sections .item-grid-cell[data-item-guid="94"]';
 	const begin = async (sourceSelector, targetSelector) => {
 		const from = await point(sourceSelector);
+		const selected = await read(`${api}.capture().selectedGuid`);
+		const submitted = (await submissions()).length;
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mousePressed",
 			...from,
@@ -37,6 +47,8 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			buttons: 1,
 			clickCount: 1,
 		});
+		if ((await read(`${api}.capture().selectedGuid`)) !== selected)
+			throw new Error("Pointer press changed selection before dragging");
 		const to = await point(targetSelector);
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseMoved",
@@ -44,6 +56,13 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			button: "left",
 			buttons: 1,
 		});
+		const item = await read(
+			`Number(document.querySelector(${JSON.stringify(sourceSelector)}).dataset.itemGuid)`,
+		);
+		if ((await read(`${api}.capture().selectedGuid`)) !== item)
+			throw new Error("Inventory drag did not select its source");
+		if ((await submissions()).length !== submitted)
+			throw new Error("Drag start submitted an inventory action");
 		return to;
 	};
 	const release = (position) =>
@@ -55,7 +74,6 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			clickCount: 1,
 		});
 	const countBefore = (await submissions()).length;
-	const selectedBefore = await read(`${api}.capture().selectedGuid`);
 	const position = await begin(source, target);
 	const ghost = await read(`(() => {
 		const ghost = document.querySelector('.item-drag-ghost');
@@ -105,8 +123,8 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	await reply(dropped.sequence, { kind: "move" });
 	if ((await submissions()).length !== countBefore + 1)
 		throw new Error("Confirmed native drop was not submitted once");
-	if ((await read(`${api}.capture().selectedGuid`)) !== selectedBefore)
-		throw new Error("Drag also selected its source/target");
+	if ((await read(`${api}.capture().selectedGuid`)) !== 91)
+		throw new Error("Drag release changed selection away from its source");
 
 	await read(`document.querySelector('.inventory-sort').click()`);
 	const sortedPosition = await begin(source, target);
@@ -177,6 +195,8 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		windowsVirtualKeyCode: 27,
 	});
 	await release(cancelledPosition);
+	if ((await read(`${api}.capture().selectedGuid`)) !== 94)
+		throw new Error("Cancelled drag lost source selection");
 	await reply(cancelled.sequence, { kind: "merge", amount: 10 });
 	if ((await submissions()).length !== countBefore + 1)
 		throw new Error("Cancelled gesture submitted a late preview");
@@ -370,8 +390,60 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	});
 	await release(nextPosition);
 
+	// Real pointer releases must distinguish the canvas from UI layered above it.
+	const viewport = "[data-game-viewport]";
+	for (const sourceSelector of [
+		source,
+		worn,
+		'.inventory-pack-strip .item-grid-cell[data-item-guid="96"]',
+	]) {
+		const before = (await submissions()).length;
+		const to = await begin(sourceSelector, viewport);
+		await release(to);
+		const preview = await lastPreview();
+		if (preview.intent.target.kind !== "ground")
+			throw new Error("Viewport release did not target ground");
+		await reply(preview.sequence, { kind: "drop" });
+		const submitted = await submissions();
+		if (
+			submitted.length !== before + 1 ||
+			submitted.at(-1).args.intent.target.kind !== "ground"
+		)
+			throw new Error(
+				"Ground drop was not submitted exactly once under sorted inventory",
+			);
+		if (
+			!(await read(
+				`document.querySelector(${JSON.stringify(sourceSelector)}) !== null`,
+			))
+		)
+			throw new Error("Ground drop optimistically removed its source");
+		if ((await read(`${api}.capture().selectedGuid`)) !== preview.intent.item)
+			throw new Error("Ground drop changed selection away from its source");
+	}
+	const beforeOverlay = (await submissions()).length;
+	const overlay = await begin(source, ".inventory-sort");
+	await release(overlay);
+	if ((await submissions()).length !== beforeOverlay)
+		throw new Error("Overlay release dropped an item");
+	await begin(source, viewport);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x: -10,
+		y: -10,
+		button: "left",
+		buttons: 1,
+	});
+	await release({ x: -10, y: -10 });
+	if ((await submissions()).length !== beforeOverlay)
+		throw new Error("Outside release dropped an item");
+
 	return {
 		nativeSubmission: true,
+		groundDrop: true,
+		equippedGroundDrop: true,
+		bagGroundDrop: true,
+		overlayAndOutsideDropExcluded: true,
 		splitDialog: true,
 		lateSubmissionPreservesNewDrag: true,
 		headerAppend: true,

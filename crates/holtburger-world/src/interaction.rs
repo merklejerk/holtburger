@@ -1,9 +1,29 @@
-//! Cached entity facts governing use admission and feedback.
+//! Cached entity facts governing pickup/use admission and feedback.
 
 use holtburger_common::Guid;
-use holtburger_common::properties::{ObjectDescriptionFlag, Usable, WorldObjectExt};
+use holtburger_common::properties::{
+    ObjectDescriptionFlag, PropertyString, Usable, WorldObjectExt, WorldObjectPropertyAccessors,
+};
 
 use crate::context::WorldContextExt;
+
+/// Known loose object eligible for a pickup attempt, with its storage-category facts.
+/// ACE Player_Inventory.cs:831 rejects static objects, creatures, and Stuck objects.
+/// Storage and independent placement restrict this affordance to loose world items;
+/// burden, busy state, and other server restrictions can still reject the attempt.
+pub fn pickup_candidate(world: &crate::WorldState, guid: Guid) -> Option<&crate::entity::Entity> {
+    let entity = world.get_visible_entity(guid)?;
+    (guid.is_dynamic_object()
+        && entity.get_string_prop(PropertyString::Name).is_some()
+        && entity.item_type().is_some()
+        && !entity.is_creature()
+        && !entity.is_stuck()
+        && !world.is_owned_by_player(guid)
+        && world.storage_location(guid).is_none()
+        && entity.placement_intent == crate::EntityPlacementIntent::Independent
+        && entity.position.landblock_id != Guid::NULL)
+        .then_some(entity)
+}
 
 /// A known object whose authored useability prohibits a direct Use request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +108,84 @@ mod tests {
         position::WorldPosition,
         properties::{ItemType, PropertyInt},
     };
+
+    #[test]
+    fn pickup_requires_known_loose_dynamic_non_creature_authority() {
+        use holtburger_common::properties::{PropertyBool, PropertyString};
+        let mut world = WorldState::synthetic();
+        world.player.guid = Guid(1);
+        let guid = Guid(0x8000_0042);
+        let mut entity = Entity::new(guid, "Loose item".into(), WorldPosition::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        world.add_entity(entity.clone());
+        assert!(pickup_candidate(&world, guid).is_some());
+        assert!(
+            world
+                .client_entity_facts(guid)
+                .expect("placement")
+                .expect("known")
+                .can_pick_up
+        );
+
+        // Independent counterexamples to each pickup prerequisite.
+        type Mutation = fn(&mut Entity);
+        let cases: [(&str, Mutation); 7] = [
+            ("stuck", |item| {
+                item.properties.bools.insert(PropertyBool::Stuck, true);
+            }),
+            ("creature", |item| {
+                item.properties
+                    .ints
+                    .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            }),
+            ("unknown type", |item| {
+                item.properties.ints.0.remove(&PropertyInt::ItemType);
+            }),
+            ("unknown name", |item| {
+                item.properties.strings.0.remove(&PropertyString::Name);
+            }),
+            ("unplaced", |item| {
+                item.position.landblock_id = Guid::NULL;
+            }),
+            ("withdrawn", |item| {
+                item.placement_intent = crate::EntityPlacementIntent::Withdrawn;
+            }),
+            ("static", |item| {
+                item.guid = Guid(0x7000_0042);
+            }),
+        ];
+        for (label, mutate) in cases {
+            let mut candidate = entity.clone();
+            mutate(&mut candidate);
+            let target = candidate.guid;
+            world.add_entity(candidate);
+            assert!(pickup_candidate(&world, target).is_none(), "{label}");
+        }
+        world.add_entity(entity);
+        world.storage.announce_container(guid, Guid(2));
+        assert!(
+            pickup_candidate(&world, guid).is_none(),
+            "another object's contained item"
+        );
+        world.storage.withdraw(guid);
+        assert!(pickup_candidate(&world, guid).is_some());
+        world.storage.equip(
+            guid,
+            Guid(2),
+            Some(holtburger_common::properties::EquipMask::MELEE_WEAPON),
+        );
+        assert!(
+            pickup_candidate(&world, guid).is_none(),
+            "equipped by another creature"
+        );
+        world.storage.withdraw(guid);
+        world.storage.announce_container(guid, world.player.guid);
+        assert!(pickup_candidate(&world, guid).is_none(), "owned item");
+    }
 
     #[test]
     fn container_feedback_respects_openability_ownership_targeting_and_creature_exception() {

@@ -111,7 +111,8 @@ export class ClientSelectedEntityTracking {
 			stackCount: record.description.stackCount,
 			structure: record.description.structure,
 			canInteract:
-				(record.description.useCapability === "direct" ||
+				(record.canPickUp ||
+					record.description.useCapability === "direct" ||
 					record.description.useCapability === "targeted" ||
 					(unrestrictedUse &&
 						record.description.useCapability === "unsupported")) &&

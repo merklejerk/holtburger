@@ -95,8 +95,8 @@ export class ClientEntitySelection {
 			this.commitAcquisition(intent, read.level.playerGuid);
 	}
 
-	/** Check an inventory click against accepted facts, not the sampled cell. */
-	selectInventoryItem(guid: number): void {
+	/** Validate inventory selection against accepted facts; clicks toggle and drags select. */
+	selectInventoryItem(guid: number, mode: "toggle" | "select"): void {
 		if (this.#destroyed) return;
 		this.beginAcquisition("external");
 		const read = this.#lifecycle.entities.read();
@@ -106,7 +106,9 @@ export class ClientEntitySelection {
 			entity?.description.kind === "known" &&
 			(entity.ownedByPlayer || guid === read.level.playerGuid)
 		)
-			this.#publish(this.#selectedGuid === guid ? null : guid);
+			this.#publish(
+				mode === "toggle" && this.#selectedGuid === guid ? null : guid,
+			);
 	}
 
 	/** Maintain identity from semantic facts; presentation contributes measured distance only. */
@@ -117,10 +119,14 @@ export class ClientEntitySelection {
 		const guid = this.#selectedGuid;
 		const entity = read.level.entities.get(guid);
 		if (entity?.ownedByPlayer) return;
-		if (entity === undefined || entity.scenePlacement === "unavailable") {
+		if (entity === undefined) {
 			this.#publish(null);
 			return;
 		}
+		// ACE drops clear ownership before publishing ground placement. Retain the
+		// identity through that gap; unavailable placement is not entity removal,
+		// and the renderer's previous distance cannot retire an unplaced selection.
+		if (entity.scenePlacement === "unavailable") return;
 		const status = this.#presentation()?.selectedEntityTrackingStatus(guid);
 		if (
 			status?.kind === "tracked" &&

@@ -85,6 +85,8 @@ export class ClientItemDrag {
 		keyboard: KeyboardInputPolicy,
 		/** Actual dragging supersedes pending item target acquisition. */
 		private readonly cancelInteraction: () => boolean,
+		/** Inventory drags select their source; binding rearrangements do not. */
+		private readonly selectDragItem: (guid: number) => void,
 	) {
 		this.#root = root;
 		this.#inventory = inventory;
@@ -226,6 +228,8 @@ export class ClientItemDrag {
 			)
 				return;
 			this.cancelInteraction();
+			if (typeof gesture.source.origin === "string")
+				this.selectDragItem(gesture.source.item);
 			gesture = {
 				kind: "dragging",
 				source: gesture.source,
@@ -367,7 +371,10 @@ export class ClientItemDrag {
 			const header = hit.closest<HTMLElement>(
 				".inventory-header[data-item-guid]",
 			);
-			if (gesture.source.origin === "pack") {
+			if (hit instanceof HTMLElement && hit.matches("[data-game-viewport]")) {
+				element = hit;
+				target = { kind: "ground" };
+			} else if (gesture.source.origin === "pack") {
 				if (cell?.closest(".inventory-pack-strip")) {
 					element = cell;
 					target = { kind: "pack", guid: Number(cell.dataset.itemGuid) };
@@ -462,6 +469,7 @@ export class ClientItemDrag {
 			(target.intent.target.kind === "item" ||
 				(gesture.source.origin === "contents" &&
 					target.intent.target.kind !== "equipment" &&
+					target.intent.target.kind !== "ground" &&
 					target.intent.target.kind !== "stack")) &&
 			this.#inventory.read().sortMode !== "native"
 		) {

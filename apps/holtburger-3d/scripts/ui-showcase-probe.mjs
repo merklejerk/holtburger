@@ -13,6 +13,13 @@ export async function probeUiShowcase(client, evaluateExpression) {
 		throw new Error(`Showcase did not settle: ${fn.toString()}`);
 	};
 	await wait(() => Boolean(document.querySelector(".character-hud")));
+	await read(() => {
+		const name = document.querySelector(".selected-entity__heading strong");
+		if (!name?.style.color || getComputedStyle(name).color !== name.style.color)
+			throw new Error(
+				"Selected entity classification color is missing or overridden.",
+			);
+	});
 	const originalViewport = await read(() => ({
 		width: innerWidth,
 		height: innerHeight,

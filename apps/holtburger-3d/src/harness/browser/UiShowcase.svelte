@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import type { Snippet } from "svelte";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { uiThemes } from "../../app/mount";
@@ -343,6 +344,9 @@
 			{#snippet target()}<ClientSelectedEntityHud
 					selectedGuid={1}
 					readSelectedDisplay={() => ({
+						nameColor:
+							SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors
+								.mob,
 						name: "Drudge Prowler",
 						stackCount: null,
 						structure: { current: null, max: null },

@@ -221,6 +221,7 @@ describe("sortInventoryItems", () => {
 				name,
 				itemType,
 				healthQuery: "ineligible" as const,
+				mapCategory: "other" as const,
 				objectFlags: 0,
 				wcid: null,
 				weenieType: null,

@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     WorldState,
     context::WorldContextExt,
+    entity_classification::{
+        DynamicEntityMapBlipCategory, semantic_dynamic_entity_map_blip_category,
+    },
     state::{
         ScenePlacementError,
         storage::{RosterCoverage, StorageLocation, StorageSlot},
@@ -73,6 +76,9 @@ pub enum EntityDescription {
         /// Public item classification consumed by frontend inventory type sorting.
         #[serde(rename = "itemType")]
         item_type: u32,
+        /// Color-independent category shared with map markers, consumed by selected-name styling.
+        #[serde(rename = "mapCategory")]
+        map_category: DynamicEntityMapBlipCategory,
         /// Slot compatibility for inventory hover presentation, including off-hand melee use.
         /// Does not establish skill/level admission; absent before valid locations arrive.
         #[serde(rename = "equipLocations")]
@@ -232,59 +238,68 @@ impl WorldState {
             let item_type = entity.item_type()?;
             Some((entity, name, item_type))
         }) {
-            Some((entity, name, item_type)) => EntityDescription::Known {
-                name: name.to_owned(),
-                stack_count: entity.is_stackable().then(|| entity.stack_size()),
-                structure: EntityStructure {
-                    current: entity.structure(),
-                    max: entity.max_structure(),
-                },
-                icon: EntityIconAppearance {
-                    base: entity.get_data_prop(PropertyDataId::Icon).map(|id| id.0),
-                    overlay: entity
-                        .get_data_prop(PropertyDataId::IconOverlay)
-                        .map(|id| id.0),
-                    underlay: entity
-                        .get_data_prop(PropertyDataId::IconUnderlay)
-                        .map(|id| id.0),
-                    ui_effects: entity.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
-                },
-                item_type: item_type.bits(),
-                use_capability: crate::item_use::item_use_capability(entity),
-                consumable: crate::item_use::consumable_facts(entity),
-                equip_locations: entity
-                    .get_int_prop(PropertyInt::ValidLocations)
-                    .map(|mask| {
-                        let mask = mask as u32;
-                        // ACE Player_Inventory.cs:DoHandleActionGetAndWieldItem allows
-                        // exactly MeleeWeapon in the Shield location for dual wielding.
-                        if mask == EquipMask::MELEE_WEAPON.bits() {
-                            mask | EquipMask::SHIELD.bits()
-                        } else {
-                            mask
-                        }
-                    }),
-                object_flags: entity.flags.bits(),
-                wcid: entity.wcid,
-                weenie_type: entity
+            Some((entity, name, item_type)) => {
+                let weenie_type = entity
                     .wcid
-                    .and_then(|wcid| self.weenie_types.as_ref().and_then(|types| types.get(wcid))),
-                pyreal_balance: entity
-                    .get_int_prop(PropertyInt::CoinValue)
-                    .map(|value| u32::try_from(value).expect("coin balance must be non-negative")),
-                burden: if guid == self.player.guid
-                    && self.storage_coverage(guid) == Some(RosterCoverage::Announced)
-                {
-                    self.player_burden()
-                } else {
-                    None
-                },
-                health_query: if creature == Some(true) {
-                    HealthQueryEligibility::Eligible
-                } else {
-                    HealthQueryEligibility::Ineligible
-                },
-            },
+                    .and_then(|wcid| self.weenie_types.as_ref().and_then(|types| types.get(wcid)));
+                EntityDescription::Known {
+                    name: name.to_owned(),
+                    stack_count: entity.is_stackable().then(|| entity.stack_size()),
+                    structure: EntityStructure {
+                        current: entity.structure(),
+                        max: entity.max_structure(),
+                    },
+                    icon: EntityIconAppearance {
+                        base: entity.get_data_prop(PropertyDataId::Icon).map(|id| id.0),
+                        overlay: entity
+                            .get_data_prop(PropertyDataId::IconOverlay)
+                            .map(|id| id.0),
+                        underlay: entity
+                            .get_data_prop(PropertyDataId::IconUnderlay)
+                            .map(|id| id.0),
+                        ui_effects: entity.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
+                    },
+                    map_category: semantic_dynamic_entity_map_blip_category(
+                        entity.flags,
+                        Some(item_type),
+                        weenie_type,
+                        entity.usable_flags(),
+                    ),
+                    item_type: item_type.bits(),
+                    use_capability: crate::item_use::item_use_capability(entity),
+                    consumable: crate::item_use::consumable_facts(entity),
+                    equip_locations: entity
+                        .get_int_prop(PropertyInt::ValidLocations)
+                        .map(|mask| {
+                            let mask = mask as u32;
+                            // ACE Player_Inventory.cs:DoHandleActionGetAndWieldItem allows
+                            // exactly MeleeWeapon in the Shield location for dual wielding.
+                            if mask == EquipMask::MELEE_WEAPON.bits() {
+                                mask | EquipMask::SHIELD.bits()
+                            } else {
+                                mask
+                            }
+                        }),
+                    object_flags: entity.flags.bits(),
+                    wcid: entity.wcid,
+                    weenie_type,
+                    pyreal_balance: entity.get_int_prop(PropertyInt::CoinValue).map(|value| {
+                        u32::try_from(value).expect("coin balance must be non-negative")
+                    }),
+                    burden: if guid == self.player.guid
+                        && self.storage_coverage(guid) == Some(RosterCoverage::Announced)
+                    {
+                        self.player_burden()
+                    } else {
+                        None
+                    },
+                    health_query: if creature == Some(true) {
+                        HealthQueryEligibility::Eligible
+                    } else {
+                        HealthQueryEligibility::Ineligible
+                    },
+                }
+            }
             None => EntityDescription::Pending,
         };
         let location = match self.storage_location(guid) {
@@ -355,8 +370,46 @@ mod tests {
     use crate::{PhysicsAttachment, entity::Entity};
     use holtburger_common::{
         ParentLocation, Placement,
-        properties::{EquipMask, ItemType, PropertyInt, WorldObjectPropertyAccessorsMut},
+        properties::{
+            EquipMask, ItemType, ObjectDescriptionFlag, PropertyInt, Usable,
+            WorldObjectPropertyAccessorsMut,
+        },
     };
+
+    #[test]
+    fn selected_category_preserves_door_useability_independently_of_use_capability() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(7);
+        let mut door = Entity::new(guid, "Door".into(), Default::default());
+        door.flags = ObjectDescriptionFlag::DOOR;
+        door.set_int_prop(PropertyInt::ItemType, ItemType::MISC.bits() as i32);
+        world.entities.insert(door);
+        for (usable, expected) in [
+            (Usable::REMOTE, DynamicEntityMapBlipCategory::Door),
+            // Targeted use without target metadata is unavailable, but direct-use admission
+            // still determines the map category. Consumers must not reconstruct it from capability.
+            (
+                Usable::SOURCE_REMOTE_TARGET_REMOTE,
+                DynamicEntityMapBlipCategory::Door,
+            ),
+            (Usable::NO, DynamicEntityMapBlipCategory::DoorNoDirectUse),
+        ] {
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_int_prop(PropertyInt::ItemUseable, usable.bits() as i32);
+            let EntityDescription::Known { map_category, .. } = world
+                .client_entity_facts(guid)
+                .unwrap()
+                .unwrap()
+                .description
+            else {
+                panic!("door description must be known");
+            };
+            assert_eq!(map_category, expected);
+        }
+    }
 
     #[test]
     fn targeting_uses_public_creature_type_and_independent_nonhidden_placement() {
@@ -579,6 +632,7 @@ mod tests {
                     ui_effects: 0
                 },
                 item_type: ItemType::MELEE_WEAPON.bits(),
+                map_category: DynamicEntityMapBlipCategory::Other,
                 equip_locations: None,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
                 consumable: None,
@@ -629,6 +683,7 @@ mod tests {
                     ui_effects: 0
                 },
                 item_type: ItemType::CREATURE.bits(),
+                map_category: DynamicEntityMapBlipCategory::Npc,
                 equip_locations: None,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
                 consumable: None,

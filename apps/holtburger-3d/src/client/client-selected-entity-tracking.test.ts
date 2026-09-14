@@ -1,3 +1,4 @@
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import { ClientSelectedEntityTracking } from "./client-selected-entity-tracking";
@@ -57,6 +58,7 @@ async function fixture() {
 							name: `Creature ${guid}`,
 							healthQuery: "eligible",
 							itemType: 0,
+							mapCategory: "other",
 							objectFlags: 0,
 							wcid: null,
 							weenieType: null,
@@ -178,6 +180,8 @@ describe("ClientSelectedEntityTracking", () => {
 		f.selection.selectInventoryItem(9);
 		expect(f.interactions.display(false)).toEqual({
 			name: "Item 9",
+			nameColor:
+				SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.other,
 			stackCount: null,
 			structure: { current: null, max: null },
 			health: { kind: "not-applicable" },
@@ -204,6 +208,7 @@ describe("ClientSelectedEntityTracking", () => {
 				name: "Creature",
 				healthQuery: "eligible",
 				itemType: 0,
+				mapCategory: "mob",
 				objectFlags: 0,
 				wcid: null,
 				weenieType: null,
@@ -218,6 +223,9 @@ describe("ClientSelectedEntityTracking", () => {
 			},
 		});
 		f.emit("client-entity-facts-changed", { upserts: [creature], removed: [] });
+		expect(f.interactions.display(false).nameColor).toBe(
+			SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
+		);
 		f.emit("client-entity-health-updated", { guid: 11, healthFraction: 0.5 });
 		f.emit("client-entity-facts-changed", {
 			upserts: [
@@ -229,6 +237,7 @@ describe("ClientSelectedEntityTracking", () => {
 						kind: "known",
 						healthQuery: "eligible",
 						itemType: 0,
+						mapCategory: "other",
 						objectFlags: 0,
 						wcid: null,
 						weenieType: null,
@@ -247,6 +256,8 @@ describe("ClientSelectedEntityTracking", () => {
 		});
 		expect(f.interactions.display(false)).toEqual({
 			name: "Renamed",
+			nameColor:
+				SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.other,
 			stackCount: null,
 			structure: { current: null, max: null },
 			health: { kind: "known", fraction: 0.5 },

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
 const slotSchema = z.discriminatedUnion("kind", [
@@ -52,6 +53,8 @@ const clientEntityFactsSchema = z
 						.readonly(),
 					/** Public classification for inventory type sorting. */
 					itemType: guid,
+					/** World-resolved category shared with map markers, used by selected-name styling. */
+					mapCategory: z.enum(DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES),
 					/** World-derived slot compatibility; not a wield-requirements verdict. */
 					equipLocations: guid.nullable(),
 					/** Shared authored use shape, independent of target and busy state. */

@@ -97,6 +97,10 @@ export interface ClientTuning {
 	};
 	/** Selected-entity HUD display policy. */
 	readonly selectedEntityHud: {
+		/** Selected healing-kit name accent. */
+		readonly healingKitColor: HexRgbaColor;
+		/** Selected mana-stone name accent. */
+		readonly manaStoneColor: HexRgbaColor;
 		/** Bounded cadence for refreshing selected-entity display text. */
 		readonly displayIntervalMs: number;
 	};

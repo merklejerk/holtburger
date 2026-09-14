@@ -916,7 +916,8 @@
 		{readSelectedEntityDisplay}
 		{inventory}
 		{itemInteractions}
-		onSelectInventoryItem={(guid) => entitySelection?.selectInventoryItem(guid)}
+		onSelectInventoryItem={(guid, mode) =>
+			entitySelection?.selectInventoryItem(guid, mode)}
 		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}

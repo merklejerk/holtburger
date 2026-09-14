@@ -113,6 +113,56 @@ async function fixture() {
 }
 
 describe("shared frontend item interaction flow", () => {
+	it("picks up loose items before use while preserving active target acquisition", async () => {
+		const f = await fixture();
+		const inventory = vi
+			.spyOn(f.lifecycle, "submitInventory")
+			.mockResolvedValue(undefined);
+		f.emit("client-entity-facts-changed", {
+			upserts: [entityFacts(4, { canPickUp: true })],
+			removed: [],
+		});
+		f.select(4);
+		f.interactions.interactSelected(false);
+		expect(inventory).toHaveBeenCalledExactlyOnceWith({
+			item: 4,
+			target: { kind: "pickup" },
+		});
+		expect(f.submit).not.toHaveBeenCalled();
+		f.interactions.use(2, false);
+		f.interactions.interactSelected(false);
+		expect(inventory).toHaveBeenCalledTimes(1);
+		expect(f.request().intent).toEqual({
+			kind: "targeted",
+			source: 2,
+			target: 4,
+		});
+		f.destroy();
+	});
+
+	it("uses an owned item normally and reports pickup submission failures", async () => {
+		const f = await fixture();
+		f.select(3);
+		f.interactions.interactSelected(false);
+		expect(f.request().intent).toEqual({
+			kind: "direct",
+			source: 3,
+			unrestricted: false,
+		});
+		f.emit("client-entity-facts-changed", {
+			upserts: [entityFacts(4, { canPickUp: true })],
+			removed: [],
+		});
+		vi.spyOn(f.lifecycle, "submitInventory").mockRejectedValue(
+			new Error("Disconnected"),
+		);
+		f.select(4);
+		f.interactions.interactSelected(false);
+		await Promise.resolve();
+		expect(f.failure).toHaveBeenCalledWith("Error: Disconnected");
+		f.destroy();
+	});
+
 	it("acquires targets for ordinary use but supplies self or selection for action bars", async () => {
 		const f = await fixture();
 		f.interactions.use(2, false);

@@ -38,7 +38,6 @@ enum EquipmentStage {
     Peace,
     Unequip,
     Wield,
-    Restore(CombatMode),
 }
 
 /// Whole-item wield and split-to-wield have different completion identities.
@@ -74,11 +73,12 @@ pub(super) struct EquipmentOperation {
     wield: WieldRequest,
 }
 
-/// An advance is either waiting, one wire request, or terminal success.
+/// Advance either waits, sends a dependent step, or sends the final request.
 enum EquipmentAdvance {
     Waiting,
     Send(GameAction),
-    Complete,
+    /// Release ownership when sending; no later request depends on this result.
+    SendFinal(GameAction),
 }
 
 impl EquipmentOperation {
@@ -135,18 +135,10 @@ impl EquipmentOperation {
                 }
             }
             EquipmentStage::Wield if self.wielded(world) => {
-                if !self.resume_combat {
-                    return Ok(EquipmentAdvance::Complete);
-                }
                 let mode = world.get_suggested_combat_mode();
-                self.stage = EquipmentStage::Restore(mode);
-                self.deadline = now + EQUIPMENT_STEP_TIMEOUT;
-                return Ok(EquipmentAdvance::Send(GameAction::ChangeCombatMode(
+                return Ok(EquipmentAdvance::SendFinal(GameAction::ChangeCombatMode(
                     Box::new(ChangeCombatModeActionData { mode }),
                 )));
-            }
-            EquipmentStage::Restore(mode) if world.player_combat_mode() == mode => {
-                return Ok(EquipmentAdvance::Complete);
             }
             _ => {}
         }
@@ -192,7 +184,7 @@ impl EquipmentOperation {
             )));
         }
         self.stage = EquipmentStage::Wield;
-        Ok(EquipmentAdvance::Send(match self.wield {
+        let action = match self.wield {
             WieldRequest::Whole => {
                 GameAction::GetAndWieldItem(Box::new(GetAndWieldItemActionData {
                     item_guid: self.plan.item,
@@ -206,7 +198,12 @@ impl EquipmentOperation {
                     amount: amount as i32,
                 }))
             }
-        }))
+        };
+        Ok(if self.resume_combat {
+            EquipmentAdvance::Send(action)
+        } else {
+            EquipmentAdvance::SendFinal(action)
+        })
     }
 }
 
@@ -240,7 +237,7 @@ impl ClientRuntime {
         split: Option<u32>,
     ) -> Result<()> {
         if self.equipment_operation.is_some()
-            || self.inventory_operation.is_some()
+            || self.pack_exchange.is_some()
             || self.active_busy_operation.is_some()
         {
             self.emit_action_result(
@@ -349,12 +346,9 @@ impl ClientRuntime {
         match operation.advance(&self.world, now) {
             Ok(EquipmentAdvance::Waiting) => {}
             Ok(EquipmentAdvance::Send(action)) => self.send_game_action(action).await?,
-            Ok(EquipmentAdvance::Complete) => {
+            Ok(EquipmentAdvance::SendFinal(action)) => {
                 self.equipment_operation = None;
-                self.emit_action_result(
-                    ActionResultSource::Client,
-                    ActionResultReason::General("Equipment change completed".into()),
-                );
+                self.send_game_action(action).await?;
             }
             Err(reason) => self.stop_equipment_change(&reason),
         }
@@ -415,23 +409,8 @@ mod tests {
             next = operation.advance(&world, now);
         }
         assert!(
-            matches!(next, Ok(EquipmentAdvance::Send(GameAction::GetAndWieldItem(data))) if data.item_guid == INCOMING)
+            matches!(next, Ok(EquipmentAdvance::SendFinal(GameAction::GetAndWieldItem(data))) if data.item_guid == INCOMING)
         );
-        assert!(matches!(
-            operation.advance(&world, now),
-            Ok(EquipmentAdvance::Waiting)
-        ));
-        event(
-            &mut world,
-            GameEvent::WieldObject(Box::new(WieldObjectEventData {
-                object_guid: INCOMING,
-                equip_mask: operation.plan.target,
-            })),
-        );
-        assert!(matches!(
-            operation.advance(&world, now),
-            Ok(EquipmentAdvance::Complete)
-        ));
     }
 
     #[test]
@@ -610,20 +589,23 @@ mod tests {
                 .start_equipment_change(INCOMING, None, None)
                 .await
                 .expect("weapon change");
-            let operation = client
-                .equipment_operation
-                .as_ref()
-                .expect("pending weapon change");
             let active = matches!(
                 mode,
                 Some(CombatMode::Melee | CombatMode::Missile | CombatMode::Magic)
             );
-            assert_eq!(operation.resume_combat, active, "initial mode: {mode:?}");
-            assert_eq!(
-                matches!(operation.stage, EquipmentStage::Peace),
-                active,
-                "initial mode: {mode:?}"
-            );
+            if active {
+                let operation = client
+                    .equipment_operation
+                    .as_ref()
+                    .expect("peace before wield");
+                assert!(operation.resume_combat);
+                assert_eq!(operation.stage, EquipmentStage::Peace);
+            } else {
+                assert!(
+                    client.equipment_operation.is_none(),
+                    "single wield needs no continuation: {mode:?}"
+                );
+            }
         }
     }
 
@@ -632,7 +614,8 @@ mod tests {
         let mut client = super::super::builder::build_test_client(ClientState::InWorld);
         client.world = outfit(2, 1);
         let mut pending = operation(&client.world, Instant::now());
-        pending.stage = EquipmentStage::Restore(CombatMode::Melee);
+        pending.stage = EquipmentStage::Wield;
+        pending.resume_combat = true;
         client.equipment_operation = Some(pending);
         client
             .handle_command(super::super::ClientCommand::SetCombatMode(

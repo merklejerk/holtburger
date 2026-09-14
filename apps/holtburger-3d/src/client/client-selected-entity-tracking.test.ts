@@ -127,6 +127,28 @@ describe("ClientSelectedEntityTracking", () => {
 		f.destroy();
 	});
 
+	it("enables pickup-only interaction and retires it when eligibility changes", async () => {
+		const f = await fixture();
+		const item = entityFacts(11);
+		if (item.description.kind !== "known")
+			throw new Error("Expected known item");
+		f.selection.select(11);
+		for (const canPickUp of [true, false]) {
+			f.emit("client-entity-facts-changed", {
+				upserts: [
+					{
+						...item,
+						canPickUp,
+						description: { ...item.description, useCapability: "unsupported" },
+					},
+				],
+				removed: [],
+			});
+			expect(f.interactions.display(false).canInteract).toBe(canPickUp);
+		}
+		f.destroy();
+	});
+
 	it("replaces subscriptions, filters health by GUID, and distinguishes unknown from zero", async () => {
 		const f = await fixture();
 		f.selection.select(7);
@@ -178,7 +200,7 @@ describe("ClientSelectedEntityTracking", () => {
 	it("queries only eligible selections and cancels once across consecutive inventory items", async () => {
 		const f = await fixture();
 		f.selection.select(7);
-		f.selection.selectInventoryItem(9);
+		f.selection.selectInventoryItem(9, "toggle");
 		expect(f.interactions.display(false)).toEqual({
 			name: "Item 9",
 			nameColor:
@@ -188,7 +210,7 @@ describe("ClientSelectedEntityTracking", () => {
 			health: { kind: "not-applicable" },
 			canInteract: true,
 		});
-		f.selection.selectInventoryItem(10);
+		f.selection.selectInventoryItem(10, "toggle");
 		f.selection.select(8);
 		expect(f.invoke.mock.calls).toEqual([
 			["query_client_entity_health", { guid: 7 }],

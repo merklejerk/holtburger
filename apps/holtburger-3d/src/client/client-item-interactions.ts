@@ -58,6 +58,7 @@ type Session = Pick<
 	| "submitItemUse"
 	| "queryItemUseTarget"
 	| "equipItem"
+	| "submitInventory"
 >;
 
 // Identities survive controller replacement so late host results cannot match a new owner.
@@ -112,7 +113,16 @@ export class ClientItemInteractions {
 		}
 		if (this.#state.kind === "acquiring")
 			this.target(selected, this.#state.generation);
-		else this.use(selected, unrestricted);
+		else {
+			const item = this.#item(selected);
+			if (item === null) return;
+			if (item.canPickUp) {
+				this.cancel();
+				void this.#session
+					.submitInventory({ item: selected, target: { kind: "pickup" } })
+					.catch((error: unknown) => this.#failure(String(error)));
+			} else this.use(selected, unrestricted);
+		}
 	}
 
 	/** Inventory supplies its clicked identity, independent of selection toggles. */

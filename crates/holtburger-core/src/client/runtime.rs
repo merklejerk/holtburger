@@ -251,7 +251,7 @@ impl ClientRuntime {
                     last_physics_time = now;
 
                     self.advance_equipment_change(now).await?;
-                    self.advance_inventory_change(now).await?;
+                    self.advance_pack_exchange(now).await?;
                     let active_world = self.activation.is_none()
                         && matches!(self.state, ClientState::InWorld);
                     if active_world {
@@ -307,7 +307,7 @@ impl ClientRuntime {
                     self.try_complete_world_activation().await?;
 
                     self.advance_equipment_change(now).await?;
-                    self.advance_inventory_change(now).await?;
+                    self.advance_pack_exchange(now).await?;
                     let active_world = self.activation.is_none()
                         && matches!(self.state, ClientState::InWorld);
                     let before_dynamic = if active_world {

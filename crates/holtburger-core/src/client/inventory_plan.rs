@@ -20,6 +20,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum InventoryTarget {
+    /// Acquire a loose ground object into automatically allocated carried storage.
+    Pickup,
+    /// Drop an owned carried or equipped object near the character.
+    Ground,
     /// Split this positive quantity into newly allocated carried storage.
     Split { amount: u32 },
     /// Merge when compatible with remaining capacity, otherwise insert before this item.
@@ -37,7 +41,7 @@ pub enum InventoryTarget {
 /// One desired inventory interaction, re-evaluated against current world state on submission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventoryIntent {
-    /// Owned source item identity.
+    /// Source identity; pickup alone accepts an unowned ground object.
     pub item: Guid,
     /// User-selected target identity or equipment location.
     pub target: InventoryTarget,
@@ -57,13 +61,11 @@ pub struct InventoryMove {
 /// A resolved operation; consumers execute these decisions without re-deriving them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InventoryPlan {
-    /// Split creates a new identity; retain exact source and destination expectations.
+    /// One split request and the current quantity limit consumed by previews.
     Split {
         step: InventoryMove,
         amount: u32,
-        source_remaining: u32,
         max_amount: u32,
-        wcid: u32,
     },
     /// Self-drop or a whole-stack split has no protocol consequence.
     Noop,
@@ -75,6 +77,8 @@ pub enum InventoryPlan {
     },
     /// One server container request also handles explicit unequip.
     Move(InventoryMove),
+    /// One server-owned drop, including dequipping when necessary.
+    Drop { item: Guid },
     /// Equipment owner executes the planned conflict removals and wield.
     Equip(EquipmentPlan),
     /// Two insertions exchange both endpoints and restore intervening native indices.
@@ -96,6 +100,9 @@ pub enum InventoryPlanError {
     /// Source must be carried or equipped by this player.
     #[error("Item is not owned by the player")]
     NotOwned,
+    /// Current authority does not establish a loose pickup candidate.
+    #[error("This object cannot currently be picked up")]
+    NotPickable,
     /// Required identity, quantity, roster, capacity, or placement is unavailable.
     #[error("Inventory facts for {0} have not arrived")]
     Pending(Guid),
@@ -131,10 +138,26 @@ pub fn plan_inventory_intent(
     world: &WorldState,
     intent: InventoryIntent,
 ) -> Result<InventoryPlan, InventoryPlanError> {
-    if !world.is_owned_by_player(intent.item) {
+    if intent.target != InventoryTarget::Pickup && !world.is_owned_by_player(intent.item) {
         return Err(InventoryPlanError::NotOwned);
     }
     match intent.target {
+        InventoryTarget::Pickup => {
+            let entity = holtburger_world::interaction::pickup_candidate(world, intent.item)
+                .ok_or(InventoryPlanError::NotPickable)?;
+            let destinations = allocate_storage(
+                world,
+                world.player.guid,
+                &[entity.uses_player_container_slot()],
+            )?;
+            let destination = destinations[0];
+            Ok(InventoryPlan::Move(InventoryMove {
+                item: intent.item,
+                container: destination.container,
+                placement: destination.placement,
+            }))
+        }
+        InventoryTarget::Ground => Ok(InventoryPlan::Drop { item: intent.item }),
         InventoryTarget::Split { amount } => {
             let entity = world
                 .entities
@@ -148,9 +171,6 @@ pub fn plan_inventory_intent(
                 return Ok(InventoryPlan::Noop);
             }
             i32::try_from(amount).map_err(|_| InventoryPlanError::ProtocolRange)?;
-            let wcid = entity
-                .wcid
-                .ok_or(InventoryPlanError::Pending(intent.item))?;
             let preferred = match world.storage_location(intent.item) {
                 Some(StorageLocation::Contained { parent, .. }) => parent,
                 Some(StorageLocation::Equipped { wearer, .. }) => wearer,
@@ -166,9 +186,7 @@ pub fn plan_inventory_intent(
                     placement: destination.placement,
                 },
                 amount,
-                source_remaining: quantity - amount,
                 max_amount: quantity,
-                wcid,
             })
         }
 
@@ -381,6 +399,8 @@ pub enum InventoryPreview {
     Merge { amount: u32 },
     /// A positional move; the frontend may disallow this under non-native sorting.
     Move,
+    /// Ground drop does not depend on native inventory sorting.
+    Drop,
     /// Full set of displaced identities for equipment highlighting and feedback.
     Equip { displaced: Vec<Guid> },
     /// Exchange two real pack positions.
@@ -407,6 +427,7 @@ impl From<&InventoryPlan> for InventoryPreview {
             InventoryPlan::Noop => Self::Noop,
             InventoryPlan::Merge { amount, .. } => Self::Merge { amount: *amount },
             InventoryPlan::Move(_) => Self::Move,
+            InventoryPlan::Drop { .. } => Self::Drop,
             InventoryPlan::Equip(plan) => Self::Equip {
                 displaced: plan.unequips.iter().map(|step| step.item).collect(),
             },
@@ -425,7 +446,7 @@ impl super::ClientRuntime {
             return Err("Inventory changes require an active world".into());
         }
         if self.equipment_operation.is_some()
-            || self.inventory_operation.is_some()
+            || self.pack_exchange.is_some()
             || self.active_busy_operation.is_some()
         {
             return Err("Another inventory operation is still pending".into());
@@ -491,6 +512,142 @@ mod tests {
             place(&mut world, guid, PACK, slot, InventoryEntryKind::Item);
         }
         world
+    }
+
+    #[test]
+    fn pickup_uses_pack_slots_and_requires_known_storage_capacity() {
+        use holtburger_common::properties::{ItemType, PropertyBool};
+        let mut world = super::super::equipment_plan::tests::outfit(0, 0);
+        let ground = Guid(0x8000_0042);
+        let mut bag =
+            holtburger_world::entity::Entity::new(ground, "Loose bag".into(), Default::default());
+        bag.position.landblock_id = Guid(0x1234_0001);
+        bag.properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CONTAINER.bits() as i32);
+        bag.properties
+            .bools
+            .insert(PropertyBool::RequiresBackpackSlot, true);
+        world.add_entity(bag);
+        let intent = InventoryIntent {
+            item: ground,
+            target: InventoryTarget::Pickup,
+        };
+        world
+            .entities
+            .get_mut(PLAYER)
+            .expect("player")
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 2);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Move(InventoryMove {
+                item: ground,
+                container: PLAYER,
+                placement: 1
+            }))
+        );
+        world
+            .entities
+            .get_mut(PLAYER)
+            .expect("player")
+            .properties
+            .ints
+            .0
+            .remove(&PropertyInt::ItemsCapacity);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::Storage(
+                StorageAllocationError::IncompleteStorage(PLAYER)
+            ))
+        );
+    }
+
+    #[test]
+    fn pickup_allocates_root_then_pack_and_drop_needs_no_free_slot() {
+        let mut world = super::super::equipment_plan::tests::outfit(1, 2);
+        let ground = Guid(0x8000_0042);
+        let mut entity =
+            holtburger_world::entity::Entity::new(ground, "Ground item".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity.properties.ints.insert(
+            PropertyInt::ItemType,
+            holtburger_common::properties::ItemType::FOOD.bits() as i32,
+        );
+        world.add_entity(entity);
+        let intent = InventoryIntent {
+            item: ground,
+            target: InventoryTarget::Pickup,
+        };
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Move(InventoryMove {
+                item: ground,
+                container: Guid(1),
+                placement: 0
+            }))
+        );
+        world
+            .entities
+            .get_mut(Guid(1))
+            .expect("player")
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 0);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Move(InventoryMove {
+                item: ground,
+                container: Guid(2),
+                placement: 1
+            }))
+        );
+        world
+            .entities
+            .get_mut(Guid(2))
+            .expect("pack")
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 1);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::Storage(StorageAllocationError::NoSpace))
+        );
+        let equipped = world.player_equipment().next().expect("equipped armor").0;
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: equipped,
+                    target: InventoryTarget::Ground
+                }
+            ),
+            Ok(InventoryPlan::Drop { item: equipped })
+        );
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: ground,
+                    target: InventoryTarget::Ground
+                }
+            ),
+            Err(InventoryPlanError::NotOwned)
+        );
+        super::super::equipment_plan::tests::event(
+            &mut world,
+            GameEvent::InventoryPutObjInContainer(Box::new(InventoryPutObjInContainerEventData {
+                item_guid: ground,
+                container_guid: Guid(1),
+                slot: 0,
+                container_type: InventoryEntryKind::Item,
+            })),
+        );
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::NotPickable)
+        );
     }
 
     #[test]
@@ -613,7 +770,6 @@ mod tests {
                     ..
                 },
                 amount: 7,
-                source_remaining: 13,
                 max_amount: 20,
                 ..
             })

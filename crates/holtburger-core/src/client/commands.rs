@@ -107,7 +107,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        if (self.equipment_operation.is_some() || self.inventory_operation.is_some())
+        if (self.equipment_operation.is_some() || self.pack_exchange.is_some())
             && matches!(
                 cmd,
                 ClientCommand::Drop(_)

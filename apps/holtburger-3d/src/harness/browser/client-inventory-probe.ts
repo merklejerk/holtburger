@@ -14,6 +14,7 @@ function item(
 ): ClientEntityFacts {
 	return {
 		guid,
+		canPickUp: false,
 		description: {
 			kind: "known",
 			name: `Inventory item ${guid}`,
@@ -1424,6 +1425,20 @@ export async function probeClientInventory(options: {
 		throw new Error("Known split fixture required");
 	records = [
 		root,
+		{
+			...owned(96, 1, 0),
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "pack", index: 0, entryKind: "container" },
+			},
+			storage: {
+				kind: "container",
+				roster: "announced",
+				itemCapacity: 24,
+				packCapacity: 0,
+			},
+		},
 		compatibleArmor,
 		{
 			...splitStack,
@@ -1441,8 +1456,35 @@ export async function probeClientInventory(options: {
 	];
 	baseline();
 	await sample();
+	// Drop authority clears ownership before publishing the ground placement.
+	const selectedBeforeDrop = selection.selectedGuid();
+	for (const guid of [compatibleArmor.guid, 95]) {
+		const original = records.find((record) => record.guid === guid);
+		if (original === undefined)
+			throw new Error("Missing drop-selection fixture");
+		selection.select(guid);
+		const unplaced: ClientEntityFacts = {
+			...original,
+			ownedByPlayer: false,
+			location: { kind: "none" },
+			scenePlacement: "unavailable",
+		};
+		update(unplaced);
+		await sample();
+		if (selection.selectedGuid() !== guid)
+			throw new Error("Ownership removal cleared drop selection");
+		update({ ...unplaced, scenePlacement: "available", canPickUp: true });
+		await sample();
+		if (selection.selectedGuid() !== guid)
+			throw new Error("Ground placement cleared drop selection");
+		update(original);
+	}
+	selection.select(selectedBeforeDrop);
+	await sample();
+
 	return {
 		equipmentHover: true,
+		dropSelectionPreserved: true,
 		equipmentStrip: true,
 		ambientCurrencyOverlay: true,
 		initial,

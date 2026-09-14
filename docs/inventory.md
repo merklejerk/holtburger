@@ -40,11 +40,14 @@ merge-only targeting rejects it. Overflow remains
 on the source. Positions and amounts are checked against the server's signed
 32-bit range before submission.
 
-`inventory_runtime.rs` serializes requests with equipment operations. It waits for
-accepted destination/quantity consequences, and confirms the first pack move and
-the target's expected intermediate position before sending the second. A merge
-requires both the destination increase and source decrease/removal. Timeout is an
-uncertain outcome: the outstanding server request may still complete.
+`inventory_runtime.rs` sends standalone moves, merges, splits, pickups, and drops
+without retaining a completion-wait interaction lock. Server updates remain the
+source of truth; overlapping requests can be rejected by the server.
+Only a dependent pack exchange retains an inventory operation owner: it confirms
+the first move and the target's expected intermediate position before sending the
+second, then releases ownership. Protected equipment sequences and pack exchanges
+exclude conflicting local requests while a continuation remains. Timeout abandons
+unsent continuation steps; it sends no cancellation, and late server updates still apply.
 
 Splits use `StackableSplitToContainer` (`0x0055`), carrying the source GUID,
 destination container GUID, signed native placement, and positive amount. The
@@ -52,14 +55,50 @@ UI amounts include the current total quantity; that amount resolves to a no-op
 before capacity allocation and sends no server command. Actual splits leave a
 nonempty source. ACE's `Player_Inventory.cs`
 `DoHandleActionStackableSplitToContainer` creates and contains the new identity
-before reducing the source quantity. The inventory owner confirms both the new
-identity at the planned destination and the expected source remainder.
+before reducing the source quantity. Both changes arrive through ordinary world-state
+updates; the client does not wait for them to release an interaction lock.
 
-`inventory_storage.rs` shares capacity allocation between splits and equipment
+`inventory_storage.rs` shares capacity allocation between pickup, splits, and equipment
 replacement. It reserves currently free positions in the preferred source
 container, then main pack, then remaining containers in native pack order.
 Fallback containers are inspected only as needed; unhydrated required storage
 rejects preflight rather than being treated as empty.
+
+## Pickup and ground drop
+
+World's `interaction::pickup_candidate` admits known, dynamic, non-creature objects
+without Stuck that have independent ground placement and no storage relationship
+or player ownership. The shared entity projection exposes `canPickUp`; this is
+permission to attempt pickup, not a guarantee against server restrictions.
+Core rechecks the same rule at submission and allocates main-pack space first,
+then carried packs in native order, respecting separate item and pack slots.
+Pickup appends with one `PutItemInContainer`; internal `Get` is merely a fixed
+main-pack/placement-zero convenience for that same wire action.
+
+Ground drop uses one `DropItem` with the source GUID. ACE `Player_Inventory.cs`
+`HandleActionDropItem` accepts carried and equipped sources and handles dequipping
+directly, so dropping equipment needs no spare inventory slot. Whole stacks and
+bags remain whole objects. The server chooses placement near the character;
+the protocol has no cursor-position field. Attunement, busy state, and other
+server restrictions still produce ordinary action failure feedback.
+
+In the 3D client, ordinary world interaction prefers pickup for an eligible object;
+active use-on-target acquisition keeps precedence. Contents, real carried bags,
+and equipment cells can be dragged onto the viewport canvas under every sort mode.
+Panels, HUD controls, and outside-app releases are not ground destinations. An
+entity under the cursor does not turn the gesture into give/use/container transfer.
+Action-bar dragging continues to edit bindings rather than dropping objects.
+Crossing the drag threshold with contents, a carried bag, or equipment selects
+the source without toggling it off or activating it. Cancellation or rejection
+keeps that selection. Binding-origin drags and use-with-target clicks preserve
+entity selection.
+The 3D host presents server inventory refusal reasons as neutral notices, without
+an inventory-failure prefix or item GUID. Reasonless inventory rollback packets
+do not produce a notice: ACE also sends them after separate explanatory feedback.
+Core retains the complete result and identity.
+Selection follows the retained identity across ownership and placement updates.
+A temporary lack of ground placement during a drop does not clear it; authoritative
+entity removal, lifecycle exit, or an established out-of-range position still does.
 
 ## Equipment replacement
 
@@ -82,7 +121,9 @@ order. It does not credit the slot that the incoming item will free later.
 
 `equipment_runtime.rs` owns peace transitions, confirmed unequips, final wield,
 and combat restoration. It revalidates the remaining plan between requests. A
-split-to-wield requires a new equipped identity and the expected source remainder.
+split-to-wield requires a new equipped identity and the expected source remainder
+before any dependent combat restoration. Ownership ends when the final request is
+sent; a standalone wield does not wait merely to announce completion.
 Manual combat changes cancel pending equipment orchestration. Failures stop further
 requests without rolling back confirmed changes. Existing action feedback reports
 partial changes and uncertain timeouts.
@@ -104,7 +145,7 @@ open, but other panels and the viewport remain available. Submission rechecks
 quantity and capacity, and Escape or Cancel closes without sending a split.
 Electron's browser context menu is removed globally; Ctrl+Shift+I toggles DevTools.
 
-In non-native sort modes, contents cells can be dragged onto equipment slots or
+In non-native sort modes, contents cells can be dragged onto the ground, equipment slots, or
 compatible stacks, but cannot perform positional moves or header appends.
 During these drags, core merge-only previews identify contents cells to leave
 undimmed; incompatible and full stacks remain dimmed. Equipment candidates use

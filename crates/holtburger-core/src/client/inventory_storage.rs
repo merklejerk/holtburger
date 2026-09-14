@@ -1,4 +1,4 @@
-//! Pure inventory capacity allocation shared by equipment replacement and stack splitting.
+//! Pure inventory capacity allocation shared by pickup, equipment replacement, and stack splitting.
 use holtburger_common::{Guid, properties::WorldObjectExt};
 use holtburger_world::{
     WorldState,

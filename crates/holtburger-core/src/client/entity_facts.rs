@@ -214,6 +214,83 @@ mod tests {
     }
 
     #[test]
+    fn pickup_affordance_republishes_property_and_storage_changes() {
+        use holtburger_common::{
+            ParentLocation, Placement,
+            properties::{ItemType, PropertyBool},
+        };
+        use holtburger_protocol::messages::{
+            ParentEventData, PositionPack, PublicUpdatePropertyBoolData, UpdatePositionData,
+        };
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let ground = Guid(0x8000_0042);
+        let mut entity =
+            holtburger_world::entity::Entity::new(ground, "Loose item".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        world.add_entity(entity);
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&ground].can_pick_up);
+        for (sequence, stuck) in [(1, true), (2, false)] {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyBool(Box::new(
+                PublicUpdatePropertyBoolData {
+                    sequence,
+                    guid: ground,
+                    property: PropertyBool::Stuck as u32,
+                    value: stuck,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&ground].can_pick_up, !stuck);
+        }
+        let position = world.entities.get(ground).expect("ground item").position;
+        for (message, expected) in [
+            (
+                GameMessage::ParentEvent(Box::new(ParentEventData {
+                    parent_guid: PLAYER,
+                    child_guid: ground,
+                    location: ParentLocation::RightHand as u32,
+                    placement: Placement::RightHandCombat as u32,
+                    parent_instance_sequence: 0,
+                    child_position_sequence: 1,
+                })),
+                false,
+            ),
+            (
+                GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                    guid: ground,
+                    pos: PositionPack {
+                        pos: position,
+                        position_sequence: 2,
+                        ..Default::default()
+                    },
+                })),
+                true,
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&ground].can_pick_up, expected);
+        }
+        for event in world.handle_message(&place(ground, PLAYER, InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&ground].owned_by_player);
+        assert!(!mirror[&ground].can_pick_up);
+    }
+
+    #[test]
     fn item_use_capability_republishes_after_public_property_updates() {
         use holtburger_common::properties::{ItemType, PropertyInt, Usable};
         use holtburger_protocol::messages::{ObjectDescriptionData, PublicUpdatePropertyIntData};

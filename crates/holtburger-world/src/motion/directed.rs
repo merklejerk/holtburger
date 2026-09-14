@@ -5,7 +5,7 @@ use crate::spatial::ContactState;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 
-use super::{CharacterMotionPresentation, MotionCommand, MotionOrder};
+use super::{CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder};
 
 /// Retail physics epsilon expressed as radians (`acclient.c:331571-331617`).
 const TURN_COMPLETION_THRESHOLD_RAD: f32 = 0.000_2_f32.to_radians();
@@ -281,7 +281,7 @@ pub fn resolve_server_directed_motion(
     state: ServerDirectedMotionState,
     steady_order: MotionOrder,
     current_pose: WorldPosition,
-    contact: ContactState,
+    contact: MotionContact,
     object_target: Option<ServerDirectedTarget>,
 ) -> ServerDirectedMotionResolution {
     match state.kind {
@@ -308,7 +308,7 @@ fn resolve_move_to(
     mut state: MoveToState,
     steady_order: MotionOrder,
     current_pose: WorldPosition,
-    contact: ContactState,
+    contact: MotionContact,
     object_target: Option<ServerDirectedTarget>,
 ) -> ServerDirectedMotionResolution {
     if let MoveToTarget::Object { guid, current } = &mut state.target {
@@ -328,7 +328,7 @@ fn resolve_move_to(
                 let Some((command, speed_mod, moving_away, turn_speed_mod)) =
                     select_move_command(state.params, state.run_rate, distance)
                 else {
-                    if contact != ContactState::Grounded {
+                    if contact.physical() != ContactState::Grounded {
                         return active_move_step(
                             state,
                             directed_order(steady_order, None, None),
@@ -369,13 +369,13 @@ fn resolve_move_to(
                 moving_away,
                 turn_speed_mod,
             } => {
-                if contact == ContactState::Grounded
+                if contact.physical() == ContactState::Grounded
                     && move_completed(state.params, distance, moving_away)
                 {
                     state.phase = MoveToPhase::FinalTurn { progress: None };
                     continue;
                 }
-                if contact == ContactState::Grounded
+                if contact.physical() == ContactState::Grounded
                     && current_pose.distance_to(&state.starting_pose)
                         > state.params.fail_distance.to_f32()
                 {
@@ -425,7 +425,7 @@ fn resolve_turn_to(
     mut state: TurnToState,
     steady_order: MotionOrder,
     current_pose: WorldPosition,
-    contact: ContactState,
+    contact: MotionContact,
     object_target: Option<ServerDirectedTarget>,
 ) -> ServerDirectedMotionResolution {
     let desired_heading = if let Some(progress) = state.progress {
@@ -484,7 +484,7 @@ fn resolve_turn_to(
 fn active_move_step(
     state: MoveToState,
     order: MotionOrder,
-    contact: ContactState,
+    contact: MotionContact,
 ) -> ServerDirectedMotionResolution {
     ServerDirectedMotionResolution::Active(ServerDirectedMotionStep {
         state: ServerDirectedMotionState {
@@ -507,12 +507,8 @@ fn directed_order(
     }
 }
 
-fn present_for_contact(order: MotionOrder, contact: ContactState) -> MotionOrder {
-    let presentation = match contact {
-        ContactState::Grounded => CharacterMotionPresentation::Grounded,
-        ContactState::Airborne | ContactState::Sliding => CharacterMotionPresentation::Falling,
-        ContactState::Unknown => CharacterMotionPresentation::StanceDefault,
-    };
+fn present_for_contact(order: MotionOrder, contact: MotionContact) -> MotionOrder {
+    let presentation = contact.presentation(CharacterMotionPresentation::StanceDefault);
     order.with_character_presentation(presentation)
 }
 
@@ -788,7 +784,7 @@ mod tests {
                         state,
                         steady(),
                         current,
-                        ContactState::Grounded,
+                        MotionContact::RequiresSupport(ContactState::Grounded),
                         target
                     ),
                     ServerDirectedMotionResolution::Complete {
@@ -816,7 +812,7 @@ mod tests {
             state,
             steady(),
             current,
-            ContactState::Grounded,
+            MotionContact::RequiresSupport(ContactState::Grounded),
             Some(target),
         ) else {
             panic!("arrival must finish the requested turn before sticky handoff");
@@ -831,7 +827,7 @@ mod tests {
                     0.0,
                     current.heading_to(&target.pose).to_degrees() + 90.0
                 ),
-                ContactState::Grounded,
+                MotionContact::RequiresSupport(ContactState::Grounded),
                 Some(target)
             ),
             ServerDirectedMotionResolution::Complete {
@@ -851,9 +847,13 @@ mod tests {
         let current = position(0.0, 0.0, 90.0);
         let state = begin_server_directed_motion(directive, current, None);
 
-        let ServerDirectedMotionResolution::Active(turning) =
-            resolve_server_directed_motion(state, steady(), current, ContactState::Grounded, None)
-        else {
+        let ServerDirectedMotionResolution::Active(turning) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            None,
+        ) else {
             panic!("misaligned MoveTo should begin by turning");
         };
         assert!(turning.order.forward.is_none());
@@ -865,7 +865,7 @@ mod tests {
             turning.state,
             steady(),
             aligned,
-            ContactState::Grounded,
+            MotionContact::RequiresSupport(ContactState::Grounded),
             None,
         ) else {
             panic!("aligned MoveTo should translate");
@@ -886,9 +886,13 @@ mod tests {
             run_rate: scalar(1.0),
         };
         let state = begin_server_directed_motion(directive, current, None);
-        let ServerDirectedMotionResolution::Active(step) =
-            resolve_server_directed_motion(state, steady(), current, ContactState::Airborne, None)
-        else {
+        let ServerDirectedMotionResolution::Active(step) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            MotionContact::RequiresSupport(ContactState::Airborne),
+            None,
+        ) else {
             panic!("airborne MoveTo remains pending");
         };
 
@@ -915,7 +919,13 @@ mod tests {
             None,
         );
         assert_eq!(
-            resolve_server_directed_motion(state, steady(), current, ContactState::Grounded, None,),
+            resolve_server_directed_motion(
+                state,
+                steady(),
+                current,
+                MotionContact::RequiresSupport(ContactState::Grounded),
+                None,
+            ),
             ServerDirectedMotionResolution::Complete {
                 sticky_target: None
             }
@@ -949,9 +959,13 @@ mod tests {
             start,
             None,
         );
-        let ServerDirectedMotionResolution::Active(turning) =
-            resolve_server_directed_motion(state, steady(), start, ContactState::Grounded, None)
-        else {
+        let ServerDirectedMotionResolution::Active(turning) = resolve_server_directed_motion(
+            state,
+            steady(),
+            start,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            None,
+        ) else {
             panic!("left target should begin a directed turn");
         };
         assert_eq!(turning.order.turn, Some((MotionCommand::TURN_RIGHT, -1.0)));
@@ -961,7 +975,7 @@ mod tests {
                 turning.state,
                 steady(),
                 position(0.0, 0.0, 79.0),
-                ContactState::Grounded,
+                MotionContact::RequiresSupport(ContactState::Grounded),
                 None,
             ),
             ServerDirectedMotionResolution::Complete {
@@ -993,7 +1007,7 @@ mod tests {
             state,
             steady(),
             current,
-            ContactState::Grounded,
+            MotionContact::RequiresSupport(ContactState::Grounded),
             Some(initial_target),
         ) else {
             panic!("misaligned object target should begin a directed turn");
@@ -1003,7 +1017,7 @@ mod tests {
             initial_turn.state,
             steady(),
             current,
-            ContactState::Grounded,
+            MotionContact::RequiresSupport(ContactState::Grounded),
             Some(moved_target),
         ) else {
             panic!("target motion must not masquerade as actor crossing");
@@ -1024,9 +1038,13 @@ mod tests {
             start,
             None,
         );
-        let ServerDirectedMotionResolution::Active(turning) =
-            resolve_server_directed_motion(state, steady(), start, ContactState::Grounded, None)
-        else {
+        let ServerDirectedMotionResolution::Active(turning) = resolve_server_directed_motion(
+            state,
+            steady(),
+            start,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            None,
+        ) else {
             panic!("misaligned MoveTo should begin a directed turn");
         };
         assert_eq!(turning.order.turn, Some((MotionCommand::TURN_RIGHT, 1.0)));
@@ -1035,7 +1053,7 @@ mod tests {
             turning.state,
             steady(),
             position(0.0, 0.0, 181.0),
-            ContactState::Grounded,
+            MotionContact::RequiresSupport(ContactState::Grounded),
             None,
         ) else {
             panic!("crossed initial heading should advance to translation");
@@ -1064,7 +1082,13 @@ mod tests {
         );
 
         assert_eq!(
-            resolve_server_directed_motion(state, steady(), current, ContactState::Grounded, None,),
+            resolve_server_directed_motion(
+                state,
+                steady(),
+                current,
+                MotionContact::RequiresSupport(ContactState::Grounded),
+                None,
+            ),
             ServerDirectedMotionResolution::Failed(
                 ServerDirectedMotionFailure::TargetUnavailable { guid: Guid(7) }
             )
@@ -1093,7 +1117,7 @@ mod tests {
             state,
             steady(),
             exactly_at_threshold,
-            ContactState::Grounded,
+            MotionContact::RequiresSupport(ContactState::Grounded),
             None,
         ) else {
             panic!("threshold fixture should remain active");
@@ -1117,9 +1141,13 @@ mod tests {
             run_rate: scalar(1.0),
         };
         let state = begin_server_directed_motion(directive, close, None);
-        let ServerDirectedMotionResolution::Active(step) =
-            resolve_server_directed_motion(state, steady(), close, ContactState::Grounded, None)
-        else {
+        let ServerDirectedMotionResolution::Active(step) = resolve_server_directed_motion(
+            state,
+            steady(),
+            close,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            None,
+        ) else {
             panic!("close move-away fixture should remain active");
         };
         assert_eq!(step.order.forward, Some((MotionCommand::WALK_FORWARD, 1.0)));
@@ -1130,7 +1158,7 @@ mod tests {
                 step.state,
                 steady(),
                 separated,
-                ContactState::Grounded,
+                MotionContact::RequiresSupport(ContactState::Grounded),
                 None,
             ),
             ServerDirectedMotionResolution::Complete {
@@ -1156,33 +1184,44 @@ mod tests {
             run_rate: scalar(1.0),
         };
         let state = begin_server_directed_motion(directive, start, None);
-        let ServerDirectedMotionResolution::Active(moving) =
-            resolve_server_directed_motion(state, steady(), start, ContactState::Grounded, None)
-        else {
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            state,
+            steady(),
+            start,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            None,
+        ) else {
             panic!("grounded fixture should begin moving");
         };
         let crossed = position(20.0, 0.0, 0.0);
-        let ServerDirectedMotionResolution::Active(airborne) = resolve_server_directed_motion(
-            moving.state,
-            steady(),
-            crossed,
-            ContactState::Airborne,
-            None,
-        ) else {
-            panic!("airborne target crossing must retain the directive");
-        };
-        assert_eq!(airborne.order.forward, Some((MotionCommand::FALLING, 1.0)));
-        assert_eq!(
-            resolve_server_directed_motion(
-                airborne.state,
-                steady(),
-                crossed,
-                ContactState::Grounded,
-                None,
+        for (contact, expected) in [
+            (
+                MotionContact::RequiresSupport(ContactState::Airborne),
+                Some((MotionCommand::FALLING, 1.0)),
             ),
-            ServerDirectedMotionResolution::Complete {
-                sticky_target: None
-            },
-        );
+            (
+                MotionContact::Unrestricted(ContactState::Airborne),
+                moving.order.forward,
+            ),
+        ] {
+            let ServerDirectedMotionResolution::Active(airborne) =
+                resolve_server_directed_motion(moving.state, steady(), crossed, contact, None)
+            else {
+                panic!("airborne target crossing must retain the directive");
+            };
+            assert_eq!(airborne.order.forward, expected);
+            assert_eq!(
+                resolve_server_directed_motion(
+                    airborne.state,
+                    steady(),
+                    crossed,
+                    MotionContact::RequiresSupport(ContactState::Grounded),
+                    None,
+                ),
+                ServerDirectedMotionResolution::Complete {
+                    sticky_target: None
+                },
+            );
+        }
     }
 }

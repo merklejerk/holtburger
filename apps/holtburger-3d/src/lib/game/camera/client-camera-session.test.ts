@@ -1,8 +1,13 @@
+import { SceneGraph } from "../scene";
+import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
+import { dynamicEntityPlacementFromPoint } from "../runtime/dynamic-entity-presentation";
+import type { DynamicEntityAdvance } from "../runtime/dynamic-entity-feed";
 import { playerEntitySnapshot } from "../../../client/client-entity-mirror.test-support";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
 	decodeClientCameraTick,
+	decodeClientPresentationTick,
 	type ClientCurrentState,
 	type ClientCameraIdentity,
 	type ClientCameraTick,
@@ -55,6 +60,108 @@ class FakeTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientCameraSession", () => {
+	it("keeps character and camera on one playback instant through bursty delivery", async () => {
+		const transport = new FakeTransport();
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const camera = new ClientCameraSession(lifecycle);
+		await camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
+		const entity = currentState().dynamic.entities[0];
+		if (entity.placement.kind !== "world")
+			throw new Error("fixture must be world placed");
+		const placement = entity.placement;
+		const point = (x: number) => ({
+			pose: {
+				...placement.pose,
+				landblockId: cellId(0xda55_0001),
+				coords: { ...placement.pose.coords, x },
+			},
+			spatialMembership: placement.spatialMembership,
+		});
+		const scene = new SceneGraph();
+		const roots = new DynamicEntityPlacementSystem(scene);
+		const root = roots.createRoot(
+			dynamicEntityPlacementFromPoint(point(0)),
+			null,
+		);
+		const unsubscribe = lifecycle.subscribe((event) => {
+			if (event.type !== "presentation-tick" || event.tick.dynamic === null)
+				return;
+			for (const advance of event.tick.dynamic.advances)
+				roots.applyPath(
+					root,
+					advance,
+					event.tick.dynamic.durationMs,
+					event.receivedAtMs,
+				);
+		});
+		let now = 0;
+		const clock = vi.spyOn(performance, "now").mockImplementation(() => now++);
+		try {
+			for (const [index, arrival] of [100, 120, 180, 181, 220].entries()) {
+				now = arrival;
+				const start = index * 4;
+				const cameraPath = tick(index + 1, start, start + 4);
+				const advance: DynamicEntityAdvance = {
+					entity: {
+						...entity,
+						placement: { ...placement, pose: point(start + 4).pose },
+					},
+					kind: "integrated",
+					path: {
+						initial: point(start),
+						legs: [{ endFraction: 1, end: point(start + 4) }],
+					},
+				};
+				transport.emit("client-presentation-tick", {
+					dynamic: {
+						hostTime: { seconds: 11 + index },
+						durationMs: cameraPath.durationMs,
+						advances: [advance],
+						updates: [],
+					},
+					camera: cameraPath,
+				});
+				for (const fraction of [0, 0.5, 1]) {
+					const sampleTime = arrival + cameraPath.durationMs * fraction;
+					roots.advance(sampleTime);
+					expect(
+						camera.presentation(sampleTime)?.placement.position.x,
+					).toBeCloseTo(
+						0xda * 192 + (scene.getNode(root)?.localTransform.m41 ?? NaN),
+					);
+				}
+			}
+		} finally {
+			clock.mockRestore();
+			unsubscribe();
+			camera.destroy();
+			lifecycle.stop();
+		}
+	});
+
+	it("accepts instantaneous corrections but rejects mismatched timed intervals", () => {
+		const camera = tick(1, 0, 4);
+		const dynamic = {
+			hostTime: { seconds: 11 },
+			durationMs: camera.durationMs * 2,
+			advances: [],
+			updates: currentState().dynamic.entities,
+		};
+		expect(() => decodeClientPresentationTick({ dynamic, camera })).toThrow(
+			"same physics interval",
+		);
+		expect(
+			decodeClientPresentationTick({
+				dynamic: { ...dynamic, durationMs: 0 },
+				camera,
+			}).dynamic?.durationMs,
+		).toBe(0);
+		expect(
+			decodeClientPresentationTick({ dynamic: null, camera }).camera,
+		).toEqual(camera);
+	});
+
 	it("awaits the generation receipt before accepting camera output", async () => {
 		const transport = new FakeTransport();
 		const lifecycle = new ClientLifecycleSession(transport);

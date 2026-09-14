@@ -5295,7 +5295,7 @@ fn sticky_attack_keeps_its_hook_and_replaces_root_travel_in_collection() {
                 RemoteMotionInput {
                     snapshot: EntityMotionSnapshot::default(),
                     pose: before,
-                    contact: ContactState::Grounded,
+                    contact: crate::motion::MotionContact::RequiresSupport(ContactState::Grounded),
                     target: None,
                     frame_policy: RemoteFramePolicy::Command,
                     omega: Vector3::zero(),

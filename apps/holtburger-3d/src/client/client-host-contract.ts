@@ -2,6 +2,8 @@ import { z } from "zod";
 import { clientEntitySnapshotSchema } from "./client-entity-mirror";
 import {
 	decodeDynamicEntitySnapshot,
+	decodeDynamicEntityTickBatch,
+	type DynamicEntityTickBatch,
 	type DynamicEntitySnapshot,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import {
@@ -934,4 +936,36 @@ export function decodeClientEntitySelectionQueryResult(
 	value: unknown,
 ): ClientEntitySelectionQueryResult {
 	return entitySelectionQueryResultSchema.parse(value);
+}
+
+/** One atomic physics publication; both paths use the receiver's single playback instant. */
+export interface ClientPresentationTick {
+	/** Accepted entity paths for this interval; absent when entity placement is unchanged. */
+	readonly dynamic: DynamicEntityTickBatch | null;
+	/** Camera result for the same interval; absent before registration or scene readiness. */
+	readonly camera: ClientCameraTick | null;
+}
+
+const clientPresentationTickSchema = z
+	.object({ dynamic: z.unknown(), camera: cameraTickSchema.nullable() })
+	.strict();
+
+/** Validate both halves before either presentation consumer observes the interval. */
+export function decodeClientPresentationTick(
+	value: unknown,
+): ClientPresentationTick {
+	const wire = clientPresentationTickSchema.parse(value);
+	const dynamic =
+		wire.dynamic === null ? null : decodeDynamicEntityTickBatch(wire.dynamic);
+	// Correction-only entity batches snap at the interval boundary and carry no playback time.
+	if (
+		dynamic !== null &&
+		dynamic.durationMs > 0 &&
+		wire.camera !== null &&
+		dynamic.durationMs !== wire.camera.durationMs
+	)
+		throw new Error(
+			"Character and camera paths must cover the same physics interval.",
+		);
+	return { dynamic, camera: wire.camera };
 }

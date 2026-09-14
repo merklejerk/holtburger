@@ -202,6 +202,42 @@ pub enum CharacterMotionPresentation {
     StanceDefault,
 }
 
+/// Physical contact paired with the entity's retail animation restriction.
+///
+/// Contact still controls directed-movement completion for unrestricted objects; only the
+/// animation restriction is waived for non-creatures and entities without gravity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionContact {
+    /// Commanded animation does not require support; retain contact for movement progress.
+    Unrestricted(ContactState),
+    /// Gravity-enabled creature whose animation responds to physical support.
+    RequiresSupport(ContactState),
+}
+
+impl MotionContact {
+    /// Actual physical contact, independent of animation eligibility.
+    pub const fn physical(self) -> ContactState {
+        match self {
+            Self::Unrestricted(contact) | Self::RequiresSupport(contact) => contact,
+        }
+    }
+
+    /// Select support presentation while preserving the caller's established hydration policy.
+    pub const fn presentation(
+        self,
+        unknown: CharacterMotionPresentation,
+    ) -> CharacterMotionPresentation {
+        match self {
+            // This presentation variant preserves the order; it does not publish physical support.
+            Self::Unrestricted(_) => CharacterMotionPresentation::Grounded,
+            Self::RequiresSupport(ContactState::Unknown) => unknown,
+            Self::RequiresSupport(contact) => {
+                CharacterMotionPresentation::resolve(contact, false, false)
+            }
+        }
+    }
+}
+
 impl CharacterMotionPresentation {
     /// Resolves retail's support-driven character presentation for one tick.
     ///
@@ -246,10 +282,19 @@ impl MotionOrder {
         mut self,
         presentation: CharacterMotionPresentation,
     ) -> Self {
-        // Retail contact_allows_move explicitly permits Dead (acclient.c:330154).
-        // Support observations cannot replace this authored state with Falling or Ready.
+        // Death cannot be displaced by support or jump presentation. Retail's other
+        // contact-exempt commands bypass support fallback, but standing-longjump Ready
+        // still takes priority after contact admission (acclient.c:330148-330158,330397-330404).
         if let Some((command, _)) = self.forward
-            && command.raw() == MotionCommand::DEAD.raw()
+            && (matches!(command, MotionCommand::DEAD)
+                || matches!(
+                    presentation,
+                    CharacterMotionPresentation::Falling
+                        | CharacterMotionPresentation::StanceDefault
+                ) && matches!(
+                    command,
+                    MotionCommand::FALLING | MotionCommand::TURN_RIGHT | MotionCommand::TURN_LEFT
+                ))
         {
             return self;
         }

@@ -1,5 +1,7 @@
 use super::registry::RETAIL_RUN_FORWARD_BASE_SPEED_MPS;
 use super::*;
+#[path = "tests/contact_eligibility.rs"]
+mod contact_eligibility;
 #[path = "tests/death_lifecycle.rs"]
 mod death_lifecycle;
 use crate::entity::{
@@ -2323,7 +2325,7 @@ fn remote_source_heading_follows_authority_and_commands_not_body_return() {
             frame_policy: crate::motion::RemoteFramePolicy::Command,
             snapshot,
             pose,
-            contact: ContactState::Grounded,
+            contact: MotionContact::RequiresSupport(ContactState::Grounded),
             target: None,
             omega: Vector3::zero(),
         },
@@ -2345,7 +2347,7 @@ fn remote_source_heading_follows_authority_and_commands_not_body_return() {
                 frame_policy: crate::motion::RemoteFramePolicy::Command,
                 snapshot,
                 pose,
-                contact: ContactState::Grounded,
+                contact: MotionContact::RequiresSupport(ContactState::Grounded),
                 target: None,
                 omega: Vector3::zero(),
             },
@@ -2382,7 +2384,7 @@ fn remote_source_heading_follows_authority_and_commands_not_body_return() {
                 frame_policy: crate::motion::RemoteFramePolicy::Command,
                 snapshot,
                 pose,
-                contact: ContactState::Grounded,
+                contact: MotionContact::RequiresSupport(ContactState::Grounded),
                 target: None,
                 omega,
             },
@@ -2449,7 +2451,7 @@ fn remote_action_interval_keeps_root_motion_after_completion() {
                     frame_policy: crate::motion::RemoteFramePolicy::Command,
                     snapshot: EntityMotionSnapshot::default(),
                     pose,
-                    contact: ContactState::Grounded,
+                    contact: MotionContact::RequiresSupport(ContactState::Grounded),
                     target: None,
                     omega: Vector3::zero(),
                 },
@@ -2526,7 +2528,7 @@ fn sticky_command_heading_survives_cancellation_and_ordinary_playback() {
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         },
-        contact: ContactState::Grounded,
+        contact: MotionContact::RequiresSupport(ContactState::Grounded),
         target: None,
         omega: Vector3::zero(),
     };

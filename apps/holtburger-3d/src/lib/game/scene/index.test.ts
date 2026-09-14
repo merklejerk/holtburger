@@ -259,6 +259,27 @@ describe("SceneGraph", () => {
 		});
 	});
 
+	it("keeps inspection scope objects independent of retained scene state", () => {
+		const scene = new SceneGraph();
+		const nodeId = scene.createNode({
+			...rootInput,
+			localBounds: AABB3.zero(),
+		});
+		const placement = scene.getResolvedPlacement(nodeId);
+		const origin = scene.getResolvedOrigin(nodeId);
+		const bounds = scene.getResolvedBounds(nodeId);
+		if (!placement || !origin || !bounds)
+			throw new Error("Expected scene snapshots.");
+		// Mutating an inspection object must not alter the scene-owned scope shared by readers.
+		Object.assign(placement.scope, { kind: "env-cell", envCellId: 1 });
+		Object.assign(origin.scope, { kind: "env-cell", envCellId: 2 });
+		Object.assign(bounds.placement.scope, { kind: "env-cell", envCellId: 3 });
+		expect(scene.getResolvedPlacement(nodeId)?.scope).toEqual({
+			kind: "outdoor",
+		});
+		expect(scene.getResolvedOrigin(nodeId)?.scope).toEqual({ kind: "outdoor" });
+	});
+
 	it("indexes bounded nodes but permits empty transform nodes", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode(rootInput);
@@ -1008,6 +1029,47 @@ describe("SceneGraph attachment dry run", () => {
 				Vec3.zero(),
 			),
 		).toEqual(new Vec3(10, 2, 1));
+	});
+
+	it("publishes batched attachment transforms immediately while retaining inspection snapshots", () => {
+		const scene = new SceneGraph();
+		const root = scene.createNode(rootInput);
+		const visual = scene.createNode({
+			parentId: root,
+			localBounds: null,
+			localTransform: Mat4.identity(),
+		});
+		const hand = scene.createNode({
+			parentId: visual,
+			localBounds: null,
+			localTransform: Mat4.identity(),
+		});
+		const held = scene.createNode({
+			parentId: hand,
+			localBounds: AABB3.zero(),
+			localTransform: createTranslationMat4(new Vec3(0, 0, 1)),
+		});
+		const before = scene.getResolvedBounds(held);
+		if (!before) throw new Error("Expected held bounds.");
+		scene.updateLocalTransformWithChildren(
+			visual,
+			createTranslationMat4(new Vec3(2, 0, 0)),
+			[{ nodeId: hand, transform: createTranslationMat4(new Vec3(0, 3, 0)) }],
+		);
+		expect(scene.getResolvedOrigin(held)?.landblockOrigin).toEqual(
+			new Vec3(2, 3, 1),
+		);
+		expect(scene.readResolvedState(held)?.placement.localToLandblock).toEqual(
+			createTranslationMat4(new Vec3(2, 3, 1)),
+		);
+		expect(before.placement.localToLandblock).toEqual(
+			createTranslationMat4(new Vec3(0, 0, 1)),
+		);
+		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(held);
+		scene.updateBounds(held, null);
+		expect(queryScopes(scene, { kind: "outdoor" }).entries).not.toContain(held);
+		scene.updateBounds(held, AABB3.zero());
+		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(held);
 	});
 
 	it("moves an attached node with its wielder without touching the node itself", () => {

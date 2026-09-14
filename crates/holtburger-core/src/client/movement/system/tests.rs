@@ -7,7 +7,9 @@ use super::*;
 use crate::client::movement_types::{Gait, LongitudinalMotion};
 use byteorder::{LittleEndian, ReadBytesExt};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
+use holtburger_common::properties::{
+    ItemType, PropertyDataId, PropertyInt, WorldObjectPropertyAccessorsMut,
+};
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_dat::file_type::MotionTable;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
@@ -99,6 +101,13 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
 
 fn seed_local_player(world: &mut WorldState, guid: Guid, position: WorldPosition) {
     world.seed_local_player_entity(guid, "Player", position);
+    let entity = world.player_entity_mut().unwrap();
+    entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+    entity
+        .physics
+        .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+            holtburger_common::properties::PhysicsState::GRAVITY,
+        ));
 }
 
 fn install_manual_drive(

@@ -148,6 +148,13 @@ pub enum HostEvent {
     ClientDynamicSoundCue(holtburger_core::ClientDynamicSoundCue),
     ClientDynamicScriptCue(holtburger_core::ClientDynamicScriptCue),
     ClientCamera(holtburger_core::ClientCameraTick),
+    /// One physics interval, published atomically for coherent character/camera playback.
+    ClientPresentationTick {
+        /// Entity paths and levels accepted in this physics interval.
+        dynamic: Option<holtburger_core::DynamicEntityTickBatch>,
+        /// Camera path solved against that same interval, when registered and ready.
+        camera: Option<holtburger_core::ClientCameraTick>,
+    },
     ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
     ClientPresentationDiscontinuity(crate::client_projection::ClientPresentationDiscontinuity),
     ClientExitRequested(crate::client_projection::ClientExitRequested),
@@ -449,6 +456,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::DynamicScriptCue(cue) => {
                 HostEvent::ClientDynamicScriptCue(cue)
+            }
+            crate::client_projection::ClientHostEvent::PresentationTick { dynamic, camera } => {
+                HostEvent::ClientPresentationTick { dynamic, camera }
             }
             crate::client_projection::ClientHostEvent::Camera(tick) => {
                 HostEvent::ClientCamera(tick)

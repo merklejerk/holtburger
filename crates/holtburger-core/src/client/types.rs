@@ -682,8 +682,15 @@ pub enum ClientViewEvent {
     DynamicSoundCue(ClientDynamicSoundCue),
     /// Cached local feedback for a successfully submitted Use, not its server outcome.
     EntityUseFeedback(holtburger_world::interaction::EntityUseFeedback),
-    /// Client-owned collision-safe camera placement, published after the matching entity advance.
+    /// Settled camera placement published during world activation, outside ordinary physics ticks.
     Camera(crate::client::ClientCameraTick),
+    /// One physics interval, published atomically for coherent character/camera playback.
+    PresentationTick {
+        /// Entity paths and levels accepted in this physics interval.
+        dynamic: Option<crate::DynamicEntityTickBatch>,
+        /// Camera path solved against that same interval, when registered and ready.
+        camera: Option<crate::ClientCameraTick>,
+    },
     /// Receipt for a newly registered client camera generation.
     CameraStarted(crate::client::ClientCameraStartReceipt),
     PresentationDiscontinuity {

@@ -26,6 +26,7 @@ export function entityFacts(
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },

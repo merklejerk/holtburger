@@ -61,6 +61,25 @@ const clientEntityFactsSchema = z
 						"direct",
 						"targeted",
 					]),
+					/** World-derived template equivalence and remaining supply. */
+					consumable: z
+						.object({
+							identity: z
+								.object({
+									wcid: guid,
+									category: z.enum([
+										"food",
+										"healing-kit",
+										"charged-mana-stone",
+									]),
+								})
+								.strict()
+								.readonly(),
+							availability: z.enum(["pending", "ready", "exhausted"]),
+						})
+						.strict()
+						.readonly()
+						.nullable(),
 					/** Public description flags for selected-entity diagnostics. */
 					objectFlags: guid,
 					/** Server template identity, independent of scene residency. */

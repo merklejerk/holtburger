@@ -274,6 +274,13 @@
 				description: {
 					...item.description,
 					equipLocations: null,
+					consumable: {
+						identity: {
+							wcid: 9000 + index,
+							category: index === 0 ? "food" : "charged-mana-stone",
+						},
+						availability: "ready",
+					},
 					useCapability: index === 0 ? "direct" : "targeted",
 				},
 			})),
@@ -311,6 +318,66 @@
 							CLIENT_TUNING.inventory.displayIntervalMs,
 					),
 				),
+			/** Drive authoritative depletion and removal through the production entity stream. */
+			depleteSupply: () => {
+				itemInteractions.cancel();
+				const current = interactionLifecycle.entities.read();
+				if (current.kind !== "current")
+					throw new Error("Expected current inventory");
+				const item = current.level.entities.get(95);
+				if (
+					item?.description.kind !== "known" ||
+					item.description.consumable === null
+				)
+					throw new Error("Expected bound supply");
+				emitInteractionEvent("client-entity-facts-changed", {
+					upserts: [
+						{
+							...item,
+							description: {
+								...item.description,
+								consumable: {
+									...item.description.consumable,
+									availability: "exhausted",
+								},
+							},
+						},
+						{
+							...item,
+							guid: 995,
+							location: {
+								kind: "contained",
+								parentGuid: 1,
+								slot: { kind: "pending" },
+							},
+						},
+					],
+					removed: [],
+				});
+			},
+			removeSupply: () =>
+				emitInteractionEvent("client-entity-facts-changed", {
+					upserts: [],
+					removed: [995],
+				}),
+			/** Publish stack changes independently of icon identity. */
+			setFoodCount: (count: number) => {
+				const current = interactionLifecycle.entities.read();
+				if (current.kind !== "current")
+					throw new Error("Expected current inventory");
+				const item = current.level.entities.get(91);
+				if (item?.description.kind !== "known")
+					throw new Error("Expected food fixture");
+				emitInteractionEvent("client-entity-facts-changed", {
+					upserts: [
+						{
+							...item,
+							description: { ...item.description, stackCount: count },
+						},
+					],
+					removed: [],
+				});
+			},
 			hoverWorld: (guid: number | null) => (hoveredGuid = guid),
 			queryCommands: () =>
 				interactionCommands.filter(
@@ -341,7 +408,7 @@
 				dialogPresentation = null;
 				emitInteractionEvent("client-entity-facts-changed", {
 					upserts: saved,
-					removed: [],
+					removed: [995],
 				});
 				activeItemUseProbe = null;
 			},
@@ -518,6 +585,7 @@
 						pyrealBalance: null,
 						burden: null,
 						equipLocations: null,
+						consumable: null,
 						useCapability: "direct",
 						stackCount: null,
 						structure: { current: null, max: null },
@@ -1735,7 +1803,8 @@
 		}}
 		onViewportHover={(x, y) => {
 			viewportHoverPoints.push({ x, y });
-			hoveredGuid = hoverHitEnabled ? 7 : null;
+			// The item-use fixture supplies explicit hit-test results through hoverWorld.
+			if (activeItemUseProbe === null) hoveredGuid = hoverHitEnabled ? 7 : null;
 		}}
 		onMaintainEntitySelection={() => {
 			selectionMaintenanceCount += 1;

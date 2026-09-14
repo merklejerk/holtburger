@@ -1,3 +1,4 @@
+import type { ClientEntityFacts } from "./client-entity-mirror";
 import type { ClientHudPlacement } from "./client-hud-layout";
 
 /** Fixed address space shared by bar and cell digit shortcuts. */
@@ -6,10 +7,16 @@ export const ACTION_SLOT_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export type ActionSlotIndex = (typeof ACTION_SLOT_INDICES)[number];
 /** Product limit, independent of adjustable visual tuning. */
 export const MAX_ACTION_BARS = ACTION_SLOT_INDICES.length;
-/** Equipment identity determines the equip action; no separate action selector exists. */
+/** World-produced equivalence retained after a consumable instance disappears. */
+export type ConsumableIdentity = NonNullable<
+	Extract<ClientEntityFacts["description"], { kind: "known" }>["consumable"]
+>["identity"];
+/** One action binding, including optional consumable replacement intent. */
 export type ActionContent = {
 	readonly kind: "equipment" | "direct" | "targeted";
 	readonly item: number;
+	/** Null keeps an exact instance, including explicitly bound empty mana stones. */
+	readonly replacement: ConsumableIdentity | null;
 };
 /** Exact sparse address space: empty cells remain present. */
 type ActionSlots = readonly [

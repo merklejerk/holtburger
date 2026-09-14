@@ -268,6 +268,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn consumable_charge_and_removal_reconstruct_from_protocol_publications() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::PublicUpdatePropertyIntData;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Mana Stone".into());
+        description.public_weenie_desc.wcid = 42;
+        description.public_weenie_desc.item_type = ItemType::MANA_STONE.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        for (sequence, effects, availability) in [(1, 1, "ready"), (2, 0, "exhausted")] {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyInt(Box::new(
+                PublicUpdatePropertyIntData {
+                    sequence,
+                    guid: ITEM,
+                    property: PropertyInt::UiEffects as u32,
+                    value: effects,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let wire = serde_json::to_value(&mirror[&ITEM]).unwrap();
+            assert_eq!(
+                wire["description"]["consumable"],
+                serde_json::json!({
+                    "identity": {"wcid": 42, "category": "charged-mana-stone"},
+                    "availability": availability,
+                })
+            );
+        }
+        for event in world.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
+            InventoryRemoveObjectData { object_guid: ITEM },
+        ))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(!mirror.contains_key(&ITEM));
+    }
+
     fn assert_reconstructed(
         world: &mut WorldState,
         publisher: &mut EntityFactsPublication,

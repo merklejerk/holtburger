@@ -198,7 +198,7 @@ try {
             images: [...document.querySelectorAll('.client-inventory img.item-icon')].map(image => ({
                 guid: image.closest('[data-item-guid]').getAttribute('data-item-guid'),
                 url: image.src, width: image.naturalWidth, height: image.naturalHeight,
-                count: image.closest("[data-item-guid]").querySelector(".item-grid-cell-count")?.textContent ?? null,
+                count: image.closest("[data-item-guid]").querySelector(".item-count-overlay")?.textContent ?? null,
             })),
             fallbacks: document.querySelectorAll('.client-inventory .item-icon-fallback').length,
             containers: [...document.querySelectorAll('.client-inventory section')].map(section => section.getAttribute('aria-label')),

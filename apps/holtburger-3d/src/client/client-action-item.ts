@@ -1,7 +1,18 @@
 import type { ItemIconDisplay } from "../app/item-icon-repository";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 
-import type { ActionContent } from "./client-action-bar-state";
+import type {
+	ActionContent,
+	ConsumableIdentity,
+} from "./client-action-bar-state";
+
+/** Compare world-produced template identities without decoding item properties. */
+export function sameConsumableIdentity(
+	left: ConsumableIdentity,
+	right: ConsumableIdentity,
+): boolean {
+	return left.wcid === right.wcid && left.category === right.category;
+}
 
 /** One frontend binding decision over world-produced capabilities; equipment retains precedence. */
 export function bindingAction(
@@ -13,11 +24,19 @@ export function bindingAction(
 		item.description.equipLocations !== null &&
 		item.description.equipLocations !== 0
 	) {
-		return { kind: "equipment", item: item.guid };
+		return { kind: "equipment", item: item.guid, replacement: null };
 	}
 	const kind = item.description.useCapability;
 	return kind === "direct" || kind === "targeted"
-		? { kind, item: item.guid }
+		? {
+				kind,
+				item: item.guid,
+				replacement:
+					item.description.consumable !== null &&
+					item.description.consumable.availability !== "exhausted"
+						? item.description.consumable.identity
+						: null,
+			}
 		: null;
 }
 
@@ -25,8 +44,12 @@ export function bindingAction(
 export interface ActionItemDisplay {
 	/** Known item name or explicit unavailable identity. */
 	readonly label: string;
+	/** Current bound stack quantity, independent of artwork and replacement identity. */
+	readonly stackCount: number | null;
 	/** Current binding kind; each cell compares this against its retained action. */
 	readonly actionKind: ActionContent["kind"] | null;
+	/** A depleted instance must not turn a waiting supply binding into a drain action. */
+	readonly readyReplacement: ConsumableIdentity | null;
 	/** Confirmed player equipment state; never inferred from a submitted command. */
 	readonly equipped: boolean;
 	/** Repository-owned artwork protected by the collection's display lease. */

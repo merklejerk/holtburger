@@ -25,7 +25,7 @@ it("preserves limits and independently editable clone bindings", () => {
 	let bars = bindActionCell(
 		[initialActionBar()],
 		{ bar: 1, slot: 4 },
-		{ kind: "equipment", item: 42 },
+		{ kind: "equipment", item: 42, replacement: null },
 	);
 	expect(deleteActionBar(bars, 1)).toBe(bars);
 	for (let id = 2; id <= MAX_ACTION_BARS; id++)
@@ -40,6 +40,7 @@ it("preserves limits and independently editable clone bindings", () => {
 	expect(changed.find((bar) => bar.id === 2)?.slots[4]).toEqual({
 		kind: "equipment",
 		item: 42,
+		replacement: null,
 	});
 	expect(
 		changed.every((bar) => bar.slots.length === ACTION_SLOT_INDICES.length),
@@ -51,11 +52,15 @@ it("swaps sparse contents atomically across bars", () => {
 	const bound = bindActionCell(
 		[initialActionBar(), { ...initialActionBar(), id: 2 }],
 		source,
-		{ kind: "equipment", item: 42 },
+		{ kind: "equipment", item: 42, replacement: null },
 	);
 	const moved = swapActionCells(bound, source, target);
 	expect(moved[0]?.slots[2]).toBeNull();
-	expect(moved[1]?.slots[8]).toEqual({ kind: "equipment", item: 42 });
+	expect(moved[1]?.slots[8]).toEqual({
+		kind: "equipment",
+		item: 42,
+		replacement: null,
+	});
 	expect(swapActionCells(moved, target, target)).toBe(moved);
 	expect(swapActionCells(moved, target, source)).toEqual(bound);
 });

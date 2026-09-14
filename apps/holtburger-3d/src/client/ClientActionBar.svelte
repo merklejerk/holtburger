@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { sameConsumableIdentity } from "./client-action-item";
 	import { APP_INPUT } from "../lib/input/app-input";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
@@ -287,7 +288,15 @@
 								? "Empty"
 								: (item?.label ?? `Unavailable item ${content.item}`)}
 							display={item?.display}
-							available={content !== null && item?.actionKind === content.kind}
+							count={item?.stackCount ?? null}
+							available={content !== null &&
+								item?.actionKind === content.kind &&
+								(content.replacement === null ||
+									(item.readyReplacement !== null &&
+										sameConsumableIdentity(
+											content.replacement,
+											item.readyReplacement,
+										)))}
 							equipped={item?.equipped === true}
 							selected={focused === slot}
 							onactivate={(alternate) => activate(slot, alternate)}

@@ -72,7 +72,9 @@
 		>
 			<ClientHudIcon name="interact" />
 		</button>
-		<strong title={displayName}><span>{displayName}</span></strong>
+		<strong title={displayName} style:color={display.nameColor}
+			><span>{displayName}</span></strong
+		>
 		<button
 			class="ui-hud-button"
 			type="button"

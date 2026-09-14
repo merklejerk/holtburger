@@ -99,6 +99,10 @@ export const CLIENT_TUNING = {
 		displayIntervalMs: 250,
 	},
 	selectedEntityHud: {
+		/** TUI-inspired item accents where no 3D category color exists. */
+		healingKitColor: hexRgba("#f0abfcff"),
+		/** Cyan selected-name accent for mana stones. */
+		manaStoneColor: hexRgba("#67e8f9ff"),
 		/** Names change rarely and do not need to follow pointer sampling cadence. */
 		displayIntervalMs: 250,
 	},

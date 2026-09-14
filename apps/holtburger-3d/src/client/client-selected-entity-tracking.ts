@@ -1,3 +1,5 @@
+import { selectedEntityNameColor } from "./client-selected-entity-color";
+import type { HexRgbaColor } from "../lib/frontend-color";
 import type { ItemStructure } from "../app/item-structure";
 import type { ClientEntitySelection } from "./client-entity-selection";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -13,6 +15,8 @@ type ClientSelectedHealth =
 export interface ClientSelectedEntityDisplay {
 	/** Current accepted name, absent until description is known. */
 	readonly name: string | null;
+	/** App-owned classification color, absent while description facts are pending. */
+	readonly nameColor: HexRgbaColor | null;
 	/** Current stack quantity, absent when the selected description has none. */
 	readonly stackCount: number | null;
 	/** Raw structure properties sampled together with the selected name and quantity. */
@@ -26,6 +30,7 @@ export interface ClientSelectedEntityDisplay {
 /** Initial/pending HUD display without a synthetic name or unknown-health meter. */
 export const EMPTY_CLIENT_SELECTED_DISPLAY: ClientSelectedEntityDisplay = {
 	name: null,
+	nameColor: null,
 	stackCount: null,
 	structure: { current: null, max: null },
 	health: { kind: "unavailable" },
@@ -99,6 +104,10 @@ export class ClientSelectedEntityTracking {
 			this.#target?.guid === guid ? this.#target.healthFraction : null;
 		return {
 			name: record.description.name,
+			nameColor: selectedEntityNameColor(
+				record.description,
+				guid === read.level.playerGuid,
+			),
 			stackCount: record.description.stackCount,
 			structure: record.description.structure,
 			canInteract:

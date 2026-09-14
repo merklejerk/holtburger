@@ -1,6 +1,8 @@
 use super::*;
 use anyhow::Result;
+use futures::FutureExt;
 use holtburger_protocol::messages::game_action::{GameAction, JumpActionData};
+use holtburger_session::SessionEvent;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::error::TryRecvError;
@@ -11,7 +13,50 @@ const COMMAND_BATCH_LIMIT: usize = 64;
 /// Stop starting more commands after this budget; an individual command is not preemptible.
 const COMMAND_BATCH_BUDGET: Duration = Duration::from_millis(2);
 
+/// Bound ready network intake so sustained server traffic still leaves turns for input and physics.
+const NETWORK_BATCH_LIMIT: usize = 64;
+/// Stop starting another receive after this budget; one packet's handling is not preemptible.
+const NETWORK_BATCH_BUDGET: Duration = Duration::from_millis(8);
+
 impl ClientRuntime {
+    /// Handle the selected packet and a bounded prefix of already-ready ordered packets.
+    async fn process_network_batch(
+        &mut self,
+        mut received: Result<Vec<SessionEvent>>,
+    ) -> Result<()> {
+        let started = Instant::now();
+        for index in 0..NETWORK_BATCH_LIMIT {
+            let events = received.inspect_err(|error| {
+                log::error!("Session error: {error}");
+                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                self.state = ClientState::Disconnected;
+                self.send_status_event();
+            })?;
+            for event in events {
+                match event {
+                    SessionEvent::Message(data) => {
+                        self.handle_message(&data).await?;
+                    }
+                    SessionEvent::TimeSync(time) => self.sync_server_time(time, Instant::now()),
+                }
+                if matches!(self.state, ClientState::Disconnected) {
+                    return Ok(());
+                }
+            }
+            if index + 1 == NETWORK_BATCH_LIMIT || started.elapsed() >= NETWORK_BATCH_BUDGET {
+                break;
+            }
+            // Poll once, as the outer select does: an idle socket must not hold the core loop.
+            // Session owns partial fragments, ordered packets, and pending control sends across
+            // cancellation, so dropping a pending receive retains that transport progress.
+            let Some(next) = self.session.recv_message().now_or_never() else {
+                break;
+            };
+            received = next;
+        }
+        Ok(())
+    }
+
     /// Consume the selected command first, then a bounded FIFO prefix of pending input.
     async fn process_command_batch(&mut self, mut first: Option<ClientCommand>) -> Result<()> {
         let started = Instant::now();
@@ -183,32 +228,7 @@ impl ClientRuntime {
                     self.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
-                    use holtburger_session::SessionEvent;
-                    match res {
-                        Ok(events) => {
-                            for event in events {
-                                match event {
-                                    SessionEvent::Message(msg_data) => {
-                                        self.handle_message(&msg_data).await?;
-
-                                        if matches!(self.state, ClientState::Disconnected) {
-                                            return Ok(());
-                                        }
-                                    }
-                                    SessionEvent::TimeSync(server_time) => {
-                                        self.sync_server_time(server_time, Instant::now());
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Session error: {}", e);
-                            self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                            self.state = ClientState::Disconnected;
-                            self.send_status_event();
-                            return Err(e);
-                        }
-                    }
+                    self.process_network_batch(res).await?;
                 }
                 Some(cmd) = async {
                     if let Some(rx) = &mut self.command_rx {
@@ -419,6 +439,88 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use crate::client::builder;
+    use holtburger_protocol::crypto::Hash32;
+    use holtburger_protocol::messages::PacketHeader;
+    use holtburger_protocol::messages::transport::packet_flags;
+    use holtburger_protocol::traits::ProtocolPack;
+
+    /// Real loopback packets exercise ready polling through Session's ordering and checksum path.
+    async fn network_fixture() -> (ClientRuntime, tokio::net::UdpSocket, std::net::SocketAddr) {
+        let server = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut client = builder::build_test_client(ClientState::Connected);
+        client.session = holtburger_session::Session::new(server.local_addr().unwrap())
+            .await
+            .unwrap();
+        client.session.send_ack(0).await.unwrap();
+        let mut bytes = [0; 128];
+        let (_, client_addr) = server.recv_from(&mut bytes).await.unwrap();
+        (client, server, client_addr)
+    }
+
+    #[tokio::test]
+    async fn network_batch_preserves_order_and_leaves_a_bounded_backlog() {
+        let (mut client, server, addr) = network_fixture().await;
+        let mut events = client.subscribe_client_view_events();
+        for index in 0..=NETWORK_BATCH_LIMIT {
+            let payload = (index as f64).to_le_bytes();
+            let mut header = PacketHeader {
+                flags: packet_flags::TIME_SYNC,
+                sequence: client.session.last_server_seq + 1 + index as u32,
+                size: payload.len() as u16,
+                ..Default::default()
+            };
+            header.checksum = header
+                .calculate_checksum()
+                .wrapping_add(Hash32::compute(&payload));
+            let mut packet = Vec::new();
+            header.pack(&mut packet);
+            packet.extend_from_slice(&payload);
+            server.send_to(&packet, addr).await.unwrap();
+        }
+        let mut times = Vec::new();
+        while times.len() <= NETWORK_BATCH_LIMIT {
+            let first = tokio::time::timeout(Duration::from_secs(1), client.session.recv_message())
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(1), client.process_network_batch(first))
+                .await
+                .unwrap()
+                .unwrap();
+            let before = times.len();
+            while let Ok(event) = events.try_recv() {
+                if let ClientViewEvent::ServerTimeUpdated { time } = event {
+                    times.push(time);
+                }
+            }
+            assert!((1..=NETWORK_BATCH_LIMIT).contains(&(times.len() - before)));
+            assert_eq!(
+                times,
+                (0..times.len())
+                    .map(|index| index as f64)
+                    .collect::<Vec<_>>()
+            );
+        }
+        // With no queued packets, polling must return without waiting for new traffic.
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            client.process_network_batch(Ok(Vec::new())),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_batch_failure_retires_the_client() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let error = client
+            .process_network_batch(Err(anyhow::anyhow!("test receive failure")))
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "test receive failure");
+        assert!(matches!(client.state, ClientState::Disconnected));
+        assert_eq!(client.exit_cause, Some(ClientExitCause::RuntimeFailure));
+    }
 
     #[tokio::test]
     async fn command_batch_leaves_a_bounded_fifo_backlog() {

@@ -19,6 +19,7 @@ import {
 	decodeClientLocalPlayerEstablished,
 	decodeClientCameraStartReceipt,
 	decodeClientCameraTick,
+	decodeClientPresentationTick,
 	decodeClientDriveRequest,
 	decodeClientCharacterMotionEventRequest,
 	decodeClientCharacterMotionCapabilities,
@@ -53,6 +54,7 @@ import {
 	type ClientCameraStartReceipt,
 	type ClientCameraStartRequest,
 	type ClientCameraTick,
+	type ClientPresentationTick,
 	type ClientDriveRequest,
 	type ClientCharacterMotionEventRequest,
 	type ClientCharacterMotionCapabilities,
@@ -138,6 +140,7 @@ type ClientEventName = Extract<
 	| "client-dynamic-sound-cue"
 	| "client-camera-started"
 	| "client-camera"
+	| "client-presentation-tick"
 	| "client-presentation-discontinuity"
 	| "client-exit-requested"
 >;
@@ -234,6 +237,11 @@ export type ClientLifecycleSessionEvent =
 			readonly receipt: ClientCameraStartReceipt;
 	  }
 	| { readonly type: "camera"; readonly tick: ClientCameraTick }
+	| {
+			readonly type: "presentation-tick";
+			readonly tick: ClientPresentationTick;
+			readonly receivedAtMs: number;
+	  }
 	| {
 			readonly type: "presentation-discontinuity";
 			readonly discontinuity: ClientPresentationDiscontinuity;
@@ -663,6 +671,20 @@ export class ClientLifecycleSession {
 				await this.#transport.listen("client-camera-started", (payload) =>
 					this.#receiveCameraStarted(payload),
 				),
+			);
+
+			unlisteners.push(
+				await this.#transport.listen("client-presentation-tick", (payload) => {
+					const receivedAtMs = performance.now();
+					const tick = decodeClientPresentationTick(payload);
+					if (this.mirror.isAwaitingSnapshot()) return;
+					if (
+						tick.dynamic !== null &&
+						!this.mirror.apply({ kind: "ticked", batch: tick.dynamic })
+					)
+						return;
+					this.#emit({ type: "presentation-tick", tick, receivedAtMs });
+				}),
 			);
 			unlisteners.push(
 				await this.#transport.listen("client-camera", (payload) =>

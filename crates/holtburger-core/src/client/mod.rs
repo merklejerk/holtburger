@@ -1106,8 +1106,8 @@ impl ClientWorldActivationRuntime {
 mod tests {
     use super::*;
     use crate::{
-        CharacterMotionEvent, CharacterMotionSequence, DynamicEntityEvent, DynamicEntityHostTime,
-        JumpExtent, SequencedCharacterMotionEvent,
+        CharacterMotionEvent, CharacterMotionSequence, DynamicEntityHostTime, JumpExtent,
+        SequencedCharacterMotionEvent,
     };
     use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
@@ -2760,8 +2760,8 @@ mod tests {
         let after = client.current_dynamic_entity_views();
         assert_eq!(before[0].placement, after[0].placement);
 
-        let event = client
-            .dynamic_entity_tick_event(
+        let batch = client
+            .dynamic_entity_tick_batch(
                 before,
                 after,
                 DynamicEntityHostTime::new(1.0).unwrap(),
@@ -2770,9 +2770,6 @@ mod tests {
             )
             .unwrap()
             .expect("clip-only change must publish a path-stable update");
-        let DynamicEntityEvent::Ticked { batch } = event else {
-            panic!("expected a dynamic entity tick");
-        };
         assert!(batch.advances.is_empty());
         assert_eq!(batch.updates.len(), 1);
         assert_eq!(
@@ -4026,8 +4023,8 @@ mod tests {
         let body = client.world.scene.body(body_id).unwrap();
         assert_eq!(body.pose, pose);
         assert_ne!(body.spatial_membership(), before_membership);
-        let event = client
-            .dynamic_entity_tick_event(
+        let batch = client
+            .dynamic_entity_tick_batch(
                 before,
                 client.current_dynamic_entity_views(),
                 DynamicEntityHostTime::new(1.0).unwrap(),
@@ -4036,9 +4033,6 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        let DynamicEntityEvent::Ticked { batch } = event else {
-            panic!("expected a membership update")
-        };
         assert!(batch.advances.is_empty());
         assert_eq!(batch.updates.len(), 1);
         let crate::DynamicEntityPlacementView::World {
@@ -4140,8 +4134,8 @@ mod tests {
             accepted.legs().len() > 1,
             "fixture must exercise intermediate geometry"
         );
-        let event = client
-            .dynamic_entity_tick_event(
+        let batch = client
+            .dynamic_entity_tick_batch(
                 before,
                 client.current_dynamic_entity_views(),
                 DynamicEntityHostTime::new(1.0).unwrap(),
@@ -4150,9 +4144,6 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        let crate::DynamicEntityEvent::Ticked { batch } = event else {
-            panic!("expected physical publication")
-        };
         let path = &batch.advances[0].path;
         assert_eq!(path.legs.len(), accepted.legs().len());
         for (published, solved) in path.legs.iter().zip(accepted.legs()) {

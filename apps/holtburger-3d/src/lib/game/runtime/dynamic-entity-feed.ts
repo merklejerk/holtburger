@@ -311,34 +311,45 @@ export type DynamicEntityEvent = z.infer<typeof dynamicEntityEventSchema>;
 /** Validates the narrow host boundary before mutable frontend state observes it. */
 export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 	const event = dynamicEntityEventSchema.parse(value);
-	if (event.kind === "ticked") {
-		const seen = new Set<number>();
-		for (const advance of event.batch.advances) {
-			if (seen.has(advance.entity.identity.guid))
-				throw new Error(
-					`Dynamic-entity tick contains duplicate GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
-				);
-			seen.add(advance.entity.identity.guid);
-			if (advance.entity.placement.kind !== "world") {
-				throw new Error(
-					`Dynamic-entity advance targets attached GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
-				);
-			}
-			if (advance.kind === "integrated") {
-				validateHostPlacedPath(advance.path, event.batch.durationMs);
-			} else {
-				validateHostPlacedPathShape(advance.path);
-			}
+	if (event.kind === "ticked") validateDynamicEntityTickBatch(event.batch);
+	return event;
+}
+
+/** Decode a tick carried by a composite client publication through the same feed rules. */
+export function decodeDynamicEntityTickBatch(
+	value: unknown,
+): DynamicEntityTickBatch {
+	const batch = dynamicEntityTickBatchSchema.parse(value);
+	validateDynamicEntityTickBatch(batch);
+	return batch;
+}
+
+function validateDynamicEntityTickBatch(batch: DynamicEntityTickBatch): void {
+	const seen = new Set<number>();
+	for (const advance of batch.advances) {
+		if (seen.has(advance.entity.identity.guid))
+			throw new Error(
+				`Dynamic-entity tick contains duplicate GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
+			);
+		seen.add(advance.entity.identity.guid);
+		if (advance.entity.placement.kind !== "world") {
+			throw new Error(
+				`Dynamic-entity advance targets attached GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
+			);
 		}
-		for (const update of event.batch.updates) {
-			if (seen.has(update.identity.guid))
-				throw new Error(
-					`Dynamic-entity tick contains duplicate GUID 0x${update.identity.guid.toString(16).padStart(8, "0")}.`,
-				);
-			seen.add(update.identity.guid);
+		if (advance.kind === "integrated") {
+			validateHostPlacedPath(advance.path, batch.durationMs);
+		} else {
+			validateHostPlacedPathShape(advance.path);
 		}
 	}
-	return event;
+	for (const update of batch.updates) {
+		if (seen.has(update.identity.guid))
+			throw new Error(
+				`Dynamic-entity tick contains duplicate GUID 0x${update.identity.guid.toString(16).padStart(8, "0")}.`,
+			);
+		seen.add(update.identity.guid);
+	}
 }
 
 /** Validates the snapshot embedded in the client lifecycle replacement contract. */

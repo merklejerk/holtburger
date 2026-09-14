@@ -1,5 +1,4 @@
 use super::*;
-use crate::DynamicEntityEvent;
 use anyhow::Result;
 use holtburger_protocol::messages::game_action::{GameAction, JumpActionData};
 use std::sync::Arc;
@@ -140,7 +139,7 @@ impl ClientRuntime {
 
     pub async fn run(&mut self) -> Result<()> {
         self.send_status_event();
-        let mut camera_worker = self.camera.spawn(self.client_view_event_tx.clone())?;
+        let _camera_scope = self.camera.run_scope();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
         let mut net_tick = tokio::time::interval(Duration::from_secs(1));
@@ -154,12 +153,6 @@ impl ClientRuntime {
             }
 
             tokio::select! {
-                error = camera_worker.failure() => {
-                    self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                    self.state = ClientState::Disconnected;
-                    self.send_status_event();
-                    return Err(error);
-                }
                 _ = net_tick.tick() => {
                     let now = Instant::now();
 
@@ -385,8 +378,8 @@ impl ClientRuntime {
                     self.publish_entity_facts();
                     self.publish_character_motion_capabilities_if_changed();
 
-                    let dynamic_event = if !before_dynamic.is_empty() {
-                        self.dynamic_entity_tick_event(
+                    let dynamic_batch = if !before_dynamic.is_empty() {
+                        self.dynamic_entity_tick_batch(
                             before_dynamic,
                             self.current_dynamic_entity_views(),
                             self.dynamic_entity_host_time(),
@@ -396,22 +389,20 @@ impl ClientRuntime {
                     } else {
                         None
                     };
-                    let dynamic_batch = dynamic_event.as_ref().and_then(|event| match event {
-                        DynamicEntityEvent::Ticked { batch } => Some(batch),
-                        _ => None,
-                    });
                     let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
                         camera::ClientCameraSceneInput::capture(
-                            &self.world, collision_snapshot.as_deref(), dynamic_batch,
+                            &self.world, collision_snapshot.as_deref(), dynamic_batch.as_ref(),
                         )
                     });
-                    if let Some(event) = dynamic_event {
-                        let _ = self
-                            .client_view_event_tx
-                            .send(ClientViewEvent::DynamicEntity(event));
-                    }
-                    if let Some(input) = camera_input {
-                        self.camera.publish_active_world(input);
+                    let camera = match camera_input {
+                        Some(input) => self.camera.advance_world(&input, dt_duration)?,
+                        None => None,
+                    };
+                    if dynamic_batch.is_some() || camera.is_some() {
+                        let _ = self.client_view_event_tx.send(ClientViewEvent::PresentationTick {
+                            dynamic: dynamic_batch,
+                            camera,
+                        });
                     }
                 }
             }

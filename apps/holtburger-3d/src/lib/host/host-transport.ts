@@ -15,6 +15,7 @@ import type {
 	ClientPresentationDiscontinuity,
 	ClientCameraStartReceipt,
 	ClientCameraTick,
+	ClientPresentationTick,
 	ClientChatMessage,
 	ClientPlayerEntered,
 	ClientVital,
@@ -164,6 +165,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-dynamic-sound-cue",
 	"client-camera-started",
 	"client-camera",
+	"client-presentation-tick",
 	"client-presentation-discontinuity",
 	"client-exit-requested",
 ] as const;
@@ -242,6 +244,7 @@ export interface HostEventPayloadMap {
 	"client-dynamic-sound-cue": ClientDynamicSoundCue;
 	"client-camera-started": ClientCameraStartReceipt;
 	"client-camera": ClientCameraTick;
+	"client-presentation-tick": ClientPresentationTick;
 	"client-presentation-discontinuity": ClientPresentationDiscontinuity;
 	"client-exit-requested": ClientExitRequested;
 }

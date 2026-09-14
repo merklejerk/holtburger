@@ -1114,8 +1114,15 @@ export class ClientPresentationSession {
 			case "local-player-established":
 				this.#playerGuid = event.identity.playerGuid;
 				return;
+			case "presentation-tick":
+				if (event.tick.dynamic !== null)
+					this.#receiveDynamic(
+						{ kind: "ticked", batch: event.tick.dynamic },
+						event.receivedAtMs,
+					);
+				return;
 			case "dynamic":
-				this.#receiveDynamic(event.event);
+				this.#receiveDynamic(event.event, performance.now());
 				return;
 			case "dynamic-sound-cue":
 				this.#deliverEntityCue({
@@ -1155,10 +1162,9 @@ export class ClientPresentationSession {
 		this.#applyServerEnvironment(state.serverTime);
 	}
 
-	#receiveDynamic(event: DynamicEntityEvent): void {
+	#receiveDynamic(event: DynamicEntityEvent, receivedAtMs: number): void {
 		switch (event.kind) {
 			case "ticked": {
-				const receivedAtMs = performance.now();
 				if (this.#session.mirror.isAwaitingSnapshot()) {
 					this.#setStatus("awaiting-snapshot");
 					return;

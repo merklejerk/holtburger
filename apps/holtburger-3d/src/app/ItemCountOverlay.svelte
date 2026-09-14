@@ -3,6 +3,8 @@
 	const compactCount = new Intl.NumberFormat("en-US", {
 		notation: "compact",
 		maximumSignificantDigits: 2,
+		// Never imply that a stack contains more items than it actually does.
+		roundingMode: "floor",
 	});
 </script>
 

@@ -1,8 +1,6 @@
 <script lang="ts">
-	import {
-		isBindingEquipment,
-		type ActionEquipmentDisplay,
-	} from "./client-action-equipment";
+	import type { ClientItemInteractions } from "./client-item-interactions";
+	import { bindingAction, type ActionItemDisplay } from "./client-action-item";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { onMount, tick } from "svelte";
 	import ClientActionBarView from "./ClientActionBar.svelte";
@@ -33,11 +31,13 @@
 		root: HTMLElement;
 		/** Session-owned retained items and interaction capability. */
 		inventory: ClientInventoryState;
+		/** Session use flow shared with inventory and selected-entity controls. */
+		interactions: ClientItemInteractions;
 		/** Current layout editing policy and usable extent. */
 		editable: boolean;
 		viewport: ClientHudViewport;
 	}
-	let { root, inventory, editable, viewport }: Props = $props();
+	let { root, inventory, interactions, editable, viewport }: Props = $props();
 	let bars = $state<readonly ClientActionBar[]>([initialActionBar()]);
 	let nextId = 2;
 	// Readers belong to mounted surfaces; cloning pulls geometry once at the user action.
@@ -50,7 +50,7 @@
 	}
 	const { keyboard } = useAppInputPolicy();
 	/** Bounded UI sample; the inventory owner retains authoritative item facts. */
-	let items = $state<ReadonlyMap<number, ActionEquipmentDisplay>>(new Map());
+	let items = $state<ReadonlyMap<number, ActionItemDisplay>>(new Map());
 	/** Fresh identities retire mounted focus, menus, geometry readers, and drag-source elements together. */
 	function resetBars() {
 		bars = [{ ...initialActionBar(), id: nextId++ }];
@@ -100,16 +100,7 @@
 	function activate(id: number, slot: ActionSlotIndex, alternate: boolean) {
 		const content = requireActionBar(bars, id).slots[slot];
 		if (content === null) return;
-		const item = inventory.readItem(content.item);
-		if (!isBindingEquipment(item)) {
-			inventory.reportFailure("Bound equipment is unavailable.");
-			return;
-		}
-		void inventory.interactions
-			.equipItem(content.item, alternate)
-			.catch((error: unknown) =>
-				inventory.reportFailure(`Equipment request failed: ${String(error)}`),
-			);
+		interactions.activate(content.item, content.kind, alternate);
 	}
 	onMount(() => {
 		const drag = new ClientItemDrag(
@@ -128,6 +119,7 @@
 				},
 			},
 			keyboard,
+			() => interactions.cancel(),
 		);
 		const repository = inventory.icons;
 		const owner = repository.createOwner("display");
@@ -145,7 +137,7 @@
 					playerGuid = view.playerGuid;
 				}
 				const keys = new Set<string>();
-				const next = new Map<number, ActionEquipmentDisplay>();
+				const next = new Map<number, ActionItemDisplay>();
 				for (const bar of bars)
 					for (const content of bar.slots) {
 						if (content === null || next.has(content.item)) continue;
@@ -159,8 +151,8 @@
 							label:
 								facts?.description.kind === "known"
 									? facts.description.name
-									: `Unavailable equipment ${content.item}`,
-							available: isBindingEquipment(facts),
+									: `Unavailable item ${content.item}`,
+							actionKind: bindingAction(facts)?.kind ?? null,
 							equipped:
 								facts?.ownedByPlayer === true &&
 								facts.location.kind === "equipped",

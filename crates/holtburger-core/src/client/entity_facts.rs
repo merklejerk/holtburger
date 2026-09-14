@@ -213,6 +213,61 @@ mod tests {
         )))
     }
 
+    #[test]
+    fn item_use_capability_republishes_after_public_property_updates() {
+        use holtburger_common::properties::{ItemType, PropertyInt, Usable};
+        use holtburger_protocol::messages::{ObjectDescriptionData, PublicUpdatePropertyIntData};
+        use holtburger_world::item_use::ItemUseCapability;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Tool".into());
+        description.public_weenie_desc.item_type = ItemType::MANA_STONE.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        for (sequence, property, value, expected) in [
+            (
+                1,
+                PropertyInt::ItemUseable,
+                Usable::SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED.bits(),
+                ItemUseCapability::Unavailable,
+            ),
+            (
+                2,
+                PropertyInt::TargetType,
+                ItemType::ARMOR.bits(),
+                ItemUseCapability::Targeted,
+            ),
+            (
+                3,
+                PropertyInt::ItemUseable,
+                Usable::NO.bits(),
+                ItemUseCapability::Unsupported,
+            ),
+        ] {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyInt(Box::new(
+                PublicUpdatePropertyIntData {
+                    sequence,
+                    guid: ITEM,
+                    property: property as u32,
+                    value: value as i32,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { use_capability, .. } = mirror[&ITEM].description else {
+                panic!("Known source required");
+            };
+            assert_eq!(use_capability, expected);
+        }
+    }
+
     fn assert_reconstructed(
         world: &mut WorldState,
         publisher: &mut EntityFactsPublication,

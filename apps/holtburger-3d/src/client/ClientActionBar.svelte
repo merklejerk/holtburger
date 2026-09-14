@@ -24,7 +24,7 @@
 		resolveClientHudPlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
-	import type { ActionEquipmentDisplay } from "./client-action-equipment";
+	import type { ActionItemDisplay } from "./client-action-item";
 	interface Props {
 		/** Cold bar configuration from the collection owner. */
 		bar: ClientActionBar;
@@ -35,7 +35,7 @@
 		editable: boolean;
 		viewport: ClientHudViewport;
 		/** Sampled bound-item presentation. */
-		items: ReadonlyMap<number, ActionEquipmentDisplay>;
+		items: ReadonlyMap<number, ActionItemDisplay>;
 		/** Register a cold geometry reader for collection-owned clone placement. */
 		onmount: (read: () => ActionBarGeometry) => () => void;
 		/** Publish geometry/configuration edits to the collection owner. */
@@ -135,7 +135,12 @@
 			return;
 		}
 		const direction = APP_INPUT.actionBarDirection(event);
-		if (direction !== null) {
+		if (
+			direction !== null &&
+			(direction === "left" || direction === "right"
+				? grid.columns > 1
+				: grid.rows > 1)
+		) {
 			event.preventDefault();
 			focused = navigateActionCell(bar, focused, direction);
 			// A tiny viewport scrolls the fixed-size grid rather than losing or shrinking cells.
@@ -228,6 +233,7 @@
 		bind:this={surface}
 		use:keyboard.scope={{
 			transient: true,
+			passthrough: true,
 			activation: (event) => {
 				if (
 					!ACTION_SLOT_INDICES.some(
@@ -279,9 +285,9 @@
 							{content}
 							label={content === null
 								? "Empty"
-								: (item?.label ?? `Unavailable equipment ${content.item}`)}
+								: (item?.label ?? `Unavailable item ${content.item}`)}
 							display={item?.display}
-							available={item?.available === true}
+							available={content !== null && item?.actionKind === content.kind}
 							equipped={item?.equipped === true}
 							selected={focused === slot}
 							onactivate={(alternate) => activate(slot, alternate)}

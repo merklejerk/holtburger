@@ -1,4 +1,8 @@
 <script lang="ts">
+	import type {
+		ClientItemInteractions,
+		ItemInteractionState,
+	} from "./client-item-interactions";
 	import type { ClientSelectedEntity } from "./client-selected-entity";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -22,7 +26,7 @@
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
-	import type { ClientSelectedEntityDisplay } from "./client-entity-interactions";
+	import type { ClientSelectedEntityDisplay } from "./client-selected-entity-tracking";
 	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock, {
 		createClientShortcuts,
@@ -59,6 +63,8 @@
 		readonly readFrameRates: () => FrameRates | null;
 		/** Session-owned inventory state, independent of floating-panel mounts. */
 		readonly inventory: ClientInventoryState | null;
+		/** Shared use/combining owner for all mounted entry points. */
+		readonly itemInteractions: ClientItemInteractions | null;
 		readonly onSelectInventoryItem: (guid: number) => void;
 		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
 		/** Use the currently selected entity through the session-owned interaction controller. */
@@ -103,6 +109,7 @@
 		readFrameRates,
 		readSelectedEntityDisplay,
 		inventory,
+		itemInteractions,
 		onSelectInventoryItem,
 		onInteractEntity,
 		readTargetIndicatorFrame,
@@ -133,6 +140,42 @@
 		onCanvas,
 	}: Props = $props();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
+	/** Pointer surface changes are cold; world geometry still uses the existing hover picker. */
+	let combineSurface = $state<number | "world" | "self" | null>(null);
+	function considerPointer(event: PointerEvent): void {
+		const element = event.target instanceof Element ? event.target : null;
+		const cell = element?.closest<HTMLElement>(
+			".item-grid-cell[data-item-guid]",
+		);
+		combineSurface = cell
+			? Number(cell.dataset.itemGuid)
+			: element?.closest("[data-combine-self]")
+				? "self"
+				: element?.closest(".client-canvas")
+					? "world"
+					: null;
+	}
+	let itemInteraction = $state<ItemInteractionState>({ kind: "idle" });
+	const combining = $derived(itemInteraction.kind === "acquiring");
+	const combineEligibility = $derived(
+		itemInteraction.kind === "acquiring"
+			? (itemInteraction.considered?.eligibility ?? "neutral")
+			: "neutral",
+	);
+	$effect(() => {
+		if (combining)
+			itemInteractions?.consider(
+				combineSurface === "world" ? hoveredEntityGuid : combineSurface,
+			);
+	});
+
+	$effect(() => {
+		const owner = itemInteractions;
+		itemInteraction = owner?.snapshot() ?? { kind: "idle" };
+		return owner?.subscribe((state) => {
+			itemInteraction = state;
+		});
+	});
 	onMount(() => keyboard.mount(document));
 	onMount(() => inputGate.attach(cancelViewportGesture));
 
@@ -335,6 +378,17 @@
 <main
 	bind:this={worldElement}
 	class="client-world ui-theme"
+	class:combining
+	data-combine-eligibility={combineEligibility}
+	onpointerover={considerPointer}
+	onpointerleave={() => (combineSurface = null)}
+	onpointerdowncapture={(event) => {
+		if (
+			event.target instanceof Element &&
+			event.target.closest(".layout-handle")
+		)
+			itemInteractions?.cancel();
+	}}
 	aria-label="Holtburger client world"
 >
 	<canvas
@@ -367,6 +421,11 @@
 	>
 		<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
 	</button>
+	{#if itemInteraction.kind === "acquiring"}
+		<div class="combine-prompt" role="status">
+			Use {itemInteraction.name} on… (Escape to cancel)
+		</div>
+	{/if}
 	<Minimap
 		readFrame={readMinimapFrame}
 		viewState={minimap}
@@ -376,9 +435,10 @@
 		onStateChange={updateMinimap}
 		{onSelectEntity}
 	/>
-	{#if inventory !== null && worldElement !== null}
+	{#if inventory !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
+				interactions={itemInteractions}
 				root={worldElement}
 				{inventory}
 				{viewport}
@@ -399,6 +459,13 @@
 		onPlacementChange={(character) => (hudLayout = { ...hudLayout, character })}
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
+		{#if itemInteraction.kind === "acquiring"}
+			<button
+				data-combine-self
+				class="ui-button"
+				onclick={() => itemInteractions?.targetSelf()}>Use on self</button
+			>
+		{/if}
 	</ClientHudPanel>
 	{#if jumpChargeActive || hudMode === "layout"}
 		<ClientHudPanel
@@ -484,7 +551,13 @@
 		>
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
-				readSelectedDisplay={readSelectedEntityDisplay}
+				readSelectedDisplay={() => {
+					const display = readSelectedEntityDisplay();
+					return itemInteraction.kind === "acquiring" &&
+						selectedEntityGuid !== null
+						? { ...display, canInteract: true }
+						: display;
+				}}
 				onInteract={onInteractEntity}
 			/>
 		</ClientHudPanel>
@@ -521,9 +594,10 @@
 					(hudLayout = { ...hudLayout, [panel]: placement })}
 			>
 				{#if panel === "inventory"}
-					{#if inventory !== null}
+					{#if inventory !== null && itemInteractions !== null}
 						{#key inventory}
 							<ClientInventoryPanel
+								interactions={itemInteractions}
 								{inventory}
 								selectedGuid={selectedEntityGuid}
 								onSelectItem={onSelectInventoryItem}
@@ -549,6 +623,32 @@
 </main>
 
 <style>
+	@layer components {
+		.combining {
+			--combine-cursor: url("./combine-cursor.svg") 12 12, crosshair;
+		}
+		.combining[data-combine-eligibility="eligible"] {
+			--combine-cursor: url("./combine-cursor-eligible.svg") 12 12, crosshair;
+		}
+		.combining[data-combine-eligibility="ineligible"] {
+			--combine-cursor: url("./combine-cursor-ineligible.svg") 12 12, crosshair;
+		}
+		.client-world.combining :global(.client-canvas),
+		.client-world.combining :global(.item-grid-cell),
+		.client-world.combining [data-combine-self] {
+			cursor: var(--combine-cursor);
+		}
+		.combine-prompt {
+			position: absolute;
+			top: 1rem;
+			left: 50%;
+			transform: translateX(-50%);
+			pointer-events: none;
+			z-index: 10;
+			background: var(--ui-color-control);
+			padding: 0.5rem 1rem;
+		}
+	}
 	@layer components {
 		.client-world {
 			position: fixed;

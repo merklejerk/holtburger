@@ -1,3 +1,4 @@
+import type { ClientItemInteractions } from "./client-item-interactions";
 import type { ClientConfirmation } from "./client-host-contract";
 import type {
 	ClientLifecycleSession,
@@ -6,6 +7,11 @@ import type {
 
 /** One cold UI value: popup dismissal and server response retain different identities. */
 export type ClientDialogPresentation =
+	| {
+			readonly kind: "local-confirmation";
+			readonly request: { readonly requestId: string; readonly text: string };
+			readonly submission: { readonly kind: "ready"; readonly error: null };
+	  }
 	| { readonly kind: "popup"; readonly id: number; readonly text: string }
 	| {
 			readonly kind: "confirmation";
@@ -14,6 +20,11 @@ export type ClientDialogPresentation =
 				| { readonly kind: "ready"; readonly error: string | null }
 				| { readonly kind: "submitting" };
 	  };
+
+type ItemDialogs = Pick<
+	ClientItemInteractions,
+	"snapshot" | "subscribe" | "respond"
+>;
 
 type DialogSession = Pick<
 	ClientLifecycleSession,
@@ -35,6 +46,11 @@ export class ClientDialogs {
 	>();
 	readonly #popups: PopupPresentation[] = [];
 	#confirmation: ConfirmationPresentation | null = null;
+	/** Local question state remains with the interaction owner. */
+	#itemBinding: {
+		readonly items: ItemDialogs;
+		readonly unsubscribe: () => void;
+	} | null = null;
 	#nextPopupId = 1;
 	#destroyed = false;
 
@@ -45,7 +61,20 @@ export class ClientDialogs {
 	}
 
 	snapshot(): ClientDialogPresentation | null {
-		return this.#confirmation ?? this.#popups[0] ?? null;
+		const local = this.#itemBinding?.items.snapshot();
+		return (
+			this.#confirmation ??
+			(local?.kind === "confirming"
+				? {
+						kind: "local-confirmation",
+						request: {
+							requestId: local.question.id,
+							text: local.question.text,
+						},
+						submission: { kind: "ready", error: null },
+					}
+				: (this.#popups[0] ?? null))
+		);
 	}
 
 	subscribe(
@@ -55,6 +84,26 @@ export class ClientDialogs {
 		return () => this.#listeners.delete(listener);
 	}
 
+	/** Bind local presentation without copying its pending operation into the dialog owner. */
+	bindItems(items: ItemDialogs): () => void {
+		if (this.#destroyed)
+			throw new Error("Cannot bind item dialogs after destruction.");
+		if (this.#itemBinding !== null)
+			throw new Error("Item dialog owner is already bound.");
+		const binding = {
+			items,
+			unsubscribe: items.subscribe(() => this.#publish()),
+		};
+		this.#itemBinding = binding;
+		this.#publish();
+		return () => {
+			if (this.#itemBinding !== binding) return;
+			binding.unsubscribe();
+			this.#itemBinding = null;
+			this.#publish();
+		};
+	}
+
 	/** A delayed close event can dismiss only the popup that supplied its button. */
 	dismissPopup(id: number): void {
 		if (this.#destroyed || this.#popups[0]?.id !== id) return;
@@ -62,8 +111,18 @@ export class ClientDialogs {
 		this.#publish();
 	}
 
-	/** Keep the question disabled until core replaces it; transport rejection permits retry. */
+	/** Local answers return to their owner; server questions await authority acknowledgement. */
 	async respond(requestId: string, accepted: boolean): Promise<void> {
+		const local = this.#itemBinding?.items.snapshot();
+		if (
+			!this.#destroyed &&
+			this.#confirmation === null &&
+			local?.kind === "confirming" &&
+			local.question.id === requestId
+		) {
+			this.#itemBinding?.items.respond(requestId, accepted);
+			return;
+		}
 		const current = this.#confirmation;
 		if (
 			this.#destroyed ||
@@ -98,6 +157,8 @@ export class ClientDialogs {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#unsubscribe();
+		this.#itemBinding?.unsubscribe();
+		this.#itemBinding = null;
 		this.#popups.length = 0;
 		this.#confirmation = null;
 		this.#publish();

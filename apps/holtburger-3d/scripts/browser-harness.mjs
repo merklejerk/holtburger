@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { existsSync } from "node:fs";
@@ -4575,6 +4576,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		);
 		inventory.drag = await probeInventoryDrag(client, evaluateExpression);
 		inventory.actionBars = await probeActionBars(client, evaluateExpression);
+		inventory.itemUse = await probeItemUse(client, evaluateExpression);
 		if (options.screenshotPath) {
 			const shot = await client.send("Page.captureScreenshot", {
 				format: "png",

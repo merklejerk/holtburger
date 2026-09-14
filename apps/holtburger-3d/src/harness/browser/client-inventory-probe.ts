@@ -25,6 +25,7 @@ function item(
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -140,6 +141,7 @@ export async function probeClientInventory(options: {
 				pyrealBalance: 12345,
 				burden: null,
 				equipLocations: null,
+				useCapability: "direct" as const,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -163,6 +165,7 @@ export async function probeClientInventory(options: {
 				pyrealBalance: null,
 				burden: null,
 				equipLocations: null,
+				useCapability: "direct" as const,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -231,6 +234,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -249,6 +253,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -662,8 +667,8 @@ export async function probeClientInventory(options: {
 			.length !== 1
 	)
 		throw new Error("Inventory selection queried health for non-creatures.");
-	if (!button("Interact").disabled)
-		throw new Error("Owned inventory enabled Interact.");
+	if (button("Interact").disabled)
+		throw new Error("Known usable inventory item disabled Interact.");
 	button("Debug").click();
 	await sample();
 	const inventoryDetails = document.querySelector(
@@ -701,6 +706,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -877,6 +883,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientItemInteractions } from "./client-item-interactions";
 	import { ClientInventoryState } from "./client-inventory-state";
 	import { browserItemIconRepository } from "../app/item-icon-repository";
 	import { prepareItemIcons } from "../app/item-icon-source";
@@ -49,10 +50,10 @@
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import {
-		ClientEntityInteractions,
+		ClientSelectedEntityTracking,
 		type ClientSelectedEntityDisplay,
 		EMPTY_CLIENT_SELECTED_DISPLAY,
-	} from "./client-entity-interactions";
+	} from "./client-selected-entity-tracking";
 	import ClientWorldView from "./ClientWorldView.svelte";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
@@ -166,7 +167,8 @@
 	let entitySelection: ClientEntitySelection | null = null;
 	let pointerSelection: ClientPointerSelectionController | null = null;
 	let selectionInput: ClientSelectionInput | null = null;
-	let entityInteractions: ClientEntityInteractions | null = null;
+	let itemInteractions = $state<ClientItemInteractions | null>(null);
+	let selectedEntityTracking: ClientSelectedEntityTracking | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
 	/** Session-local diagnostic policy; each use captures the current value. */
 	let unrestrictedUse = $state(false);
@@ -413,10 +415,17 @@
 			event.preventDefault();
 			return;
 		}
+		if (APP_INPUT.shortcut("cancel", event) && itemInteractions?.cancel()) {
+			event.preventDefault();
+			return;
+		}
 		if (selectionInput?.keydown(event, performance.now())) return;
 		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
-			if (!event.repeat) inputArbiter.enterPrecise();
+			if (!event.repeat) {
+				itemInteractions?.cancel();
+				inputArbiter.enterPrecise();
+			}
 			return;
 		}
 		if (
@@ -427,7 +436,7 @@
 			!event.isComposing
 		) {
 			event.preventDefault();
-			if (!event.repeat) entityInteractions?.interact(unrestrictedUse);
+			if (!event.repeat) itemInteractions?.interactSelected(unrestrictedUse);
 			return;
 		}
 		if (inputArbiter !== null && characterInput.apply(event, true))
@@ -449,6 +458,7 @@
 	}
 
 	function enterPreciseJump(): void {
+		itemInteractions?.cancel();
 		inputArbiter?.enterPrecise();
 	}
 
@@ -516,7 +526,10 @@
 	}
 
 	function readSelectedEntityDisplay(): ClientSelectedEntityDisplay {
-		return entityInteractions?.display() ?? EMPTY_CLIENT_SELECTED_DISPLAY;
+		return (
+			selectedEntityTracking?.display(unrestrictedUse) ??
+			EMPTY_CLIENT_SELECTED_DISPLAY
+		);
 	}
 
 	async function setEntityCollisionDisabled(disabled: boolean): Promise<void> {
@@ -728,6 +741,7 @@
 			keydown: handleGameKeydown,
 			keyup: handleGameKeyup,
 			cancel: () => {
+				itemInteractions?.cancelTargeting();
 				selectionInput?.cancel();
 				characterInput.reset();
 				inputArbiter?.reset();
@@ -804,12 +818,24 @@
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 		});
 		selectionInput = input;
-		const interactions = new ClientEntityInteractions({
+		const interactions = new ClientSelectedEntityTracking({
 			selection,
 			lifecycle: owner,
 			onFailure: appendChatError,
 		});
-		entityInteractions = interactions;
+		selectedEntityTracking = interactions;
+		const items = new ClientItemInteractions({
+			session: owner,
+			selection,
+			reportFailure: (message) =>
+				toastCenter.publish({ message, tone: "warning" }),
+			beginAcquisition: () => {
+				inputArbiter?.applyCancel(true, false);
+				keyboard.returnToGame();
+			},
+		});
+		itemInteractions = items;
+		const unbindItems = dialogOwner.bindItems(items);
 		unrestrictedUse = false;
 		const unsubscribeSelection = selection.subscribe((guid) => {
 			selectedEntityGuid = guid;
@@ -833,6 +859,9 @@
 			inventoryOwner.destroy();
 			inventory = null;
 			icons.dispose();
+			unbindItems();
+			items.destroy();
+			itemInteractions = null;
 			dialogOwner.destroy();
 			unsubscribeDialogs();
 			dialogs = null;
@@ -842,7 +871,8 @@
 			unsubscribeSelection();
 			unsubscribeHover();
 			interactions.destroy();
-			if (entityInteractions === interactions) entityInteractions = null;
+			if (selectedEntityTracking === interactions)
+				selectedEntityTracking = null;
 			input.destroy();
 			cycle.destroy();
 			pointer.destroy();
@@ -885,8 +915,9 @@
 		{readTargetIndicatorFrame}
 		{readSelectedEntityDisplay}
 		{inventory}
+		{itemInteractions}
 		onSelectInventoryItem={(guid) => entitySelection?.selectInventoryItem(guid)}
-		onInteractEntity={() => entityInteractions?.interact(unrestrictedUse)}
+		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
@@ -905,8 +936,22 @@
 		onPreciseJumpAim={aimPreciseJump}
 		onPreciseJumpActivate={activatePreciseJump}
 		onPreciseJumpEnter={enterPreciseJump}
-		onViewportSelect={(clientX, clientY) =>
-			pointerSelection?.acquireViewportPoint(clientX, clientY)}
+		onViewportSelect={(clientX, clientY) => {
+			const state = itemInteractions?.snapshot();
+			if (state?.kind === "acquiring") {
+				const current = itemInteractions;
+				pointerSelection?.acquireTarget(clientX, clientY, {
+					isCurrent: () => {
+						const latest = current?.snapshot();
+						return (
+							latest?.kind === "acquiring" &&
+							latest.generation === state.generation
+						);
+					},
+					commit: (guid) => current?.target(guid, state.generation),
+				});
+			} else pointerSelection?.acquireViewportPoint(clientX, clientY);
+		}}
 		onViewportHover={(clientX, clientY) =>
 			pointerSelection?.acquireViewportHover(clientX, clientY)}
 		onMaintainEntitySelection={() => entitySelection?.maintainSelection()}

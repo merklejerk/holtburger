@@ -51,6 +51,46 @@ describe("ClientEntitySelection", () => {
 		selection.destroy();
 	});
 
+	it("resolves interaction targets without changing selection and discards cancelled picks", () => {
+		const lifecycle = new FakeLifecycle();
+		const presentation = new FakePresentation();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => presentation,
+		});
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => presentation,
+			selection,
+			onSelectionSubmissionFailed: (error) => {
+				throw error;
+			},
+		});
+		selection.select(77);
+		let current = true;
+		const targets: Array<number | null> = [];
+		const destination = {
+			isCurrent: () => current,
+			commit: (guid: number | null) => targets.push(guid),
+		};
+		const reply = () => {
+			const request = lifecycle.requests.at(-1);
+			if (request === undefined) throw new Error("Expected pick request");
+			lifecycle.emit(available(request.sequence, [8, 4]));
+		};
+		pointer.acquireTarget(40, 20, destination);
+		reply();
+		expect(targets).toEqual([4]);
+		expect(selection.selectedGuid()).toBe(77);
+		pointer.acquireTarget(40, 20, destination);
+		current = false;
+		reply();
+		expect(targets).toEqual([4]);
+		expect(presentation.refinedCandidates).toHaveLength(1);
+		pointer.destroy();
+		selection.destroy();
+	});
+
 	it("invalidates an older viewport result when minimap selection wins", async () => {
 		const lifecycle = new FakeLifecycle();
 		const selection = new ClientEntitySelection({

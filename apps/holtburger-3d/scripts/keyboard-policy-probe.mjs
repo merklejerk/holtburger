@@ -47,6 +47,48 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			1,
 			"Explorer receives game keys through the app boundary",
 		);
+		await press("1", "Digit1", 49, { modifiers: 2 });
+		assert.equal(
+			(await capture()).movement.forward,
+			1,
+			"Selecting an action bar preserves held movement",
+		);
+		assert.equal((await capture()).gameActive, true);
+		await key("keyUp", "w", "KeyW", 87);
+		assert.equal(
+			(await capture()).movement.forward,
+			0,
+			"Movement releases reach the game while a bar is selected",
+		);
+		await key("keyDown", "w", "KeyW", 87);
+		assert.equal(
+			(await capture()).movement.forward,
+			1,
+			"Unrelated presses reach the game while a bar is selected",
+		);
+		await press("ArrowRight", "ArrowRight", 39);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('.action-cell[aria-pressed="true"]')?.dataset.actionCell`,
+			),
+			"2",
+			"Bar navigation still consumes its own keys",
+		);
+		await press("Enter", "Enter", 13);
+		assert.equal(
+			(await capture()).movement.forward,
+			1,
+			"Completing bar selection preserves held movement",
+		);
+		await press("1", "Digit1", 49, { modifiers: 2 });
+		await invoke("blurWindow");
+		assert.equal(
+			(await capture()).movement.forward,
+			0,
+			"Blur cancels movement alongside bar selection",
+		);
+		await key("keyUp", "w", "KeyW", 87);
+		await key("keyDown", "w", "KeyW", 87);
 		await click("#keyboard-button");
 		let state = await capture();
 		assert.equal(state.clicks, 1);

@@ -1,4 +1,14 @@
 import {
+	itemUseTargetQuerySchema,
+	itemUseTargetResultSchema,
+	type ClientItemUseTargetQuery,
+	type ClientItemUseTargetResult,
+	itemUseRequestSchema,
+	itemUseResultSchema,
+	type ClientItemUseRequest,
+	type ClientItemUseResult,
+} from "./client-item-use-contract";
+import {
 	inventoryIntentSchema,
 	type ClientInventoryIntent,
 	inventoryPreviewRequestSchema,
@@ -92,10 +102,11 @@ type ClientCommandName = Extract<
 	| "queue_client_character_motion_event"
 	| "send_client_chat"
 	| "query_client_entity_health"
-	| "use_client_entity"
 	| "preview_client_inventory"
 	| "submit_client_inventory"
 	| "equip_client_item"
+	| "query_client_item_use_target"
+	| "submit_client_item_use"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
 	| "set_client_camera_intent"
@@ -113,6 +124,8 @@ type ClientEventName = Extract<
 	HostEventName,
 	| "client-current-state"
 	| "client-inventory-preview"
+	| "client-item-use-target-result"
+	| "client-item-use-result"
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
@@ -171,6 +184,11 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| {
+			readonly type: "item-use-target-result";
+			readonly result: ClientItemUseTargetResult;
+	  }
+	| { readonly type: "item-use-result"; readonly result: ClientItemUseResult }
 	| {
 			readonly type: "inventory-preview";
 			readonly result: ClientInventoryPreviewResult;
@@ -391,17 +409,26 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Evaluate a considered target without executing use. */
+	async queryItemUseTarget(query: ClientItemUseTargetQuery): Promise<void> {
+		await this.#transport.invoke("query_client_item_use_target", {
+			query: itemUseTargetQuerySchema.parse(query),
+		});
+	}
+
+	/** Submit a use with a semantic execution precondition. */
+	async submitItemUse(request: ClientItemUseRequest): Promise<void> {
+		await this.#transport.invoke("submit_client_item_use", {
+			request: itemUseRequestSchema.parse(request),
+		});
+	}
+
 	/** Equip one owned item through core’s equipment replacement policy with a side preference. */
 	async equipItem(guid: number, alternate: boolean): Promise<void> {
 		await this.#transport.invoke("equip_client_item", {
 			guid,
 			alternate,
 		});
-	}
-
-	/** Use one selected entity through core's existing interaction command. */
-	async useEntity(guid: number, unrestricted: boolean): Promise<void> {
-		await this.#transport.invoke("use_client_entity", { guid, unrestricted });
 	}
 
 	/** Send one ordinary local-speech message. */
@@ -554,6 +581,21 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen(
+					"client-item-use-target-result",
+					(payload) => {
+						this.#emit({
+							type: "item-use-target-result",
+							result: itemUseTargetResultSchema.parse(payload),
+						});
+					},
+				),
+				await this.#transport.listen("client-item-use-result", (payload) => {
+					this.#emit({
+						type: "item-use-result",
+						result: itemUseResultSchema.parse(payload),
+					});
+				}),
 				await this.#transport.listen("client-inventory-preview", (payload) => {
 					this.#emit({
 						type: "inventory-preview",

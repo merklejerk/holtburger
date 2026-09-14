@@ -11,7 +11,7 @@
 	const { presentation, onDismiss, onRespond }: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	const submitting = $derived(
-		presentation.kind === "confirmation" &&
+		presentation.kind !== "popup" &&
 			presentation.submission.kind === "submitting",
 	);
 
@@ -38,7 +38,7 @@
 			? presentation.text
 			: presentation.request.text}
 	</p>
-	{#if presentation.kind === "confirmation" && presentation.submission.kind === "ready" && presentation.submission.error !== null}
+	{#if presentation.kind !== "popup" && presentation.submission.kind === "ready" && presentation.submission.error !== null}
 		<p role="alert">{presentation.submission.error}</p>
 	{/if}
 	<div class="client-message-actions">

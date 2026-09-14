@@ -555,6 +555,10 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Correlated guarded-use evaluation or dispatch result.
+    ItemUseResult(super::item_use::ItemUseResult),
+    /// Read-only considered-target compatibility result.
+    ItemUseTargetResult(super::item_use::ItemUseTargetResult),
     /// Shared inventory interpretation for one frontend drag target.
     InventoryPreview(super::inventory_plan::InventoryPreviewResult),
     /// Acknowledges the accepted local-player entity response policy.
@@ -804,6 +808,10 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Evaluate and dispatch only if the expected consequence still matches.
+    SubmitItemUse(super::item_use::ItemUseRequest),
+    /// Evaluate one considered target without dispatch or busy admission.
+    QueryItemUseTarget(super::item_use::ItemUseTargetQuery),
     /// Evaluate the current drag target without issuing inventory mutations.
     PreviewInventory(super::inventory_plan::InventoryPreviewRequest),
     /// Re-evaluate and execute an identity-based inventory gesture.

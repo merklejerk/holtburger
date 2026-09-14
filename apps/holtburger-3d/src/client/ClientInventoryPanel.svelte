@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientItemInteractions } from "./client-item-interactions";
 	import { onMount, tick } from "svelte";
 	import InventorySplitDialog from "./InventorySplitDialog.svelte";
 	import {
@@ -22,10 +23,13 @@
 	interface Props {
 		/** Stable session owner; the parent keys this component by that lifetime. */
 		readonly inventory: ClientInventoryState;
+		/** Shared source activation and target acquisition. */
+		readonly interactions: ClientItemInteractions;
 		readonly selectedGuid: number | null;
 		readonly onSelectItem: (guid: number) => void;
 	}
-	const { inventory, selectedGuid, onSelectItem }: Props = $props();
+	const { inventory, interactions, selectedGuid, onSelectItem }: Props =
+		$props();
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
@@ -63,6 +67,53 @@
 	let splitRequest = $state<InventorySplitRequest | null>(null);
 	let splitOwner: ClientInventorySplit | null = null;
 
+	onMount(() => {
+		const abort = new AbortController();
+		let consumedTargetSequence = false;
+		const itemGuid = (event: MouseEvent): number | null => {
+			const cell =
+				event.target instanceof Element
+					? event.target.closest<HTMLElement>(
+							".item-grid-cell[data-item-guid]:not(:disabled)",
+						)
+					: null;
+			return cell === null ? null : Number(cell.dataset.itemGuid);
+		};
+		panel.addEventListener(
+			"click",
+			(event) => {
+				const guid = itemGuid(event);
+				if (guid === null) return;
+				if (event.detail <= 1) consumedTargetSequence = false;
+				const state = interactions.snapshot();
+				if (event.detail > 1 || state.kind === "acquiring") {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+					if (event.detail <= 1 && state.kind === "acquiring") {
+						consumedTargetSequence = true;
+						interactions.target(guid, state.generation);
+					}
+				}
+			},
+			{ capture: true, signal: abort.signal },
+		);
+		panel.addEventListener(
+			"dblclick",
+			(event) => {
+				const guid = itemGuid(event);
+				if (guid === null) return;
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				if (!consumedTargetSequence) {
+					// The first click may have toggled an already-selected source off.
+					if (selectedGuid !== guid) onSelectItem(guid);
+					interactions.use(guid, false);
+				}
+			},
+			{ capture: true, signal: abort.signal },
+		);
+		return () => abort.abort();
+	});
 	onMount(() => {
 		const split = new ClientInventorySplit(panel, inventory, (request) => {
 			splitRequest = request;

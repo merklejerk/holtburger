@@ -39,7 +39,7 @@ export interface InventoryCurrencyRow extends Omit<
 /** Session commands and results used by the mounted inventory drag owner. */
 export type InventoryInteractionSession = Pick<
 	ClientLifecycleSession,
-	"previewInventory" | "submitInventory" | "equipItem" | "subscribe"
+	"previewInventory" | "submitInventory" | "subscribe"
 >;
 
 /** Existing lifecycle facts and semantic mirror; the model does not subscribe to raw properties. */

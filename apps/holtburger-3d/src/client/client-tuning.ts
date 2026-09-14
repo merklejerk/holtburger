@@ -93,6 +93,8 @@ export const CLIENT_TUNING = {
 	inventory: {
 		/** Pointer travel that distinguishes inventory selection from dragging. */
 		dragThresholdCssPixels: 6,
+		/** Ignore double-click completion from a finished drag gesture. */
+		doubleClickSuppressionMs: 500,
 		/** Mounted inventory display cadence, independent of host publication. */
 		displayIntervalMs: 250,
 	},

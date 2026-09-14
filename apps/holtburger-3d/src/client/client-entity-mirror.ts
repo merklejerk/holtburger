@@ -54,6 +54,13 @@ const clientEntityFactsSchema = z
 					itemType: guid,
 					/** World-derived slot compatibility; not a wield-requirements verdict. */
 					equipLocations: guid.nullable(),
+					/** Shared authored use shape, independent of target and busy state. */
+					useCapability: z.enum([
+						"unavailable",
+						"unsupported",
+						"direct",
+						"targeted",
+					]),
 					/** Public description flags for selected-entity diagnostics. */
 					objectFlags: guid,
 					/** Server template identity, independent of scene residency. */

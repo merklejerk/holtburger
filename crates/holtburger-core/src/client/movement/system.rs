@@ -24,7 +24,7 @@ use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionIt
 use holtburger_session::Session;
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::motion::{
-    CharacterMotionPresentation, MotionCommand, MotionOrder, SequenceTick,
+    CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder, SequenceTick,
     ServerDirectedMotionResolution, ServerDirectedMotionState, resolve_server_directed_motion,
 };
 use holtburger_world::spatial::{ContactState, LocalDriveControl, LocalDriveGait};
@@ -829,13 +829,13 @@ impl MovementSystem {
             let target = state
                 .target_guid()
                 .and_then(|target| world.server_directed_target(target));
-            let terminal_order = steady_order.with_character_presentation(match contact {
-                ContactState::Grounded => CharacterMotionPresentation::Grounded,
-                ContactState::Airborne | ContactState::Sliding => {
-                    CharacterMotionPresentation::Falling
-                }
-                ContactState::Unknown => CharacterMotionPresentation::StanceDefault,
-            });
+            let contact = world
+                .player_entity()
+                .ok_or_else(|| anyhow::anyhow!("server-directed player entity is unavailable"))?
+                .motion_contact(contact);
+            let terminal_order = steady_order.with_character_presentation(
+                contact.presentation(CharacterMotionPresentation::StanceDefault),
+            );
             let order = match resolve_server_directed_motion(
                 state,
                 steady_order,
@@ -906,7 +906,14 @@ impl MovementSystem {
             .runtime_body_view(body_id)
             .map(|body| body.contact)
             .unwrap_or(ContactState::Unknown);
-        let presentation = self.character_presentation(contact);
+        let presentation = match world
+            .player_entity()
+            .context("manual player entity is unavailable")?
+            .motion_contact(contact)
+        {
+            MotionContact::Unrestricted(_) => CharacterMotionPresentation::Grounded,
+            MotionContact::RequiresSupport(contact) => self.character_presentation(contact),
+        };
         let required_command = match presentation {
             CharacterMotionPresentation::Ready => Some(MotionCommand::READY),
             CharacterMotionPresentation::Falling => Some(MotionCommand::FALLING),

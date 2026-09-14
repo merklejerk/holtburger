@@ -4,7 +4,6 @@ import {
 	getMat4Translation,
 	multiplyMat4,
 	transformAABB3,
-	transformPoint3,
 } from "../math/matrices";
 import { containsPoint, translateBounds } from "../math/geometry-utils";
 import { frustumIntersectsAABB, type Frustum } from "../math/frustum";
@@ -30,6 +29,7 @@ import type {
 	ResolvedScenePlacement,
 	ResolvedSceneOrigin,
 	ResolvedSceneBounds,
+	ResolvedSceneState,
 	ScenePointResidencyCandidates,
 	SceneResidency,
 	SceneSpatialMembership,
@@ -47,6 +47,8 @@ const EMPTY_PORTAL_CROSSINGS: readonly ScenePortalCrossingInput[] =
 type ScenePortalAperture = ScenePortalCrossingInput["sourceAperture"];
 
 type SceneNodeRecord = {
+	/** Scene-owned resolved facts, refreshed before any descendant or query consumes them. */
+	resolved: ResolvedSceneState;
 	cullingGroup: string;
 	id: SceneNodeId;
 	localBounds: AABB3 | null;
@@ -69,7 +71,7 @@ type SceneNodeRecord = {
 interface SpatialEntry {
 	readonly cullingGroup: string;
 	readonly nodeId: SceneNodeId;
-	readonly placement: ResolvedScenePlacement;
+	placement: ResolvedScenePlacement;
 	/** Every source-domain scope in which this one node must be selected. */
 	readonly scopes: readonly SceneScope[];
 	/** Conservative bounds in the root landblock coordinate frame. */
@@ -135,12 +137,16 @@ export class SceneGraph {
 
 		const nodeId = createSceneNodeId(this.#nextNodeId);
 		this.#nextNodeId += 1;
-		const node = createSceneNodeRecord(nodeId, input);
+		const node = createSceneNodeRecord(
+			nodeId,
+			input,
+			(parentId) => this.#requireNode(parentId).resolved,
+		);
 		this.#nodes.set(nodeId, node);
 		if (node.parentId !== null) {
 			this.#requireNode(node.parentId).children.add(nodeId);
 		}
-		this.#syncSpatialSubtree(node.id);
+		this.#syncSpatialEntry(node);
 		return nodeId;
 	}
 
@@ -187,7 +193,7 @@ export class SceneGraph {
 		nodeId: SceneNodeId,
 	): ResolvedScenePlacement | undefined {
 		if (!this.#nodes.has(nodeId)) return undefined;
-		return copyResolvedPlacement(this.#resolvePlacement(nodeId));
+		return copyResolvedPlacement(this.#requireNode(nodeId).resolved.placement);
 	}
 
 	/** Borrow the immutable plural scope membership inherited from a live node's root. */
@@ -195,32 +201,24 @@ export class SceneGraph {
 		nodeId: SceneNodeId,
 	): SceneSpatialMembership | undefined {
 		if (!this.#nodes.has(nodeId)) return undefined;
-		return this.#resolveSpatialMembership(nodeId);
+		return this.#requireNode(nodeId).resolved.spatialMembership;
 	}
 
-	/**
-	 * Return one live node's landblock-local origin and residency, without composing transforms.
-	 *
-	 * The frame-rate counterpart to {@link SceneGraph.getResolvedPlacement}: that method answers
-	 * "what is this node's transform" and must copy the matrix it hands out, which costs a compose
-	 * per ancestor hop plus two clones. A consumer that only needs a position instead walks the
-	 * origin point up the same chain — 9 multiplies per hop, and the returned vector is the only
-	 * allocation. Reach for the placement query only when the full transform is genuinely consumed.
-	 */
+	/** Borrow resolved facts synchronously; do not mutate or retain them across scene mutations. */
+	readResolvedState(nodeId: SceneNodeId): ResolvedSceneState | undefined {
+		return this.#nodes.get(nodeId)?.resolved;
+	}
+
+	/** Copy the current resolved origin without copying a full transform. */
 	getResolvedOrigin(nodeId: SceneNodeId): ResolvedSceneOrigin | undefined {
-		let node = this.#nodes.get(nodeId);
+		const node = this.#nodes.get(nodeId);
 		if (!node) return undefined;
-		// A node's own origin is its transform's translation; each hop then carries that point up.
-		const landblockOrigin = getMat4Translation(node.localTransform);
-		while (node.parentId !== null) {
-			node = this.#requireNode(node.parentId);
-			transformPoint3(node.localTransform, landblockOrigin, landblockOrigin);
-		}
+		const placement = node.resolved.placement;
 		return {
-			envCellId: node.envCellId,
-			landblockId: node.landblockId,
-			landblockOrigin,
-			scope: scopeFor(node.landblockId, node.envCellId),
+			envCellId: placement.envCellId,
+			landblockId: placement.landblockId,
+			landblockOrigin: getMat4Translation(placement.localToLandblock),
+			scope: { ...placement.scope },
 		};
 	}
 
@@ -230,7 +228,7 @@ export class SceneGraph {
 		if (!node?.localBounds) return null;
 		return {
 			localBounds: node.localBounds.clone(),
-			placement: copyResolvedPlacement(this.#resolvePlacement(nodeId)),
+			placement: copyResolvedPlacement(node.resolved.placement),
 		};
 	}
 
@@ -686,29 +684,7 @@ export class SceneGraph {
 		return this.#envCellScopes.get(envCellId)?.seenOutside ?? null;
 	}
 
-	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */
-	#resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
-		let node = this.#requireNode(nodeId);
-		let localToLandblock = node.localTransform.clone();
-		while (node.parentId !== null) {
-			node = this.#requireNode(node.parentId);
-			localToLandblock = multiplyMat4(node.localTransform, localToLandblock);
-		}
-		return {
-			envCellId: node.envCellId,
-			landblockId: node.landblockId,
-			scope: scopeFor(node.landblockId, node.envCellId),
-			localToLandblock,
-		};
-	}
-
-	#resolveSpatialMembership(nodeId: SceneNodeId): SceneSpatialMembership {
-		let node = this.#requireNode(nodeId);
-		while (node.parentId !== null) node = this.#requireNode(node.parentId);
-		return node.spatialMembership;
-	}
-
-	/** Guard the acyclic invariant `#resolvePlacement`'s ancestor walk depends on. */
+	/** Guard the acyclic invariant required by parent-first subtree resolution. */
 	#isSelfOrDescendant(
 		candidateId: SceneNodeId,
 		ancestorId: SceneNodeId,
@@ -731,6 +707,33 @@ export class SceneGraph {
 
 	#syncSpatialSubtree(nodeId: SceneNodeId): void {
 		const node = this.#requireNode(nodeId);
+		const previous = node.resolved;
+		if (node.parentId === null) {
+			node.resolved = {
+				placement: {
+					envCellId: node.envCellId,
+					landblockId: node.landblockId,
+					scope: scopeFor(node.landblockId, node.envCellId),
+					localToLandblock: previous.placement.localToLandblock.copy(
+						node.localTransform,
+					),
+				},
+				spatialMembership: node.spatialMembership,
+			};
+		} else {
+			const parent = this.#requireNode(node.parentId).resolved;
+			node.resolved = {
+				placement: {
+					...parent.placement,
+					localToLandblock: multiplyMat4(
+						parent.placement.localToLandblock,
+						node.localTransform,
+						previous.placement.localToLandblock,
+					),
+				},
+				spatialMembership: parent.spatialMembership,
+			};
+		}
 		this.#syncSpatialEntry(node);
 		for (const childId of node.children) this.#syncSpatialSubtree(childId);
 	}
@@ -742,8 +745,8 @@ export class SceneGraph {
 			this.#removeSpatialEntry(node.id);
 			return;
 		}
-		const placement = this.#resolvePlacement(node.id);
-		const scopes = this.#resolveSpatialMembership(node.id).scopes.filter(
+		const { placement, spatialMembership } = node.resolved;
+		const scopes = spatialMembership.scopes.filter(
 			(scope) =>
 				scope.kind === "outdoor" || this.#envCellScopes.has(scope.envCellId),
 		);
@@ -751,13 +754,33 @@ export class SceneGraph {
 			this.#removeSpatialEntry(node.id);
 			return;
 		}
-		const retainsCullingGroup =
+		if (
 			existingEntry !== undefined &&
 			existingEntry.cullingGroup === node.cullingGroup &&
 			existingEntry.placement.landblockId === placement.landblockId &&
-			sameScopeSequence(existingEntry.scopes, scopes);
-		this.#removeSpatialEntry(node.id, !retainsCullingGroup);
-		this.#spatialEntries.set(node.id, {
+			sameScopeSequence(existingEntry.scopes, scopes)
+		) {
+			// Moving within the same groups only invalidates their aggregate bounds.
+			// Keep registration and the entry itself; the placement object carries current residency.
+			existingEntry.placement = placement;
+			transformAABB3(
+				placement.localToLandblock,
+				node.localBounds,
+				existingEntry.landblockBounds,
+			);
+			for (const scope of existingEntry.scopes) {
+				const group = this.#cullingGroups
+					.get(scopeKey(scope))
+					?.get(placement.landblockId)
+					?.get(node.cullingGroup);
+				if (!group)
+					throw new Error(`Scene node ${node.id} lost its culling group.`);
+				group.dirty = true;
+			}
+			return;
+		}
+		this.#removeSpatialEntry(node.id);
+		const entry: SpatialEntry = {
 			landblockBounds: transformAABB3(
 				placement.localToLandblock,
 				node.localBounds,
@@ -767,11 +790,12 @@ export class SceneGraph {
 			nodeId: node.id,
 			placement,
 			scopes,
-		});
-		this.#addSpatialEntry(this.#spatialEntries.get(node.id)!);
+		};
+		this.#spatialEntries.set(node.id, entry);
+		this.#addSpatialEntry(entry);
 	}
 
-	#removeSpatialEntry(nodeId: SceneNodeId, pruneEmptyGroup = true): void {
+	#removeSpatialEntry(nodeId: SceneNodeId): void {
 		const entry = this.#spatialEntries.get(nodeId);
 		if (!entry) return;
 		this.#spatialEntries.delete(nodeId);
@@ -782,7 +806,7 @@ export class SceneGraph {
 			const group = groups?.get(entry.cullingGroup);
 			group?.entries.delete(nodeId);
 			if (group) group.dirty = true;
-			if (pruneEmptyGroup && group?.entries.size === 0) {
+			if (group?.entries.size === 0) {
 				groups?.delete(entry.cullingGroup);
 				if (groups?.size === 0)
 					landblockGroups?.delete(entry.placement.landblockId);
@@ -906,6 +930,7 @@ export class SceneGraph {
 function createSceneNodeRecord(
 	nodeId: SceneNodeId,
 	input: SceneNodeInput,
+	resolveParent: (parentId: SceneNodeId) => ResolvedSceneState,
 ): SceneNodeRecord {
 	const fields = {
 		children: new Set<SceneNodeId>(),
@@ -915,20 +940,41 @@ function createSceneNodeRecord(
 		localTransform: input.localTransform.clone(),
 	};
 	if (input.parentId === null) {
+		const spatialMembership = validateSpatialMembership(
+			input,
+			input.spatialMembership ?? residentSpatialMembership(input),
+		);
 		return {
 			...fields,
 			envCellId: input.envCellId,
 			landblockId: input.landblockId,
 			parentId: null,
-			spatialMembership: validateSpatialMembership(
-				input,
-				input.spatialMembership ?? residentSpatialMembership(input),
-			),
+			spatialMembership,
+			resolved: {
+				placement: {
+					envCellId: input.envCellId,
+					landblockId: input.landblockId,
+					scope: scopeFor(input.landblockId, input.envCellId),
+					localToLandblock: input.localTransform.clone(),
+				},
+				spatialMembership,
+			},
 		};
 	}
+	const parent = resolveParent(input.parentId);
 	return {
 		...fields,
 		parentId: input.parentId,
+		resolved: {
+			placement: {
+				...parent.placement,
+				localToLandblock: multiplyMat4(
+					parent.placement.localToLandblock,
+					input.localTransform,
+				),
+			},
+			spatialMembership: parent.spatialMembership,
+		},
 	};
 }
 
@@ -940,6 +986,7 @@ function createSceneNodeRecord(
  */
 function carriedNodeFields(node: SceneNodeRecord, localTransform: Mat4) {
 	return {
+		resolved: node.resolved,
 		children: node.children,
 		cullingGroup: node.cullingGroup,
 		id: node.id,
@@ -953,6 +1000,7 @@ function copyResolvedPlacement(
 ): ResolvedScenePlacement {
 	return {
 		...placement,
+		scope: { ...placement.scope },
 		localToLandblock: placement.localToLandblock.clone(),
 	};
 }

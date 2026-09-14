@@ -2,10 +2,8 @@
 //!
 //! The camera is deliberately a presentation product, but its placement still belongs beside the
 //! client authority, which publishes the installed collision snapshot and accepted local-player
-//! path to the independent camera worker. The host forwards semantic inputs and receives a
+//! path to the camera solve in the same physics tick. The host forwards semantic inputs and receives a
 //! serializable path; it never owns a second body or collision scene.
-
-mod target_playback;
 
 use crate::placed_motion::present_placed_motion_pose;
 use std::sync::Arc;
@@ -33,7 +31,13 @@ use crate::kinematic_boom::{
     serialize_kinematic_boom_path, standard_kinematic_boom_profile, stationary_kinematic_boom_path,
 };
 use crate::{DynamicEntityPlacementAdvanceKind, DynamicEntityTickBatch};
-use target_playback::{TargetPlayback, TargetTravel, TargetUpdate};
+/// Current physics interval, or an explicit placement discontinuity.
+enum TargetUpdate {
+    /// Complete accepted travel consumed once by the camera in this physics tick.
+    Travel(crate::DynamicEntityPlacedPath),
+    /// Retire camera placement continuity after a correction or teleport.
+    Reset,
+}
 
 /// Renderer-authored camera registration request.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -246,7 +250,7 @@ pub enum ClientCameraTick {
         #[serde(flatten)]
         identity: ClientCameraIdentity,
         sequence: u64,
-        /// Exact camera-worker duration used by the boom solve and path playback.
+        /// Accepted physics duration shared by entity and camera path playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
         clearance: ClientCameraClearance,
@@ -261,7 +265,7 @@ pub enum ClientCameraTick {
         #[serde(flatten)]
         identity: ClientCameraIdentity,
         sequence: u64,
-        /// Exact camera-worker duration used by the boom solve and path playback.
+        /// Accepted physics duration shared by entity and camera path playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
         clearance: ClientCameraClearance,
@@ -277,7 +281,7 @@ pub enum ClientCameraTick {
         #[serde(flatten)]
         identity: ClientCameraIdentity,
         sequence: u64,
-        /// Exact camera-worker duration used by the boom solve and path playback.
+        /// Accepted physics duration shared by entity and camera path playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
         clearance: ClientCameraClearance,
@@ -294,7 +298,7 @@ pub enum ClientCameraTick {
         #[serde(flatten)]
         identity: ClientCameraIdentity,
         sequence: u64,
-        /// Exact camera-worker duration used for stationary playback.
+        /// Accepted physics duration used for stationary playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
         desired_reach: f32,
@@ -365,7 +369,7 @@ pub(super) struct ClientCameraSceneInput {
     collision: Option<Result<CameraCollisionPublication, String>>,
 }
 
-/// Environment and entities captured together before the independent camera worker reads them.
+/// Environment and entities captured together for the post-physics camera solve.
 struct CameraCollisionPublication {
     /// Installed environment geometry and topology.
     environment: Arc<holtburger_world::CollisionScene>,
@@ -413,13 +417,9 @@ impl ClientCameraSceneInput {
                             })
                             .map(|advance| match advance.kind {
                                 DynamicEntityPlacementAdvanceKind::Integrated => {
-                                    TargetUpdate::Travel(TargetTravel {
-                                        instant: batch.host_time,
-                                        seconds: batch.duration_ms / 1_000.0,
-                                        path: Arc::new(advance.path.clone()),
-                                    })
+                                    TargetUpdate::Travel(advance.path.clone())
                                 }
-                                _ => TargetUpdate::Reset(batch.host_time),
+                                _ => TargetUpdate::Reset,
                             })
                     });
                     CameraBodyInput {
@@ -478,9 +478,18 @@ struct ActiveCamera {
     pivot_offset: Vector3,
     /// Parent-driven target sphere whose topology is reconciled by the shared spatial solver.
     target_body: ChildSpatialBody,
-    /// Bounded, publication-fed parent travel consumed at camera cadence.
-    target_playback: TargetPlayback,
+    /// Last consumed parent endpoint; detects discontinuities without a playback queue.
+    target_pose: WorldPosition,
     sequence: u64,
+}
+
+impl ActiveCamera {
+    /// Retire parent continuity so the next boom solve proves a fresh placement.
+    fn reset_target(&mut self, pose: WorldPosition) {
+        self.target_pose = pose;
+        self.target_body = ChildSpatialBody::new(self.target_body.definition(), pose);
+        self.controller.invalidate_target_path();
+    }
 }
 
 /// Client-side lifecycle owner for the generic kinematic boom controller.
@@ -651,24 +660,14 @@ impl ClientCameraRuntime {
         self.pending = None;
     }
 
-    /// Preserve travel before a later world publication can replace the worker input.
-    pub(super) fn observe_target(&mut self, input: &ClientCameraSceneInput) {
-        if let Some(active) = self.active.as_mut()
-            && let Some(body) = input.body(active.identity)
-        {
-            active
-                .target_playback
-                .observe(body.pose, body.update.as_ref());
-        }
-    }
-
     /// Advances against a published query view without reading mutable world state.
     pub(super) fn advance(
         &mut self,
         input: &ClientCameraSceneInput,
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
-        let _ = self.initialize_if_ready(input)?;
+        let starting = self.active.is_none();
+        self.initialize_if_ready(input)?;
         let Some(_) = self.active.as_ref() else {
             return Ok(None);
         };
@@ -690,16 +689,30 @@ impl ClientCameraRuntime {
             .body(active.identity)
             .context("client camera target body is unavailable")
             .and_then(|body| {
-                active
-                    .target_playback
-                    .observe(body.pose, body.update.as_ref());
-                if let Some(pose) = active.target_playback.take_reseed() {
-                    active.target_body =
-                        ChildSpatialBody::new(active.target_body.definition(), pose);
-                    active.controller.invalidate_target_path();
+                let (initial, waypoints) = match body.update.as_ref() {
+                    Some(TargetUpdate::Travel(path)) if !starting => (
+                        path.initial.pose,
+                        path.legs
+                            .iter()
+                            .map(|leg| ChildSpatialBodyWaypoint {
+                                parent_pose: leg.end.pose,
+                                end_fraction: leg.end_fraction,
+                            })
+                            .collect(),
+                    ),
+                    _ => (
+                        body.pose,
+                        vec![ChildSpatialBodyWaypoint {
+                            parent_pose: body.pose,
+                            end_fraction: 1.0,
+                        }],
+                    ),
+                };
+                if initial != active.target_pose || matches!(body.update, Some(TargetUpdate::Reset))
+                {
+                    active.reset_target(initial);
                 }
-                let (initial, waypoints) =
-                    active.target_playback.advance(duration.as_secs_f64())?;
+                active.target_pose = body.pose;
                 target_samples_from_parent_path(
                     collision.environment.as_ref(),
                     initial,
@@ -711,16 +724,17 @@ impl ClientCameraRuntime {
         let samples = match samples {
             Ok(samples) => samples,
             Err(_) => {
-                if let Some(body) = input.body(active.identity) {
-                    active.target_playback.recover(body.pose);
-                }
-                return project_camera_failure(
+                // Publish the existing safe placement before retiring its proof for recovery.
+                let tick = project_camera_failure(
                     active,
                     duration_ms,
                     ClientCameraFailureReason::TargetContract,
                     KinematicBoomDiagnostics::default(),
-                )
-                .map(Some);
+                )?;
+                if let Some(body) = input.body(active.identity) {
+                    active.reset_target(body.pose);
+                }
+                return Ok(Some(tick));
             }
         };
         let initial_visual_pivot = active.controller.visual_pivot();
@@ -738,16 +752,17 @@ impl ClientCameraRuntime {
         let outcome = match active.controller.advance(query, duration_seconds, &samples) {
             Ok(outcome) => outcome,
             Err(_) => {
-                if let Some(body) = input.body(active.identity) {
-                    active.target_playback.recover(body.pose);
-                }
-                return project_camera_failure(
+                // Publish the existing safe placement before retiring its proof for recovery.
+                let tick = project_camera_failure(
                     active,
                     duration_ms,
                     ClientCameraFailureReason::ControllerInput,
                     KinematicBoomDiagnostics::default(),
-                )
-                .map(Some);
+                )?;
+                if let Some(body) = input.body(active.identity) {
+                    active.reset_target(body.pose);
+                }
+                return Ok(Some(tick));
             }
         };
         let tick = project_camera_outcome(active, initial_visual_pivot, duration_ms, outcome)?;
@@ -756,7 +771,7 @@ impl ClientCameraRuntime {
             ClientCameraTick::Held { .. } | ClientCameraTick::Fallback { .. }
         ) && let Some(body) = input.body(active.identity)
         {
-            active.target_playback.recover(body.pose);
+            active.reset_target(body.pose);
         }
         Ok(Some(tick))
     }
@@ -837,10 +852,7 @@ impl ClientCameraRuntime {
             target_sphere_role: sphere.role,
             pivot_offset,
             target_body,
-            target_playback: TargetPlayback::new(
-                body.pose,
-                body.update.as_ref().map(TargetUpdate::instant),
-            ),
+            target_pose: body.pose,
             sequence: 0,
         });
         self.pending = None;
@@ -1279,32 +1291,16 @@ mod tests {
                 ),
             })
             .unwrap();
-        let point = |pose| crate::DynamicEntityPathPoint {
-            pose,
-            spatial_membership: crate::DynamicEntitySpatialMembership {
-                reaches_outdoors: true,
-                reached_env_cell_ids: vec![cell],
-            },
-        };
-        let seconds = 0.03;
-        let update = TargetUpdate::Travel(TargetTravel {
-            instant: crate::DynamicEntityHostTime::new(seconds).unwrap(),
-            seconds,
-            path: Arc::new(crate::DynamicEntityPlacedPath {
-                initial: point(initial),
-                legs: vec![crate::DynamicEntityPathLeg {
-                    end_fraction: 1.0,
-                    end: point(end),
-                }],
-            }),
-        });
-        let mut playback = TargetPlayback::new(initial, None);
-        playback.observe(end, Some(&update));
         let mut child = ChildSpatialBody::new(
             ChildSpatialBodyDefinition::new(Vector3::zero(), 0.1).unwrap(),
             initial,
         );
-        let (start, waypoints) = playback.advance(seconds * 0.25).unwrap();
+        let start = initial;
+        let quarter = interpolate_pose(initial, end, 0.25).unwrap();
+        let waypoints = [ChildSpatialBodyWaypoint {
+            parent_pose: quarter,
+            end_fraction: 1.0,
+        }];
         let samples =
             target_samples_from_parent_path(&scene, start, &waypoints, &mut child, Vector3::zero())
                 .unwrap();
@@ -1313,89 +1309,17 @@ mod tests {
             samples.last().unwrap().target_seed.placement.cell,
             Some(cell)
         );
-        let (start, waypoints) = playback.advance(seconds * 0.5).unwrap();
+        let start = quarter;
+        let waypoints = [ChildSpatialBodyWaypoint {
+            parent_pose: interpolate_pose(initial, end, 0.75).unwrap(),
+            end_fraction: 1.0,
+        }];
         let samples =
             target_samples_from_parent_path(&scene, start, &waypoints, &mut child, Vector3::zero())
                 .unwrap();
         assert_eq!(child.committed_cell(), None);
         assert_eq!(samples.last().unwrap().target_seed.placement.cell, None);
         assert!((samples.last().unwrap().visual_pivot.coords.x - 9.5).abs() < 1e-5);
-    }
-
-    #[test]
-    fn camera_preserves_source_speed_across_independent_service_phases() {
-        // These deliberately incommensurate test clocks reproduce the original cadence defect.
-        let source_ms = 30_u64;
-        let service_ms = 16_u64;
-        let source_speed = 5.0_f32;
-        for phase in [0_u64, 7, 15] {
-            let (client, collision, batch) = super::super::tests::floor_contact_publication();
-            let mut camera = registered_camera(&client.world);
-            let mut input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
-            camera
-                .advance(&input, Duration::from_millis(service_ms))
-                .unwrap();
-            let base = input.target.as_ref().unwrap().body.as_ref().unwrap().pose;
-            let mut last_publication = 0;
-            let mut previous_z = camera
-                .active
-                .as_ref()
-                .unwrap()
-                .controller
-                .visual_pivot()
-                .coords
-                .z;
-            for now in (phase..1200).step_by(service_ms as usize) {
-                let publication = now / source_ms + 1;
-                if publication != last_publication {
-                    let mut path = batch.advances[0].path.clone();
-                    let mut start = base;
-                    start.coords.z +=
-                        (publication - 1) as f32 * source_speed * source_ms as f32 / 1000.0;
-                    let mut end = base;
-                    end.coords.z += publication as f32 * source_speed * source_ms as f32 / 1000.0;
-                    path.initial.pose = start;
-                    path.legs.truncate(1);
-                    path.legs[0].end_fraction = 1.0;
-                    path.legs[0].end.pose = end;
-                    let body = input.target.as_mut().unwrap().body.as_mut().unwrap();
-                    body.pose = end;
-                    body.update = Some(TargetUpdate::Travel(TargetTravel {
-                        instant: crate::DynamicEntityHostTime::new(
-                            publication as f64 * source_ms as f64 / 1000.0,
-                        )
-                        .unwrap(),
-                        seconds: source_ms as f64 / 1000.0,
-                        path: Arc::new(path),
-                    }));
-                    camera.observe_target(&input);
-                    last_publication = publication;
-                }
-                let tick = camera
-                    .advance(&input, Duration::from_millis(service_ms))
-                    .unwrap()
-                    .unwrap();
-                assert!(matches!(tick, ClientCameraTick::Advanced { .. }));
-                let z = camera
-                    .active
-                    .as_ref()
-                    .unwrap()
-                    .controller
-                    .visual_pivot()
-                    .coords
-                    .z;
-                // After the existing vertical filter settles, the camera must not alternate
-                // between near-stationary and double-speed output as publications arrive.
-                if now > 600 {
-                    let speed = (z - previous_z) / (service_ms as f32 / 1000.0);
-                    assert!(
-                        (speed - source_speed).abs() < 1.0,
-                        "phase={phase} now={now} speed={speed}"
-                    );
-                }
-                previous_z = z;
-            }
-        }
     }
 
     #[test]
@@ -1510,7 +1434,7 @@ mod tests {
         let TargetUpdate::Travel(travel) = body.update.as_ref().unwrap() else {
             panic!("expected integrated travel");
         };
-        let path = travel.path.as_ref();
+        let path = travel;
         assert_eq!(path, &batch.advances[0].path);
         let mut child = ChildSpatialBody::new(
             ChildSpatialBodyDefinition::new(Vector3::zero(), 0.1).unwrap(),
@@ -1914,11 +1838,73 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn camera_worker_orbits_without_world_ticks_and_retires_direct_input_on_shutdown() {
-        let (mut client, collision, _) = indoor_camera();
+    #[test]
+    fn successive_physics_paths_keep_the_camera_extended() {
+        let (client, collision, batch) = super::super::tests::floor_contact_publication();
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        let mut request = start_request(
+            client.world.player.guid,
+            u64::from(client.world.player_entity().unwrap().instance_sequence()),
+        );
+        // Keep the camera above the floor; this test exercises movement continuity, not obstruction.
+        request.view_direction = [0.0, 0.0, 1.0];
+        camera.start(request, &client.world).unwrap();
+        let mut input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let duration = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        for _ in 0..100 {
+            camera.advance(&input, duration).unwrap();
+        }
+        for _ in 0..10 {
+            let body = input.target.as_mut().unwrap().body.as_mut().unwrap();
+            let start = body.pose;
+            let mut end = start;
+            end.coords.x += 0.1;
+            let mut path = batch.advances[0].path.clone();
+            path.initial.pose = start;
+            path.legs.truncate(1);
+            path.legs[0].end_fraction = 1.0;
+            path.legs[0].end.pose = end;
+            body.pose = end;
+            body.update = Some(TargetUpdate::Travel(path));
+            let tick = camera.advance(&input, duration).unwrap().unwrap();
+            let ClientCameraTick::Advanced { rendered_reach, .. } = tick else {
+                panic!("continuous movement reset camera: {tick:?}");
+            };
+            assert!(rendered_reach >= request.minimum_reach);
+            assert_eq!(camera.active.as_ref().unwrap().target_pose, end);
+        }
+    }
+
+    #[test]
+    fn invalid_target_interval_preserves_the_last_safe_camera_for_failure_output() {
+        let (client, collision, batch) = super::super::tests::floor_contact_publication();
+        let mut camera = registered_camera(&client.world);
+        let mut input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let duration = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        for _ in 0..100 {
+            camera.advance(&input, duration).unwrap();
+        }
+        let safe = camera.active.as_ref().unwrap().controller.camera();
+        let body = input.target.as_mut().unwrap().body.as_mut().unwrap();
+        let mut path = batch.advances[0].path.clone();
+        path.initial.pose = body.pose;
+        path.legs.truncate(1);
+        path.legs[0].end.pose = body.pose;
+        path.legs[0].end_fraction = -1.0;
+        body.update = Some(TargetUpdate::Travel(path));
+        let tick = camera.advance(&input, duration).unwrap().unwrap();
+        let ClientCameraTick::Held { path, .. } = tick else {
+            panic!("failed interval must preserve the prior proof: {tick:?}");
+        };
+        assert_eq!(path.initial.position, safe.pose.into());
+    }
+
+    #[test]
+    fn stationary_physics_ticks_apply_orbit_and_retire_input_on_shutdown() {
+        let (client, collision, _) = indoor_camera();
         let identity = client.camera.identity().unwrap();
         let input = client.camera_input_handle();
+        let scope = client.camera.run_scope();
         let request = ClientCameraIntentRequest {
             camera_generation: identity.camera_generation,
             player_guid: identity.player_guid,
@@ -1927,92 +1913,47 @@ mod tests {
             view_direction: [1.0, 0.0, 0.0],
             cumulative_zoom_displacement: 0.0,
         };
-        assert!(matches!(
+        assert_eq!(
             input.set_intent(request).unwrap(),
             ClientCameraUpdateReceipt::Accepted
-        ));
-        let request = ClientCameraIntentRequest {
-            input_sequence: 2,
-            ..request
-        };
-        let mut events = client.subscribe_client_view_events();
-        let worker = client
-            .camera
-            .spawn(client.client_view_event_tx.clone())
-            .unwrap();
-        client
-            .camera
-            .publish_active_world(ClientCameraSceneInput::capture(
-                &client.world,
-                Some(&collision),
-                None,
-            ));
-        assert!(matches!(
-            input.set_intent(request).unwrap(),
-            ClientCameraUpdateReceipt::Accepted
-        ));
-
-        // No ClientRuntime::run or further world publication occurs while the worker advances.
-        let mut sequences = Vec::new();
-        for _ in 0..2 {
-            let event = tokio::time::timeout(Duration::from_secs(2), events.recv())
-                .await
+        );
+        let duration = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        let scene = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let mut previous = 0;
+        for _ in 0..3 {
+            let tick = client
+                .camera
+                .advance_world(&scene, duration)
                 .unwrap()
                 .unwrap();
-            let ClientViewEvent::Camera(tick) = event else {
-                panic!("expected camera publication")
+            let (sequence, duration_ms) = match tick {
+                ClientCameraTick::Advanced {
+                    sequence,
+                    duration_ms,
+                    ..
+                }
+                | ClientCameraTick::Reseeded {
+                    sequence,
+                    duration_ms,
+                    ..
+                } => (sequence, duration_ms),
+                other => panic!("stationary orbit failed: {other:?}"),
             };
-            let sequence = match tick {
-                ClientCameraTick::Advanced { sequence, .. }
-                | ClientCameraTick::Reseeded { sequence, .. }
-                | ClientCameraTick::Held { sequence, .. }
-                | ClientCameraTick::Fallback { sequence, .. } => sequence,
-            };
-            sequences.push(sequence);
+            assert!(sequence > previous);
+            assert_eq!(duration_ms, duration.as_secs_f64() * 1000.0);
+            previous = sequence;
         }
-        assert!(sequences[1] > sequences[0]);
-
-        client.reset_camera();
-        let replacement = client
-            .start_camera(start_request(
-                identity.player_guid,
-                identity.entity_generation,
-            ))
-            .unwrap();
-        assert_ne!(
-            replacement.identity.camera_generation,
-            identity.camera_generation
-        );
-        client
-            .camera
-            .publish_active_world(ClientCameraSceneInput::capture(
-                &client.world,
-                Some(&collision),
-                None,
-            ));
-        assert!(matches!(
-            input.set_intent(request).unwrap(),
-            ClientCameraUpdateReceipt::IgnoredStale
-        ));
-        let current = ClientCameraIntentRequest {
-            camera_generation: replacement.identity.camera_generation,
-            ..request
-        };
-        assert!(matches!(
-            input.set_intent(current).unwrap(),
-            ClientCameraUpdateReceipt::Accepted
-        ));
-        drop(worker);
+        drop(scope);
         assert_eq!(client.camera.identity(), None);
-        assert!(matches!(
+        assert_eq!(
             input
                 .set_intent(ClientCameraIntentRequest {
-                    input_sequence: current.input_sequence + 1,
-                    ..current
+                    input_sequence: 2,
+                    ..request
                 })
                 .unwrap(),
             ClientCameraUpdateReceipt::IgnoredStale
-        ));
+        );
     }
 
     #[test]
@@ -2039,11 +1980,11 @@ mod tests {
         ));
         client
             .camera
-            .publish_active_world(ClientCameraSceneInput::capture(
-                &client.world,
-                Some(&collision),
-                None,
-            ));
+            .advance_world(
+                &ClientCameraSceneInput::capture(&client.world, Some(&collision), None),
+                Duration::from_millis(super::super::PHYSICS_TICK_MS),
+            )
+            .unwrap();
         assert!(matches!(
             input.set_intent(request).unwrap(),
             ClientCameraUpdateReceipt::Accepted

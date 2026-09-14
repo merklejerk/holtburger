@@ -637,6 +637,13 @@ pub enum ClientHostEvent {
     DynamicScriptCue(ClientDynamicScriptCue),
     DynamicSoundCue(ClientDynamicSoundCue),
     Camera(ClientCameraTick),
+    /// One physics interval, published atomically for coherent character/camera playback.
+    PresentationTick {
+        /// Entity paths and levels accepted in this physics interval.
+        dynamic: Option<holtburger_core::DynamicEntityTickBatch>,
+        /// Camera path solved against that same interval, when registered and ready.
+        camera: Option<holtburger_core::ClientCameraTick>,
+    },
     CameraStarted(ClientCameraStartReceipt),
     PresentationDiscontinuity(ClientPresentationDiscontinuity),
     ExitRequested(ClientExitRequested),
@@ -961,6 +968,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::DynamicSoundCue(cue) => Some(ClientHostEvent::DynamicSoundCue(cue)),
         ClientViewEvent::DynamicScriptCue(cue) => Some(ClientHostEvent::DynamicScriptCue(cue)),
         ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
+        ClientViewEvent::PresentationTick { dynamic, camera } => {
+            Some(ClientHostEvent::PresentationTick { dynamic, camera })
+        }
         ClientViewEvent::CameraStarted(receipt) => Some(ClientHostEvent::CameraStarted(receipt)),
         ClientViewEvent::PresentationDiscontinuity {
             world_generation,

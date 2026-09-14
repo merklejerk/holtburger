@@ -409,7 +409,8 @@ pub struct KinematicBoomClearance {
 /// One exact target boundary sampled from the accepted possessed-body path.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KinematicBoomTargetSample {
-    /// Strictly increasing normalized tick fraction in `(0, 1]`.
+    /// Strictly increasing normalized tick fraction in `[0, 1]`; an initial zero is
+    /// an instantaneous physical correction before timed travel.
     pub end_fraction: f32,
     /// Presentation pivot before controller-owned vertical damping.
     pub visual_pivot: WorldPosition,
@@ -1315,6 +1316,13 @@ struct ControlLegSpan {
 }
 
 fn required_control_legs(span: ControlLegSpan) -> Result<usize, KinematicBoomInputError> {
+    // An initial correction has no elapsed travel to subdivide. Solve its endpoint once
+    // through the ordinary radial and continuity collision checks, retaining reach and
+    // advancing neither orbit nor recovery time. Multiple zero-time legs would violate
+    // the placed-path contract.
+    if span.tick_fraction == 0.0 {
+        return Ok(1);
+    }
     let target_travel = placement_distance(span.pivot_start, span.pivot_end)?
         .max(placement_distance(span.seed_start, span.seed_end)?);
     let angle = span
@@ -1339,9 +1347,10 @@ fn validate_tick(
         return Err(KinematicBoomInputError::InvalidTickDuration);
     }
     let mut previous = 0.0;
-    for sample in samples {
+    for (index, sample) in samples.iter().enumerate() {
         if !sample.end_fraction.is_finite()
-            || sample.end_fraction <= previous
+            || sample.end_fraction < 0.0
+            || (index > 0 && sample.end_fraction <= previous)
             || sample.end_fraction > 1.0
         {
             return Err(KinematicBoomInputError::InvalidTargetPath);
@@ -2823,6 +2832,74 @@ mod tests {
             "one={} two={}",
             one.rendered_reach(),
             two.rendered_reach()
+        );
+    }
+
+    #[test]
+    fn initial_ground_and_step_corrections_preserve_extended_camera() {
+        // Measured teleport grounding and object-step corrections from the live client.
+        for rise in [0.006620407, 0.6] {
+            let scene = empty_scene();
+            let mut camera = controller(64);
+            settle_reach(&mut camera, &scene, sample());
+            let reach = camera.rendered_reach();
+            let mut correction = sample();
+            correction.end_fraction = 0.0;
+            correction.visual_pivot.coords.z += rise;
+            correction.target_seed.placement.pose.coords.z += rise;
+            let end = KinematicBoomTargetSample {
+                end_fraction: 1.0,
+                ..correction
+            };
+            let outcome = camera
+                .advance(&scene, 1.0 / 30.0, &[correction, end])
+                .unwrap();
+            assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+            assert!(camera.rendered_reach() >= reach - camera.profile.surface_clearance);
+            assert_continuous_path_fits(&scene, &outcome);
+            assert_sphere_fits(
+                &scene,
+                camera.camera(),
+                camera.committed_clearance().unwrap().radius,
+            );
+            assert_eq!(
+                validate_tick(1.0 / 30.0, &[correction, correction, end]),
+                Err(KinematicBoomInputError::InvalidTargetPath)
+            );
+        }
+    }
+
+    #[test]
+    fn initial_correction_still_retracts_for_geometry() {
+        let mut camera = wall_controller(Vector3::new(1.0, 0.0, 0.0));
+        settle_reach(&mut camera, &empty_scene(), wall_sample());
+        let previous_reach = camera.rendered_reach();
+        let scene = wall_scene();
+        let correction = KinematicBoomTargetSample {
+            end_fraction: 0.0,
+            ..wall_sample()
+        };
+        let outcome = camera
+            .advance(&scene, 1.0 / 30.0, &[correction, wall_sample()])
+            .unwrap();
+        assert!(camera.rendered_reach() < previous_reach);
+        assert!(camera.rendered_reach() > 0.0);
+        // The wall appeared across the old boom, so interpolation must be withdrawn
+        // while the new endpoint remains collision-proven and extended.
+        assert!(matches!(
+            outcome,
+            KinematicBoomOutcome::Advanced {
+                advance: KinematicBoomAdvance::Reseeded {
+                    reason: KinematicBoomReseedReason::ObstructedPath,
+                    ..
+                },
+                ..
+            }
+        ));
+        assert_sphere_fits(
+            &scene,
+            camera.camera(),
+            camera.committed_clearance().unwrap().radius,
         );
     }
 

@@ -74,10 +74,6 @@ interface ReceivedTick {
 	readonly receivedAtMs: number;
 }
 
-interface PlaybackPath {
-	readonly tick: ClientCameraTick;
-}
-
 const MAX_PRE_REGISTRATION_OUTPUTS = 2;
 
 /**
@@ -98,11 +94,8 @@ export class ClientCameraSession {
 	#registrationReject: ((error: unknown) => void) | null = null;
 	#preRegistrationOutputs = new Map<number, ReceivedTick>();
 	#highestSequence = 0;
-	#active: PlaybackPath | null = null;
-	#pending: PlaybackPath | null = null;
-	#activeStartedAtMs = 0;
+	#active: ReceivedTick | null = null;
 	#droppedPaths = 0;
-	#latestPath: ClientCameraTick | null = null;
 	#nextInputSequence = 1;
 	#cumulativeZoomDisplacement = 0;
 	#lastSubmittedDirection: readonly [number, number, number] | null = null;
@@ -115,6 +108,8 @@ export class ClientCameraSession {
 		this.#unsubscribe = lifecycle.subscribe((event) => {
 			if (event.type === "camera-started") this.#receiveStarted(event.receipt);
 			if (event.type === "camera") this.#receiveCurrentOutput(event.tick);
+			if (event.type === "presentation-tick" && event.tick.camera !== null)
+				this.#receiveCurrentOutput(event.tick.camera, event.receivedAtMs);
 		});
 	}
 
@@ -254,7 +249,7 @@ export class ClientCameraSession {
 		}
 	}
 
-	/** Accept one validated host tick; path playback is latest-wins but bounded to two paths. */
+	/** Accept one validated host tick; path playback shares its start with the containing physics publication. */
 	receive(tick: ClientCameraTick, receivedAtMs: number): void {
 		if (!Number.isFinite(receivedAtMs))
 			throw new Error("Client camera receipt time must be finite.");
@@ -264,20 +259,18 @@ export class ClientCameraSession {
 	presentation(nowMs: number): HostKinematicBoomPresentation | null {
 		if (!Number.isFinite(nowMs))
 			throw new Error("Client camera sample time must be finite.");
-		this.#advancePlayback(nowMs);
 		const active = this.#active;
 		if (active === null) return null;
 		return evaluateHostKinematicBoomPath(
 			active.tick.path,
 			active.tick.durationMs,
-			nowMs - this.#activeStartedAtMs,
+			nowMs - active.receivedAtMs,
 		);
 	}
 
 	acknowledgedProjection(nowMs: number): ProjectionClearanceRevision | null {
 		if (!Number.isFinite(nowMs))
 			throw new Error("Client camera projection sample time must be finite.");
-		this.#advancePlayback(nowMs);
 		return this.#activeProjection();
 	}
 
@@ -288,8 +281,8 @@ export class ClientCameraSession {
 				? { kind: "awaiting-registration" }
 				: { kind: "stopped" };
 		}
-		const latest = this.#latestPath;
-		if (latest === null) return { kind: "awaiting-first-path", identity };
+		const latest = this.#active?.tick;
+		if (latest === undefined) return { kind: "awaiting-first-path", identity };
 		return {
 			kind: "active",
 			identity,
@@ -372,9 +365,8 @@ export class ClientCameraSession {
 		if (tick.sequence > this.#highestSequence + 1)
 			this.#droppedPaths += tick.sequence - this.#highestSequence - 1;
 		this.#highestSequence = tick.sequence;
-		this.#latestPath = tick;
 		if (tick.kind === "fallback") {
-			this.#acceptPath({ tick }, receivedAtMs);
+			this.#active = received;
 			this.#pruneProjectionRevisions();
 			return;
 		}
@@ -386,64 +378,7 @@ export class ClientCameraSession {
 				`Client camera acknowledged unknown projection revision ${tick.clearance.projectionRevision}.`,
 			);
 		}
-		this.#acceptPath({ tick }, receivedAtMs);
-		this.#pruneProjectionRevisions();
-	}
-
-	#acceptPath(path: PlaybackPath, receivedAtMs: number): void {
-		const { tick } = path;
-		if (tick.kind !== "advanced" || this.#active?.tick.kind === "fallback") {
-			this.#active = path;
-			this.#pending = null;
-			this.#activeStartedAtMs = receivedAtMs;
-			return;
-		}
-		if (this.#active === null) {
-			this.#active = path;
-			this.#activeStartedAtMs = receivedAtMs;
-			return;
-		}
-		const activeEndsAt = this.#activeStartedAtMs + this.#active.tick.durationMs;
-		if (receivedAtMs >= activeEndsAt) {
-			const pending = this.#pending;
-			if (pending === null) {
-				this.#active = path;
-				this.#activeStartedAtMs = receivedAtMs;
-				return;
-			}
-			const pendingEndsAt = activeEndsAt + pending.tick.durationMs;
-			if (receivedAtMs >= pendingEndsAt) {
-				this.#active = path;
-				this.#pending = null;
-				this.#activeStartedAtMs = receivedAtMs;
-				return;
-			}
-			this.#active = pending;
-			this.#pending = path;
-			this.#activeStartedAtMs = activeEndsAt;
-			return;
-		}
-		if (this.#pending === null) {
-			this.#pending = path;
-			return;
-		}
-		this.#droppedPaths += 1;
-		this.#active = path;
-		this.#pending = null;
-		this.#activeStartedAtMs = receivedAtMs;
-	}
-
-	#advancePlayback(nowMs: number): void {
-		const active = this.#active;
-		if (
-			active === null ||
-			nowMs - this.#activeStartedAtMs < active.tick.durationMs ||
-			this.#pending === null
-		)
-			return;
-		this.#activeStartedAtMs += active.tick.durationMs;
-		this.#active = this.#pending;
-		this.#pending = null;
+		this.#active = received;
 		this.#pruneProjectionRevisions();
 	}
 
@@ -457,11 +392,9 @@ export class ClientCameraSession {
 
 	#pruneProjectionRevisions(): void {
 		const retained = new Set([this.#lastRequestedProjectionRevision]);
-		for (const playback of [this.#active, this.#pending]) {
-			const tick = playback?.tick;
-			if (tick !== undefined && tick.kind !== "fallback") {
-				retained.add(tick.clearance.projectionRevision);
-			}
+		const tick = this.#active?.tick;
+		if (tick !== undefined && tick.kind !== "fallback") {
+			retained.add(tick.clearance.projectionRevision);
 		}
 		for (const revision of this.#projectionRevisions.keys()) {
 			if (!retained.has(revision)) this.#projectionRevisions.delete(revision);
@@ -490,10 +423,7 @@ export class ClientCameraSession {
 		this.#preRegistrationOutputs.clear();
 		this.#highestSequence = 0;
 		this.#active = null;
-		this.#pending = null;
-		this.#activeStartedAtMs = 0;
 		this.#droppedPaths = 0;
-		this.#latestPath = null;
 		this.#nextInputSequence = 1;
 		this.#cumulativeZoomDisplacement = 0;
 		this.#lastSubmittedDirection = null;

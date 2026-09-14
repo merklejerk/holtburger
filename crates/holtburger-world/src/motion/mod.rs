@@ -54,5 +54,6 @@ pub use sequence::{
     FiredMotionHook, MotionClipCompletion, MotionSequenceRuntime, SequenceNode, SequenceTick,
 };
 pub use state::{
-    ActiveMotion, CharacterMotionPresentation, MotionCommand, MotionOrder, MotionState,
+    ActiveMotion, CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder,
+    MotionState,
 };

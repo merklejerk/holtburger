@@ -5,12 +5,13 @@ use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_
 use crate::entity_scale::EntityScaleState;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
-use crate::motion::MotionCommand;
+use crate::motion::{MotionCommand, MotionContact};
+use crate::spatial::ContactState;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyFloat,
     PropertyInstanceId, PropertyInt, PropertyString, PropertyUpdate, WeenieHeaderFlag,
-    WeenieHeaderFlag2, WorldObjectProperties, WorldObjectPropertyAccessors,
+    WeenieHeaderFlag2, WorldObjectExt, WorldObjectProperties, WorldObjectPropertyAccessors,
     WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::sequence::is_newer_u16;
@@ -1226,6 +1227,17 @@ impl HasPropertiesMut for Entity {
 }
 
 impl Entity {
+    /// Resolve retail animation contact eligibility from current authoritative entity facts.
+    /// Non-creatures and gravity-disabled objects bypass contact restriction
+    /// (`CMotionInterp::contact_allows_move`, acclient.c:330160-330175).
+    pub fn motion_contact(&self, contact: ContactState) -> MotionContact {
+        if self.is_creature() && self.physics.effective().response.gravity {
+            MotionContact::RequiresSupport(contact)
+        } else {
+            MotionContact::Unrestricted(contact)
+        }
+    }
+
     /// Received attachment intent, which may still be waiting for a usable parent.
     pub const fn attachment(&self) -> Option<PhysicsAttachment> {
         self.placement_intent.attachment()

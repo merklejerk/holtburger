@@ -3,11 +3,11 @@
 use super::{BodyMotionRuntime, MotionRuntimeRegistry};
 use crate::entity::{EntityMotionAction, EntityMotionDirective, EntityMotionSnapshot};
 use crate::motion::{
-    CharacterMotionPresentation, MotionOrder, SequenceTick, ServerDirectedMotionResolution,
-    ServerDirectedMotionState, ServerDirectedTarget, begin_server_directed_motion,
-    resolve_server_directed_motion,
+    CharacterMotionPresentation, MotionContact, MotionOrder, SequenceTick,
+    ServerDirectedMotionResolution, ServerDirectedMotionState, ServerDirectedTarget,
+    begin_server_directed_motion, resolve_server_directed_motion,
 };
-use crate::spatial::{AuthoritativePoseEffect, ContactState, integrate_angular_velocity};
+use crate::spatial::{AuthoritativePoseEffect, integrate_angular_velocity};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_content::MotionSequenceTable;
@@ -18,8 +18,8 @@ pub(crate) struct RemoteMotionInput {
     pub snapshot: EntityMotionSnapshot,
     /// Actual position; rotation seeds command frames and refreshes body-following sources.
     pub pose: WorldPosition,
-    /// Current support classification used by command reduction.
-    pub contact: ContactState,
+    /// Physical contact and world-resolved animation eligibility.
+    pub contact: MotionContact,
     /// Current target lookup, with absence retaining retail's admission/failure rules.
     pub target: Option<ServerDirectedTarget>,
     /// Supported character commands retain their ordinary source frame.
@@ -108,11 +108,11 @@ impl RemoteMotionState {
             ..input.pose
         };
         let steady = MotionOrder::from_snapshot(input.snapshot);
-        let terminal = steady.with_character_presentation(CharacterMotionPresentation::resolve(
-            input.contact,
-            false,
-            false,
-        ));
+        let terminal = steady.with_character_presentation(
+            input
+                .contact
+                .presentation(CharacterMotionPresentation::Grounded),
+        );
         let Some(directive) = input.snapshot.directive else {
             self.directive = None;
             return terminal;

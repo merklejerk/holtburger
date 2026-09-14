@@ -561,7 +561,7 @@ impl WorldState {
         Some(RemoteMotionInput {
             snapshot,
             pose: body.map_or(entity.position, SpatialBody::authored_source_pose),
-            contact: body.map_or(ContactState::Unknown, |body| body.contact),
+            contact: entity.motion_contact(body.map_or(ContactState::Unknown, |body| body.contact)),
             target: snapshot
                 .directive
                 .and_then(|directive| directive.target_guid())
@@ -912,7 +912,7 @@ impl WorldState {
             RemoteMotionInput {
                 snapshot,
                 pose,
-                contact,
+                contact: entity.motion_contact(contact),
                 target,
                 omega: Vector3::zero(),
                 frame_policy,

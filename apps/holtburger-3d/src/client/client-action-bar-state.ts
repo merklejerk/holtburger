@@ -8,7 +8,7 @@ export type ActionSlotIndex = (typeof ACTION_SLOT_INDICES)[number];
 export const MAX_ACTION_BARS = ACTION_SLOT_INDICES.length;
 /** Equipment identity determines the equip action; no separate action selector exists. */
 export type ActionContent = {
-	readonly kind: "equipment";
+	readonly kind: "equipment" | "direct" | "targeted";
 	readonly item: number;
 };
 /** Exact sparse address space: empty cells remain present. */

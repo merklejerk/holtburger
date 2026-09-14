@@ -99,6 +99,8 @@ pub enum HostEvent {
     ClientPreciseJumpTransactionFeedback(
         crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
     ),
+    ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
+    ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     ClientEntitySelectionQueryResult(
         crate::client_projection::ClientEntitySelectionQueryResultWire,
@@ -383,6 +385,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::PreciseJumpTransactionFeedback(feedback) => {
                 HostEvent::ClientPreciseJumpTransactionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::ItemUseTargetResult(result) => {
+                HostEvent::ClientItemUseTargetResult(result)
+            }
+            crate::client_projection::ClientHostEvent::ItemUseResult(result) => {
+                HostEvent::ClientItemUseResult(result)
             }
             crate::client_projection::ClientHostEvent::InventoryPreview(result) => {
                 HostEvent::ClientInventoryPreview(result)
@@ -808,6 +816,53 @@ mod tests {
     }
 
     #[test]
+    fn guarded_item_use_decodes_semantic_expectation_without_confirmation_state() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "submit_client_item_use", "request": {
+                "sequence": 7, "player": 1, "sourceOwned": true,
+                "intent": { "kind": "targeted", "source": 2, "target": 3 },
+                "expected": { "kind": "destroy-item", "target": 3, "amount": 1 }
+            } }
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::SubmitClientItemUse { request }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("guarded item use did not decode");
+        };
+        assert_eq!(request.sequence, 7);
+        assert!(request.source_owned);
+        assert_eq!(
+            request.expected,
+            holtburger_world::item_use::ItemUseConsequence::DestroyItem {
+                target: holtburger_common::Guid(3),
+                amount: 1
+            }
+        );
+    }
+
+    #[test]
+    fn combine_target_query_decodes_as_a_read_only_client_command() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "query_client_item_use_target", "query": { "sequence": 7, "source": 2, "target": 3 } }
+        })).unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::QueryClientItemUseTarget { query }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("target query did not decode");
+        };
+        assert_eq!((query.sequence, query.source.0, query.target.0), (7, 2, 3));
+    }
+
+    #[test]
     fn equipment_identity_decodes_through_the_client_command_boundary() {
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request",
@@ -889,32 +944,18 @@ mod tests {
     }
 
     #[test]
-    fn entity_interaction_commands_decode_into_the_client_inventory() {
-        for (command, guid) in [
-            ("query_client_entity_health", 7),
-            ("query_client_entity_health", 0),
-            ("use_client_entity", 7),
-        ] {
+    fn health_subscription_decodes_entity_and_cancellation_identities() {
+        for guid in [7, 0] {
             let decoded: HostCommand = serde_json::from_value(
-                serde_json::json!({ "command": command, "guid": guid, "unrestricted": false }),
+                serde_json::json!({ "command": "query_client_entity_health", "guid": guid }),
             )
             .unwrap();
-            match (command, decoded) {
-                (
-                    "query_client_entity_health",
-                    HostCommand::Client(ClientHostCommand::QueryClientEntityHealth {
-                        guid: decoded,
-                    }),
-                ) => assert_eq!(decoded.0, guid),
-                (
-                    "use_client_entity",
-                    HostCommand::Client(ClientHostCommand::UseClientEntity {
-                        guid: decoded,
-                        unrestricted: false,
-                    }),
-                ) => assert_eq!(decoded.0, guid),
-                _ => panic!("interaction did not decode into the client inventory"),
-            }
+            let HostCommand::Client(ClientHostCommand::QueryClientEntityHealth { guid: decoded }) =
+                decoded
+            else {
+                panic!("health subscription did not decode");
+            };
+            assert_eq!(decoded.0, guid);
         }
     }
 

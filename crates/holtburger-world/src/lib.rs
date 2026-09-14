@@ -26,6 +26,7 @@ pub mod hydration;
 mod identify;
 pub mod inspect;
 pub mod interaction;
+pub mod item_use;
 pub mod magic;
 pub mod motion;
 pub mod player;

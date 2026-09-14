@@ -8,7 +8,7 @@
 		bar: number;
 		/** One of the visible digit addresses 1–9/0. */
 		digit: string;
-		/** Persistent reference, including temporarily unavailable equipment. */
+		/** Persistent reference, including temporarily unavailable items. */
 		content: ActionContent | null;
 		/** Current resolved name, or an unavailable identity label. */
 		label: string;

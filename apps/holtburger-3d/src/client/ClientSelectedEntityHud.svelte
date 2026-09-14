@@ -6,7 +6,7 @@
 	import {
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 		type ClientSelectedEntityDisplay,
-	} from "./client-entity-interactions";
+	} from "./client-selected-entity-tracking";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import { CLIENT_TUNING } from "./client-tuning";
 

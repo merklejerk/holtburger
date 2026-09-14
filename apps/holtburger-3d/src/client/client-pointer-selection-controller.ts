@@ -37,8 +37,11 @@ interface PendingViewportQuery {
 
 /** A click can publish only while its selected-identity intent is current. */
 interface PendingClickQuery extends PendingViewportQuery {
-	/** Token issued by the single selection owner. */
-	readonly intent: symbol;
+	/** Destination owns freshness and consumes the resolved identity. */
+	readonly destination: {
+		readonly isCurrent: () => boolean;
+		readonly commit: (guid: number | null) => void;
+	};
 }
 
 /** Pointer acquisition and hover; selected identity belongs to the selection owner. */
@@ -83,6 +86,27 @@ export class ClientPointerSelectionController {
 	acquireViewportPoint(clientX: number, clientY: number): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
+		this.#acquirePoint(clientX, clientY, {
+			isCurrent: () => this.#selection.isCurrentAcquisition(intent),
+			commit: (guid) => this.#selection.commitAcquisition(intent, guid),
+		});
+	}
+
+	/** Resolve an interaction target without mutating ordinary selection. */
+	acquireTarget(
+		clientX: number,
+		clientY: number,
+		destination: PendingClickQuery["destination"],
+	): void {
+		this.#acquirePoint(clientX, clientY, destination);
+	}
+
+	#acquirePoint(
+		clientX: number,
+		clientY: number,
+		destination: PendingClickQuery["destination"],
+	): void {
+		if (this.#destroyed) return;
 		const presentation = this.#presentation();
 		const sampled =
 			presentation?.samplePresentedCameraRay(clientX, clientY) ?? null;
@@ -92,7 +116,7 @@ export class ClientPointerSelectionController {
 		}
 		const sequence = this.#allocateSequence();
 		const pending: PendingClickQuery = {
-			intent,
+			destination,
 			ray: sampled.refinement,
 			sequence,
 		};
@@ -100,10 +124,7 @@ export class ClientPointerSelectionController {
 		void this.#lifecycle
 			.queryEntitySelectionCandidates({ ...sampled.query, sequence })
 			.catch((error: unknown) => {
-				if (
-					this.#pendingSelection !== pending ||
-					!this.#selection.isCurrentAcquisition(intent)
-				)
+				if (this.#pendingSelection !== pending || !destination.isCurrent())
 					return;
 				this.#pendingSelection = null;
 				this.#onSelectionSubmissionFailed(error);
@@ -193,7 +214,7 @@ export class ClientPointerSelectionController {
 		const pending = this.#pendingSelection;
 		if (pending === null || result.sequence !== pending.sequence) return;
 		this.#pendingSelection = null;
-		if (!this.#selection.isCurrentAcquisition(pending.intent)) return;
+		if (!pending.destination.isCurrent()) return;
 		if (result.status === "unavailable") return;
 		const presentation = this.#presentation();
 		if (presentation === null) return;
@@ -202,7 +223,7 @@ export class ClientPointerSelectionController {
 			result.candidateGuids,
 			result.staticLimitDistance,
 		);
-		this.#selection.commitAcquisition(pending.intent, refinement.selectedGuid);
+		pending.destination.commit(refinement.selectedGuid);
 	}
 
 	#receiveHoverQueryResult(result: ClientEntitySelectionQueryResult): void {

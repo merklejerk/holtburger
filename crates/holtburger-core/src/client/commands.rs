@@ -139,6 +139,11 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::SubmitItemUse(request) => self.submit_item_use(request).await,
+            ClientCommand::QueryItemUseTarget(query) => {
+                self.query_item_use_target(query);
+                Ok(())
+            }
             ClientCommand::SubmitInventory(intent) => self.submit_inventory_intent(intent).await,
             ClientCommand::PreviewInventory(request) => {
                 self.preview_inventory_intent(request);
@@ -528,35 +533,20 @@ impl ClientRuntime {
                     );
                     return Ok(());
                 }
-                log::info!(">>> Using: 0x{:08X}", guid);
-                if !self.arm_busy_operation(BusyOperationKind::Use) {
-                    return Ok(());
-                }
-                let feedback =
-                    holtburger_world::interaction::describe_entity_use(&self.world, guid);
-                // After useability admission, retail submits Use before progress feedback (acclient.c:414515). Cached lock state
-                // must never suppress the wire command or imply a server-side activation failure.
-                self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
-                    .await?;
-                if let Some(feedback) = feedback {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(super::ClientViewEvent::EntityUseFeedback(feedback));
-                }
+                self.dispatch_item_use(&holtburger_world::item_use::ItemUseIntent::Direct {
+                    source: guid,
+                    unrestricted,
+                })
+                .await?;
                 Ok(())
             }
             ClientCommand::UseWithTarget { item, target } => {
-                log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
-                if !self.arm_busy_operation(BusyOperationKind::UseWithTarget) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::UseWithTarget(Box::new(
-                    UseWithTargetActionData {
-                        item_guid: item,
-                        target_guid: target,
-                    },
-                )))
-                .await
+                self.dispatch_item_use(&holtburger_world::item_use::ItemUseIntent::Targeted {
+                    source: item,
+                    target,
+                })
+                .await?;
+                Ok(())
             }
             ClientCommand::SalvageItemsWith { tool, items } => {
                 log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);

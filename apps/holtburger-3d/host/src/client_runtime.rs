@@ -130,6 +130,14 @@ pub struct ClientPreciseJumpCancelRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Query compatibility without executing item use.
+    QueryClientItemUseTarget {
+        query: holtburger_core::client::item_use::ItemUseTargetQuery,
+    },
+    /// Execute only while the supplied semantic use consequence still matches.
+    SubmitClientItemUse {
+        request: holtburger_core::client::item_use::ItemUseRequest,
+    },
     /// Equip an owned item using shared side preference and replacement planning.
     EquipClientItem {
         guid: holtburger_common::Guid,
@@ -161,12 +169,6 @@ pub enum ClientHostCommand {
     /// Replace the server health subscription; null GUID cancels it.
     QueryClientEntityHealth {
         guid: holtburger_common::Guid,
-    },
-    /// Use the selected world object through core's existing busy-operation behavior.
-    UseClientEntity {
-        guid: holtburger_common::Guid,
-        /// Explicit app-local diagnostic choice, captured for this use attempt.
-        unrestricted: bool,
     },
     /// Answer exactly the confirmation occurrence displayed by the renderer.
     RespondToClientConfirmation {
@@ -218,6 +220,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "preview_client_inventory",
     "submit_client_inventory",
     "equip_client_item",
+    "submit_client_item_use",
+    "query_client_item_use_target",
     "start_client",
     "request_client_current_state",
     "select_client_character",
@@ -225,7 +229,6 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "queue_client_character_motion_event",
     "send_client_chat",
     "query_client_entity_health",
-    "use_client_entity",
     "respond_to_client_confirmation",
     "start_client_camera",
     "set_client_camera_intent",
@@ -563,6 +566,16 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        QueryClientItemUseTarget { query } => runtime
+            .send_command(ClientCommand::QueryItemUseTarget(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientItemUse { request } => runtime
+            .send_command(ClientCommand::SubmitItemUse(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         EquipClientItem { guid, alternate } => runtime
             .send_command(ClientCommand::GetAndWield {
                 item: guid,
@@ -583,11 +596,6 @@ pub async fn dispatch_client(
             .map_err(application_error),
         QueryClientEntityHealth { guid } => runtime
             .send_command(ClientCommand::QueryHealth(guid))
-            .await
-            .map(|()| HostResponse::Unit)
-            .map_err(application_error),
-        UseClientEntity { guid, unrestricted } => runtime
-            .send_command(ClientCommand::Use { guid, unrestricted })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

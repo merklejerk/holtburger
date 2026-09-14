@@ -12,6 +12,8 @@ export interface KeyboardConsumer {
 
 /** An explicitly activatable UI surface, also used by editors nested within it. */
 export interface KeyboardScope {
+	/** Unhandled presses continue to game controls without cancelling held game actions. */
+	readonly passthrough?: boolean;
 	/** One-shot command scopes end on cancellation and are not restored after modals. */
 	readonly transient?: boolean;
 	/** Optional command that enters this scope from the game or another explicit scope. */
@@ -59,8 +61,8 @@ export class KeyboardInputPolicy {
 	readonly #scopes = new Map<HTMLElement, KeyboardScope>();
 	/** Native modal order, with the innermost interaction last. */
 	readonly #modals: ModalOwnership[] = [];
-	/** Physical presses observed by this boundary, including native editor input. */
-	readonly #presses = new Map<string, "active" | "cancelled">();
+	/** Physical presses retain their game release destination across pass-through scopes. */
+	readonly #presses = new Map<string, "active" | "game" | "cancelled">();
 	/** Focused editor or intentional UI surface; null selects the game. */
 	#owner: HTMLElement | null = null;
 	/** A pointer gesture must see Escape before a focused scope consumes it. */
@@ -78,7 +80,9 @@ export class KeyboardInputPolicy {
 	/** Whether keyboard commands can currently enter the world context. */
 	get gameActive(): boolean {
 		return (
-			this.#owner === null && this.#modals.length === 0 && this.viewport.allowed
+			this.#allowsGame(this.#owner) &&
+			this.#modals.length === 0 &&
+			this.viewport.allowed
 		);
 	}
 
@@ -228,8 +232,8 @@ export class KeyboardInputPolicy {
 	/** Cancel without release edges, and quarantine physical presses until they are released. */
 	cancel(): void {
 		for (const key of this.#presses.keys()) this.#presses.set(key, "cancelled");
-		if (this.#owner === null) this.#game?.cancel();
-		else {
+		this.#game?.cancel();
+		if (this.#owner !== null) {
 			const owner = this.#owner;
 			const scope = this.#scopeFor(owner);
 			scope?.cancel?.();
@@ -246,14 +250,16 @@ export class KeyboardInputPolicy {
 		const key = event.code || event.key;
 		const fresh = !event.repeat;
 		// A non-repeat press is fresh even when focus loss hid the preceding release.
-		if (fresh) this.#presses.set(key, "active");
+		if (fresh) {
+			this.#presses.set(key, "active");
+		}
 		// Composition belongs to the browser, including repeats of a composing key.
 		if (event.isComposing) {
 			if (event.key === "Tab") event.preventDefault();
 			this.#presses.set(key, "cancelled");
 			return;
 		}
-		if (this.#presses.get(key) !== "active") {
+		if (!this.#presses.has(key) || this.#presses.get(key) === "cancelled") {
 			event.preventDefault();
 			event.stopImmediatePropagation();
 			return;
@@ -295,8 +301,11 @@ export class KeyboardInputPolicy {
 				this.returnToGame();
 				event.preventDefault();
 			}
-		} else if (this.gameActive) this.#game?.keydown(event);
-		else this.#presses.set(key, "cancelled");
+		}
+		if (!event.defaultPrevented && this.gameActive) {
+			this.#presses.set(key, "game");
+			this.#game?.keydown(event);
+		} else if (owner === null) this.#presses.set(key, "cancelled");
 		// A configured Tab command can run, but the browser must never traverse focus.
 		if (event.key === "Tab") event.preventDefault();
 		if (event.defaultPrevented) event.stopImmediatePropagation();
@@ -307,8 +316,8 @@ export class KeyboardInputPolicy {
 		const key = event.code || event.key;
 		const press = this.#presses.get(key);
 		this.#presses.delete(key);
-		if (press !== "active") return;
-		if (this.gameActive) this.#game?.keyup(event);
+		if (press === undefined || press === "cancelled") return;
+		if (press === "game") this.#game?.keyup(event);
 		else if (this.#owner !== null) this.#scopeFor(this.#owner)?.keyup?.(event);
 		if (event.defaultPrevented) event.stopImmediatePropagation();
 	};
@@ -337,9 +346,24 @@ export class KeyboardInputPolicy {
 		);
 	}
 
+	/** Editors remain exclusive even when nested inside a pass-through surface. */
+	#allowsGame(owner: HTMLElement | null): boolean {
+		return (
+			owner === null ||
+			(!isEditor(owner) && this.#scopeFor(owner)?.passthrough === true)
+		);
+	}
+
 	#setOwner(owner: HTMLElement | null): void {
 		if (this.#owner === owner) return;
-		this.cancel();
+		if (this.#allowsGame(this.#owner) && this.#allowsGame(owner)) {
+			// Selecting or completing a command surface must not interrupt movement.
+			for (const key of this.#presses.keys()) {
+				if (this.#presses.get(key) !== "game")
+					this.#presses.set(key, "cancelled");
+			}
+			if (this.#owner !== null) this.#scopeFor(this.#owner)?.cancel?.();
+		} else this.cancel();
 		this.#owner = owner;
 	}
 

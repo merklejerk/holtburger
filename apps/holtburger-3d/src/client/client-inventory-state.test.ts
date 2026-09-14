@@ -78,7 +78,6 @@ function fixture(
 			entities: mirror,
 			previewInventory: vi.fn(async () => {}),
 			submitInventory: vi.fn(async () => {}),
-			equipItem: vi.fn(async () => {}),
 			state: () => ({ lifecycle }),
 			subscribe: (listener) => {
 				listeners.add(listener);

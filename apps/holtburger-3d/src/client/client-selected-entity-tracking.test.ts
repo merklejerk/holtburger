@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { entityFacts } from "./client-entity-mirror.test-support";
-import { ClientEntityInteractions } from "./client-entity-interactions";
+import { ClientSelectedEntityTracking } from "./client-selected-entity-tracking";
 import { ClientEntitySelection } from "./client-entity-selection";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 
@@ -24,7 +24,7 @@ async function fixture() {
 		presentation: () => null,
 	});
 	const onFailure = vi.fn();
-	const interactions = new ClientEntityInteractions({
+	const interactions = new ClientSelectedEntityTracking({
 		lifecycle,
 		selection,
 		onFailure,
@@ -63,6 +63,7 @@ async function fixture() {
 							pyrealBalance: null,
 							burden: null,
 							equipLocations: null,
+							useCapability: "direct" as const,
 							stackCount: null,
 							structure: { current: null, max: null },
 							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -100,7 +101,28 @@ async function fixture() {
 	};
 }
 
-describe("ClientEntityInteractions", () => {
+describe("ClientSelectedEntityTracking", () => {
+	it("honors unrestricted use for an explicit NO without enabling unavailable descriptions", async () => {
+		const f = await fixture();
+		const item = entityFacts(11);
+		if (item.description.kind !== "known")
+			throw new Error("Expected known item");
+		f.selection.select(11);
+		for (const useCapability of ["unsupported", "unavailable"] as const) {
+			f.emit("client-entity-facts-changed", {
+				upserts: [
+					{ ...item, description: { ...item.description, useCapability } },
+				],
+				removed: [],
+			});
+			expect(f.interactions.display(false).canInteract).toBe(false);
+			expect(f.interactions.display(true).canInteract).toBe(
+				useCapability === "unsupported",
+			);
+		}
+		f.destroy();
+	});
+
 	it("replaces subscriptions, filters health by GUID, and distinguishes unknown from zero", async () => {
 		const f = await fixture();
 		f.selection.select(7);
@@ -108,34 +130,34 @@ describe("ClientEntityInteractions", () => {
 		expect(f.invoke.mock.calls).toEqual([
 			["query_client_entity_health", { guid: 7 }],
 		]);
-		expect(f.interactions.display().health).toEqual({
+		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
 		f.emit("client-entity-health-updated", { guid: 7, healthFraction: 0.4 });
-		expect(f.interactions.display().health).toEqual({
+		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0.4,
 		});
 		f.selection.select(null);
 		f.selection.select(7);
-		expect(f.interactions.display().health).toEqual({
+		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
 		expect(f.invoke).toHaveBeenLastCalledWith("query_client_entity_health", {
 			guid: 7,
 		});
 		f.emit("client-entity-health-updated", { guid: 7, healthFraction: 0.4 });
-		expect(f.interactions.display().health).toEqual({
+		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0.4,
 		});
 		f.selection.select(8);
 		f.emit("client-entity-health-updated", { guid: 7, healthFraction: 0.2 });
-		expect(f.interactions.display().health).toEqual({
+		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
 		f.emit("client-entity-health-updated", { guid: 8, healthFraction: 0 });
-		expect(f.interactions.display().health).toEqual({
+		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0,
 		});
@@ -143,7 +165,9 @@ describe("ClientEntityInteractions", () => {
 		expect(f.invoke).toHaveBeenLastCalledWith("query_client_entity_health", {
 			guid: 0,
 		});
-		expect(f.interactions.display().health).toEqual({ kind: "unavailable" });
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "unavailable",
+		});
 		f.destroy();
 	});
 
@@ -151,14 +175,13 @@ describe("ClientEntityInteractions", () => {
 		const f = await fixture();
 		f.selection.select(7);
 		f.selection.selectInventoryItem(9);
-		expect(f.interactions.display()).toEqual({
+		expect(f.interactions.display(false)).toEqual({
 			name: "Item 9",
 			stackCount: null,
 			structure: { current: null, max: null },
 			health: { kind: "not-applicable" },
-			canInteract: false,
+			canInteract: true,
 		});
-		f.interactions.interact(false);
 		f.selection.selectInventoryItem(10);
 		f.selection.select(8);
 		expect(f.invoke.mock.calls).toEqual([
@@ -172,10 +195,7 @@ describe("ClientEntityInteractions", () => {
 	it("reconciles same-GUID eligibility and name changes without duplicate queries", async () => {
 		const f = await fixture();
 		f.selection.select(11);
-		f.interactions.interact(false);
-		expect(f.invoke.mock.calls).toEqual([
-			["use_client_entity", { guid: 11, unrestricted: false }],
-		]);
+		expect(f.invoke.mock.calls).toEqual([]);
 		f.invoke.mockClear();
 		const creature = entityFacts(11, {
 			description: {
@@ -189,6 +209,7 @@ describe("ClientEntityInteractions", () => {
 				pyrealBalance: null,
 				burden: null,
 				equipLocations: null,
+				useCapability: "direct" as const,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -212,6 +233,7 @@ describe("ClientEntityInteractions", () => {
 						pyrealBalance: null,
 						burden: null,
 						equipLocations: null,
+						useCapability: "direct" as const,
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -220,7 +242,7 @@ describe("ClientEntityInteractions", () => {
 			],
 			removed: [],
 		});
-		expect(f.interactions.display()).toEqual({
+		expect(f.interactions.display(false)).toEqual({
 			name: "Renamed",
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -238,42 +260,6 @@ describe("ClientEntityInteractions", () => {
 		f.destroy();
 	});
 
-	it("uses the target at the button edge and reports command failures", async () => {
-		const f = await fixture();
-		f.interactions.interact(false);
-		expect(f.invoke).not.toHaveBeenCalled();
-		f.selection.select(7);
-		f.interactions.interact(false);
-		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", {
-			guid: 7,
-			unrestricted: false,
-		});
-		const failure = new Error("transport closed");
-		f.invoke.mockRejectedValueOnce(failure);
-		f.selection.select(8);
-		await vi.waitFor(() => expect(f.onFailure).toHaveBeenCalledWith(failure));
-		f.invoke.mockRejectedValueOnce(failure);
-		f.interactions.interact(false);
-		await vi.waitFor(() => expect(f.onFailure).toHaveBeenCalledTimes(2));
-		f.destroy();
-	});
-
-	it("captures the explicit unrestricted policy independently for each use", async () => {
-		const f = await fixture();
-		f.selection.select(7);
-		f.interactions.interact(true);
-		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", {
-			guid: 7,
-			unrestricted: true,
-		});
-		f.interactions.interact(false);
-		expect(f.invoke).toHaveBeenLastCalledWith("use_client_entity", {
-			guid: 7,
-			unrestricted: false,
-		});
-		f.destroy();
-	});
-
 	it("cancels on portal entry and does not restore a target on world reentry", async () => {
 		const f = await fixture();
 		f.selection.select(7);
@@ -288,7 +274,6 @@ describe("ClientEntityInteractions", () => {
 		});
 		f.invoke.mockClear();
 		f.emit("client-lifecycle-changed", { kind: "in-world" });
-		f.interactions.interact(false);
 		expect(f.invoke).not.toHaveBeenCalled();
 		f.destroy();
 	});
@@ -302,7 +287,6 @@ describe("ClientEntityInteractions", () => {
 			cause: "server-disconnect",
 		});
 		expect(f.selection.selectedGuid()).toBeNull();
-		f.interactions.interact(false);
 		f.destroy();
 		expect(f.invoke).not.toHaveBeenCalled();
 	});
@@ -315,8 +299,9 @@ describe("ClientEntityInteractions", () => {
 		f.interactions.destroy();
 		f.selection.select(8);
 		f.emit("client-entity-health-updated", { guid: 8, healthFraction: 0.9 });
-		f.interactions.interact(false);
-		expect(f.interactions.display().health).toEqual({ kind: "unavailable" });
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "unavailable",
+		});
 		expect(f.invoke.mock.calls).toEqual([
 			["query_client_entity_health", { guid: 0 }],
 		]);

@@ -29,6 +29,7 @@ mod equipment_runtime;
 pub mod inventory_plan;
 mod inventory_runtime;
 pub mod inventory_storage;
+pub mod item_use;
 mod messages;
 mod movement;
 pub mod movement_types;

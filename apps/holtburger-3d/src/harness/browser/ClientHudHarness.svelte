@@ -1,4 +1,12 @@
 <script lang="ts">
+	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+	import { APP_INPUT } from "../../lib/input/app-input";
+	import {
+		itemUseRequestSchema,
+		itemUseResultSchema,
+		itemUseTargetResultSchema,
+	} from "../../client/client-item-use-contract";
+	import { ClientItemInteractions } from "../../client/client-item-interactions";
 	import { probeClientTargeting } from "./client-targeting-probe";
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
@@ -16,7 +24,7 @@
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { probeBrowserInput } from "./input-browser-probe";
 	import { onMount, tick } from "svelte";
-	import { ClientEntityInteractions } from "../../client/client-entity-interactions";
+	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
 	import { CLIENT_TUNING } from "../../client/client-tuning";
@@ -164,8 +172,11 @@
 				await tick();
 				const command = interactionCommands.at(-1);
 				if (
-					command?.command !== "use_client_entity" ||
-					command.args?.unrestricted !== expected
+					command?.command !== "submit_client_item_use" ||
+					!((intent) =>
+						intent.kind === "direct" && intent.unrestricted === expected)(
+						itemUseRequestSchema.parse(command.args?.request).intent,
+					)
 				) {
 					throw new Error("Debug use policy did not reach the use request.");
 				}
@@ -246,6 +257,98 @@
 			await uiThemes.replace(defaultUiThemeUrl, null);
 		}
 	}
+	let activeItemUseProbe: ReturnType<typeof beginItemUseProbe> | null = null;
+	function beginItemUseProbe() {
+		const read = interactionLifecycle.entities.read();
+		if (read.kind !== "current")
+			throw new Error("Item-use probe requires current entities");
+		const saved = [91, 95].map((guid) => {
+			const item = read.level.entities.get(guid);
+			if (item === undefined || item.description.kind !== "known")
+				throw new Error("Missing item-use fixture");
+			return { ...item, description: item.description };
+		});
+		emitInteractionEvent("client-entity-facts-changed", {
+			upserts: saved.map((item, index) => ({
+				...item,
+				description: {
+					...item.description,
+					equipLocations: null,
+					useCapability: index === 0 ? "direct" : "targeted",
+				},
+			})),
+			removed: [],
+		});
+		const owner = new ClientDialogs(interactionLifecycle);
+		dialogOwner = owner;
+		const unbind = owner.bindItems(itemInteractions);
+		const unsubscribe = owner.subscribe((value) => {
+			dialogPresentation = value;
+		});
+		const releaseKeys = keyboard.bindGame({
+			keydown: (event) => {
+				if (APP_INPUT.shortcut("interact", event)) {
+					event.preventDefault();
+					if (!event.repeat) itemInteractions.interactSelected(false);
+				} else if (
+					APP_INPUT.shortcut("cancel", event) &&
+					itemInteractions.cancel()
+				)
+					event.preventDefault();
+			},
+			keyup: () => {},
+			cancel: () => {
+				itemInteractions.cancelTargeting();
+			},
+		});
+		const fixture = {
+			/** Let the preceding drag suppression and bounded inventory display sample finish. */
+			ready: () =>
+				new Promise((resolve) =>
+					window.setTimeout(
+						resolve,
+						CLIENT_TUNING.inventory.doubleClickSuppressionMs +
+							CLIENT_TUNING.inventory.displayIntervalMs,
+					),
+				),
+			hoverWorld: (guid: number | null) => (hoveredGuid = guid),
+			queryCommands: () =>
+				interactionCommands.filter(
+					(entry) => entry.command === "query_client_item_use_target",
+				),
+			targetReply: (payload: unknown) =>
+				emitInteractionEvent(
+					"client-item-use-target-result",
+					itemUseTargetResultSchema.parse(payload),
+				),
+			interactBinding: INPUT_DEFAULTS.client.interact[0],
+			alternateModifier: INPUT_DEFAULTS.actionBars.alternate,
+			selected: () => selection.selectedGuid(),
+			snapshot: () => itemInteractions.snapshot(),
+			reply: (payload: unknown) =>
+				emitInteractionEvent(
+					"client-item-use-result",
+					itemUseResultSchema.parse(payload),
+				),
+			select: (guid: number | null) => selection.select(guid),
+			destroy: () => {
+				itemInteractions.cancel();
+				releaseKeys();
+				unbind();
+				unsubscribe();
+				owner.destroy();
+				dialogOwner = null;
+				dialogPresentation = null;
+				emitInteractionEvent("client-entity-facts-changed", {
+					upserts: saved,
+					removed: [],
+				});
+				activeItemUseProbe = null;
+			},
+		};
+		activeItemUseProbe = fixture;
+		return fixture;
+	}
 	const probeInventory = () =>
 		probeClientInventory({
 			emit: emitInteractionEvent,
@@ -280,6 +383,9 @@
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
 		/** Delay one submission acknowledgement to test gesture lifetime independence. */
+		/** Controlled use outcomes with production UI, controller, and session decoding. */
+		readonly beginItemUseProbe: () => void;
+		readonly itemUseProbe: () => NonNullable<typeof activeItemUseProbe>;
 		readonly deferNextInventorySubmission: () => void;
 		/** Reject the delayed acknowledgement through the real session promise. */
 		readonly rejectDeferredInventorySubmission: () => void;
@@ -412,6 +518,7 @@
 						pyrealBalance: null,
 						burden: null,
 						equipLocations: null,
+						useCapability: "direct",
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -456,13 +563,22 @@
 		lifecycle: interactionLifecycle,
 		presentation: () => null,
 	});
-	const interactions = new ClientEntityInteractions({
+	const interactions = new ClientSelectedEntityTracking({
 		selection,
 		lifecycle: interactionLifecycle,
 		onFailure: (error) => {
 			throw error;
 		},
 	});
+	const itemInteractions = new ClientItemInteractions({
+		session: interactionLifecycle,
+		selection,
+		reportFailure: (message) => {
+			interactionFailures.push(message);
+		},
+		beginAcquisition: () => keyboard.returnToGame(),
+	});
+	const interactionFailures: string[] = [];
 	const unsubscribeSelection = selection.subscribe((guid) => {
 		selectedGuid = guid;
 	});
@@ -702,8 +818,8 @@
 		if (
 			unknown !== "Unknown" ||
 			health !== "35" ||
-			use?.command !== "use_client_entity" ||
-			use.args?.guid !== target
+			use?.command !== "submit_client_item_use" ||
+			itemUseRequestSchema.parse(use.args?.request).intent.source !== target
 		) {
 			throw new Error(
 				"Selected entity health or use dispatch did not match the selected target.",
@@ -1493,8 +1609,6 @@
 				entities: { read: readInventoryEntities },
 				previewInventory: (request) =>
 					interactionLifecycle.previewInventory(request),
-				equipItem: (guid, alternate) =>
-					interactionLifecycle.equipItem(guid, alternate),
 				submitInventory: (intent) =>
 					interactionLifecycle.submitInventory(intent),
 				state: () => interactionLifecycle.state(),
@@ -1522,6 +1636,13 @@
 				return keyboardFixture;
 			},
 			probeInventory,
+			beginItemUseProbe: () => {
+				beginItemUseProbe();
+			},
+			itemUseProbe: () => {
+				if (activeItemUseProbe === null) throw new Error("No item-use probe");
+				return activeItemUseProbe;
+			},
 			inventoryDragCommands: () => interactionCommands,
 			deferNextInventorySubmission: () => {
 				deferInventorySubmission = true;
@@ -1567,6 +1688,7 @@
 			inventoryToasts.destroy();
 			inventory = null;
 			icons.dispose();
+			itemInteractions.destroy();
 			interactions.destroy();
 			unsubscribeSelection();
 			selection.destroy();
@@ -1590,6 +1712,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		{itemInteractions}
 		entityMetadata={{
 			status: "available",
 			path: "fixture.hwc",
@@ -1626,10 +1749,10 @@
 		{readSelectedEntity}
 		{readFrameRates}
 		readTargetIndicatorFrame={() => targetIndicatorFrame}
-		readSelectedEntityDisplay={() => interactions.display()}
+		readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
 		{inventory}
 		onSelectInventoryItem={(guid) => selection.selectInventoryItem(guid)}
-		onInteractEntity={() => interactions.interact(unrestrictedUse)}
+		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}
 		selectedEntityGuid={selectedGuid}
 		hoveredEntityGuid={hoveredGuid}
 		showRetailHiddenGeometry={false}

@@ -1,4 +1,4 @@
-import { isBindingEquipment } from "./client-action-equipment";
+import { bindingAction } from "./client-action-item";
 import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { nextInventoryPreviewSequence } from "./client-inventory-contract";
 import type { ClientInventoryState } from "./client-inventory-state";
@@ -83,6 +83,8 @@ export class ClientItemDrag {
 		inventory: ClientInventoryState,
 		private readonly bindings: ActionDragBindings,
 		keyboard: KeyboardInputPolicy,
+		/** Actual dragging supersedes pending item target acquisition. */
+		private readonly cancelInteraction: () => boolean,
 	) {
 		this.#root = root;
 		this.#inventory = inventory;
@@ -100,7 +102,7 @@ export class ClientItemDrag {
 		window.addEventListener("pointercancel", this.#cancelPointer, options);
 		window.addEventListener("blur", this.#cancel, options);
 		this.#releaseEscape = keyboard.bindEscapeCancellation(() => {
-			if (this.#gesture === null) return false;
+			if (this.#gesture === null) return this.cancelInteraction();
 			this.#cancel();
 			return true;
 		});
@@ -222,6 +224,7 @@ export class ClientItemDrag {
 				CLIENT_TUNING.inventory.dragThresholdCssPixels
 			)
 				return;
+			this.cancelInteraction();
 			gesture = {
 				kind: "dragging",
 				source: gesture.source,
@@ -341,7 +344,7 @@ export class ClientItemDrag {
 			gesture.target = { kind: "action", element: actionElement, cell };
 			actionElement.dataset.inventoryDrop =
 				typeof gesture.source.origin !== "string" ||
-				this.#equippable(gesture.source.item)
+				this.#bindable(gesture.source.item)
 					? "accepted"
 					: "rejected";
 			return;
@@ -509,7 +512,8 @@ export class ClientItemDrag {
 		event.preventDefault();
 		event.stopPropagation();
 		this.#suppressClick = true;
-		this.#suppressDoubleClickUntil = performance.now() + 500;
+		this.#suppressDoubleClickUntil =
+			performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
 		this.#ghost.hidden = true;
 		this.#ghost.hidePopover();
 		this.#clearDimming();
@@ -529,11 +533,11 @@ export class ClientItemDrag {
 			const target = gesture.target.cell;
 			const item = gesture.source.item;
 			this.#finishGesture();
-			if (this.#equippable(item))
-				this.bindings.bind(target, { kind: "equipment", item });
+			const content = bindingAction(this.#inventory.readItem(item));
+			if (content !== null) this.bindings.bind(target, content);
 			else
 				this.#inventory.reportFailure(
-					"Only owned equipment can be bound to an action cell.",
+					"Only owned equippable or usable items can be bound to an action cell.",
 				);
 			return;
 		}
@@ -557,8 +561,8 @@ export class ClientItemDrag {
 			throw new Error("Invalid action cell address");
 		return { bar, slot };
 	}
-	#equippable(item: number): boolean {
-		return isBindingEquipment(this.#inventory.readItem(item));
+	#bindable(item: number): boolean {
+		return bindingAction(this.#inventory.readItem(item)) !== null;
 	}
 
 	#clearHighlight(): void {
@@ -581,7 +585,8 @@ export class ClientItemDrag {
 	#cancel = (): void => {
 		if (this.#gesture?.kind === "dragging") {
 			this.#suppressClick = true;
-			this.#suppressDoubleClickUntil = performance.now() + 500;
+			this.#suppressDoubleClickUntil =
+				performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
 		}
 		this.#finishGesture();
 	};

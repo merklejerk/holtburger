@@ -1,3 +1,4 @@
+import type { ItemInteractionState } from "./client-item-interactions";
 import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
 import { describe, expect, it, vi } from "vitest";
 import { ClientDialogs } from "./client-dialogs";
@@ -62,6 +63,36 @@ async function fixture() {
 }
 
 describe("ClientDialogs", () => {
+	it("owns local subscription teardown without requiring unbind before destroy", async () => {
+		const f = await fixture();
+		const unsubscribe = vi.fn();
+		const local: ItemInteractionState = {
+			kind: "confirming",
+			question: { id: "local-1", text: "Destroy armor?" },
+			request: {
+				sequence: 1,
+				player: 7,
+				sourceOwned: true,
+				intent: { kind: "targeted", source: 2, target: 3 },
+				expected: { kind: "destroy-item", target: 3, amount: 1 },
+			},
+		};
+		const items = {
+			snapshot: () => local,
+			subscribe: () => unsubscribe,
+			respond: vi.fn(),
+		};
+		const release = f.dialogs.bindItems(items);
+		expect(f.dialogs.snapshot()?.kind).toBe("local-confirmation");
+		f.dialogs.destroy();
+		expect(f.dialogs.snapshot()).toBeNull();
+		expect(unsubscribe).toHaveBeenCalledOnce();
+		release();
+		expect(unsubscribe).toHaveBeenCalledOnce();
+		expect(() => f.dialogs.bindItems(items)).toThrow("after destruction");
+		f.destroy();
+	});
+
 	it("retains pre-world popups in order and gives answerable confirmations priority", async () => {
 		const f = await fixture();
 		f.emit("client-popup-string", { message: "First\nmessage" });

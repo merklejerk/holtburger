@@ -77,6 +77,9 @@ pub enum EntityDescription {
         /// Does not establish skill/level admission; absent before valid locations arrive.
         #[serde(rename = "equipLocations")]
         equip_locations: Option<u32>,
+        /// Authored use shape consumed by inventory and action interaction entry points.
+        #[serde(rename = "useCapability")]
+        use_capability: crate::item_use::ItemUseCapability,
         /// Public object-description flags consumed by selected-entity diagnostics.
         #[serde(rename = "objectFlags")]
         object_flags: u32,
@@ -245,6 +248,7 @@ impl WorldState {
                     ui_effects: entity.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
                 },
                 item_type: item_type.bits(),
+                use_capability: crate::item_use::item_use_capability(entity),
                 equip_locations: entity
                     .get_int_prop(PropertyInt::ValidLocations)
                     .map(|mask| {
@@ -573,6 +577,7 @@ mod tests {
                 },
                 item_type: ItemType::MELEE_WEAPON.bits(),
                 equip_locations: None,
+                use_capability: crate::item_use::ItemUseCapability::Direct,
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
                 wcid: Some(123),
@@ -621,6 +626,7 @@ mod tests {
                 },
                 item_type: ItemType::CREATURE.bits(),
                 equip_locations: None,
+                use_capability: crate::item_use::ItemUseCapability::Direct,
                 object_flags: 0,
                 wcid: None,
                 weenie_type: None,

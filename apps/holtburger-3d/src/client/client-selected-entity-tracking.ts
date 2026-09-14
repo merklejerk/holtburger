@@ -19,7 +19,7 @@ export interface ClientSelectedEntityDisplay {
 	readonly structure: ItemStructure;
 	/** World eligibility plus the latest matching server health response. */
 	readonly health: ClientSelectedHealth;
-	/** First-cut use remains available for known non-owned targets only. */
+	/** Whether selected use is available under the current frontend diagnostic policy. */
 	readonly canInteract: boolean;
 }
 
@@ -32,19 +32,19 @@ export const EMPTY_CLIENT_SELECTED_DISPLAY: ClientSelectedEntityDisplay = {
 	canInteract: false,
 };
 
-type InteractionLifecycle = Pick<
+type TrackingLifecycle = Pick<
 	ClientLifecycleSession,
-	"state" | "subscribe" | "queryEntityHealth" | "useEntity" | "entities"
+	"state" | "subscribe" | "queryEntityHealth" | "entities"
 >;
-type InteractionSelection = Pick<
+type TrackingSelection = Pick<
 	ClientEntitySelection,
 	"selectedGuid" | "subscribe"
 >;
 
-/** Existing session-owned interaction controller; selection and network target are different facts. */
-export class ClientEntityInteractions {
-	readonly #lifecycle: InteractionLifecycle;
-	readonly #selection: InteractionSelection;
+/** Session-owned selected display and health subscription; use execution belongs to ClientItemInteractions. */
+export class ClientSelectedEntityTracking {
+	readonly #lifecycle: TrackingLifecycle;
+	readonly #selection: TrackingSelection;
 	readonly #unsubscribeSelection: () => void;
 	readonly #unsubscribeLifecycle: () => void;
 	readonly #onFailure: (error: unknown) => void;
@@ -55,8 +55,8 @@ export class ClientEntityInteractions {
 	#destroyed = false;
 
 	constructor(options: {
-		readonly selection: InteractionSelection;
-		readonly lifecycle: InteractionLifecycle;
+		readonly selection: TrackingSelection;
+		readonly lifecycle: TrackingLifecycle;
 		readonly onFailure: (error: unknown) => void;
 	}) {
 		this.#selection = options.selection;
@@ -87,7 +87,7 @@ export class ClientEntityInteractions {
 	}
 
 	/** One coherent bounded HUD read; no fallback to differently aged rendered names. */
-	display(): ClientSelectedEntityDisplay {
+	display(unrestrictedUse: boolean): ClientSelectedEntityDisplay {
 		const guid = this.#selection.selectedGuid();
 		const read = this.#lifecycle.entities.read();
 		if (this.#destroyed || guid === null || read.kind === "pending")
@@ -102,7 +102,10 @@ export class ClientEntityInteractions {
 			stackCount: record.description.stackCount,
 			structure: record.description.structure,
 			canInteract:
-				!record.ownedByPlayer &&
+				(record.description.useCapability === "direct" ||
+					record.description.useCapability === "targeted" ||
+					(unrestrictedUse &&
+						record.description.useCapability === "unsupported")) &&
 				this.#lifecycle.state().lifecycle?.kind === "in-world",
 			health:
 				record.description.healthQuery === "ineligible"
@@ -111,13 +114,6 @@ export class ClientEntityInteractions {
 						? { kind: "awaiting-response" }
 						: { kind: "known", fraction },
 		};
-	}
-
-	/** Use reads selected identity, independently of whether it supports creature health. */
-	interact(unrestricted: boolean): void {
-		const guid = this.#selection.selectedGuid();
-		if (this.#destroyed || guid === null || !this.display().canInteract) return;
-		void this.#lifecycle.useEntity(guid, unrestricted).catch(this.#onFailure);
 	}
 
 	/** Cancel once while transport is still alive, then retire both listeners. */

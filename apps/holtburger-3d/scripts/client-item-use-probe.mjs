@@ -210,6 +210,16 @@ export async function probeItemUse(client, evaluateExpression) {
 			);
 		};
 		await bind(food, 91);
+		for (const count of [12, 2, 1]) {
+			await read(api + `.itemUseProbe().setFoodCount(${count})`);
+			await read(api + ".itemUseProbe().ready()");
+			assert.equal(
+				await read(
+					`document.querySelector(${JSON.stringify(action)}).querySelector(".item-count-overlay")?.textContent.trim() ?? null`,
+				),
+				count > 1 ? String(count) : null,
+			);
+		}
 		await click(action);
 		assert.deepEqual((await state()).request.intent, {
 			kind: "direct",
@@ -259,7 +269,50 @@ export async function probeItemUse(client, evaluateExpression) {
 		);
 		assert.equal((await state()).kind, "acquiring");
 
+		// A drag that captured the old instance cannot clear its automatic replacement.
+		const dragStart = await point(action);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...dragStart,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: 5,
+			y: 5,
+			button: "left",
+			buttons: 1,
+		});
+		await read(api + ".itemUseProbe().depleteSupply()");
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			x: 5,
+			y: 5,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		await read(api + ".itemUseProbe().ready()");
+		assert.equal(
+			await read(
+				`document.querySelector(${JSON.stringify(action)}).dataset.actionItem`,
+			),
+			"995",
+		);
+		await read(api + ".itemUseProbe().removeSupply()");
+		await read(api + ".itemUseProbe().ready()");
+		assert.equal(
+			await read(
+				`document.querySelector(${JSON.stringify(action)}).dataset.actionItem ?? null`,
+			),
+			null,
+		);
+
 		return {
+			consumableReplacementAndClearing: true,
+			actionStackCounts: true,
 			doubleClick: true,
 			targetRetry: true,
 			localConfirmation: true,

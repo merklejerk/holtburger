@@ -80,6 +80,8 @@ pub enum EntityDescription {
         /// Authored use shape consumed by inventory and action interaction entry points.
         #[serde(rename = "useCapability")]
         use_capability: crate::item_use::ItemUseCapability,
+        /// Template identity and remaining supply for consumable consumers.
+        consumable: Option<crate::item_use::ConsumableFacts>,
         /// Public object-description flags consumed by selected-entity diagnostics.
         #[serde(rename = "objectFlags")]
         object_flags: u32,
@@ -249,6 +251,7 @@ impl WorldState {
                 },
                 item_type: item_type.bits(),
                 use_capability: crate::item_use::item_use_capability(entity),
+                consumable: crate::item_use::consumable_facts(entity),
                 equip_locations: entity
                     .get_int_prop(PropertyInt::ValidLocations)
                     .map(|mask| {
@@ -578,6 +581,7 @@ mod tests {
                 item_type: ItemType::MELEE_WEAPON.bits(),
                 equip_locations: None,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
+                consumable: None,
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
                 wcid: Some(123),
@@ -627,6 +631,7 @@ mod tests {
                 item_type: ItemType::CREATURE.bits(),
                 equip_locations: None,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
+                consumable: None,
                 object_flags: 0,
                 wcid: None,
                 weenie_type: None,

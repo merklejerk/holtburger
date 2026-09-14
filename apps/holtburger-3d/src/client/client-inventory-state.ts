@@ -156,6 +156,13 @@ export class ClientInventoryState {
 		return this.#view;
 	}
 
+	/** Authoritative ownership and hydration for binding reconciliation, never retained display data. */
+	readEntities(): ClientEntityRead {
+		return this.#lifecycle.state().lifecycle?.kind === "in-world"
+			? this.#lifecycle.entities.read()
+			: { kind: "pending" };
+	}
+
 	/** Action bars consume item facts without building hidden inventory sections. */
 	readItems(): ClientInventoryItems {
 		this.#refresh();

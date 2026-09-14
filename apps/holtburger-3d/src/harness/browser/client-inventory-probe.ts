@@ -25,6 +25,7 @@ function item(
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -141,6 +142,7 @@ export async function probeClientInventory(options: {
 				pyrealBalance: 12345,
 				burden: null,
 				equipLocations: null,
+				consumable: null,
 				useCapability: "direct" as const,
 				stackCount: null,
 				structure: { current: null, max: null },
@@ -165,6 +167,7 @@ export async function probeClientInventory(options: {
 				pyrealBalance: null,
 				burden: null,
 				equipLocations: null,
+				consumable: null,
 				useCapability: "direct" as const,
 				stackCount: null,
 				structure: { current: null, max: null },
@@ -234,6 +237,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -253,6 +257,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -706,6 +711,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -883,6 +889,7 @@ export async function probeClientInventory(options: {
 			pyrealBalance: null,
 			burden: null,
 			equipLocations: null,
+			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
 			structure: { current: null, max: null },
@@ -917,7 +924,7 @@ export async function probeClientInventory(options: {
 		update({ ...record, description: { ...record.description, stackCount } });
 	};
 	const badge = (guid: number) =>
-		cell(guid).querySelector<HTMLElement>(".item-grid-cell-count");
+		cell(guid).querySelector<HTMLElement>(".item-count-overlay");
 	const artwork = (guid: number) => {
 		const image = cell(guid).querySelector("img");
 		if (
@@ -966,7 +973,7 @@ export async function probeClientInventory(options: {
 		if (
 			badge(20)?.textContent?.trim() !== "2" ||
 			badge(22)?.textContent?.trim() !== "20K" ||
-			document.querySelector('[data-item-guid="1"] .item-grid-cell-count') !==
+			document.querySelector('[data-item-guid="1"] .item-count-overlay') !==
 				null
 		)
 			throw new Error(
@@ -980,9 +987,7 @@ export async function probeClientInventory(options: {
 				"Stack quantity is missing from accessible labels/tooltips.",
 			);
 		const packBadges = [
-			...document.querySelectorAll(
-				'[data-item-guid="31"] .item-grid-cell-count',
-			),
+			...document.querySelectorAll('[data-item-guid="31"] .item-count-overlay'),
 		];
 		if (
 			packBadges.length !== 1 ||
@@ -994,7 +999,7 @@ export async function probeClientInventory(options: {
 		const countElement = badge(22);
 		if (countElement === null) throw new Error("Count element missing.");
 		const suffix = countElement.querySelector<HTMLElement>(
-			".item-grid-cell-count-suffix",
+			".item-count-overlay-suffix",
 		);
 		if (suffix === null) throw new Error("Compact count suffix missing.");
 		const originalCountStyle = countElement.style.cssText;

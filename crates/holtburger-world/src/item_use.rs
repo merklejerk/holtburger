@@ -25,6 +25,97 @@ pub enum ItemUseCapability {
     Targeted,
 }
 
+/// Template-equivalent consumables; quantities and remaining uses are instance state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConsumableCategory {
+    /// Food and drink with template-defined effects.
+    Food,
+    /// Healing kits with template-defined bonuses.
+    HealingKit,
+    /// A mana source, never an empty stone's destructive drain action.
+    ChargedManaStone,
+}
+
+/// Stable public identity retained by consumers after an instance disappears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumableIdentity {
+    /// Server template ID; ordinary ACE consumables are not loot-mutated.
+    pub wcid: u32,
+    /// Semantic family, independent of the generic use action shape.
+    pub category: ConsumableCategory,
+}
+
+/// Whether an instance can still supply its consumable behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConsumableAvailability {
+    /// Remaining-use facts have not arrived.
+    Pending,
+    /// The instance has not exhausted its consumable behavior.
+    Ready,
+    /// Remaining uses or charge have been exhausted.
+    Exhausted,
+}
+
+/// Public consumable semantics; replacement and clearing policies belong to the frontend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumableFacts {
+    /// Template equivalence excludes remaining quantity, uses, and mana amount.
+    pub identity: ConsumableIdentity,
+    /// Current supply state, not a server use-success prediction.
+    pub availability: ConsumableAvailability,
+}
+
+/// The public charge signal used by retail acclient.c:414615-414655 and ACE ManaStone.cs.
+fn mana_stone_charged(entity: &Entity) -> bool {
+    entity.ui_effects().unwrap_or(0) & 1 != 0
+}
+
+/// ACE LootGenerationFactory.cs leaves these mundane categories unmutated.
+/// Empty stones retain the category but are exhausted as mana sources; explicitly binding
+/// an empty stone still selects its ordinary exact-instance drain action.
+pub fn consumable_facts(entity: &Entity) -> Option<ConsumableFacts> {
+    use ConsumableAvailability::{Exhausted, Pending, Ready};
+    let (category, availability) = if entity.item_type()?.intersects(ItemType::MANA_STONE) {
+        (
+            ConsumableCategory::ChargedManaStone,
+            if mana_stone_charged(entity) {
+                Ready
+            } else {
+                Exhausted
+            },
+        )
+    } else if entity.flags.contains(ObjectDescriptionFlag::HEALER) {
+        (
+            ConsumableCategory::HealingKit,
+            match entity.structure() {
+                Some(0) => Exhausted,
+                Some(_) => Ready,
+                None => Pending,
+            },
+        )
+    } else if entity.flags.contains(ObjectDescriptionFlag::FOOD) {
+        (
+            ConsumableCategory::Food,
+            if entity.is_stackable() && entity.stack_size() == 0 {
+                Exhausted
+            } else {
+                Ready
+            },
+        )
+    } else {
+        return None;
+    };
+    Some(ConsumableFacts {
+        identity: ConsumableIdentity {
+            wcid: entity.wcid?,
+            category,
+        },
+        availability,
+    })
+}
+
 /// Classify from public semantics without restricting bindings to an item-type allowlist.
 pub fn item_use_capability(entity: &Entity) -> ItemUseCapability {
     if entity.get_string_prop(PropertyString::Name).is_none() || entity.item_type().is_none() {
@@ -132,7 +223,7 @@ pub fn evaluate_item_use(
             if entity
                 .item_type()
                 .is_some_and(|kind| kind.intersects(ItemType::MANA_STONE))
-                && entity.ui_effects().unwrap_or(0) & 1 == 0
+                && !mana_stone_charged(entity)
             {
                 if Some(*target) == world.get_player_guid() {
                     return Err("An empty mana stone cannot be used on yourself.".into());
@@ -196,6 +287,53 @@ mod tests {
         world.storage.announce_container(Guid(2), Guid(1));
         world.storage.announce_container(Guid(3), Guid(1));
         world
+    }
+
+    #[test]
+    fn consumable_identity_excludes_remaining_supply_and_requires_template() {
+        let mut food = item(2, ItemType::FOOD, Usable::CONTAINED);
+        food.flags.insert(ObjectDescriptionFlag::FOOD);
+        assert_eq!(consumable_facts(&food), None);
+        food.wcid = Some(42);
+        food.properties.ints.insert(PropertyInt::MaxStackSize, 10);
+        food.properties.ints.insert(PropertyInt::StackSize, 3);
+        let full = consumable_facts(&food).unwrap();
+        assert_eq!(full.availability, ConsumableAvailability::Ready);
+        food.properties.ints.insert(PropertyInt::StackSize, 0);
+        let empty = consumable_facts(&food).unwrap();
+        assert_eq!(empty.identity, full.identity);
+        assert_eq!(empty.availability, ConsumableAvailability::Exhausted);
+
+        let mut kit = item(3, ItemType::MISC, Usable::CONTAINED);
+        kit.wcid = Some(43);
+        kit.flags.insert(ObjectDescriptionFlag::HEALER);
+        assert_eq!(
+            consumable_facts(&kit).unwrap().availability,
+            ConsumableAvailability::Pending
+        );
+        for (remaining, expected) in [
+            (5, ConsumableAvailability::Ready),
+            (0, ConsumableAvailability::Exhausted),
+        ] {
+            kit.properties
+                .ints
+                .insert(PropertyInt::Structure, remaining);
+            assert_eq!(consumable_facts(&kit).unwrap().availability, expected);
+        }
+    }
+
+    #[test]
+    fn mana_supply_tracks_public_charge_not_assessed_mana_amount() {
+        let mut stone = item(2, ItemType::MANA_STONE, Usable::CONTAINED);
+        stone.wcid = Some(44);
+        let empty = consumable_facts(&stone).unwrap();
+        stone.properties.ints.insert(PropertyInt::UiEffects, 1);
+        let charged = consumable_facts(&stone).unwrap();
+        assert_eq!(empty.identity, charged.identity);
+        assert_eq!(empty.availability, ConsumableAvailability::Exhausted);
+        assert_eq!(charged.availability, ConsumableAvailability::Ready);
+        let ordinary = item(3, ItemType::ARMOR, Usable::CONTAINED);
+        assert_eq!(consumable_facts(&ordinary), None);
     }
 
     #[test]

@@ -1,6 +1,11 @@
 <script lang="ts">
+	import { reconcileActionBars } from "./client-action-bar-reconciliation";
 	import type { ClientItemInteractions } from "./client-item-interactions";
-	import { bindingAction, type ActionItemDisplay } from "./client-action-item";
+	import {
+		bindingAction,
+		sameConsumableIdentity,
+		type ActionItemDisplay,
+	} from "./client-action-item";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { onMount, tick } from "svelte";
 	import ClientActionBarView from "./ClientActionBar.svelte";
@@ -98,10 +103,36 @@
 		}
 	}
 	function activate(id: number, slot: ActionSlotIndex, alternate: boolean) {
+		reconcile();
 		const content = requireActionBar(bars, id).slots[slot];
 		if (content === null) return;
+		if (content.replacement !== null) {
+			const item = inventory.readItem(content.item);
+			if (
+				item?.description.kind !== "known" ||
+				item.description.consumable?.availability !== "ready" ||
+				!sameConsumableIdentity(
+					content.replacement,
+					item.description.consumable.identity,
+				)
+			) {
+				inventory.reportFailure("Waiting for consumable inventory facts.");
+				return;
+			}
+		}
 		interactions.activate(content.item, content.kind, alternate);
 	}
+	/** Semantic updates reconcile bindings; artwork sampling only presents the result. */
+	function reconcile() {
+		if (
+			!bars.some((bar) =>
+				bar.slots.some((content) => content?.replacement != null),
+			)
+		)
+			return;
+		bars = reconcileActionBars(bars, inventory.readEntities());
+	}
+
 	onMount(() => {
 		const drag = new ClientItemDrag(
 			root,
@@ -127,15 +158,18 @@
 		let disposed = false;
 		let sampling = false;
 		let playerGuid: number | null = null;
+		// Replacement snapshots retire old-character bindings before supply reconciliation.
+		const acceptPlayer = (guid: number | null) => {
+			if (guid === null || guid === playerGuid) return;
+			if (playerGuid !== null) resetBars();
+			playerGuid = guid;
+		};
 		const sample = async () => {
 			if (disposed || sampling) return;
 			sampling = true;
 			try {
 				const view = inventory.readItems();
-				if (view.playerGuid !== null && view.playerGuid !== playerGuid) {
-					if (playerGuid !== null) resetBars();
-					playerGuid = view.playerGuid;
-				}
+				acceptPlayer(view.playerGuid);
 				const keys = new Set<string>();
 				const next = new Map<number, ActionItemDisplay>();
 				for (const bar of bars)
@@ -152,7 +186,16 @@
 								facts?.description.kind === "known"
 									? facts.description.name
 									: `Unavailable item ${content.item}`,
+							stackCount:
+								facts?.description.kind === "known"
+									? facts.description.stackCount
+									: null,
 							actionKind: bindingAction(facts)?.kind ?? null,
+							readyReplacement:
+								facts?.description.kind === "known" &&
+								facts.description.consumable?.availability === "ready"
+									? facts.description.consumable.identity
+									: null,
 							equipped:
 								facts?.ownedByPlayer === true &&
 								facts.location.kind === "equipped",
@@ -173,6 +216,14 @@
 			void sample();
 		}, CLIENT_TUNING.inventory.displayIntervalMs);
 		const unsubscribe = inventory.interactions.subscribe((event) => {
+			if (event.type === "current-state")
+				acceptPlayer(event.state.localPlayerGuid);
+			if (
+				event.type === "entities" ||
+				event.type === "current-state" ||
+				(event.type === "lifecycle" && event.lifecycle.kind === "in-world")
+			)
+				reconcile();
 			if (
 				event.type === "lifecycle" &&
 				(event.lifecycle.kind === "entering-world" ||

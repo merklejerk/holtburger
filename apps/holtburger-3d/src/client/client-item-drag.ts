@@ -126,6 +126,7 @@ export class ClientItemDrag {
 			if (event.type === "inventory-preview") this.#preview(event.result);
 			else if (
 				event.type === "resyncing" ||
+				event.type === "current-state" ||
 				event.type === "exit-requested" ||
 				(event.type === "lifecycle" && event.lifecycle.kind !== "in-world")
 			)
@@ -525,6 +526,14 @@ export class ClientItemDrag {
 			const target =
 				gesture.target?.kind === "action" ? gesture.target.cell : null;
 			const source = gesture.source.origin;
+			// Automatic supply replacement may change the binding during this pointer gesture.
+			if (this.bindings.read(source)?.item !== gesture.source.item) {
+				this.#cancel();
+				this.#inventory.reportFailure(
+					"The action cell changed while dragging.",
+				);
+				return;
+			}
 			this.#finishGesture();
 			this.bindings.transfer(source, target);
 			return;

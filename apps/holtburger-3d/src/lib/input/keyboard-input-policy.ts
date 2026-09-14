@@ -22,6 +22,13 @@ export interface KeyboardScope {
 	readonly keydown: (event: KeyboardEvent) => void;
 	/** Optional release handling for custom surfaces with held actions. */
 	readonly keyup?: (event: KeyboardEvent) => void;
+	/** Observe physical modifier state even when a release belongs to passthrough game controls. */
+	readonly modifiersChanged?: (
+		modifiers: Pick<
+			KeyboardEvent,
+			"shiftKey" | "ctrlKey" | "altKey" | "metaKey"
+		>,
+	) => void;
 	/** Clear held scope actions when needed; native editors need no cancellation callback. */
 	readonly cancel?: () => void;
 }
@@ -247,6 +254,8 @@ export class KeyboardInputPolicy {
 	/** Capture routing also prevents native button activation from competing with game commands. */
 	readonly keydown = (event: KeyboardEvent): void => {
 		this.#validateOwner();
+		if (this.#owner !== null)
+			this.#scopeFor(this.#owner)?.modifiersChanged?.(event);
 		const key = event.code || event.key;
 		const fresh = !event.repeat;
 		// A non-repeat press is fresh even when focus loss hid the preceding release.
@@ -313,6 +322,8 @@ export class KeyboardInputPolicy {
 
 	/** A release belonging to an outgoing owner never reaches the replacement owner. */
 	readonly keyup = (event: KeyboardEvent): void => {
+		if (this.#owner !== null)
+			this.#scopeFor(this.#owner)?.modifiersChanged?.(event);
 		const key = event.code || event.key;
 		const press = this.#presses.get(key);
 		this.#presses.delete(key);

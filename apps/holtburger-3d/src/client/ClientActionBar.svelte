@@ -60,6 +60,8 @@
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	let focused = $state<ActionSlotIndex | null>(null);
+	// Cold modifier edges drive hints only; activation still reads the actual input event.
+	let alternateHeld = $state(false);
 	let surface: HTMLDivElement;
 	let menuOpen = $state(false);
 	let menuButton = $state<HTMLButtonElement | null>(null);
@@ -243,12 +245,17 @@
 					)
 				)
 					return false;
+				alternateHeld = APP_INPUT.actionBarAlternate(event);
 				focused = 0;
 				return true;
 			},
 			keydown,
+			modifiersChanged: (event) => {
+				alternateHeld = APP_INPUT.actionBarAlternate(event);
+			},
 			cancel: () => {
 				focused = null;
+				alternateHeld = false;
 			},
 		}}
 	>
@@ -297,6 +304,9 @@
 											content.replacement,
 											item.readyReplacement,
 										)))}
+							alternateLabel={focused !== null && alternateHeld
+								? (item?.alternateLabel ?? null)
+								: null}
 							equipped={item?.equipped === true}
 							selected={focused === slot}
 							onactivate={(alternate) => activate(slot, alternate)}

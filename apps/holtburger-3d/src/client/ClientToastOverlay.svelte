@@ -4,23 +4,22 @@
 
 	interface Props {
 		readonly toast: ClientToast | null;
-		/** Inert editor-only copy shown when no live toast exists. */
-		readonly previewMessage: string | null;
+		/** State-owned guidance or editor preview shown while no ephemeral toast is active. */
+		readonly persistentMessage: {
+			readonly kind: "status" | "preview";
+			readonly message: string;
+		} | null;
 	}
 
-	const { toast, previewMessage }: Props = $props();
+	const { toast, persistentMessage }: Props = $props();
 	const presentation = $derived(
-		toast !== null
-			? { kind: "toast" as const, toast }
-			: previewMessage !== null
-				? { kind: "preview" as const, message: previewMessage }
-				: null,
+		toast !== null ? { kind: "toast" as const, toast } : persistentMessage,
 	);
 </script>
 
 <div class="client-toast-overlay">
 	{#if presentation !== null}
-		{#key presentation.kind === "toast" ? presentation.toast.id : "preview"}
+		{#key presentation.kind === "toast" ? presentation.toast.id : presentation.kind}
 			<p
 				class="client-toast ui-readout"
 				class:client-toast-preview={presentation.kind === "preview"}
@@ -30,7 +29,9 @@
 					? presentation.toast.tone === "warning"
 						? "alert"
 						: "status"
-					: undefined}
+					: presentation.kind === "status"
+						? "status"
+						: undefined}
 				transition:fade={{ duration: 120 }}
 			>
 				{presentation.kind === "toast"

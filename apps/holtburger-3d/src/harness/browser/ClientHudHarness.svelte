@@ -579,6 +579,7 @@
 						name: guid === 1 ? "Wayfarer" : "Drudge",
 						healthQuery: "eligible",
 						itemType: 0,
+						hasAlternateEquipSide: false,
 						mapCategory: "other",
 						objectFlags: 0,
 						wcid: guid === 7 ? 42 : null,

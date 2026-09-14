@@ -48,6 +48,8 @@ export interface ActionItemDisplay {
 	readonly stackCount: number | null;
 	/** Current binding kind; each cell compares this against its retained action. */
 	readonly actionKind: ActionContent["kind"] | null;
+	/** Available alternate behavior, consumed by focused action-cell modifier hints. */
+	readonly alternateLabel: string | null;
 	/** A depleted instance must not turn a waiting supply binding into a drain action. */
 	readonly readyReplacement: ConsumableIdentity | null;
 	/** Confirmed player equipment state; never inferred from a submitted command. */

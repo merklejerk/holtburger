@@ -181,6 +181,7 @@
 							repository.retainKey(owner, key);
 							keys.add(key);
 						}
+						const action = bindingAction(facts);
 						next.set(content.item, {
 							label:
 								facts?.description.kind === "known"
@@ -190,7 +191,15 @@
 								facts?.description.kind === "known"
 									? facts.description.stackCount
 									: null,
-							actionKind: bindingAction(facts)?.kind ?? null,
+							actionKind: action?.kind ?? null,
+							alternateLabel:
+								action?.kind === "targeted"
+									? "Use on selected target"
+									: action?.kind === "equipment" &&
+										  facts?.description.kind === "known" &&
+										  facts.description.hasAlternateEquipSide
+										? "Equip alternate side"
+										: null,
 							readyReplacement:
 								facts?.description.kind === "known" &&
 								facts.description.consumable?.availability === "ready"

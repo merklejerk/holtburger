@@ -4575,7 +4575,11 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			[],
 		);
 		inventory.drag = await probeInventoryDrag(client, evaluateExpression);
-		inventory.actionBars = await probeActionBars(client, evaluateExpression);
+		inventory.actionBars = await probeActionBars(
+			client,
+			evaluateExpression,
+			options.screenshotPath,
+		);
 		inventory.itemUse = await probeItemUse(client, evaluateExpression);
 		if (options.screenshotPath) {
 			const shot = await client.send("Page.captureScreenshot", {

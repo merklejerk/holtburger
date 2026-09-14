@@ -20,6 +20,7 @@ export function entityFacts(
 			name: `Item ${guid}`,
 			healthQuery: "ineligible",
 			itemType: 0,
+			hasAlternateEquipSide: false,
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,

@@ -900,7 +900,7 @@
 	/>
 {/if}
 {#if !usesWorldPresentation}
-	<ClientToastOverlay {toast} previewMessage={null} />
+	<ClientToastOverlay {toast} persistentMessage={null} />
 {/if}
 
 {#if usesWorldPresentation && startupError === null && commandFailure === null}

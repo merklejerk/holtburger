@@ -57,6 +57,8 @@ const clientEntityFactsSchema = z
 					mapCategory: z.enum(DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES),
 					/** World-derived slot compatibility; not a wield-requirements verdict. */
 					equipLocations: guid.nullable(),
+					/** World-owned equipment alternate-side capability for action-cell hints. */
+					hasAlternateEquipSide: z.boolean(),
 					/** Shared authored use shape, independent of target and busy state. */
 					useCapability: z.enum([
 						"unavailable",

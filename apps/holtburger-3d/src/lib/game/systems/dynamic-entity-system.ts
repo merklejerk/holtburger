@@ -801,14 +801,12 @@ export class DynamicEntitySystem<
 			entity.presentationState.hidden
 		)
 			return null;
-		const placement = this.#scene.getResolvedPlacement(entity.visualRootNodeId);
-		const membership = this.#scene.getResolvedSpatialMembership(
-			entity.visualRootNodeId,
-		);
-		if (placement === undefined || membership === undefined)
+		const resolved = this.#scene.readResolvedState(entity.visualRootNodeId);
+		if (resolved === undefined)
 			throw new Error(
 				`Dynamic visual root ${entity.visualRootNodeId} no longer exists.`,
 			);
+		const { placement, spatialMembership: membership } = resolved;
 		for (const part of entity.renderable.parts) {
 			multiplyMat4(
 				placement.localToLandblock,

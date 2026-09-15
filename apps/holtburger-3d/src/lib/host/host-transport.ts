@@ -1,4 +1,8 @@
 import type {
+	SpellInspectionContext,
+	SpellInspectionResult,
+} from "../../client/client-spell-inspection-contract";
+import type {
 	ClientItemUseResult,
 	ClientItemUseTargetResult,
 } from "../../client/client-item-use-contract";
@@ -44,6 +48,7 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"load_texture_pixels",
 	"prepare_ui_icons",
 	"load_spell_references",
+	"load_spell_components",
 	"load_animation",
 	"load_setup_visual",
 	"load_physics_script",
@@ -94,6 +99,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"equip_client_item",
 	"submit_client_item_use",
 	"query_client_item_use_target",
+	"query_client_spell_inspection",
 	"respond_to_client_confirmation",
 	"start_client_camera",
 	"set_client_camera_intent",
@@ -148,6 +154,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-inventory-preview",
 	"client-item-use-result",
 	"client-item-use-target-result",
+	"client-spell-inspection-context",
+	"client-spell-inspection-result",
 	"client-state-resyncing",
 	"client-entity-facts-changed",
 	"client-entity-collision-disabled",
@@ -220,6 +228,8 @@ export interface HostEventPayloadMap {
 	"client-inventory-preview": ClientInventoryPreviewResult;
 	"client-item-use-result": ClientItemUseResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;
+	"client-spell-inspection-context": SpellInspectionContext;
+	"client-spell-inspection-result": SpellInspectionResult;
 	"explorer-dynamic-entity": DynamicEntityEvent;
 	"explorer-fixed-tick": ExplorerFixedTickEnvelope;
 	"explorer-possession-event-outcomes": readonly PossessionEventOutcome[];

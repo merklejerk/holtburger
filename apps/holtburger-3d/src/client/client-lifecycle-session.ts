@@ -1,4 +1,12 @@
 import {
+	spellInspectionQuerySchema,
+	spellInspectionContextSchema,
+	spellInspectionResultSchema,
+	type SpellInspectionQuery,
+	type SpellInspectionContext,
+	type SpellInspectionResult,
+} from "./client-spell-inspection-contract";
+import {
 	itemUseTargetQuerySchema,
 	itemUseTargetResultSchema,
 	type ClientItemUseTargetQuery,
@@ -109,6 +117,7 @@ type ClientCommandName = Extract<
 	| "submit_client_inventory"
 	| "equip_client_item"
 	| "query_client_item_use_target"
+	| "query_client_spell_inspection"
 	| "submit_client_item_use"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
@@ -128,6 +137,8 @@ type ClientEventName = Extract<
 	| "client-current-state"
 	| "client-inventory-preview"
 	| "client-item-use-target-result"
+	| "client-spell-inspection-context"
+	| "client-spell-inspection-result"
 	| "client-item-use-result"
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
@@ -192,6 +203,14 @@ export interface ClientLifecycleSessionState {
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
+	| {
+			readonly type: "spell-inspection-context";
+			readonly context: SpellInspectionContext;
+	  }
+	| {
+			readonly type: "spell-inspection-result";
+			readonly result: SpellInspectionResult;
+	  }
 	| {
 			readonly type: "item-use-target-result";
 			readonly result: ClientItemUseTargetResult;
@@ -424,6 +443,13 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Request character-bound spell facts independently of panel visibility. */
+	async querySpellInspection(query: SpellInspectionQuery): Promise<void> {
+		await this.#transport.invoke("query_client_spell_inspection", {
+			query: spellInspectionQuerySchema.parse(query),
+		});
+	}
+
 	/** Evaluate a considered target without executing use. */
 	async queryItemUseTarget(query: ClientItemUseTargetQuery): Promise<void> {
 		await this.#transport.invoke("query_client_item_use_target", {
@@ -613,6 +639,24 @@ export class ClientLifecycleSession {
 						this.#emit({
 							type: "item-use-target-result",
 							result: itemUseTargetResultSchema.parse(payload),
+						});
+					},
+				),
+				await this.#transport.listen(
+					"client-spell-inspection-context",
+					(payload) => {
+						this.#emit({
+							type: "spell-inspection-context",
+							context: spellInspectionContextSchema.parse(payload),
+						});
+					},
+				),
+				await this.#transport.listen(
+					"client-spell-inspection-result",
+					(payload) => {
+						this.#emit({
+							type: "spell-inspection-result",
+							result: spellInspectionResultSchema.parse(payload),
 						});
 					},
 				),

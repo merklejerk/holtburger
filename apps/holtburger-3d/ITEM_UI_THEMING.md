@@ -119,3 +119,18 @@ API without depending on inventory or scene rendering. Dispose that consumer's o
 when its actual model lifetime ends. Missing required artwork reports context once
 per retained failure and leaves a selectable name fallback; missing optional artwork
 retains the available composite and reports its omitted layer.
+
+Expanded spell details use the same body typography and icon display cadence.
+`ClientSpellFormula` renders ordered component slots, including repeated tapers,
+through `UiIcon`. The `spell-component` recipe replaces exact opaque white with
+opaque black at the host; no CSS filter approximates that authored pixel rule.
+Component images retain separate model and display leases across collapse and
+character-context replacement. Formula availability text does not imply casting
+success, inventory sufficiency, or mana affordability.
+
+Component list density is controlled by `--ui-spell-component-icon-size` (20px),
+`--ui-spell-component-row-gap` (2px), and `--ui-spell-component-label-gap` (6px).
+These affect display layout only, so changing size does not regenerate artwork.
+Spell accordion colors inherit the shared palette and text inherits body typography;
+its remaining padding, dividers, and disclosure layout are component CSS rather
+than dedicated theme variables.

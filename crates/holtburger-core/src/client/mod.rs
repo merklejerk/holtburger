@@ -41,6 +41,7 @@ pub mod runtime_body_view_cache;
 pub mod selection_envelope;
 pub mod selection_query;
 mod simulation;
+pub mod spell_inspection;
 pub mod types;
 pub use builder::ClientRuntimeBuilder;
 use camera::ClientCameraSettlement;
@@ -105,6 +106,8 @@ pub struct ClientRuntime {
     world_name: Option<String>,
     /// Character whose initial PlayerDescription established complete spell knowledge.
     known_spells_character: Option<Guid>,
+    /// Character-bound inspection inputs and their publication revision.
+    spell_inspection: spell_inspection::SpellInspectionState,
     /// Terminal cause selected by the authority before it publishes `Exiting`.
     exit_cause: Option<ClientExitCause>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
@@ -645,6 +648,8 @@ impl ClientRuntime {
     }
 
     pub(super) fn emit_current_application_snapshot(&mut self) {
+        self.refresh_spell_inspection_context();
+        self.emit_spell_inspection_context();
         self.publish_entity_facts();
         self.emit_fellowship_state_updated();
         self.emit_vendor_state_updated();
@@ -699,6 +704,14 @@ impl ClientRuntime {
     }
 
     pub fn handle_world_event(&mut self, event: &WorldEvent) {
+        if matches!(
+            event,
+            WorldEvent::PlayerInfo(_)
+                | WorldEvent::DerivedStatsUpdated(_)
+                | WorldEvent::SkillUpdated(_)
+        ) {
+            self.refresh_spell_inspection_context();
+        }
         self.emit_world_view_projection(event);
         self.publish_entity_facts();
     }

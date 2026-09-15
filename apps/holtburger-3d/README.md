@@ -143,7 +143,13 @@ synthetic artwork; the scoping worksheet retains the completed burst measurement
 The Spells system button opens a movable, resizable window listing the character's
 known spells alphabetically with retail-composed artwork. Loading and an empty
 spellbook are distinct; missing definitions or artwork remain visible as diagnostics.
-Casting and spell-bar bindings are separate follow-up features.
+Click a spell to expand its school, description, authored mana, applicable duration,
+range and ordered formula components. One spell expands at a time. Range matches
+retail inspection and ACE's ordinary spellbook casting rule (ranks plus initial
+skill bonus, capped at 75 metres). Formula selection uses the account-customized
+recipe or the school's foci/infused-augmentation recipe. Inventory readiness and
+component lookup failures remain explicit. Casting and spell-bar bindings are
+separate follow-up features.
 
 Core snapshots and `PlayerSpellsUpdated` supply complete knowledge after the initial
 character description. Static `load_spell_references` queries are independent of that
@@ -337,3 +343,11 @@ The previous implementation is retained in `../holtburger-3d-legacy` as a runnab
 ## Item UI styling
 
 See [Item UI theme hooks](ITEM_UI_THEMING.md) for cell, selection, empty-slot, strip-arrow, and inventory layout properties.
+
+Spell inspection separates immutable `load_spell_references` / `load_spell_components`
+content from character-bound `query_client_spell_inspection` results. Core emits a
+context revision when relevant skill, account or foci inputs change; independent
+inspectors discard older correlated replies. Requested component artwork survives
+collapse, with character-model leases retired on context changes and display leases
+protecting images until their DOM is replaced. Component icons use retail's exact
+opaque-white to opaque-black transform. Inventory availability shading is not included.

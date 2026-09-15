@@ -139,6 +139,8 @@ impl super::ClientRuntime {
             .collect(&mut self.world)
             .expect("accepted world relationships must project into coherent entity facts");
         if !delta.upserts.is_empty() || !delta.removed.is_empty() {
+            // Storage-only messages can change foci readiness without a separate world event.
+            self.refresh_spell_inspection_context();
             let _ = self
                 .client_view_event_tx
                 .send(super::ClientViewEvent::EntityFactsChanged(delta));

@@ -265,11 +265,11 @@ function createWindow(entry: {
 	});
 	window.webContents.on(
 		"console-message",
-		(_event, level, message, line, sourceId) => {
-			if (level >= 2) {
-				const severity = level >= 3 ? "error" : "warn";
+		({ level, message, lineNumber, sourceId }) => {
+			if (level === "warning" || level === "error") {
+				const severity = level === "error" ? "error" : "warn";
 				console[severity](
-					`[holtburger-renderer:${severity}] ${message} (${sourceId}:${line})`,
+					`[holtburger-renderer:${severity}] ${message} (${sourceId}:${lineNumber})`,
 				);
 				return;
 			}

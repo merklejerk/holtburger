@@ -86,6 +86,7 @@ impl ClientRuntime {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
         self.known_spells_character = None;
+        self.refresh_spell_inspection_context();
         self.start_world_activation_with_reset(
             ClientWorldActivationState::InitialEntry,
             player_guid,
@@ -277,6 +278,7 @@ impl ClientRuntime {
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
                 self.known_spells_character = None;
+                self.refresh_spell_inspection_context();
                 self.authenticating = false;
                 self.character_selection.characters = data.characters.clone();
                 self.turbine_chat.enabled = data.use_turbine_chat;

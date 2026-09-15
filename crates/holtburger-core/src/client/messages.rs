@@ -82,6 +82,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.clear_busy_operation();
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
@@ -277,6 +278,7 @@ impl ClientRuntime {
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
+                self.clear_busy_operation();
                 self.known_spells_character = None;
                 self.refresh_spell_inspection_context();
                 self.authenticating = false;

@@ -162,6 +162,12 @@ pub enum ClientHostCommand {
     },
     /// Toggle peace and the current equipment-derived stance in core.
     ToggleClientCombatMode,
+    /// Submit a spellbook cast with caller-owned recipient intent.
+    CastClientSpell {
+        #[serde(rename = "spellId")]
+        spell_id: u32,
+        aim: holtburger_core::client::types::SpellCastAim,
+    },
     RequestClientCurrentState,
     SelectClientCharacter {
         guid: holtburger_common::Guid,
@@ -236,6 +242,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "queue_client_character_motion_event",
     "send_client_chat",
     "toggle_client_combat_mode",
+    "cast_client_spell",
     "query_client_entity_health",
     "respond_to_client_confirmation",
     "start_client_camera",
@@ -551,6 +558,11 @@ pub async fn dispatch_client(
     match command {
         StartClient { startup } => runtime
             .start(startup)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CastClientSpell { spell_id, aim } => runtime
+            .send_command(ClientCommand::CastSpell { spell_id, aim })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

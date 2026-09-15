@@ -410,6 +410,16 @@
 		}
 	}
 
+	async function castSpell(spellId: number): Promise<void> {
+		if (session === null) return;
+		const selection = entitySelection?.selectedGuid() ?? null;
+		try {
+			await session.castSpell(spellId, selection);
+		} catch (error) {
+			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+		}
+	}
+
 	async function toggleCombatMode(): Promise<void> {
 		if (session === null || lifecycle.kind !== "in-world") return;
 		try {
@@ -945,6 +955,7 @@
 		{combatMode}
 		combatEnabled={lifecycle.kind === "in-world"}
 		onToggleCombat={() => void toggleCombatMode()}
+		onCastSpell={(spellId) => void castSpell(spellId)}
 		{entityMetadata}
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 		{debugEnabled}

@@ -31,7 +31,17 @@
 			| { readonly kind: "icon"; readonly key: string }
 			| { readonly kind: "failed"; readonly detail: string };
 	}
-	const { spells }: { readonly spells: ClientSpellServices } = $props();
+	const {
+		spells,
+		castEnabled,
+		onCastSpell,
+	}: {
+		readonly spells: ClientSpellServices;
+		/** Confirmed magic stance in an active client session. */
+		readonly castEnabled: boolean;
+		/** Submit one normal cast without changing row expansion. */
+		readonly onCastSpell: (spellId: number) => void;
+	} = $props();
 	/** The expanded spell identity survives unrelated list refreshes. */
 	let expandedId = $state<number | null>(null);
 	/** Cold detail presentation from inspection replies. */
@@ -285,6 +295,17 @@
 								>{expandedId === row.id ? "▾" : "▸"}</span
 							>
 						</button>
+						<button
+							type="button"
+							class="cast-spell"
+							disabled={!castEnabled || row.details === null}
+							title={row.details === null
+								? "Spell definition is unavailable."
+								: !castEnabled
+									? "Enter magic stance to cast."
+									: `Cast ${row.name}`}
+							onclick={() => onCastSpell(row.id)}>Cast</button
+						>
 						{#if expandedId === row.id}
 							<div class="spell-details">
 								{#if row.details !== null}
@@ -442,6 +463,9 @@
 			padding: 0;
 		}
 		li {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
 			border: 1px solid transparent;
 			border-bottom-color: color-mix(
 				in srgb,
@@ -449,11 +473,15 @@
 				transparent
 			);
 		}
+		li[hidden] {
+			display: none;
+		}
 		li.expanded {
 			border-color: var(--ui-color-border);
 			background: var(--ui-color-well);
 		}
 		.spell-details {
+			grid-column: 1 / -1;
 			border-top: 1px solid
 				color-mix(
 					in srgb,
@@ -473,6 +501,18 @@
 		}
 		.spell-details p {
 			white-space: pre-wrap;
+		}
+		.cast-spell {
+			font: inherit;
+			color: inherit;
+			background: var(--ui-color-control);
+			border: 1px solid var(--ui-color-border);
+			margin: var(--ui-spell-row-padding);
+			cursor: pointer;
+		}
+		.cast-spell:disabled {
+			opacity: var(--ui-spell-control-disabled-opacity);
+			cursor: default;
 		}
 		.spell-header {
 			width: 100%;

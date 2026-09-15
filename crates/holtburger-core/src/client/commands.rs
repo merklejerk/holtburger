@@ -7,51 +7,12 @@ use crate::motion_command_for_soul_emote_pose;
 use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
-use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
-use holtburger_world::context::WorldContextExt;
 use holtburger_world::interaction::EntityUseRejection;
-use holtburger_world::spell::MagicSchool;
 use std::time::Instant;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NormalizedSpellCast {
-    Targeted { target: Guid, spell_id: u32 },
-    Untargeted { spell_id: u32 },
-}
-
-fn normalize_spell_cast(
-    world: &holtburger_world::WorldState,
-    spell_id: u32,
-    requested_target: Option<Guid>,
-) -> NormalizedSpellCast {
-    let player_guid = world.player.guid;
-
-    if let Some(spell) = world.spell_catalog.get(spell_id) {
-        if spell.is_untargeted() {
-            return NormalizedSpellCast::Untargeted { spell_id };
-        }
-
-        if spell.is_self_targeted() {
-            return NormalizedSpellCast::Targeted {
-                target: player_guid,
-                spell_id,
-            };
-        }
-
-        if requested_target == Some(player_guid) && spell.school == MagicSchool::WarMagic {
-            return NormalizedSpellCast::Untargeted { spell_id };
-        }
-    }
-
-    match requested_target {
-        Some(target) => NormalizedSpellCast::Targeted { target, spell_id },
-        None => NormalizedSpellCast::Untargeted { spell_id },
-    }
-}
 
 fn render_soul_emote_text(text: &str) -> String {
     text.replace("%p", "their")
@@ -128,8 +89,7 @@ impl ClientRuntime {
                     | ClientCommand::AddToTrade { .. }
                     // ACE missile attacks consume ammo; spellcasting consumes components.
                     // Combat actions also compete with equipment peace/wield transitions.
-                    | ClientCommand::CastTargetedSpell { .. }
-                    | ClientCommand::CastUntargetedSpell { .. }
+                    | ClientCommand::CastSpell { .. }
                     | ClientCommand::TargetedMeleeAttack { .. }
                     | ClientCommand::TargetedMissileAttack { .. }
             )
@@ -186,10 +146,6 @@ impl ClientRuntime {
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
-            | ClientCommand::CastTargetedSpell { .. }
-            | ClientCommand::CastUntargetedSpell { .. }
-            | ClientCommand::TargetedMeleeAttack { .. }
-            | ClientCommand::TargetedMissileAttack { .. }
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
             | ClientCommand::OpenTrade(_)
@@ -285,7 +241,11 @@ impl ClientRuntime {
             ClientCommand::ToggleCombatMode
             | ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
-            | ClientCommand::Ping
+            | ClientCommand::CastSpell { .. }
+            | ClientCommand::TargetedMeleeAttack { .. }
+            | ClientCommand::TargetedMissileAttack { .. } => self.handle_combat_command(cmd).await,
+
+            ClientCommand::Ping
             | ClientCommand::RequestCurrentApplicationState
             | ClientCommand::AcknowledgeClientWorldReveal { .. }
             | ClientCommand::SetFellowshipUpdatesSubscribed { .. }
@@ -561,53 +521,6 @@ impl ClientRuntime {
                     SalvageItemsWithActionData {
                         tool_guid: tool,
                         items,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::CastTargetedSpell { target, spell_id } => {
-                self.send_normalized_spell_cast(spell_id, Some(target))
-                    .await
-            }
-            ClientCommand::CastUntargetedSpell { spell_id } => {
-                self.send_normalized_spell_cast(spell_id, None).await
-            }
-            ClientCommand::TargetedMeleeAttack {
-                target,
-                attack_height,
-                power_level,
-            } => {
-                log::info!(
-                    ">>> Targeted melee attack on 0x{:08X} ({:?}, power {:.2})",
-                    target.0,
-                    attack_height,
-                    power_level
-                );
-                self.send_game_action(GameAction::TargetedMeleeAttack(Box::new(
-                    TargetedMeleeAttackActionData {
-                        target_guid: target,
-                        attack_height,
-                        power_level,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::TargetedMissileAttack {
-                target,
-                attack_height,
-                accuracy_level,
-            } => {
-                log::info!(
-                    ">>> Targeted missile attack on 0x{:08X} ({:?}, accuracy {:.2})",
-                    target.0,
-                    attack_height,
-                    accuracy_level
-                );
-                self.send_game_action(GameAction::TargetedMissileAttack(Box::new(
-                    TargetedMissileAttackActionData {
-                        target_guid: target,
-                        attack_height,
-                        accuracy_level,
                     },
                 )))
                 .await
@@ -1054,68 +967,6 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::ToggleCombatMode => {
-                if !matches!(self.state, ClientState::InWorld) {
-                    return Ok(());
-                }
-                // An equipment transaction temporarily enters peace. Do not interpret that
-                // intermediate stance as a new player request or interrupt its restoration.
-                if self.equipment_operation.is_some() {
-                    self.emit_action_result(
-                        ActionResultSource::Client,
-                        ActionResultReason::General(
-                            "Wait for the equipment change to finish.".into(),
-                        ),
-                    );
-                    return Ok(());
-                }
-                let current = self.world.player_combat_mode();
-                if self.world.player.guid == Guid::NULL || current == CombatMode::Undef {
-                    self.emit_action_result(
-                        ActionResultSource::Client,
-                        ActionResultReason::General(
-                            "Character combat state has not arrived yet.".into(),
-                        ),
-                    );
-                    return Ok(());
-                }
-                let mode = match current {
-                    CombatMode::NonCombat => self.world.get_suggested_combat_mode(),
-                    _ => CombatMode::NonCombat,
-                };
-                if mode == current {
-                    self.emit_action_result(
-                        ActionResultSource::Client,
-                        ActionResultReason::General(
-                            "You cannot enter combat with the currently held equipment.".into(),
-                        ),
-                    );
-                    return Ok(());
-                }
-                // Stance completion is a mode/motion update, not UseDone. ACE owns its
-                // NextUseTime animation queue (Player_Combat.cs:737), so do not arm use busy state.
-                self.send_game_action(GameAction::ChangeCombatMode(Box::new(
-                    ChangeCombatModeActionData { mode },
-                )))
-                .await
-            }
-            ClientCommand::SetCombatMode(mode) => {
-                self.stop_equipment_change(
-                    "Combat mode changed by another command; the last request may still complete",
-                );
-                log::info!(">>> Changing combat mode to: {:?}", mode);
-                self.send_game_action(GameAction::ChangeCombatMode(Box::new(
-                    ChangeCombatModeActionData { mode },
-                )))
-                .await
-            }
-            ClientCommand::CancelAttack => {
-                log::info!(">>> Canceling attack");
-                self.send_game_action(GameAction::CancelAttack(Box::new(
-                    CancelAttackActionData {},
-                )))
-                .await
-            }
             ClientCommand::QueryEntityDebugInfo(guid) => {
                 log::info!(">>> Client requested Debug Snapshot for {}", guid);
                 if let Some(entity) = self.world.get_visible_entity(guid) {
@@ -1155,39 +1006,6 @@ impl ClientRuntime {
     pub(super) async fn send_login_complete(&mut self) -> Result<()> {
         self.send_game_action(GameAction::LoginComplete(Box::new(LoginCompleteActionData)))
             .await
-    }
-
-    async fn send_normalized_spell_cast(
-        &mut self,
-        spell_id: u32,
-        requested_target: Option<Guid>,
-    ) -> Result<()> {
-        match normalize_spell_cast(&self.world, spell_id, requested_target) {
-            NormalizedSpellCast::Targeted { target, spell_id } => {
-                log::info!(
-                    ">>> Casting targeted spell {} on 0x{:08X}",
-                    spell_id,
-                    target.0
-                );
-                if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::CastTargetedSpell(Box::new(
-                    CastTargetedSpellActionData { target, spell_id },
-                )))
-                .await
-            }
-            NormalizedSpellCast::Untargeted { spell_id } => {
-                log::info!(">>> Casting untargeted spell {}", spell_id);
-                if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
-                    CastUntargetedSpellActionData { spell_id },
-                )))
-                .await
-            }
-        }
     }
 
     async fn handle_social_command(&mut self, cmd: ClientCommand) -> Result<()> {
@@ -1358,7 +1176,6 @@ fn on_off(value: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{CombatMode, NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
         ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
@@ -1372,21 +1189,20 @@ mod tests {
     };
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
+    use holtburger_protocol::messages::combat::CombatMode;
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
         SkillAdvancementClass,
     };
     use holtburger_world::RuntimeBodyResetCause;
-    use holtburger_world::WorldState;
     use holtburger_world::entity::Entity;
-    use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
+    use holtburger_world::spell::SpellCatalog;
     use holtburger_world::state::motion_resolution::test_support::explicit_motion_catalog;
     use holtburger_world::state::{
         FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
         FellowshipMemberState, FellowshipState, TradeSide, TradeState,
     };
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
-    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Instant;
 
@@ -1489,108 +1305,6 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
-    }
-
-    fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
-        SpellInfo {
-            name: "Test Spell".to_string(),
-            description: String::new(),
-            school,
-            icon_id: 0,
-            category: 0,
-            bitfield,
-            base_mana: 0,
-            base_range_constant: 0.0,
-            base_range_mod: 0.0,
-            power: 0,
-            spell_economy_mod: 0.0,
-            formula_version: 0,
-            component_loss: 0.0,
-            meta_spell_type: 0,
-            meta_spell_id: 0,
-            extras: SpellExtrasInfo::None,
-            components: [0; 8],
-            caster_effect: 0,
-            target_effect: 0,
-            fizzle_effect: 0,
-            recovery_interval: 0.0,
-            recovery_amount: 0.0,
-            display_order: 0,
-            non_component_target_type,
-            mana_mod: 0,
-        }
-    }
-
-    fn world_with_spell(player_guid: Guid, spell_id: u32, spell: SpellInfo) -> WorldState {
-        let mut world = WorldState::synthetic();
-        world.player.guid = player_guid;
-        world.spell_catalog = Arc::new(SpellCatalog {
-            spells: HashMap::from([(spell_id, spell)]),
-            ..Default::default()
-        });
-        world
-    }
-
-    #[test]
-    fn self_targeted_spells_are_normalized_to_target_self() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(
-            player_guid,
-            100,
-            spell_info(MagicSchool::CreatureEnchantment, 0x8, 1),
-        );
-
-        let normalized = normalize_spell_cast(&world, 100, None);
-
-        assert_eq!(
-            normalized,
-            NormalizedSpellCast::Targeted {
-                target: player_guid,
-                spell_id: 100,
-            }
-        );
-    }
-
-    #[test]
-    fn untargeted_spells_ignore_requested_self_target() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(player_guid, 200, spell_info(MagicSchool::WarMagic, 0, 0));
-
-        let normalized = normalize_spell_cast(&world, 200, Some(player_guid));
-
-        assert_eq!(
-            normalized,
-            NormalizedSpellCast::Untargeted { spell_id: 200 }
-        );
-    }
-
-    #[test]
-    fn war_magic_self_casts_are_normalized_to_untargeted() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(player_guid, 300, spell_info(MagicSchool::WarMagic, 0, 5));
-
-        let normalized = normalize_spell_cast(&world, 300, Some(player_guid));
-
-        assert_eq!(
-            normalized,
-            NormalizedSpellCast::Untargeted { spell_id: 300 }
-        );
-    }
-
-    #[test]
-    fn non_war_targeted_self_casts_remain_targeted() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(player_guid, 400, spell_info(MagicSchool::LifeMagic, 0, 5));
-
-        let normalized = normalize_spell_cast(&world, 400, Some(player_guid));
-
-        assert_eq!(
-            normalized,
-            NormalizedSpellCast::Targeted {
-                target: player_guid,
-                spell_id: 400,
-            }
-        );
     }
 
     #[tokio::test]

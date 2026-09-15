@@ -3,6 +3,7 @@ use super::*;
 use crate::pages::game::combat::{CombatIssueState, DesiredCombatEngagement};
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::CombatFeedback;
+use holtburger_core::client::types::SpellCastAim;
 use holtburger_protocol::messages::movement::messages::motion::{
     MoveToObject, MoveToParameters, Origin,
 };
@@ -114,7 +115,7 @@ fn targeted_spell_cast_snaps_facing_before_casting() {
     ));
     assert!(matches!(
         result.commands[1],
-        ClientCommand::CastTargetedSpell { target, spell_id }
+        ClientCommand::CastSpell { spell_id, aim: SpellCastAim::Normal { selection: Some(target) } }
             if target == target_guid && spell_id == 42
     ));
 }

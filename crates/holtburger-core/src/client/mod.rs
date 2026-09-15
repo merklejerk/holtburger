@@ -19,6 +19,7 @@ pub mod character_motion;
 mod character_selection;
 pub mod collision;
 pub mod combat_feedback;
+mod combat_runtime;
 mod commands;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
@@ -301,6 +302,7 @@ impl ClientRuntime {
     }
 
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
+        self.clear_busy_operation();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("Client is exiting; the last request may still complete");
         self.exit_cause = Some(cause);
@@ -580,6 +582,13 @@ impl ClientRuntime {
                 )
             )
         })
+    }
+
+    /// Release local operation ownership without claiming server completion.
+    pub(super) fn clear_busy_operation(&mut self) {
+        if self.active_busy_operation.take().is_some() {
+            self.emit_busy_state_updated();
+        }
     }
 
     pub(super) fn arm_busy_operation(&mut self, operation: BusyOperationKind) -> bool {

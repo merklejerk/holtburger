@@ -30,6 +30,8 @@ import {
 } from "./client-entity-mirror";
 import {
 	decodeClientCurrentState,
+	decodeClientCombatMode,
+	type ClientCombatMode,
 	decodeClientSpells,
 	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
@@ -112,6 +114,7 @@ type ClientCommandName = Extract<
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "send_client_chat"
+	| "toggle_client_combat_mode"
 	| "query_client_entity_health"
 	| "preview_client_inventory"
 	| "submit_client_inventory"
@@ -155,6 +158,7 @@ type ClientEventName = Extract<
 	| "client-player-entered"
 	| "client-player-vitals-updated"
 	| "client-player-spells-updated"
+	| "client-combat-mode-updated"
 	| "client-entity-health-updated"
 	| "client-chat-message"
 	| "client-transient-string"
@@ -193,6 +197,8 @@ export interface ClientLifecycleSessionState {
 	readonly playerName: string | null;
 	/** Null until a complete description is available. */
 	readonly knownSpells: readonly number[] | null;
+	/** Latest server stance, consumed by the combat shortcut. */
+	readonly combatMode: ClientCombatMode;
 	readonly vitals: readonly ClientVital[];
 	readonly characterMotion: ClientCharacterMotionCapabilities | null;
 	/** Current server question, retained independently of presentation mounts. */
@@ -202,6 +208,7 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
 			readonly type: "spell-inspection-context";
@@ -472,6 +479,12 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Request the equipment-derived stance toggle; server events confirm the outcome. */
+	async toggleCombatMode(): Promise<void> {
+		if (this.#state.lifecycle?.kind !== "in-world") return;
+		await this.#transport.invoke("toggle_client_combat_mode");
+	}
+
 	/** Send one ordinary local-speech message. */
 	async sendChat(message: string): Promise<void> {
 		if (message.trim().length === 0) {
@@ -595,6 +608,16 @@ export class ClientLifecycleSession {
 						const spellIds = decodeClientSpells(payload);
 						this.#state = { ...this.#state, knownSpells: spellIds };
 						this.#emit({ type: "spells", spellIds });
+					},
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-combat-mode-updated",
+					(payload) => {
+						const { mode } = decodeClientCombatMode(payload);
+						this.#state = { ...this.#state, combatMode: mode };
+						this.#emit({ type: "combat-mode", mode });
 					},
 				),
 			);
@@ -826,6 +849,7 @@ export class ClientLifecycleSession {
 			worldName: state.worldName,
 			playerName: state.playerName,
 			knownSpells: state.knownSpells,
+			combatMode: state.combatMode,
 			vitals: state.vitals,
 			characterMotion: state.characterMotion,
 			activeConfirmation: state.activeConfirmation,
@@ -1002,6 +1026,7 @@ function emptyState(): ClientLifecycleSessionState {
 		worldName: null,
 		playerName: null,
 		knownSpells: null,
+		combatMode: "unknown",
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

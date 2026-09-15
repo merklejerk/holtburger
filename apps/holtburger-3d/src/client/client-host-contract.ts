@@ -11,6 +11,22 @@ import {
 	type LandblockVector3,
 } from "../lib/assets/ac-frame";
 
+/** Server-confirmed stance consumed by the shortcut dock. */
+const combatModeSchema = z.enum([
+	"unknown",
+	"peace",
+	"melee",
+	"missile",
+	"magic",
+]);
+export type ClientCombatMode = z.infer<typeof combatModeSchema>;
+
+export function decodeClientCombatMode(value: unknown): {
+	mode: ClientCombatMode;
+} {
+	return z.object({ mode: combatModeSchema }).strict().parse(value);
+}
+
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
 const finiteNumber = z.number().finite();
 
@@ -243,6 +259,7 @@ const currentStateSchema = z
 		worldName: z.string().nullable(),
 		playerName: z.string().nullable(),
 		knownSpells: knownSpellIdsSchema.nullable(),
+		combatMode: combatModeSchema,
 		vitals: z.array(vitalSchema),
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),

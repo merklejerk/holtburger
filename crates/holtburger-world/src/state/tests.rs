@@ -39,6 +39,7 @@ use holtburger_dat::file_type::{
 };
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter};
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementStateFlags,
@@ -5999,5 +6000,29 @@ fn update_object_recreates_description_and_can_introduce_an_unknown_object() {
                 .get_int_prop(PropertyInt::PlayerKillerStatus),
             None
         );
+    }
+}
+
+#[test]
+fn login_combat_mode_defaults_to_peace_without_overriding_explicit_server_modes() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(1);
+    state.seed_local_player_entity(guid, "Player", WorldPosition::default());
+    assert_eq!(state.player_int_property(PropertyInt::CombatMode), None);
+    assert_eq!(state.player_combat_mode(), CombatMode::NonCombat);
+
+    for mode in [
+        CombatMode::Melee,
+        CombatMode::Missile,
+        CombatMode::Magic,
+        CombatMode::NonCombat,
+        CombatMode::Undef,
+    ] {
+        state
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, mode as i32);
+        assert_eq!(state.player_combat_mode(), mode);
     }
 }

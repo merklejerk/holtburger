@@ -303,7 +303,7 @@ impl ClientRuntime {
             WieldRequest::Whole
         };
         let now = Instant::now();
-        // Undefined (including an absent property) is not evidence of active combat.
+        // Only explicit active modes need restoration; an absent login property means peace.
         let resume_combat = matches!(
             self.world.player_combat_mode(),
             CombatMode::Melee | CombatMode::Missile | CombatMode::Magic
@@ -607,6 +607,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn combat_toggle_preserves_pending_equipment_restoration() {
+        let mut client = super::super::builder::build_test_client(ClientState::InWorld);
+        client.world = outfit(2, 1);
+        let mut pending = operation(&client.world, Instant::now());
+        pending.stage = EquipmentStage::Wield;
+        pending.resume_combat = true;
+        client.equipment_operation = Some(pending);
+        client
+            .handle_command(super::super::ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert!(client.equipment_operation.as_ref().unwrap().resume_combat);
     }
 
     #[tokio::test]

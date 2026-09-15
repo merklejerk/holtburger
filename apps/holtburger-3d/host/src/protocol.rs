@@ -130,6 +130,10 @@ pub enum HostEvent {
         #[serde(rename = "healthFraction")]
         health_fraction: f32,
     },
+    /// Server-confirmed stance replacement.
+    ClientCombatModeUpdated {
+        mode: crate::client_projection::ClientCombatMode,
+    },
     ClientPlayerSpellsUpdated {
         #[serde(rename = "spellIds")]
         spell_ids: Vec<u32>,
@@ -438,6 +442,9 @@ impl ClientEventSink for StdioEventSink {
                 guid,
                 health_fraction,
             },
+            crate::client_projection::ClientHostEvent::CombatModeUpdated { mode } => {
+                HostEvent::ClientCombatModeUpdated { mode }
+            }
             crate::client_projection::ClientHostEvent::PlayerSpellsUpdated { spell_ids } => {
                 HostEvent::ClientPlayerSpellsUpdated { spell_ids }
             }

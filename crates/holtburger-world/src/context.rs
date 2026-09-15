@@ -4,7 +4,8 @@ use crate::stats::{AttributeType, SkillType};
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt, WorldObjectPropertyAccessors,
+    CombatUse, EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt,
+    WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
@@ -517,19 +518,46 @@ pub trait WorldContextExt: WorldContext {
         !e.has_active_pet()
     }
 
+    /// Retail's default stance from wielded weapons, then the held/caster slot.
+    /// A held non-caster or incomplete equipped entity cannot enter combat.
     fn get_suggested_combat_mode(&self) -> CombatMode {
-        let mut best = CombatMode::Melee;
+        // acclient.c:390641: weapons take precedence over the held slot; empty hands use melee.
+        let mut held_mode = CombatMode::Melee;
+        let mut weapon_mode = None;
         for guid in self.iter_equipment() {
-            if let Some(wield_location) = self.equipment_mask(guid) {
-                if wield_location.intersects(EquipMask::CASTER) {
-                    return CombatMode::Magic;
-                }
-                if wield_location.intersects(EquipMask::MISSILE_WEAPON) {
-                    best = CombatMode::Missile;
-                }
+            let Some(location) = self.equipment_mask(guid) else {
+                return CombatMode::NonCombat;
+            };
+            if location.intersects(
+                EquipMask::MELEE_WEAPON | EquipMask::MISSILE_WEAPON | EquipMask::TWO_HANDED,
+            ) {
+                let Some(entity) = self.get_entity(guid) else {
+                    return CombatMode::NonCombat;
+                };
+                // Finish checking hydration before accepting a weapon. Equipment iteration
+                // order must not decide whether an unknown wield slot blocks this request.
+                weapon_mode = Some(if entity.combat_use() == Some(CombatUse::Missile as u32) {
+                    CombatMode::Missile
+                } else {
+                    CombatMode::Melee
+                });
+            }
+            if location.intersects(EquipMask::CASTER) {
+                held_mode = if self
+                    .get_entity(guid)
+                    .and_then(|entity| entity.item_type())
+                    .is_some_and(|kind| kind.contains(ItemType::CASTER))
+                {
+                    CombatMode::Magic
+                } else {
+                    CombatMode::NonCombat
+                };
             }
         }
-        best
+        match weapon_mode {
+            Some(mode) => mode,
+            None => held_mode,
+        }
     }
 
     fn is_wielding_caster(&self) -> bool {
@@ -688,7 +716,7 @@ mod tests {
     use crate::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use crate::stats::{AttributeType, SkillType};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{EquipMask, WorldObjectExt};
+    use holtburger_common::properties::{CombatUse, EquipMask, WorldObjectExt};
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, Usable,
     };
@@ -701,7 +729,8 @@ mod tests {
         player_guid: Option<Guid>,
         entities: HashMap<Guid, Entity>,
         inventory: HashSet<Guid>,
-        equipment: HashSet<Guid>,
+        // Explicit order lets tests exercise partially hydrated equipment in either order.
+        equipment: Vec<Guid>,
         open_containers: HashSet<Guid>,
         player_attributes: HashMap<AttributeType, u32>,
         player_skills: HashMap<SkillType, u32>,
@@ -787,7 +816,7 @@ mod tests {
         let mut world = TestWorld {
             player_guid: Some(player_guid),
             inventory: HashSet::from([side_pack_guid, nested_item_guid, equipped_item_guid]),
-            equipment: HashSet::from([equipped_item_guid]),
+            equipment: vec![equipped_item_guid],
             player_attributes: HashMap::from([(AttributeType::StrengthAttr, 100)]),
             player_skills: HashMap::from([(SkillType::Run, 300)]),
             player_int_properties: vec![(PropertyInt::AugmentationIncreasedCarryingCapacity, 1)],
@@ -854,7 +883,7 @@ mod tests {
 
         let mut world = TestWorld {
             player_guid: Some(player_guid),
-            equipment: HashSet::from([sword_guid]),
+            equipment: vec![sword_guid],
             ..Default::default()
         };
 
@@ -982,14 +1011,54 @@ mod tests {
     }
 
     #[test]
-    fn suggested_combat_mode_detects_missile_and_caster_by_wield_slot() {
+    fn incomplete_equipment_defers_combat_in_either_iteration_order() {
+        let bow_guid = Guid(1);
+        let pending_guid = Guid(2);
+        for equipment in [vec![bow_guid, pending_guid], vec![pending_guid, bow_guid]] {
+            let mut world = TestWorld {
+                equipment,
+                ..Default::default()
+            };
+            let mut bow = entity(bow_guid, "Bow");
+            bow.properties.ints.insert(
+                PropertyInt::CurrentWieldedLocation,
+                EquipMask::MISSILE_WEAPON.bits() as i32,
+            );
+            bow.properties
+                .ints
+                .insert(PropertyInt::CombatUse, CombatUse::Missile as i32);
+            world.entities.insert(bow_guid, bow);
+            assert_eq!(world.get_suggested_combat_mode(), CombatMode::NonCombat);
+        }
+    }
+
+    #[test]
+    fn held_non_casters_refuse_combat_and_empty_hands_allow_melee() {
+        let guid = Guid(1);
+        let mut world = TestWorld::default();
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::Melee);
+        let mut held = entity(guid, "Held item");
+        held.properties.ints.insert(
+            PropertyInt::CurrentWieldedLocation,
+            EquipMask::CASTER.bits() as i32,
+        );
+        held.properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::MISC.bits() as i32);
+        world.entities.insert(guid, held);
+        world.equipment.push(guid);
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::NonCombat);
+    }
+
+    #[test]
+    fn suggested_combat_mode_uses_weapon_combat_use_and_held_item_type() {
         let player_guid = Guid(0x5000_0001);
         let bow_guid = Guid(0x8000_0001);
         let wand_guid = Guid(0x8000_0002);
 
         let mut world = TestWorld {
             player_guid: Some(player_guid),
-            equipment: HashSet::from([bow_guid]),
+            equipment: vec![bow_guid],
             ..Default::default()
         };
 
@@ -998,6 +1067,9 @@ mod tests {
             PropertyInt::CurrentWieldedLocation,
             EquipMask::MISSILE_WEAPON.bits() as i32,
         );
+        bow.properties
+            .ints
+            .insert(PropertyInt::CombatUse, CombatUse::Missile as i32);
         world.entities.insert(bow_guid, bow);
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Missile);
@@ -1007,8 +1079,11 @@ mod tests {
             PropertyInt::CurrentWieldedLocation,
             EquipMask::CASTER.bits() as i32,
         );
+        wand.properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CASTER.bits() as i32);
         world.entities.insert(wand_guid, wand);
-        world.equipment.insert(wand_guid);
+        world.equipment = vec![wand_guid];
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Magic);
     }
@@ -1279,7 +1354,7 @@ mod tests {
         let world = TestWorld {
             player_guid: Some(player_guid),
             inventory: HashSet::from([inventory_guid]),
-            equipment: HashSet::from([equipped_guid]),
+            equipment: vec![equipped_guid],
             ..Default::default()
         };
 

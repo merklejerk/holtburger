@@ -38,7 +38,7 @@
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
-	import type { ClientVital } from "./client-host-contract";
+	import type { ClientCombatMode, ClientVital } from "./client-host-contract";
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
@@ -56,6 +56,12 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** Server-confirmed stance for the dock, independent of open panels. */
+		readonly combatMode: ClientCombatMode;
+		/** Gameplay lifecycle admits stance commands. */
+		readonly combatEnabled: boolean;
+		/** Same stance action used by the keyboard binding. */
+		readonly onToggleCombat: () => void;
 		/** Resolve world inventory destinations without changing selection. */
 		onPickInventoryTarget: ClientViewportTargetPicker;
 		/** Ordinary inventory refusal feedback. */
@@ -113,6 +119,9 @@
 	}
 
 	let {
+		combatMode,
+		combatEnabled,
+		onToggleCombat,
 		entityMetadata,
 		cameraController,
 		debugEnabled,
@@ -594,6 +603,9 @@
 		onPlacementChange={(shortcuts) => (hudLayout = { ...hudLayout, shortcuts })}
 	>
 		<ClientShortcutDock
+			{combatMode}
+			{combatEnabled}
+			{onToggleCombat}
 			{shortcuts}
 			{activePanel}
 			onToggle={(panel) => (activePanel = activePanel === panel ? null : panel)}

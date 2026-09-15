@@ -351,6 +351,8 @@ pub enum ClientPresentationDiscontinuityKind {
 pub struct ClientApplicationSnapshot {
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
+    /// Server-confirmed stance, undefined before the local player is established.
+    pub combat_mode: CombatMode,
     /// Complete shell-facing lifecycle level.
     pub lifecycle: ClientLifecycleState,
     /// Accepted local-player debug override; never changes server physics flags.
@@ -1020,6 +1022,8 @@ pub enum ClientCommand {
         request_id: u64,
         accepted: bool,
     },
+    /// Toggle peace and the equipped default stance using current authoritative facts.
+    ToggleCombatMode,
     SetCombatMode(CombatMode),
     CancelAttack,
     QueryEntityDebugInfo(Guid),

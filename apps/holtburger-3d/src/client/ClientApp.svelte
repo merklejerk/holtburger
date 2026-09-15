@@ -59,6 +59,7 @@
 	import ClientWorldView from "./ClientWorldView.svelte";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
+		ClientCombatMode,
 		ClientCharacterMotionCapabilities,
 		ClientCharacterMotionEventRequest,
 		ClientCharacterMotionRejection,
@@ -101,6 +102,8 @@
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
 	let spells = $state<ClientSpellServices | null>(null);
+	/** Event-driven stance consumed only by the shortcut dock. */
+	let combatMode = $state<ClientCombatMode>("unknown");
 	let inventory = $state<ClientInventoryState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
@@ -269,7 +272,11 @@
 			case "entity-collision-disabled":
 				entityCollisionDisabled = event.disabled;
 				return;
+			case "combat-mode":
+				combatMode = event.mode;
+				return;
 			case "current-state":
+				combatMode = event.state.combatMode;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
 				playerName = event.state.playerName;
@@ -403,6 +410,15 @@
 		}
 	}
 
+	async function toggleCombatMode(): Promise<void> {
+		if (session === null || lifecycle.kind !== "in-world") return;
+		try {
+			await session.toggleCombatMode();
+		} catch (error) {
+			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+		}
+	}
+
 	async function sendChat(message: string): Promise<void> {
 		if (session === null) throw new Error("Chat session is unavailable.");
 		await session.sendChat(message);
@@ -410,6 +426,11 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (APP_INPUT.shortcut("toggleCombat", event) && !event.isComposing) {
+			event.preventDefault();
+			if (!event.repeat) void toggleCombatMode();
+			return;
+		}
 		if (
 			APP_INPUT.shortcut("cancel", event) &&
 			inputArbiter?.applyCancel(true, event.repeat)
@@ -921,6 +942,9 @@
 
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
+		{combatMode}
+		combatEnabled={lifecycle.kind === "in-world"}
+		onToggleCombat={() => void toggleCombatMode()}
 		{entityMetadata}
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 		{debugEnabled}

@@ -4,6 +4,28 @@ import { AppInput } from "./app-input";
 import { INPUT_DEFAULTS } from "./input-defaults";
 
 describe("InputContext", () => {
+	it("binds both backquote characters without consuming modified system chords", () => {
+		const input = new AppInput(INPUT_DEFAULTS);
+		for (const [key, shiftKey] of [
+			["`", false],
+			["~", true],
+		] as const) {
+			const event = {
+				key,
+				shiftKey,
+				ctrlKey: false,
+				altKey: false,
+				metaKey: false,
+			};
+			expect(input.shortcut("toggleCombat", event)).toBe(true);
+			for (const modifier of ["ctrlKey", "altKey", "metaKey"] as const) {
+				expect(
+					input.shortcut("toggleCombat", { ...event, [modifier]: true }),
+				).toBe(false);
+			}
+		}
+	});
+
 	it("resolves give from the configured chord rather than the default key", () => {
 		const input = new AppInput({
 			...INPUT_DEFAULTS,

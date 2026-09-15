@@ -160,10 +160,14 @@ impl WorldState {
             .unwrap_or(0) as u64
     }
 
+    /// Effective stance: login starts in peace until an explicit server update replaces it.
     pub fn player_combat_mode(&self) -> CombatMode {
+        // Retail initializes NONCOMBAT in ClientCombatSystem::Begin (acclient.c:389826).
+        // ACE initializes Creature.CombatMode separately from the property dictionary
+        // (Creature.cs:91), so PlayerDescription need not contain PropertyInt::CombatMode.
         let value = self
             .player_int_property(PropertyInt::CombatMode)
-            .unwrap_or(0);
+            .unwrap_or(CombatMode::NonCombat as i32);
         CombatMode::from_repr(value as u32).unwrap_or(CombatMode::NonCombat)
     }
 

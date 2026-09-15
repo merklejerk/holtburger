@@ -319,6 +319,7 @@ function currentState(): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,
+		combatMode: "peace",
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

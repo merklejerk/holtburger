@@ -54,6 +54,7 @@ async function fixture() {
 		worldName: "Test",
 		playerName: "Player",
 		knownSpells: null,
+		combatMode: "peace",
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

@@ -372,6 +372,9 @@
 					persistentMessage={{ kind: "preview", message: toastMessage }}
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
+					combatMode="peace"
+					combatEnabled={false}
+					onToggleCombat={() => {}}
 					{shortcuts}
 					activePanel={windowOpen ? "debug" : null}
 					onToggle={() => (windowOpen = !windowOpen)}

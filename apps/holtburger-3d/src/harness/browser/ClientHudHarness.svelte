@@ -599,6 +599,7 @@
 			worldName: "Fixture",
 			playerName: "Wayfarer",
 			knownSpells: null,
+			combatMode: "peace",
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,
@@ -2029,6 +2030,9 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		combatMode="peace"
+		combatEnabled={false}
+		onToggleCombat={() => {}}
 		{itemInteractions}
 		entityMetadata={{
 			status: "available",

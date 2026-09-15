@@ -160,6 +160,8 @@ pub enum ClientHostCommand {
     StartClient {
         startup: ClientLaunchConfiguration,
     },
+    /// Toggle peace and the current equipment-derived stance in core.
+    ToggleClientCombatMode,
     RequestClientCurrentState,
     SelectClientCharacter {
         guid: holtburger_common::Guid,
@@ -233,6 +235,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "replace_client_drive",
     "queue_client_character_motion_event",
     "send_client_chat",
+    "toggle_client_combat_mode",
     "query_client_entity_health",
     "respond_to_client_confirmation",
     "start_client_camera",
@@ -548,6 +551,11 @@ pub async fn dispatch_client(
     match command {
         StartClient { startup } => runtime
             .start(startup)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ToggleClientCombatMode => runtime
+            .send_command(ClientCommand::ToggleCombatMode)
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

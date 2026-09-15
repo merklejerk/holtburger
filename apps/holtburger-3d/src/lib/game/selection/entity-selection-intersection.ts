@@ -30,6 +30,8 @@ export type EntitySelectionGeometry =
 
 /** Nearest exact browser hit after current-pose refinement. */
 export interface EntitySelectionRefinement {
+	/** False when a candidate lacks geometry; interaction callers must not infer empty ground. */
+	readonly complete: boolean;
 	readonly selectedGuid: number | null;
 	readonly distance: number | null;
 }
@@ -43,9 +45,12 @@ export function refineEntitySelectionCandidates(
 ): EntitySelectionRefinement {
 	validateRay(ray, staticLimitDistance);
 	let selectedGuid: number | null = null;
+	let complete = true;
 	let selectedDistance = staticLimitDistance;
 	for (const guid of candidateGuids) {
+		let visited = false;
 		const hit = source.withSpawnedEntitySelectionGeometry(guid, (geometry) => {
+			visited = true;
 			const origin = createLandblockWorldOrigin(geometry.landblockId);
 			const localRay = {
 				direction: ray.direction,
@@ -93,6 +98,7 @@ export function refineEntitySelectionCandidates(
 			}
 			return closest;
 		});
+		if (!visited) complete = false;
 		if (
 			hit !== null &&
 			(hit < selectedDistance ||
@@ -104,6 +110,7 @@ export function refineEntitySelectionCandidates(
 		}
 	}
 	return {
+		complete,
 		distance: selectedGuid === null ? null : selectedDistance,
 		selectedGuid,
 	};

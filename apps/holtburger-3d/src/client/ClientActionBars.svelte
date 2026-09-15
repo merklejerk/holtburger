@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
 	import { reconcileActionBars } from "./client-action-bar-reconciliation";
 	import type { ClientItemInteractions } from "./client-item-interactions";
 	import {
@@ -32,6 +33,10 @@
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	interface Props {
+		/** Resolve world inventory destinations without changing selection. */
+		onPickInventoryTarget: ClientViewportTargetPicker;
+		/** Ordinary inventory refusal feedback. */
+		onInventoryNotice: (message: string) => void;
 		/** Select an inventory source once a real drag begins. */
 		onSelectDragItem: (guid: number) => void;
 		/** Common DOM boundary for inventory and action-cell gestures. */
@@ -51,6 +56,8 @@
 		editable,
 		viewport,
 		onSelectDragItem,
+		onPickInventoryTarget,
+		onInventoryNotice,
 	}: Props = $props();
 	let bars = $state<readonly ClientActionBar[]>([initialActionBar()]);
 	let nextId = 2;
@@ -161,6 +168,8 @@
 			keyboard,
 			() => interactions.cancel(),
 			onSelectDragItem,
+			onPickInventoryTarget,
+			onInventoryNotice,
 		);
 		const repository = inventory.icons;
 		const owner = repository.createOwner("display");

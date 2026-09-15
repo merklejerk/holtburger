@@ -125,6 +125,7 @@ const clientEntityFactsSchema = z
 		]),
 		ownedByPlayer: z.boolean(),
 		canPickUp: z.boolean(),
+		canReceiveGive: z.boolean(),
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
 		targeting: z.enum(["ineligible", "creature", "non-creature"]),

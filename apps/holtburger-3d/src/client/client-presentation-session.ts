@@ -683,6 +683,7 @@ export class ClientPresentationSession {
 		const runtime = this.#owner?.runtime;
 		return runtime === undefined
 			? {
+					complete: false,
 					distance: null,
 					selectedGuid: null,
 				}

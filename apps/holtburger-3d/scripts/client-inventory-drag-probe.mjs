@@ -438,8 +438,92 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	if ((await submissions()).length !== beforeOverlay)
 		throw new Error("Outside release dropped an item");
 
+	await read(`${api}.giveProbe.begin()`);
+	await read(`${api}.giveProbe.setTarget({kind: "entity", guid: 7})`);
+	const giveBefore = (await submissions()).length;
+	const givePoint = await begin(source, viewport);
+	await release(givePoint);
+	const givePreview = await lastPreview();
+	if (
+		givePreview.intent.target.kind !== "give" ||
+		givePreview.intent.target.guid !== 7
+	)
+		throw new Error("Entity release did not resolve give");
+	await reply(givePreview.sequence, { kind: "give" });
+	if ((await submissions()).length !== giveBefore + 1)
+		throw new Error("Give release did not submit once");
+	const binding = await read(`${api}.giveProbe.binding`);
+	const giveKey = {
+		key: binding.key ?? "Unidentified",
+		code: binding.code ?? "",
+		modifiers:
+			(binding.alt ? 1 : 0) |
+			(binding.ctrl ? 2 : 0) |
+			(binding.meta ? 4 : 0) |
+			(binding.shift ? 8 : 0),
+	};
+	await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...giveKey });
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		...giveKey,
+		autoRepeat: true,
+	});
+	await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...giveKey });
+	const given = await submissions();
+	if (
+		given.length !== giveBefore + 2 ||
+		given.at(-1).args.intent.target.guid !== 7 ||
+		given.at(-1).args.intent.item !== 91
+	)
+		throw new Error(
+			"Configured give key did not use selection history exactly once",
+		);
+	for (const result of [
+		{ kind: "entity", guid: 94 },
+		{ kind: "unavailable", reason: "Injected unavailable picking" },
+	]) {
+		await read(`${api}.giveProbe.setTarget(${JSON.stringify(result)})`);
+		const p = await begin(source, viewport);
+		await release(p);
+		if ((await submissions()).length !== giveBefore + 2)
+			throw new Error("Failed give became an inventory action");
+		if (await read('document.querySelector("[data-item-dragging]") !== null'))
+			throw new Error("Unavailable destination left a gesture pending");
+	}
+	await read(`${api}.giveProbe.setTarget(null)`);
+	const delayed = await begin(source, viewport);
+	await release(delayed);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Escape",
+		code: "Escape",
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Escape",
+		code: "Escape",
+	});
+	await read(`${api}.giveProbe.reply({kind: "entity", guid: 7})`);
+	if ((await submissions()).length !== giveBefore + 2)
+		throw new Error("Cancelled world pick submitted give");
+	const removedPoint = await begin(source, viewport);
+	await release(removedPoint);
+	const removedSource = await read(`${api}.giveProbe.removeSource(91)`);
+	await read(`${api}.giveProbe.reply({kind: "entity", guid: 7})`);
+	if ((await submissions()).length !== giveBefore + 2)
+		throw new Error("Removed source submitted a late give");
+	if (await read('document.querySelector("[data-item-dragging]") !== null'))
+		throw new Error("Source removal left a world pick active");
+	await read(
+		`${api}.giveProbe.restoreSource(${JSON.stringify(removedSource)})`,
+	);
+	await read(`${api}.giveProbe.end()`);
+
 	return {
 		nativeSubmission: true,
+		worldGive: true,
+		configuredGiveHotkey: true,
+		giveFailureNeverDrops: true,
 		groundDrop: true,
 		equippedGroundDrop: true,
 		bagGroundDrop: true,

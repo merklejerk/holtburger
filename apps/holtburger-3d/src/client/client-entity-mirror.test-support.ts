@@ -16,6 +16,7 @@ export function entityFacts(
 	return {
 		guid,
 		canPickUp: false,
+		canReceiveGive: false,
 		description: {
 			kind: "known",
 			name: `Item ${guid}`,

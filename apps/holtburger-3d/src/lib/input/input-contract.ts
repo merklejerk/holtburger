@@ -76,6 +76,7 @@ type ClientShortcut =
 	| "nextNonCreature"
 	| "previousNonCreature"
 	| "interact"
+	| "give"
 	| "preciseJump"
 	| "cancel"
 	| "enterWorld"

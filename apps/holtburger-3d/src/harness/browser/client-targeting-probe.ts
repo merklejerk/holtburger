@@ -68,7 +68,11 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				},
 				refinement: { start: Vec3.zero(), direction: new Vec3(0, 0, -1) },
 			}),
-			refineEntitySelection: () => ({ selectedGuid: 2, distance: 1 }),
+			refineEntitySelection: () => ({
+				complete: true,
+				selectedGuid: 2,
+				distance: 1,
+			}),
 		}),
 	});
 	let scans = 0;

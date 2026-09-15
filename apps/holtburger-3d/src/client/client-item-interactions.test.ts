@@ -15,12 +15,14 @@ async function fixture() {
 		},
 	});
 	let selected: number | null = null;
+	let previous: number | null = null;
 	const failure = vi.fn();
 	const beginAcquisition = vi.fn();
 	const interactions = new ClientItemInteractions({
 		session: lifecycle,
-		selection: { selectedGuid: () => selected },
+		selection: { selectedGuid: () => selected, previousGuid: () => previous },
 		reportFailure: failure,
+		reportNotice: failure,
 		beginAcquisition,
 	});
 	await lifecycle.start();
@@ -103,6 +105,7 @@ async function fixture() {
 		},
 		emit,
 		select: (guid: number | null) => {
+			previous = guid === null ? null : selected;
 			selected = guid;
 		},
 		destroy: () => {
@@ -113,6 +116,33 @@ async function fixture() {
 }
 
 describe("shared frontend item interaction flow", () => {
+	it("gives the selected item to the previous recipient and cancels use targeting", async () => {
+		const f = await fixture();
+		const give = vi
+			.spyOn(f.lifecycle, "submitInventory")
+			.mockResolvedValue(undefined);
+		f.emit("client-entity-facts-changed", {
+			upserts: [entityFacts(4, { canReceiveGive: true })],
+			removed: [],
+		});
+		f.select(4);
+		f.select(2);
+		f.interactions.use(2, false);
+		f.interactions.giveSelected();
+		expect(f.interactions.snapshot().kind).toBe("idle");
+		expect(give).toHaveBeenCalledExactlyOnceWith({
+			item: 2,
+			target: { kind: "give", guid: 4 },
+		});
+		f.emit("client-entity-facts-changed", { upserts: [], removed: [4] });
+		f.interactions.giveSelected();
+		expect(give).toHaveBeenCalledTimes(1);
+		expect(f.failure).toHaveBeenLastCalledWith(
+			"The previous selection cannot receive an item.",
+		);
+		f.destroy();
+	});
+
 	it("picks up loose items before use while preserving active target acquisition", async () => {
 		const f = await fixture();
 		const inventory = vi

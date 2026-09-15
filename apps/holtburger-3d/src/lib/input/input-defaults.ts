@@ -64,6 +64,8 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r" }],
+		/** Give the selected inventory item to the previous selected recipient. */
+		give: [{ key: "g", ctrl: false, alt: false, meta: false }],
 		/** Enter the aimed jump interaction. */
 		preciseJump: [{ key: "j", shift: true }],
 		/** Cancel the active context, then clear selection when gameplay owns Escape. */

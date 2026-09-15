@@ -72,8 +72,12 @@ function allocateOperation(): number {
 /** One frontend use flow. Rust evaluates consequences; this owner decides whether to ask. */
 export class ClientItemInteractions {
 	readonly #session: Session;
-	readonly #selection: Pick<ClientEntitySelection, "selectedGuid">;
+	readonly #selection: Pick<
+		ClientEntitySelection,
+		"selectedGuid" | "previousGuid"
+	>;
 	readonly #failure: (message: string) => void;
+	readonly #notice: (message: string) => void;
 	readonly #beginAcquisition: () => void;
 	readonly #unsubscribe: () => void;
 	readonly #listeners = new Set<(state: ItemInteractionState) => void>();
@@ -82,14 +86,20 @@ export class ClientItemInteractions {
 
 	constructor(options: {
 		readonly session: Session;
-		readonly selection: Pick<ClientEntitySelection, "selectedGuid">;
+		readonly selection: Pick<
+			ClientEntitySelection,
+			"selectedGuid" | "previousGuid"
+		>;
 		readonly reportFailure: (message: string) => void;
+		/** Ordinary local gameplay refusal, without warning severity. */
+		readonly reportNotice: (message: string) => void;
 		/** Retire mutually exclusive frontend modes before acquisition begins. */
 		readonly beginAcquisition: () => void;
 	}) {
 		this.#session = options.session;
 		this.#selection = options.selection;
 		this.#failure = options.reportFailure;
+		this.#notice = options.reportNotice;
 		this.#beginAcquisition = options.beginAcquisition;
 		this.#unsubscribe = options.session.subscribe((event) =>
 			this.#receive(event),
@@ -123,6 +133,40 @@ export class ClientItemInteractions {
 					.catch((error: unknown) => this.#failure(String(error)));
 			} else this.use(selected, unrestricted);
 		}
+	}
+
+	/** Give uses the current item and exactly one previous recipient; selection is unchanged. */
+	giveSelected(): void {
+		if (this.#destroyed) return;
+		const source = this.#selection.selectedGuid();
+		const recipient = this.#selection.previousGuid();
+		this.cancel();
+		const read = this.#session.entities.read();
+		if (
+			read.kind === "pending" ||
+			this.#session.state().lifecycle?.kind !== "in-world"
+		) {
+			this.#notice("Giving requires current world information.");
+			return;
+		}
+		if (source === null || recipient === null) {
+			this.#notice("Select a recipient, then select the item to give.");
+			return;
+		}
+		if (!read.level.entities.get(source)?.ownedByPlayer) {
+			this.#notice("Select an item you are carrying or wearing to give.");
+			return;
+		}
+		if (!read.level.entities.get(recipient)?.canReceiveGive) {
+			this.#notice("The previous selection cannot receive an item.");
+			return;
+		}
+		void this.#session
+			.submitInventory({
+				item: source,
+				target: { kind: "give", guid: recipient },
+			})
+			.catch((error: unknown) => this.#failure(String(error)));
 	}
 
 	/** Inventory supplies its clicked identity, independent of selection toggles. */

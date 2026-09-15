@@ -7,7 +7,9 @@ use super::{
 };
 use holtburger_common::{
     Guid,
-    properties::{EquipMask, WorldObjectExt},
+    properties::{
+        EquipMask, PropertyInt, PropertyString, WorldObjectExt, WorldObjectPropertyAccessors,
+    },
 };
 use holtburger_world::{
     WorldState,
@@ -24,6 +26,8 @@ pub enum InventoryTarget {
     Pickup,
     /// Drop an owned carried or equipped object near the character.
     Ground,
+    /// Give the whole source stack to a plausible world recipient.
+    Give { guid: Guid },
     /// Split this positive quantity into newly allocated carried storage.
     Split { amount: u32 },
     /// Merge when compatible with remaining capacity, otherwise insert before this item.
@@ -79,6 +83,12 @@ pub enum InventoryPlan {
     Move(InventoryMove),
     /// One server-owned drop, including dequipping when necessary.
     Drop { item: Guid },
+    /// Exact give request, including its positive signed-wire quantity.
+    Give {
+        item: Guid,
+        recipient: Guid,
+        amount: i32,
+    },
     /// Equipment owner executes the planned conflict removals and wield.
     Equip(EquipmentPlan),
     /// Two insertions exchange both endpoints and restore intervening native indices.
@@ -103,6 +113,12 @@ pub enum InventoryPlanError {
     /// Current authority does not establish a loose pickup candidate.
     #[error("This object cannot currently be picked up")]
     NotPickable,
+    /// Recipient must be a distinct plausible world recipient.
+    #[error("This entity cannot receive an item")]
+    InvalidRecipient,
+    /// A known stack must have a positive quantity.
+    #[error("The item has no quantity to give")]
+    EmptyGive,
     /// Required identity, quantity, roster, capacity, or placement is unavailable.
     #[error("Inventory facts for {0} have not arrived")]
     Pending(Guid),
@@ -156,6 +172,37 @@ pub fn plan_inventory_intent(
                 container: destination.container,
                 placement: destination.placement,
             }))
+        }
+        InventoryTarget::Give { guid } => {
+            if guid == intent.item
+                || !holtburger_world::interaction::give_recipient_candidate(world, guid)
+            {
+                return Err(InventoryPlanError::InvalidRecipient);
+            }
+            let entity = world
+                .entities
+                .get(intent.item)
+                .ok_or(InventoryPlanError::Pending(intent.item))?;
+            if entity.get_string_prop(PropertyString::Name).is_none()
+                || entity.item_type().is_none()
+            {
+                return Err(InventoryPlanError::Pending(intent.item));
+            }
+            let amount = if entity.is_stackable() {
+                entity
+                    .get_int_prop(PropertyInt::StackSize)
+                    .ok_or(InventoryPlanError::Pending(intent.item))?
+            } else {
+                1
+            };
+            if amount <= 0 {
+                return Err(InventoryPlanError::EmptyGive);
+            }
+            Ok(InventoryPlan::Give {
+                item: intent.item,
+                recipient: guid,
+                amount,
+            })
         }
         InventoryTarget::Ground => Ok(InventoryPlan::Drop { item: intent.item }),
         InventoryTarget::Split { amount } => {
@@ -401,6 +448,8 @@ pub enum InventoryPreview {
     Move,
     /// Ground drop does not depend on native inventory sorting.
     Drop,
+    /// Give is independent of native inventory sorting.
+    Give,
     /// Full set of displaced identities for equipment highlighting and feedback.
     Equip { displaced: Vec<Guid> },
     /// Exchange two real pack positions.
@@ -428,6 +477,7 @@ impl From<&InventoryPlan> for InventoryPreview {
             InventoryPlan::Merge { amount, .. } => Self::Merge { amount: *amount },
             InventoryPlan::Move(_) => Self::Move,
             InventoryPlan::Drop { .. } => Self::Drop,
+            InventoryPlan::Give { .. } => Self::Give,
             InventoryPlan::Equip(plan) => Self::Equip {
                 displaced: plan.unequips.iter().map(|step| step.item).collect(),
             },
@@ -512,6 +562,96 @@ mod tests {
             place(&mut world, guid, PACK, slot, InventoryEntryKind::Item);
         }
         world
+    }
+
+    #[test]
+    fn give_resolves_source_quantity_and_revalidates_both_identities() {
+        use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
+        let mut world = super::super::equipment_plan::tests::outfit(0, 0);
+        let source = world.player_equipment().next().expect("equipped item").0;
+        let recipient = Guid(0x8000_0042);
+        let mut entity = holtburger_world::entity::Entity::new(
+            recipient,
+            "Recipient".into(),
+            Default::default(),
+        );
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.add_entity(entity);
+        let intent = InventoryIntent {
+            item: source,
+            target: InventoryTarget::Give { guid: recipient },
+        };
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Give {
+                item: source,
+                recipient,
+                amount: 1
+            })
+        );
+        world
+            .entities
+            .get_mut(source)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::MaxStackSize, i32::MAX);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::Pending(source))
+        );
+        for amount in [1, 17, i32::MAX] {
+            world
+                .entities
+                .get_mut(source)
+                .unwrap()
+                .properties
+                .ints
+                .insert(PropertyInt::StackSize, amount);
+            assert_eq!(
+                plan_inventory_intent(&world, intent),
+                Ok(InventoryPlan::Give {
+                    item: source,
+                    recipient,
+                    amount
+                })
+            );
+        }
+        for amount in [0, -1] {
+            world
+                .entities
+                .get_mut(source)
+                .unwrap()
+                .properties
+                .ints
+                .insert(PropertyInt::StackSize, amount);
+            assert_eq!(
+                plan_inventory_intent(&world, intent),
+                Err(InventoryPlanError::EmptyGive)
+            );
+        }
+        world
+            .entities
+            .get_mut(source)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::StackSize, 17);
+        world.entities.get_mut(recipient).unwrap().flags = ObjectDescriptionFlag::ATTACKABLE;
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::InvalidRecipient)
+        );
+        world.entities.get_mut(recipient).unwrap().flags = ObjectDescriptionFlag::PLAYER;
+        world.remove_entity(source);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::NotOwned)
+        );
     }
 
     #[test]

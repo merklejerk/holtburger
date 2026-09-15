@@ -6,6 +6,7 @@ const unsigned = z.number().int().min(0).max(0xffff_ffff);
 const inventoryTargetSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("pickup") }),
 	z.object({ kind: z.literal("ground") }),
+	z.object({ kind: z.literal("give"), guid: unsigned }),
 	z.object({ kind: z.literal("split"), amount: unsigned.positive() }),
 	z.object({ kind: z.literal("item"), guid: unsigned }),
 	z.object({ kind: z.literal("stack"), guid: unsigned }),
@@ -35,6 +36,7 @@ export const inventoryPreviewResultSchema = z.object({
 		z.object({ kind: z.literal("merge"), amount: unsigned.positive() }),
 		z.object({ kind: z.literal("move") }),
 		z.object({ kind: z.literal("drop") }),
+		z.object({ kind: z.literal("give") }),
 		z.object({ kind: z.literal("equip"), displaced: z.array(unsigned) }),
 		z.object({ kind: z.literal("swap") }),
 		z.object({ kind: z.literal("rejected"), reason: z.string() }),

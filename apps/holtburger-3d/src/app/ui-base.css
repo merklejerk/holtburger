@@ -74,6 +74,17 @@
 		--ui-menu-padding: 4px;
 		--ui-menu-item-padding: 5px 12px;
 		--ui-icon-rendering: pixelated;
+		/* Spell panel and accordion density; icon size changes display only. */
+		--ui-spell-panel-padding: 8px;
+		--ui-spell-row-padding: 4px 6px;
+		--ui-spell-row-gap: 8px;
+		--ui-spell-icon-size: 32px;
+		--ui-spell-details-padding: 10px 12px;
+		--ui-spell-details-line-height: 1.5;
+		--ui-spell-expansion-indicator-gap: 8px;
+		/* Border color contributions when mixed with transparency. */
+		--ui-spell-row-divider-tint: 20%;
+		--ui-spell-details-divider-tint: 30%;
 		/* Spell filter category colors and pill geometry. */
 		--ui-spell-filter-disposition-color: #82bd91;
 		--ui-spell-filter-target-color: #79b6d6;
@@ -82,6 +93,12 @@
 		--ui-spell-filter-level-color: #c6b575;
 		--ui-spell-filter-gap: 6px;
 		--ui-spell-filter-pill-radius: 12px;
+		--ui-spell-filter-pill-padding: 2px 8px;
+		--ui-spell-filter-max-height: 40vh;
+		/* Category color contributions over the well surface, as percentages. */
+		--ui-spell-filter-tint: 12%;
+		--ui-spell-filter-active-tint: 38%;
+		--ui-spell-control-disabled-opacity: 0.5;
 		/* Spell formula list density; prepared artwork remains native resolution. */
 		--ui-spell-component-icon-size: 20px;
 		--ui-spell-component-row-gap: 2px;

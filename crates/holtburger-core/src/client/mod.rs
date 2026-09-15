@@ -251,6 +251,11 @@ impl ClientRuntime {
                 .player_entity()
                 .map(|entity| entity.name().to_string()),
             known_spells: self.known_spell_ids(),
+            combat_mode: if self.world.player.guid == Guid::NULL {
+                holtburger_protocol::messages::combat::CombatMode::Undef
+            } else {
+                self.world.player_combat_mode()
+            },
             vitals: self.world.player.vitals.clone(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),

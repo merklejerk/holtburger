@@ -7,10 +7,12 @@ use crate::motion_command_for_soul_emote_pose;
 use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::interaction::EntityUseRejection;
 use holtburger_world::spell::MagicSchool;
 use std::time::Instant;
@@ -280,7 +282,8 @@ impl ClientRuntime {
             | ClientCommand::RaiseSkill { .. }
             | ClientCommand::TrainSkill { .. } => self.handle_progression_command(cmd).await,
 
-            ClientCommand::SetCombatMode(_)
+            ClientCommand::ToggleCombatMode
+            | ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
             | ClientCommand::RequestCurrentApplicationState
@@ -1051,6 +1054,51 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::ToggleCombatMode => {
+                if !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+                // An equipment transaction temporarily enters peace. Do not interpret that
+                // intermediate stance as a new player request or interrupt its restoration.
+                if self.equipment_operation.is_some() {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(
+                            "Wait for the equipment change to finish.".into(),
+                        ),
+                    );
+                    return Ok(());
+                }
+                let current = self.world.player_combat_mode();
+                if self.world.player.guid == Guid::NULL || current == CombatMode::Undef {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(
+                            "Character combat state has not arrived yet.".into(),
+                        ),
+                    );
+                    return Ok(());
+                }
+                let mode = match current {
+                    CombatMode::NonCombat => self.world.get_suggested_combat_mode(),
+                    _ => CombatMode::NonCombat,
+                };
+                if mode == current {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(
+                            "You cannot enter combat with the currently held equipment.".into(),
+                        ),
+                    );
+                    return Ok(());
+                }
+                // Stance completion is a mode/motion update, not UseDone. ACE owns its
+                // NextUseTime animation queue (Player_Combat.cs:737), so do not arm use busy state.
+                self.send_game_action(GameAction::ChangeCombatMode(Box::new(
+                    ChangeCombatModeActionData { mode },
+                )))
+                .await
+            }
             ClientCommand::SetCombatMode(mode) => {
                 self.stop_equipment_change(
                     "Combat mode changed by another command; the last request may still complete",
@@ -1310,7 +1358,7 @@ fn on_off(value: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{NormalizedSpellCast, normalize_spell_cast};
+    use super::{CombatMode, NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
         ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
@@ -1381,6 +1429,53 @@ mod tests {
             .get_mut(guid)
             .expect("seeded player should exist")
             .set_did_prop(PropertyDataId::MotionTable, Guid(MOTION_TABLE_ID));
+    }
+
+    #[tokio::test]
+    async fn combat_toggle_waits_for_world_and_preserves_server_authority_and_use_busy() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        // ACE initializes peace without requiring a CombatMode property in login data.
+        assert_eq!(
+            client.world.player_int_property(PropertyInt::CombatMode),
+            None
+        );
+        client.state = ClientState::EnteringWorld;
+        client
+            .handle_command(ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+
+        client.state = ClientState::InWorld;
+        assert!(client.arm_busy_operation(BusyOperationKind::Use));
+        client
+            .handle_command(ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(client.world.player_combat_mode(), CombatMode::NonCombat);
+        assert_eq!(
+            client.application_snapshot().combat_mode,
+            CombatMode::NonCombat
+        );
+        assert_eq!(
+            client.active_busy_operation.as_ref().unwrap().operation,
+            BusyOperationKind::Use
+        );
+
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+        client
+            .handle_command(ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 2);
+        assert_eq!(client.world.player_combat_mode(), CombatMode::Magic);
     }
 
     #[tokio::test]

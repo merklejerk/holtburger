@@ -5,6 +5,7 @@
 		| "encumbered"
 		| "sick"
 		| "inventory"
+		| "combat"
 		| "training"
 		| "spells"
 		| "party"
@@ -37,6 +38,10 @@
 		<path d="M7 9h10l2 12H5Zm3 0V6a2 2 0 0 1 4 0v3M8 14h8" />
 	{:else if name === "sick"}
 		<path d="M8 4h8v5h4v8h-4v4H8v-4H4V9h4Zm1 8h6M9 16c2-2 4-2 6 0" />
+	{:else if name === "combat"}
+		<path
+			d="m4 3 4 1 12 15-2 2L5 7Zm16 0-4 1-4 5m-3 4-5 6 2 2 5-6M3 16l5 5m8-5 5 5"
+		/>
 	{:else if name === "inventory"}
 		<path d="M4 7h16v14H4Zm4 0V5a4 4 0 0 1 8 0v2M8 12h8" />
 	{:else if name === "training"}

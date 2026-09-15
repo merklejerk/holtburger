@@ -64,6 +64,11 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r" }],
+		/** Toggle peace/combat with either character on the backquote key. */
+		toggleCombat: [
+			{ key: "`", ctrl: false, alt: false, meta: false },
+			{ key: "~", ctrl: false, alt: false, meta: false },
+		],
 		/** Give the selected inventory item to the previous selected recipient. */
 		give: [{ key: "g", ctrl: false, alt: false, meta: false }],
 		/** Enter the aimed jump interaction. */

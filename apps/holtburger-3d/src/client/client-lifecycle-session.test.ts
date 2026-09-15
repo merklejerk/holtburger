@@ -66,6 +66,37 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("toggles only in world and reconciles stance through events and replacement snapshots", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.toggleCombatMode();
+		expect(transport.calls).toEqual([]);
+		await session.start();
+		transport.emit("client-current-state", currentState(1));
+		transport.calls.length = 0;
+		await session.toggleCombatMode();
+		expect(transport.calls).toEqual(["invoke:toggle_client_combat_mode"]);
+		expect(session.state().combatMode).toBe("peace");
+		transport.emit("client-combat-mode-updated", { mode: "missile" });
+		expect(session.state().combatMode).toBe("missile");
+		transport.emit("client-current-state", {
+			...currentState(1),
+			combatMode: "magic",
+		});
+		expect(session.state().combatMode).toBe("magic");
+		transport.emit("client-combat-mode-updated", { mode: "peace" });
+		expect(session.state().combatMode).toBe("peace");
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "teleport",
+		});
+		transport.calls.length = 0;
+		await session.toggleCombatMode();
+		expect(transport.calls).toEqual([]);
+		session.stop();
+	});
+
 	it("recovers known spells from snapshots and preserves them across portal updates", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -664,6 +695,7 @@ describe("ClientLifecycleSession", () => {
 			playerGuid: 9,
 			playerName: "Mira",
 			knownSpells: null,
+			combatMode: "peace",
 			worldName: "Morningthaw",
 			vitals: [{ kind: "health", current: 80, maximum: 100 }],
 			exit: {
@@ -806,6 +838,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,
+		combatMode: "peace",
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

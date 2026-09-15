@@ -221,6 +221,7 @@ export async function probeClientInventory(options: {
 			worldName: "Fixture",
 			playerName: "Wayfarer",
 			knownSpells: null,
+			combatMode: "peace",
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,

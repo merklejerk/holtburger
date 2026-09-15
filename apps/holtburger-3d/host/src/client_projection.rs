@@ -22,6 +22,30 @@ use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::stats::Vital;
 use serde::Serialize;
 
+/// Cold UI stance; unknown is preserved until character facts arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCombatMode {
+    Unknown,
+    Peace,
+    Melee,
+    Missile,
+    Magic,
+}
+
+impl From<holtburger_protocol::messages::combat::CombatMode> for ClientCombatMode {
+    fn from(mode: holtburger_protocol::messages::combat::CombatMode) -> Self {
+        use holtburger_protocol::messages::combat::CombatMode;
+        match mode {
+            CombatMode::Undef => Self::Unknown,
+            CombatMode::NonCombat => Self::Peace,
+            CombatMode::Melee => Self::Melee,
+            CombatMode::Missile => Self::Missile,
+            CombatMode::Magic => Self::Magic,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientVitalKind {
@@ -242,6 +266,8 @@ pub enum ClientWorldActivationCauseWire {
 pub struct ClientCurrentState {
     /// Complete knowledge, absent until the initial character description.
     pub known_spells: Option<Vec<u32>>,
+    /// Server-confirmed stance for the combat shortcut.
+    pub combat_mode: ClientCombatMode,
     /// Accepted local-player entity response override.
     pub entity_collision_disabled: bool,
     /// Complete renderer-facing lifecycle level.
@@ -618,6 +644,10 @@ pub enum ClientHostEvent {
         player_guid: Guid,
         name: String,
     },
+    /// Server-confirmed stance replacement.
+    CombatModeUpdated {
+        mode: ClientCombatMode,
+    },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
     },
@@ -796,6 +826,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             known_spells: snapshot.known_spells.clone(),
+            combat_mode: snapshot.combat_mode.into(),
             lifecycle: (&snapshot.lifecycle).into(),
             entity_collision_disabled: snapshot.entity_collision_disabled,
             local_player_guid: snapshot.local_player_guid,
@@ -873,6 +904,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             guid,
             health_fraction,
         }),
+        ClientViewEvent::CombatModeUpdated { mode } => {
+            Some(ClientHostEvent::CombatModeUpdated { mode: mode.into() })
+        }
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
             Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })
         }

@@ -15,6 +15,7 @@ import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session
 import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
 import type {
 	ClientCurrentState,
+	ClientCombatMode,
 	ClientDynamicScriptCue,
 	ClientDynamicSoundCue,
 	ClientExitRequested,
@@ -93,6 +94,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"replace_client_drive",
 	"queue_client_character_motion_event",
 	"send_client_chat",
+	"toggle_client_combat_mode",
 	"query_client_entity_health",
 	"preview_client_inventory",
 	"submit_client_inventory",
@@ -171,6 +173,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-player-entered",
 	"client-player-vitals-updated",
 	"client-player-spells-updated",
+	"client-combat-mode-updated",
 	"client-entity-health-updated",
 	"client-chat-message",
 	"client-action-feedback",
@@ -250,6 +253,7 @@ export interface HostEventPayloadMap {
 	"client-world-name-updated": { name: string };
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
+	"client-combat-mode-updated": { mode: ClientCombatMode };
 	"client-player-vitals-updated": {
 		vitals: ClientVital[];
 	};

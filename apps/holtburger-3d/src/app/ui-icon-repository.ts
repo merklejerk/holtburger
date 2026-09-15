@@ -2,55 +2,63 @@ import { LeaseRegistry } from "../lib/game/ownership";
 import {
 	MAX_ICON_BATCH,
 	type IconIssue,
-	type ItemIconRequest,
-	type ItemIconSpec,
-	type PreparedItemIcon,
-} from "./item-icon-source";
+	type UiIconRequest,
+	type UiIconSpec,
+	type PreparedUiIcon,
+} from "./ui-icon-source";
 
 /** Persistent models and temporary displayed snapshots share the same lease accounting. */
-export interface ItemIconOwner {
+export interface UiIconOwner {
 	readonly kind: "persistent" | "display";
 }
 /** Local preparation failures join host diagnostics without inventing a game property. */
-type ItemIconProblem =
+type UiIconProblem =
 	IconIssue | { readonly code: "preparation"; readonly detail: string };
-type ItemIconProblems = readonly [ItemIconProblem, ...ItemIconProblem[]];
+type UiIconProblems = readonly [UiIconProblem, ...UiIconProblem[]];
 /** Immutable bounded-cadence UI snapshot; names remain the cell's fallback. */
-export type ItemIconDisplay =
+export type UiIconDisplay =
 	| { readonly kind: "loading" }
 	| { readonly kind: "ready"; readonly url: string }
 	| {
 			readonly kind: "degraded";
 			readonly url: string;
-			readonly issues: ItemIconProblems;
+			readonly issues: UiIconProblems;
 	  }
-	| { readonly kind: "failed"; readonly issues: ItemIconProblems };
+	| { readonly kind: "failed"; readonly issues: UiIconProblems };
 
 /** Inject browser capabilities so lifetime tests need no DOM. */
-export interface ItemIconServices {
+export interface UiIconServices {
 	readonly prepare: (
-		requests: readonly ItemIconRequest[],
-	) => Promise<readonly PreparedItemIcon[]>;
+		requests: readonly UiIconRequest[],
+	) => Promise<readonly PreparedUiIcon[]>;
 	/** Validate/decode once; reject after cleaning any URL allocated before failure. */
 	readonly createImage: (bytes: Uint8Array) => Promise<string>;
 	readonly revokeImage: (url: string) => void;
 	readonly report: (
 		key: string,
-		spec: ItemIconSpec,
-		issues: ItemIconProblems,
+		spec: UiIconSpec,
+		issues: UiIconProblems,
 	) => void;
 }
 type EntryState =
 	| { readonly kind: "queued" }
 	| { readonly kind: "preparing" }
-	| Exclude<ItemIconDisplay, { kind: "loading" }>;
-interface Entry extends ItemIconRequest {
+	| Exclude<UiIconDisplay, { kind: "loading" }>;
+interface Entry extends UiIconRequest {
 	state: EntryState;
 }
-const loading: ItemIconDisplay = Object.freeze({ kind: "loading" });
+const loading: UiIconDisplay = Object.freeze({ kind: "loading" });
 
 /** Canonical complete-input identity. Retail mask interpretation stays in the host. */
-function itemIconKey(spec: ItemIconSpec): string {
+function uiIconKey(spec: UiIconSpec): string {
+	if (spec.kind === "spell")
+		return JSON.stringify([
+			spec.kind,
+			spec.base,
+			spec.background,
+			spec.effects,
+			spec.overlay,
+		]);
 	if (spec.kind === "base") return JSON.stringify([spec.kind, spec.base]);
 	return JSON.stringify([
 		spec.kind,
@@ -63,29 +71,29 @@ function itemIconKey(spec: ItemIconSpec): string {
 }
 
 /** One content-source lifetime: shared references, bounded work and owned browser URLs. */
-export class ItemIconRepository {
-	readonly #services: ItemIconServices;
-	readonly #leases = new LeaseRegistry<ItemIconOwner>();
+export class UiIconRepository {
+	readonly #services: UiIconServices;
+	readonly #leases = new LeaseRegistry<UiIconOwner>();
 	readonly #entries = new Map<string, Entry>();
 	#running = false;
 	#disposed = false;
 	#revision = 0;
-	constructor(services: ItemIconServices) {
+	constructor(services: UiIconServices) {
 		this.#services = services;
 	}
 	get revision(): number {
 		return this.#revision;
 	}
-	createOwner(kind: ItemIconOwner["kind"]): ItemIconOwner {
+	createOwner(kind: UiIconOwner["kind"]): UiIconOwner {
 		if (this.#disposed) throw new Error("Icon repository is disposed.");
 		// Object identity prevents collisions between callers, display uses and repositories.
 		const owner = Object.freeze({ kind });
 		this.#leases.addOwner(owner);
 		return owner;
 	}
-	retain(owner: ItemIconOwner, spec: ItemIconSpec): string {
+	retain(owner: UiIconOwner, spec: UiIconSpec): string {
 		this.#requireOwner(owner);
-		const key = itemIconKey(spec);
+		const key = uiIconKey(spec);
 		if (!this.#entries.has(key)) {
 			this.#entries.set(key, { key, spec, state: { kind: "queued" } });
 			this.#revision++;
@@ -95,24 +103,24 @@ export class ItemIconRepository {
 		return key;
 	}
 	/** Protect a published image until its consumer commits a replacement. */
-	retainKey(owner: ItemIconOwner, key: string): void {
+	retainKey(owner: UiIconOwner, key: string): void {
 		this.#requireOwner(owner);
 		if (!this.#entries.has(key))
 			throw new Error(`Cannot retain unknown icon: ${key}`);
 		this.#leases.addLease(owner, key);
 	}
-	read(key: string): ItemIconDisplay {
+	read(key: string): UiIconDisplay {
 		const entry = this.#entries.get(key);
 		if (!entry) throw new Error(`Unknown retained icon: ${key}`);
 		return entry.state.kind === "queued" || entry.state.kind === "preparing"
 			? loading
 			: entry.state;
 	}
-	release(owner: ItemIconOwner, key: string): void {
+	release(owner: UiIconOwner, key: string): void {
 		this.#leases.dropLease(owner, key);
 		this.#collect();
 	}
-	releaseOwner(owner: ItemIconOwner): void {
+	releaseOwner(owner: UiIconOwner): void {
 		this.#leases.dropOwner(owner);
 		this.#collect();
 	}
@@ -125,7 +133,7 @@ export class ItemIconRepository {
 		}
 		this.#collect();
 	}
-	#requireOwner(owner: ItemIconOwner): void {
+	#requireOwner(owner: UiIconOwner): void {
 		if (this.#disposed || !this.#leases.hasOwner(owner))
 			throw new Error("Icon owner is not active in this repository.");
 	}
@@ -185,7 +193,7 @@ export class ItemIconRepository {
 	#accepts(entry: Entry): boolean {
 		return !this.#disposed && this.#entries.get(entry.key) === entry;
 	}
-	async #install(entry: Entry, result: PreparedItemIcon): Promise<void> {
+	async #install(entry: Entry, result: PreparedUiIcon): Promise<void> {
 		if (result.kind === "failed") {
 			this.#settle(entry, { kind: "failed", issues: result.issues });
 			return;
@@ -215,7 +223,7 @@ export class ItemIconRepository {
 	}
 	#settle(
 		entry: Entry,
-		state: Exclude<ItemIconDisplay, { kind: "loading" }>,
+		state: Exclude<UiIconDisplay, { kind: "loading" }>,
 	): void {
 		entry.state = Object.freeze(state);
 		this.#revision++;
@@ -225,10 +233,10 @@ export class ItemIconRepository {
 }
 
 /** Production services; failed browser decoding cleans its URL before rejecting. */
-export function browserItemIconRepository(
-	prepare: ItemIconServices["prepare"],
-): ItemIconRepository {
-	return new ItemIconRepository({
+export function browserUiIconRepository(
+	prepare: UiIconServices["prepare"],
+): UiIconRepository {
+	return new UiIconRepository({
 		prepare,
 		async createImage(bytes) {
 			const url = URL.createObjectURL(
@@ -246,6 +254,6 @@ export function browserItemIconRepository(
 		},
 		revokeImage: (url) => URL.revokeObjectURL(url),
 		report: (key, spec, issues) =>
-			console.warn("Item icon preparation:", key, { spec, issues }),
+			console.warn("UI icon preparation:", key, { spec, issues }),
 	});
 }

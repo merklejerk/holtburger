@@ -11,9 +11,9 @@ import { INVENTORY_CURRENCIES } from "./client-inventory-currencies";
 import type { ClientLifecycle } from "./client-host-contract";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import {
-	ItemIconRepository,
-	type ItemIconServices,
-} from "../app/item-icon-repository";
+	UiIconRepository,
+	type UiIconServices,
+} from "../app/ui-icon-repository";
 
 const item = (guid: number, base: number, parent = 1) => {
 	const record = entityFacts(guid);
@@ -60,8 +60,8 @@ function fixture(
 	let lifecycle: ClientLifecycle | null = initialLifecycle;
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	let image = 0;
-	const services: ItemIconServices = {
-		prepare: vi.fn<ItemIconServices["prepare"]>(async (requests) =>
+	const services: UiIconServices = {
+		prepare: vi.fn<UiIconServices["prepare"]>(async (requests) =>
 			requests.map(({ key }) => ({
 				kind: "ready",
 				key,
@@ -72,7 +72,7 @@ function fixture(
 		revokeImage: vi.fn(),
 		report: vi.fn(),
 	};
-	const icons = new ItemIconRepository(services);
+	const icons = new UiIconRepository(services);
 	const model = new ClientInventoryState(
 		{
 			entities: mirror,

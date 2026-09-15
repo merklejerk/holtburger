@@ -240,6 +240,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Complete knowledge, absent until the initial character description.
+    pub known_spells: Option<Vec<u32>>,
     /// Accepted local-player entity response override.
     pub entity_collision_disabled: bool,
     /// Complete renderer-facing lifecycle level.
@@ -612,6 +614,9 @@ pub enum ClientHostEvent {
         player_guid: Guid,
         name: String,
     },
+    PlayerSpellsUpdated {
+        spell_ids: Vec<u32>,
+    },
     PlayerVitalsUpdated {
         vitals: Vec<ClientVitalWire>,
     },
@@ -786,6 +791,7 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
+            known_spells: snapshot.known_spells.clone(),
             lifecycle: (&snapshot.lifecycle).into(),
             entity_collision_disabled: snapshot.entity_collision_disabled,
             local_player_guid: snapshot.local_player_guid,
@@ -857,6 +863,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             guid,
             health_fraction,
         }),
+        ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
+            Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })
+        }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
             Some(ClientHostEvent::PlayerVitalsUpdated {
                 vitals: project_vitals(&vitals),

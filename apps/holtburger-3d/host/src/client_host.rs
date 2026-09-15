@@ -285,6 +285,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
+            known_spells: None,
             entities: holtburger_core::ClientEntitySnapshot::default(),
             entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,
@@ -652,6 +653,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            known_spells: None,
             entities: holtburger_core::ClientEntitySnapshot::default(),
             entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,

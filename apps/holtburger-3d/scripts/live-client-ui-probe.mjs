@@ -187,7 +187,7 @@ try {
 			client,
 			`() => {
             const panel = document.querySelector('.client-inventory');
-            const images = [...document.querySelectorAll('.client-inventory img.item-icon')];
+            const images = [...document.querySelectorAll('.client-inventory img.ui-icon')];
             return panel?.getAttribute('aria-busy') === 'false' && images.length > 0 &&
                 images.every(image => image.complete && image.naturalWidth === 32);
         }`,
@@ -195,12 +195,12 @@ try {
 			"decoded inventory artwork",
 		);
 		const inventoryState = `() => ({
-            images: [...document.querySelectorAll('.client-inventory img.item-icon')].map(image => ({
+            images: [...document.querySelectorAll('.client-inventory img.ui-icon')].map(image => ({
                 guid: image.closest('[data-item-guid]').getAttribute('data-item-guid'),
                 url: image.src, width: image.naturalWidth, height: image.naturalHeight,
                 count: image.closest("[data-item-guid]").querySelector(".item-count-overlay")?.textContent ?? null,
             })),
-            fallbacks: document.querySelectorAll('.client-inventory .item-icon-fallback').length,
+            fallbacks: document.querySelectorAll('.client-inventory .ui-icon-fallback').length,
             containers: [...document.querySelectorAll('.client-inventory section')].map(section => section.getAttribute('aria-label')),
         })`;
 		const before = await evaluate(client, inventoryState);
@@ -215,7 +215,7 @@ try {
 		);
 		await waitFor(
 			client,
-			`() => document.querySelector('.client-inventory img.item-icon') !== null`,
+			`() => document.querySelector('.client-inventory img.ui-icon') !== null`,
 			timeoutMs,
 			"reopened inventory",
 		);

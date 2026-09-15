@@ -14,6 +14,7 @@ pub mod repository;
 pub mod selection_envelope;
 pub mod soul_emote;
 mod source_reader;
+pub mod spells;
 pub mod terrain_collision;
 pub mod terrain_topology;
 #[cfg(test)]

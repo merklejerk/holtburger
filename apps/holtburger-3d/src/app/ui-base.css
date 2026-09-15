@@ -73,7 +73,7 @@
 		--ui-menu-min-width: 140px;
 		--ui-menu-padding: 4px;
 		--ui-menu-item-padding: 5px 12px;
-		--ui-item-icon-rendering: pixelated;
+		--ui-icon-rendering: pixelated;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
 		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;
 		/* Compact suffix size relative to the quantity's font size. */

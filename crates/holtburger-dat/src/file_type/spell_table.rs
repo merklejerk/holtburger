@@ -1,4 +1,4 @@
-use crate::utils::{align_boundary, read_obfuscated_string};
+use crate::utils::align_boundary;
 use crate::{EOR_PORTAL_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::{BinRead, BinResult};
 use std::collections::HashMap;
@@ -24,14 +24,19 @@ impl StaticResourceKey for SpellTable {
         ResourceKey::new(EOR_PORTAL_NAMESPACE, Self::FILE_ID);
 }
 
-#[derive(BinRead, Debug, Clone)]
+#[binrw::binread]
+#[derive(Debug, Clone)]
 #[br(little)]
 pub struct SpellBase {
-    #[br(parse_with = parse_obfuscated)]
+    #[br(temp, parse_with = parse_obfuscated)]
+    name_bytes: Vec<u8>,
+    #[br(calc = encoding_rs::WINDOWS_1252.decode(&name_bytes).0.into_owned())]
     pub name: String,
     #[br(parse_with = parse_align)]
     pub _align1: (),
-    #[br(parse_with = parse_obfuscated)]
+    #[br(temp, parse_with = parse_obfuscated)]
+    description_bytes: Vec<u8>,
+    #[br(calc = encoding_rs::WINDOWS_1252.decode(&description_bytes).0.into_owned())]
     pub description: String,
     #[br(parse_with = parse_align)]
     pub _align2: (),
@@ -52,8 +57,11 @@ pub struct SpellBase {
     #[br(args(meta_spell_type))]
     pub extras: SpellExtras,
 
-    #[br(count = 8)]
-    pub raw_components: Vec<u32>,
+    /// Encoded slots retained for the spell-export diagnostic.
+    pub raw_components: [u32; 8],
+    /// Decoded component identities, preserving all eight authored slots.
+    #[br(calc = decode_components(raw_components, &name_bytes, &description_bytes))]
+    pub components: [u32; 8],
 
     pub caster_effect: u32,
     pub target_effect: u32,
@@ -86,7 +94,8 @@ impl Default for SpellBase {
             meta_spell_type: 0,
             meta_spell_id: 0,
             extras: SpellExtras::None,
-            raw_components: vec![0; 8],
+            raw_components: [0; 8],
+            components: [0; 8],
             caster_effect: 0,
             target_effect: 0,
             fizzle_effect: 0,
@@ -133,8 +142,56 @@ fn parse_obfuscated<R: Read + Seek>(
     reader: &mut R,
     _endian: binrw::Endian,
     _args: (),
-) -> BinResult<String> {
-    read_obfuscated_string(reader)
+) -> BinResult<Vec<u8>> {
+    let length = u16::read_le(reader)?;
+    let mut bytes = vec![0; usize::from(length)];
+    reader.read_exact(&mut bytes)?;
+    for byte in &mut bytes {
+        *byte = byte.rotate_left(4);
+    }
+    Ok(bytes)
+}
+
+/// Retail legacy hash consumes signed Windows-1252 bytes, not Unicode codepoints.
+/// acclient.c:287412; preserving source bytes avoids a lossy text round trip.
+fn formula_hash(bytes: &[u8]) -> u32 {
+    let mut hash = 0u32;
+    for &byte in bytes.iter().take_while(|&&byte| byte != 0) {
+        hash = hash
+            .wrapping_mul(16)
+            .wrapping_add(i32::from(byte as i8) as u32);
+        let high = hash & 0xf0000000;
+        if high != 0 {
+            hash = (hash ^ (high >> 24)) & 0x0fffffff;
+        }
+    }
+    hash
+}
+
+/// acclient.c:429170 and :465015: zero slots remain zero, subtraction wraps.
+fn decode_components(raw: [u32; 8], name: &[u8], description: &[u8]) -> [u32; 8] {
+    let key =
+        (formula_hash(name) % 0x12107680).wrapping_add(formula_hash(description) % 0xbeadcf45);
+    raw.map(|component| {
+        if component == 0 {
+            0
+        } else {
+            component.wrapping_sub(key)
+        }
+    })
+}
+
+/// Formula component tier used by static spell reference consumers (acclient.c:465529).
+/// Unknown components retain retail's zero result; callers diagnose absent mappings.
+pub fn component_power_tier(component: u32) -> u32 {
+    match component {
+        1..=6 => component,
+        110 => 7,
+        112 => 8,
+        192 => 9,
+        193 => 10,
+        _ => 0,
+    }
 }
 
 fn parse_align<R: Read + Seek>(reader: &mut R, _endian: binrw::Endian, _args: ()) -> BinResult<()> {
@@ -203,6 +260,53 @@ fn parse_spell_set_tiers_hash_table<R: Read + Seek>(
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn formula_hash_uses_signed_source_bytes_and_stops_at_nul() {
+        assert_eq!(formula_hash(b"A"), 65);
+        assert_eq!(formula_hash(&[b'A', 0x92]), 930);
+        assert_eq!(formula_hash(b"A\0ignored"), 65);
+    }
+
+    #[test]
+    fn decoding_preserves_slots_and_wraps_without_corrective_masking() {
+        assert_eq!(
+            decode_components([66, 0, 175, 177, 257, 258, 1, 0], b"A", b""),
+            [1, 0, 110, 112, 192, 193, u32::MAX - 63, 0]
+        );
+    }
+
+    #[test]
+    fn parsed_formula_uses_original_extended_character_bytes() {
+        let mut bytes = Vec::new();
+        for text in [&[b'A', 0x92][..], &[][..]] {
+            bytes.extend_from_slice(&(text.len() as u16).to_le_bytes());
+            bytes.extend(text.iter().map(|byte| byte.rotate_left(4)));
+            while bytes.len() % 4 != 0 {
+                bytes.push(0);
+            }
+        }
+        bytes.extend_from_slice(&[0; 13 * 4]);
+        let raw = [931u32, 0, 1040, 1042, 1122, 1123, 0, 0];
+        for slot in raw {
+            bytes.extend_from_slice(&slot.to_le_bytes());
+        }
+        bytes.extend_from_slice(&[0; 3 * 4 + 2 * 8 + 3 * 4]);
+        let spell = SpellBase::read(&mut Cursor::new(bytes)).unwrap();
+        assert_eq!(spell.name, "A’");
+        assert_eq!(spell.raw_components, raw);
+        assert_eq!(spell.components, [1, 0, 110, 112, 192, 193, 0, 0]);
+    }
+
+    #[test]
+    fn component_tiers_preserve_all_retail_cases() {
+        for tier in 1..=6 {
+            assert_eq!(component_power_tier(tier), tier);
+        }
+        for (component, tier) in [(110, 7), (112, 8), (192, 9), (193, 10), (0, 0), (999, 0)] {
+            assert_eq!(component_power_tier(component), tier);
+        }
+    }
 
     #[test]
     fn test_parse_spell_table_minimal() {

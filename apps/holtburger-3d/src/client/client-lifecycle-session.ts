@@ -22,6 +22,7 @@ import {
 } from "./client-entity-mirror";
 import {
 	decodeClientCurrentState,
+	decodeClientSpells,
 	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
 	decodeClientDynamicSoundCue,
@@ -142,6 +143,7 @@ type ClientEventName = Extract<
 	| "client-world-name-updated"
 	| "client-player-entered"
 	| "client-player-vitals-updated"
+	| "client-player-spells-updated"
 	| "client-entity-health-updated"
 	| "client-chat-message"
 	| "client-transient-string"
@@ -178,6 +180,8 @@ export interface ClientLifecycleSessionState {
 	readonly worldGeneration: number;
 	readonly worldName: string | null;
 	readonly playerName: string | null;
+	/** Null until a complete description is available. */
+	readonly knownSpells: readonly number[] | null;
 	readonly vitals: readonly ClientVital[];
 	readonly characterMotion: ClientCharacterMotionCapabilities | null;
 	/** Current server question, retained independently of presentation mounts. */
@@ -187,6 +191,7 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
 			readonly type: "item-use-target-result";
 			readonly result: ClientItemUseTargetResult;
@@ -332,6 +337,8 @@ export class ClientLifecycleSession {
 		this.#dynamicSession.stop();
 		this.entities.awaitSnapshot();
 		this.#entryRequestGuid = null;
+		this.#state = { ...this.#state, knownSpells: null };
+		this.#emit({ type: "resyncing" });
 	}
 
 	/** Read the latest lifecycle facts without exposing the host transport or protocol types. */
@@ -536,6 +543,7 @@ export class ClientLifecycleSession {
 				await this.#transport.listen("client-state-resyncing", (payload) => {
 					if (payload !== null)
 						throw new Error("Invalid client resync notification.");
+					this.#state = { ...this.#state, knownSpells: null };
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
 					this.#emit({ type: "resyncing" });
@@ -551,6 +559,16 @@ export class ClientLifecycleSession {
 						if (prepared === null) return;
 						this.entities.commit(prepared);
 						this.#emit({ type: "entities" });
+					},
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-player-spells-updated",
+					(payload) => {
+						const spellIds = decodeClientSpells(payload);
+						this.#state = { ...this.#state, knownSpells: spellIds };
+						this.#emit({ type: "spells", spellIds });
 					},
 				),
 			);
@@ -763,6 +781,7 @@ export class ClientLifecycleSession {
 			worldGeneration: state.worldGeneration,
 			worldName: state.worldName,
 			playerName: state.playerName,
+			knownSpells: state.knownSpells,
 			vitals: state.vitals,
 			characterMotion: state.characterMotion,
 			activeConfirmation: state.activeConfirmation,
@@ -791,6 +810,17 @@ export class ClientLifecycleSession {
 		this.#state = {
 			...this.#state,
 			lifecycle,
+			knownSpells:
+				lifecycle.kind === "connecting" ||
+				lifecycle.kind === "authenticating" ||
+				lifecycle.kind === "character-selection" ||
+				lifecycle.kind === "entering-world" ||
+				lifecycle.kind === "exiting" ||
+				(lifecycle.kind === "portal-space" &&
+					lifecycle.cause === "initial-entry" &&
+					lifecycle.worldGeneration !== this.#state.worldGeneration)
+					? null
+					: this.#state.knownSpells,
 			activeConfirmation:
 				lifecycle.kind === "exiting" ? null : this.#state.activeConfirmation,
 			worldGeneration:
@@ -927,6 +957,7 @@ function emptyState(): ClientLifecycleSessionState {
 		worldGeneration: 0,
 		worldName: null,
 		playerName: null,
+		knownSpells: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

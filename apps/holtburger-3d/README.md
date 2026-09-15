@@ -121,10 +121,10 @@ inventory model. See [inventory ownership and protocol semantics](../../docs/inv
 The recoverable entity-facts stream carries base/overlay/underlay DIDs and effects
 from the world's property map, independently of scene residency. The persistent
 `ClientInventoryState` owns inventory preferences and references; mounted panels only
-sample its view. `ItemIconRepository` shares prepared images by complete appearance
+sample its view. `UiIconRepository` shares prepared images by complete appearance
 and uses the existing lease registry for both persistent owners and temporary DOM uses.
 
-The shared host command `prepare_item_icons` prepares at most 32 icons per batch in
+The shared host command `prepare_ui_icons` prepares at most 32 icons per batch in
 `spawn_blocking`, with no gameplay actor or renderer dependency. `holtburger-dat`
 decodes DID mappers, `holtburger-content` resolves static sources and normalizes pixels,
 and the app host owns retail recipe/composition policy. Responses contain native
@@ -137,6 +137,26 @@ live probe credentials to check artwork and close/reopen retention without movin
 the character. This is a diagnostic command requiring local game assets. The canonical
 `npm run harness:browser -- --client-hud --brief` covers inventory behavior with
 synthetic artwork; the scoping worksheet retains the completed burst measurements.
+
+## Spells panel
+
+The Spells system button opens a movable, resizable window listing the character's
+known spells alphabetically with retail-composed artwork. Loading and an empty
+spellbook are distinct; missing definitions or artwork remain visible as diagnostics.
+Casting and spell-bar bindings are separate follow-up features.
+
+Core snapshots and `PlayerSpellsUpdated` supply complete knowledge after the initial
+character description. Static `load_spell_references` queries are independent of that
+membership: content resolves formula tiers from decoded DAT components, and the app
+host selects the complete artwork recipe. Spell icons use the same `prepare_ui_icons`
+pipeline as inventory, with their own composition order. `SpellReferences` caches
+definitions for the content lifetime. `ClientSpellState` lazily retains requested
+known-spell artwork until removal or character/session teardown, so closing and
+reopening the panel reuses prepared images. Each panel or future bar also holds
+independent display leases until its displayed images are replaced.
+
+The browser HUD harness exercises a large spell list, missing definitions, updates
+while closed, and character replacement during a pending static lookup.
 
 ## UI themes
 

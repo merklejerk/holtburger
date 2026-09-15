@@ -47,6 +47,8 @@ export interface ClientUiDefaults {
 	readonly character: ClientUiPanel;
 	/** Chat history and command input. */
 	readonly chat: ClientUiPanel;
+	/** Known-spells floating window. */
+	readonly spells: Omit<ClientUiPanel, "resizable">;
 	/** Inventory window with independently retained geometry; borders always resize. */
 	readonly inventory: Omit<ClientUiPanel, "resizable">;
 	/** Diagnostics window with independently retained geometry; borders always resize. */

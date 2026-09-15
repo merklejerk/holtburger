@@ -1,16 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	ItemIconRepository,
-	type ItemIconServices,
-} from "./item-icon-repository";
+import { UiIconRepository, type UiIconServices } from "./ui-icon-repository";
 import {
 	MAX_ICON_BATCH,
-	type ItemIconRequest,
-	type ItemIconSpec,
-	type PreparedItemIcon,
-} from "./item-icon-source";
+	type UiIconRequest,
+	type UiIconSpec,
+	type PreparedUiIcon,
+} from "./ui-icon-source";
 
-const spec = (base = 1): ItemIconSpec => ({
+const spec = (base = 1): UiIconSpec => ({
 	kind: "item",
 	base,
 	itemType: 4,
@@ -19,15 +16,15 @@ const spec = (base = 1): ItemIconSpec => ({
 	uiEffects: 0,
 });
 interface Work {
-	requests: readonly ItemIconRequest[];
-	resolve: (results: readonly PreparedItemIcon[]) => void;
+	requests: readonly UiIconRequest[];
+	resolve: (results: readonly PreparedUiIcon[]) => void;
 	reject: (error: Error) => void;
 }
 function fixture() {
 	const pending: Work[] = [];
 	let imageId = 0;
-	const services: ItemIconServices = {
-		prepare: vi.fn<ItemIconServices["prepare"]>(
+	const services: UiIconServices = {
+		prepare: vi.fn<UiIconServices["prepare"]>(
 			(requests) =>
 				new Promise((resolve, reject) =>
 					pending.push({ requests, resolve, reject }),
@@ -37,7 +34,7 @@ function fixture() {
 		revokeImage: vi.fn(),
 		report: vi.fn(),
 	};
-	const repository = new ItemIconRepository(services);
+	const repository = new UiIconRepository(services);
 	const owner = repository.createOwner("persistent");
 	const next = async () => {
 		await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0));
@@ -56,7 +53,29 @@ function fixture() {
 	return { repository, owner, services, next, ready };
 }
 
-describe("ItemIconRepository", () => {
+describe("UiIconRepository", () => {
+	it("shares complete spell recipes while keeping each consumer's image alive", async () => {
+		const f = fixture();
+		const bar = f.repository.createOwner("persistent");
+		const spell = {
+			kind: "spell",
+			base: 1,
+			background: 2,
+			effects: 3,
+			overlay: null,
+		} as const;
+		const key = f.repository.retain(f.owner, spell);
+		expect(f.repository.retain(bar, spell)).toBe(key);
+		const different = f.repository.retain(bar, { ...spell, background: 4 });
+		expect(different).not.toBe(key);
+		f.ready(await f.next());
+		await vi.waitFor(() => expect(f.repository.read(key).kind).toBe("ready"));
+		f.repository.releaseOwner(f.owner);
+		expect(f.repository.read(key).kind).toBe("ready");
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.repository.releaseOwner(bar);
+		expect(f.services.revokeImage).toHaveBeenCalledTimes(2);
+	});
 	it("keeps standalone graphics distinct from composed artwork of the same asset", async () => {
 		const f = fixture();
 		const baseSpec = { kind: "base", base: 1 } as const;

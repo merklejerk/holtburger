@@ -2,8 +2,8 @@
 	import { APP_INPUT } from "../lib/input/app-input";
 	import ItemCountOverlay from "../app/ItemCountOverlay.svelte";
 	import { formatItemQuantity } from "../app/item-quantity";
-	import ItemIcon from "../app/ItemIcon.svelte";
-	import type { ItemIconDisplay } from "../app/item-icon-repository";
+	import UiIcon from "../app/UiIcon.svelte";
+	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { ActionContent } from "./client-action-bar-state";
 	interface Props {
 		/** Stable bar identity for binding gestures. */
@@ -15,7 +15,7 @@
 		/** Current resolved name, or an unavailable identity label. */
 		label: string;
 		/** Existing repository artwork with a display lease owned by the collection. */
-		display: ItemIconDisplay | undefined;
+		display: UiIconDisplay | undefined;
 		/** Bound stack quantity; single items have no visible count. */
 		count: number | null;
 		/** Availability is presentation; activation still revalidates. */
@@ -82,7 +82,7 @@
 	aria-pressed={selected}
 	onclick={(event) => onactivate(APP_INPUT.actionBarAlternate(event))}
 >
-	{#if content !== null}<ItemIcon
+	{#if content !== null}<UiIcon
 			{display}
 			name={label}
 			tooltipLabel={statusLabel}

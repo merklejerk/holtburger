@@ -1,4 +1,11 @@
 <script lang="ts">
+	import { z } from "zod";
+	import { SpellReferences } from "../../app/spell-references";
+	import {
+		ClientSpellState,
+		type ClientSpellServices,
+	} from "../../client/client-spells";
+	import { probeClientSpells } from "./client-spells-probe";
 	import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 	import type {
 		ClientViewportTargetDestination,
@@ -40,7 +47,7 @@
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
 	import { ClientInventoryState } from "../../client/client-inventory-state";
-	import { browserItemIconRepository } from "../../app/item-icon-repository";
+	import { browserUiIconRepository } from "../../app/ui-icon-repository";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
 	import type {
 		ClientChatErrorMessage,
@@ -452,6 +459,8 @@
 		>;
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
+		/** Exercise spell membership, artwork reuse, and panel teardown. */
+		readonly probeSpells: () => Promise<unknown>;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
 		/** Controlled viewport answers exercise production drag ownership. */
@@ -549,6 +558,20 @@
 	}
 	/** Counts persistent inventory pulls, including while its panel is hidden. */
 	let inventorySampleCount = 0;
+	let spellReferenceGate: Promise<void> | null = null;
+	function holdSpellReferences(): () => void {
+		if (spellReferenceGate !== null)
+			throw new Error("Spell references already held.");
+		let release = () => {};
+		spellReferenceGate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return () => {
+			spellReferenceGate = null;
+			release();
+		};
+	}
+	let spells = $state<ClientSpellServices | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	function readInventoryEntities() {
 		inventorySampleCount += 1;
@@ -574,6 +597,7 @@
 			worldGeneration: 1,
 			worldName: "Fixture",
 			playerName: "Wayfarer",
+			knownSpells: null,
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,
@@ -1753,7 +1777,7 @@
 			),
 			(character) => character.charCodeAt(0),
 		);
-		const icons = browserItemIconRepository(async (requests) => {
+		const icons = browserUiIconRepository(async (requests) => {
 			preparedIconCount += requests.length;
 			if (iconPreparationGate !== null) await iconPreparationGate;
 			return requests.map(({ key, spec }) =>
@@ -1799,6 +1823,39 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		inventory = inventoryOwner;
+		const references = new SpellReferences({
+			invoke: async (_command, args) => {
+				if (spellReferenceGate !== null) await spellReferenceGate;
+				const ids = z
+					.object({ request: z.object({ spellIds: z.array(z.number()) }) })
+					.parse(args).request.spellIds;
+				return ids.map((id) =>
+					id === 999999
+						? { kind: "missing", id }
+						: {
+								kind: "known",
+								id,
+								name: `Spell ${String(id).padStart(4, "0")}`,
+								artwork: {
+									kind: "ready",
+									spec: {
+										kind: "spell",
+										base: id,
+										background: 1,
+										effects: 2,
+										overlay: null,
+									},
+								},
+							},
+				);
+			},
+		});
+		const spellState = new ClientSpellState(
+			interactionLifecycle,
+			references,
+			icons,
+		);
+		spells = spellState;
 		probeBrowserInput(keyboard, inputGate);
 		void interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
@@ -1824,6 +1881,10 @@
 				if (activeItemUseProbe === null) throw new Error("No item-use probe");
 				return activeItemUseProbe;
 			},
+			probeSpells: () =>
+				probeClientSpells(emitInteractionEvent, holdSpellReferences, (ids) =>
+					references.load(ids),
+				),
 			inventoryDragCommands: () => interactionCommands,
 			giveProbe,
 			deferNextInventorySubmission: () => {
@@ -1865,6 +1926,9 @@
 		};
 		return () => {
 			keyboardFixture?.dispose();
+			spellState.destroy();
+			references.dispose();
+			spells = null;
 			inventoryOwner.destroy();
 			unsubscribeInventoryToasts();
 			inventoryToasts.destroy();
@@ -1942,6 +2006,7 @@
 		{readFrameRates}
 		readTargetIndicatorFrame={() => targetIndicatorFrame}
 		readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
+		{spells}
 		{inventory}
 		onSelectInventoryItem={(guid, mode) =>
 			selection.selectInventoryItem(guid, mode)}

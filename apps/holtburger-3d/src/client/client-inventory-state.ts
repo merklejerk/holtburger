@@ -1,8 +1,5 @@
-import type {
-	ItemIconOwner,
-	ItemIconRepository,
-} from "../app/item-icon-repository";
-import type { ItemIconSpec } from "../app/item-icon-source";
+import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
+import type { UiIconSpec } from "../app/ui-icon-source";
 import type { ClientEntityRead } from "./client-entity-mirror";
 import type { ClientLifecycle } from "./client-host-contract";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -88,7 +85,7 @@ export interface ClientInventoryView {
 
 /** Session-owned preferences and icon references, independent of the active floating panel. */
 export class ClientInventoryState {
-	readonly icons: ItemIconRepository;
+	readonly icons: UiIconRepository;
 	/** App-owned toast delivery for rejected gestures and transport failures. */
 	readonly reportFailure: (message: string) => void;
 	/** Session capability consumed by the mounted imperative drag owner. */
@@ -96,7 +93,7 @@ export class ClientInventoryState {
 	/** Static footer artwork retained across panel closure and inventory resynchronization. */
 	readonly pyrealIconKey: string;
 	readonly #lifecycle: InventoryLifecycle;
-	readonly #owner: ItemIconOwner;
+	readonly #owner: UiIconOwner;
 	readonly #unsubscribe: () => void;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#baseline: InventoryBaseline | null = null;
@@ -107,7 +104,7 @@ export class ClientInventoryState {
 
 	constructor(
 		lifecycle: InventoryLifecycle,
-		icons: ItemIconRepository,
+		icons: UiIconRepository,
 		reportFailure: (message: string) => void,
 	) {
 		this.reportFailure = reportFailure;
@@ -245,7 +242,7 @@ export class ClientInventoryState {
 			const description = entity.description;
 			if (description.kind !== "known") continue;
 			const { overlay, underlay, uiEffects, base } = description.icon;
-			const spec: ItemIconSpec =
+			const spec: UiIconSpec =
 				entity.guid === level.playerGuid
 					? { kind: "main-pack", overlay, underlay, uiEffects }
 					: {

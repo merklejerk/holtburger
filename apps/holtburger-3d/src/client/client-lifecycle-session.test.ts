@@ -66,6 +66,43 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("recovers known spells from snapshots and preserves them across portal updates", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.state().knownSpells).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(0x50000001),
+			knownSpells: [1, 3],
+		});
+		expect(session.state().knownSpells).toEqual([1, 3]);
+		transport.emit("client-player-spells-updated", { spellIds: [3, 4] });
+		expect(session.state().knownSpells).toEqual([3, 4]);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().knownSpells).toEqual([3, 4]);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().knownSpells).toBeNull();
+		transport.emit("client-player-spells-updated", { spellIds: [] });
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().knownSpells).toEqual([]);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().knownSpells).toBeNull();
+		transport.emit("client-player-spells-updated", { spellIds: [1] });
+		session.stop();
+		expect(session.state().knownSpells).toBeNull();
+	});
 	it.each([false, true])(
 		"submits equipment identity and off-side preference %s",
 		async (alternate) => {
@@ -626,6 +663,7 @@ describe("ClientLifecycleSession", () => {
 			worldGeneration: 4,
 			playerGuid: 9,
 			playerName: "Mira",
+			knownSpells: null,
 			worldName: "Morningthaw",
 			vitals: [{ kind: "health", current: 80, maximum: 100 }],
 			exit: {
@@ -767,6 +805,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldGeneration: 2,
 		worldName: "Leafcull",
 		playerName: "Drudge",
+		knownSpells: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

@@ -37,6 +37,8 @@ const CLIENT_PORTAL_TRANSITION = {
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
+	/** Maximum publication cadence for asynchronously prepared spell artwork. */
+	spells: { iconDisplayIntervalMs: 100 },
 	/** Shared audio policy selected explicitly by the client composition root. */
 	audio: SHARED_FRONTEND_TUNING.audio,
 	diagnostics: CLIENT_DIAGNOSTICS,

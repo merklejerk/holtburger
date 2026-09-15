@@ -1,6 +1,15 @@
 <script lang="ts" module>
 	import type { ClientHudIconName } from "./ClientHudIcon.svelte";
 
+	/** Implemented floating system windows; other dock glyphs remain placeholders. */
+	export type ClientSystemPanel = "inventory" | "debug" | "spells";
+
+	function systemPanel(icon: ClientHudIconName): ClientSystemPanel | null {
+		return icon === "inventory" || icon === "debug" || icon === "spells"
+			? icon
+			: null;
+	}
+
 	/** One displayed game-panel shortcut, shared by sizing and rendering. */
 	interface ClientShortcut {
 		/** Glyph identifying the panel and its current action. */
@@ -34,8 +43,8 @@
 	interface Props {
 		/** The same visible list used to determine the initial dock width. */
 		readonly shortcuts: readonly ClientShortcut[];
-		readonly activePanel: "inventory" | "debug" | null;
-		readonly onToggle: (panel: "inventory" | "debug") => void;
+		readonly activePanel: ClientSystemPanel | null;
+		readonly onToggle: (panel: ClientSystemPanel) => void;
 	}
 
 	const { shortcuts, activePanel, onToggle }: Props = $props();
@@ -47,21 +56,19 @@
 	aria-label="Game panels"
 >
 	{#each shortcuts as shortcut}
+		{@const panel = systemPanel(shortcut.icon)}
 		<button
 			type="button"
 			class="ui-hud-button"
-			title={shortcut.icon === "inventory"
-				? "Inventory"
-				: shortcut.icon === "debug"
+			title={panel === null
+				? `${shortcut.label} (stub)`
+				: panel === "debug"
 					? "Client diagnostics"
-					: `${shortcut.label} (stub)`}
+					: shortcut.label}
 			aria-label={shortcut.label}
-			aria-pressed={shortcut.icon === "debug" || shortcut.icon === "inventory"
-				? activePanel === shortcut.icon
-				: undefined}
+			aria-pressed={panel === null ? undefined : activePanel === panel}
 			onclick={() => {
-				if (shortcut.icon === "debug" || shortcut.icon === "inventory")
-					onToggle(shortcut.icon);
+				if (panel !== null) onToggle(panel);
 			}}
 		>
 			<ClientHudIcon name={shortcut.icon} />

@@ -22,6 +22,32 @@ pub struct IconLayers<'a> {
     pub underlay: Option<&'a UiImage>,
 }
 
+/// Spell composition has its own ordering; effects replace pixels on the backing too.
+pub fn compose_spell(
+    base: &UiImage,
+    background: &UiImage,
+    effects: &UiImage,
+    overlay: Option<&UiImage>,
+) -> Result<Vec<u8>> {
+    // ClientMagicSystem::CompositeSpellIcon, acclient.c:386851.
+    let mut output = canvas(background)?;
+    blend(&mut output, &canvas(base)?, true);
+    replace_white(&mut output, &canvas(effects)?);
+    if let Some(overlay) = overlay {
+        blend(&mut output, &canvas(overlay)?, true);
+    }
+    Ok(output)
+}
+
+/// Retail compares all four channels and copies the same-coordinate effect pixel.
+fn replace_white(pixels: &mut [u8], effects: &[u8]) {
+    for (pixel, effect) in pixels.chunks_exact_mut(4).zip(effects.chunks_exact(4)) {
+        if pixel == [255, 255, 255, 255] {
+            pixel.copy_from_slice(effect);
+        }
+    }
+}
+
 /// Follow IconData::RenderIcons (acclient.c:418927), preserving alpha semantics per step.
 pub fn compose(layers: IconLayers<'_>) -> Result<Vec<u8>> {
     let mut work = canvas(layers.base)?;
@@ -29,16 +55,7 @@ pub fn compose(layers: IconLayers<'_>) -> Result<Vec<u8>> {
         blend(&mut work, &canvas(overlay)?, true);
     }
     let effects = canvas(layers.effects)?;
-    for (pixel, effect) in work
-        .as_chunks_mut::<4>()
-        .0
-        .iter_mut()
-        .zip(effects.as_chunks::<4>().0)
-    {
-        if *pixel == [255, 255, 255, 255] {
-            pixel.copy_from_slice(effect);
-        }
-    }
+    replace_white(&mut work, &effects);
     let mut output = canvas(layers.background)?;
     if let Some(underlay) = layers.underlay {
         blend(&mut output, &canvas(underlay)?, false);
@@ -120,6 +137,30 @@ mod tests {
             height: 1,
             pixels: pixel.to_vec(),
         }
+    }
+
+    #[test]
+    fn spell_effects_follow_base_blend_and_precede_final_overlay() {
+        let transparent = image([0, 0, 0, 0]);
+        let white = image([255, 255, 255, 255]);
+        let effects = image([20, 30, 40, 255]);
+        let nearly_white = image([255, 255, 254, 255]);
+        assert_eq!(
+            &compose_spell(&transparent, &white, &effects, None).unwrap()[..4],
+            &[20, 30, 40, 255]
+        );
+        assert_eq!(
+            &compose_spell(&white, &transparent, &effects, None).unwrap()[..4],
+            &[20, 30, 40, 255]
+        );
+        assert_eq!(
+            &compose_spell(&nearly_white, &white, &effects, None).unwrap()[..4],
+            &[255, 255, 254, 255]
+        );
+        assert_eq!(
+            &compose_spell(&white, &transparent, &effects, Some(&white)).unwrap()[..4],
+            &[255, 255, 255, 255]
+        );
     }
 
     #[test]

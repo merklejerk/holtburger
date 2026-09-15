@@ -7,11 +7,19 @@ import { asHostBinary } from "../lib/host/binary-response";
 export const MAX_ICON_BATCH = 32;
 export const MAX_ICON_FRAME_BYTES = 256 * 1024;
 const MAX_ICON_KEY_BYTES = 128;
-const ITEM_ICON_SIZE = 32;
+const UI_ICON_SIZE = 32;
 const uint = z.number().int().nonnegative().max(0xffff_ffff);
 const did = uint.positive().nullable();
 /** Complete visual inputs. Item identity, selection, sorting and display size are excluded. */
-export type ItemIconSpec =
+export type UiIconSpec =
+	| {
+			/** Complete host-resolved spell composition inputs. */
+			readonly kind: "spell";
+			readonly base: number;
+			readonly background: number;
+			readonly effects: number;
+			readonly overlay: number | null;
+	  }
 	| {
 			/** Standalone authored graphic without item decorations. */
 			readonly kind: "base";
@@ -32,9 +40,9 @@ export type ItemIconSpec =
 	  ));
 
 /** Keyed specifications sent to the host's shared-content capability. */
-export interface ItemIconRequest {
+export interface UiIconRequest {
 	readonly key: string;
-	readonly spec: ItemIconSpec;
+	readonly spec: UiIconSpec;
 }
 
 const issueSchema = z
@@ -81,24 +89,24 @@ const resultSchema = z.discriminatedUnion("kind", [
 		.strict()
 		.readonly(),
 ]);
-export type PreparedItemIcon = z.infer<typeof resultSchema>;
+export type PreparedUiIcon = z.infer<typeof resultSchema>;
 
 /** One transport boundary, including structural validation and exact response-key matching. */
-export async function prepareItemIcons(
+export async function prepareUiIcons(
 	transport: Pick<HostTransport, "invoke">,
-	icons: readonly ItemIconRequest[],
-): Promise<readonly PreparedItemIcon[]> {
-	const value = await transport.invoke("prepare_item_icons", {
+	icons: readonly UiIconRequest[],
+): Promise<readonly PreparedUiIcon[]> {
+	const value = await transport.invoke("prepare_ui_icons", {
 		request: { icons },
 	});
-	return decodeItemIcons(asHostBinary(value, "Item-icon preparation"), icons);
+	return decodeUiIcons(asHostBinary(value, "UI-icon preparation"), icons);
 }
 
 /** Reject malformed/partial batches as a whole; repository callers settle their live entries. */
-export function decodeItemIcons(
+export function decodeUiIcons(
 	bytes: Uint8Array,
-	requested: readonly ItemIconRequest[],
-): readonly PreparedItemIcon[] {
+	requested: readonly UiIconRequest[],
+): readonly PreparedUiIcon[] {
 	if (bytes.byteLength > MAX_ICON_FRAME_BYTES)
 		throw new Error("Icon response exceeds byte limit.");
 	const value: unknown = decode(bytes, {
@@ -132,7 +140,7 @@ function isNativeIconPng(bytes: Uint8Array): boolean {
 	return (
 		view.getUint32(8) === 13 &&
 		view.getUint32(12) === 0x49484452 &&
-		view.getUint32(16) === ITEM_ICON_SIZE &&
-		view.getUint32(20) === ITEM_ICON_SIZE
+		view.getUint32(16) === UI_ICON_SIZE &&
+		view.getUint32(20) === UI_ICON_SIZE
 	);
 }

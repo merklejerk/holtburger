@@ -37,7 +37,18 @@ const CONTAINER_ENTRY: u32 = 10;
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub enum ItemIconSpec {
+pub enum UiIconSpec {
+    /// Complete app-resolved spell artwork; no player membership is required.
+    Spell {
+        /// Authored spell graphic.
+        base: NonZeroU32,
+        /// Formula-tier backing.
+        background: NonZeroU32,
+        /// Same-coordinate white replacement image.
+        effects: NonZeroU32,
+        /// Fellowship or self overlay, already resolved with retail precedence.
+        overlay: Option<NonZeroU32>,
+    },
     /// Standalone authored graphic, without category backing or item effects.
     Base {
         /// Required RenderSurface identity, independent of a live item.
@@ -68,16 +79,16 @@ pub enum ItemIconSpec {
 /// One opaque frontend correlation key and its complete inputs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ItemIconRequest {
+pub struct UiIconRequest {
     pub key: String,
-    pub spec: ItemIconSpec,
+    pub spec: UiIconSpec,
 }
 
 /// A batch has unique keys and is bounded before any asset work begins.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PrepareItemIconsRequest {
-    pub icons: Vec<ItemIconRequest>,
+pub struct PrepareUiIconsRequest {
+    pub icons: Vec<UiIconRequest>,
 }
 
 /// Layer context for console diagnostics; it does not expose server item identity.
@@ -123,7 +134,7 @@ pub struct IconIssues(Vec<IconIssue>);
 /// Exactly one terminal outcome per requested key.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-pub enum ItemIconResult {
+pub enum UiIconResult {
     Ready {
         #[serde(with = "serde_bytes")]
         image: Vec<u8>,
@@ -140,16 +151,22 @@ pub enum ItemIconResult {
 
 /// Wire result is flattened for straightforward discriminated-union validation in the frontend.
 #[derive(Debug, Clone, Serialize)]
-pub struct PreparedItemIcon {
+pub struct PreparedUiIcon {
     pub key: String,
     #[serde(flatten)]
-    pub result: ItemIconResult,
+    pub result: UiIconResult,
 }
 
 /// Resolved artwork identity, independent of raw masks and per-request degradation reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Recipe {
     Base(u32),
+    Spell {
+        base: u32,
+        background: u32,
+        effects: u32,
+        overlay: Option<u32>,
+    },
     Composed {
         base: u32,
         background: u32,
@@ -167,6 +184,12 @@ struct ResolvedIcon {
 
 /// Base-only requests never resolve or require decorative layers.
 enum ResolvedArtwork {
+    Spell {
+        base: Arc<UiImage>,
+        background: Arc<UiImage>,
+        effects: Arc<UiImage>,
+        overlay: Option<Arc<UiImage>>,
+    },
     Base(Arc<UiImage>),
     Composed {
         base: Arc<UiImage>,
@@ -177,7 +200,7 @@ enum ResolvedArtwork {
     },
 }
 
-impl PrepareItemIconsRequest {
+impl PrepareUiIconsRequest {
     /// Reject malformed envelopes without decoding content or acquiring runtime locks.
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -197,27 +220,27 @@ impl PrepareItemIconsRequest {
 }
 
 /// Synchronous CPU/content work; the host adapter invokes this through spawn_blocking.
-pub fn prepare_item_icons(
+pub fn prepare_ui_icons(
     repository: &ContentRepository,
-    request: &PrepareItemIconsRequest,
-) -> Result<Vec<PreparedItemIcon>> {
+    request: &PrepareUiIconsRequest,
+) -> Result<Vec<PreparedUiIcon>> {
     prepare_with_assets(&mut UiAssetReader::new(repository), request)
 }
 
 /// Prepare and encode the binary response off the async runtime workers.
 /// The maximum-width request ID accounts for the actual protocol response envelope.
-pub async fn prepare_item_icon_bytes(
+pub async fn prepare_ui_icon_bytes(
     repository: Arc<ContentRepository>,
-    request: PrepareItemIconsRequest,
+    request: PrepareUiIconsRequest,
 ) -> Result<Vec<u8>> {
     tokio::task::spawn_blocking(move || {
-        let icons = prepare_item_icons(&repository, &request)?;
+        let icons = prepare_ui_icons(&repository, &request)?;
         encode_response(&icons)
     })
     .await?
 }
 
-fn encode_response(icons: &[PreparedItemIcon]) -> Result<Vec<u8>> {
+fn encode_response(icons: &[PreparedUiIcon]) -> Result<Vec<u8>> {
     let bytes = rmp_serde::to_vec_named(icons)?;
     let frame = encode_frame(&ProtocolFrame::Response {
         id: u64::MAX,
@@ -232,8 +255,8 @@ fn encode_response(icons: &[PreparedItemIcon]) -> Result<Vec<u8>> {
 
 fn prepare_with_assets(
     assets: &mut impl UiAssets,
-    request: &PrepareItemIconsRequest,
-) -> Result<Vec<PreparedItemIcon>> {
+    request: &PrepareUiIconsRequest,
+) -> Result<Vec<PreparedUiIcon>> {
     request.validate()?;
     let mut images: HashMap<Recipe, Vec<u8>> = HashMap::new();
     let mut output = Vec::with_capacity(request.icons.len());
@@ -244,6 +267,12 @@ fn prepare_with_assets(
                 return Ok(image.clone());
             }
             let pixels = match &resolved.artwork {
+                ResolvedArtwork::Spell {
+                    base,
+                    background,
+                    effects,
+                    overlay,
+                } => compositor::compose_spell(base, background, effects, overlay.as_deref()),
                 ResolvedArtwork::Base(base) => compositor::canvas(base),
                 ResolvedArtwork::Composed {
                     base,
@@ -266,19 +295,19 @@ fn prepare_with_assets(
             Ok(image)
         });
         let result = match prepared {
-            Ok(image) if issues.is_empty() => ItemIconResult::Ready { image },
-            Ok(image) => ItemIconResult::Degraded {
+            Ok(image) if issues.is_empty() => UiIconResult::Ready { image },
+            Ok(image) => UiIconResult::Degraded {
                 image,
                 issues: IconIssues(issues),
             },
             Err(error) => {
                 issues.push(error);
-                ItemIconResult::Failed {
+                UiIconResult::Failed {
                     issues: IconIssues(issues),
                 }
             }
         };
-        output.push(PreparedItemIcon {
+        output.push(PreparedUiIcon {
             key: request.key.clone(),
             result,
         });
@@ -288,11 +317,39 @@ fn prepare_with_assets(
 
 fn resolve(
     assets: &mut impl UiAssets,
-    spec: &ItemIconSpec,
+    spec: &UiIconSpec,
     issues: &mut Vec<IconIssue>,
 ) -> Result<ResolvedIcon, IconIssue> {
     let (base_id, background_entry, overlay, underlay, effects) = match *spec {
-        ItemIconSpec::Base { base } => {
+        UiIconSpec::Spell {
+            base,
+            background,
+            effects,
+            overlay,
+        } => {
+            let overlay_image = optional_image(assets, overlay, IconLayer::Overlay, issues);
+            return Ok(ResolvedIcon {
+                recipe: Recipe::Spell {
+                    base: base.get(),
+                    background: background.get(),
+                    effects: effects.get(),
+                    overlay: overlay_image.as_ref().map(|(id, _)| *id),
+                },
+                artwork: ResolvedArtwork::Spell {
+                    base: assets
+                        .image(base.get())
+                        .map_err(|e| asset_issue(IconLayer::Base, e))?,
+                    background: assets
+                        .image(background.get())
+                        .map_err(|e| asset_issue(IconLayer::Background, e))?,
+                    effects: assets
+                        .image(effects.get())
+                        .map_err(|e| asset_issue(IconLayer::Effects, e))?,
+                    overlay: overlay_image.map(|(_, image)| image),
+                },
+            });
+        }
+        UiIconSpec::Base { base } => {
             return Ok(ResolvedIcon {
                 recipe: Recipe::Base(base.get()),
                 artwork: ResolvedArtwork::Base(
@@ -302,7 +359,7 @@ fn resolve(
                 ),
             });
         }
-        ItemIconSpec::Item {
+        UiIconSpec::Item {
             base,
             item_type,
             overlay,
@@ -322,7 +379,7 @@ fn resolve(
             underlay,
             ui_effects,
         ),
-        ItemIconSpec::MainPack {
+        UiIconSpec::MainPack {
             overlay,
             underlay,
             ui_effects,

@@ -78,7 +78,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	const ghost = await read(`(() => {
 		const ghost = document.querySelector('.item-drag-ghost');
 		const rect = ghost.getBoundingClientRect();
-		return { x: rect.x, y: rect.y, visible: ghost.checkVisibility(), art: ghost.querySelector('.item-icon, .item-icon-fallback') !== null };
+		return { x: rect.x, y: rect.y, visible: ghost.checkVisibility(), art: ghost.querySelector('.ui-icon, .ui-icon-fallback') !== null };
 	})()`);
 	if (
 		!ghost.visible ||

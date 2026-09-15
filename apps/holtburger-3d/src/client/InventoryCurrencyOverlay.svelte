@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, type Snippet } from "svelte";
-	import ItemIcon from "../app/ItemIcon.svelte";
-	import type { ItemIconDisplay } from "../app/item-icon-repository";
+	import UiIcon from "../app/UiIcon.svelte";
+	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { InventoryCurrencyRow } from "./client-inventory-state";
 
 	interface Props {
@@ -13,7 +13,7 @@
 		rows: readonly InventoryCurrencyRow[];
 		pending: boolean;
 		/** Images sampled by the panel under its display leases. */
-		displays: ReadonlyMap<string, ItemIconDisplay>;
+		displays: ReadonlyMap<string, UiIconDisplay>;
 	}
 	const { children, label, rows, pending, displays }: Props = $props();
 	const id = $props.id();
@@ -102,7 +102,7 @@
 				<div class="currency-row">
 					<dt>
 						<span class="currency-icon"
-							><ItemIcon
+							><UiIcon
 								display={displays.get(row.iconKey)}
 								name=""
 								tooltipLabel={row.name}
@@ -166,14 +166,12 @@
 			height: var(--ui-inventory-currency-icon-size);
 			flex: none;
 		}
-		.currency-icon :global(.item-icon) {
-			--ui-item-icon-rendering: var(
-				--ui-inventory-currency-icon-upsample-filter
-			);
+		.currency-icon :global(.ui-icon) {
+			--ui-icon-rendering: var(--ui-inventory-currency-icon-upsample-filter);
 		}
 		@container currency-art (width < 32px) {
-			.currency-icon :global(.item-icon) {
-				--ui-item-icon-rendering: var(
+			.currency-icon :global(.ui-icon) {
+				--ui-icon-rendering: var(
 					--ui-inventory-currency-icon-downsample-filter
 				);
 			}

@@ -43,6 +43,7 @@ async function fixture() {
 			worldGeneration: 1,
 			worldName: null,
 			playerName: null,
+			knownSpells: null,
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: requestId === null ? null : confirmation(requestId),

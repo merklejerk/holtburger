@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { ItemIconDisplay } from "./item-icon-repository";
+	import type { UiIconDisplay } from "./ui-icon-repository";
 	interface Props {
 		/** Decorative art; the enclosing actionable cell owns its accessible name. */
-		readonly display: ItemIconDisplay | undefined;
+		readonly display: UiIconDisplay | undefined;
 		/** Visible fallback while unavailable, without disabling selection or actions. */
 		readonly name: string;
 		/** Full cell label, including quantity, retained when diagnostics override its tooltip. */
@@ -18,26 +18,26 @@
 
 {#if display?.kind === "ready" || display?.kind === "degraded"}
 	<img
-		class="item-icon"
+		class="ui-icon"
 		src={display.url}
 		alt=""
 		draggable="false"
 		title={diagnosticTitle}
 	/>
 {:else}
-	<span class="item-icon-fallback" title={diagnosticTitle}>{name}</span>
+	<span class="ui-icon-fallback" title={diagnosticTitle}>{name}</span>
 {/if}
 
 <style>
 	@layer components {
-		.item-icon {
+		.ui-icon {
 			display: block;
 			width: 100%;
 			height: 100%;
 			object-fit: contain;
-			image-rendering: var(--ui-item-icon-rendering);
+			image-rendering: var(--ui-icon-rendering);
 		}
-		.item-icon-fallback {
+		.ui-icon-fallback {
 			display: block;
 			min-width: 0;
 			max-width: 100%;

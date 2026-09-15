@@ -44,6 +44,7 @@ async function fixture() {
 		worldGeneration: 2,
 		worldName: "Leafcull",
 		playerName: "Player",
+		knownSpells: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

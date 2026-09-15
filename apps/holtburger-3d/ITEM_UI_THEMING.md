@@ -15,13 +15,13 @@ Cells and inventory section headers share `.ui-item-selection[aria-pressed="true
 Selection does not change their geometry. These optional properties control the
 whole selection decoration, rather than prescribing a colored border:
 
-| Property | Base fallback |
-| --- | --- |
-| `--ui-item-selection-color` | `--ui-color-active` |
-| `--ui-item-selection-outline` | `2px solid currentColor` |
-| `--ui-item-selection-outline-offset` | `-2px` |
-| `--ui-item-selection-shadow` | `none` |
-| `--ui-item-selection-background` | `transparent` |
+| Property                             | Base fallback            |
+| ------------------------------------ | ------------------------ |
+| `--ui-item-selection-color`          | `--ui-color-active`      |
+| `--ui-item-selection-outline`        | `2px solid currentColor` |
+| `--ui-item-selection-outline-offset` | `-2px`                   |
+| `--ui-item-selection-shadow`         | `none`                   |
+| `--ui-item-selection-background`     | `transparent`            |
 
 Holtburger Standard sets the outline to `none`, adds an inset/outer golden glow,
 and uses warm gold text and a light gold tint. The inset glow remains visible
@@ -48,16 +48,16 @@ strings (default `"▲"` and `"▼"`); accessible button labels remain independe
 
 ## Density and layout
 
-| Property | Default |
-| --- | --- |
-| `--ui-item-cell-padding` | `1px` |
-| `--ui-item-cell-min-size` | `36px` |
-| `--ui-item-grid-gap` | `5px` |
-| `--ui-item-strip-inset` | `5px` |
-| `--ui-item-strip-arrow-height` | `18px` |
-| `--ui-inventory-padding` | `10px` |
-| `--ui-inventory-section-gap` | `14px` |
-| `--ui-inventory-divider` | `1px solid currentColor` |
+| Property                       | Default                  |
+| ------------------------------ | ------------------------ |
+| `--ui-item-cell-padding`       | `1px`                    |
+| `--ui-item-cell-min-size`      | `36px`                   |
+| `--ui-item-grid-gap`           | `5px`                    |
+| `--ui-item-strip-inset`        | `5px`                    |
+| `--ui-item-strip-arrow-height` | `18px`                   |
+| `--ui-inventory-padding`       | `10px`                   |
+| `--ui-inventory-section-gap`   | `14px`                   |
+| `--ui-inventory-divider`       | `1px solid currentColor` |
 
 `--ui-item-cell-min-size` is the shared cell-size basis: contents-grid cells start
 at that size and expand to fill each row; pack-strip cells use that size exactly.
@@ -72,18 +72,18 @@ require changing the scroll implementation.
 cells. Quantity is an entity fact, independent of prepared artwork and its cache key.
 The bottom-right overlay does not consume pointer events or alter cell geometry and
 sits above artwork/selection. The button's accessible label and tooltip contain the
-full quantity. Its visual snippet receives that full label, so an `ItemIcon` diagnostic
+full quantity. Its visual snippet receives that full label, so a `UiIcon` diagnostic
 tooltip can preserve quantity while the fallback text keeps the item name.
 
 Defaults are declared in `ui-base.css`:
 
-| Property | Default |
-| --- | --- |
-| `--ui-item-count-font` | `bold 20px / 1 Arial, Helvetica, sans-serif` |
-| `--ui-item-count-color` | `#fff` |
-| `--ui-item-count-shadow` | Four 1px black diagonal shadows |
-| `--ui-item-count-background` | `transparent` |
-| `--ui-item-count-inset` | `1px` |
+| Property                     | Default                                      |
+| ---------------------------- | -------------------------------------------- |
+| `--ui-item-count-font`       | `bold 20px / 1 Arial, Helvetica, sans-serif` |
+| `--ui-item-count-color`      | `#fff`                                       |
+| `--ui-item-count-shadow`     | Four 1px black diagonal shadows              |
+| `--ui-item-count-background` | `transparent`                                |
+| `--ui-item-count-inset`      | `1px`                                        |
 
 Counts through 999 use integer text. Larger counts use `K`, `M`, or `B` with one
 decimal place (`1000 → 1.0K`, `1250000 → 1.3M`). Rounding can advance to the next
@@ -94,14 +94,22 @@ adjust the shared cell-size basis or count font/inset when more room is needed.
 ## Icon artwork and ownership
 
 `ItemGridCell` accepts a decorative `visual` snippet while retaining the accessible
-name and tooltip on its button. `ItemIcon` displays a prepared 32×32 PNG or the item
+name and tooltip on its button. `UiIcon` displays a prepared 32×32 PNG or the item
 name while loading/unavailable. Degraded/failed visuals include diagnostic detail
 in their tooltip; the button keeps the item name as its accessible label. Empty slots render neither art nor fallback text.
-`--ui-item-icon-rendering` defaults to `pixelated`; themes may select another CSS
+`--ui-icon-rendering` defaults to `pixelated`; themes may select another CSS
 `image-rendering` value. Cell padding and size control enlargement without changing
 prepared-image identity or baking selection decoration into the image.
 
-`ClientApp` creates `ClientInventoryState` and `ItemIconRepository` before lifecycle
+The spell list also uses `UiIcon` and `--ui-icon-rendering`, with native 32×32
+artwork beside each name. The host composes formula-tier backgrounds, base spell
+graphics, white-pixel replacement, and the final self/fellowship overlay. Themes
+control display sampling; they do not select or reconstruct those authored layers.
+`ClientSpellState` retains lazily requested known-spell artwork while the panel is
+hidden, releasing it on spell removal or character/session teardown. Mounted spell
+consumers hold separate display leases until their DOM is replaced.
+
+`ClientApp` creates `ClientInventoryState` and `UiIconRepository` before lifecycle
 startup. Inventory maintains references while hidden and derives sorted sections
 when consumed. Equal specifications share a retained URL across items and surfaces.
 The mounted panel borrows display references until Svelte commits replacements;

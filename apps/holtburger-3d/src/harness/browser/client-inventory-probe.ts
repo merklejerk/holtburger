@@ -220,6 +220,7 @@ export async function probeClientInventory(options: {
 			worldGeneration: 1,
 			worldName: "Fixture",
 			playerName: "Wayfarer",
+			knownSpells: null,
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,
@@ -1150,7 +1151,7 @@ export async function probeClientInventory(options: {
 			appearance(20, 0x06000002);
 			await sample();
 			if (
-				cell(20).querySelector(".item-icon-fallback") === null ||
+				cell(20).querySelector(".ui-icon-fallback") === null ||
 				cell(20).disabled
 			)
 				throw new Error(
@@ -1180,7 +1181,7 @@ export async function probeClientInventory(options: {
 		if (
 			badge(20)?.textContent !== "7" ||
 			!cell(20)
-				.querySelector(".item-icon-fallback")
+				.querySelector(".ui-icon-fallback")
 				?.getAttribute("title")
 				?.includes("quantity: 7")
 		)
@@ -1189,7 +1190,7 @@ export async function probeClientInventory(options: {
 			);
 		if (
 			!cell(20)
-				.querySelector(".item-icon-fallback")
+				.querySelector(".ui-icon-fallback")
 				?.getAttribute("title")
 				?.includes("Injected missing HUD fixture image")
 		)
@@ -1197,7 +1198,7 @@ export async function probeClientInventory(options: {
 				"Missing-art detail was absent from the fallback tooltip.",
 			);
 		if (
-			cell(20).querySelector(".item-icon-fallback") === null ||
+			cell(20).querySelector(".ui-icon-fallback") === null ||
 			cell(20).disabled
 		)
 			throw new Error("Missing artwork blocked its named fallback.");

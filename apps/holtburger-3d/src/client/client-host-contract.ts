@@ -221,6 +221,18 @@ export function decodeClientConfirmationUpdated(value: unknown): {
 	return confirmationUpdatedSchema.parse(value);
 }
 
+/** Complete known membership; the initial snapshot separately permits pending (null). */
+const knownSpellIdsSchema = z
+	.array(z.number().int().positive().max(0xffff_ffff))
+	.refine(
+		(ids) => new Set(ids).size === ids.length,
+		"Duplicate known spell identity.",
+	);
+export function decodeClientSpells(value: unknown): number[] {
+	return z.object({ spellIds: knownSpellIdsSchema }).strict().parse(value)
+		.spellIds;
+}
+
 const currentStateSchema = z
 	.object({
 		entityCollisionDisabled: z.boolean(),
@@ -230,6 +242,7 @@ const currentStateSchema = z
 		worldGeneration: z.number().int().nonnegative(),
 		worldName: z.string().nullable(),
 		playerName: z.string().nullable(),
+		knownSpells: knownSpellIdsSchema.nullable(),
 		vitals: z.array(vitalSchema),
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),

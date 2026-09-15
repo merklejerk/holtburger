@@ -85,6 +85,7 @@ impl ClientRuntime {
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
+        self.known_spells_character = None;
         self.start_world_activation_with_reset(
             ClientWorldActivationState::InitialEntry,
             player_guid,
@@ -263,6 +264,11 @@ impl ClientRuntime {
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
+        if let GameMessage::GameEvent(event) = &message
+            && let GameEvent::PlayerDescription(description) = &event.event
+        {
+            self.known_spells_character = Some(description.guid);
+        }
         self.handle_world_events(world_events.clone()).await?;
 
         match message {
@@ -270,6 +276,7 @@ impl ClientRuntime {
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
+                self.known_spells_character = None;
                 self.authenticating = false;
                 self.character_selection.characters = data.characters.clone();
                 self.turbine_chat.enabled = data.use_turbine_chat;
@@ -1288,8 +1295,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spell_knowledge_requires_description_and_resets_on_character_entry() {
+        let mut client = build_test_client();
+        let player = Guid(0x50000001);
+        let mut events = client.subscribe_client_view_events();
+        client.world.player.add_spell(7, &mut Vec::new());
+        client.handle_world_event(&WorldEvent::SpellUpdated {
+            spell_id: 7,
+            name: None,
+            spell_ids: vec![7],
+        });
+        assert_eq!(client.application_snapshot().known_spells, None);
+        assert!(
+            !std::iter::from_fn(|| events.try_recv().ok())
+                .any(|event| matches!(event, ClientViewEvent::PlayerSpellsUpdated { .. }))
+        );
+
+        let description = PlayerDescriptionEventData {
+            guid: player,
+            sequence: 0,
+            name: "Player".into(),
+            wee_type: 1,
+            pos: None,
+            properties: Default::default(),
+            positions: Default::default(),
+            attributes: Default::default(),
+            skills: Default::default(),
+            enchantments: Vec::new(),
+            spells: Default::default(),
+            has_health: true,
+            options1: Default::default(),
+            options2: Default::default(),
+            shortcuts: Vec::new(),
+            hotbar_spells: Vec::new(),
+            desired_comps: Vec::new(),
+            spellbook_filters: 0,
+            gameplay_options: Vec::new(),
+            inventory: Vec::new(),
+            equipped_objects: Vec::new(),
+        };
+        let message = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 0,
+            event: GameEvent::PlayerDescription(Box::new(description)),
+        }));
+        client
+            .handle_message(&encode_message(&message))
+            .await
+            .unwrap();
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![]));
+        let mut changes = Vec::new();
+        client.world.player.add_spell(3, &mut changes);
+        client.world.player.add_spell(1, &mut changes);
+        client.handle_world_events(changes).await.unwrap();
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![1, 3]));
+        let mut changes = Vec::new();
+        client.world.player.remove_spell(1, &mut changes);
+        client.handle_world_events(changes).await.unwrap();
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
+
+        // Scene replacement is independent of character knowledge.
+        client.start_world_activation(ClientWorldActivationState::Teleport, player);
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
+        client.character_selection.character_id = Some(Guid(0x50000002));
+        client.begin_world_entry_transition().await.unwrap();
+        assert_eq!(client.application_snapshot().known_spells, None);
+    }
+
+    #[tokio::test]
     async fn test_spell_world_event_projects_supplied_snapshot() {
         let mut client = build_test_client();
+        client.known_spells_character = Some(client.world.player.guid);
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::SpellUpdated {

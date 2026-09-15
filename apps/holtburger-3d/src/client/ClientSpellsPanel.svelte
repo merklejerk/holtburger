@@ -349,7 +349,7 @@
 			min-height: 0;
 			display: flex;
 			flex-direction: column;
-			padding: 8px;
+			padding: var(--ui-spell-panel-padding);
 			box-sizing: border-box;
 		}
 		.spell-results {
@@ -381,11 +381,11 @@
 			cursor: pointer;
 		}
 		.spell-controls button:disabled {
-			opacity: 0.5;
+			opacity: var(--ui-spell-control-disabled-opacity);
 			cursor: default;
 		}
 		.spell-filters {
-			max-height: 40vh;
+			max-height: var(--ui-spell-filter-max-height);
 			overflow: auto;
 		}
 		.spell-count {
@@ -422,16 +422,16 @@
 			border-color: var(--filter-color);
 			background: color-mix(
 				in srgb,
-				var(--filter-color) 12%,
+				var(--filter-color) var(--ui-spell-filter-tint),
 				var(--ui-color-well)
 			);
 			border-radius: var(--ui-spell-filter-pill-radius);
-			padding: 2px 8px;
+			padding: var(--ui-spell-filter-pill-padding);
 		}
 		.filter-pills button.active {
 			background: color-mix(
 				in srgb,
-				var(--filter-color) 38%,
+				var(--filter-color) var(--ui-spell-filter-active-tint),
 				var(--ui-color-well)
 			);
 			outline: 1px solid var(--filter-color);
@@ -445,7 +445,7 @@
 			border: 1px solid transparent;
 			border-bottom-color: color-mix(
 				in srgb,
-				var(--ui-color-border) 20%,
+				var(--ui-color-border) var(--ui-spell-row-divider-tint),
 				transparent
 			);
 		}
@@ -455,9 +455,13 @@
 		}
 		.spell-details {
 			border-top: 1px solid
-				color-mix(in srgb, var(--ui-color-border) 30%, transparent);
-			padding: 10px 12px;
-			line-height: 1.5;
+				color-mix(
+					in srgb,
+					var(--ui-color-border) var(--ui-spell-details-divider-tint),
+					transparent
+				);
+			padding: var(--ui-spell-details-padding);
+			line-height: var(--ui-spell-details-line-height);
 		}
 		.expanded .spell-header,
 		.spell-header:hover {
@@ -465,7 +469,7 @@
 		}
 		.expansion-indicator {
 			margin-left: auto;
-			padding-left: 8px;
+			padding-left: var(--ui-spell-expansion-indicator-gap);
 		}
 		.spell-details p {
 			white-space: pre-wrap;
@@ -480,13 +484,13 @@
 			cursor: pointer;
 			display: flex;
 			align-items: center;
-			gap: 8px;
-			padding: 4px 6px;
+			gap: var(--ui-spell-row-gap);
+			padding: var(--ui-spell-row-padding);
 		}
 		.spell-icon {
-			width: 32px;
-			height: 32px;
-			flex: 0 0 32px;
+			width: var(--ui-spell-icon-size);
+			height: var(--ui-spell-icon-size);
+			flex: 0 0 var(--ui-spell-icon-size);
 			display: grid;
 			place-items: center;
 		}

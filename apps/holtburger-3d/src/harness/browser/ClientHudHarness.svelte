@@ -1,4 +1,9 @@
 <script lang="ts">
+	import type { ClientEntityFacts } from "../../client/client-entity-mirror";
+	import type {
+		ClientViewportTargetDestination,
+		ClientViewportTargetResult,
+	} from "../../client/client-pointer-selection-controller";
 	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 	import { APP_INPUT } from "../../lib/input/app-input";
 	import {
@@ -449,6 +454,8 @@
 		readonly probeInventory: typeof probeInventory;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
+		/** Controlled viewport answers exercise production drag ownership. */
+		readonly giveProbe: typeof giveProbe;
 		/** Delay one submission acknowledgement to test gesture lifetime independence. */
 		/** Controlled use outcomes with production UI, controller, and session decoding. */
 		readonly beginItemUseProbe: () => void;
@@ -596,6 +603,7 @@
 					location: { kind: "none" },
 					ownedByPlayer: false,
 					canPickUp: false,
+					canReceiveGive: false,
 					targeting: "non-creature",
 					scenePlacement: "available",
 					storage:
@@ -642,6 +650,9 @@
 		},
 	});
 	const itemInteractions = new ClientItemInteractions({
+		reportNotice: (message) => {
+			toast = { id: 1, message, tone: "status" };
+		},
 		session: interactionLifecycle,
 		selection,
 		reportFailure: (message) => {
@@ -649,6 +660,90 @@
 		},
 		beginAcquisition: () => keyboard.returnToGame(),
 	});
+	let inventoryWorldResult: ClientViewportTargetResult | null = {
+		kind: "empty",
+	};
+	let pendingInventoryWorldPick: ClientViewportTargetDestination | null = null;
+	let releaseGiveKeys: (() => void) | null = null;
+	const giveProbe = {
+		binding: INPUT_DEFAULTS.client.give[0],
+		begin: () => {
+			const read = interactionLifecycle.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Give fixture requires current entities");
+			const recipient = read.level.entities.get(91);
+			if (recipient?.description.kind !== "known")
+				throw new Error("Give fixture recipient missing");
+			emitInteractionEvent("client-entity-facts-changed", {
+				upserts: [
+					{
+						...recipient,
+						guid: 7,
+						canReceiveGive: true,
+						ownedByPlayer: false,
+						location: { kind: "none" },
+						scenePlacement: "available",
+						targeting: "creature",
+						description: {
+							...recipient.description,
+							name: "Give recipient",
+							healthQuery: "eligible",
+						},
+					},
+				],
+				removed: [],
+			});
+			selection.select(7);
+			releaseGiveKeys = keyboard.bindGame({
+				keydown: (event) => {
+					if (APP_INPUT.shortcut("give", event) && !event.isComposing) {
+						event.preventDefault();
+						if (!event.repeat) itemInteractions.giveSelected();
+					}
+				},
+				keyup: () => {},
+				cancel: () => {},
+			});
+			keyboard.returnToGame();
+		},
+		removeSource: (guid: number): ClientEntityFacts => {
+			const read = interactionLifecycle.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Source removal requires current authority");
+			const source = read.level.entities.get(guid);
+			if (source === undefined)
+				throw new Error("Source removal requires an existing source");
+			emitInteractionEvent("client-entity-facts-changed", {
+				upserts: [],
+				removed: [guid],
+			});
+			return source;
+		},
+		restoreSource: (source: ClientEntityFacts) =>
+			emitInteractionEvent("client-entity-facts-changed", {
+				upserts: [source],
+				removed: [],
+			}),
+		setTarget: (result: ClientViewportTargetResult | null) => {
+			inventoryWorldResult = result;
+		},
+		reply: (result: ClientViewportTargetResult) => {
+			const pending = pendingInventoryWorldPick;
+			pendingInventoryWorldPick = null;
+			if (pending === null) throw new Error("No pending viewport pick");
+			if (pending.isCurrent()) pending.commit(result);
+		},
+		end: () => {
+			emitInteractionEvent("client-entity-facts-changed", {
+				upserts: [],
+				removed: [7],
+			});
+			inventoryWorldResult = { kind: "empty" };
+			pendingInventoryWorldPick = null;
+			releaseGiveKeys?.();
+			releaseGiveKeys = null;
+		},
+	};
 	const interactionFailures: string[] = [];
 	const unsubscribeSelection = selection.subscribe((guid) => {
 		selectedGuid = guid;
@@ -1730,6 +1825,7 @@
 				return activeItemUseProbe;
 			},
 			inventoryDragCommands: () => interactionCommands,
+			giveProbe,
 			deferNextInventorySubmission: () => {
 				deferInventorySubmission = true;
 			},
@@ -1814,6 +1910,15 @@
 		}}
 		onPreciseJumpEnter={() => {
 			preciseJumpEnterCount += 1;
+		}}
+		onInventoryNotice={(message) => {
+			toast = { id: 1, message, tone: "status" };
+		}}
+		onPickInventoryTarget={(_x, _y, destination) => {
+			if (inventoryWorldResult === null)
+				pendingInventoryWorldPick = destination;
+			else if (destination.isCurrent())
+				destination.commit(inventoryWorldResult);
 		}}
 		onViewportSelect={(x, y) => {
 			viewportSelectionPoints.push({ x, y });

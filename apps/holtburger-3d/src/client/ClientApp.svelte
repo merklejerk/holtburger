@@ -419,6 +419,11 @@
 			event.preventDefault();
 			return;
 		}
+		if (APP_INPUT.shortcut("give", event) && !event.isComposing) {
+			event.preventDefault();
+			if (!event.repeat) itemInteractions?.giveSelected();
+			return;
+		}
 		if (selectionInput?.keydown(event, performance.now())) return;
 		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
@@ -827,6 +832,8 @@
 		const items = new ClientItemInteractions({
 			session: owner,
 			selection,
+			reportNotice: (message) =>
+				toastCenter.publish({ message, tone: "status" }),
 			reportFailure: (message) =>
 				toastCenter.publish({ message, tone: "warning" }),
 			beginAcquisition: () => {
@@ -937,6 +944,16 @@
 		onPreciseJumpAim={aimPreciseJump}
 		onPreciseJumpActivate={activatePreciseJump}
 		onPreciseJumpEnter={enterPreciseJump}
+		onInventoryNotice={(message) =>
+			toastCenter.publish({ message, tone: "status" })}
+		onPickInventoryTarget={(x, y, destination) => {
+			if (pointerSelection === null)
+				destination.commit({
+					kind: "unavailable",
+					reason: "World picking is unavailable.",
+				});
+			else pointerSelection.acquireTarget(x, y, destination);
+		}}
 		onViewportSelect={(clientX, clientY) => {
 			const state = itemInteractions?.snapshot();
 			if (state?.kind === "acquiring") {
@@ -949,7 +966,15 @@
 							latest.generation === state.generation
 						);
 					},
-					commit: (guid) => current?.target(guid, state.generation),
+					commit: (result) => {
+						if (result.kind === "unavailable")
+							toastCenter.publish({ message: result.reason, tone: "status" });
+						else
+							current?.target(
+								result.kind === "entity" ? result.guid : null,
+								state.generation,
+							);
+					},
 				});
 			} else pointerSelection?.acquireViewportPoint(clientX, clientY);
 		}}

@@ -291,6 +291,51 @@ mod tests {
     }
 
     #[test]
+    fn give_recipient_fact_republishes_type_and_storage_changes() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::PublicUpdatePropertyIntData;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let recipient = Guid(0x8000_0042);
+        let mut entity = holtburger_world::entity::Entity::new(
+            recipient,
+            "Recipient".into(),
+            Default::default(),
+        );
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.add_entity(entity);
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&recipient].can_receive_give);
+        for (sequence, item_type, expected) in
+            [(1, ItemType::FOOD, false), (2, ItemType::CREATURE, true)]
+        {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyInt(Box::new(
+                PublicUpdatePropertyIntData {
+                    sequence,
+                    guid: recipient,
+                    property: PropertyInt::ItemType as u32,
+                    value: item_type.bits() as i32,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&recipient].can_receive_give, expected);
+        }
+        for event in world.handle_message(&place(recipient, PLAYER, InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(!mirror[&recipient].can_receive_give);
+    }
+
+    #[test]
     fn item_use_capability_republishes_after_public_property_updates() {
         use holtburger_common::properties::{ItemType, PropertyInt, Usable};
         use holtburger_protocol::messages::{ObjectDescriptionData, PublicUpdatePropertyIntData};

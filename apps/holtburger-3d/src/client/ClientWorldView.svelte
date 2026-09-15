@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
 	import type {
 		ClientItemInteractions,
 		ItemInteractionState,
@@ -52,6 +53,10 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** Resolve world inventory destinations without changing selection. */
+		onPickInventoryTarget: ClientViewportTargetPicker;
+		/** Ordinary inventory refusal feedback. */
+		onInventoryNotice: (message: string) => void;
 		/** Startup catalog availability for switch classification diagnostics. */
 		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly cameraController: ClientViewportCameraController | null;
@@ -114,6 +119,8 @@
 		inventory,
 		itemInteractions,
 		onSelectInventoryItem,
+		onPickInventoryTarget,
+		onInventoryNotice,
 		onInteractEntity,
 		readTargetIndicatorFrame,
 		selectedEntityGuid,
@@ -437,6 +444,8 @@
 	{#if inventory !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
+				{onPickInventoryTarget}
+				{onInventoryNotice}
 				interactions={itemInteractions}
 				onSelectDragItem={(guid) => onSelectInventoryItem(guid, "select")}
 				root={worldElement}

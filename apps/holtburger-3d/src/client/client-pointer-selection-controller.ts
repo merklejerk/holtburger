@@ -35,13 +35,30 @@ interface PendingViewportQuery {
 	readonly ray: ClientPresentedCameraRay["refinement"];
 }
 
+/** A completed interaction pick distinguishes a miss from unavailable evidence. */
+export type ClientViewportTargetResult =
+	| { readonly kind: "entity"; readonly guid: number }
+	| { readonly kind: "empty" }
+	| { readonly kind: "unavailable"; readonly reason: string };
+
+/** Caller owns gesture freshness and completion feedback. */
+export interface ClientViewportTargetDestination {
+	readonly isCurrent: () => boolean;
+	readonly commit: (result: ClientViewportTargetResult) => void;
+}
+
+/** App-composed viewport picker shared by inventory hover and release. */
+export type ClientViewportTargetPicker = (
+	x: number,
+	y: number,
+	destination: ClientViewportTargetDestination,
+) => void;
+
 /** A click can publish only while its selected-identity intent is current. */
 interface PendingClickQuery extends PendingViewportQuery {
-	/** Destination owns freshness and consumes the resolved identity. */
-	readonly destination: {
-		readonly isCurrent: () => boolean;
-		readonly commit: (guid: number | null) => void;
-	};
+	/** Inventory destinations require all geometry; selection can use rendered hits. */
+	readonly requireCompleteGeometry: boolean;
+	readonly destination: ClientViewportTargetDestination;
 }
 
 /** Pointer acquisition and hover; selected identity belongs to the selection owner. */
@@ -86,36 +103,60 @@ export class ClientPointerSelectionController {
 	acquireViewportPoint(clientX: number, clientY: number): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
-		this.#acquirePoint(clientX, clientY, {
-			isCurrent: () => this.#selection.isCurrentAcquisition(intent),
-			commit: (guid) => this.#selection.commitAcquisition(intent, guid),
-		});
+		this.#acquirePoint(
+			clientX,
+			clientY,
+			{
+				isCurrent: () => this.#selection.isCurrentAcquisition(intent),
+				commit: (result) => {
+					if (result.kind === "unavailable") return;
+					this.#selection.commitAcquisition(
+						intent,
+						result.kind === "entity" ? result.guid : null,
+					);
+				},
+			},
+			false,
+		);
 	}
 
 	/** Resolve an interaction target without mutating ordinary selection. */
 	acquireTarget(
 		clientX: number,
 		clientY: number,
-		destination: PendingClickQuery["destination"],
+		destination: ClientViewportTargetDestination,
 	): void {
-		this.#acquirePoint(clientX, clientY, destination);
+		this.#acquirePoint(clientX, clientY, destination, true);
 	}
 
 	#acquirePoint(
 		clientX: number,
 		clientY: number,
-		destination: PendingClickQuery["destination"],
+		destination: ClientViewportTargetDestination,
+		requireCompleteGeometry: boolean,
 	): void {
-		if (this.#destroyed) return;
+		if (this.#destroyed || !destination.isCurrent()) return;
+		const previous = this.#pendingSelection;
+		this.#pendingSelection = null;
+		if (previous?.destination.isCurrent())
+			previous.destination.commit({
+				kind: "unavailable",
+				reason: "World picking was superseded.",
+			});
 		const presentation = this.#presentation();
 		const sampled =
 			presentation?.samplePresentedCameraRay(clientX, clientY) ?? null;
 		if (sampled === null) {
 			this.#pendingSelection = null;
+			destination.commit({
+				kind: "unavailable",
+				reason: "World picking is unavailable.",
+			});
 			return;
 		}
 		const sequence = this.#allocateSequence();
 		const pending: PendingClickQuery = {
+			requireCompleteGeometry,
 			destination,
 			ray: sampled.refinement,
 			sequence,
@@ -127,7 +168,8 @@ export class ClientPointerSelectionController {
 				if (this.#pendingSelection !== pending || !destination.isCurrent())
 					return;
 				this.#pendingSelection = null;
-				this.#onSelectionSubmissionFailed(error);
+				destination.commit({ kind: "unavailable", reason: String(error) });
+				if (!requireCompleteGeometry) this.#onSelectionSubmissionFailed(error);
 			});
 	}
 
@@ -215,15 +257,26 @@ export class ClientPointerSelectionController {
 		if (pending === null || result.sequence !== pending.sequence) return;
 		this.#pendingSelection = null;
 		if (!pending.destination.isCurrent()) return;
-		if (result.status === "unavailable") return;
 		const presentation = this.#presentation();
-		if (presentation === null) return;
+		if (result.status === "unavailable" || presentation === null) {
+			pending.destination.commit({
+				kind: "unavailable",
+				reason: "World picking is unavailable.",
+			});
+			return;
+		}
 		const refinement = presentation.refineEntitySelection(
 			pending.ray,
 			result.candidateGuids,
 			result.staticLimitDistance,
 		);
-		pending.destination.commit(refinement.selectedGuid);
+		pending.destination.commit(
+			pending.requireCompleteGeometry && !refinement.complete
+				? { kind: "unavailable", reason: "World target geometry is not ready." }
+				: refinement.selectedGuid === null
+					? { kind: "empty" }
+					: { kind: "entity", guid: refinement.selectedGuid },
+		);
 	}
 
 	#receiveHoverQueryResult(result: ClientEntitySelectionQueryResult): void {

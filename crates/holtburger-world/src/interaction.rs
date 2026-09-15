@@ -25,6 +25,24 @@ pub fn pickup_candidate(world: &crate::WorldState, guid: Guid) -> Option<&crate:
         .then_some(entity)
 }
 
+/// Coarse world recipient admission, not a prediction of item-specific acceptance.
+/// Players and non-attackable creatures follow the existing TUI recipient policy;
+/// ACE Player_Inventory.cs:3190 owns approach and final give acceptance.
+pub fn give_recipient_candidate(world: &crate::WorldState, guid: Guid) -> bool {
+    let Some(entity) = world.get_visible_entity(guid) else {
+        return false;
+    };
+    guid != world.player.guid
+        && entity.get_string_prop(PropertyString::Name).is_some()
+        && entity.item_type().is_some()
+        && (entity.flags.contains(ObjectDescriptionFlag::PLAYER)
+            || (entity.is_creature() && !entity.flags.contains(ObjectDescriptionFlag::ATTACKABLE)))
+        && !world.is_owned_by_player(guid)
+        && world.storage_location(guid).is_none()
+        && entity.placement_intent == crate::EntityPlacementIntent::Independent
+        && entity.position.landblock_id != Guid::NULL
+}
+
 /// A known object whose authored useability prohibits a direct Use request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityUseRejection {
@@ -108,6 +126,58 @@ mod tests {
         position::WorldPosition,
         properties::{ItemType, PropertyInt},
     };
+
+    #[test]
+    fn give_recipient_requires_known_unstored_player_or_peaceful_creature() {
+        let mut world = WorldState::synthetic();
+        world.player.guid = Guid(1);
+        let guid = Guid(0x8000_0042);
+        let mut entity = Entity::new(guid, "Recipient".into(), WorldPosition::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.add_entity(entity.clone());
+        assert!(give_recipient_candidate(&world, guid));
+        for (flags, expected) in [
+            (ObjectDescriptionFlag::ATTACKABLE, false),
+            (
+                ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE,
+                true,
+            ),
+            (ObjectDescriptionFlag::VENDOR, true),
+        ] {
+            entity.flags = flags;
+            world.add_entity(entity.clone());
+            assert_eq!(give_recipient_candidate(&world, guid), expected);
+            assert_eq!(
+                world
+                    .client_entity_facts(guid)
+                    .unwrap()
+                    .unwrap()
+                    .can_receive_give,
+                expected
+            );
+        }
+        world.storage.announce_container(guid, Guid(2));
+        assert!(!give_recipient_candidate(&world, guid));
+        world.storage.withdraw(guid);
+        entity.position.landblock_id = Guid::NULL;
+        world.add_entity(entity.clone());
+        assert!(!give_recipient_candidate(&world, guid));
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity.properties.strings.0.remove(&PropertyString::Name);
+        world.add_entity(entity.clone());
+        assert!(!give_recipient_candidate(&world, guid));
+        entity
+            .properties
+            .strings
+            .insert(PropertyString::Name, "Self".into());
+        entity.guid = world.player.guid;
+        world.add_entity(entity);
+        assert!(!give_recipient_candidate(&world, world.player.guid));
+    }
 
     #[test]
     fn pickup_requires_known_loose_dynamic_non_creature_authority() {

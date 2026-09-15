@@ -200,6 +200,8 @@ pub struct ClientEntityFacts {
     pub owned_by_player: bool,
     /// Shared loose-object pickup admission consumed by ordinary interaction.
     pub can_pick_up: bool,
+    /// Coarse recipient admission consumed by give gestures; server acceptance may differ.
+    pub can_receive_give: bool,
     /// Scene capability independent of loaded renderer assets.
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
@@ -368,6 +370,7 @@ impl WorldState {
             location,
             owned_by_player,
             can_pick_up: crate::interaction::pickup_candidate(self, guid).is_some(),
+            can_receive_give: crate::interaction::give_recipient_candidate(self, guid),
             scene_placement,
             targeting,
             storage,

@@ -1,3 +1,7 @@
+import type {
+	ClientViewportTargetPicker,
+	ClientViewportTargetResult,
+} from "./client-pointer-selection-controller";
 import { bindingAction } from "./client-action-item";
 import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { nextInventoryPreviewSequence } from "./client-inventory-contract";
@@ -36,7 +40,16 @@ interface InventoryDragTarget {
 	readonly intent: ClientInventoryIntent;
 	readonly sequence: number;
 }
+/** Viewport resolution belongs to one exact pointer sample, never cached hover authority. */
+interface ViewportDragTarget {
+	readonly kind: "viewport";
+	readonly element: HTMLElement;
+	readonly x: number;
+	readonly y: number;
+	result: ClientViewportTargetResult | null;
+}
 type DragTarget =
+	| ViewportDragTarget
 	| InventoryDragTarget
 	| {
 			readonly kind: "action";
@@ -87,6 +100,10 @@ export class ClientItemDrag {
 		private readonly cancelInteraction: () => boolean,
 		/** Inventory drags select their source; binding rearrangements do not. */
 		private readonly selectDragItem: (guid: number) => void,
+		/** Shared exact picker; the gesture owns completion and invalidation. */
+		private readonly pickWorldTarget: ClientViewportTargetPicker,
+		/** Coarse local refusals use the neutral notice surface. */
+		private readonly reportNotice: (message: string) => void,
 	) {
 		this.#root = root;
 		this.#inventory = inventory;
@@ -126,7 +143,15 @@ export class ClientItemDrag {
 		);
 		this.#unsubscribe = inventory.interactions.subscribe((event) => {
 			if (event.type === "inventory-preview") this.#preview(event.result);
-			else if (
+			else if (event.type === "entities") {
+				const source = this.#gesture?.source;
+				if (
+					source !== undefined &&
+					typeof source.origin === "string" &&
+					!this.#worldEntity(source.item)?.ownedByPlayer
+				)
+					this.#cancel();
+			} else if (
 				event.type === "resyncing" ||
 				event.type === "current-state" ||
 				event.type === "exit-requested" ||
@@ -372,8 +397,8 @@ export class ClientItemDrag {
 				".inventory-header[data-item-guid]",
 			);
 			if (hit instanceof HTMLElement && hit.matches("[data-game-viewport]")) {
-				element = hit;
-				target = { kind: "ground" };
+				this.#worldTarget(hit, force);
+				return;
 			} else if (gesture.source.origin === "pack") {
 				if (cell?.closest(".inventory-pack-strip")) {
 					element = cell;
@@ -419,6 +444,97 @@ export class ClientItemDrag {
 		gesture.target = this.#request(element, {
 			item: gesture.source.item,
 			target,
+		});
+	}
+
+	#worldEntity(guid: number) {
+		const read = this.#inventory.readEntities();
+		return read.kind === "current" ? read.level.entities.get(guid) : undefined;
+	}
+
+	#worldTarget(element: HTMLElement, force: boolean): void {
+		const gesture = this.#gesture;
+		if (gesture?.kind !== "dragging") return;
+		const current = gesture.target;
+		if (
+			!force &&
+			current?.kind === "viewport" &&
+			(current.result === null ||
+				(current.x === this.#cursor.x && current.y === this.#cursor.y))
+		)
+			return;
+		this.#clearHighlight();
+		const target: ViewportDragTarget = {
+			kind: "viewport",
+			element,
+			...this.#cursor,
+			result: null,
+		};
+		gesture.target = target;
+		element.dataset.inventoryDrop = "pending";
+		this.pickWorldTarget(target.x, target.y, {
+			isCurrent: () => {
+				const active = this.#gesture;
+				return (
+					active !== null &&
+					active.kind !== "pressed" &&
+					active.target === target
+				);
+			},
+			commit: (result) => {
+				const active = this.#gesture;
+				if (
+					active === null ||
+					active.kind === "pressed" ||
+					active.target !== target
+				)
+					return;
+				target.result = result;
+				// Keep one hover query in flight; refresh its newest point before highlighting the destination.
+				if (
+					active.kind === "dragging" &&
+					(target.x !== this.#cursor.x || target.y !== this.#cursor.y)
+				) {
+					this.#target(false);
+					return;
+				}
+				const recipient =
+					result.kind === "entity" ? this.#worldEntity(result.guid) : null;
+				element.dataset.inventoryDrop =
+					result.kind === "empty" || recipient?.canReceiveGive
+						? "accepted"
+						: "rejected";
+				if (active.kind === "released")
+					this.#resolveWorldRelease(active, target);
+			},
+		});
+	}
+
+	#resolveWorldRelease(
+		gesture: Extract<Gesture, { kind: "released" }>,
+		target: ViewportDragTarget,
+	): void {
+		const result = target.result;
+		if (result === null) return;
+		if (result.kind === "unavailable") {
+			this.#finishGesture();
+			this.reportNotice(result.reason);
+			return;
+		}
+		if (
+			result.kind === "entity" &&
+			!this.#worldEntity(result.guid)?.canReceiveGive
+		) {
+			this.#finishGesture();
+			this.reportNotice("This entity cannot receive an item.");
+			return;
+		}
+		gesture.target = this.#request(target.element, {
+			item: gesture.source.item,
+			target:
+				result.kind === "empty"
+					? { kind: "ground" }
+					: { kind: "give", guid: result.guid },
 		});
 	}
 
@@ -470,6 +586,7 @@ export class ClientItemDrag {
 				(gesture.source.origin === "contents" &&
 					target.intent.target.kind !== "equipment" &&
 					target.intent.target.kind !== "ground" &&
+					target.intent.target.kind !== "give" &&
 					target.intent.target.kind !== "stack")) &&
 			this.#inventory.read().sortMode !== "native"
 		) {
@@ -562,11 +679,14 @@ export class ClientItemDrag {
 			this.#cancel();
 			return;
 		}
-		this.#gesture = {
+		const released: Extract<Gesture, { kind: "released" }> = {
 			kind: "released",
 			source: gesture.source,
 			target: gesture.target,
 		};
+		this.#gesture = released;
+		if (released.target.kind === "viewport")
+			this.#resolveWorldRelease(released, released.target);
 	};
 
 	/** DOM labels carry stable cell addresses independently of remappable key bindings. */

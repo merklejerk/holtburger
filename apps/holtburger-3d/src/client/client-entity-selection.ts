@@ -24,7 +24,12 @@ export class ClientEntitySelection {
 	readonly #listeners = new Set<(guid: number | null) => void>();
 	readonly #externalListeners = new Set<() => void>();
 	readonly #unsubscribe: () => void;
-	#selectedGuid: number | null = null;
+	/** One selection history pair; repeated publication never rotates it. */
+	#pair: { readonly current: number | null; readonly previous: number | null } =
+		{
+			current: null,
+			previous: null,
+		};
 	#intent = Symbol("initial selection");
 	#destroyed = false;
 
@@ -51,7 +56,12 @@ export class ClientEntitySelection {
 	}
 
 	selectedGuid(): number | null {
-		return this.#selectedGuid;
+		return this.#pair.current;
+	}
+
+	/** Previous distinct selection, retired with authoritative identity loss. */
+	previousGuid(): number | null {
+		return this.#pair.previous;
 	}
 
 	subscribe(listener: (guid: number | null) => void): () => void {
@@ -107,16 +117,22 @@ export class ClientEntitySelection {
 			(entity.ownedByPlayer || guid === read.level.playerGuid)
 		)
 			this.#publish(
-				mode === "toggle" && this.#selectedGuid === guid ? null : guid,
+				mode === "toggle" && this.#pair.current === guid ? null : guid,
 			);
 	}
 
 	/** Maintain identity from semantic facts; presentation contributes measured distance only. */
 	maintainSelection(): void {
-		if (this.#destroyed || this.#selectedGuid === null) return;
+		if (this.#destroyed) return;
 		const read = this.#lifecycle.entities.read();
 		if (read.kind === "pending") return;
-		const guid = this.#selectedGuid;
+		if (
+			this.#pair.previous !== null &&
+			!read.level.entities.has(this.#pair.previous)
+		)
+			this.#pair = { ...this.#pair, previous: null };
+		const guid = this.#pair.current;
+		if (guid === null) return;
 		const entity = read.level.entities.get(guid);
 		if (entity?.ownedByPlayer) return;
 		if (entity === undefined) {
@@ -143,8 +159,11 @@ export class ClientEntitySelection {
 	}
 
 	#publish(guid: number | null): void {
-		if (guid === this.#selectedGuid) return;
-		this.#selectedGuid = guid;
+		if (guid === this.#pair.current) return;
+		this.#pair = {
+			current: guid,
+			previous: guid === null ? null : this.#pair.current,
+		};
 		for (const listener of this.#listeners) listener(guid);
 	}
 }

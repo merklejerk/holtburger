@@ -11,6 +11,21 @@ import {
 } from "./entity-selection-intersection";
 
 describe("exact entity selection", () => {
+	it("distinguishes absent candidate geometry from an available empty query", () => {
+		const source = { withSpawnedEntitySelectionGeometry: () => null };
+		const ray = { start: Vec3.zero(), direction: new Vec3(0, 0, 1) };
+		expect(refineEntitySelectionCandidates(source, ray, [7], 20)).toEqual({
+			complete: false,
+			selectedGuid: null,
+			distance: null,
+		});
+		expect(refineEntitySelectionCandidates(source, ray, [], 20)).toEqual({
+			complete: true,
+			selectedGuid: null,
+			distance: null,
+		});
+	});
+
 	it("refines current transforms across landblock frames and orders exact ties by GUID", () => {
 		const targetLandblock = "0x0101ffff" as const;
 		const origin = createLandblockWorldOrigin(targetLandblock);
@@ -31,6 +46,7 @@ describe("exact entity selection", () => {
 		);
 
 		expect(result).toMatchObject({
+			complete: true,
 			distance: 10,
 			selectedGuid: 4,
 		});
@@ -99,6 +115,7 @@ describe("exact entity selection", () => {
 				10,
 			),
 		).toMatchObject({
+			complete: true,
 			distance: 3,
 			selectedGuid: 7,
 		});

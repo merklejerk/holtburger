@@ -86,7 +86,8 @@ In the 3D client, ordinary world interaction prefers pickup for an eligible obje
 active use-on-target acquisition keeps precedence. Contents, real carried bags,
 and equipment cells can be dragged onto the viewport canvas under every sort mode.
 Panels, HUD controls, and outside-app releases are not ground destinations. An
-entity under the cursor does not turn the gesture into give/use/container transfer.
+entity under the cursor is resolved as a give destination as described below;
+use and container transfer are not inferred from a viewport release.
 Action-bar dragging continues to edit bindings rather than dropping objects.
 Crossing the drag threshold with contents, a carried bag, or equipment selects
 the source without toggling it off or activating it. Cancellation or rejection
@@ -99,6 +100,37 @@ Core retains the complete result and identity.
 Selection follows the retained identity across ownership and placement updates.
 A temporary lack of ground placement during a drop does not clear it; authoritative
 entity removal, lifecycle exit, or an established out-of-range position still does.
+
+## Give
+
+Give uses the existing inventory preview/submission pipeline. World's
+`give_recipient_candidate` publishes `canReceiveGive`: known, world-present
+players other than self and non-attackable creatures (including vendors) are
+plausible recipients. Stored/owned objects are excluded. This intentionally does
+not cover hostile-creature or non-creature turn-ins, or predict NPC emote rules,
+recipient preferences, burden or capacity. Attunement is not a blanket local
+rejection: player transfers and NPC turn-ins have different server rules.
+
+Core rechecks source ownership and recipient eligibility and resolves the whole
+source stack, or one known non-stackable item. Stackable sources require a known,
+positive quantity in the signed wire range. One `GiveObjectRequest` carries that
+quantity, source GUID and recipient GUID. Equipped sources require no preliminary
+unequip or storage capacity. There is no completion-wait lock or optimistic
+removal; NPC turn-ins may consume only one item according to server rules.
+
+The configurable `give` shortcut defaults to G: select recipient, select item,
+then invoke give. Current selection supplies the source and the previous distinct
+selection supplies the recipient. Repeated selection of the current identity does
+not rotate history. Explicit clearing/world exit clears both; removal retires the
+affected identity. Recovery blocks submission until current facts are available.
+Give does not change selection, reverse roles or search further back in history.
+
+Viewport inventory drags resolve an entity before classifying its eligibility.
+An eligible hit gives; an ineligible hit refuses. Only an available, fully refined
+empty result drops on the ground. Missing candidate geometry, unavailable picking
+or failed queries never become ground drops. Hover supplies an accepted/refused viewport outline with one query in flight; release samples
+again. Gesture identity rejects stale replies after cancellation, replacement or
+source removal. Action-bar binding drags remain selection-neutral binding edits.
 
 ## Equipment replacement
 

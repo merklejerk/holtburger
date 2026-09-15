@@ -15,6 +15,7 @@ function item(
 	return {
 		guid,
 		canPickUp: false,
+		canReceiveGive: false,
 		description: {
 			kind: "known",
 			name: `Inventory item ${guid}`,

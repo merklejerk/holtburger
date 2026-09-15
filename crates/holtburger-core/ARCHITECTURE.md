@@ -339,9 +339,11 @@ character-only preparation and do not acquire motion-table/run-stat requirements
 `client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor.
 
 `client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,
-append, merge-only targets, splits, equipment targets, pickup, ground drop, and
+append, merge-only targets, splits, equipment targets, pickup, ground drop, give, and
 native pack exchanges. Pickup admission comes from world's `pickup_candidate`;
-ground drop supports owned carried and equipped sources. `inventory_storage.rs`
+ground drop and give support owned carried and equipped sources. Give recipient
+admission comes from world's coarse `give_recipient_candidate`; the resolved plan
+carries the authoritative source quantity in the signed wire range. `inventory_storage.rs`
 shares current-capacity allocation between pickup, splits, and equipment
 replacement; none credits a slot that a later action might free.
 `inventory_runtime.rs` sends standalone requests without a completion-wait lock.

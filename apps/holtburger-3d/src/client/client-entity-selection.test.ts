@@ -1,6 +1,7 @@
 import {
 	ClientPointerSelectionController,
 	type ClientPointerSelectionPresentationPort,
+	type ClientViewportTargetResult,
 } from "./client-pointer-selection-controller";
 import {
 	ClientEntityMirror,
@@ -21,6 +22,31 @@ import type { ClientEntitySelectionQueryRequest } from "./client-host-contract";
 import type { ClientSelectedEntityTrackingStatus } from "./client-selection-tracking";
 
 describe("ClientEntitySelection", () => {
+	it("retains exactly one distinct selection and retires history on removal or clear", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		selection.select(7);
+		selection.select(12);
+		selection.select(12);
+		expect(selection.previousGuid()).toBe(7);
+		lifecycle.update([], [7]);
+		expect(selection.previousGuid()).toBeNull();
+		expect(selection.selectedGuid()).toBe(12);
+		selection.select(8);
+		expect(selection.previousGuid()).toBe(12);
+		selection.select(null);
+		expect(selection.previousGuid()).toBeNull();
+		selection.select(8);
+		selection.select(12);
+		lifecycle.update([], [12]);
+		expect(selection.selectedGuid()).toBeNull();
+		expect(selection.previousGuid()).toBeNull();
+		selection.destroy();
+	});
+
 	it("correlates acquisition and publishes one exact winner", async () => {
 		const lifecycle = new FakeLifecycle();
 		const presentation = new FakePresentation();
@@ -71,7 +97,10 @@ describe("ClientEntitySelection", () => {
 		const targets: Array<number | null> = [];
 		const destination = {
 			isCurrent: () => current,
-			commit: (guid: number | null) => targets.push(guid),
+			commit: (result: ClientViewportTargetResult) => {
+				if (result.kind !== "unavailable")
+					targets.push(result.kind === "entity" ? result.guid : null);
+			},
 		};
 		const reply = () => {
 			const request = lifecycle.requests.at(-1);
@@ -87,6 +116,55 @@ describe("ClientEntitySelection", () => {
 		reply();
 		expect(targets).toEqual([4]);
 		expect(presentation.refinedCandidates).toHaveLength(1);
+		pointer.destroy();
+		selection.destroy();
+	});
+
+	it("completes unavailable and superseded interaction picks without selecting", async () => {
+		const lifecycle = new FakeLifecycle();
+		const presentation = new FakePresentation();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => presentation,
+		});
+		selection.select(77);
+		const results: ClientViewportTargetResult[] = [];
+		const pointer = new ClientPointerSelectionController({
+			lifecycle,
+			presentation: () => presentation,
+			selection,
+			onSelectionSubmissionFailed: () => {
+				throw new Error("Interaction owns its failure notice");
+			},
+		});
+		const destination = {
+			isCurrent: () => true,
+			commit: (result: ClientViewportTargetResult) => results.push(result),
+		};
+		pointer.acquireTarget(1, 2, destination);
+		pointer.acquireTarget(3, 4, destination);
+		expect(results).toEqual([
+			{ kind: "unavailable", reason: "World picking was superseded." },
+		]);
+		const request = lifecycle.requests.at(-1);
+		if (request === undefined) throw new Error("Expected query");
+		lifecycle.emit({
+			type: "entity-selection-query-result",
+			result: {
+				sequence: request.sequence,
+				status: "unavailable",
+				reason: "collision-coordinator-unavailable",
+			},
+		});
+		expect(results.at(-1)?.kind).toBe("unavailable");
+		lifecycle.rejectNext = true;
+		pointer.acquireTarget(1, 2, destination);
+		await Promise.resolve();
+		expect(results.at(-1)).toEqual({
+			kind: "unavailable",
+			reason: "Error: host offline",
+		});
+		expect(selection.selectedGuid()).toBe(77);
 		pointer.destroy();
 		selection.destroy();
 	});
@@ -674,6 +752,7 @@ class FakePresentation
 		const selectedGuid =
 			candidateGuids.length === 0 ? null : Math.min(...candidateGuids);
 		return {
+			complete: true,
 			distance: selectedGuid === null ? null : 1,
 			selectedGuid,
 		};

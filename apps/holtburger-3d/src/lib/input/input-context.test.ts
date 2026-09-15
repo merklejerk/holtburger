@@ -4,6 +4,29 @@ import { AppInput } from "./app-input";
 import { INPUT_DEFAULTS } from "./input-defaults";
 
 describe("InputContext", () => {
+	it("resolves give from the configured chord rather than the default key", () => {
+		const input = new AppInput({
+			...INPUT_DEFAULTS,
+			client: { ...INPUT_DEFAULTS.client, give: [{ key: "F9", ctrl: true }] },
+		});
+		expect(
+			input.shortcut("give", { key: "F9", shiftKey: false, ctrlKey: true }),
+		).toBe(true);
+		expect(
+			input.shortcut("give", { key: "F9", shiftKey: false, ctrlKey: false }),
+		).toBe(false);
+		const original = INPUT_DEFAULTS.client.give[0];
+		expect(
+			input.shortcut("give", {
+				key: original.key,
+				shiftKey: false,
+				ctrlKey: original.ctrl,
+				altKey: original.alt,
+				metaKey: original.meta,
+			}),
+		).toBe(false);
+	});
+
 	it("resolves configured modifiers held before pointer focus", () => {
 		const context = new InputContext(
 			{ precision: [{ key: "Control" }] },

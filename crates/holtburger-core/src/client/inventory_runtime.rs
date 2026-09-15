@@ -8,8 +8,8 @@ use super::{
 use anyhow::Result;
 use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::{
-    DropItemActionData, GameAction, PutItemInContainerActionData, StackableMergeActionData,
-    StackableSplitToContainerActionData,
+    DropItemActionData, GameAction, GiveObjectRequestActionData, PutItemInContainerActionData,
+    StackableMergeActionData, StackableSplitToContainerActionData,
 };
 use holtburger_world::state::storage::{StorageLocation, StorageSlot};
 use std::time::{Duration, Instant};
@@ -90,6 +90,15 @@ impl ClientRuntime {
                 return self.start_planned_equipment_change(plan, None).await;
             }
             InventoryPlan::Move(step) => move_action(step),
+            InventoryPlan::Give {
+                item,
+                recipient,
+                amount,
+            } => GameAction::GiveObjectRequest(Box::new(GiveObjectRequestActionData {
+                target_guid: recipient,
+                item_guid: item,
+                amount,
+            })),
             InventoryPlan::Drop { item } => {
                 GameAction::DropItem(Box::new(DropItemActionData { item_guid: item }))
             }
@@ -218,7 +227,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pickup_and_equipped_drop_emit_the_exact_native_actions() {
+    async fn pickup_equipped_drop_and_give_emit_the_exact_native_actions() {
         use super::super::inventory_plan::InventoryTarget;
         use byteorder::{LittleEndian, ReadBytesExt};
         use holtburger_common::properties::{ItemType, PropertyInt};
@@ -258,6 +267,25 @@ mod tests {
             })
             .await
             .expect("drop equipped");
+        let recipient = Guid(0x8000_0050);
+        let mut entity = holtburger_world::entity::Entity::new(
+            recipient,
+            "Recipient".into(),
+            Default::default(),
+        );
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        client.world.add_entity(entity);
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: equipped,
+                target: InventoryTarget::Give { guid: recipient },
+            })
+            .await
+            .expect("give equipped");
         let bytes = std::fs::read(capture.path()).expect("captured packets");
         let mut reader = Cursor::new(bytes.as_slice());
         let mut actions = Vec::new();
@@ -281,11 +309,14 @@ mod tests {
             assert_eq!(offset, packet.len());
             actions.push(message.action);
         }
-        assert_eq!(actions.len(), 2);
+        assert_eq!(actions.len(), 3);
         assert!(
             matches!(&actions[0], GameAction::PutItemInContainer(data) if data.item_guid == ground && data.container_guid == Guid(2) && data.placement == 1)
         );
         assert!(matches!(&actions[1], GameAction::DropItem(data) if data.item_guid == equipped));
+        assert!(
+            matches!(&actions[2], GameAction::GiveObjectRequest(data) if data.item_guid == equipped && data.target_guid == recipient && data.amount == 1)
+        );
         assert!(client.pack_exchange.is_none());
         assert!(client.equipment_operation.is_none());
     }

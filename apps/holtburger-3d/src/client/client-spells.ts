@@ -1,3 +1,4 @@
+import type { SpellSearch } from "./client-spell-search";
 import type { SpellInspectionResult } from "./client-spell-inspection-contract";
 import type {
 	SpellComponentReference,
@@ -14,6 +15,8 @@ export type SpellInspectionDisplay =
 
 /** App-local spell resources; display consumers keep independent artwork leases. */
 export interface ClientSpellServices {
+	/** Cold panel preferences survive remount for the current character. */
+	search: SpellSearch;
 	/** Authority snapshots and cold knowledge-change events. */
 	readonly session: {
 		state(): Pick<ReturnType<ClientLifecycleSession["state"]>, "knownSpells">;
@@ -39,6 +42,8 @@ export interface ClientSpellServices {
 
 /** Retain lazily requested known-spell artwork independently of floating panel lifetime. */
 export class ClientSpellState implements ClientSpellServices {
+	/** App-local view state, unrelated to knowledge and icon leases. */
+	search: SpellSearch = { text: "", tags: [] };
 	readonly #owner: UiIconOwner;
 	readonly #unsubscribe: () => void;
 	/** Spell identities can share an image key; release only after its last known spell leaves. */
@@ -209,6 +214,7 @@ export class ClientSpellState implements ClientSpellServices {
 		const ids = this.session.state().knownSpells;
 		// A reset invalidates in-flight lookups even if the next character knows the same IDs.
 		if (ids === null) {
+			this.search = { text: "", tags: [] };
 			this.#epoch++;
 			this.#formulaEpoch++;
 		}

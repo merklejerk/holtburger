@@ -1,4 +1,4 @@
-//! App-local spell artwork selection over shared static reference data.
+//! App-local spell reference projection and artwork selection over static content.
 
 use std::{collections::HashSet, num::NonZeroU32};
 
@@ -56,6 +56,8 @@ pub enum SpellArtwork {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpellDetails {
+    /// Static discovery classifications, independent of artwork.
+    pub classification: holtburger_content::spells::classification::SpellClassification,
     /// Authored description.
     pub description: String,
     /// Authored school ID; unknown values remain distinguishable.
@@ -120,6 +122,7 @@ fn project_references(
                 id,
                 name: spell.name.to_owned(),
                 details: SpellDetails {
+                    classification: spell.classification,
                     description: spell.description.to_owned(),
                     school: spell.school,
                     base_mana: spell.base_mana,
@@ -237,6 +240,10 @@ mod tests {
             id: 1,
             name: "Spell".into(),
             details: SpellDetails {
+                classification: holtburger_content::spells::classification::classify(
+                    1,
+                    &holtburger_dat::file_type::spell_table::SpellBase::default(),
+                ),
                 description: "Description".into(),
                 school: 3,
                 base_mana: 10,
@@ -251,7 +258,7 @@ mod tests {
             serde_json::to_value(reference).unwrap(),
             serde_json::json!({
                 "kind":"known", "id":1, "name":"Spell",
-                "details":{"description":"Description", "school":3, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
+                "details":{"classification":{"beneficial":false,"level":null,"target":"untargeted","fellowship":false,"damage":null},"description":"Description", "school":3, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
                     "kind":"ready", "spec":{"kind":"spell", "base":1,"background":610,"effects":702,"overlay":704}
                 }
             })

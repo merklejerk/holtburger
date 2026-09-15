@@ -1,9 +1,13 @@
 //! Static spell references, independent of player knowledge and UI layout.
 
+pub mod classification;
+
 use holtburger_dat::file_type::{SpellTable, spell_table::component_power_tier};
 
-/// Source facts consumed by the app host's spell artwork projection.
+/// Static facts consumed by independent spell reference views and artwork projection.
 pub struct SpellReference<'a> {
+    /// Derived static discovery facts, independent of artwork and character state.
+    pub classification: classification::SpellClassification,
     /// Authored display name.
     pub name: &'a str,
     /// Authored inspection description.
@@ -27,6 +31,7 @@ pub struct SpellReference<'a> {
 /// Query an already parsed table without consulting live character membership.
 pub fn spell_reference(table: &SpellTable, id: u32) -> Option<SpellReference<'_>> {
     table.spells.get(&id).map(|spell| SpellReference {
+        classification: classification::classify(id, spell),
         name: &spell.name,
         description: &spell.description,
         school: spell.school,

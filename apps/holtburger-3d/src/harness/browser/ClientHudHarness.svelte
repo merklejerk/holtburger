@@ -1851,8 +1851,10 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		inventory = inventoryOwner;
+		let spellReferenceRequests = 0;
 		const references = new SpellReferences({
 			invoke: async (command, args) => {
+				spellReferenceRequests++;
 				if (command === "load_spell_components")
 					return [
 						{
@@ -1882,13 +1884,25 @@
 						: {
 								kind: "known",
 								id,
-								name: `Spell ${String(id).padStart(4, "0")}`,
+								name:
+									id === 2000
+										? "Harm Other I"
+										: `Spell ${String(id).padStart(4, "0")} ${id % 2 === 0 ? "Frost Protection Self" : "Acid Protection Other"}`,
 								details: {
 									description: "Fixture spell description.",
-									school: 3,
+									school: id % 2 === 0 ? 2 : 3,
 									baseMana: 10,
 									manaPerTarget: 2,
 									durationSeconds: 60,
+									classification: {
+										beneficial: id !== 2000,
+										level: ((id - 1) % 8) + 1,
+										target:
+											id !== 2000 && id % 2 === 0 ? "self-target" : "other",
+										fellowship: false,
+										damage:
+											id === 2000 ? "direct" : id % 2 === 0 ? "frost" : "acid",
+									},
 								},
 								artwork: {
 									kind: "ready",
@@ -1936,8 +1950,11 @@
 				return activeItemUseProbe;
 			},
 			probeSpells: () =>
-				probeClientSpells(emitInteractionEvent, holdSpellReferences, (ids) =>
-					references.load(ids),
+				probeClientSpells(
+					emitInteractionEvent,
+					holdSpellReferences,
+					(ids) => references.load(ids),
+					() => spellReferenceRequests,
 				),
 			inventoryDragCommands: () => interactionCommands,
 			giveProbe,

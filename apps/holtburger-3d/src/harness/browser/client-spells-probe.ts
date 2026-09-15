@@ -1,10 +1,16 @@
 import { tick } from "svelte";
+import {
+	spellSearchEntry,
+	spellSearchWords,
+	matchesSpellSearch,
+} from "../../client/client-spell-search";
 
 /** Exercise production spell membership, static lookup, image decoding, and panel lifetimes. */
 export async function probeClientSpells(
 	emit: (event: string, payload: unknown) => void,
 	holdReferences: () => () => void,
 	loadReferences: (ids: readonly number[]) => Promise<unknown>,
+	readReferenceRequests: () => number,
 ) {
 	const button = (label: string) => {
 		const element = document.querySelector<HTMLButtonElement>(
@@ -22,7 +28,7 @@ export async function probeClientSpells(
 		}
 		await tick();
 	};
-	const ids = Array.from({ length: 512 }, (_, i) => i + 1);
+	const ids = Array.from({ length: 1024 }, (_, i) => i + 1);
 	emit("client-player-spells-updated", { spellIds: [...ids, 999999] });
 	button("Spells");
 	await waitFor(
@@ -34,6 +40,137 @@ export async function probeClientSpells(
 	const missing = document.querySelector('[data-spell-id="999999"]');
 	if (!missing?.textContent?.includes("Spell definition is missing."))
 		throw new Error("Missing definition was not diagnosed.");
+
+	const input = () => {
+		const element = document.querySelector<HTMLInputElement>(
+			'[aria-label="Search spell names"]',
+		);
+		if (element === null) throw new Error("Missing spell search input.");
+		return element;
+	};
+	const searchFor = async (text: string) => {
+		input().value = text;
+		input().dispatchEvent(new Event("input", { bubbles: true }));
+		await tick();
+	};
+	const pill = (label: string) => {
+		const element = [
+			...document.querySelectorAll<HTMLButtonElement>(".filter-pills button"),
+		].find((button) => button.textContent?.trim() === label);
+		if (element === undefined) throw new Error(`Missing ${label} filter.`);
+		element.click();
+	};
+	const timings: number[] = [];
+	const longTasks: number[] = [];
+	const observer = new PerformanceObserver((list) => {
+		longTasks.push(...list.getEntries().map((entry) => entry.duration));
+	});
+	observer.observe({ type: "longtask" });
+	const matchingTimings: number[] = [];
+	const requestBaseline = readReferenceRequests();
+	const entries = [...document.querySelectorAll(".spell-header")].map(
+		(header) => spellSearchEntry(header.textContent ?? "", null),
+	);
+	for (let repeat = 0; repeat < 20; repeat++) {
+		for (const query of ["acid prot", "self frost", "zzzz", ""]) {
+			// Separate input tasks so the synthetic loop does not manufacture one long task.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			const matchingStart = performance.now();
+			const terms = spellSearchWords(query);
+			entries.filter((entry) => matchesSpellSearch(entry, terms, []));
+			matchingTimings.push(performance.now() - matchingStart);
+			const start = performance.now();
+			await searchFor(query);
+			timings.push(performance.now() - start);
+			const expected =
+				query === "" ? ids.length + 1 : query === "zzzz" ? 0 : ids.length / 2;
+			if (
+				document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+				expected
+			)
+				throw new Error("Name terms did not intersect.");
+		}
+	}
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	observer.disconnect();
+	timings.sort((a, b) => a - b);
+	matchingTimings.sort((a, b) => a - b);
+	const p95 = timings[Math.floor(timings.length * 0.95)];
+	if (p95 === undefined || p95 >= 50)
+		throw new Error(`Spell search DOM update p95 exceeded 50ms: ${p95}`);
+	await searchFor("acid prot");
+	pill("Acid");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length / 2
+	)
+		throw new Error("Name/tag intersection failed.");
+	pill("Fire");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length / 2
+	)
+		throw new Error("Filter union failed to preserve matching acid spells.");
+	pill("Fire");
+	pill("Beneficial");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length / 2
+	)
+		throw new Error("Beneficial filter excluded beneficial spells.");
+	pill("Harmful");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length / 2
+	)
+		throw new Error("Disposition union failed to intersect search.");
+	pill("Harmful");
+	pill("Beneficial");
+	pill("Acid");
+	button("Reset spell search and filters");
+	await tick();
+	if (
+		input().value !== "" ||
+		document.querySelectorAll('.filter-pills [aria-pressed="true"]').length !==
+			0 ||
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+			ids.length + 1
+	)
+		throw new Error("Reset did not clear search and filters.");
+	pill("Acid");
+	pill("Frost");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length
+	)
+		throw new Error("Damage pills did not union.");
+	pill("Life");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length / 2
+	)
+		throw new Error("School failed to intersect damage union.");
+	pill("Item");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length
+	)
+		throw new Error("School union failed within category.");
+	pill("Life");
+	pill("Item");
+	pill("Acid");
+	pill("Frost");
+	await searchFor("");
+	const filteringContentRequests = readReferenceRequests() - requestBaseline;
+	if (filteringContentRequests !== 0)
+		throw new Error("Filtering issued content requests.");
 	const toggleSpell = (id: number) => {
 		const header = document.querySelector<HTMLButtonElement>(
 			`[data-spell-id="${id}"] .spell-header`,
@@ -41,6 +178,22 @@ export async function probeClientSpells(
 		if (header === null) throw new Error(`Missing spell header ${id}.`);
 		header.click();
 	};
+	toggleSpell(1);
+	await tick();
+	await searchFor("frost");
+	if (document.querySelector(".spell-details") !== null)
+		throw new Error("Hidden spell retained expanded inspection.");
+	button("Close Spells");
+	await tick();
+	button("Spells");
+	await waitFor(
+		() =>
+			document.querySelectorAll("[data-spell-id]:not([hidden])").length ===
+			ids.length / 2,
+	);
+	if (input().value !== "frost")
+		throw new Error("Search did not survive panel remount.");
+	await searchFor("");
 	toggleSpell(1);
 	await tick();
 	if (
@@ -120,7 +273,7 @@ export async function probeClientSpells(
 			"Reopened spell panel retained stale membership or ordering.",
 		);
 	const release = holdReferences();
-	emit("client-player-spells-updated", { spellIds: [600, 601] });
+	emit("client-player-spells-updated", { spellIds: [1600, 1601] });
 	await waitFor(
 		() =>
 			document
@@ -142,13 +295,24 @@ export async function probeClientSpells(
 		() => document.querySelectorAll("[data-spell-id] img").length === 1,
 	);
 	release();
-	await loadReferences([600, 601]);
+	await loadReferences([1600, 1601]);
 	await tick();
 	if (
-		document.querySelector('[data-spell-id="600"]') !== null ||
+		document.querySelector('[data-spell-id="1600"]') !== null ||
 		document.querySelectorAll("[data-spell-id]").length !== 1
 	)
 		throw new Error("Retired character lookup replaced current spell rows.");
+	emit("client-player-spells-updated", { spellIds: [2000] });
+	await waitFor(
+		() => document.querySelector('[data-spell-id="2000"] img') !== null,
+	);
+	pill("Direct");
+	pill("Harmful");
+	await searchFor("harm");
+	if (document.querySelectorAll("[data-spell-id]:not([hidden])").length !== 1)
+		throw new Error("Direct damage did not match Harm.");
+	button("Reset spell search and filters");
+	await tick();
 	emit("client-player-spells-updated", { spellIds: [] });
 	await waitFor(
 		() =>
@@ -159,6 +323,16 @@ export async function probeClientSpells(
 	button("Close Spells");
 	return {
 		largeList: ids.length,
+		searchDomUpdateP95Ms: p95,
+		searchDomUpdateMedianMs: timings[Math.floor(timings.length / 2)],
+		searchMatchingP95Ms:
+			matchingTimings[Math.floor(matchingTimings.length * 0.95)],
+		searchLongTasksMs: longTasks,
+		browser: navigator.userAgent,
+		searchMatchingMeanMs:
+			matchingTimings.reduce((a, b) => a + b, 0) / matchingTimings.length,
+		filteringContentRequests,
+		searchAndTagIntersections: true,
 		inlineDetails: true,
 		formulaComponents: true,
 		contextRefresh: true,

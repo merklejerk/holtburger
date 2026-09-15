@@ -31,23 +31,21 @@ function fixture() {
 		overlay: null,
 	} as const;
 	const references = new SpellReferences({ invoke: async () => [] });
-	const components = vi
-		.spyOn(references, "components")
-		.mockResolvedValue(
-			new Map([
-				[
-					188,
-					{
-						id: 188,
-						name: "Prismatic Taper",
-						artwork: {
-							kind: "ready",
-							spec: { kind: "spell-component", base: 188 },
-						},
+	const components = vi.spyOn(references, "components").mockResolvedValue(
+		new Map([
+			[
+				188,
+				{
+					id: 188,
+					name: "Prismatic Taper",
+					artwork: {
+						kind: "ready",
+						spec: { kind: "spell-component", base: 188 },
 					},
-				],
-			]),
-		);
+				},
+			],
+		]),
+	);
 	const load = vi.spyOn(references, "load").mockImplementation(async (ids) =>
 		ids.map((id) => ({
 			kind: "known",
@@ -57,6 +55,13 @@ function fixture() {
 				baseMana: 10,
 				manaPerTarget: 0,
 				durationSeconds: 60,
+				classification: {
+					beneficial: true,
+					level: 1,
+					target: "other",
+					fellowship: false,
+					damage: "acid",
+				},
 			},
 			id,
 			name: `Spell ${id}`,
@@ -104,6 +109,15 @@ function fixture() {
 }
 
 describe("ClientSpellState artwork lifetime", () => {
+	it("retains cold filters across membership changes and clears them on character reset", () => {
+		const f = fixture();
+		f.state.search = { text: "acid", tags: ["acid"] };
+		f.set([1]);
+		expect(f.state.search).toEqual({ text: "acid", tags: ["acid"] });
+		f.set(null);
+		expect(f.state.search).toEqual({ text: "", tags: [] });
+		f.state.destroy();
+	});
 	it("loads lazily, survives panel close, and releases shared artwork after its last known spell", async () => {
 		const f = fixture();
 		expect(f.load).not.toHaveBeenCalled();
@@ -143,6 +157,13 @@ describe("ClientSpellState artwork lifetime", () => {
 							baseMana: 10,
 							manaPerTarget: 0,
 							durationSeconds: 60,
+							classification: {
+								beneficial: true,
+								level: 1,
+								target: "other",
+								fellowship: false,
+								damage: "acid",
+							},
 						},
 						id: 1,
 						name: "Spell",

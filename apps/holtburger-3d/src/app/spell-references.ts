@@ -26,6 +26,30 @@ const referenceSchema = z.discriminatedUnion("kind", [
 			name: z.string(),
 			details: z
 				.object({
+					classification: z
+						.object({
+							beneficial: z.boolean(),
+							level: z.number().int().min(1).max(8).nullable(),
+							target: z
+								.enum(["self-target", "other", "item-target", "untargeted"])
+								.nullable(),
+							fellowship: z.boolean(),
+							damage: z
+								.enum([
+									"direct",
+									"acid",
+									"bludgeoning",
+									"frost",
+									"lightning",
+									"fire",
+									"piercing",
+									"slashing",
+									"nether",
+								])
+								.nullable(),
+						})
+						.strict()
+						.readonly(),
 					description: z.string(),
 					school: z.number().int().nonnegative().max(0xffff_ffff),
 					baseMana: z.number().int().nonnegative().max(0xffff_ffff),

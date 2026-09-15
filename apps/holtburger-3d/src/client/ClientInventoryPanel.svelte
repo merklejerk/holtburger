@@ -8,10 +8,10 @@
 	} from "./client-inventory-split";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
-	import ItemIcon from "../app/ItemIcon.svelte";
+	import UiIcon from "../app/UiIcon.svelte";
 	import InventoryCurrencyOverlay from "./InventoryCurrencyOverlay.svelte";
 	import InventoryEquipmentStrip from "./InventoryEquipmentStrip.svelte";
-	import type { ItemIconDisplay } from "../app/item-icon-repository";
+	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { ClientEntityFacts } from "./client-entity-mirror";
 	import type {
 		ClientInventoryState,
@@ -33,7 +33,7 @@
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
-	let displays = $state<ReadonlyMap<string, ItemIconDisplay>>(new Map());
+	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
 	/** Footer artwork follows the same bounded display sampling as the inventory cells. */
 	const pyrealDisplay = $derived(displays.get(inventory.pyrealIconKey));
 	const sections = $derived(view?.sections ?? []);
@@ -181,7 +181,7 @@
 		};
 	});
 
-	function iconFor(guid: number): ItemIconDisplay | undefined {
+	function iconFor(guid: number): UiIconDisplay | undefined {
 		const key = view?.iconKeys.get(guid);
 		return key === undefined ? undefined : displays.get(key);
 	}
@@ -231,7 +231,7 @@
 				disabled={pending || item.description.kind === "pending"}
 				onselect={() => onSelectItem(item.guid)}
 			>
-				{#snippet visual(tooltipLabel: string)}<ItemIcon
+				{#snippet visual(tooltipLabel: string)}<UiIcon
 						{tooltipLabel}
 						display={iconFor(item.guid)}
 						name={itemName(item)}
@@ -312,14 +312,14 @@
 			>
 				{#if pyrealDisplay?.kind === "ready" || pyrealDisplay?.kind === "degraded"}
 					<span class="inventory-currency-icon"
-						><ItemIcon
+						><UiIcon
 							display={pyrealDisplay}
 							name="Pyreals"
 							tooltipLabel="Pyreals"
 						/></span
 					>
 				{:else}
-					<ItemIcon
+					<UiIcon
 						display={pyrealDisplay}
 						name="Pyreals:"
 						tooltipLabel="Pyreals"
@@ -398,7 +398,7 @@
 						}}
 					>
 						{#snippet visual(tooltipLabel: string)}
-							<ItemIcon
+							<UiIcon
 								{tooltipLabel}
 								display={item === null ? undefined : iconFor(item.guid)}
 								name={index === 0
@@ -481,15 +481,13 @@
 			height: var(--ui-inventory-pyreal-icon-size);
 			flex: none;
 		}
-		.inventory-currency-icon :global(.item-icon) {
-			--ui-item-icon-rendering: var(--ui-inventory-pyreal-icon-upsample-filter);
+		.inventory-currency-icon :global(.ui-icon) {
+			--ui-icon-rendering: var(--ui-inventory-pyreal-icon-upsample-filter);
 		}
-		/* PreparedItemIcon PNGs have a fixed 32px native extent; this compares CSS display sizes. */
+		/* PreparedUiIcon PNGs have a fixed 32px native extent; this compares CSS display sizes. */
 		@container inventory-pyreal-icon (width < 32px) {
-			.inventory-currency-icon :global(.item-icon) {
-				--ui-item-icon-rendering: var(
-					--ui-inventory-pyreal-icon-downsample-filter
-				);
+			.inventory-currency-icon :global(.ui-icon) {
+				--ui-icon-rendering: var(--ui-inventory-pyreal-icon-downsample-filter);
 			}
 		}
 		.inventory-sort svg {

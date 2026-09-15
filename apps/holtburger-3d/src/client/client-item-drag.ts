@@ -263,7 +263,7 @@ export class ClientItemDrag {
 			};
 			this.#gesture = gesture;
 			const source = gesture.source.element;
-			const icon = source.querySelector(".item-icon, .item-icon-fallback");
+			const icon = source.querySelector(".ui-icon, .ui-icon-fallback");
 			const bounds = source.getBoundingClientRect();
 			this.#ghost.style.width = `${bounds.width}px`;
 			this.#ghost.style.height = `${bounds.height}px`;

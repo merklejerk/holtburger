@@ -1,8 +1,8 @@
 <script lang="ts">
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
-	import ItemIcon from "../app/ItemIcon.svelte";
-	import type { ItemIconDisplay } from "../app/item-icon-repository";
+	import UiIcon from "../app/UiIcon.svelte";
+	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { InventoryEquipment } from "./client-inventory-equipment";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
 
@@ -11,7 +11,7 @@
 		readonly equipment: InventoryEquipment;
 		readonly pending: boolean;
 		/** Same display leases and selection owner as the contents panel. */
-		readonly iconFor: (guid: number) => ItemIconDisplay | undefined;
+		readonly iconFor: (guid: number) => UiIconDisplay | undefined;
 		readonly selectedGuid: number | null;
 		readonly onSelectItem: (guid: number) => void;
 		/** Cold pointer interaction; the panel owns dimming of incompatible contents. */
@@ -57,7 +57,7 @@
 					}}
 				>
 					{#snippet visual(tooltipLabel: string)}
-						<ItemIcon
+						<UiIcon
 							display={item === null ? undefined : iconFor(item.guid)}
 							{name}
 							{tooltipLabel}

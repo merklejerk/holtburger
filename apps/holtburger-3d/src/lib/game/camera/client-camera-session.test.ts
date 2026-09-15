@@ -318,6 +318,7 @@ function currentState(): ClientCurrentState {
 		worldGeneration: 1,
 		worldName: "Leafcull",
 		playerName: "Drudge",
+		knownSpells: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

@@ -103,6 +103,8 @@ pub struct ClientRuntime {
     world_generation: u64,
     /// Latest server-provided world name retained for replacement application snapshots.
     world_name: Option<String>,
+    /// Character whose initial PlayerDescription established complete spell knowledge.
+    known_spells_character: Option<Guid>,
     /// Terminal cause selected by the authority before it publishes `Exiting`.
     exit_cause: Option<ClientExitCause>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
@@ -217,6 +219,13 @@ impl ClientRuntime {
         }
     }
 
+    /// Availability is tied to description identity, never scene or lifecycle readiness.
+    fn known_spell_ids(&self) -> Option<Vec<u32>> {
+        self.known_spells_character
+            .filter(|&guid| guid == self.world.player.guid)
+            .map(|_| self.world.player.spells.keys().copied().collect())
+    }
+
     /// Builds one atomic replacement level for shells that lost their event baseline.
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
@@ -238,6 +247,7 @@ impl ClientRuntime {
                 .world
                 .player_entity()
                 .map(|entity| entity.name().to_string()),
+            known_spells: self.known_spell_ids(),
             vitals: self.world.player.vitals.clone(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),
@@ -752,7 +762,9 @@ impl ClientRuntime {
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
             WorldEvent::SpellUpdated { spell_ids, .. }
-            | WorldEvent::SpellRemoved { spell_ids, .. } => {
+            | WorldEvent::SpellRemoved { spell_ids, .. }
+                if self.known_spells_character == Some(self.world.player.guid) =>
+            {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerSpellsUpdated {
@@ -803,11 +815,11 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
 
-                let mut spell_ids = data.spells.clone();
-                spell_ids.sort();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids });
+                if let Some(spell_ids) = self.known_spell_ids() {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids });
+                }
 
                 let _ = self
                     .client_view_event_tx

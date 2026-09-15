@@ -32,6 +32,8 @@ pub struct SharedHostContent {
     pub weenie_catalog: Arc<WeenieCatalogContent>,
     /// Lazily parsed client bootstrap, cached at the content owner rather than in either mode.
     client_bootstrap: Arc<Mutex<Option<Arc<WorldBootstrap>>>>,
+    /// One decoded spell table shared by bootstrap assembly and static queries.
+    spell_table: Arc<Mutex<Option<Arc<SpellTable>>>>,
 }
 
 impl SharedHostContent {
@@ -69,7 +71,22 @@ impl SharedHostContent {
             service: Arc::new(service),
             motion_catalog: Arc::new(motion_catalog),
             client_bootstrap: Arc::new(Mutex::new(None)),
+            spell_table: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Reuse the parsed table without giving static queries ownership of core state.
+    pub fn spell_table(&self) -> Result<Arc<SpellTable>> {
+        let mut cached = self
+            .spell_table
+            .lock()
+            .map_err(|_| anyhow::anyhow!("spell table cache lock poisoned"))?;
+        if let Some(table) = cached.as_ref() {
+            return Ok(Arc::clone(table));
+        }
+        let table = Arc::new(self.repository.read_asset::<SpellTable>("spell table")?);
+        *cached = Some(Arc::clone(&table));
+        Ok(table)
     }
 
     /// Loads the client bootstrap once while keeping DAT policy out of the core client runtime.
@@ -86,10 +103,7 @@ impl SharedHostContent {
             .repository
             .read_asset::<SkillTable>("skill table")
             .context("failed to load skill table for client bootstrap")?;
-        let spell_table = self
-            .repository
-            .read_asset::<SpellTable>("spell table")
-            .context("failed to load spell table for client bootstrap")?;
+        let spell_table = self.spell_table()?.as_ref().clone();
         let xp_table = self
             .repository
             .read_asset::<XpTable>("XP table")
@@ -150,8 +164,11 @@ pub enum SharedContentCommand {
         request: LoadLandblockProfileRequest,
     },
     LoadSkySource,
-    PrepareItemIcons {
-        request: crate::item_icons::PrepareItemIconsRequest,
+    LoadSpellReferences {
+        request: crate::spell_references::LoadSpellReferencesRequest,
+    },
+    PrepareUiIcons {
+        request: crate::ui_icons::PrepareUiIconsRequest,
     },
     LoadTexturePixels {
         request: LoadTexturePixelsRequest,
@@ -177,7 +194,8 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "load_landblock_profile",
     "load_sky_source",
     "load_texture_pixels",
-    "prepare_item_icons",
+    "prepare_ui_icons",
+    "load_spell_references",
     "load_motion_table_closure",
 ];
 
@@ -267,8 +285,19 @@ pub async fn dispatch_shared_content(
                 .await
                 .map_err(application_error)?,
         )),
-        PrepareItemIcons { request } => Ok(HostResponse::Binary(
-            crate::item_icons::prepare_item_icon_bytes(
+        LoadSpellReferences { request } => {
+            request.validate().map_err(application_error)?;
+            let content = runtime.content().clone();
+            let results = tokio::task::spawn_blocking(move || {
+                crate::spell_references::load_spell_references(&content, &request)
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(results)
+        }
+        PrepareUiIcons { request } => Ok(HostResponse::Binary(
+            crate::ui_icons::prepare_ui_icon_bytes(
                 Arc::clone(&runtime.content().repository),
                 request,
             )

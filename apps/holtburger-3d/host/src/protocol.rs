@@ -84,7 +84,9 @@ impl<'de> Deserialize<'de> for HostCommand {
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 pub enum HostEvent {
     ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
-    ClientCurrentState(crate::client_projection::ClientCurrentState),
+    // The infrequent full snapshot is boxed so ordinary protocol frames do not
+    // reserve space for all of its collections.
+    ClientCurrentState(Box<crate::client_projection::ClientCurrentState>),
     /// Marks the cached application state stale until the replacement arrives.
     ClientStateResyncing(()),
     /// Semantic entity records, independent of dynamic renderer events.
@@ -125,6 +127,10 @@ pub enum HostEvent {
         guid: holtburger_common::Guid,
         #[serde(rename = "healthFraction")]
         health_fraction: f32,
+    },
+    ClientPlayerSpellsUpdated {
+        #[serde(rename = "spellIds")]
+        spell_ids: Vec<u32>,
     },
     ClientPlayerVitalsUpdated {
         vitals: Vec<crate::client_projection::ClientVitalWire>,
@@ -376,7 +382,7 @@ impl ClientEventSink for StdioEventSink {
                 HostEvent::ClientEntityCollisionDisabled(disabled)
             }
             crate::client_projection::ClientHostEvent::CurrentState(state) => {
-                HostEvent::ClientCurrentState(state)
+                HostEvent::ClientCurrentState(Box::new(state))
             }
             crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
                 HostEvent::ClientLifecycleChanged(lifecycle)
@@ -424,6 +430,9 @@ impl ClientEventSink for StdioEventSink {
                 guid,
                 health_fraction,
             },
+            crate::client_projection::ClientHostEvent::PlayerSpellsUpdated { spell_ids } => {
+                HostEvent::ClientPlayerSpellsUpdated { spell_ids }
+            }
             crate::client_projection::ClientHostEvent::PlayerVitalsUpdated { vitals } => {
                 HostEvent::ClientPlayerVitalsUpdated { vitals }
             }

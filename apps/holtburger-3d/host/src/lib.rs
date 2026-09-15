@@ -39,7 +39,6 @@ pub mod host_mode;
 pub mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
-pub mod item_icons;
 pub mod landblock_profile;
 pub mod landblock_source_batch;
 pub mod map_geometry;
@@ -61,6 +60,8 @@ pub mod shared_host_content;
 pub mod sky_source;
 pub mod sound_table_source;
 pub mod source_projection;
+pub mod spell_references;
+pub mod ui_icons;
 pub mod weenie_appearance;
 
 pub use shared_host_content::SharedHostContent;

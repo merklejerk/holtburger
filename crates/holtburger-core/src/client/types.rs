@@ -349,6 +349,8 @@ pub enum ClientPresentationDiscontinuityKind {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// None until initial description; an empty collection is a complete empty spellbook.
+    pub known_spells: Option<Vec<u32>>,
     /// Complete shell-facing lifecycle level.
     pub lifecycle: ClientLifecycleState,
     /// Accepted local-player debug override; never changes server physics flags.

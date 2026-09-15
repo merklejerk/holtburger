@@ -42,7 +42,8 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"load_landblock_profile",
 	"load_sky_source",
 	"load_texture_pixels",
-	"prepare_item_icons",
+	"prepare_ui_icons",
+	"load_spell_references",
 	"load_animation",
 	"load_setup_visual",
 	"load_physics_script",
@@ -161,6 +162,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-world-name-updated",
 	"client-player-entered",
 	"client-player-vitals-updated",
+	"client-player-spells-updated",
 	"client-entity-health-updated",
 	"client-chat-message",
 	"client-action-feedback",
@@ -237,6 +239,7 @@ export interface HostEventPayloadMap {
 	"client-server-time-updated": { time: number };
 	"client-world-name-updated": { name: string };
 	"client-player-entered": ClientPlayerEntered;
+	"client-player-spells-updated": { spellIds: number[] };
 	"client-player-vitals-updated": {
 		vitals: ClientVital[];
 	};

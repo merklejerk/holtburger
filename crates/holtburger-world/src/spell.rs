@@ -109,9 +109,6 @@ impl SpellInfo {
 
 impl From<DatSpellBase> for SpellInfo {
     fn from(value: DatSpellBase) -> Self {
-        let components =
-            std::array::from_fn(|index| value.raw_components.get(index).copied().unwrap_or(0));
-
         Self {
             name: value.name,
             description: value.description,
@@ -129,7 +126,7 @@ impl From<DatSpellBase> for SpellInfo {
             meta_spell_type: value.meta_spell_type,
             meta_spell_id: value.meta_spell_id,
             extras: value.extras.into(),
-            components,
+            components: value.components,
             caster_effect: value.caster_effect,
             target_effect: value.target_effect,
             fizzle_effect: value.fizzle_effect,

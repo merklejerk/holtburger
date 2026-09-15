@@ -1,16 +1,13 @@
-import {
-	ItemIconRepository,
-	type ItemIconServices,
-} from "./item-icon-repository";
+import { UiIconRepository, type UiIconServices } from "./ui-icon-repository";
 import { encode } from "@msgpack/msgpack";
 import { describe, expect, it, vi } from "vitest";
 import {
-	decodeItemIcons,
-	prepareItemIcons,
+	decodeUiIcons,
+	prepareUiIcons,
 	MAX_ICON_FRAME_BYTES,
 	MAX_ICON_BATCH,
-	type ItemIconRequest,
-} from "./item-icon-source";
+	type UiIconRequest,
+} from "./ui-icon-source";
 
 // Synthetic transparent 32x32 PNG; no runtime game assets are required.
 const png = Uint8Array.from(
@@ -19,7 +16,7 @@ const png = Uint8Array.from(
 	),
 	(c) => c.charCodeAt(0),
 );
-const request: ItemIconRequest = {
+const request: UiIconRequest = {
 	key: "first",
 	spec: {
 		kind: "item",
@@ -38,7 +35,7 @@ const issue = {
 	detail: "Missing declared overlay",
 };
 
-describe("item icon host source", () => {
+describe("UI icon host source", () => {
 	it("round-trips ready, degraded and failed entries while preserving diagnostics", async () => {
 		const results = [
 			ready,
@@ -47,8 +44,8 @@ describe("item icon host source", () => {
 		];
 		const requests = results.map(({ key }) => ({ ...request, key }));
 		const invoke = vi.fn().mockResolvedValue(encode(results));
-		expect(await prepareItemIcons({ invoke }, requests)).toEqual(results);
-		expect(invoke).toHaveBeenCalledWith("prepare_item_icons", {
+		expect(await prepareUiIcons({ invoke }, requests)).toEqual(results);
+		expect(invoke).toHaveBeenCalledWith("prepare_ui_icons", {
 			request: { icons: requests },
 		});
 	});
@@ -59,23 +56,20 @@ describe("item icon host source", () => {
 		[{ key: "first", kind: "failed", issues: [] }],
 		[{ ...ready, image: new Uint8Array([1, 2, 3]) }],
 	])("rejects malformed or incomplete batches", (...results) => {
-		expect(() => decodeItemIcons(encode(results), [request])).toThrow();
+		expect(() => decodeUiIcons(encode(results), [request])).toThrow();
 	});
 	it("rejects a batch omitting a requested key", () => {
 		expect(() =>
-			decodeItemIcons(encode([ready]), [
-				request,
-				{ ...request, key: "second" },
-			]),
+			decodeUiIcons(encode([ready]), [request, { ...request, key: "second" }]),
 		).toThrow("omitted");
 	});
 	it("rejects oversized transport and propagates command rejection", async () => {
 		expect(() =>
-			decodeItemIcons(new Uint8Array(MAX_ICON_FRAME_BYTES + 1), [request]),
+			decodeUiIcons(new Uint8Array(MAX_ICON_FRAME_BYTES + 1), [request]),
 		).toThrow("byte limit");
 		const error = new Error("host unavailable");
 		await expect(
-			prepareItemIcons({ invoke: vi.fn().mockRejectedValue(error) }, [request]),
+			prepareUiIcons({ invoke: vi.fn().mockRejectedValue(error) }, [request]),
 		).rejects.toBe(error);
 	});
 });
@@ -92,9 +86,9 @@ describe("host failures through retained icon ownership", () => {
 		"settles %s failures and continues the next batch without retrying retained failures",
 		async (fault) => {
 			let calls = 0;
-			const services: ItemIconServices = {
+			const services: UiIconServices = {
 				prepare: (requests) =>
-					prepareItemIcons(
+					prepareUiIcons(
 						{
 							invoke: async () => {
 								calls++;
@@ -127,7 +121,7 @@ describe("host failures through retained icon ownership", () => {
 				revokeImage: vi.fn(),
 				report: vi.fn(),
 			};
-			const repository = new ItemIconRepository(services);
+			const repository = new UiIconRepository(services);
 			const owner = repository.createOwner("persistent");
 			const specs = Array.from({ length: MAX_ICON_BATCH + 1 }, (_, index) => ({
 				kind: "item" as const,

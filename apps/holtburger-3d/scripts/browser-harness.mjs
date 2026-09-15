@@ -4595,6 +4595,11 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			client,
 			`document.querySelector('button[aria-label="Close Inventory"]').click()`,
 		);
+		inventory.spells = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSpells",
+			[],
+		);
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,

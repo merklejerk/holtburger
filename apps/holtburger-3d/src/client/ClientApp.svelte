@@ -1,8 +1,10 @@
 <script lang="ts">
+	import { SpellReferences } from "../app/spell-references";
+	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientItemInteractions } from "./client-item-interactions";
 	import { ClientInventoryState } from "./client-inventory-state";
-	import { browserItemIconRepository } from "../app/item-icon-repository";
-	import { prepareItemIcons } from "../app/item-icon-source";
+	import { browserUiIconRepository } from "../app/ui-icon-repository";
+	import { prepareUiIcons } from "../app/ui-icon-source";
 	import {
 		clientSelectedEntity,
 		type ClientSelectedEntity,
@@ -98,6 +100,7 @@
 	);
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
+	let spells = $state<ClientSpellServices | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
@@ -776,13 +779,16 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
-		const icons = browserItemIconRepository((requests) =>
-			prepareItemIcons(transport, requests),
+		const icons = browserUiIconRepository((requests) =>
+			prepareUiIcons(transport, requests),
 		);
 		const inventoryOwner = new ClientInventoryState(owner, icons, (message) =>
 			toastCenter.publish({ message, tone: "warning" }),
 		);
 		inventory = inventoryOwner;
+		const spellReferences = new SpellReferences(transport);
+		const spellState = new ClientSpellState(owner, spellReferences, icons);
+		spells = spellState;
 		const dialogOwner = new ClientDialogs(owner);
 		dialogs = dialogOwner;
 		const unsubscribeDialogs = dialogOwner.subscribe(
@@ -863,6 +869,9 @@
 
 		return () => {
 			disposed = true;
+			spellState.destroy();
+			spellReferences.dispose();
+			spells = null;
 			inventoryOwner.destroy();
 			inventory = null;
 			icons.dispose();
@@ -921,6 +930,7 @@
 		{readFrameRates}
 		{readTargetIndicatorFrame}
 		{readSelectedEntityDisplay}
+		{spells}
 		{inventory}
 		{itemInteractions}
 		onSelectInventoryItem={(guid, mode) =>

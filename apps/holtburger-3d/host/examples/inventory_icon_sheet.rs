@@ -1,7 +1,7 @@
 //! Real-asset visual probe. Run from the repository root with an output directory argument.
 use anyhow::{Context, Result};
-use holtburger_3d_host::item_icons::{
-    ItemIconRequest, ItemIconResult, ItemIconSpec, PrepareItemIconsRequest, prepare_item_icons,
+use holtburger_3d_host::ui_icons::{
+    PrepareUiIconsRequest, UiIconRequest, UiIconResult, UiIconSpec, prepare_ui_icons,
 };
 use holtburger_common::properties::ItemType;
 use holtburger_content::ContentRepository;
@@ -14,7 +14,7 @@ fn main() -> Result<()> {
     );
     std::fs::create_dir_all(&directory)?;
     let repository = ContentRepository::discover(Some("dats".into()))?;
-    let item = |base, kind: ItemType, effects, overlay, underlay| ItemIconSpec::Item {
+    let item = |base, kind: ItemType, effects, overlay, underlay| UiIconSpec::Item {
         base: NonZeroU32::new(base),
         item_type: kind.bits(),
         ui_effects: effects,
@@ -23,10 +23,10 @@ fn main() -> Result<()> {
     };
     let specs = vec![
         // ACE World WCID 273 (coinstack), PropertyDataId.Icon (8).
-        ItemIconSpec::Base {
+        UiIconSpec::Base {
             base: NonZeroU32::new(0x0600229f).context("pyreal icon ID")?,
         },
-        ItemIconSpec::MainPack {
+        UiIconSpec::MainPack {
             overlay: None,
             underlay: None,
             ui_effects: 0,
@@ -39,21 +39,21 @@ fn main() -> Result<()> {
         item(0x06003788, ItemType::MISC, 0, 0, 0),
         item(0x06002276, ItemType::CLOTHING, 0, 0x06006d77, 0),
     ];
-    let request = PrepareItemIconsRequest {
+    let request = PrepareUiIconsRequest {
         icons: specs
             .into_iter()
             .enumerate()
-            .map(|(index, spec)| ItemIconRequest {
+            .map(|(index, spec)| UiIconRequest {
                 key: index.to_string(),
                 spec,
             })
             .collect(),
     };
-    for icon in prepare_item_icons(&repository, &request)? {
+    for icon in prepare_ui_icons(&repository, &request)? {
         let (image, issues) = match icon.result {
-            ItemIconResult::Ready { image } => (image, None),
-            ItemIconResult::Degraded { image, issues } => (image, Some(issues)),
-            ItemIconResult::Failed { issues } => anyhow::bail!("{}: {issues:?}", icon.key),
+            UiIconResult::Ready { image } => (image, None),
+            UiIconResult::Degraded { image, issues } => (image, Some(issues)),
+            UiIconResult::Failed { issues } => anyhow::bail!("{}: {issues:?}", icon.key),
         };
         std::fs::write(directory.join(format!("{}.png", icon.key)), image)?;
         println!("{}: {}", icon.key, serde_json::to_string(&issues)?);

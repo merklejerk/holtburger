@@ -1,4 +1,4 @@
-import type { ItemIconDisplay } from "../app/item-icon-repository";
+import type { UiIconDisplay } from "../app/ui-icon-repository";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 
 import type {
@@ -55,5 +55,5 @@ export interface ActionItemDisplay {
 	/** Confirmed player equipment state; never inferred from a submitted command. */
 	readonly equipped: boolean;
 	/** Repository-owned artwork protected by the collection's display lease. */
-	readonly display: ItemIconDisplay | undefined;
+	readonly display: UiIconDisplay | undefined;
 }

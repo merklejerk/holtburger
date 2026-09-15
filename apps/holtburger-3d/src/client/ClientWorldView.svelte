@@ -20,6 +20,8 @@
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
+	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
+	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
@@ -31,6 +33,7 @@
 	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock, {
 		createClientShortcuts,
+		type ClientSystemPanel,
 	} from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
@@ -66,6 +69,8 @@
 		/** Client-owned selected facts with optional presentation details. */
 		readonly readSelectedEntity: () => ClientSelectedEntity | null;
 		readonly readFrameRates: () => FrameRates | null;
+		/** Lazily retained spell artwork, independent of floating-panel mounts. */
+		readonly spells: ClientSpellServices | null;
 		/** Session-owned inventory state, independent of floating-panel mounts. */
 		readonly inventory: ClientInventoryState | null;
 		/** Shared use/combining owner for all mounted entry points. */
@@ -116,6 +121,7 @@
 		readSelectedEntity,
 		readFrameRates,
 		readSelectedEntityDisplay,
+		spells,
 		inventory,
 		itemInteractions,
 		onSelectInventoryItem,
@@ -196,7 +202,7 @@
 	/** Cold client presentation policy: runtime visibility or explicit HUD layout editing. */
 	type ClientHudMode = "runtime" | "layout";
 	let hudMode = $state<ClientHudMode>("runtime");
-	let activePanel = $state<"inventory" | "debug" | null>(null);
+	let activePanel = $state<ClientSystemPanel | null>(null);
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
@@ -598,7 +604,11 @@
 		{#key panel}
 			<ClientHudWindow
 				icon={panel}
-				title={panel === "inventory" ? "Inventory" : "Client diagnostics"}
+				title={panel === "inventory"
+					? "Inventory"
+					: panel === "spells"
+						? "Spells"
+						: "Client diagnostics"}
 				placement={hudLayout[panel]}
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
@@ -607,7 +617,11 @@
 				onPlacementChange={(placement) =>
 					(hudLayout = { ...hudLayout, [panel]: placement })}
 			>
-				{#if panel === "inventory"}
+				{#if panel === "spells"}
+					{#if spells !== null}{#key spells}<ClientSpellsPanel
+								{spells}
+							/>{/key}{/if}
+				{:else if panel === "inventory"}
 					{#if inventory !== null && itemInteractions !== null}
 						{#key inventory}
 							<ClientInventoryPanel

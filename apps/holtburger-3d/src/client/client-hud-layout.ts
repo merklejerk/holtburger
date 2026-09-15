@@ -257,6 +257,7 @@ export function createClientHudLayout(
 		character: place(defaults.character),
 		chat: place(defaults.chat),
 		inventory: place(defaults.inventory),
+		spells: place(defaults.spells),
 		debug: place(defaults.debug),
 		frameRate: place(defaults.frameRate),
 		jumpPower: place(defaults.jumpPower),

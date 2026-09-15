@@ -115,6 +115,7 @@ type ClientCommandName = Extract<
 	| "queue_client_character_motion_event"
 	| "send_client_chat"
 	| "toggle_client_combat_mode"
+	| "cast_client_spell"
 	| "query_client_entity_health"
 	| "preview_client_inventory"
 	| "submit_client_inventory"
@@ -476,6 +477,21 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("equip_client_item", {
 			guid,
 			alternate,
+		});
+	}
+
+	/** Cast using the selection captured by the caller; core resolves the spell route. */
+	async castSpell(spellId: number, selection: number | null): Promise<void> {
+		if (this.#unlisten === null)
+			throw new Error("Spell session is unavailable.");
+		if (
+			this.#state.lifecycle?.kind !== "in-world" ||
+			this.#state.combatMode !== "magic"
+		)
+			throw new Error("Enter magic stance before casting.");
+		await this.#transport.invoke("cast_client_spell", {
+			spellId,
+			aim: { kind: "normal", selection },
 		});
 	}
 

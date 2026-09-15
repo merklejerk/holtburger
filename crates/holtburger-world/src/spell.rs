@@ -96,6 +96,17 @@ pub struct SpellInfo {
     pub mana_mod: u32,
 }
 
+/// Recipient source for an ordinary spellbook cast, independent of UI selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpellCastingRoute {
+    /// The caster is the recipient, regardless of selection.
+    SelfTarget,
+    /// The spell is cast without an object recipient.
+    Untargeted,
+    /// The caller must supply its selected object.
+    SelectedTarget,
+}
+
 impl SpellInfo {
     const SELF_TARGETED_FLAG: u32 = 0x8;
 
@@ -103,8 +114,17 @@ impl SpellInfo {
         self.bitfield & Self::SELF_TARGETED_FLAG != 0
     }
 
-    pub fn is_untargeted(&self) -> bool {
-        self.non_component_target_type == 0
+    /// Retail acclient.c:387433 checks self before formula targeting (:429344).
+    /// Discovery's authored target mask is not the casting contract: the local
+    /// 6,266-spell census contains 46 non-self zero/nonzero disagreements.
+    pub fn casting_route(&self) -> SpellCastingRoute {
+        if self.is_self_targeted() {
+            SpellCastingRoute::SelfTarget
+        } else if formula::casting_target_type(&self.components) == 0 {
+            SpellCastingRoute::Untargeted
+        } else {
+            SpellCastingRoute::SelectedTarget
+        }
     }
 }
 

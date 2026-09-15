@@ -2033,6 +2033,7 @@
 		combatMode="peace"
 		combatEnabled={false}
 		onToggleCombat={() => {}}
+		onCastSpell={() => {}}
 		{itemInteractions}
 		entityMetadata={{
 			status: "available",

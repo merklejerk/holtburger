@@ -3,6 +3,22 @@
 use holtburger_dat::file_type::spell_table::component_power_tier;
 use std::num::Wrapping;
 
+/// Retail target mask from the original decoded formula, before customization.
+/// acclient.c:429344/464887 require five contiguous components; :464934 uses
+/// the last contiguous component, and :464327 maps its ID through a fixed switch.
+pub(super) fn casting_target_type(slots: &[u32; 8]) -> u32 {
+    if slots[..5].contains(&0) {
+        return 0;
+    }
+    let count = slots.iter().take_while(|&&id| id != 0).count();
+    match slots[count - 1] {
+        0x31..=0x38 | 0x3c..=0x3e | 0xbe => 16,
+        0x39 => 560015,
+        0x3b => 268500992,
+        _ => 0,
+    }
+}
+
 /// Malformed authored formulas cannot become plausible component requirements.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum FormulaError {
@@ -169,6 +185,27 @@ pub fn has_foci(world: &crate::WorldState, school: super::MagicSchool) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn casting_targets_follow_complete_contiguous_formulas() {
+        for (component, expected) in (0x31..=0x38)
+            .chain(0x3c..=0x3e)
+            .chain([0xbe])
+            .map(|id| (id, 16))
+            .chain([(0x39, 560015), (0x3b, 268500992), (0x3a, 0)])
+        {
+            for length in 5..=8 {
+                let mut slots = [0; 8];
+                slots[..length].fill(1);
+                slots[length - 1] = component;
+                assert_eq!(casting_target_type(&slots), expected);
+            }
+        }
+        assert_eq!(casting_target_type(&[1, 1, 0, 1, 0x31, 0, 0, 0]), 0);
+        // Non-contiguous trailing data cannot replace the actual last component.
+        assert_eq!(casting_target_type(&[1, 1, 1, 1, 0x39, 0, 0x31, 0]), 560015);
+    }
+
     #[test]
     fn account_versions_match_independent_scalar_fixtures() {
         let authored = [6, 63, 10, 64, 20, 30, 65, 40];

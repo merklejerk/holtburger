@@ -2,6 +2,7 @@ use super::*;
 use crate::pages::game::combat as combat_model;
 use holtburger_core::ActionResultReason;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
+use holtburger_core::client::types::SpellCastAim;
 
 pub(super) enum EnterCombatModeResult {
     Success(UpdateResult),
@@ -32,13 +33,17 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                                 PlayerDriveIntent::SnapFacing { heading },
                             ));
                         }
-                        result
-                            .commands
-                            .push(ClientCommand::CastTargetedSpell { spell_id, target });
+                        result.commands.push(ClientCommand::CastSpell {
+                            spell_id,
+                            aim: SpellCastAim::Normal {
+                                selection: Some(target),
+                            },
+                        });
                     } else {
-                        result
-                            .commands
-                            .push(ClientCommand::CastUntargetedSpell { spell_id });
+                        result.commands.push(ClientCommand::CastSpell {
+                            spell_id,
+                            aim: SpellCastAim::Untargeted,
+                        });
                     }
                 }
             }

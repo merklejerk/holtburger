@@ -443,6 +443,21 @@ impl WorldState {
             entity.physics.clear_after_collision(change.cleared);
             events.push(WorldEvent::RuntimeBodyChanged { body_id });
         }
+        if let Some(guid) = body_id.authoritative_guid() {
+            // A short launch can land inside one collection: its final contact alone would
+            // hide both physical edges. Retire pre-launch animation work in that case too.
+            let previous = if update.launch_admitted {
+                self.interrupt_motion_on_support_change(
+                    guid,
+                    update.previous_contact,
+                    ContactState::Airborne,
+                );
+                ContactState::Airborne
+            } else {
+                update.previous_contact
+            };
+            self.interrupt_motion_on_support_change(guid, previous, update.current_contact);
+        }
         events.push(WorldEvent::RuntimeBodyAdvanced {
             body_id,
             kind: crate::spatial::RuntimeBodyAdvanceKind::Integrated,
@@ -460,10 +475,18 @@ impl WorldState {
                     return Vec::new();
                 }
 
+                let previous = self
+                    .scene
+                    .body(*body_id)
+                    .expect("ensured runtime body")
+                    .contact;
                 if !self.scene.apply_runtime_body_contact(*body_id, *contact) {
                     return Vec::new();
                 }
 
+                if let Some(guid) = body_id.authoritative_guid() {
+                    self.interrupt_motion_on_support_change(guid, previous, *contact);
+                }
                 let mut events = Vec::new();
                 Self::emit_runtime_body_changed(&mut events, *body_id);
 

@@ -2,6 +2,8 @@ use super::registry::RETAIL_RUN_FORWARD_BASE_SPEED_MPS;
 use super::*;
 #[path = "tests/contact_eligibility.rs"]
 mod contact_eligibility;
+#[path = "tests/contact_interruption.rs"]
+mod contact_interruption;
 #[path = "tests/death_lifecycle.rs"]
 mod death_lifecycle;
 use crate::entity::{

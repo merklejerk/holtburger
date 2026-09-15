@@ -880,6 +880,38 @@ mod tests {
     }
 
     #[test]
+    fn spell_cast_aim_decodes_through_the_messagepack_command_router() {
+        for (aim, expected) in [
+            (
+                serde_json::json!({"kind": "normal", "selection": 7}),
+                holtburger_core::client::types::SpellCastAim::Normal {
+                    selection: Some(holtburger_common::Guid(7)),
+                },
+            ),
+            (
+                serde_json::json!({"kind": "untargeted"}),
+                holtburger_core::client::types::SpellCastAim::Untargeted,
+            ),
+        ] {
+            let request = rmp_serde::to_vec_named(&serde_json::json!({
+                "kind": "request", "id": 1,
+                "command": { "command": "cast_client_spell", "spellId": 42, "aim": aim }
+            }))
+            .unwrap();
+            let mut reader = Cursor::new(framed_payload(request));
+            let Some(InboundFrame::Request {
+                command: HostCommand::Client(ClientHostCommand::CastClientSpell { spell_id, aim }),
+                ..
+            }) = read_frame(&mut reader).unwrap()
+            else {
+                panic!("spell cast did not decode");
+            };
+            assert_eq!(spell_id, 42);
+            assert_eq!(aim, expected);
+        }
+    }
+
+    #[test]
     fn spell_inspection_decodes_through_the_messagepack_command_router() {
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request", "id": 1,

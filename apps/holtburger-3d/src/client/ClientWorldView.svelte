@@ -58,6 +58,8 @@
 	interface Props {
 		/** Server-confirmed stance for the dock, independent of open panels. */
 		readonly combatMode: ClientCombatMode;
+		/** Shared casting action also usable by future spell shortcuts. */
+		readonly onCastSpell: (spellId: number) => void;
 		/** Gameplay lifecycle admits stance commands. */
 		readonly combatEnabled: boolean;
 		/** Same stance action used by the keyboard binding. */
@@ -120,6 +122,7 @@
 
 	let {
 		combatMode,
+		onCastSpell,
 		combatEnabled,
 		onToggleCombat,
 		entityMetadata,
@@ -632,6 +635,8 @@
 				{#if panel === "spells"}
 					{#if spells !== null}{#key spells}<ClientSpellsPanel
 								{spells}
+								castEnabled={combatEnabled && combatMode === "magic"}
+								{onCastSpell}
 							/>{/key}{/if}
 				{:else if panel === "inventory"}
 					{#if inventory !== null && itemInteractions !== null}

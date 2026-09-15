@@ -95,6 +95,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"queue_client_character_motion_event",
 	"send_client_chat",
 	"toggle_client_combat_mode",
+	"cast_client_spell",
 	"query_client_entity_health",
 	"preview_client_inventory",
 	"submit_client_inventory",

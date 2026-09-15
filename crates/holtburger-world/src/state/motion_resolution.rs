@@ -871,6 +871,32 @@ impl WorldState {
         Ok(())
     }
 
+    /// Match retail's walkable-bit edges for gravity-enabled creatures.
+    /// acclient.c:306805,330655,330680 route takeoff/landing through RemoveLinkAnimations.
+    /// Unknown contact is hydration, not an observed physical edge. Sliding is non-walkable.
+    pub(crate) fn interrupt_motion_on_support_change(
+        &mut self,
+        guid: Guid,
+        previous: ContactState,
+        current: ContactState,
+    ) {
+        let (Some(previous), Some(current_walkable)) = (previous.walkable(), current.walkable())
+        else {
+            return;
+        };
+        if previous == current_walkable {
+            return;
+        }
+        if self.entities.get(guid).is_some_and(|entity| {
+            matches!(
+                entity.motion_contact(current),
+                crate::motion::MotionContact::RequiresSupport(_)
+            )
+        }) {
+            self.motion_runtimes.interrupt_transitions(guid);
+        }
+    }
+
     /// Re-selects one server-authored body's presentation after a committed support transition.
     ///
     /// The zero quantum changes the selected sequence without double-advancing the tick. Remote

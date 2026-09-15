@@ -66,6 +66,35 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("casts only in confirmed magic and forwards each captured selection", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(session.castSpell(42, 7)).rejects.toThrow("Spell session");
+		await session.start();
+		await expect(session.castSpell(42, 7)).rejects.toThrow("magic stance");
+		transport.emit("client-combat-mode-updated", { mode: "magic" });
+		await session.castSpell(42, 7);
+		await session.castSpell(42, null);
+		expect(
+			transport.invocations.filter(
+				(call) => call.command === "cast_client_spell",
+			),
+		).toEqual([
+			{
+				command: "cast_client_spell",
+				args: { spellId: 42, aim: { kind: "normal", selection: 7 } },
+			},
+			{
+				command: "cast_client_spell",
+				args: { spellId: 42, aim: { kind: "normal", selection: null } },
+			},
+		]);
+		transport.emit("client-current-state", currentState(1));
+		await expect(session.castSpell(42, 7)).rejects.toThrow("magic stance");
+		session.stop();
+		await expect(session.castSpell(42, 7)).rejects.toThrow("Spell session");
+	});
+
 	it("toggles only in world and reconciles stance through events and replacement snapshots", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

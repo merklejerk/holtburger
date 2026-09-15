@@ -193,6 +193,18 @@ impl BodyMotionRuntime {
         runtime
     }
 
+    /// Retire unfinished animation work without traversing skipped hooks or reporting success.
+    /// Retail HandleEnterWorld (acclient.c:317294) drains pending animations with failure;
+    /// MotionDone (:329942) also retires action-owned sticky state.
+    fn interrupt_transitions(&mut self) {
+        self.sequence.remove_transition_prefix();
+        if self.action_count() != 0 {
+            self.sticky.complete_action();
+        }
+        self.active_action = None;
+        self.action_queue.clear();
+    }
+
     /// Applies a fresh accepted state before its action batch, without advancing time.
     /// Unlike continuous selection, every accepted Dead command interrupts pending playback.
     pub fn accept_order(&mut self, table: &MotionSequenceTable, order: MotionOrder) {
@@ -211,12 +223,7 @@ impl BodyMotionRuntime {
             // acclient.c:330249 clears links before Dead; HandleEnterWorld (317294) drains
             // all pending actions without executing skipped frames. MotionDone (329942)
             // also retires the associated sticky target.
-            self.sequence.remove_transition_prefix();
-            if self.action_count() != 0 {
-                self.sticky.complete_action();
-            }
-            self.active_action = None;
-            self.action_queue.clear();
+            self.interrupt_transitions();
         }
         self.steady_order = order;
         self.unmodelled = apply_order_channels(table, &mut self.state, &mut self.sequence, order);
@@ -560,6 +567,13 @@ impl MotionRuntimeRegistry {
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Interrupt an existing body's pending animation work; never instantiate playback here.
+    pub(crate) fn interrupt_transitions(&mut self, guid: Guid) {
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            runtime.interrupt_transitions();
+        }
     }
 
     pub fn get(&self, guid: Guid) -> Option<&BodyMotionRuntime> {

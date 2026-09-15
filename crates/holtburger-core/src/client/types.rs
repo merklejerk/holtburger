@@ -45,6 +45,16 @@ use crate::{DynamicEntityEvent, DynamicEntitySnapshot};
 
 pub use holtburger_world::WorldEvent;
 
+/// Caller intent for a spellbook cast; normal casting resolves spell semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SpellCastAim {
+    /// Selection captured at submission; self and naturally untargeted spells ignore it.
+    Normal { selection: Option<Guid> },
+    /// Deliberately cast without a recipient, even for normally targeted spells.
+    Untargeted,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChatChannelKind {
     Fellowship,
@@ -990,12 +1000,10 @@ pub enum ClientCommand {
         tool: Guid,
         items: Vec<Guid>,
     },
-    CastTargetedSpell {
-        target: Guid,
+    /// Submit one spellbook cast with explicit recipient intent.
+    CastSpell {
         spell_id: u32,
-    },
-    CastUntargetedSpell {
-        spell_id: u32,
+        aim: SpellCastAim,
     },
     TargetedMeleeAttack {
         target: Guid,

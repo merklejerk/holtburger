@@ -34,6 +34,67 @@ export async function probeClientSpells(
 	const missing = document.querySelector('[data-spell-id="999999"]');
 	if (!missing?.textContent?.includes("Spell definition is missing."))
 		throw new Error("Missing definition was not diagnosed.");
+	const toggleSpell = (id: number) => {
+		const header = document.querySelector<HTMLButtonElement>(
+			`[data-spell-id="${id}"] .spell-header`,
+		);
+		if (header === null) throw new Error(`Missing spell header ${id}.`);
+		header.click();
+	};
+	toggleSpell(1);
+	await tick();
+	if (
+		!document
+			.querySelector('[data-spell-id="1"] .spell-details')
+			?.textContent?.includes("Fixture spell description.")
+	)
+		throw new Error("Expanded spell omitted authored details.");
+	if (
+		!document
+			.querySelector('[data-spell-id="1"] .spell-details')
+			?.textContent?.includes("Range: 27.3 yds.")
+	)
+		throw new Error("Expanded spell omitted character-derived range.");
+	await waitFor(
+		() =>
+			document.querySelectorAll('[data-spell-id="1"] .component-icon img')
+				.length === 2,
+	);
+	if (
+		!document
+			.querySelector('[data-spell-id="1"] [aria-label="Spell formula"]')
+			?.textContent?.includes("Prismatic Taper")
+	)
+		throw new Error("Formula omitted component names.");
+	emit("client-spell-inspection-context", { revision: 2, player: 1 });
+	await waitFor(
+		() =>
+			document
+				.querySelector('[data-spell-id="1"] .spell-details')
+				?.textContent?.includes("Range: 32.8 yds.") === true &&
+			document.querySelectorAll('[data-spell-id="1"] .component-icon img')
+				.length === 2,
+	);
+	const names = [
+		...document.querySelectorAll(
+			'[data-spell-id="1"] [aria-label="Spell formula"] li',
+		),
+	].map((row) => row.textContent?.trim());
+	if (names.join(",") !== "Prismatic Taper,Prismatic Taper")
+		throw new Error("Context refresh lost repeated formula slots.");
+	toggleSpell(3);
+	await tick();
+	if (document.querySelector('[data-spell-id="1"] .spell-details') !== null)
+		throw new Error("Opening another spell retained the previous expansion.");
+	toggleSpell(3);
+	await tick();
+	if (document.querySelector(".spell-details") !== null)
+		throw new Error("Clicking the expanded spell did not collapse it.");
+	toggleSpell(1);
+	emit("client-player-spells-updated", { spellIds: [1, 3] });
+	await waitFor(
+		() => document.querySelector('[data-spell-id="1"] .spell-details') !== null,
+	);
 	const originalUrl = document.querySelector<HTMLImageElement>(
 		'[data-spell-id="1"] img',
 	)?.src;
@@ -98,6 +159,9 @@ export async function probeClientSpells(
 	button("Close Spells");
 	return {
 		largeList: ids.length,
+		inlineDetails: true,
+		formulaComponents: true,
+		contextRefresh: true,
 		reopenedArtworkReused: true,
 		missingDefinitionVisible: true,
 		characterResetDuringLookup: true,

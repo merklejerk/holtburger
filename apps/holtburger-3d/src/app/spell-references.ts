@@ -24,6 +24,16 @@ const referenceSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("known"),
 			id,
 			name: z.string(),
+			details: z
+				.object({
+					description: z.string(),
+					school: z.number().int().nonnegative().max(0xffff_ffff),
+					baseMana: z.number().int().nonnegative().max(0xffff_ffff),
+					manaPerTarget: z.number().int().nonnegative().max(0xffff_ffff),
+					durationSeconds: z.number().finite().positive().nullable(),
+				})
+				.strict()
+				.readonly(),
 			artwork: z.discriminatedUnion("kind", [
 				z
 					.object({ kind: z.literal("ready"), spec: spellSpec })
@@ -42,6 +52,38 @@ const referenceSchema = z.discriminatedUnion("kind", [
 		.readonly(),
 ]);
 
+/** Component metadata uses the same artwork availability contract as spell definitions. */
+const componentSchema = z
+	.object({
+		id,
+		name: z.string(),
+		artwork: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("ready"),
+					spec: z
+						.object({ kind: z.literal("spell-component"), base: id })
+						.strict()
+						.readonly(),
+				})
+				.strict()
+				.readonly(),
+			z
+				.object({ kind: z.literal("failed"), detail: z.string().min(1) })
+				.strict()
+				.readonly(),
+		]),
+	})
+	.strict()
+	.readonly();
+export type SpellComponentReference = z.infer<typeof componentSchema>;
+
+/** Static details consumed by inline inspection and independent inspectors. */
+export type SpellDetails = Extract<
+	z.infer<typeof referenceSchema>,
+	{ kind: "known" }
+>["details"];
+
 /** Per-identity failures remain visible alongside successful static references. */
 export type SpellReference =
 	| z.infer<typeof referenceSchema>
@@ -57,6 +99,8 @@ export class SpellReferences {
 	readonly #entries = new Map<number, Promise<SpellReference>>();
 	#tail: Promise<void> = Promise.resolve();
 	#disposed = false;
+	#components: Promise<ReadonlyMap<number, SpellComponentReference>> | null =
+		null;
 
 	constructor(transport: Pick<HostTransport, "invoke">) {
 		this.#transport = transport;
@@ -93,9 +137,32 @@ export class SpellReferences {
 		);
 	}
 
+	/** One small dictionary per content lifetime; no PNGs are prepared by this lookup. */
+	components(): Promise<ReadonlyMap<number, SpellComponentReference>> {
+		if (this.#disposed)
+			return Promise.reject(new Error("Spell references are disposed."));
+		if (this.#components === null) this.#components = this.#loadComponents();
+		return this.#components;
+	}
+
+	async #loadComponents(): Promise<
+		ReadonlyMap<number, SpellComponentReference>
+	> {
+		const value = await this.#transport.invoke("load_spell_components");
+		if (this.#disposed) throw new Error("Spell reference source retired.");
+		const references = z.array(componentSchema).parse(value);
+		const result = new Map(
+			references.map((reference) => [reference.id, reference]),
+		);
+		if (result.size !== references.length)
+			throw new Error("Duplicate spell component identity.");
+		return result;
+	}
+
 	dispose(): void {
 		this.#disposed = true;
 		this.#entries.clear();
+		this.#components = null;
 	}
 
 	async #loadBatch(ids: readonly number[]): Promise<readonly SpellReference[]> {

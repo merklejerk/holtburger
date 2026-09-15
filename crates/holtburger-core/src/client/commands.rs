@@ -139,6 +139,10 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::QuerySpellInspection(query) => {
+                self.query_spell_inspection(query);
+                Ok(())
+            }
             ClientCommand::SubmitItemUse(request) => self.submit_item_use(request).await,
             ClientCommand::QueryItemUseTarget(query) => {
                 self.query_item_use_target(query);

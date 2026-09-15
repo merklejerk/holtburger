@@ -130,6 +130,10 @@ pub struct ClientPreciseJumpCancelRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Read-only spell examination against current character facts.
+    QueryClientSpellInspection {
+        query: holtburger_core::client::spell_inspection::SpellInspectionQuery,
+    },
     /// Query compatibility without executing item use.
     QueryClientItemUseTarget {
         query: holtburger_core::client::item_use::ItemUseTargetQuery,
@@ -222,6 +226,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "equip_client_item",
     "submit_client_item_use",
     "query_client_item_use_target",
+    "query_client_spell_inspection",
     "start_client",
     "request_client_current_state",
     "select_client_character",
@@ -563,6 +568,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         QueueClientCharacterMotionEvent { request } => runtime
             .queue_character_motion_event(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientSpellInspection { query } => runtime
+            .send_command(ClientCommand::QuerySpellInspection(query))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

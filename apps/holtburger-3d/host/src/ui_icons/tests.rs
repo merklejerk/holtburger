@@ -339,3 +339,17 @@ fn spell_preparation_preserves_required_failures_and_optional_degradation() {
     assert_eq!(issues.0[0].asset_id, Some(99));
     assert_eq!(&rgba(&results[0].result)[..4], &[80, 90, 100, 255]);
 }
+
+#[test]
+fn spell_component_transform_replaces_only_exact_opaque_white() {
+    let source = UiImage {
+        width: 3,
+        height: 1,
+        pixels: vec![255, 255, 255, 255, 254, 255, 255, 255, 255, 255, 255, 0],
+    };
+    let result = compositor::compose_spell_component(&source).unwrap();
+    assert_eq!(
+        &result[..12],
+        &[0, 0, 0, 255, 254, 255, 255, 255, 255, 255, 255, 0]
+    );
+}

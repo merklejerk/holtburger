@@ -128,6 +128,17 @@ fn blend(destination: &mut [u8], source: &[u8], four_channels: bool) {
     }
 }
 
+/// Retail component transform (acclient.c:386923); availability is a separate UI overlay.
+pub fn compose_spell_component(base: &UiImage) -> Result<Vec<u8>> {
+    let mut output = canvas(base)?;
+    for pixel in output.chunks_exact_mut(4) {
+        if pixel == [255, 255, 255, 255] {
+            pixel.copy_from_slice(&[0, 0, 0, 255]);
+        }
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

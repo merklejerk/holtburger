@@ -557,6 +557,10 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Character input invalidation for independent spell inspectors.
+    SpellInspectionContext(super::spell_inspection::SpellInspectionContext),
+    /// Correlated read-only spell inspection result.
+    SpellInspectionResult(super::spell_inspection::SpellInspectionResult),
     /// Correlated guarded-use evaluation or dispatch result.
     ItemUseResult(super::item_use::ItemUseResult),
     /// Read-only considered-target compatibility result.
@@ -817,6 +821,8 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Read-only character-bound spell examination.
+    QuerySpellInspection(super::spell_inspection::SpellInspectionQuery),
     /// Evaluate and dispatch only if the expected consequence still matches.
     SubmitItemUse(super::item_use::ItemUseRequest),
     /// Evaluate one considered target without dispatch or busy admission.

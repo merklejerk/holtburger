@@ -26,6 +26,12 @@ export type UiIconSpec =
 			/** Required RenderSurface identity, independent of inventory membership. */
 			readonly base: number;
 	  }
+	| {
+			/** Component-specific opaque-white replacement. */
+			readonly kind: "spell-component";
+			/** Authored component RenderSurface. */
+			readonly base: number;
+	  }
 	| ({
 			readonly overlay: number | null;
 			readonly underlay: number | null;

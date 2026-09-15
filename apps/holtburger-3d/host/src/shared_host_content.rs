@@ -164,6 +164,8 @@ pub enum SharedContentCommand {
         request: LoadLandblockProfileRequest,
     },
     LoadSkySource,
+    /// Small static component dictionary, loaded lazily by inspectors.
+    LoadSpellComponents,
     LoadSpellReferences {
         request: crate::spell_references::LoadSpellReferencesRequest,
     },
@@ -196,6 +198,7 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "load_texture_pixels",
     "prepare_ui_icons",
     "load_spell_references",
+    "load_spell_components",
     "load_motion_table_closure",
 ];
 
@@ -285,6 +288,16 @@ pub async fn dispatch_shared_content(
                 .await
                 .map_err(application_error)?,
         )),
+        LoadSpellComponents => {
+            let content = runtime.content().clone();
+            let results = tokio::task::spawn_blocking(move || {
+                crate::spell_references::load_spell_components(&content)
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(results)
+        }
         LoadSpellReferences { request } => {
             request.validate().map_err(application_error)?;
             let content = runtime.content().clone();

@@ -52,6 +52,22 @@ pub enum SpellArtwork {
     },
 }
 
+/// Immutable authored inspection facts, independent of current character state.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpellDetails {
+    /// Authored description.
+    pub description: String,
+    /// Authored school ID; unknown values remain distinguishable.
+    pub school: u32,
+    /// Base mana before economy adjustments.
+    pub base_mana: u32,
+    /// Additional mana per target.
+    pub mana_per_target: u32,
+    /// Positive authored duration, when applicable.
+    pub duration_seconds: Option<f64>,
+}
+
 /// Exactly one result per requested spell identity.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -61,6 +77,8 @@ pub enum SpellReferenceResult {
         id: u32,
         /// Authored name independent of image availability.
         name: String,
+        /// Static examination facts, available even if artwork fails.
+        details: SpellDetails,
         /// Resolved visual inputs or their explicit failure.
         artwork: SpellArtwork,
     },
@@ -101,6 +119,13 @@ fn project_references(
             SpellReferenceResult::Known {
                 id,
                 name: spell.name.to_owned(),
+                details: SpellDetails {
+                    description: spell.description.to_owned(),
+                    school: spell.school,
+                    base_mana: spell.base_mana,
+                    mana_per_target: spell.mana_mod,
+                    duration_seconds: spell.duration_seconds,
+                },
                 artwork,
             }
         })
@@ -139,6 +164,43 @@ fn spell_icon_spec(
     })
 }
 
+/// Component identity, authored name, and the complete image transform recipe.
+#[derive(Debug, Serialize)]
+pub struct SpellComponentReference {
+    /// Formula component identity, not an item GUID.
+    pub id: u32,
+    /// Authored display name.
+    pub name: String,
+    /// Explicit image availability; missing art does not hide the name.
+    pub artwork: SpellArtwork,
+}
+
+/// The measured component table has 163 entries; one lazy content lookup serves all inspectors.
+pub fn load_spell_components(content: &SharedHostContent) -> Result<Vec<SpellComponentReference>> {
+    let table = holtburger_content::spells::spell_components(&content.repository)?;
+    let mut references: Vec<_> = table
+        .components
+        .into_iter()
+        .map(|(id, component)| {
+            let artwork = match NonZeroU32::new(component.icon) {
+                Some(base) => SpellArtwork::Ready {
+                    spec: UiIconSpec::SpellComponent { base },
+                },
+                None => SpellArtwork::Failed {
+                    detail: "Component artwork identity is zero".into(),
+                },
+            };
+            SpellComponentReference {
+                id,
+                name: component.name,
+                artwork,
+            }
+        })
+        .collect();
+    references.sort_by_key(|reference| reference.id);
+    Ok(references)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +236,13 @@ mod tests {
         let reference = SpellReferenceResult::Known {
             id: 1,
             name: "Spell".into(),
+            details: SpellDetails {
+                description: "Description".into(),
+                school: 3,
+                base_mana: 10,
+                mana_per_target: 2,
+                duration_seconds: Some(60.0),
+            },
             artwork: SpellArtwork::Ready {
                 spec: spell_icon_spec(&mut Mappings, 1, 10, 0x2008).unwrap(),
             },
@@ -181,7 +250,8 @@ mod tests {
         assert_eq!(
             serde_json::to_value(reference).unwrap(),
             serde_json::json!({
-                "kind":"known", "id":1, "name":"Spell", "artwork": {
+                "kind":"known", "id":1, "name":"Spell",
+                "details":{"description":"Description", "school":3, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
                     "kind":"ready", "spec":{"kind":"spell", "base":1,"background":610,"effects":702,"overlay":704}
                 }
             })

@@ -38,6 +38,8 @@ const CONTAINER_ENTRY: u32 = 10;
     deny_unknown_fields
 )]
 pub enum UiIconSpec {
+    /// Retail component artwork with opaque white replaced by opaque black.
+    SpellComponent { base: NonZeroU32 },
     /// Complete app-resolved spell artwork; no player membership is required.
     Spell {
         /// Authored spell graphic.
@@ -161,6 +163,7 @@ pub struct PreparedUiIcon {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Recipe {
     Base(u32),
+    SpellComponent(u32),
     Spell {
         base: u32,
         background: u32,
@@ -191,6 +194,7 @@ enum ResolvedArtwork {
         overlay: Option<Arc<UiImage>>,
     },
     Base(Arc<UiImage>),
+    SpellComponent(Arc<UiImage>),
     Composed {
         base: Arc<UiImage>,
         background: Arc<UiImage>,
@@ -274,6 +278,7 @@ fn prepare_with_assets(
                     overlay,
                 } => compositor::compose_spell(base, background, effects, overlay.as_deref()),
                 ResolvedArtwork::Base(base) => compositor::canvas(base),
+                ResolvedArtwork::SpellComponent(base) => compositor::compose_spell_component(base),
                 ResolvedArtwork::Composed {
                     base,
                     background,
@@ -347,6 +352,16 @@ fn resolve(
                         .map_err(|e| asset_issue(IconLayer::Effects, e))?,
                     overlay: overlay_image.map(|(_, image)| image),
                 },
+            });
+        }
+        UiIconSpec::SpellComponent { base } => {
+            return Ok(ResolvedIcon {
+                recipe: Recipe::SpellComponent(base.get()),
+                artwork: ResolvedArtwork::SpellComponent(
+                    assets
+                        .image(base.get())
+                        .map_err(|e| asset_issue(IconLayer::Base, e))?,
+                ),
             });
         }
         UiIconSpec::Base { base } => {

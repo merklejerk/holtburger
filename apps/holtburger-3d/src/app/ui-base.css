@@ -74,6 +74,10 @@
 		--ui-menu-padding: 4px;
 		--ui-menu-item-padding: 5px 12px;
 		--ui-icon-rendering: pixelated;
+		/* Spell formula list density; prepared artwork remains native resolution. */
+		--ui-spell-component-icon-size: 20px;
+		--ui-spell-component-row-gap: 2px;
+		--ui-spell-component-label-gap: 6px;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
 		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;
 		/* Compact suffix size relative to the quantity's font size. */

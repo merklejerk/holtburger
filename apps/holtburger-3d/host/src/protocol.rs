@@ -101,6 +101,8 @@ pub enum HostEvent {
     ClientPreciseJumpTransactionFeedback(
         crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
     ),
+    ClientSpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
+    ClientSpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
     ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
@@ -398,6 +400,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::PreciseJumpTransactionFeedback(feedback) => {
                 HostEvent::ClientPreciseJumpTransactionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::SpellInspectionContext(context) => {
+                HostEvent::ClientSpellInspectionContext(context)
+            }
+            crate::client_projection::ClientHostEvent::SpellInspectionResult(result) => {
+                HostEvent::ClientSpellInspectionResult(result)
             }
             crate::client_projection::ClientHostEvent::ItemUseTargetResult(result) => {
                 HostEvent::ClientItemUseTargetResult(result)
@@ -862,6 +870,42 @@ mod tests {
                 amount: 1
             }
         );
+    }
+
+    #[test]
+    fn spell_inspection_decodes_through_the_messagepack_command_router() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "query_client_spell_inspection", "query": { "sequence": 7, "spellId": 42 } }
+        })).unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::QueryClientSpellInspection { query }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("spell inspection query did not decode");
+        };
+        assert_eq!((query.sequence, query.spell_id), (7, 42));
+    }
+
+    #[test]
+    fn component_dictionary_decodes_through_the_messagepack_command_router() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 2,
+            "command": { "command": "load_spell_components" }
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        assert!(matches!(
+            read_frame(&mut reader).unwrap(),
+            Some(InboundFrame::Request {
+                command: HostCommand::Shared(
+                    crate::shared_host_content::SharedContentCommand::LoadSpellComponents
+                ),
+                ..
+            })
+        ));
     }
 
     #[test]

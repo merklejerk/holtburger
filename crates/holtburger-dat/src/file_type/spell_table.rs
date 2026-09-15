@@ -1,6 +1,7 @@
 use crate::utils::align_boundary;
 use crate::{EOR_PORTAL_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::{BinRead, BinResult};
+use holtburger_common::legacy_hash::legacy_string_hash;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 
@@ -138,7 +139,7 @@ pub struct SpellSetTiers {
     pub spells: Vec<u32>,
 }
 
-fn parse_obfuscated<R: Read + Seek>(
+pub(super) fn parse_obfuscated<R: Read + Seek>(
     reader: &mut R,
     _endian: binrw::Endian,
     _args: (),
@@ -152,26 +153,10 @@ fn parse_obfuscated<R: Read + Seek>(
     Ok(bytes)
 }
 
-/// Retail legacy hash consumes signed Windows-1252 bytes, not Unicode codepoints.
-/// acclient.c:287412; preserving source bytes avoids a lossy text round trip.
-fn formula_hash(bytes: &[u8]) -> u32 {
-    let mut hash = 0u32;
-    for &byte in bytes.iter().take_while(|&&byte| byte != 0) {
-        hash = hash
-            .wrapping_mul(16)
-            .wrapping_add(i32::from(byte as i8) as u32);
-        let high = hash & 0xf0000000;
-        if high != 0 {
-            hash = (hash ^ (high >> 24)) & 0x0fffffff;
-        }
-    }
-    hash
-}
-
 /// acclient.c:429170 and :465015: zero slots remain zero, subtraction wraps.
 fn decode_components(raw: [u32; 8], name: &[u8], description: &[u8]) -> [u32; 8] {
-    let key =
-        (formula_hash(name) % 0x12107680).wrapping_add(formula_hash(description) % 0xbeadcf45);
+    let key = (legacy_string_hash(name) % 0x12107680)
+        .wrapping_add(legacy_string_hash(description) % 0xbeadcf45);
     raw.map(|component| {
         if component == 0 {
             0
@@ -260,13 +245,6 @@ fn parse_spell_set_tiers_hash_table<R: Read + Seek>(
 mod tests {
     use super::*;
     use std::io::Cursor;
-
-    #[test]
-    fn formula_hash_uses_signed_source_bytes_and_stops_at_nul() {
-        assert_eq!(formula_hash(b"A"), 65);
-        assert_eq!(formula_hash(&[b'A', 0x92]), 930);
-        assert_eq!(formula_hash(b"A\0ignored"), 65);
-    }
 
     #[test]
     fn decoding_preserves_slots_and_wraps_without_corrective_masking() {

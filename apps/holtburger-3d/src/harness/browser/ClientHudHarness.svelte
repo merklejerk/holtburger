@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { z } from "zod";
+	import { spellInspectionQuerySchema } from "../../client/client-spell-inspection-contract";
 	import { SpellReferences } from "../../app/spell-references";
 	import {
 		ClientSpellState,
@@ -653,6 +654,28 @@
 		},
 		invoke: async (command, args) => {
 			interactionCommands.push({ command, args });
+			if (command === "query_client_spell_inspection") {
+				const { query } = z
+					.object({
+						query: spellInspectionQuerySchema,
+					})
+					.parse(args);
+				emitInteractionEvent("client-spell-inspection-result", {
+					...query,
+					context: { revision: spellInspectionRevision, player: 1 },
+					outcome: {
+						kind: "ready",
+						rangeMetres: spellInspectionRevision === 1 ? 25 : 30,
+						formula: {
+							kind: "ready",
+							components:
+								spellInspectionRevision === 1
+									? [1, 188, 0, 0, 0, 0, 0, 0]
+									: [188, 188, 0, 0, 0, 0, 0, 0],
+						},
+					},
+				});
+			}
 			if (command === "submit_client_inventory" && deferInventorySubmission) {
 				deferInventorySubmission = false;
 				await new Promise<void>((_resolve, reject) => {
@@ -773,7 +796,12 @@
 		selectedGuid = guid;
 	});
 
+	let spellInspectionRevision = 1;
 	function emitInteractionEvent(event: string, payload: unknown): void {
+		if (event === "client-spell-inspection-context")
+			spellInspectionRevision = z
+				.object({ revision: z.number() })
+				.parse(payload).revision;
 		const handler = interactionHandlers.get(event);
 		if (handler === undefined)
 			throw new Error(`Missing interaction listener: ${event}`);
@@ -1824,7 +1852,26 @@
 		);
 		inventory = inventoryOwner;
 		const references = new SpellReferences({
-			invoke: async (_command, args) => {
+			invoke: async (command, args) => {
+				if (command === "load_spell_components")
+					return [
+						{
+							id: 1,
+							name: "Lead Scarab",
+							artwork: {
+								kind: "ready",
+								spec: { kind: "spell-component", base: 1 },
+							},
+						},
+						{
+							id: 188,
+							name: "Prismatic Taper",
+							artwork: {
+								kind: "ready",
+								spec: { kind: "spell-component", base: 188 },
+							},
+						},
+					];
 				if (spellReferenceGate !== null) await spellReferenceGate;
 				const ids = z
 					.object({ request: z.object({ spellIds: z.array(z.number()) }) })
@@ -1836,6 +1883,13 @@
 								kind: "known",
 								id,
 								name: `Spell ${String(id).padStart(4, "0")}`,
+								details: {
+									description: "Fixture spell description.",
+									school: 3,
+									baseMana: 10,
+									manaPerTarget: 2,
+									durationSeconds: 60,
+								},
 								artwork: {
 									kind: "ready",
 									spec: {

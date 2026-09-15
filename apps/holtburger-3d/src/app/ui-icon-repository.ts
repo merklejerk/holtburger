@@ -59,7 +59,8 @@ function uiIconKey(spec: UiIconSpec): string {
 			spec.effects,
 			spec.overlay,
 		]);
-	if (spec.kind === "base") return JSON.stringify([spec.kind, spec.base]);
+	if (spec.kind === "base" || spec.kind === "spell-component")
+		return JSON.stringify([spec.kind, spec.base]);
 	return JSON.stringify([
 		spec.kind,
 		spec.kind === "item" ? spec.base : null,

@@ -1,3 +1,4 @@
+pub mod formula;
 use std::collections::HashMap;
 
 use holtburger_dat::file_type::spell_table::{
@@ -201,5 +202,103 @@ impl From<DatSpellSetTiers> for SpellSetTierInfo {
             spell_count: value.spell_count,
             spells: value.spells,
         }
+    }
+}
+
+/// Retail examination and ACE spellbook-casting distance limit, in metres.
+/// acclient.c:218245, :423598; ACE Player_Magic.cs:481. Item-cast range uses
+/// a different skill input and is deliberately outside this spellbook query.
+pub fn spellbook_range_metres(
+    spell: &SpellInfo,
+    skills: &HashMap<crate::stats::SkillType, crate::stats::Skill>,
+) -> Option<f32> {
+    use crate::stats::SkillType;
+    let school_skill = match spell.school {
+        MagicSchool::WarMagic => Some(SkillType::WarMagic),
+        MagicSchool::LifeMagic => Some(SkillType::LifeMagic),
+        MagicSchool::ItemEnchantment => Some(SkillType::ItemEnchantment),
+        MagicSchool::CreatureEnchantment => Some(SkillType::CreatureEnchantment),
+        MagicSchool::VoidMagic => Some(SkillType::VoidMagic),
+        MagicSchool::None => None,
+    };
+    let level = |kind| {
+        skills
+            .get(&kind)
+            .map(|skill| skill.init.wrapping_add(skill.ranks))
+    };
+    let level = match school_skill {
+        Some(kind) => level(kind)?,
+        None => [
+            SkillType::WarMagic,
+            SkillType::LifeMagic,
+            SkillType::ItemEnchantment,
+            SkillType::CreatureEnchantment,
+            SkillType::VoidMagic,
+        ]
+        .into_iter()
+        .try_fold(0, |maximum, kind| {
+            level(kind).map(|value| maximum.max(value))
+        })?,
+    };
+    Some((spell.base_range_constant + spell.base_range_mod * level as f32).min(75.0))
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    use crate::stats::{Skill, SkillType, TrainingLevel};
+
+    fn skill(kind: SkillType, ranks: u32) -> Skill {
+        Skill {
+            skill_type: kind,
+            ranks,
+            init: 10,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: 200,
+            current: 300,
+            training: TrainingLevel::Trained,
+            trained_cost: 0,
+            specialized_cost: 0,
+        }
+    }
+
+    #[test]
+    fn spellbook_range_uses_ranks_and_initial_bonus_not_buffed_or_attribute_skill() {
+        let mut spell: SpellInfo = DatSpellBase {
+            school: 1,
+            base_range_constant: 10.0,
+            base_range_mod: 0.5,
+            ..DatSpellBase::default()
+        }
+        .into();
+        let skills = HashMap::from([(SkillType::WarMagic, skill(SkillType::WarMagic, 20))]);
+        assert_eq!(spellbook_range_metres(&spell, &skills), Some(25.0));
+        spell.base_range_mod = 10.0;
+        assert_eq!(spellbook_range_metres(&spell, &skills), Some(75.0));
+        assert_eq!(spellbook_range_metres(&spell, &HashMap::new()), None);
+    }
+
+    #[test]
+    fn schoolless_inspection_requires_complete_context_and_selects_highest_magic_level() {
+        let spell: SpellInfo = DatSpellBase {
+            base_range_mod: 1.0,
+            ..DatSpellBase::default()
+        }
+        .into();
+        let mut skills: HashMap<_, _> = [
+            SkillType::WarMagic,
+            SkillType::LifeMagic,
+            SkillType::ItemEnchantment,
+            SkillType::CreatureEnchantment,
+            SkillType::VoidMagic,
+        ]
+        .into_iter()
+        .map(|kind| (kind, skill(kind, 0)))
+        .collect();
+        skills.insert(SkillType::VoidMagic, skill(SkillType::VoidMagic, 30));
+        assert_eq!(spellbook_range_metres(&spell, &skills), Some(40.0));
+        skills.remove(&SkillType::LifeMagic);
+        assert_eq!(spellbook_range_metres(&spell, &skills), None);
     }
 }

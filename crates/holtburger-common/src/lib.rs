@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod character;
 pub mod defaults;
 pub mod guid;
+pub mod legacy_hash;
 pub mod math;
 pub mod properties;
 pub mod sequence;

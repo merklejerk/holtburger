@@ -584,6 +584,10 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Character input invalidation for spell inspectors.
+    SpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
+    /// Correlated character-bound spell facts.
+    SpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
     /// Correlated semantic item-use outcome.
     ItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
@@ -811,6 +815,12 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::SpellInspectionContext(context) => {
+            Some(ClientHostEvent::SpellInspectionContext(context))
+        }
+        ClientViewEvent::SpellInspectionResult(result) => {
+            Some(ClientHostEvent::SpellInspectionResult(result))
+        }
         ClientViewEvent::ItemUseResult(result) => Some(ClientHostEvent::ItemUseResult(result)),
         ClientViewEvent::ItemUseTargetResult(result) => {
             Some(ClientHostEvent::ItemUseTargetResult(result))

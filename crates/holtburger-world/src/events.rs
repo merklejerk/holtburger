@@ -91,6 +91,12 @@ pub enum WorldEvent {
         guid: Guid,
         motion: EntityNetworkMotion,
     },
+    /// Packet admission changed authored playback without a network-motion notification.
+    /// Core republishes the current entity view; routine playback progression uses tick batches.
+    EntityMotionPlaybackChanged {
+        /// Entity whose admitted playback description changed.
+        guid: Guid,
+    },
     /// A runtime body's structure or externally-authored state changed.
     RuntimeBodyChanged {
         body_id: SpatialBodyId,

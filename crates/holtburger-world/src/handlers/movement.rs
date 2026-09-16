@@ -133,15 +133,20 @@ pub(crate) fn handle_message(
             };
             report_unsupported_interpreted_commands(state, guid, snapshot);
             report_rejected_motion_actions(guid, rejected_actions);
-            if is_local && data.is_autonomous {
+            let playback_changed = if is_local && data.is_autonomous {
                 // Local prediction already owns playback; an admitted echo only renews sticky.
                 state.admit_entity_sticky_target(guid, sticky_target);
+                false
             } else {
-                state.accept_entity_motion(guid, snapshot, actions, sticky_target);
-            }
+                state.accept_entity_motion(guid, snapshot, actions, sticky_target)
+            };
 
             if motion_changed {
                 publish_entity_motion_update(state, guid, snapshot, events);
+            } else if playback_changed {
+                // The next tick captures its baseline after packet admission, so it cannot
+                // discover this edge. A network-motion notification already publishes it above.
+                events.push(WorldEvent::EntityMotionPlaybackChanged { guid });
             }
 
             if snapshot.indicates_death_motion() {

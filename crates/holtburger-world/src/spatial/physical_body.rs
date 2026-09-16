@@ -1393,9 +1393,23 @@ pub(super) fn resolve_body_facing(
     policy: PhysicalBodyResponsePolicy,
     control_heading: Option<f32>,
 ) -> Quaternion {
-    let heading = if policy.align_path && displacement.length_squared() > f32::EPSILON {
-        Some(Vector3::zero().heading_to(&displacement))
-    } else if policy.surface_motion == PhysicalSurfaceMotion::Sledding
+    if policy.align_path && displacement.length_squared() > f32::EPSILON {
+        // Retail Frame::set_vector_heading (acclient.c:342873) applies local-X pitch,
+        // then world-Z yaw, with local +Y forward. atan2(z, horizontal) is asin(normal.z)
+        // without normalization roundoff at vertical flight. The yaw expression also preserves
+        // retail's -90-degree choice for an exactly vertical vector (atan2(0, 0) == 0).
+        let half_pitch = displacement.z.atan2(displacement.x.hypot(displacement.y)) * 0.5;
+        let half_yaw = (displacement.y.atan2(displacement.x) - std::f32::consts::FRAC_PI_2) * 0.5;
+        let (sin_pitch, cos_pitch) = half_pitch.sin_cos();
+        let (sin_yaw, cos_yaw) = half_yaw.sin_cos();
+        return Quaternion {
+            w: cos_yaw * cos_pitch,
+            x: cos_yaw * sin_pitch,
+            y: sin_yaw * sin_pitch,
+            z: sin_yaw * cos_pitch,
+        };
+    }
+    let heading = if policy.surface_motion == PhysicalSurfaceMotion::Sledding
         && velocity.length_squared() > f32::EPSILON
     {
         Some(Vector3::zero().heading_to(&velocity))
@@ -1775,6 +1789,50 @@ mod tests {
             PhysicalRestitution::Elastic(PhysicalElasticity::ZERO),
             PhysicalRestitution::Inelastic
         );
+    }
+
+    #[test]
+    fn align_path_points_forward_along_full_travel_without_roll() {
+        let policy = PhysicalBodyResponsePolicy {
+            align_path: true,
+            surface_motion: PhysicalSurfaceMotion::Stable,
+            restitution: PhysicalRestitution::Inelastic,
+            friction: PhysicalFriction::DEFAULT,
+        };
+        let current = Quaternion::from_heading(0.75);
+        for x in [-1.0, 0.0, 1.0] {
+            for y in [-1.0, 0.0, 1.0] {
+                for z in [-1.0, 0.0, 1.0] {
+                    let direction = Vector3::new(x, y, z);
+                    let rotation =
+                        resolve_body_facing(current, direction, Vector3::zero(), policy, None);
+                    if direction == Vector3::zero() {
+                        assert_eq!(rotation, current);
+                        continue;
+                    }
+                    let forward = rotation.rotate_vector(Vector3::new(0.0, 1.0, 0.0));
+                    assert!(
+                        (forward - direction.normalize()).length() < 0.000_01,
+                        "{direction:?}: {forward:?}"
+                    );
+                    let horizontal = x.hypot(y);
+                    let right = if horizontal == 0.0 {
+                        Vector3::new(0.0, -1.0, 0.0)
+                    } else {
+                        Vector3::new(y / horizontal, -x / horizontal, 0.0)
+                    };
+                    assert!(
+                        (rotation.rotate_vector(Vector3::new(1.0, 0.0, 0.0)) - right).length()
+                            < 0.000_01
+                    );
+                    let norm = rotation.w * rotation.w
+                        + rotation.x * rotation.x
+                        + rotation.y * rotation.y
+                        + rotation.z * rotation.z;
+                    assert!((norm - 1.0).abs() < 0.000_01);
+                }
+            }
+        }
     }
 
     #[test]

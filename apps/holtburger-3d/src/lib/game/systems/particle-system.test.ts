@@ -14,7 +14,10 @@ import type { DrawableParticleEmitter } from "../behavior/particle-emitter-repos
 import type { DatAssetId } from "../game-types";
 import type { SceneNodeId } from "../scene";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
-import { ParticleSystem } from "./particle-system";
+import {
+	ParticleSystem,
+	DISTANCE_EMISSION_INTERVAL_SECONDS,
+} from "./particle-system";
 import { PARTICLE_RECORD_STRIDE_FLOATS } from "../behavior/particle-record-slots";
 
 const TARGET: BehaviorTarget = {
@@ -1259,35 +1262,152 @@ describe("ParticleSystem", () => {
 		},
 	);
 
-	it("uses endpoint displacement from the last birth, scaled spacing, and no catch-up bursts", () => {
+	it("tests displacement from the last birth rather than accumulating backtracking travel", () => {
 		let origin = ORIGIN;
-		const particles = runtime({
-			sceneOriginOf: () => origin,
-			distanceSpacingMultiplier: 2,
-		});
+		const particles = runtime({ sceneOriginOf: () => origin });
 		particles.create(
 			TARGET,
-			prepared({ emitsPerMeter: true, emitsPerSecond: false, birthrate: 0.5 }),
+			prepared({ emitsPerMeter: true, emitsPerSecond: false, birthrate: 1 }),
 			NO_OFFSET,
 			1,
 			0,
 			origin,
 		);
-		const move = (x: number, time: number) => {
-			origin = sceneVector3([x, 0, 0]);
-			particles.advance(time);
-		};
-		move(0, 0);
-		move(0.75, 0.1);
-		move(0, 0.2); // Returning does not accumulate the path length.
-		move(1, 0.3); // Equal spacing is not enough.
+		origin = sceneVector3([0.75, 0, 0]);
+		particles.advance(0.75);
+		origin = ORIGIN;
+		particles.advance(1.5);
 		expect(particles.getDiagnostics().emittedTotal).toBe(0);
-		move(1.1, 0.4);
-		expect(particles.getDiagnostics().emittedTotal).toBe(1);
-		move(2, 0.5);
-		expect(particles.getDiagnostics().emittedTotal).toBe(1);
-		move(100, 0.6);
+		origin = sceneVector3([2.5, 0, 0]);
+		particles.advance(4);
 		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		expect(storedRecord(particles).localOrigin[0]).toBeGreaterThan(1);
+		expect(storedRecord(particles).localOrigin[0]).toBeLessThanOrEqual(
+			1 + DISTANCE_EMISSION_INTERVAL_SECONDS,
+		);
+	});
+
+	it.each([15, 30, 60, 144])(
+		"caps fast distance emission and preserves birth positions and ages at %s FPS",
+		(fps) => {
+			let origin = ORIGIN;
+			const particles = runtime({ sceneOriginOf: () => origin });
+			particles.create(
+				TARGET,
+				prepared({
+					emitsPerMeter: true,
+					emitsPerSecond: false,
+					birthrate: 0.05,
+				}),
+				NO_OFFSET,
+				1,
+				0,
+				origin,
+			);
+			for (let frame = 1; frame <= fps; frame++) {
+				origin = sceneVector3([(15 * frame) / fps, 0, 0]);
+				particles.advance(frame / fps);
+			}
+			expect(particles.getDiagnostics().emittedTotal).toBe(
+				1 / DISTANCE_EMISSION_INTERVAL_SECONDS,
+			);
+			for (
+				let slot = 0;
+				slot < 1 / DISTANCE_EMISSION_INTERVAL_SECONDS;
+				slot++
+			) {
+				const record = storedRecord(particles, slot);
+				expect(record.localOrigin[0]).toBeCloseTo(
+					(slot + 1) * 15 * DISTANCE_EMISSION_INTERVAL_SECONDS,
+				);
+				expect(record.birthTime).toBeCloseTo(
+					(slot + 1) * DISTANCE_EMISSION_INTERVAL_SECONDS,
+				);
+			}
+		},
+	);
+
+	it.each([1, 30, 60, 144])(
+		"honors historical capacity and lifetime at %s FPS",
+		(fps) => {
+			let origin = ORIGIN;
+			const particles = runtime({ sceneOriginOf: () => origin });
+			particles.create(
+				TARGET,
+				prepared({
+					emitsPerMeter: true,
+					emitsPerSecond: false,
+					birthrate: 1,
+					maxParticles: 1,
+					lifespan: 0.5,
+				}),
+				NO_OFFSET,
+				1,
+				0,
+				origin,
+			);
+			for (let frame = 1; frame <= fps; frame++) {
+				origin = sceneVector3([(4 * frame) / fps, 0, 0]);
+				particles.advance(frame / fps);
+			}
+			expect(particles.getDiagnostics().emittedTotal).toBe(2);
+			expect(particles.getDiagnostics().particleCount).toBe(1);
+			expect(storedRecord(particles).birthTime).toBeCloseTo(
+				23 * DISTANCE_EMISSION_INTERVAL_SECONDS,
+			);
+			expect(storedRecord(particles).localOrigin[0]).toBeCloseTo(
+				4 * 23 * DISTANCE_EMISSION_INTERVAL_SECONDS,
+			);
+		},
+	);
+
+	it("waits at exact authored spacing and emits after crossing it", () => {
+		let origin = ORIGIN;
+		const particles = runtime({ sceneOriginOf: () => origin });
+		particles.create(
+			TARGET,
+			prepared({ emitsPerMeter: true, emitsPerSecond: false, birthrate: 1 }),
+			NO_OFFSET,
+			1,
+			0,
+			origin,
+		);
+		origin = sceneVector3([1, 0, 0]);
+		particles.advance(0.1);
+		expect(particles.getDiagnostics().emittedTotal).toBe(0);
+		origin = sceneVector3([1.01, 0, 0]);
+		particles.advance(0.1 + DISTANCE_EMISSION_INTERVAL_SECONDS);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+	});
+
+	it("retains displacement eligibility while full and emits after capacity frees", () => {
+		let origin = ORIGIN;
+		const particles = runtime({ sceneOriginOf: () => origin });
+		particles.create(
+			TARGET,
+			prepared({
+				emitsPerMeter: true,
+				emitsPerSecond: false,
+				birthrate: 1,
+				maxParticles: 1,
+				initialParticles: 1,
+				lifespan: 0.5,
+			}),
+			NO_OFFSET,
+			1,
+			0,
+			origin,
+		);
+		origin = sceneVector3([1, 0, 0]);
+		particles.advance(0.1);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		origin = sceneVector3([2, 0, 0]);
+		particles.advance(0.2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		particles.advance(0.5);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		expect(storedRecord(particles).localOrigin).toEqual(origin);
+		expect(storedRecord(particles).birthTime).toBeCloseTo(0.5);
 	});
 
 	it("emits with a stationary owner when the attached part or its authored offset moves", () => {
@@ -1347,11 +1467,11 @@ describe("ParticleSystem", () => {
 		expect(storedRecord(particles).localOrigin).toEqual(ORIGIN);
 		origin = sceneVector3([100.01, 0, 0]);
 		particles.advance(0.2);
-		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(4);
 		origin = sceneVector3([200, 0, 0]);
 		particles.reanchor({ ...TARGET, generation: TARGET.generation + 1 });
 		particles.advance(0.3);
-		expect(particles.getDiagnostics().emittedTotal).toBe(3);
+		expect(particles.getDiagnostics().emittedTotal).toBe(7);
 	});
 
 	it("preserves capacity, total budget, and stop-with-drain for distance emission", () => {
@@ -1377,6 +1497,7 @@ describe("ParticleSystem", () => {
 		origin = sceneVector3([1, 0, 0]);
 		particles.advance(0.5);
 		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		origin = sceneVector3([1.5, 0, 0]);
 		particles.advance(1);
 		expect(particles.getDiagnostics().emittedTotal).toBe(2);
 		origin = sceneVector3([2, 0, 0]);
@@ -1417,9 +1538,9 @@ describe("ParticleSystem", () => {
 			0,
 			origin,
 		);
-		origin = sceneVector3([100, 0, 0]);
+		origin = sceneVector3([4, 0, 0]);
 		particles.advance(2);
-		expect(particles.getDiagnostics().emittedTotal).toBe(0);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
 		particles.create(
 			TARGET,
 			prepared({ emitsPerMeter: true, emitsPerSecond: true, birthrate: 1 }),
@@ -1431,8 +1552,99 @@ describe("ParticleSystem", () => {
 		particles.advance(2);
 		origin = sceneVector3([200, 0, 0]);
 		particles.advance(2.5);
-		expect(particles.getDiagnostics().emittedTotal).toBe(1);
-		particles.advance(3);
 		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		particles.advance(3);
+		expect(particles.getDiagnostics().emittedTotal).toBe(3);
+	});
+	it("changes live distance spacing without discarding particles and applies it to new emitters", () => {
+		let origin = ORIGIN;
+		const particles = runtime({ sceneOriginOf: () => origin });
+		const emitter = prepared({
+			emitsPerMeter: true,
+			emitsPerSecond: false,
+			birthrate: 1,
+		});
+		particles.create(TARGET, emitter, NO_OFFSET, 1, 0, origin);
+		origin = sceneVector3([2, 0, 0]);
+		particles.advance(0.1);
+		particles.setDistanceSpacingMultiplier(4);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+		particles.create(SECOND_TARGET, emitter, NO_OFFSET, 1, 0.1, origin);
+		origin = sceneVector3([4, 0, 0]);
+		particles.advance(0.2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		origin = sceneVector3([7, 0, 0]);
+		particles.advance(0.3);
+		expect(particles.getDiagnostics().emittedTotal).toBe(3);
+	});
+	it("keeps saturated fractional-spacing trails identical across render rates", () => {
+		const replay = (fps: number) => {
+			let origin = ORIGIN;
+			const particles = runtime({ sceneOriginOf: () => origin });
+			particles.create(
+				TARGET,
+				prepared({
+					emitsPerMeter: true,
+					emitsPerSecond: false,
+					birthrate: 0.05,
+					maxParticles: 20,
+					lifespan: 1,
+				}),
+				NO_OFFSET,
+				1,
+				0,
+				origin,
+			);
+			for (let frame = 1; frame <= fps * 3; frame++) {
+				origin = sceneVector3([(15 * frame) / fps, 0, 0]);
+				particles.advance(frame / fps);
+			}
+			return {
+				emitted: particles.getDiagnostics().emittedTotal,
+				records: Array.from(
+					{ length: particles.getDiagnostics().particleCount },
+					(_, slot) => storedRecord(particles, slot),
+				),
+			};
+		};
+		const baseline = replay(30);
+		for (const fps of [60, 144]) {
+			const result = replay(fps);
+			expect(result.emitted).toBe(baseline.emitted);
+			expect(result.records).toEqual(baseline.records);
+		}
+	});
+
+	it("does not bridge snaps or hidden travel with distance births", () => {
+		let origin = ORIGIN;
+		let time = 0;
+		const particles = runtime({
+			sceneOriginOf: () => origin,
+			clock: () => time,
+		});
+		particles.create(
+			TARGET,
+			prepared({ emitsPerMeter: true, emitsPerSecond: false, birthrate: 1 }),
+			NO_OFFSET,
+			1,
+			time,
+			origin,
+		);
+		time = 1;
+		origin = sceneVector3([100, 0, 0]);
+		particles.reanchor(TARGET);
+		particles.advance(time);
+		time = 2;
+		origin = sceneVector3([200, 0, 0]);
+		particles.advance(time, () => false);
+		time = 3;
+		origin = sceneVector3([300, 0, 0]);
+		particles.advance(time);
+		expect(particles.getDiagnostics().emittedTotal).toBe(0);
+		time = 4;
+		origin = sceneVector3([301.02, 0, 0]);
+		particles.advance(time);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		expect(storedRecord(particles).birthTime).toBe(4);
 	});
 });

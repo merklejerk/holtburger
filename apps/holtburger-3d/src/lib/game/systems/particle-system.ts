@@ -43,6 +43,11 @@ import {
 	type Vector3,
 } from "../behavior/particle-motion";
 
+/** Retail physics admission ceiling (acclient.c:300085, 748376), independent of rendering. */
+export const DISTANCE_EMISSION_INTERVAL_SECONDS = 1 / 30;
+/** Arithmetic tolerance for clock and displacement equality, not a visual tuning value. */
+const EMISSION_BOUNDARY_EPSILON = 1e-9;
+
 /** Uniform [0, 1) source; injected so emission randomness is explicit and tests are exact. */
 export type UniformRoll = () => number;
 
@@ -350,10 +355,17 @@ interface EmitterInstance {
 	lastEmissionTime: number | null;
 	/** Distance-only trigger state; time-trigger precedence leaves this absent. */
 	readonly distanceEmission: {
-		/** Squared spacing computed once from authored birthrate and shared tuning. */
-		readonly spacingSquared: number;
-		/** Attached origin at initialization, last actual birth, or explicit discontinuity. */
+		/** Linear spacing recomputed when the live spacing policy changes. */
+		spacing: number;
+		/** Last sampled attached origin and time, including frames with no births. */
 		lastOrigin: SceneVector3;
+		lastTime: number;
+		/** Last admitted birth location; motion within the spacing radius does not accumulate. */
+		lastBirthOrigin: SceneVector3;
+		/** Fixed clock origin, restarted only when a snap or hidden interval breaks continuity. */
+		epoch: number;
+		/** Next integer clock step; multiplication avoids accumulating per-frame roundoff. */
+		nextTick: number;
 	} | null;
 	emittedCount: number;
 	/** Stopped emitters release no further particles but let live ones finish their lifespans. */
@@ -540,16 +552,30 @@ export class ParticleSystem {
 	#replacedEmitterTotal = 0;
 
 	constructor(dependencies: ParticleSystemDependencies) {
-		if (
-			!Number.isFinite(dependencies.distanceSpacingMultiplier) ||
-			dependencies.distanceSpacingMultiplier <= 0
-		) {
+		this.#dependencies = dependencies;
+		this.#roll = dependencies.roll;
+		this.setDistanceSpacingMultiplier(dependencies.distanceSpacingMultiplier);
+	}
+
+	/** Current spacing policy for new emitters; existing emitters update on the same change. */
+	#distanceSpacingMultiplier = 1;
+
+	/** Change future birth spacing without moving or removing existing particles. */
+	setDistanceSpacingMultiplier(multiplier: number): void {
+		if (!Number.isFinite(multiplier) || multiplier <= 0) {
 			throw new Error(
 				"Particle distance spacing multiplier must be finite and positive.",
 			);
 		}
-		this.#dependencies = dependencies;
-		this.#roll = dependencies.roll;
+		this.#distanceSpacingMultiplier = multiplier;
+		for (const instance of this.#instances) {
+			if (instance.distanceEmission !== null) {
+				instance.distanceEmission.spacing =
+					instance.emitter.info.birthrate * multiplier;
+				instance.distanceEmission.lastBirthOrigin =
+					instance.distanceEmission.lastOrigin;
+			}
+		}
 	}
 
 	/**
@@ -618,6 +644,10 @@ export class ParticleSystem {
 			if (existing >= 0) this.#removeEmitter(existing, "replaced");
 		}
 		const envelopeRadius = drawableEnvelopeRadius(emitter, hookOffset);
+		const initialOrigin =
+			!emitter.info.emitsPerSecond && emitter.info.emitsPerMeter
+				? this.#attachedOrigin(frameTarget, hookOffset, parentOrigin)
+				: null;
 		const instance: EmitterInstance = {
 			drawFrame: emitter.info.followsParent
 				? new FollowingRangeFrame()
@@ -632,17 +662,14 @@ export class ParticleSystem {
 			hiddenSince: null,
 			lastEmissionTime: null,
 			distanceEmission:
-				!emitter.info.emitsPerSecond && emitter.info.emitsPerMeter
+				initialOrigin !== null
 					? {
-							spacingSquared:
-								(emitter.info.birthrate *
-									this.#dependencies.distanceSpacingMultiplier) **
-								2,
-							lastOrigin: this.#attachedOrigin(
-								frameTarget,
-								hookOffset,
-								parentOrigin,
-							),
+							spacing: emitter.info.birthrate * this.#distanceSpacingMultiplier,
+							lastTime: timeSeconds,
+							epoch: timeSeconds,
+							nextTick: 1,
+							lastOrigin: initialOrigin,
+							lastBirthOrigin: initialOrigin,
 						}
 					: null,
 			nextDeathTime: Number.POSITIVE_INFINITY,
@@ -723,11 +750,18 @@ export class ParticleSystem {
 			this.#visibleEmitterCount += 1;
 			if (instance.hiddenSince !== null) {
 				this.#reconcileVisible(instance, timeSeconds);
+				this.#resetDistanceEmission(instance, timeSeconds);
 				instance.hiddenSince = null;
+			}
+			// Distance births are processed chronologically before final expiry: otherwise a slow
+			// frame would free slots that were still occupied at an earlier birth along the path.
+			if (instance.distanceEmission !== null && !instance.stopped) {
+				this.#emitDistanceDue(instance, timeSeconds);
 			}
 			this.#reapExpired(instance, timeSeconds);
 			this.#applyAutoStop(instance, timeSeconds);
-			if (!instance.stopped) this.#emitDue(instance, timeSeconds);
+			if (instance.distanceEmission === null && !instance.stopped)
+				this.#emitDue(instance, timeSeconds);
 			// A stopped emitter with nothing left alive has finished its whole job.
 			if (instance.stopped && instance.particles.length === 0) {
 				this.#removeEmitter(index, "reaped");
@@ -1050,43 +1084,99 @@ export class ParticleSystem {
 	}
 
 	/**
-	 * Release at most one particle once the selected time or distance trigger qualifies.
-	 *
-	 * RETAIL QUIRK: for time triggers, `birthrate` is a **minimum interval**, not a rate. Retail emits at most one particle per
-	 * update with no catch-up (acclient.c:312447-312476, 318289). Reproduced deliberately: emitting
-	 * a burst to "catch up" a slow frame would change authored density.
+	 * RETAIL QUIRK: time triggers keep their minimum interval and one birth per update
+	 * (acclient.c:312447-312476, 318289). Catch-up would change authored time-effect density.
 	 */
 	#emitDue(instance: EmitterInstance, timeSeconds: number): void {
 		const info = instance.emitter.info;
-		if (instance.particles.length >= info.maxParticles) return;
-		if (info.emitsPerSecond) {
-			if (
-				instance.lastEmissionTime !== null &&
-				timeSeconds - instance.lastEmissionTime < info.birthrate
-			)
-				return;
-		} else if (instance.distanceEmission === null) return;
+		if (!info.emitsPerSecond || instance.particles.length >= info.maxParticles)
+			return;
+		if (
+			instance.lastEmissionTime !== null &&
+			timeSeconds - instance.lastEmissionTime < info.birthrate
+		)
+			return;
+		this.#emit(instance, timeSeconds, this.#liveOriginOf(instance));
+	}
+
+	/**
+	 * RETAIL QUIRK: one admission per physics update caps distance emission at 30/s
+	 * (acclient.c:300085, 318307, 748376). Removing the ceiling overfills short missile trails;
+	 * the archive has 202 distance-only emitters. The missing comparison in acclient.c:312447
+	 * is recovered from acclient.exe 0x517F91–0x517FBF: birthrate² < displacement².
+	 *
+	 * RETAIL DIVERGENCE: use a fixed 30 Hz clock instead of retail's render-quantized physics
+	 * admission (acclient.c:300085–300116). This preserves the user-requested FPS independence
+	 * for those 202 emitters. Births interpolate sampled positions, but not sampled rotations;
+	 * curved paths between samples and retail's global update phase are not reconstructed.
+	 */
+	#emitDistanceDue(instance: EmitterInstance, timeSeconds: number): void {
+		const state = instance.distanceEmission;
+		if (state === null) return;
 		const parentOrigin = this.#liveOriginOf(instance);
-		if (instance.distanceEmission !== null) {
-			const origin = this.#attachedOrigin(
-				instance.frameTarget,
-				instance.hookOffset,
-				parentOrigin,
+		const origin = this.#attachedOrigin(
+			instance.frameTarget,
+			instance.hookOffset,
+			parentOrigin,
+		);
+		const previous = state.lastOrigin;
+		const previousTime = state.lastTime;
+		state.lastOrigin = origin;
+		state.lastTime = timeSeconds;
+		if (timeSeconds <= previousTime) return;
+		const lastTick = Math.floor(
+			(timeSeconds - state.epoch) / DISTANCE_EMISSION_INTERVAL_SECONDS +
+				EMISSION_BOUNDARY_EPSILON,
+		);
+		for (; state.nextTick <= lastTick; state.nextTick += 1) {
+			const birthTime =
+				state.epoch + state.nextTick * DISTANCE_EMISSION_INTERVAL_SECONDS;
+			this.#reapExpired(instance, birthTime + EMISSION_BOUNDARY_EPSILON);
+			this.#applyAutoStop(instance, birthTime);
+			if (instance.stopped) break;
+			if (instance.particles.length >= instance.emitter.info.maxParticles) {
+				// Occupied clock steps are lost, not owed. Jump to the next possible free slot.
+				state.nextTick = Math.max(
+					state.nextTick,
+					Math.min(
+						lastTick,
+						Math.ceil(
+							(instance.nextDeathTime - state.epoch) /
+								DISTANCE_EMISSION_INTERVAL_SECONDS -
+								EMISSION_BOUNDARY_EPSILON,
+						) - 1,
+					),
+				);
+				continue;
+			}
+			const fraction = Math.min(
+				1,
+				(birthTime - previousTime) / (timeSeconds - previousTime),
 			);
-			const previous = instance.distanceEmission.lastOrigin;
-			const displacementSquared =
-				(origin[0] - previous[0]) ** 2 +
-				(origin[1] - previous[1]) ** 2 +
-				(origin[2] - previous[2]) ** 2;
-			// User-approved approximation, not a recovered retail correction: acclient.c:312447
-			// loses the distance comparison to undefined x87 flags. Across 202 distance-only
-			// emitters, use authored birthrate as spacing times one positive tuning multiplier.
-			// Endpoint displacement (including articulated motion and hook offset), time precedence,
-			// and at most one birth per update follow retail; exact threshold units remain unknown.
-			if (displacementSquared <= instance.distanceEmission.spacingSquared)
-				return;
+			const birthOrigin = sceneVector3([
+				previous[0] + (origin[0] - previous[0]) * fraction,
+				previous[1] + (origin[1] - previous[1]) * fraction,
+				previous[2] + (origin[2] - previous[2]) * fraction,
+			]);
+			const displacement = Math.hypot(
+				birthOrigin[0] - state.lastBirthOrigin[0],
+				birthOrigin[1] - state.lastBirthOrigin[1],
+				birthOrigin[2] - state.lastBirthOrigin[2],
+			);
+			// Retail's comparison is strict. Treat numerical equality consistently across cadences.
+			if (displacement <= state.spacing + EMISSION_BOUNDARY_EPSILON) continue;
+			// #emit adds the current hook offset; translate its parent to the interpolated birth.
+			this.#emit(
+				instance,
+				birthTime,
+				sceneVector3([
+					parentOrigin[0] + birthOrigin[0] - origin[0],
+					parentOrigin[1] + birthOrigin[1] - origin[1],
+					parentOrigin[2] + birthOrigin[2] - origin[2],
+				]),
+			);
+			state.lastBirthOrigin = birthOrigin;
 		}
-		this.#emit(instance, timeSeconds, parentOrigin);
 	}
 
 	#emit(
@@ -1186,13 +1276,6 @@ export class ParticleSystem {
 		instance.emittedCount += 1;
 		this.#emittedTotal += 1;
 		instance.lastEmissionTime = timeSeconds;
-		if (instance.distanceEmission !== null) {
-			instance.distanceEmission.lastOrigin = attachedEmitterOrigin(
-				parentOrigin,
-				instance.hookOffset,
-				rotation,
-			);
-		}
 	}
 
 	/**
@@ -1263,12 +1346,23 @@ export class ParticleSystem {
 				instance.distanceEmission === null
 			)
 				continue;
-			instance.distanceEmission.lastOrigin = this.#attachedOrigin(
-				instance.frameTarget,
-				instance.hookOffset,
-				this.#liveOriginOf(instance),
-			);
+			this.#resetDistanceEmission(instance, this.#dependencies.clock());
 		}
+	}
+
+	/** Snaps and hidden intervals do not supply a known traversed path. */
+	#resetDistanceEmission(instance: EmitterInstance, timeSeconds: number): void {
+		const state = instance.distanceEmission;
+		if (state === null) return;
+		state.lastOrigin = this.#attachedOrigin(
+			instance.frameTarget,
+			instance.hookOffset,
+			this.#liveOriginOf(instance),
+		);
+		state.lastTime = timeSeconds;
+		state.lastBirthOrigin = state.lastOrigin;
+		state.epoch = timeSeconds;
+		state.nextTick = 1;
 	}
 
 	/** Resolve the authored offset in the live attached frame, excluding random spawn offsets. */

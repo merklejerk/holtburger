@@ -470,6 +470,7 @@ function createRepository(
 
 function source(id: string, appearanceKey: string): DynamicPresentationSource {
 	return {
+		placementFrame: 0,
 		entityClass: "other",
 		nameplate: null,
 		behavior: {

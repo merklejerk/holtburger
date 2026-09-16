@@ -25,7 +25,6 @@ import type { SceneSpatialPlacement } from "../scene";
 import {
 	type ParentLocation,
 	type SetupSidewaysSpan,
-	RESTING_PLACEMENT_KEY,
 	resolveObjectPresentationBounds,
 	type ResolvedObjectPresentation,
 	resolvePlacementPose,
@@ -452,7 +451,7 @@ export class DynamicEntitySystem<
 	): DynamicEntityRecord {
 		const source = resident.source;
 		const rootScale = source.scale.clone();
-		const pose = defaultPose(source.presentation);
+		const pose = defaultPose(source);
 		const parts = createActiveParts(source.presentation, pose, rootScale);
 		const rootNodeId = this.#placements.createRoot(
 			resident.placement,
@@ -582,12 +581,18 @@ export class DynamicEntitySystem<
 					entity.animationHandle?.asset ?? null,
 					entity.motionClosure,
 				);
+				// Placement changes update unanimated parts without restarting scripts or playback.
+				const replacementPose =
+					source.placementFrame !== entity.source.placementFrame &&
+					entity.animationHandle === null &&
+					entity.motionPlayback === null
+						? defaultPose(source)
+						: entity.articulatedPose;
 				const parts = mergePreparedParts(
 					entity.renderable.parts,
 					template.parts,
 				).map((part) => {
-					const pose =
-						entity.articulatedPose.partToObjectTransforms[part.partIndex];
+					const pose = replacementPose.partToObjectTransforms[part.partIndex];
 					if (pose === undefined)
 						throw new Error(
 							`Replacement part ${part.partIndex} has no current pose.`,
@@ -623,6 +628,7 @@ export class DynamicEntitySystem<
 				const setupBounds = staticPresentationBounds(source);
 				stage.commit(owner.templateOwnerId);
 				entity.source = source;
+				entity.articulatedPose = replacementPose;
 				entity.setupBounds = setupBounds;
 				entity.renderable = renderable;
 				entity.attachmentFrames = attachmentFrames;
@@ -1720,7 +1726,7 @@ function prepareEntityVisualState(
 }
 
 function staticPresentationBounds(source: DynamicPresentationSource) {
-	const pose = defaultPose(source.presentation);
+	const pose = defaultPose(source);
 	return presentationBoundsForPose(source, pose);
 }
 
@@ -1893,8 +1899,6 @@ function poseFor(
 	};
 }
 
-function defaultPose(
-	presentation: ResolvedObjectPresentation,
-): ArticulatedPose {
-	return poseFor(presentation, RESTING_PLACEMENT_KEY);
+function defaultPose(source: DynamicPresentationSource): ArticulatedPose {
+	return poseFor(source.presentation, source.placementFrame);
 }

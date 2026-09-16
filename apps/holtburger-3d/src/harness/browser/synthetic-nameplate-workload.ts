@@ -276,6 +276,7 @@ function entity(input: {
 				soundTableDid: null,
 			},
 			objectScale: 1,
+			placementFrame: 0,
 			radar: {
 				behavior: null,
 				category: input.entityClass,

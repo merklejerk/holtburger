@@ -1,0 +1,146 @@
+{
+  "description": "Real WCID 7278 through production browser runtime with a temporary harness-only placementFrame=0 snapshot override. Confirms content loading/rendering; connected cast and travel-direction visual comparison remain pending.",
+  "consoleMessages": [],
+  "entityLifecycle": {
+    "advances": {
+      "requestedTickCount": 0,
+      "changedTickCount": 0,
+      "first": null,
+      "last": null
+    },
+    "launched": null,
+    "relocated": null,
+    "spawned": {
+      "generation": 1,
+      "identity": {
+        "guid": 4026531841,
+        "wcid": 7278
+      }
+    },
+    "spawnedState": {
+      "currentEntities": [
+        {
+          "generation": 1,
+          "identity": {
+            "guid": 4026531841,
+            "wcid": 7278
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 3663003685,
+              "coords": {
+                "x": 96,
+                "y": 99.53554,
+                "z": 596.4645
+              },
+              "rotation": {
+                "w": 1,
+                "x": 0,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "unknown",
+            "sampleMode": "authoritative-only"
+          },
+          "appearance": {
+            "paletteDid": null,
+            "subPalettes": 0,
+            "textureChanges": 0,
+            "partChanges": 0
+          }
+        }
+      ],
+      "visibleDynamicEntityCount": 1,
+      "runtime": {
+        "activeAnimationCount": 0,
+        "activeAudioCount": 0,
+        "activeParticleCount": 0,
+        "activeParticleEmitterCount": 16,
+        "activePhysicsScriptCount": 1,
+        "activeSkyScriptCount": 0,
+        "animationAssetCount": 0,
+        "animationReferenceCount": 0,
+        "entityCount": 18,
+        "residentEffectStateCount": 18,
+        "templateCount": 3
+      }
+    },
+    "completedState": {
+      "currentEntities": [
+        {
+          "generation": 1,
+          "identity": {
+            "guid": 4026531841,
+            "wcid": 7278
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 3663003685,
+              "coords": {
+                "x": 96,
+                "y": 99.53554,
+                "z": 596.4645
+              },
+              "rotation": {
+                "w": 1,
+                "x": 0,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "unknown",
+            "sampleMode": "authoritative-only"
+          },
+          "appearance": {
+            "paletteDid": null,
+            "subPalettes": 0,
+            "textureChanges": 0,
+            "partChanges": 0
+          }
+        }
+      ],
+      "visibleDynamicEntityCount": 1,
+      "runtime": {
+        "activeAnimationCount": 0,
+        "activeAudioCount": 0,
+        "activeParticleCount": 0,
+        "activeParticleEmitterCount": 16,
+        "activePhysicsScriptCount": 1,
+        "activeSkyScriptCount": 0,
+        "animationAssetCount": 0,
+        "animationReferenceCount": 0,
+        "entityCount": 18,
+        "residentEffectStateCount": 18,
+        "templateCount": 3
+      }
+    },
+    "despawnedState": {
+      "currentEntities": [],
+      "visibleDynamicEntityCount": 0,
+      "runtime": {
+        "activeAnimationCount": 0,
+        "activeAudioCount": 0,
+        "activeParticleCount": 0,
+        "activeParticleEmitterCount": 16,
+        "activePhysicsScriptCount": 1,
+        "activeSkyScriptCount": 0,
+        "animationAssetCount": 0,
+        "animationReferenceCount": 0,
+        "entityCount": 17,
+        "residentEffectStateCount": 17,
+        "templateCount": 2
+      }
+    }
+  }
+}

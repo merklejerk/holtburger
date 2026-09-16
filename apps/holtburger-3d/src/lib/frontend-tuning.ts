@@ -11,8 +11,8 @@ import type { FrontendTuning } from "./frontend-tuning-contract";
  */
 export const SHARED_FRONTEND_TUNING = {
 	particles: {
-		/** Positive multiplier for the approved authored-birthrate distance-spacing approximation. */
-		distanceSpacingMultiplier: 1,
+		/** Positive multiplier for the authored minimum distance between particle births. */
+		distanceSpacingMultiplier: 3,
 	},
 	animationPresentation: {
 		/** Compose active player locomotion with gestures on compatible humanoid setups. */

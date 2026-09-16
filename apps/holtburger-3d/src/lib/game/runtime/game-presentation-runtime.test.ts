@@ -3173,6 +3173,7 @@ function spawnedEntity(
 			sampleMode: "authoritative-only",
 		},
 		presentation: {
+			placementFrame: 0,
 			entityClass: "other",
 			appearance: {
 				paletteDid: null,

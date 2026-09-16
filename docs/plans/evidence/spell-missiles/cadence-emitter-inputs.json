@@ -1,0 +1,214 @@
+[
+  {
+    "name": "lightning-default",
+    "speed": 15,
+    "info": {
+      "birthrate": 0.05,
+      "maxParticles": 20.0,
+      "initialParticles": 0.0,
+      "totalParticles": 0.0,
+      "totalSeconds": 0.0,
+      "lifespan": 1.0,
+      "lifespanRand": 0.0,
+      "minOffset": 0.1,
+      "maxOffset": 0.1,
+      "minA": 0.6,
+      "maxA": 1.6,
+      "minB": 0.5,
+      "maxB": 1.5,
+      "minC": 0.8,
+      "maxC": 1.2,
+      "startScale": 0.1,
+      "finalScale": 2.0,
+      "scaleRand": 1.1,
+      "startTrans": 0.0,
+      "finalTrans": 1.0,
+      "transRand": 0.25,
+      "id": "0x3200012d",
+      "emitsPerSecond": false,
+      "emitsPerMeter": true,
+      "motionType": 4,
+      "offsetDir": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "a": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "b": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "c": [
+        0.0,
+        20.0,
+        0.0
+      ],
+      "isPersistent": true,
+      "followsParent": true
+    }
+  },
+  {
+    "name": "lightning-v",
+    "speed": 15,
+    "info": {
+      "birthrate": 0.05,
+      "maxParticles": 20.0,
+      "initialParticles": 0.0,
+      "totalParticles": 0.0,
+      "totalSeconds": 0.0,
+      "lifespan": 1.0,
+      "lifespanRand": 0.0,
+      "minOffset": 0.1,
+      "maxOffset": 0.1,
+      "minA": 0.6,
+      "maxA": 1.6,
+      "minB": 0.5,
+      "maxB": 1.5,
+      "minC": 0.8,
+      "maxC": 1.2,
+      "startScale": 0.1,
+      "finalScale": 3.8,
+      "scaleRand": 0.1,
+      "startTrans": 0.0,
+      "finalTrans": 1.0,
+      "transRand": 0.25,
+      "id": "0x32000195",
+      "emitsPerSecond": false,
+      "emitsPerMeter": true,
+      "motionType": 4,
+      "offsetDir": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "a": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "b": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "c": [
+        0.0,
+        20.0,
+        0.0
+      ],
+      "isPersistent": true,
+      "followsParent": false
+    }
+  },
+  {
+    "name": "force-v",
+    "speed": 15,
+    "info": {
+      "birthrate": 0.25,
+      "maxParticles": 20.0,
+      "initialParticles": 0.0,
+      "totalParticles": 0.0,
+      "totalSeconds": 10.0,
+      "lifespan": 1.5,
+      "lifespanRand": 0.5,
+      "minOffset": 0.1,
+      "maxOffset": 0.1,
+      "minA": 0.6,
+      "maxA": 1.6,
+      "minB": 0.5,
+      "maxB": 1.5,
+      "minC": 0.5,
+      "maxC": 1.5,
+      "startScale": 1.0,
+      "finalScale": 0.1,
+      "scaleRand": 0.1,
+      "startTrans": 0.0,
+      "finalTrans": 1.0,
+      "transRand": 0.25,
+      "id": "0x320001aa",
+      "emitsPerSecond": false,
+      "emitsPerMeter": true,
+      "motionType": 1,
+      "offsetDir": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "a": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "b": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "c": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "isPersistent": false,
+      "followsParent": false
+    }
+  },
+  {
+    "name": "tectonic-rifts",
+    "speed": 2,
+    "info": {
+      "birthrate": 0.0566667,
+      "maxParticles": 10.0,
+      "initialParticles": 0.0,
+      "totalParticles": 0.0,
+      "totalSeconds": 1.5,
+      "lifespan": 0.4,
+      "lifespanRand": 0.1,
+      "minOffset": 0.0,
+      "maxOffset": 0.0,
+      "minA": 0.9,
+      "maxA": 1.0,
+      "minB": 0.5,
+      "maxB": 1.5,
+      "minC": 0.5,
+      "maxC": 1.2,
+      "startScale": 3.0,
+      "finalScale": 0.1,
+      "scaleRand": 0.01,
+      "startTrans": 1.0,
+      "finalTrans": 0.0,
+      "transRand": 0.0,
+      "id": "0x320004d1",
+      "emitsPerSecond": false,
+      "emitsPerMeter": true,
+      "motionType": 9,
+      "offsetDir": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "a": [
+        0.0,
+        6.0,
+        0.0
+      ],
+      "b": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "c": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "isPersistent": false,
+      "followsParent": true
+    }
+  }
+]

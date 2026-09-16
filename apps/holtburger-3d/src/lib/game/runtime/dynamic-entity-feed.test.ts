@@ -20,6 +20,7 @@ function entity(
 		identity: { guid, wcid: 42 },
 		display: { name: "Drudge", level: null },
 		presentation: {
+			placementFrame: 0,
 			entityClass: "other",
 			content: {
 				motionTableDid: null,

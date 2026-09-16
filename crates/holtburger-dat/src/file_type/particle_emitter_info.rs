@@ -28,8 +28,8 @@ impl EmitterTrigger {
         self.0 & 1 != 0
     }
 
-    /// Emits on distance travelled. The retail predicate is unrecovered (IDA-flagged undefined
-    /// operands, acclient.c:312468), so a consumer must report rather than guess.
+    /// Emits after linear displacement exceeds birthrate. The decompiler lost the comparison
+    /// (acclient.c:312468); exe 0x00517F91–0x00517FBF compares birthrate² < displacement².
     pub fn per_meter(self) -> bool {
         self.0 & 2 != 0
     }
@@ -70,7 +70,9 @@ pub struct ParticleEmitterInfo {
     pub gfx_obj_id: u32,
     /// The mesh each particle draws.
     pub hw_gfx_obj_id: u32,
-    /// Minimum interval between emissions in seconds; at most one particle emits per tick.
+    /// Minimum seconds for time triggers, or minimum linear displacement for distance triggers.
+    /// Retail admits at most one particle per physics update. The distance comparison lost by
+    /// the decompiler (acclient.c:312447) is birthrate² < displacement² in exe 0x00517F91–0x00517FBF.
     pub birthrate: f64,
     pub max_particles: i32,
     pub initial_particles: i32,

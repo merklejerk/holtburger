@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import { formatItemType, formatObjectFlags } from "./client-entity-labels";
 	import type { ClientSelectedEntity } from "./client-selected-entity";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
@@ -21,6 +22,9 @@
 		/** Explicit local override of authored useability for diagnostic requests. */
 		readonly unrestrictedUse: boolean;
 		readonly onUnrestrictedUseChange: (enabled: boolean) => void;
+		/** Session-local spacing override for distance-triggered particles. */
+		readonly particleDistanceSpacingMultiplier: number;
+		readonly onParticleDistanceSpacingChange: (multiplier: number) => void;
 		readonly showRetailHiddenGeometry: boolean;
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 	}
@@ -33,6 +37,8 @@
 		onEntityCollisionDisabledChange,
 		unrestrictedUse,
 		onUnrestrictedUseChange,
+		particleDistanceSpacingMultiplier,
+		onParticleDistanceSpacingChange,
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 	}: Props = $props();
@@ -71,6 +77,35 @@
 {/snippet}
 
 <div class="debug-panel-body ui-body">
+	<section aria-label="Particle spacing">
+		<label for="particle-spacing"
+			>Particle trail spacing: {particleDistanceSpacingMultiplier.toFixed(
+				1,
+			)}×</label
+		>
+		<input
+			id="particle-spacing"
+			type="range"
+			min="0.1"
+			max="30"
+			step="0.1"
+			value={particleDistanceSpacingMultiplier}
+			oninput={(event) =>
+				onParticleDistanceSpacingChange(event.currentTarget.valueAsNumber)}
+		/>
+		<button
+			type="button"
+			onclick={() =>
+				onParticleDistanceSpacingChange(
+					SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier,
+				)}>Reset spacing</button
+		>
+		<p class="ui-muted">
+			Higher values spread particles farther apart. Applies live to all
+			distance-triggered effects. Existing particles finish normally. Recast to
+			compare; resets when the app reloads.
+		</p>
+	</section>
 	<section aria-label="Entity metadata">
 		<strong>Entity metadata</strong>
 		{#if entityMetadata === null}<p class="ui-muted">Loading catalog status…</p>

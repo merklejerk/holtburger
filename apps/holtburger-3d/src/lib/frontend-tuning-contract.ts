@@ -334,7 +334,7 @@ interface FrontendRenderingTuning {
 export interface FrontendTuning {
 	/** Shared authored particle emission policy. */
 	readonly particles: {
-		/** Finite positive multiplier for the approved distance-spacing approximation. */
+		/** Finite positive multiplier for the authored minimum distance between particle births. */
 		readonly distanceSpacingMultiplier: number;
 	};
 	/** Sampling policy for animated roots omitted by the previous frame. */

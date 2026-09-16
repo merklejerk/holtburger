@@ -619,6 +619,7 @@ export interface EnvCellLayerRuntimeDiagnostics
 function dynamicVisualKey(entity: DynamicEntityView): string {
 	return JSON.stringify({
 		appearance: entity.presentation.appearance,
+		placementFrame: entity.presentation.placementFrame,
 		setupDid: entity.presentation.content.setupDid,
 	});
 }
@@ -3047,6 +3048,11 @@ export class GamePresentationRuntime {
 		await this.#renderer?.sky?.install(source, this.#texturePreparer);
 	}
 
+	/** Live diagnostic spacing policy shared by all distance-triggered effects. */
+	setParticleDistanceSpacingMultiplier(multiplier: number): void {
+		this.#particles.setDistanceSpacingMultiplier(multiplier);
+	}
+
 	/** Replace frontend-selected dynamic display choices without altering world data. */
 	setFrameSettings(settings: FrameSettings): void {
 		validateNameplateSettings(settings.nameplates);
@@ -3183,6 +3189,7 @@ export class GamePresentationRuntime {
 			identity: "portal-transition",
 			localBounds: assets.visual.localBounds,
 			presentation: assets.visual.presentation,
+			placementFrame: 0,
 			scale: new Vec3(1, 1, 1),
 			setupId: setupId as DatAssetId,
 		};

@@ -189,6 +189,8 @@ pub struct DynamicEntityPhysicalPreparationInput {
     pub elasticity: Option<f32>,
     /// Effective semantic physics decisions consumed while deriving local physical demand.
     pub physics: EffectiveEntityPhysicsState,
+    /// Requested setup pose; unknown or absent asset keys resolve to Default.
+    pub placement_frame: u32,
 }
 
 /// Validated source-neutral entity definition shared by both producer compositions.
@@ -401,7 +403,7 @@ pub enum DynamicEntityPhysicalPreparationError {
         source: SetupPhysicalShapeError,
     },
     #[error(
-        "WCID {wcid} setup 0x{setup_did:08X} physics script 0x{script_did:08X} contains collision-mutating hook {hook_type}"
+        "WCID {wcid} setup 0x{setup_did:08X} physics script 0x{script_did:08X} contains unsupported collision-mutating hook {hook_type}"
     )]
     CollisionMutatingScript {
         wcid: u32,
@@ -757,6 +759,10 @@ pub fn prepare_dynamic_entity_physics(
             setup_did: definition.content.setup_did,
             motion_table_did: definition.content.motion_table_did,
             appearance: &definition.appearance,
+            placement_frame: match &definition.placement {
+                EntityPlacement::World(_) => Placement::Resting as u32,
+                EntityPlacement::Attached(attachment) => attachment.placement as u32,
+            },
             friction: definition.friction,
             elasticity: definition.elasticity,
             physics: definition.physics,
@@ -791,6 +797,7 @@ pub fn prepare_dynamic_entity_physical_definition(
             setup_did: input.setup_did,
             motion_table_did: input.motion_table_did,
             appearance: &input.appearance,
+            placement_frame: input.placement_frame,
             friction,
             elasticity,
             physics: input.physics,
@@ -806,6 +813,7 @@ struct DynamicEntityPhysicalFacts<'a> {
     setup_did: u32,
     motion_table_did: Option<u32>,
     appearance: &'a EntityAppearance,
+    placement_frame: u32,
     friction: PhysicalFriction,
     elasticity: PhysicalElasticity,
     physics: EffectiveEntityPhysicsState,
@@ -822,6 +830,7 @@ fn prepare_dynamic_entity_physical_facts(
         setup_did,
         motion_table_did,
         appearance,
+        placement_frame,
         friction,
         elasticity,
         physics,
@@ -880,6 +889,7 @@ fn prepare_dynamic_entity_physical_facts(
         wcid,
         setup_did,
         appearance,
+        placement_frame,
         &setup,
         setup_preparation.physics.has_physics_bsp,
         content,
@@ -1008,11 +1018,12 @@ fn prepare_target_geometry(
     wcid: u32,
     setup_did: u32,
     appearance: &EntityAppearance,
+    placement_frame: u32,
     setup: &SetupModel,
     cached_bsp_branch: bool,
     content: &ContentRepository,
 ) -> Result<PreparedEntityTargetGeometry, DynamicEntityPhysicalPreparationError> {
-    validate_default_script_stability(wcid, setup_did, setup.default_script_did, content)?;
+    validate_default_script_collision_support(wcid, setup_did, setup.default_script_did, content)?;
 
     let mut effective_part_dids = setup.parts.clone();
     for change in &appearance.part_changes {
@@ -1043,7 +1054,7 @@ fn prepare_target_geometry(
     }
 
     validate_setup_part_arrays(wcid, setup_did, setup)?;
-    let frames = stable_part_frames(setup, default_animation.as_ref());
+    let frames = stable_part_frames(setup, default_animation.as_ref(), placement_frame);
     if let Some(frames) = frames
         && frames.frames.len() != setup.parts.len()
     {
@@ -1135,19 +1146,19 @@ fn validate_setup_part_arrays(
 fn stable_part_frames<'a>(
     setup: &'a SetupModel,
     default_animation: Option<&'a Animation>,
+    placement_frame: u32,
 ) -> Option<&'a AnimationFrame> {
     default_animation
         .and_then(|animation| animation.part_frames.first())
         .or_else(|| {
-            setup
-                .placement_frames
-                .get(&Placement::Resting)
+            Placement::from_key(placement_frame)
+                .and_then(|placement| setup.placement_frames.get(&placement))
                 .or_else(|| setup.placement_frames.get(&Placement::Default))
                 .map(|placement| &placement.anim_frame)
         })
 }
 
-fn validate_default_script_stability(
+fn validate_default_script_collision_support(
     wcid: u32,
     setup_did: u32,
     root_script_did: Option<u32>,
@@ -1164,7 +1175,7 @@ fn validate_default_script_stability(
         }
         let script = read_physics_script(content, wcid, script_did)?;
         for record in &script.records {
-            if collision_mutating_hook(record.hook.hook_type) {
+            if unsupported_collision_hook(record.hook.hook_type) {
                 return Err(
                     DynamicEntityPhysicalPreparationError::CollisionMutatingScript {
                         wcid,
@@ -1182,11 +1193,13 @@ fn validate_default_script_stability(
     Ok(())
 }
 
-fn collision_mutating_hook(hook_type: u32) -> bool {
-    // ReplaceObject, Ethereal, Scale, SetOmega, and CreateBlockingParticle can change collision
-    // identity, filtering, shape, root transform, or introduce another blocker. Unknown hooks fail
-    // closed because their collision effect is not classified.
-    matches!(hook_type, 5 | 6 | 12 | 22 | 26) || hook_type > 26
+fn unsupported_collision_hook(hook_type: u32) -> bool {
+    // Whole-object Scale is supported: this preparation retains unit geometry, and the world
+    // applies effective scale at installation and on later script updates. Scale does not replace
+    // that geometry. Producers remain responsible for executing the script's scale timeline.
+    // ReplaceObject, Ethereal, SetOmega, and CreateBlockingParticle still mutate unsupported
+    // collision identity, filtering, transforms, or blockers. Unknown hooks fail closed.
+    matches!(hook_type, 5 | 6 | 22 | 26) || hook_type > 26
 }
 
 fn read_setup(
@@ -1309,6 +1322,86 @@ mod tests {
         LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyActuation, PhysicalSphereSet,
         resolve_effective_entity_physics_state,
     };
+
+    #[test]
+    fn stable_geometry_uses_requested_placement_with_default_fallback_and_animation_precedence() {
+        use holtburger_dat::file_type::animation::AnimationFlags;
+        use holtburger_dat::file_type::setup_model::PlacementType;
+        use holtburger_dat::graphics::Frame;
+        let frame = |x| AnimationFrame {
+            frames: vec![Frame {
+                origin: Vector3::new(x, 0.0, 0.0),
+                ..Default::default()
+            }],
+            hooks: Vec::new(),
+        };
+        let sphere = holtburger_common::Sphere {
+            center: Vector3::new(0.0, 0.0, 0.0),
+            radius: 1.0,
+        };
+        let setup = SetupModel {
+            id: 0x02000001,
+            flags: 0,
+            parts: vec![0x01000001],
+            parent_index: Vec::new(),
+            default_scale: Vec::new(),
+            holding_locations: Default::default(),
+            connection_points: Default::default(),
+            placement_frames: [
+                (
+                    Placement::Default,
+                    PlacementType {
+                        anim_frame: frame(2.0),
+                    },
+                ),
+                (
+                    Placement::Resting,
+                    PlacementType {
+                        anim_frame: frame(7.0),
+                    },
+                ),
+            ]
+            .into(),
+            cyl_spheres: Vec::new(),
+            spheres: Vec::new(),
+            height: 1.0,
+            radius: 1.0,
+            step_up: 0.0,
+            step_down: 0.0,
+            sorting_sphere: sphere,
+            selection_sphere: sphere,
+            lights: Vec::new(),
+            default_animation: None,
+            default_script_did: None,
+            default_motion_table: None,
+            default_sound_table: None,
+            default_script_table: None,
+        };
+        let animation = Animation {
+            id: 0x03000001,
+            flags: AnimationFlags::empty(),
+            num_parts: 1,
+            num_frames: 1,
+            pos_frames: Vec::new(),
+            part_frames: vec![frame(11.0)],
+        };
+        for (requested, expected) in [(0, 2.0), (Placement::Resting as u32, 7.0), (u32::MAX, 2.0)] {
+            assert_eq!(
+                stable_part_frames(&setup, None, requested).unwrap().frames[0]
+                    .origin
+                    .x,
+                expected
+            );
+            assert_eq!(
+                stable_part_frames(&setup, Some(&animation), requested)
+                    .unwrap()
+                    .frames[0]
+                    .origin
+                    .x,
+                11.0
+            );
+        }
+    }
 
     #[test]
     fn authored_radar_facts_type_in_domain_values() {
@@ -1501,11 +1594,11 @@ mod tests {
 
     #[test]
     fn collision_script_classifier_is_explicit_and_fails_closed_for_unknown_hooks() {
-        assert!(collision_mutating_hook(5));
-        assert!(collision_mutating_hook(12));
-        assert!(!collision_mutating_hook(13));
-        assert!(!collision_mutating_hook(19));
-        assert!(collision_mutating_hook(99));
+        assert!(unsupported_collision_hook(5));
+        assert!(!unsupported_collision_hook(12));
+        assert!(!unsupported_collision_hook(13));
+        assert!(!unsupported_collision_hook(19));
+        assert!(unsupported_collision_hook(99));
     }
 
     fn prepared_physics() -> DynamicPhysicalBodyDefinition {

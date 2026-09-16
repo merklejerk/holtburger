@@ -23,6 +23,8 @@ export interface DynamicPresentationSource {
 	readonly setupId: DatAssetId;
 	/** Host-resolved appearance and rigid-part inputs. */
 	readonly presentation: ResolvedObjectPresentation;
+	/** Requested setup pose; missing asset entries fall back to Default. */
+	readonly placementFrame: number;
 	/** Setup-default behavior references; decoded assets remain behind repositories. */
 	readonly behavior: ResolvedObjectBehavior;
 	/** Producer-selected root scale in render axes. */

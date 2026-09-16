@@ -331,6 +331,7 @@ function currentState(): ClientCurrentState {
 					identity: { guid: PLAYER_GUID, wcid: 42 },
 					display: { name: "Drudge", level: null },
 					presentation: {
+						placementFrame: 0,
 						entityClass: "player",
 						content: {
 							motionTableDid: null,

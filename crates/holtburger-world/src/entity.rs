@@ -536,6 +536,19 @@ mod tests {
     };
 
     #[test]
+    fn independent_description_retains_lossless_placement_and_defaults_to_zero() {
+        use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
+        let mut entity = Entity::new(Guid(1), "missile".into(), Default::default());
+        for requested in [Some(101), Some(u32::MAX), None] {
+            entity.apply_description(&ObjectDescriptionData {
+                animation_frame: requested,
+                ..Default::default()
+            });
+            assert_eq!(entity.placement_frame, requested.unwrap_or(0));
+        }
+    }
+
+    #[test]
     fn initial_description_returns_sticky_target_with_the_decoded_motion() {
         use holtburger_protocol::messages::movement::MovementType;
         use holtburger_protocol::messages::movement::messages::motion::MovementInvalid;
@@ -1163,6 +1176,8 @@ pub struct Entity {
     pub appearance: EntityAppearance,
     /// Received placement authority; retained coordinates alone cannot override withdrawal.
     pub placement_intent: EntityPlacementIntent,
+    /// Lossless ANIMFRAME setup-placement key, independent of parent attachment.
+    pub placement_frame: u32,
     pub autonomous_movement: bool,
     /// Retained steady-state movement supplied by this entity's current network generation.
     pub network_motion: EntityNetworkMotion,
@@ -1619,19 +1634,16 @@ impl Entity {
         self.appearance = EntityAppearance::from(&data.model_data);
         // The wire carries placement in the ANIMFRAME slot, defaulting to 0 when the flag is
         // absent, exactly as `PhysicsDesc` initializes `animframe_id` (`acclient.c:318475`).
+        self.placement_frame = data.animation_frame.unwrap_or(0);
         let attachment = data.parent.and_then(|parent| {
-            PhysicsAttachment::from_wire(
-                parent.id,
-                parent.location_id,
-                data.animation_frame.unwrap_or(0),
-            )
-            .inspect_err(|error| {
-                log::warn!(
-                    "Entity {:?} description names an unusable attachment: {error}",
-                    self.guid
-                )
-            })
-            .ok()
+            PhysicsAttachment::from_wire(parent.id, parent.location_id, self.placement_frame)
+                .inspect_err(|error| {
+                    log::warn!(
+                        "Entity {:?} description names an unusable attachment: {error}",
+                        self.guid
+                    )
+                })
+                .ok()
         });
 
         self.placement_intent = match attachment {
@@ -1711,6 +1723,7 @@ impl Entity {
             selection_envelope: None,
             appearance: EntityAppearance::default(),
             placement_intent: EntityPlacementIntent::Independent,
+            placement_frame: 0,
             autonomous_movement: false,
             network_motion: EntityNetworkMotion::Uninitialized,
             server_action_sequence: 0,

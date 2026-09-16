@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
 	import type { InputDigitIndex } from "../../lib/input/input-contract";
 	import {
@@ -78,6 +79,11 @@
 		type ClientToast,
 	} from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
+
+	/** Interactive preview of the session-local spacing control. */
+	let particleDistanceSpacingMultiplier = $state<number>(
+		SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier,
+	);
 
 	let spellBar = $state(initialSpellBar());
 	let hudMode = $state<"runtime" | "layout">("runtime");
@@ -2151,6 +2157,10 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		{particleDistanceSpacingMultiplier}
+		onParticleDistanceSpacingChange={(value) => {
+			particleDistanceSpacingMultiplier = value;
+		}}
 		{hudMode}
 		onHudModeChange={(mode) => (hudMode = mode)}
 		{spellBar}

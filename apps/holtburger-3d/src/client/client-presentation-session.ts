@@ -246,6 +246,8 @@ export type ClientPresentationCameraController = PossessionCameraController<
 
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
 export interface ClientPresentationRuntime extends MapTerrainSource {
+	/** Apply diagnostic spacing to current and future distance emitters. */
+	setParticleDistanceSpacingMultiplier(multiplier: number): void;
 	setFrameSettings(settings: FrameSettings): void;
 	/** Accept every desired record before returning the visual-realization promise. */
 	replaceDynamicEntitySnapshot(
@@ -381,6 +383,9 @@ export class ClientPresentationSession {
 	/** Client-only diagnostic observer; absent from ordinary non-debug composition. */
 	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	#owner: ClientPresentationOwner | null = null;
+	/** Retained while the asynchronous presentation owner is being constructed. */
+	#particleDistanceSpacingMultiplier: number =
+		SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier;
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
 	#unsubscribe: (() => void) | null = null;
@@ -767,6 +772,12 @@ export class ClientPresentationSession {
 		});
 	}
 
+	/** Keep live diagnostic spacing across presentation owner construction. */
+	setParticleDistanceSpacingMultiplier(multiplier: number): void {
+		this.#owner?.runtime.setParticleDistanceSpacingMultiplier(multiplier);
+		this.#particleDistanceSpacingMultiplier = multiplier;
+	}
+
 	/** Replace cold presentation policy immediately, or retain it until owner construction lands. */
 	setFrameSettings(settings: FrameSettings): void {
 		this.#frameSettings = settings;
@@ -1070,6 +1081,9 @@ export class ClientPresentationSession {
 				return;
 			}
 			this.#owner = owner;
+			owner.runtime.setParticleDistanceSpacingMultiplier(
+				this.#particleDistanceSpacingMultiplier,
+			);
 			owner.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				owner.profileSource,

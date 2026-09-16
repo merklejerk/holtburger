@@ -1,0 +1,4874 @@
+{
+  "description": "Projectile-only extract of passive connected-client capture during user-reported Lightning Bolt V reproduction. Times are milliseconds since recorder start. No per-particle positions were captured.",
+  "elapsedSeconds": 72.05190000009537,
+  "dropped": 0,
+  "events": [
+    {
+      "t": 35078.40000009537,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 166728,
+            "participation": "pose-only",
+            "noDraw": false,
+            "hidden": false,
+            "cloaked": false,
+            "translucency": 0,
+            "lighting": true,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 116.13978576660156,
+                "y": 115.63648986816406,
+                "z": 63.304466247558594
+              },
+              "rotation": {
+                "w": -0.6282579302787781,
+                "x": 0.03190573304891586,
+                "y": 0.02580055594444275,
+                "z": -0.7769224047660828
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "unknown",
+            "sampleMode": "authoritative-only"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 35078.700000047684,
+      "kind": "host:client-dynamic-script-cue",
+      "data": {
+        "guid": 2147485761,
+        "generation": 0,
+        "cue": 4,
+        "intensity": 0.6000000238418579
+      }
+    },
+    {
+      "t": 35113.90000009537,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 166728,
+            "participation": "physical",
+            "noDraw": false,
+            "hidden": false,
+            "cloaked": false,
+            "translucency": 0,
+            "lighting": true,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 116.13978576660156,
+                "y": 115.63648986816406,
+                "z": 63.304466247558594
+              },
+              "rotation": {
+                "w": -0.6282579302787781,
+                "x": 0.03190573304891586,
+                "y": 0.02580055594444275,
+                "z": -0.7769224047660828
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "unknown",
+            "sampleMode": "authoritative-only"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 35114.60000014305,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 115.69783020019531,
+                  "y": 115.54191589355469,
+                  "z": 63.26728057861328
+                },
+                "rotation": {
+                  "w": -0.6287875175476074,
+                  "x": -1.4185410623923644e-09,
+                  "y": 8.726956934879126e-10,
+                  "z": -0.7775772213935852
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 116.13978576660156,
+                  "y": 115.63648986816406,
+                  "z": 63.304466247558594
+                },
+                "rotation": {
+                  "w": -0.6282579302787781,
+                  "x": 0.03190573304891586,
+                  "y": 0.02580055594444275,
+                  "z": -0.7769224047660828
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 115.69783020019531,
+                      "y": 115.54191589355469,
+                      "z": 63.26728057861328
+                    },
+                    "rotation": {
+                      "w": -0.6287875175476074,
+                      "x": 0,
+                      "y": 0,
+                      "z": -0.7775772213935852
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35144.300000190735,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 115.2493896484375,
+                  "y": 115.44595336914062,
+                  "z": 63.229549407958984
+                },
+                "rotation": {
+                  "w": -0.6287869215011597,
+                  "x": 1.9419289106988903e-17,
+                  "y": -5.897964527114578e-17,
+                  "z": -0.7775776982307434
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 115.69783020019531,
+                  "y": 115.54191589355469,
+                  "z": 63.26728057861328
+                },
+                "rotation": {
+                  "w": -0.6287875175476074,
+                  "x": -1.4185410623923644e-09,
+                  "y": 8.726956934879126e-10,
+                  "z": -0.7775772213935852
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 115.2493896484375,
+                      "y": 115.44595336914062,
+                      "z": 63.229549407958984
+                    },
+                    "rotation": {
+                      "w": -0.6287869215011597,
+                      "x": 0,
+                      "y": -5.551115123125783e-17,
+                      "z": -0.7775776982307434
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35176.10000014305,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 114.81499481201172,
+                  "y": 115.35299682617188,
+                  "z": 63.19300079345703
+                },
+                "rotation": {
+                  "w": -0.628787100315094,
+                  "x": -8.26953420612324e-25,
+                  "y": 3.3316435926742124e-25,
+                  "z": -0.7775775194168091
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 115.2493896484375,
+                  "y": 115.44595336914062,
+                  "z": 63.229549407958984
+                },
+                "rotation": {
+                  "w": -0.6287869215011597,
+                  "x": 1.9419289106988903e-17,
+                  "y": -5.897964527114578e-17,
+                  "z": -0.7775776982307434
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 114.81499481201172,
+                      "y": 115.35299682617188,
+                      "z": 63.19300079345703
+                    },
+                    "rotation": {
+                      "w": -0.628787100315094,
+                      "x": 0,
+                      "y": 0,
+                      "z": -0.7775775194168091
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35204.90000009537,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 114.37655639648438,
+                  "y": 115.2591781616211,
+                  "z": 63.15611267089844
+                },
+                "rotation": {
+                  "w": -0.6287897825241089,
+                  "x": -3.1519047246112357e-32,
+                  "y": -7.854183054454196e-34,
+                  "z": -0.7775753736495972
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 114.81499481201172,
+                  "y": 115.35299682617188,
+                  "z": 63.19300079345703
+                },
+                "rotation": {
+                  "w": -0.628787100315094,
+                  "x": -8.26953420612324e-25,
+                  "y": 3.3316435926742124e-25,
+                  "z": -0.7775775194168091
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 114.37655639648438,
+                      "y": 115.2591781616211,
+                      "z": 63.15611267089844
+                    },
+                    "rotation": {
+                      "w": -0.6287897825241089,
+                      "x": -4.930380657631324e-32,
+                      "y": 0,
+                      "z": -0.7775753736495972
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35234.300000190735,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 113.93940734863281,
+                  "y": 115.16563415527344,
+                  "z": 63.11933135986328
+                },
+                "rotation": {
+                  "w": -0.6287888288497925,
+                  "x": 9.831061610194333e-40,
+                  "y": 2.206204302232992e-40,
+                  "z": -0.7775761485099792
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 114.37655639648438,
+                  "y": 115.2591781616211,
+                  "z": 63.15611267089844
+                },
+                "rotation": {
+                  "w": -0.6287897825241089,
+                  "x": -3.1519047246112357e-32,
+                  "y": -7.854183054454196e-34,
+                  "z": -0.7775753736495972
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 113.93940734863281,
+                      "y": 115.16563415527344,
+                      "z": 63.11933135986328
+                    },
+                    "rotation": {
+                      "w": -0.6287888288497925,
+                      "x": 0,
+                      "y": 1.8367099231598242e-40,
+                      "z": -0.7775761485099792
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35266.700000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 113.5038833618164,
+                  "y": 115.07243347167969,
+                  "z": 63.08268737792969
+                },
+                "rotation": {
+                  "w": -0.6287850141525269,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775792479515076
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 113.93940734863281,
+                  "y": 115.16563415527344,
+                  "z": 63.11933135986328
+                },
+                "rotation": {
+                  "w": -0.6287888288497925,
+                  "x": 9.831061610194333e-40,
+                  "y": 2.206204302232992e-40,
+                  "z": -0.7775761485099792
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 113.5038833618164,
+                      "y": 115.07243347167969,
+                      "z": 63.08268737792969
+                    },
+                    "rotation": {
+                      "w": -0.6287850141525269,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775792479515076
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35293.800000190735,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 113.05818176269531,
+                  "y": 114.97705841064453,
+                  "z": 63.045188903808594
+                },
+                "rotation": {
+                  "w": -0.6287879943847656,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775768637657166
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 113.5038833618164,
+                  "y": 115.07243347167969,
+                  "z": 63.08268737792969
+                },
+                "rotation": {
+                  "w": -0.6287850141525269,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775792479515076
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 113.05818176269531,
+                      "y": 114.97705841064453,
+                      "z": 63.045188903808594
+                    },
+                    "rotation": {
+                      "w": -0.6287879943847656,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775768637657166
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35324.5,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 112.61835479736328,
+                  "y": 114.88294219970703,
+                  "z": 63.008182525634766
+                },
+                "rotation": {
+                  "w": -0.6287896037101746,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775755524635315
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 113.05818176269531,
+                  "y": 114.97705841064453,
+                  "z": 63.045188903808594
+                },
+                "rotation": {
+                  "w": -0.6287879943847656,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775768637657166
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 112.61835479736328,
+                      "y": 114.88294219970703,
+                      "z": 63.008182525634766
+                    },
+                    "rotation": {
+                      "w": -0.6287896037101746,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775755524635315
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35353.700000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 112.18856811523438,
+                  "y": 114.79096984863281,
+                  "z": 62.972023010253906
+                },
+                "rotation": {
+                  "w": -0.6287854909896851,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775788903236389
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 112.61835479736328,
+                  "y": 114.88294219970703,
+                  "z": 63.008182525634766
+                },
+                "rotation": {
+                  "w": -0.6287896037101746,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775755524635315
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 112.18856811523438,
+                      "y": 114.79096984863281,
+                      "z": 62.972023010253906
+                    },
+                    "rotation": {
+                      "w": -0.6287854909896851,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775788903236389
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35384.800000190735,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 111.7467269897461,
+                  "y": 114.69641876220703,
+                  "z": 62.93484878540039
+                },
+                "rotation": {
+                  "w": -0.6287863254547119,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775782346725464
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 112.18856811523438,
+                  "y": 114.79096984863281,
+                  "z": 62.972023010253906
+                },
+                "rotation": {
+                  "w": -0.6287854909896851,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775788903236389
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 111.7467269897461,
+                      "y": 114.69641876220703,
+                      "z": 62.93484878540039
+                    },
+                    "rotation": {
+                      "w": -0.6287863254547119,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775782346725464
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35413.90000009537,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 111.30892181396484,
+                  "y": 114.60272979736328,
+                  "z": 62.898014068603516
+                },
+                "rotation": {
+                  "w": -0.6287848949432373,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775794267654419
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 111.7467269897461,
+                  "y": 114.69641876220703,
+                  "z": 62.93484878540039
+                },
+                "rotation": {
+                  "w": -0.6287863254547119,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775782346725464
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 111.30892181396484,
+                      "y": 114.60272979736328,
+                      "z": 62.898014068603516
+                    },
+                    "rotation": {
+                      "w": -0.6287848353385925,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775793075561523
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35444.10000014305,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 110.86837005615234,
+                  "y": 114.50845336914062,
+                  "z": 62.86094665527344
+                },
+                "rotation": {
+                  "w": -0.6287850737571716,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775792479515076
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 111.30892181396484,
+                  "y": 114.60272979736328,
+                  "z": 62.898014068603516
+                },
+                "rotation": {
+                  "w": -0.6287848949432373,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775794267654419
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 110.86837005615234,
+                      "y": 114.50845336914062,
+                      "z": 62.86094665527344
+                    },
+                    "rotation": {
+                      "w": -0.6287850141525269,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.777579128742218
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35474.5,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 110.43804931640625,
+                  "y": 114.41636657714844,
+                  "z": 62.82474136352539
+                },
+                "rotation": {
+                  "w": -0.6287854909896851,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775788903236389
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 110.86837005615234,
+                  "y": 114.50845336914062,
+                  "z": 62.86094665527344
+                },
+                "rotation": {
+                  "w": -0.6287850737571716,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775792479515076
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 110.43804931640625,
+                      "y": 114.41636657714844,
+                      "z": 62.82474136352539
+                    },
+                    "rotation": {
+                      "w": -0.6287854909896851,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775788903236389
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35504.200000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 109.98976135253906,
+                  "y": 114.3204345703125,
+                  "z": 62.787025451660156
+                },
+                "rotation": {
+                  "w": -0.6287850737571716,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775792479515076
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 110.43804931640625,
+                  "y": 114.41636657714844,
+                  "z": 62.82474136352539
+                },
+                "rotation": {
+                  "w": -0.6287854909896851,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775788903236389
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 109.98976135253906,
+                      "y": 114.3204345703125,
+                      "z": 62.787025451660156
+                    },
+                    "rotation": {
+                      "w": -0.6287850141525269,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.777579128742218
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35534,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 109.55585479736328,
+                  "y": 114.22758483886719,
+                  "z": 62.750518798828125
+                },
+                "rotation": {
+                  "w": -0.6287892460823059,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775758504867554
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 109.98976135253906,
+                  "y": 114.3204345703125,
+                  "z": 62.787025451660156
+                },
+                "rotation": {
+                  "w": -0.6287850737571716,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775792479515076
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 109.55585479736328,
+                      "y": 114.22758483886719,
+                      "z": 62.750518798828125
+                    },
+                    "rotation": {
+                      "w": -0.6287892460823059,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775758504867554
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35565.90000009537,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 109.11360931396484,
+                  "y": 114.13294982910156,
+                  "z": 62.71331024169922
+                },
+                "rotation": {
+                  "w": -0.628788411617279,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775765657424927
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 109.55585479736328,
+                  "y": 114.22758483886719,
+                  "z": 62.750518798828125
+                },
+                "rotation": {
+                  "w": -0.6287892460823059,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775758504867554
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 109.11360931396484,
+                      "y": 114.13294982910156,
+                      "z": 62.71331024169922
+                    },
+                    "rotation": {
+                      "w": -0.6287883520126343,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775764465332031
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35594.200000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 108.67156982421875,
+                  "y": 114.03836059570312,
+                  "z": 62.67612075805664
+                },
+                "rotation": {
+                  "w": -0.6287898421287537,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775754332542419
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 109.11360931396484,
+                  "y": 114.13294982910156,
+                  "z": 62.71331024169922
+                },
+                "rotation": {
+                  "w": -0.628788411617279,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775765657424927
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 108.67156982421875,
+                      "y": 114.03836059570312,
+                      "z": 62.67612075805664
+                    },
+                    "rotation": {
+                      "w": -0.6287897825241089,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775753140449524
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35624.40000009537,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 108.23688507080078,
+                  "y": 113.94534301757812,
+                  "z": 62.639549255371094
+                },
+                "rotation": {
+                  "w": -0.6287879943847656,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775769233703613
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 108.67156982421875,
+                  "y": 114.03836059570312,
+                  "z": 62.67612075805664
+                },
+                "rotation": {
+                  "w": -0.6287898421287537,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775754332542419
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 108.23688507080078,
+                      "y": 113.94534301757812,
+                      "z": 62.639549255371094
+                    },
+                    "rotation": {
+                      "w": -0.6287879347801208,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775768041610718
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35656,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 107.8053970336914,
+                  "y": 113.85301208496094,
+                  "z": 62.60324478149414
+                },
+                "rotation": {
+                  "w": -0.6287902593612671,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775750756263733
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 108.23688507080078,
+                  "y": 113.94534301757812,
+                  "z": 62.639549255371094
+                },
+                "rotation": {
+                  "w": -0.6287879943847656,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775769233703613
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 107.8053970336914,
+                      "y": 113.85301208496094,
+                      "z": 62.60324478149414
+                    },
+                    "rotation": {
+                      "w": -0.6287901997566223,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775749564170837
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 107.36705780029297,
+                  "y": 113.75920867919922,
+                  "z": 62.56636428833008
+                },
+                "rotation": {
+                  "w": -0.6287848949432373,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775794267654419
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 107.8053970336914,
+                  "y": 113.85301208496094,
+                  "z": 62.60324478149414
+                },
+                "rotation": {
+                  "w": -0.6287902593612671,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775750756263733
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 107.36705780029297,
+                      "y": 113.75920867919922,
+                      "z": 62.56636428833008
+                    },
+                    "rotation": {
+                      "w": -0.6287848353385925,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775793075561523
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35713.700000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 106.92823791503906,
+                  "y": 113.6653060913086,
+                  "z": 62.52944564819336
+                },
+                "rotation": {
+                  "w": -0.6287879943847656,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775769233703613
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 107.36705780029297,
+                  "y": 113.75920867919922,
+                  "z": 62.56636428833008
+                },
+                "rotation": {
+                  "w": -0.6287848949432373,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775794267654419
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 106.92823791503906,
+                      "y": 113.6653060913086,
+                      "z": 62.52944564819336
+                    },
+                    "rotation": {
+                      "w": -0.6287879347801208,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775768041610718
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35745.200000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 106.48734283447266,
+                  "y": 113.57096099853516,
+                  "z": 62.49235153198242
+                },
+                "rotation": {
+                  "w": -0.6287892460823059,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775759100914001
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 106.92823791503906,
+                  "y": 113.6653060913086,
+                  "z": 62.52944564819336
+                },
+                "rotation": {
+                  "w": -0.6287879943847656,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775769233703613
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 106.48734283447266,
+                      "y": 113.57096099853516,
+                      "z": 62.49235153198242
+                    },
+                    "rotation": {
+                      "w": -0.6287891864776611,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775757908821106
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35774.200000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 106.04875946044922,
+                  "y": 113.47711181640625,
+                  "z": 62.45545196533203
+                },
+                "rotation": {
+                  "w": -0.6287902593612671,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775750756263733
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 106.48734283447266,
+                  "y": 113.57096099853516,
+                  "z": 62.49235153198242
+                },
+                "rotation": {
+                  "w": -0.6287892460823059,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775759100914001
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 106.04875946044922,
+                      "y": 113.47711181640625,
+                      "z": 62.45545196533203
+                    },
+                    "rotation": {
+                      "w": -0.6287901997566223,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775749564170837
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35803.60000014305,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 105.61357879638672,
+                  "y": 113.38398742675781,
+                  "z": 62.41883850097656
+                },
+                "rotation": {
+                  "w": -0.6287875771522522,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775772213935852
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 106.04875946044922,
+                  "y": 113.47711181640625,
+                  "z": 62.45545196533203
+                },
+                "rotation": {
+                  "w": -0.6287902593612671,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775750756263733
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 105.61357879638672,
+                      "y": 113.38398742675781,
+                      "z": 62.41883850097656
+                    },
+                    "rotation": {
+                      "w": -0.6287875175476074,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775771021842957
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35836.300000190735,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 105.16653442382812,
+                  "y": 113.28832244873047,
+                  "z": 62.3812255859375
+                },
+                "rotation": {
+                  "w": -0.6287859082221985,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.777578592300415
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 105.61357879638672,
+                  "y": 113.38398742675781,
+                  "z": 62.41883850097656
+                },
+                "rotation": {
+                  "w": -0.6287875771522522,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775772213935852
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 105.16653442382812,
+                      "y": 113.28832244873047,
+                      "z": 62.3812255859375
+                    },
+                    "rotation": {
+                      "w": -0.6287859082221985,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.777578592300415
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35864.700000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 104.7249755859375,
+                  "y": 113.19383239746094,
+                  "z": 62.34407424926758
+                },
+                "rotation": {
+                  "w": -0.6287867426872253,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775779366493225
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 105.16653442382812,
+                  "y": 113.28832244873047,
+                  "z": 62.3812255859375
+                },
+                "rotation": {
+                  "w": -0.6287859082221985,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.777578592300415
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 104.7249755859375,
+                      "y": 113.19383239746094,
+                      "z": 62.34407424926758
+                    },
+                    "rotation": {
+                      "w": -0.6287866830825806,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.777577817440033
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35893.5,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 104.29811096191406,
+                  "y": 113.10248565673828,
+                  "z": 62.30815887451172
+                },
+                "rotation": {
+                  "w": -0.6287859082221985,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.777578592300415
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 104.7249755859375,
+                  "y": 113.19383239746094,
+                  "z": 62.34407424926758
+                },
+                "rotation": {
+                  "w": -0.6287867426872253,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775779366493225
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 104.29811096191406,
+                      "y": 113.10248565673828,
+                      "z": 62.30815887451172
+                    },
+                    "rotation": {
+                      "w": -0.6287859082221985,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.777578592300415
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35926.300000190735,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 103.85616302490234,
+                  "y": 113.0079116821289,
+                  "z": 62.27097702026367
+                },
+                "rotation": {
+                  "w": -0.6287863254547119,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775782346725464
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 104.29811096191406,
+                  "y": 113.10248565673828,
+                  "z": 62.30815887451172
+                },
+                "rotation": {
+                  "w": -0.6287859082221985,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.777578592300415
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 103.85616302490234,
+                      "y": 113.0079116821289,
+                      "z": 62.27097702026367
+                    },
+                    "rotation": {
+                      "w": -0.6287863254547119,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775782346725464
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35954.40000009537,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 103.40838623046875,
+                  "y": 112.91209411621094,
+                  "z": 62.23330307006836
+                },
+                "rotation": {
+                  "w": -0.6287892460823059,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775758504867554
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 103.85616302490234,
+                  "y": 113.0079116821289,
+                  "z": 62.27097702026367
+                },
+                "rotation": {
+                  "w": -0.6287863254547119,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775782346725464
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 103.40838623046875,
+                      "y": 112.91209411621094,
+                      "z": 62.23330307006836
+                    },
+                    "rotation": {
+                      "w": -0.6287892460823059,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775758504867554
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 35984,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 102.98316955566406,
+                  "y": 112.82110595703125,
+                  "z": 62.19752883911133
+                },
+                "rotation": {
+                  "w": -0.6287908554077148,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775745391845703
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 103.40838623046875,
+                  "y": 112.91209411621094,
+                  "z": 62.23330307006836
+                },
+                "rotation": {
+                  "w": -0.6287892460823059,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775758504867554
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 102.98316955566406,
+                      "y": 112.82110595703125,
+                      "z": 62.19752883911133
+                    },
+                    "rotation": {
+                      "w": -0.6287908554077148,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775745391845703
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 36013.5,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 102.54385375976562,
+                  "y": 112.72709655761719,
+                  "z": 62.16056823730469
+                },
+                "rotation": {
+                  "w": -0.6287873387336731,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775774002075195
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 102.98316955566406,
+                  "y": 112.82110595703125,
+                  "z": 62.19752883911133
+                },
+                "rotation": {
+                  "w": -0.6287908554077148,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775745391845703
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 102.54385375976562,
+                      "y": 112.72709655761719,
+                      "z": 62.16056823730469
+                    },
+                    "rotation": {
+                      "w": -0.6287873387336731,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775774002075195
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 36044.200000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 102.10635375976562,
+                  "y": 112.63347625732422,
+                  "z": 62.12376022338867
+                },
+                "rotation": {
+                  "w": -0.6287876963615417,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775771021842957
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 102.54385375976562,
+                  "y": 112.72709655761719,
+                  "z": 62.16056823730469
+                },
+                "rotation": {
+                  "w": -0.6287873387336731,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775774002075195
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 102.10635375976562,
+                      "y": 112.63347625732422,
+                      "z": 62.12376022338867
+                    },
+                    "rotation": {
+                      "w": -0.6287876963615417,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775771021842957
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 36074.700000047684,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 101.65518951416016,
+                  "y": 112.53693389892578,
+                  "z": 62.08580017089844
+                },
+                "rotation": {
+                  "w": -0.6287894248962402,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775757312774658
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 102.10635375976562,
+                  "y": 112.63347625732422,
+                  "z": 62.12376022338867
+                },
+                "rotation": {
+                  "w": -0.6287876963615417,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775771021842957
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 101.65518951416016,
+                      "y": 112.53693389892578,
+                      "z": 62.08580017089844
+                    },
+                    "rotation": {
+                      "w": -0.6287893652915955,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775756120681763
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 36106.60000014305,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 166728,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 101.21963500976562,
+                  "y": 112.44373321533203,
+                  "z": 62.049156188964844
+                },
+                "rotation": {
+                  "w": -0.6287906765937805,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775747179985046
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 101.65518951416016,
+                  "y": 112.53693389892578,
+                  "z": 62.08580017089844
+                },
+                "rotation": {
+                  "w": -0.6287894248962402,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775757312774658
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 101.21963500976562,
+                      "y": 112.44373321533203,
+                      "z": 62.049156188964844
+                    },
+                    "rotation": {
+                      "w": -0.6287906765937805,
+                      "x": 0,
+                      "y": -1.401298464324817e-45,
+                      "z": -0.7775747179985046
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 36134.90000009537,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 165896,
+            "participation": "physical",
+            "noDraw": false,
+            "hidden": false,
+            "cloaked": false,
+            "translucency": 0,
+            "lighting": true,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 101.10064697265625,
+                "y": 112.41827392578125,
+                "z": 62.039146423339844
+              },
+              "rotation": {
+                "w": -0.6287966966629028,
+                "x": 0,
+                "y": 1.401298464324817e-45,
+                "z": -0.7775698900222778
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "airborne",
+            "sampleMode": "simulating-velocity"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 36135.60000014305,
+      "kind": "projectile-advances",
+      "data": [
+        {
+          "entity": {
+            "generation": 0,
+            "identity": {
+              "guid": 2147485761,
+              "wcid": 1635
+            },
+            "display": {
+              "name": "Lightning Bolt",
+              "level": null
+            },
+            "presentation": {
+              "entityClass": "other",
+              "content": {
+                "motionTableDid": null,
+                "setupDid": 33555440,
+                "soundTableDid": 536870968,
+                "physicsEffectTableDid": 872415239
+              },
+              "appearance": {
+                "paletteDid": null,
+                "subPalettes": [],
+                "textureChanges": [],
+                "partChanges": []
+              },
+              "objectScale": 1,
+              "radar": {
+                "category": "other",
+                "behavior": null,
+                "obviousRange": null
+              }
+            },
+            "physics": {
+              "semanticMask": 165896,
+              "participation": "physical",
+              "noDraw": false,
+              "hidden": false,
+              "cloaked": false,
+              "translucency": 0,
+              "lighting": true,
+              "defaultAnimation": false,
+              "defaultScript": false
+            },
+            "placement": {
+              "kind": "world",
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 101.10064697265625,
+                  "y": 112.41827392578125,
+                  "z": 62.039146423339844
+                },
+                "rotation": {
+                  "w": -0.6287966966629028,
+                  "x": 0,
+                  "y": 1.401298464324817e-45,
+                  "z": -0.7775698900222778
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              },
+              "contact": "airborne",
+              "sampleMode": "simulating-velocity"
+            },
+            "motion": null
+          },
+          "kind": "integrated",
+          "path": {
+            "initial": {
+              "pose": {
+                "landblockId": 2848653349,
+                "coords": {
+                  "x": 101.21963500976562,
+                  "y": 112.44373321533203,
+                  "z": 62.049156188964844
+                },
+                "rotation": {
+                  "w": -0.6287906765937805,
+                  "x": 0,
+                  "y": -1.401298464324817e-45,
+                  "z": -0.7775747179985046
+                }
+              },
+              "spatialMembership": {
+                "reachesOutdoors": true,
+                "reachedEnvCellIds": []
+              }
+            },
+            "legs": [
+              {
+                "endFraction": 0.27078670263290405,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 101.10064697265625,
+                      "y": 112.41827392578125,
+                      "z": 62.039146423339844
+                    },
+                    "rotation": {
+                      "w": -0.6287922859191895,
+                      "x": 0,
+                      "y": 0,
+                      "z": -0.7775734066963196
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              },
+              {
+                "endFraction": 1,
+                "end": {
+                  "pose": {
+                    "landblockId": 2848653349,
+                    "coords": {
+                      "x": 101.10064697265625,
+                      "y": 112.41827392578125,
+                      "z": 62.039146423339844
+                    },
+                    "rotation": {
+                      "w": -0.6287966370582581,
+                      "x": 0,
+                      "y": 1.401298464324817e-45,
+                      "z": -0.7775697708129883
+                    }
+                  },
+                  "spatialMembership": {
+                    "reachesOutdoors": true,
+                    "reachedEnvCellIds": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "t": 36151.40000009537,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 1213300,
+            "participation": "physical",
+            "noDraw": true,
+            "hidden": false,
+            "cloaked": true,
+            "translucency": 0,
+            "lighting": false,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 101.10064697265625,
+                "y": 112.41827392578125,
+                "z": 62.039146423339844
+              },
+              "rotation": {
+                "w": -0.6287966966629028,
+                "x": 0,
+                "y": 1.401298464324817e-45,
+                "z": -0.7775698900222778
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "airborne",
+            "sampleMode": "simulating-velocity"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 36151.5,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 1213300,
+            "participation": "physical",
+            "noDraw": true,
+            "hidden": false,
+            "cloaked": true,
+            "translucency": 0,
+            "lighting": false,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 101.10064697265625,
+                "y": 112.41827392578125,
+                "z": 62.039146423339844
+              },
+              "rotation": {
+                "w": -0.6287966966629028,
+                "x": 0,
+                "y": 1.401298464324817e-45,
+                "z": -0.7775698900222778
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "airborne",
+            "sampleMode": "simulating-velocity"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 36151.60000014305,
+      "kind": "host:client-dynamic-script-cue",
+      "data": {
+        "guid": 2147485761,
+        "generation": 0,
+        "cue": 5,
+        "intensity": 0.6000000238418579
+      }
+    },
+    {
+      "t": 36151.700000047684,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 1213300,
+            "participation": "physical",
+            "noDraw": true,
+            "hidden": false,
+            "cloaked": true,
+            "translucency": 0,
+            "lighting": false,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 101.10064697265625,
+                "y": 112.41827392578125,
+                "z": 62.039146423339844
+              },
+              "rotation": {
+                "w": -0.6287966966629028,
+                "x": 0,
+                "y": 1.401298464324817e-45,
+                "z": -0.7775698900222778
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "airborne",
+            "sampleMode": "simulating-velocity"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 36151.800000190735,
+      "kind": "runtime:upsertDynamicEntity",
+      "data": [
+        {
+          "generation": 0,
+          "identity": {
+            "guid": 2147485761,
+            "wcid": 1635
+          },
+          "display": {
+            "name": "Lightning Bolt",
+            "level": null
+          },
+          "presentation": {
+            "entityClass": "other",
+            "content": {
+              "motionTableDid": null,
+              "setupDid": 33555440,
+              "soundTableDid": 536870968,
+              "physicsEffectTableDid": 872415239
+            },
+            "appearance": {
+              "paletteDid": null,
+              "subPalettes": [],
+              "textureChanges": [],
+              "partChanges": []
+            },
+            "objectScale": 1,
+            "radar": {
+              "category": "other",
+              "behavior": null,
+              "obviousRange": null
+            }
+          },
+          "physics": {
+            "semanticMask": 1213300,
+            "participation": "physical",
+            "noDraw": true,
+            "hidden": false,
+            "cloaked": true,
+            "translucency": 0,
+            "lighting": false,
+            "defaultAnimation": false,
+            "defaultScript": false
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 2848653349,
+              "coords": {
+                "x": 101.10064697265625,
+                "y": 112.41827392578125,
+                "z": 62.039146423339844
+              },
+              "rotation": {
+                "w": -0.6287966966629028,
+                "x": 0,
+                "y": 1.401298464324817e-45,
+                "z": -0.7775698900222778
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "airborne",
+            "sampleMode": "simulating-velocity"
+          },
+          "motion": null
+        }
+      ]
+    },
+    {
+      "t": 41141.60000014305,
+      "kind": "runtime:removeDynamicEntity",
+      "data": [
+        2147485761,
+        0
+      ]
+    }
+  ]
+}

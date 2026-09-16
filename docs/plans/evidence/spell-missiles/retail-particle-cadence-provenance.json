@@ -1,0 +1,16 @@
+{
+  "binary": "/home/cluracan/code/ac-re/ac-bins/acclient.exe",
+  "sha256": "bca95bbebed4b9ed1ff09d0da83144e2fc4208f63ad7ada5cb47c3ca207ccba9",
+  "distancePredicateVA": "0x00517F50",
+  "physicsUseTimeVA": "0x0050A420",
+  "minimumQuantumInitializerVA": "0x006FC1E0",
+  "minimumQuantumNumerator": {
+    "address": "0x007938C0",
+    "value": 1.0
+  },
+  "minimumQuantumDenominator": {
+    "address": "0x007C7550",
+    "value": 30.0
+  },
+  "minimumQuantumDestination": "0x00842C08"
+}

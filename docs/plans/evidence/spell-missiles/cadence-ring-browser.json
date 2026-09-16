@@ -1,0 +1,220 @@
+{
+  "description": "WCID 7274 isolated Explorer carrier, default effect restarted at launch after harness setup, 12 paced 33.333333ms host ticks, spacing 3. Does not prove connected cast, full ring geometry, or Explorer script-scale parity.",
+  "consoleMessages": [],
+  "entityLifecycle": {
+    "advances": {
+      "requestedTickCount": 12,
+      "changedTickCount": 12,
+      "first": {
+        "durationMilliseconds": 33.333333,
+        "entities": [
+          {
+            "generation": 1,
+            "guid": 4026531841,
+            "endpoint": {
+              "landblockId": 3663003685,
+              "coords": {
+                "x": 96.066666,
+                "y": 99.53554,
+                "z": 596.4645
+              },
+              "rotation": {
+                "w": 0.70710677,
+                "x": 0,
+                "y": 0,
+                "z": -0.70710677
+              }
+            },
+            "contact": "airborne",
+            "pathLegCount": 1
+          }
+        ]
+      },
+      "last": {
+        "durationMilliseconds": 33.333333,
+        "entities": [
+          {
+            "generation": 1,
+            "guid": 4026531841,
+            "endpoint": {
+              "landblockId": 3663003685,
+              "coords": {
+                "x": 96.79999,
+                "y": 99.53554,
+                "z": 596.4645
+              },
+              "rotation": {
+                "w": 0.70710677,
+                "x": 0,
+                "y": 0,
+                "z": -0.70710677
+              }
+            },
+            "contact": "airborne",
+            "pathLegCount": 1
+          }
+        ]
+      }
+    },
+    "launched": {
+      "generation": 1,
+      "guid": 4026531841,
+      "placement": {
+        "kind": "world",
+        "pose": {
+          "landblockId": 3663003685,
+          "coords": {
+            "x": 96,
+            "y": 99.53554,
+            "z": 596.4645
+          },
+          "rotation": {
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "z": 0
+          }
+        },
+        "spatialMembership": {
+          "reachesOutdoors": true,
+          "reachedEnvCellIds": []
+        },
+        "contact": "airborne",
+        "sampleMode": "simulating-velocity"
+      }
+    },
+    "relocated": null,
+    "spawned": {
+      "generation": 1,
+      "identity": {
+        "guid": 4026531841,
+        "wcid": 7274
+      }
+    },
+    "spawnedState": {
+      "currentEntities": [
+        {
+          "generation": 1,
+          "identity": {
+            "guid": 4026531841,
+            "wcid": 7274
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 3663003685,
+              "coords": {
+                "x": 96,
+                "y": 99.53554,
+                "z": 596.4645
+              },
+              "rotation": {
+                "w": 1,
+                "x": 0,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "unknown",
+            "sampleMode": "authoritative-only"
+          },
+          "appearance": {
+            "paletteDid": null,
+            "subPalettes": 0,
+            "textureChanges": 0,
+            "partChanges": 0
+          }
+        }
+      ],
+      "visibleDynamicEntityCount": 1,
+      "runtime": {
+        "activeAnimationCount": 0,
+        "activeAudioCount": 0,
+        "activeParticleCount": 0,
+        "activeParticleEmitterCount": 17,
+        "activePhysicsScriptCount": 1,
+        "activeSkyScriptCount": 0,
+        "animationAssetCount": 0,
+        "animationReferenceCount": 0,
+        "entityCount": 18,
+        "residentEffectStateCount": 18,
+        "templateCount": 3
+      }
+    },
+    "completedState": {
+      "currentEntities": [
+        {
+          "generation": 1,
+          "identity": {
+            "guid": 4026531841,
+            "wcid": 7274
+          },
+          "placement": {
+            "kind": "world",
+            "pose": {
+              "landblockId": 3663003685,
+              "coords": {
+                "x": 96.79999,
+                "y": 99.53554,
+                "z": 596.4645
+              },
+              "rotation": {
+                "w": 0.70710677,
+                "x": 0,
+                "y": 0,
+                "z": -0.70710677
+              }
+            },
+            "spatialMembership": {
+              "reachesOutdoors": true,
+              "reachedEnvCellIds": []
+            },
+            "contact": "airborne",
+            "sampleMode": "simulating-velocity"
+          },
+          "appearance": {
+            "paletteDid": null,
+            "subPalettes": 0,
+            "textureChanges": 0,
+            "partChanges": 0
+          }
+        }
+      ],
+      "visibleDynamicEntityCount": 1,
+      "runtime": {
+        "activeAnimationCount": 0,
+        "activeAudioCount": 0,
+        "activeParticleCount": 0,
+        "activeParticleEmitterCount": 17,
+        "activePhysicsScriptCount": 1,
+        "activeSkyScriptCount": 0,
+        "animationAssetCount": 0,
+        "animationReferenceCount": 0,
+        "entityCount": 18,
+        "residentEffectStateCount": 18,
+        "templateCount": 3
+      }
+    },
+    "despawnedState": {
+      "currentEntities": [],
+      "visibleDynamicEntityCount": 0,
+      "runtime": {
+        "activeAnimationCount": 0,
+        "activeAudioCount": 0,
+        "activeParticleCount": 0,
+        "activeParticleEmitterCount": 16,
+        "activePhysicsScriptCount": 1,
+        "activeSkyScriptCount": 0,
+        "animationAssetCount": 0,
+        "animationReferenceCount": 0,
+        "entityCount": 17,
+        "residentEffectStateCount": 17,
+        "templateCount": 2
+      }
+    }
+  }
+}

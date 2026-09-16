@@ -85,6 +85,7 @@ export function adaptDynamicEntityPresentation(
 			),
 			localBounds: visual.localBounds,
 			presentation: visual.presentation,
+			placementFrame: entity.presentation.placementFrame,
 			scale: new Vec3(
 				entity.presentation.objectScale,
 				entity.presentation.objectScale,

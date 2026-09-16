@@ -1276,7 +1276,12 @@ mod tests {
             CombatMode::NonCombat
         );
         assert_eq!(
-            client.active_busy_operation.as_ref().unwrap().operation,
+            client
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .operation
+                .kind(),
             BusyOperationKind::Use
         );
 
@@ -2197,7 +2202,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: BusyOperationKind::Buy,
+                operation: crate::client::PendingOperation::Buy,
                 ..
             })
         ));
@@ -2244,7 +2249,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: BusyOperationKind::Buy,
+                operation: crate::client::PendingOperation::Buy,
                 ..
             })
         ));

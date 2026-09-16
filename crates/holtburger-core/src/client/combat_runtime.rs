@@ -1,7 +1,5 @@
 //! Shared combat request execution; world and existing operation owners retain state.
-use super::types::{
-    ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, SpellCastAim,
-};
+use super::types::{ActionResultReason, ActionResultSource, ClientCommand, SpellCastAim};
 use super::{ClientRuntime, ClientState};
 use anyhow::Result;
 use holtburger_common::Guid;
@@ -9,6 +7,29 @@ use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::*;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::spell::SpellCastingRoute;
+
+/// Resolved cast request shared by wire publication and pending-operation correlation.
+#[derive(Debug)]
+struct PreparedSpellCast {
+    /// Canonical spell identifier after stripping the frontend marker bit.
+    spell_id: u32,
+    /// Actual recipient after resolving self-target and untargeted spell routes.
+    target: Option<Guid>,
+}
+
+impl PreparedSpellCast {
+    fn into_action(self) -> GameAction {
+        match self.target {
+            Some(target) => GameAction::CastTargetedSpell(Box::new(CastTargetedSpellActionData {
+                target,
+                spell_id: self.spell_id,
+            })),
+            None => GameAction::CastUntargetedSpell(Box::new(CastUntargetedSpellActionData {
+                spell_id: self.spell_id,
+            })),
+        }
+    }
+}
 
 impl ClientRuntime {
     pub(super) async fn handle_combat_command(&mut self, command: ClientCommand) -> Result<()> {
@@ -124,7 +145,7 @@ impl ClientRuntime {
         &self,
         spell_id: u32,
         aim: SpellCastAim,
-    ) -> Result<GameAction, &'static str> {
+    ) -> Result<PreparedSpellCast, &'static str> {
         let spell_id = spell_id & 0x7fff_ffff;
         let Some(spell) = self.world.spell_catalog.get(spell_id) else {
             return Err("Spell definition is unavailable.");
@@ -150,15 +171,7 @@ impl ClientRuntime {
         if self.world.player.guid == Guid::NULL {
             return Err("Character identity has not arrived yet.");
         }
-        Ok(match target {
-            Some(target) => GameAction::CastTargetedSpell(Box::new(CastTargetedSpellActionData {
-                target,
-                spell_id,
-            })),
-            None => GameAction::CastUntargetedSpell(Box::new(CastUntargetedSpellActionData {
-                spell_id,
-            })),
-        })
+        Ok(PreparedSpellCast { spell_id, target })
     }
 
     async fn cast_spell(&mut self, spell_id: u32, aim: SpellCastAim) -> Result<()> {
@@ -169,11 +182,13 @@ impl ClientRuntime {
                 return Ok(());
             }
         };
-        if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
+        if !self.arm_busy_operation(super::PendingOperation::SpellCast {
+            target: action.target,
+        }) {
             self.reject_combat_request("Wait for the current action to finish.");
             return Ok(());
         }
-        let result = self.send_game_action(action).await;
+        let result = self.send_game_action(action.into_action()).await;
         if result.is_err() {
             self.clear_busy_operation();
         }
@@ -193,6 +208,7 @@ mod tests {
     use super::*;
     use crate::client::builder::build_test_client;
     use crate::client::movement_types::{CharacterDrive, PlayerDriveIntent};
+    use crate::client::types::BusyOperationKind;
     use crate::client::types::{BusyOperationResult, ClientExitCause, ClientViewEvent};
     use byteorder::{LittleEndian, ReadBytesExt};
     use holtburger_common::position::WorldPosition;
@@ -279,7 +295,9 @@ mod tests {
             (0, SpellCastAim::Untargeted, None),
         ] {
             let client = client(flags);
-            let action = client.prepare_spell_cast(0x8000_002a, aim).unwrap();
+            let prepared = client.prepare_spell_cast(0x8000_002a, aim).unwrap();
+            assert_eq!(prepared.target, expected);
+            let action = prepared.into_action();
             match (action, expected) {
                 (GameAction::CastTargetedSpell(data), Some(target)) => {
                     assert_eq!(data.target, target);
@@ -328,13 +346,21 @@ mod tests {
             .unwrap();
         let command = || ClientCommand::CastSpell {
             spell_id: 42,
-            aim: SpellCastAim::Untargeted,
+            aim: SpellCastAim::Normal {
+                selection: Some(Guid(2)),
+            },
         };
         client.handle_command(command()).await.unwrap();
         assert_eq!(client.session.game_action_sequence, 2);
         assert_eq!(
             client.active_busy_operation(),
             Some(BusyOperationKind::SpellCast)
+        );
+        assert_eq!(
+            client.active_busy_operation.as_ref().unwrap().operation,
+            crate::client::PendingOperation::SpellCast {
+                target: Some(Guid(2))
+            }
         );
         let mut events = client.subscribe_client_view_events();
         client.handle_command(command()).await.unwrap();
@@ -467,7 +493,8 @@ mod tests {
                         selection: Some(Guid(2))
                     }
                 )
-                .unwrap(),
+                .unwrap()
+                .into_action(),
             GameAction::CastUntargetedSpell(_)
         ));
     }

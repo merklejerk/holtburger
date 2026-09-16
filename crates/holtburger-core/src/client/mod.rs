@@ -73,9 +73,49 @@ use types::*;
 const PHYSICS_TICK_MS: u64 = 30;
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Operation context retained until completion, failure, timeout, or world reset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PendingOperation {
+    Use,
+    UseWithTarget,
+    Salvage,
+    /// Resolved wire target; untargeted casts cannot correlate automatic turns.
+    SpellCast {
+        target: Option<Guid>,
+    },
+    Buy,
+    Sell,
+}
+
+impl PendingOperation {
+    fn kind(self) -> BusyOperationKind {
+        match self {
+            Self::Use => BusyOperationKind::Use,
+            Self::UseWithTarget => BusyOperationKind::UseWithTarget,
+            Self::Salvage => BusyOperationKind::Salvage,
+            Self::SpellCast { .. } => BusyOperationKind::SpellCast,
+            Self::Buy => BusyOperationKind::Buy,
+            Self::Sell => BusyOperationKind::Sell,
+        }
+    }
+}
+
+impl From<BusyOperationKind> for PendingOperation {
+    fn from(kind: BusyOperationKind) -> Self {
+        match kind {
+            BusyOperationKind::Use => Self::Use,
+            BusyOperationKind::UseWithTarget => Self::UseWithTarget,
+            BusyOperationKind::Salvage => Self::Salvage,
+            BusyOperationKind::SpellCast => Self::SpellCast { target: None },
+            BusyOperationKind::Buy => Self::Buy,
+            BusyOperationKind::Sell => Self::Sell,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingBusyOperation {
-    operation: BusyOperationKind,
+    operation: PendingOperation,
     deadline: Instant,
     pending_error: Option<(WeenieError, Option<String>)>,
 }
@@ -519,7 +559,7 @@ impl ClientRuntime {
     fn active_busy_operation(&self) -> Option<BusyOperationKind> {
         self.active_busy_operation
             .as_ref()
-            .map(|pending| pending.operation)
+            .map(|pending| pending.operation.kind())
     }
 
     fn emit_busy_state_updated(&self) {
@@ -591,7 +631,8 @@ impl ClientRuntime {
         }
     }
 
-    pub(super) fn arm_busy_operation(&mut self, operation: BusyOperationKind) -> bool {
+    pub(super) fn arm_busy_operation(&mut self, operation: impl Into<PendingOperation>) -> bool {
+        let operation = operation.into();
         if let Some(active) = self.active_busy_operation.as_ref() {
             log::warn!(
                 "Ignoring busy-tracked {:?} while {:?} is still pending.",
@@ -629,7 +670,7 @@ impl ClientRuntime {
 
         self.emit_busy_state_updated();
         self.emit_busy_operation_finished(
-            pending.operation,
+            pending.operation.kind(),
             BusyOperationResult::Completed {
                 error: resolved_error,
                 parameter,
@@ -1176,7 +1217,7 @@ mod tests {
     use holtburger_protocol::messages::movement::{
         InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementEventData,
         MovementInvalid, MovementStateFlags, MovementType, MovementTypeData, PositionPack,
-        UpdatePositionData, UpdatePositionFlag,
+        TurnToObject, TurnToParameters, UpdatePositionData, UpdatePositionFlag,
     };
     use holtburger_protocol::messages::{CharacterEntry, GameMessage, VectorUpdateData};
     use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
@@ -2129,6 +2170,64 @@ mod tests {
         );
     }
 
+    const CAST_TURN_TARGET: Guid = Guid(0x0500_0042);
+
+    async fn receive_matching_cast_turn(client: &mut ClientRuntime) {
+        let before_motion = client
+            .world
+            .motion_runtimes
+            .motion_playback(client.world.player.guid);
+        let before_pose = client.world.local_player_runtime_pose();
+        let before_snapshot = client.world.player_entity().unwrap().network_motion;
+        let was_manual = client.movement.has_active_manual_drive();
+        let sequence = client.world.player.server_control_sequence.wrapping_add(1);
+        let packet = GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid: client.world.player.guid,
+            object_instance_sequence: client.world.player.instance_sequence,
+            movement_sequence: client.world.player.movement_sequence.wrapping_add(1),
+            server_control_sequence: sequence,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target: CAST_TURN_TARGET,
+                desired_heading: 180.0,
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 1.0,
+                    desired_heading: 180.0,
+                },
+            }),
+        }));
+        let mut bytes = Vec::new();
+        packet.pack(&mut bytes);
+        client.handle_message(&bytes).await.unwrap();
+        assert_eq!(client.world.player.server_control_sequence, sequence);
+        assert_eq!(
+            client
+                .world
+                .player_entity()
+                .unwrap()
+                .server_control_sequence(),
+            sequence
+        );
+        assert_eq!(
+            client.world.player_entity().unwrap().network_motion,
+            before_snapshot
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .motion_playback(client.world.player.guid),
+            before_motion
+        );
+        assert_eq!(client.world.local_player_runtime_pose(), before_pose);
+        assert_eq!(client.movement.has_active_manual_drive(), was_manual);
+        assert!(!client.movement.has_server_controlled_motion());
+    }
+
     #[tokio::test]
     async fn manual_movement_preserves_windup_and_applies_one_locomotion_and_stop_displacement() {
         const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
@@ -2189,13 +2288,20 @@ mod tests {
             client.world.scene.body(body_id).unwrap().contact,
             holtburger_world::ContactState::Grounded
         );
-        assert!(client.arm_busy_operation(BusyOperationKind::SpellCast));
+        assert!(client.arm_busy_operation(PendingOperation::SpellCast {
+            target: Some(CAST_TURN_TARGET)
+        }));
+        receive_matching_cast_turn(&mut client).await;
         let message =
             encoded_game_message(GameMessage::UpdateMotion(Box::new(MovementEventData {
                 guid,
                 object_instance_sequence: client.world.player.instance_sequence,
-                movement_sequence: 1,
-                server_control_sequence: 1,
+                movement_sequence: client.world.player.movement_sequence.wrapping_add(1),
+                server_control_sequence: client
+                    .world
+                    .player
+                    .server_control_sequence
+                    .wrapping_add(1),
                 is_autonomous: false,
                 movement_type: MovementType::Invalid,
                 motion_flags: 0,
@@ -2259,6 +2365,7 @@ mod tests {
                 .tick(now, &mut client.world, &mut client.session)
                 .await
                 .unwrap();
+            receive_matching_cast_turn(&mut client).await;
             let start_pose = client.world.scene.body(body_id).unwrap().pose;
             let mut authored_translation = Vector3::zero();
             let mut saw_stop = false;
@@ -2408,7 +2515,9 @@ mod tests {
             Some(&collision),
         )
         .unwrap();
-        assert!(client.arm_busy_operation(BusyOperationKind::SpellCast));
+        assert!(client.arm_busy_operation(PendingOperation::SpellCast {
+            target: Some(CAST_TURN_TARGET)
+        }));
         let message =
             encoded_game_message(GameMessage::UpdateMotion(Box::new(MovementEventData {
                 guid,
@@ -2556,6 +2665,7 @@ mod tests {
             "retail Ready and Stand must resolve through their shared motion-table row"
         );
 
+        receive_matching_cast_turn(&mut client).await;
         client
             .movement
             .enqueue_character_motion_event(SequencedCharacterMotionEvent {
@@ -2600,7 +2710,7 @@ mod tests {
                 committed.teleport_sequence,
                 committed.force_position_sequence,
             ),
-            (11, 12, 13, 14)
+            (11, 13, 13, 14)
         );
         assert!(committed.resolved.world_velocity().z > 0.0);
         assert!(
@@ -2631,6 +2741,7 @@ mod tests {
             "accepted launch must begin the table-authored Ready-to-Falling transition"
         );
 
+        receive_matching_cast_turn(&mut client).await;
         let mut falling_step = None;
         for step in 6..=25 {
             let airborne = simulation::tick(
@@ -4049,7 +4160,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(PendingBusyOperation {
-                operation: BusyOperationKind::Buy,
+                operation: PendingOperation::Buy,
                 ..
             })
         ));

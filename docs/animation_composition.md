@@ -90,3 +90,36 @@ the destination Falling cycle directly. The player motion table `0x09000001` rou
 through a Falling-to-Stand landing clip (`0x030004a6`) and magic stance clips (`0x03000598`);
 playing those links in flight hid the intended lower-body pose. Same-style takeoff retains its
 authored transition. Ordinary casting transitions continue independently.
+
+### Local casting turns and movement ownership
+
+Core retains the resolved target with the pending spell-cast operation. A local,
+non-autonomous `TurnToObject` whose target matches that operation is acknowledged
+without installing the turn into world playback or taking over manual movement.
+This covers turns before windup and release, including repeated turn requests.
+The operation's existing completion, failure, timeout, and reset lifetime bounds
+this policy. Heading turns, other targets, remote entities, and casts without a
+resolved target retain ordinary admission.
+
+The world acknowledgement advances player and entity motion/control sequences
+while preserving the accepted motion snapshot, animation cursors, and physical
+pose. Core preserves held input and jump state through its existing gesture
+admission path. No renderer or wire format changes are involved.
+
+This deliberately differs from retail's installation of non-autonomous movement
+(`acclient.c:299939–299946`). Restoring that behavior lets casting turns interrupt
+local running and jump charge. The packet-family census is the five
+`MovementTypeData` variants: only `TurnToObject` qualifies; `TurnToHeading`,
+`MoveToObject`, `MoveToPosition`, and `Invalid` retain existing handling. Target,
+local-player, autonomous, operation-lifetime, and stale-sequence cases are covered
+by core admission tests; running and charged/airborne jumps use the authored
+motion simulation fixtures. This policy has no asset-layout dependency.
+
+ACE's `GameActionAutonomousPosition` queues position updates even during turns.
+`GameActionMoveToState` cancels an active move/turn chain; the magic completion
+callback then rechecks facing after cancellation and can request another turn.
+Normal input/position publication remains enabled, so this policy can extend
+server-side casting delays. Matching target and operation lifetime is a
+correlation, not a wire-provided cause: an unrelated turn toward that same target
+during the cast is indistinguishable. A turn toward a wielded item's owner will
+not match a cast whose resolved target is the item and is therefore preserved.

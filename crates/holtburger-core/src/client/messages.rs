@@ -21,6 +21,24 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl ClientRuntime {
+    /// Correlates object turns with the resolved target of an outstanding local cast.
+    fn suppresses_cast_turn(&self, data: &MovementEventData) -> bool {
+        if data.guid != self.world.player.guid || data.is_autonomous {
+            return false;
+        }
+        let Some(pending) = &self.active_busy_operation else {
+            return false;
+        };
+        let super::PendingOperation::SpellCast {
+            target: Some(target),
+        } = pending.operation
+        else {
+            return false;
+        };
+        pending.deadline > std::time::Instant::now()
+            && matches!(&data.data, MovementTypeData::TurnToObject(turn) if turn.target == target)
+    }
+
     fn apply_local_position_authority(
         &mut self,
         position: holtburger_common::position::WorldPosition,
@@ -265,7 +283,23 @@ impl ClientRuntime {
         }
 
         // Pass to world state for tracking positioning and spawning
-        let world_events = self.world.handle_message(&message);
+        let world_events = if let GameMessage::UpdateMotion(data) = &message
+            && self.suppresses_cast_turn(data)
+        {
+            // RETAIL DIVERGENCE: acclient.c:299939-299946 installs non-autonomous motion.
+            // Installing these turns interrupts held movement/jump during casting. Scope is
+            // local TurnToObject packets matching an outstanding cast target; no asset layout
+            // is involved. See docs/animation_composition.md for the packet-family census.
+            if self.world.acknowledge_local_object_turn(data) {
+                self.movement
+                    .record_server_control_sequence(data.server_control_sequence);
+                self.movement
+                    .admit_server_gesture(std::time::Instant::now(), &mut self.world);
+            }
+            Vec::new()
+        } else {
+            self.world.handle_message(&message)
+        };
         if let GameMessage::GameEvent(event) = &message
             && let GameEvent::PlayerDescription(description) = &event.event
         {
@@ -803,12 +837,14 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use crate::DynamicEntityEvent;
-    use crate::client::{ClientState, PHYSICS_TICK_MS, builder};
+    use crate::client::{ClientState, PHYSICS_TICK_MS, PendingOperation, builder};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
     use holtburger_protocol::errors::WeenieError;
-    use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_protocol::messages::movement::{
+        MotionStance, TurnToHeading, TurnToObject, TurnToParameters,
+    };
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_world::WorldEvent;
     use holtburger_world::stats::CharacterLevelInfo;
@@ -1125,6 +1161,113 @@ mod tests {
         }
 
         assert!(saw_soul_emote);
+    }
+
+    #[tokio::test]
+    async fn cast_turn_correlation_preserves_authority_and_ends_with_operation() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        let target = Guid(0x5000_0002);
+        client.world.seed_local_player_entity(
+            guid,
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x0100_0001),
+                ..Default::default()
+            },
+        );
+        assert!(client.arm_busy_operation(PendingOperation::SpellCast {
+            target: Some(target)
+        }));
+        let params = TurnToParameters {
+            movement_parameters: 0,
+            speed: 1.0,
+            desired_heading: 180.0,
+        };
+        let mut turn = MovementEventData {
+            guid,
+            object_instance_sequence: client.world.player.instance_sequence,
+            movement_sequence: 20,
+            server_control_sequence: 10,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target,
+                desired_heading: 180.0,
+                params: params.clone(),
+            }),
+        };
+        assert!(client.suppresses_cast_turn(&turn));
+        for unrelated in [
+            MovementEventData {
+                guid: target,
+                ..turn.clone()
+            },
+            MovementEventData {
+                is_autonomous: true,
+                ..turn.clone()
+            },
+            MovementEventData {
+                data: MovementTypeData::TurnToObject(TurnToObject {
+                    target: Guid(0x5000_0003),
+                    desired_heading: 180.0,
+                    params: params.clone(),
+                }),
+                ..turn.clone()
+            },
+            MovementEventData {
+                movement_type: MovementType::TurnToHeading,
+                data: MovementTypeData::TurnToHeading(TurnToHeading { params }),
+                ..turn.clone()
+            },
+        ] {
+            assert!(!client.suppresses_cast_turn(&unrelated));
+        }
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                turn.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert!(!client.movement.has_server_controlled_motion());
+        turn.server_control_sequence = 9;
+        turn.movement_sequence = 19;
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                turn.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert_eq!(
+            client.world.player_entity().unwrap().movement_sequence(),
+            20
+        );
+
+        client.active_busy_operation.as_mut().unwrap().deadline = std::time::Instant::now();
+        assert!(!client.suppresses_cast_turn(&turn));
+        client.finish_busy_operation_from_use_done(WeenieError::None);
+        assert!(!client.suppresses_cast_turn(&turn));
+        turn.server_control_sequence = 11;
+        turn.movement_sequence = 21;
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                turn.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert!(client.movement.has_server_controlled_motion());
+        assert!(client.arm_busy_operation(BusyOperationKind::SpellCast));
+        assert!(
+            !client.suppresses_cast_turn(&turn),
+            "untargeted casts cannot correlate turns"
+        );
+        client.clear_busy_operation();
+        assert!(client.arm_busy_operation(BusyOperationKind::Use));
+        assert!(!client.suppresses_cast_turn(&turn));
     }
 
     #[tokio::test]

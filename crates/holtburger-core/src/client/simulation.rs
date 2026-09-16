@@ -793,7 +793,7 @@ pub(super) async fn handle_server_controlled_movement(
     );
     let motion = build_server_controlled_motion(data, world);
     if EntityMotionDirective::from_movement_event(data).is_none()
-        && world.permits_manual_gesture_input(world.player.guid)
+        && world.permits_gesture_locomotion(world.player.guid)
     {
         movement.admit_server_gesture(Instant::now(), world);
     } else {

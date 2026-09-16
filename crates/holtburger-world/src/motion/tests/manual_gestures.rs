@@ -559,7 +559,7 @@ fn admitted_windups_and_release_preserve_manual_locomotion() {
                 "packet admission must preserve the current locomotion occurrence"
             );
             let runtime = registry.get(caster).unwrap();
-            assert!(runtime.permits_manual_gesture_input(table));
+            assert!(runtime.permits_gesture_locomotion(table));
             assert_eq!(
                 runtime.motion_playback().unwrap().activity,
                 OrdinaryMotionActivity::Gesture
@@ -722,4 +722,235 @@ fn airborne_stance_changes_skip_grounded_routes_without_discarding_casting() {
         assert_eq!(playback.ordinary, takeoff.ordinary);
         assert_eq!(playback.locomotion.unwrap().clip.animation_id(), WALK_ANIM);
     }
+    // Unsupported cast content must leave an observer's authored takeoff intact.
+    let guid = Guid(1);
+    let mut unsupported = MotionRuntimeRegistry::new();
+    unsupported.drive_remote(
+        table,
+        guid,
+        remote_gesture_input(STAND, ContactState::Airborne),
+        0.1,
+    );
+    let takeoff = unsupported.motion_playback(guid).unwrap().ordinary;
+    assert_eq!(takeoff.unwrap().clip.animation_id(), ENTRY_ANIM);
+    unsupported.accept_remote(
+        table,
+        guid,
+        remote_gesture_input(REACH, ContactState::Airborne),
+        [],
+        None,
+    );
+    assert_eq!(unsupported.motion_playback(guid).unwrap().ordinary, takeoff);
+
+    let guid = Guid(1);
+    let mut registry = MotionRuntimeRegistry::new();
+    for style in [STYLE, COMBAT_STYLE, STYLE] {
+        let mut input = remote_gesture_input(RELEASE, ContactState::Airborne);
+        input.snapshot.current_style =
+            Some(holtburger_protocol::messages::movement::MotionStance::from_repr(style).unwrap());
+        registry.accept_remote(table, guid, input, [], None);
+        let mut input = remote_gesture_input(RELEASE, ContactState::Airborne);
+        input.snapshot.current_style =
+            Some(holtburger_protocol::messages::movement::MotionStance::from_repr(style).unwrap());
+        registry.drive_remote(table, guid, input, 0.1);
+        registry.present_locomotion(
+            table,
+            guid,
+            MotionOrder {
+                style: Some(MotionCommand(style)),
+                forward: Some((MotionCommand::FALLING, 1.0)),
+                ..MotionOrder::default()
+            },
+            0.1,
+        );
+        let playback = registry.motion_playback(guid).unwrap();
+        assert_eq!(playback.activity, OrdinaryMotionActivity::Gesture);
+        assert_eq!(
+            registry.state(guid).unwrap().substate,
+            MotionCommand(RELEASE)
+        );
+        assert_eq!(playback.locomotion.unwrap().clip.animation_id(), WALK_ANIM);
+    }
+}
+
+/// Remote packets carry the gesture independently of the observer's support state.
+fn remote_gesture_input(command: u32, contact: ContactState) -> RemoteMotionInput {
+    RemoteMotionInput {
+        snapshot: EntityMotionSnapshot {
+            forward_command: Some(InterpretedMotionCommand(command as u16)),
+            ..EntityMotionSnapshot::default()
+        },
+        pose: holtburger_common::position::WorldPosition::default(),
+        contact: MotionContact::RequiresSupport(contact),
+        target: None,
+        frame_policy: RemoteFramePolicy::Command,
+        omega: Vector3::zero(),
+    }
+}
+
+#[test]
+fn remote_gestures_keep_their_clock_through_airborne_admission_and_return() {
+    let catalog = gesture_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = Guid(1);
+    for initial_contact in [ContactState::Grounded, ContactState::Airborne] {
+        let mut registry = MotionRuntimeRegistry::new();
+        // Start with an established airborne observer too: eligibility must not require
+        // its previous ordinary state to be an idle or casting pose.
+        registry.drive_remote(
+            table,
+            guid,
+            remote_gesture_input(STAND, initial_contact),
+            0.1,
+        );
+        for (command, windups) in [(STAND, vec![1, 2]), (RELEASE, vec![]), (STAND, vec![])] {
+            registry.accept_remote(
+                table,
+                guid,
+                remote_gesture_input(command, initial_contact),
+                windups.into_iter().map(|sequence| EntityMotionAction {
+                    command: MotionCommand(WINDUP),
+                    ..action(sequence)
+                }),
+                None,
+            );
+            let mut grounded = registry.get(guid).unwrap().clone();
+            assert_eq!(
+                grounded.motion_playback().unwrap().activity,
+                OrdinaryMotionActivity::Gesture
+            );
+            for contact in [
+                ContactState::Airborne,
+                ContactState::Sliding,
+                ContactState::Grounded,
+            ] {
+                for _ in 0..2 {
+                    grounded.drive(table, order(command), 0.25);
+                    let tick = registry
+                        .drive_remote(table, guid, remote_gesture_input(command, contact), 0.25)
+                        .clone();
+                    let runtime = registry.get(guid).unwrap();
+                    assert_eq!(
+                        runtime.sequence().frame_number(),
+                        grounded.sequence().frame_number()
+                    );
+                    assert_eq!(
+                        runtime
+                            .motion_playback()
+                            .unwrap()
+                            .ordinary
+                            .map(|layer| layer.clip),
+                        grounded
+                            .motion_playback()
+                            .unwrap()
+                            .ordinary
+                            .map(|layer| layer.clip)
+                    );
+                    assert_eq!(tick.hooks, grounded.tick().hooks);
+                    assert_eq!(tick.action_completed, grounded.tick().action_completed);
+                    // The observed leg track cannot mutate the physical source or cast cursor.
+                    let sample = runtime.remote_motion_sample();
+                    registry.present_locomotion(
+                        table,
+                        guid,
+                        order(WALK).with_character_presentation(
+                            CharacterMotionPresentation::resolve(contact, false, false),
+                        ),
+                        0.25,
+                    );
+                    assert_eq!(registry.get(guid).unwrap().remote_motion_sample(), sample);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn remote_airborne_windups_deliver_hooks_once_and_complete() {
+    let mut hooked_action = hook_animation();
+    hooked_action.id = ACTION_ANIM;
+    let catalog = catalog_with_action_animation(COMBAT_STAND, 4.0, hooked_action);
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = Guid(1);
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.accept_remote(
+        table,
+        guid,
+        remote_gesture_input(STAND, ContactState::Airborne),
+        [EntityMotionAction {
+            command: MotionCommand(WINDUP),
+            ..action(1)
+        }],
+        None,
+    );
+    let mut grounded = registry.get(guid).unwrap().clone();
+    let mut hooks = Vec::new();
+    let mut completions = 0;
+    for _ in 0..4 {
+        grounded.drive(table, order(STAND), 0.25);
+        let tick = registry.drive_remote(
+            table,
+            guid,
+            remote_gesture_input(STAND, ContactState::Airborne),
+            0.25,
+        );
+        assert_eq!(tick.hooks, grounded.tick().hooks);
+        assert_eq!(tick.action_completed, grounded.tick().action_completed);
+        hooks.extend(tick.hooks.clone());
+        completions += usize::from(tick.action_completed);
+    }
+    assert!(!hooks.is_empty());
+    assert_eq!(completions, 1);
+}
+
+#[test]
+fn remote_directives_and_unrelated_actions_keep_airborne_priority() {
+    let motion_catalog = gesture_catalog();
+    let table = motion_catalog.table(0x0900_0001).unwrap();
+    let guid = Guid(1);
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.accept_remote(
+        table,
+        guid,
+        remote_gesture_input(RELEASE, ContactState::Airborne),
+        [],
+        None,
+    );
+    let mut directed = remote_gesture_input(RELEASE, ContactState::Airborne);
+    directed.snapshot.directive = Some(crate::entity::EntityMotionDirective::TurnToHeading {
+        admission: EntityMotionAdmission {
+            object_instance_sequence: 1,
+            movement_sequence: 2,
+            server_control_sequence: 3,
+            is_autonomous: false,
+        },
+        params: crate::entity::EntityTurnToParameters {
+            flags: 0,
+            speed: OrderedMotionScalar::from_f32(1.0).unwrap(),
+            desired_heading_degrees: OrderedMotionScalar::from_f32(0.0).unwrap(),
+        },
+    });
+    registry.accept_remote(table, guid, directed, [], None);
+    assert_eq!(
+        registry.state(guid).unwrap().substate,
+        MotionCommand::FALLING
+    );
+
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.enqueue_action(table, guid, action(1));
+    registry.drive(table, guid, MotionOrder::default(), 0.1);
+    registry.accept_remote(
+        table,
+        guid,
+        remote_gesture_input(RELEASE, ContactState::Airborne),
+        [],
+        None,
+    );
+    assert_ne!(
+        registry.state(guid).unwrap().substate,
+        MotionCommand(RELEASE)
+    );
+    assert_eq!(registry.get(guid).unwrap().action_count(), 1);
 }

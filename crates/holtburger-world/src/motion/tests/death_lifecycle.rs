@@ -35,6 +35,7 @@ fn death_catalog(rest_rate: f32) -> MotionSequenceCatalog {
                 HashMap::from([
                     (dead, motion(vec![clip(HOOK_ANIM, 4.0)], None, None)),
                     (ACTION, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
+                    (WINDUP, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
                 ]),
             )]),
         }],
@@ -309,5 +310,59 @@ fn world_creation_update_and_replacement_have_distinct_playback_lifetimes() {
             .tick
             .hooks
             .is_empty()
+    );
+}
+
+#[test]
+fn remote_death_retires_airborne_windups() {
+    let catalog = death_catalog(0.0);
+    let table = catalog.table(TABLE).unwrap();
+    let guid = Guid(1);
+    let mut registry = MotionRuntimeRegistry::new();
+    let input = |command| RemoteMotionInput {
+        snapshot: snapshot(command),
+        pose: WorldPosition::default(),
+        contact: MotionContact::RequiresSupport(ContactState::Airborne),
+        target: None,
+        frame_policy: RemoteFramePolicy::Command,
+        omega: Vector3::zero(),
+    };
+    registry.accept_remote(
+        table,
+        guid,
+        input(InterpretedMotionCommand(STAND as u16)),
+        [EntityMotionAction {
+            command: MotionCommand(WINDUP),
+            ..action(1)
+        }],
+        None,
+    );
+    assert_eq!(registry.get(guid).unwrap().action_count(), 1);
+    registry.accept_remote(
+        table,
+        guid,
+        input(InterpretedMotionCommand(MotionCommand::DEAD.raw() as u16)),
+        [],
+        None,
+    );
+    assert_eq!(registry.get(guid).unwrap().action_count(), 0);
+    for _ in 0..8 {
+        registry.drive_remote(
+            table,
+            guid,
+            input(InterpretedMotionCommand(MotionCommand::DEAD.raw() as u16)),
+            0.25,
+        );
+        assert_eq!(registry.state(guid).unwrap().substate, MotionCommand::DEAD);
+    }
+    assert_eq!(
+        registry
+            .motion_playback(guid)
+            .unwrap()
+            .ordinary
+            .unwrap()
+            .clip
+            .animation_id(),
+        REST
     );
 }

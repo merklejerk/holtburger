@@ -1,3 +1,5 @@
+import { composeHumanoidGesturePose } from "../animation/humanoid-gesture-pose";
+import type { AnimationPoseComposition } from "../animation/humanoid-body-layout";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import {
 	advancePlayingFrame,
@@ -58,7 +60,11 @@ interface OrdinaryPlayback {
 }
 
 /** A node always has at least one playable track. Both tracks share one entity lifetime. */
-type NodeAnimation = { readonly activity: AnimationMotionActivity } & (
+type NodeAnimation = {
+	readonly activity: AnimationMotionActivity;
+	/** Resolved frontend pose policy; semantic visibility still owns all animation hooks. */
+	readonly poseComposition: AnimationPoseComposition;
+} & (
 	| { readonly kind: "ordinary"; readonly ordinary: OrdinaryPlayback }
 	| { readonly kind: "locomotion"; readonly locomotion: AnimationRecord }
 	| {
@@ -88,11 +94,20 @@ function composePlayback(
 	ordinary: OrdinaryPlayback | null,
 	locomotion: AnimationRecord | null,
 	activity: AnimationMotionActivity,
+	poseComposition: AnimationPoseComposition,
 ): NodeAnimation | null {
 	if (ordinary !== null && locomotion !== null)
-		return { kind: "layered", ordinary, locomotion, activity };
-	if (ordinary !== null) return { kind: "ordinary", ordinary, activity };
-	if (locomotion !== null) return { kind: "locomotion", locomotion, activity };
+		return {
+			kind: "layered",
+			ordinary,
+			locomotion,
+			activity,
+			poseComposition,
+		};
+	if (ordinary !== null)
+		return { kind: "ordinary", ordinary, activity, poseComposition };
+	if (locomotion !== null)
+		return { kind: "locomotion", locomotion, activity, poseComposition };
 	return null;
 }
 
@@ -183,6 +198,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		ordinaryUpdate: AnimationLayerUpdate,
 		locomotionUpdate: AnimationLayerUpdate,
 		initialPartToObjectTransforms: readonly Mat4[],
+		poseComposition: AnimationPoseComposition,
 	): void {
 		if (this.#destroyed)
 			throw new Error("Cannot play a clip on destroyed animation playback.");
@@ -237,7 +253,12 @@ export class AnimationSystem<TOwnerId extends string> {
 				: ordinaryRecord === null
 					? null
 					: { current: ordinaryRecord, successor: null };
-		const node = composePlayback(ordinary, locomotion, activity);
+		const node = composePlayback(
+			ordinary,
+			locomotion,
+			activity,
+			poseComposition,
+		);
 		if (node === null) {
 			this.#records.delete(nodeId);
 		} else {
@@ -362,6 +383,7 @@ export class AnimationSystem<TOwnerId extends string> {
 					successor === null ? null : { current: successor, successor: null },
 					locomotion,
 					node.activity,
+					node.poseComposition,
 				);
 				if (next === null) this.#records.delete(nodeId);
 				else {
@@ -402,7 +424,28 @@ export class AnimationSystem<TOwnerId extends string> {
 			const record = this.#records.get(nodeId);
 			if (!record)
 				throw new Error(`Animation sample request contains unknown ${nodeId}.`);
-			return this.#sample(nodeId, selectedPlayback(record));
+			const selected = selectedPlayback(record);
+			const sample = this.#sample(nodeId, selected);
+			if (
+				record.kind !== "layered" ||
+				record.poseComposition.kind === "ordinary" ||
+				selected === record.locomotion ||
+				(record.activity !== "gesture" && record.ordinary.successor === null)
+			)
+				return sample;
+			const locomotionPose = this.#samplePartPose(record.locomotion);
+			return {
+				...sample,
+				articulatedPose: {
+					...sample.articulatedPose,
+					partToObjectTransforms: composeHumanoidGesturePose(
+						sample.articulatedPose.partToObjectTransforms,
+						locomotionPose,
+						record.poseComposition.layout,
+						record.poseComposition.chestLocomotionWeight,
+					),
+				},
+			};
 		});
 		this.#diagnostics = {
 			...this.#diagnostics,
@@ -452,6 +495,7 @@ export class AnimationSystem<TOwnerId extends string> {
 					kind: "ordinary",
 					ordinary: { current: record, successor: null },
 					activity: "explicit",
+					poseComposition: { kind: "ordinary" },
 				});
 				this.#stagedNodeIds.add(nodeId);
 				samples.push(this.#sample(nodeId, record));

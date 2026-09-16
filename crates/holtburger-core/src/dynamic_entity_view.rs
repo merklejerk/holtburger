@@ -367,6 +367,8 @@ pub struct DynamicEntityAdvance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityMotion {
+    /// Whether independent movement is commanded now, rather than merely retaining an idle/stop clip.
+    pub locomotion_command_active: bool,
     /// Accepted ordinary command/action playback.
     pub ordinary: Option<DynamicEntityMotionLayer>,
     /// Independent locomotion, including while hidden by a gesture.
@@ -406,6 +408,7 @@ impl From<MotionPlaybackLayer> for DynamicEntityMotionLayer {
 impl From<MotionPlayback> for DynamicEntityMotion {
     fn from(playback: MotionPlayback) -> Self {
         Self {
+            locomotion_command_active: playback.locomotion_command_active,
             ordinary: playback.ordinary.map(Into::into),
             locomotion: playback.locomotion.map(Into::into),
             activity: match playback.activity {

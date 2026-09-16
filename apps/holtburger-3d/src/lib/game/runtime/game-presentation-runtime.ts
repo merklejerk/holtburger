@@ -1,3 +1,7 @@
+import {
+	resolveHumanoidBodyLayout,
+	type HumanoidBodyLayout,
+} from "../animation/humanoid-body-layout";
 import { OceanBackdrop } from "../terrain/ocean-backdrop";
 import type { SetupSidewaysSpan } from "../resolution/presentation";
 import { createLandblockWorldOrigin } from "../landblocks";
@@ -389,6 +393,8 @@ interface PendingCommitArtifact {
 }
 
 interface DynamicEntityPresentationRecord {
+	/** Composition compatibility of the currently committed setup, resolved once per visual. */
+	bodyLayout: HumanoidBodyLayout | null;
 	readonly generation: number;
 	/**
 	 * Dynamics owner generation this node's behavior targets carry.
@@ -2393,6 +2399,7 @@ export class GamePresentationRuntime {
 	#applyDynamicEntityMotion(
 		installed: DynamicEntityPresentationRecord,
 		motion: DynamicEntityMotion | null,
+		entityClass: DynamicEntityView["presentation"]["entityClass"],
 	): void {
 		if (motion === null && installed.motionState === null) return;
 		const ordinary = this.#resolveMotionLayer(
@@ -2415,6 +2422,18 @@ export class GamePresentationRuntime {
 			ordinary.update,
 			locomotion.update,
 			this.#dynamics.getPartToObjectTransforms(installed.nodeId),
+			SHARED_FRONTEND_TUNING.animationPresentation.splitPlayerBody &&
+				motion?.locomotionCommandActive === true &&
+				entityClass === "player" &&
+				installed.bodyLayout !== null
+				? {
+						kind: "humanoid-gesture",
+						layout: installed.bodyLayout,
+						chestLocomotionWeight:
+							SHARED_FRONTEND_TUNING.animationPresentation
+								.chestLocomotionWeight,
+					}
+				: { kind: "ordinary" },
 		);
 		installed.motionState =
 			motion === null
@@ -2507,6 +2526,10 @@ export class GamePresentationRuntime {
 						return;
 					replacement.commit();
 					live.visualKey = record.visualKey;
+					live.bodyLayout = resolveHumanoidBodyLayout(
+						resolved.presentation.parts.length,
+						resolved.partParents,
+					);
 					this.#applyDynamicEntityState(live, record);
 				} finally {
 					replacement.release();
@@ -2539,6 +2562,10 @@ export class GamePresentationRuntime {
 		if (preparedEntity === undefined)
 			throw new Error("Committed dynamic entity has no prepared source.");
 		const installed: DynamicEntityPresentationRecord = {
+			bodyLayout: resolveHumanoidBodyLayout(
+				resolved.presentation.parts.length,
+				resolved.partParents,
+			),
 			behaviorGeneration: activation.generation,
 			generation: entity.generation,
 			nodeId,
@@ -2645,7 +2672,11 @@ export class GamePresentationRuntime {
 			installed.presentationStateIdentity = identity;
 		}
 		this.#dynamics.updateNameplateContent(installed.nodeId, entity.display);
-		this.#applyDynamicEntityMotion(installed, entity.motion);
+		this.#applyDynamicEntityMotion(
+			installed,
+			entity.motion,
+			entity.presentation.entityClass,
+		);
 	}
 
 	#retainSpawnedVisual(

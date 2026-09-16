@@ -34,6 +34,7 @@ function buildAnimationSystem() {
 			{ kind: "install", clip: wholeAnimationClip(testAnimation()) },
 			{ kind: "remove" },
 			[Mat4.identity()],
+			{ kind: "ordinary" },
 		);
 	};
 	return { play, system };

@@ -193,6 +193,7 @@ impl ObjectResourceClosure {
             "parts": parts,
             "lights": setup_lights(&setup_model),
             "holdingLocations": setup_holding_locations(&setup_model)?,
+            "partParents": setup_model.parent_index,
             "placementFrames": setup_placement_frames(&setup_model),
             "defaultAnimationId": setup_model.default_animation.map(dat_id),
             "defaultMotionTableId": setup_model.default_motion_table.map(dat_id),

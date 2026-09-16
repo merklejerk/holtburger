@@ -43,6 +43,7 @@ describe("decodeSetupVisual", () => {
 								coneAngle: 0,
 							},
 						],
+						partParents: [],
 						holdingLocations: [],
 						placementFrames: [{ placementId: 0, frames: [] }],
 						defaultAnimationId: "0x03000001",

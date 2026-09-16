@@ -478,6 +478,7 @@ function buildResponse(
 				],
 				lights: options.lights ?? [],
 				holdingLocations: options.holdingLocations ?? [],
+				partParents: [0xffffffff],
 				placementFrames: options.placementFrames ?? [
 					{
 						placementId: 0,

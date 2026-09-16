@@ -79,6 +79,8 @@ pub struct BodyMotionRuntime {
 /// Independent selection and cursor; action ownership remains in `BodyMotionRuntime`.
 #[derive(Debug, Clone)]
 struct LocomotionPlayback {
+    /// A forward, sidestep, or turn command is currently requested, excluding retained idle/stop playback.
+    command_active: bool,
     /// Selected locomotion channels, independent of the ordinary command state.
     state: MotionState,
     /// Cursor advanced by its owner, preserving physical transitions for manual movement.
@@ -108,6 +110,7 @@ impl LocomotionPlayback {
             state,
             sequence,
             authority,
+            command_active: false,
         }
     }
 }
@@ -214,6 +217,8 @@ pub struct MotionPlaybackLayer {
 /// Both available playback descriptions; this contract does not choose the displayed layer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPlayback {
+    /// Active independent movement intent; retained idle and stop clips do not imply a command.
+    pub locomotion_command_active: bool,
     /// Current accepted command/action playback, if it has animation content.
     pub ordinary: Option<MotionPlaybackLayer>,
     /// Independent manual or observed locomotion, even while an action is active.
@@ -453,6 +458,10 @@ impl BodyMotionRuntime {
             OrdinaryMotionActivity::Locomotion
         };
         Some(MotionPlayback {
+            locomotion_command_active: self
+                .locomotion
+                .as_ref()
+                .is_some_and(|track| track.command_active),
             ordinary,
             locomotion,
             activity,
@@ -474,6 +483,8 @@ impl BodyMotionRuntime {
             LocomotionPlayback::new(table, LocomotionAuthority::Presentation)
         });
         locomotion.authority = LocomotionAuthority::Presentation;
+        locomotion.command_active =
+            order.forward.is_some() || order.sidestep.is_some() || order.turn.is_some();
         let unmodelled = apply_order(
             table,
             &mut locomotion.state,
@@ -646,6 +657,7 @@ impl BodyMotionRuntime {
             &mut locomotion.sequence,
             order,
         );
+        locomotion.command_active = moving;
         // Inspect the transition before advancing: its final moving interval still belongs to
         // locomotion even if advancement reaches the idle cycle in this tick.
         let manual_displacement = moving

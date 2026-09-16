@@ -339,6 +339,10 @@ export interface FrontendTuning {
 	};
 	/** Sampling policy for animated roots omitted by the previous frame. */
 	readonly animationPresentation: {
+		/** Enable humanoid player gesture and locomotion pose composition. */
+		readonly splitPlayerBody: boolean;
+		/** Chest rotation blend in [0, 1]; the upper body moves with the adjusted chest. */
+		readonly chestLocomotionWeight: number;
 		/** Maximum interval between offscreen animation samples. */
 		readonly offscreenSampleIntervalSeconds: number;
 	};

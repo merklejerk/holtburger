@@ -186,6 +186,7 @@ describe("dynamic-entity view contract", () => {
 					completion: "loop",
 				},
 			},
+			locomotionCommandActive: true,
 			activity: "gesture",
 		};
 		expect(decodeDynamicEntityView({ ...entity(1, 1), motion }).motion).toEqual(

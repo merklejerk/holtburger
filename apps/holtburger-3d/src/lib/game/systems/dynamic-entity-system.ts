@@ -628,7 +628,9 @@ export class DynamicEntitySystem<
 				entity.attachmentFrames = attachmentFrames;
 				entity.motionPlayback = visual.motionPlayback;
 				entity.preparedAnimation = visual.animation;
-				entity.cullingBounds = visual.animation.localBounds;
+				entity.cullingBounds = visual.animation.localBounds
+					.clone()
+					.union(rigidBounds);
 				entity.rigidPresentationBounds = rigidBounds;
 				entity.publishedPresentationBounds = expandedBounds;
 				entity.selectionGeometryMorphology =
@@ -1218,7 +1220,7 @@ export class DynamicEntitySystem<
 	/**
 	 * Fold the current particle envelope into every bounds that culls this entity.
 	 *
-	 * Two independent culls read two different bounds: the scene graph's pose-independent broadphase
+	 * Two independent culls read two different bounds: the scene graph's conservative broadphase
 	 * bounds, and the per-pose presentation bounds behind the renderer's footprint test. An envelope
 	 * applied to only one of them still loses the whole swarm at the other, which is exactly what
 	 * happened — the mesh left the broadphase frustum while its particles were still on screen.
@@ -1493,7 +1495,7 @@ export class DynamicEntitySystem<
 					`Static-fallback entity ${entity.rootNodeId} received an animated pose.`,
 				);
 			// Assigned before the first sample so every `#applySample` can publish an envelope.
-			entity.cullingBounds = animation.localBounds;
+			entity.cullingBounds = animation.localBounds.clone();
 			this.#publishCullingBounds(entity);
 			if (sample) {
 				this.#refreshParticleEnvelope(entity);
@@ -1588,6 +1590,24 @@ export class DynamicEntitySystem<
 			visualRootTransform,
 			entity.rigidPresentationBounds,
 		);
+		const cullingBounds = entity.cullingBounds;
+		if (cullingBounds === null)
+			throw new Error(
+				"Dynamic pose publication requires prepared culling bounds.",
+			);
+		// Composing independently authored poses can exceed either clip's prepared sweep.
+		// Retain the union for this visual lifetime so broadphase selection covers every sampled pose.
+		if (
+			rigidPresentationBounds.min.x < cullingBounds.min.x ||
+			rigidPresentationBounds.min.y < cullingBounds.min.y ||
+			rigidPresentationBounds.min.z < cullingBounds.min.z ||
+			rigidPresentationBounds.max.x > cullingBounds.max.x ||
+			rigidPresentationBounds.max.y > cullingBounds.max.y ||
+			rigidPresentationBounds.max.z > cullingBounds.max.z
+		) {
+			cullingBounds.union(rigidPresentationBounds);
+			this.#publishCullingBounds(entity);
+		}
 		const publishedPresentationBounds = expandBounds(
 			rigidPresentationBounds,
 			entity.appliedEnvelopeRadius,

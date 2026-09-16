@@ -1,3 +1,4 @@
+import { HUMANOID_BODY_LAYOUT } from "../animation/humanoid-body-layout";
 import type {
 	BehaviorEventRouter,
 	BehaviorObservation,
@@ -383,6 +384,7 @@ describe("AnimationSystem", () => {
 			},
 			{ kind: "remove" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0);
 		let expectedFrame = 0;
@@ -402,6 +404,7 @@ describe("AnimationSystem", () => {
 				{ kind: "retime", framesPerSecond: speed },
 				{ kind: "unchanged" },
 				initialPose(),
+				{ kind: "ordinary" },
 			);
 		}
 	});
@@ -424,6 +427,7 @@ describe("AnimationSystem", () => {
 			},
 			{ kind: "remove" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 
 		const sample = requiredAt(advanceAndSample(system, 0), 0);
@@ -444,6 +448,7 @@ describe("AnimationSystem", () => {
 				{ kind: "install", clip: playingClip(animation, 0, 0, 30, "loop") },
 				{ kind: "remove" },
 				initialPose(2),
+				{ kind: "ordinary" },
 			);
 
 		play(fixedPoseAnimation("0x03000010", [1, 9]));
@@ -488,6 +493,7 @@ describe("AnimationSystem", () => {
 			{ kind: "install", clip: playingClip(animation, 0, 3, -30, "loop") },
 			{ kind: "remove" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 
 		// A reversed clip enters just inside its high frame rather than resuming where it was.
@@ -514,6 +520,7 @@ describe("AnimationSystem", () => {
 			{ kind: "install", clip: playingClip(animation, 0, 3, -30, "hold") },
 			{ kind: "remove" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 
 		advanceAndSample(system, 0);
@@ -544,6 +551,7 @@ describe("AnimationSystem", () => {
 				{ kind: "install", clip: playingClip(animation, 1, 1, 30, "loop") },
 				{ kind: "remove" },
 				initialPose(),
+				{ kind: "ordinary" },
 			),
 		).toThrow("names generation");
 		const sample = requiredAt(advanceAndSample(system, 0), 0);
@@ -566,6 +574,7 @@ describe("AnimationSystem", () => {
 			{ kind: "install", clip: playingClip(animation, 0, 1, 30, "loop") },
 			{ kind: "remove" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 
 		expect(() => system.sample(frame, ["scene-node:1"])).toThrow(
@@ -759,6 +768,113 @@ function animationWithInitialTransparency(): PreparedAnimation {
 }
 
 describe("independent gesture and locomotion playback", () => {
+	it("composes partial gesture clips without dispatching locomotion hooks", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		const layout = HUMANOID_BODY_LAYOUT;
+		const gesturePartCount = 17;
+		const base = testAnimation(Vec3.zero());
+		const gesture: PreparedAnimation = {
+			...base,
+			id: "0x03000020",
+			partCount: gesturePartCount,
+			partFrames: base.partFrames.flatMap((frame) =>
+				Array.from({ length: gesturePartCount }, () => frame),
+			),
+		};
+		const locomotion: PreparedAnimation = {
+			...base,
+			id: "0x03000021",
+			partCount: layout.partSources.length,
+			partFrames: base.partFrames.flatMap((frame) =>
+				layout.partSources.map(() => frame),
+			),
+		};
+		installEffectState(effects, target.targetId, layout.partSources.length);
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "install", clip: playingClip(gesture, 0, 3, 30, "hold") },
+			{ kind: "install", clip: playingClip(locomotion, 0, 3, 30, "loop") },
+			initialPose(layout.partSources.length),
+			{ kind: "humanoid-gesture", layout, chestLocomotionWeight: 0.5 },
+		);
+		advanceAndSample(system, 0);
+		const sample = requiredAt(advanceAndSample(system, 0.1), 0);
+		expect(sample.articulatedPose.partToObjectTransforms).toHaveLength(
+			layout.partSources.length,
+		);
+		expect(sample.articulatedPose.partToObjectTransforms[25]?.m41).toBeCloseTo(
+			3,
+		);
+		expect(sample.articulatedPose.partToObjectTransforms[29]?.m41).toBeCloseTo(
+			0,
+		);
+		expect(observations().length).toBeGreaterThan(0);
+		expect(
+			observations().every((entry) => entry.provenance.assetId === gesture.id),
+		).toBe(true);
+	});
+
+	it.each(["gesture", "explicit"] as const)(
+		"composes a complete humanoid pose during %s",
+		(activity) => {
+			const effects = new EffectSystem();
+			const system = buildAnimationSystemOver(effects);
+			const target = testTarget("scene-node:1");
+			const layout = HUMANOID_BODY_LAYOUT;
+			const gestureTranslations = layout.partSources.map(
+				(_, index) => 10 + 10 * index,
+			);
+			const locomotionTranslations = layout.partSources.map(
+				(_, index) => 1 + index,
+			);
+			const gesture = fixedPoseAnimation("0x03000020", gestureTranslations);
+			const locomotion = fixedPoseAnimation(
+				"0x03000021",
+				locomotionTranslations,
+			);
+			installEffectState(effects, target.targetId, layout.partSources.length);
+			system.applyMotion(
+				"owner",
+				target,
+				activity,
+				{ kind: "install", clip: playingClip(gesture, 0, 0, 0, "hold") },
+				{ kind: "install", clip: playingClip(locomotion, 0, 0, 0, "loop") },
+				initialPose(layout.partSources.length),
+				{ kind: "humanoid-gesture", layout, chestLocomotionWeight: 0.5 },
+			);
+			const sample = requiredAt(advanceAndSample(system, 0), 0);
+			expect(
+				sample.articulatedPose.partToObjectTransforms.map((part) => part.m41),
+			).toEqual(
+				activity === "explicit"
+					? gestureTranslations
+					: layout.partSources.map((source, index) =>
+							source === "locomotion" ? 1 + index : 1 + 10 * index,
+						),
+			);
+			// Disable composition without replacing either track: the full authored gesture returns.
+			system.applyMotion(
+				"owner",
+				target,
+				activity,
+				{ kind: "unchanged" },
+				{ kind: "unchanged" },
+				initialPose(layout.partSources.length),
+				{ kind: "ordinary" },
+			);
+			expect(
+				requiredAt(
+					advanceAndSample(system, 0.1),
+					0,
+				).articulatedPose.partToObjectTransforms.map((part) => part.m41),
+			).toEqual(gestureTranslations);
+		},
+	);
+
 	it("reveals the running locomotion cursor without dispatching its hidden hooks", () => {
 		const effects = new EffectSystem();
 		const system = buildAnimationSystemOver(effects);
@@ -785,6 +901,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "install", clip: gesture },
 			{ kind: "install", clip: locomotion },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0);
 		const hidden = requiredAt(advanceAndSample(system, 0.2), 0);
@@ -797,6 +914,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "remove" },
 			{ kind: "unchanged" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		const revealed = requiredAt(advanceAndSample(system, 0.2), 0);
 		expect(revealed.articulatedPose.partToObjectTransforms[0]?.m41).toBeCloseTo(
@@ -825,6 +943,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "install", clip: gesture },
 			{ kind: "install", clip: forward },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0);
 		advanceAndSample(system, 0.1);
@@ -835,6 +954,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "unchanged" },
 			{ kind: "install", clip: playingClip(animation, 0, 3, -10, "loop") },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0.1);
 		const stillGesture = requiredAt(advanceAndSample(system, 0.2), 0);
@@ -851,6 +971,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "remove" },
 			{ kind: "unchanged" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		expect(
 			requiredAt(advanceAndSample(system, 0.2), 0).articulatedPose
@@ -864,6 +985,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "install", clip: gesture },
 			{ kind: "install", clip: playingClip(animation, 0, 3, 10, "hold") },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0.2);
 		advanceAndSample(system, 0.6);
@@ -874,6 +996,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "remove" },
 			{ kind: "unchanged" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		expect(
 			requiredAt(advanceAndSample(system, 0.6), 0).articulatedPose
@@ -895,6 +1018,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "install", clip: playingClip(animation, 0, 3, 10, "hold") },
 			{ kind: "install", clip: playingClip(animation, 0, 3, 6, "loop") },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0);
 		advanceAndSample(system, 0.1);
@@ -914,6 +1038,7 @@ describe("independent gesture and locomotion playback", () => {
 			},
 			{ kind: "unchanged" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		expect(
 			requiredAt(advanceAndSample(system, 0.2), 0).articulatedPose
@@ -964,6 +1089,7 @@ describe("independent gesture and locomotion playback", () => {
 				{ kind: "install", clip: playingClip(gesture, 0, 3, 10, "hold") },
 				{ kind: "remove" },
 				initialPose(2),
+				{ kind: "ordinary" },
 			);
 			advanceAndSample(system, 0);
 			advanceAndSample(system, 0.1);
@@ -974,6 +1100,7 @@ describe("independent gesture and locomotion playback", () => {
 				{ kind: "install", clip: partial },
 				{ kind: "remove" },
 				initialPose(2),
+				{ kind: "ordinary" },
 			);
 			advanceAndSample(system, 0.2);
 			if (retirement === "replacement") {
@@ -984,6 +1111,7 @@ describe("independent gesture and locomotion playback", () => {
 					{ kind: "install", clip: partial },
 					{ kind: "remove" },
 					initialPose(2),
+					{ kind: "ordinary" },
 				);
 			}
 			const sample = requiredAt(
@@ -1010,6 +1138,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "install", clip: playingClip(animation, 0, 3, 10, "hold") },
 			{ kind: "install", clip: playingClip(animation, 0, 3, 6, "loop") },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		advanceAndSample(system, 0);
 		advanceAndSample(system, 0.1);
@@ -1020,6 +1149,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "remove" },
 			{ kind: "unchanged" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		const replacement = playingClip(
 			fixedPoseAnimation("0x03000022", [9]),
@@ -1035,6 +1165,7 @@ describe("independent gesture and locomotion playback", () => {
 			{ kind: "install", clip: replacement },
 			{ kind: "unchanged" },
 			initialPose(),
+			{ kind: "ordinary" },
 		);
 		expect(
 			requiredAt(advanceAndSample(system, 0.1), 0).articulatedPose
@@ -1068,6 +1199,7 @@ describe("independent gesture and locomotion playback", () => {
 					clip: playingClip(testAnimation(Vec3.zero()), 0, 3, 60, "loop"),
 				},
 				initialPose(),
+				{ kind: "ordinary" },
 			);
 			advanceAndSample(system, 0);
 			advanceAndSample(system, 0.02);
@@ -1078,6 +1210,7 @@ describe("independent gesture and locomotion playback", () => {
 				{ kind: "unchanged" },
 				{ kind: "retime", framesPerSecond: 30 },
 				initialPose(),
+				{ kind: "ordinary" },
 			);
 			expect(observations()).toHaveLength(0);
 			system.applyMotion(
@@ -1087,6 +1220,7 @@ describe("independent gesture and locomotion playback", () => {
 				{ kind: "remove" },
 				{ kind: "unchanged" },
 				initialPose(),
+				{ kind: "ordinary" },
 			);
 			expect(
 				requiredAt(advanceAndSample(system, 0.02), 0).articulatedPose

@@ -1,3 +1,4 @@
+import { HUMANOID_TEST_PARENTS } from "../animation/humanoid-body-test-fixture";
 import { PARTICLE_RECORD_STRIDE_FLOATS } from "../behavior/particle-record-slots";
 import { acVector3, sceneVec3, sceneVector3 } from "../../assets/ac-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
@@ -1307,6 +1308,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			if (entity.motion?.ordinary) {
 				entity.motion = {
 					...entity.motion,
+					locomotionCommandActive: true,
 					activity: "gesture",
 					locomotion: { ...entity.motion.ordinary, playbackId: "2" },
 				};
@@ -1835,25 +1837,32 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
-	it.each(["retime", "reverse", "stop"] as const)(
-		"preserves independent hidden locomotion through %s and snapshots, then reveals its local cursor",
-		async (change) => {
+	it.each([
+		{ change: "retime", entityClass: "player" },
+		{ change: "reverse", entityClass: "player" },
+		{ change: "stop", entityClass: "player" },
+		{ change: "retime", entityClass: "mob" },
+	] as const)(
+		"preserves independent locomotion through $change and snapshots for $entityClass",
+		async ({ change, entityClass }) => {
 			const runtime = await buildSpawnRuntime(
-				{ load: async () => appearanceVisual(1) },
+				{ load: async () => humanoidVisual() },
 				{
 					...MOTION_TABLE_ANIMATION_SOURCE,
 					async loadAnimation(id) {
 						return {
 							id,
 							frameCount: 4,
-							partCount: 1,
+							partCount: HUMANOID_TEST_PARENTS.length,
 							positionFrames: [],
 							hooks: [],
-							partFrames: [0, 1, 2, 3].map((x) => {
-								const frame = Mat4.identity();
-								frame.m41 = x;
-								return frame;
-							}),
+							partFrames: [0, 1, 2, 3].flatMap((x) =>
+								Array.from({ length: HUMANOID_TEST_PARENTS.length }, () => {
+									const frame = Mat4.identity();
+									frame.m41 = x;
+									return frame;
+								}),
+							),
 						};
 					},
 				},
@@ -1882,8 +1891,14 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			};
 			const entity: DynamicEntityView = {
 				...motionDrivenEntity(1, null),
-				motion: { activity: "gesture", ordinary, locomotion },
+				motion: {
+					locomotionCommandActive: true,
+					activity: "gesture",
+					ordinary,
+					locomotion,
+				},
 			};
+			entity.presentation.entityClass = entityClass;
 			const partX = () => {
 				const selected = runtime.selectedEntityPresentationState(
 					entity.identity.guid,
@@ -1895,9 +1910,14 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			await runtime.replaceDynamicEntitySnapshot([entity]);
 			setTestCamera(runtime, SPAWN_TEST_CAMERA);
 			runtime.render(0);
-			const gestureX = partX();
+			const splitBody =
+				SHARED_FRONTEND_TUNING.animationPresentation.splitPlayerBody &&
+				entityClass === "player";
+			// All fixture parts share a translation: composition displays locomotion
+			// immediately, while the original selection holds the gesture's frame 3.
+			const gestureX = partX() + (splitBody ? 3 : 0);
 			runtime.render(0.25);
-			expect(partX()).toBeCloseTo(gestureX);
+			expect(partX()).toBeCloseTo(gestureX - (splitBody ? 2 : 0));
 			const changed = {
 				playbackId: change === "retime" ? locomotion.playbackId : "3",
 				clip: {
@@ -1908,15 +1928,45 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			};
 			const updated: DynamicEntityView = {
 				...entity,
-				motion: { activity: "gesture", ordinary, locomotion: changed },
+				motion: {
+					locomotionCommandActive: true,
+					activity: "gesture",
+					ordinary,
+					locomotion: changed,
+				},
 			};
 			await runtime.replaceDynamicEntitySnapshot([updated]);
 			runtime.render(0.25);
 			runtime.render(0.375);
+			expect(partX()).toBeCloseTo(
+				splitBody
+					? gestureX -
+							3 +
+							(change === "retime" ? 2 : change === "reverse" ? 3 : 1)
+					: gestureX,
+			);
+			// Releasing input must restore the full gesture even when both clip identities survive.
+			await runtime.replaceDynamicEntitySnapshot([
+				{
+					...updated,
+					motion: {
+						activity: "gesture",
+						ordinary,
+						locomotion: changed,
+						locomotionCommandActive: false,
+					},
+				},
+			]);
+			runtime.render(0.375);
 			expect(partX()).toBeCloseTo(gestureX);
 			const revealed: DynamicEntityView = {
 				...entity,
-				motion: { activity: "locomotion", ordinary: null, locomotion: changed },
+				motion: {
+					locomotionCommandActive: true,
+					activity: "locomotion",
+					ordinary: null,
+					locomotion: changed,
+				},
 			};
 			await runtime.replaceDynamicEntitySnapshot([revealed]);
 			runtime.render(0.375);
@@ -2941,6 +2991,7 @@ function motionDrivenEntity(
 				: {
 						ordinary: { playbackId: "1", clip: motion },
 						locomotion: null,
+						locomotionCommandActive: true,
 						activity: "explicit",
 					},
 		presentation: {
@@ -3183,6 +3234,33 @@ function appearanceVisual(radius: number): DecodedStaticPresentation {
 	};
 }
 
+/** Full humanoid setup with uniform geometry and poses for track-selection integration tests. */
+function humanoidVisual(): DecodedStaticPresentation {
+	const base = appearanceVisual(1);
+	const part = base.presentation.parts[0];
+	if (!part) throw new Error("Humanoid fixture requires base geometry.");
+	return {
+		...base,
+		partParents: HUMANOID_TEST_PARENTS,
+		presentation: {
+			...base.presentation,
+			parts: HUMANOID_TEST_PARENTS.map((_, partIndex) => ({
+				...part,
+				partIndex,
+			})),
+			placementPoses: new Map([
+				[
+					0,
+					{
+						placementId: 0,
+						partTransforms: HUMANOID_TEST_PARENTS.map(() => Mat4.identity()),
+					},
+				],
+			]),
+		},
+	};
+}
+
 function spawnedVisual(): DecodedStaticPresentation {
 	return {
 		behavior: {
@@ -3238,6 +3316,7 @@ function spawnedVisual(): DecodedStaticPresentation {
 			sortingBounds: null,
 			sourceAssetId: "0x02000001",
 		},
+		partParents: [],
 		setupId: "0x02000001",
 	};
 }

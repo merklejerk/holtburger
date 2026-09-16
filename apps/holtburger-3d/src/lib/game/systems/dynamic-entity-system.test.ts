@@ -1,3 +1,5 @@
+import { HUMANOID_BODY_LAYOUT } from "../animation/humanoid-body-layout";
+import { composeHumanoidGesturePose } from "../animation/humanoid-gesture-pose";
 import { describe, expect, it } from "vitest";
 import { expandBounds } from "../math/geometry-utils";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -41,6 +43,83 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it("publishes composed attachment transforms and expands broadphase coverage", async () => {
+		const { system, scene } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			new FixtureAnimationSource(HUMANOID_BODY_LAYOUT.partSources.length),
+		);
+		const indices = HUMANOID_BODY_LAYOUT.partSources.map((_, index) => index);
+		const original = source("composed", indices);
+		const installation = system.replaceOwner("owner", [original]);
+		await installation.ready;
+		const prepared = requiredAt(installation.getPreparedEntities(), 0);
+		commit(installation);
+		const root = requiredAt(installation.nodeIds, 0);
+		const gesture = indices.map(() => Mat4.identity());
+		const locomotion = indices.map(() => {
+			const pose = Mat4.identity();
+			pose.m41 = 100;
+			return pose;
+		});
+		const composed = composeHumanoidGesturePose(
+			gesture,
+			locomotion,
+			HUMANOID_BODY_LAYOUT,
+			0.5,
+		);
+		const sample = presentationSample(prepared, 0);
+		const authoredBounds = system
+			.getPreparedAnimation(root)
+			?.localBounds.clone();
+		if (!authoredBounds) throw new Error("Fixture has no prepared bounds.");
+		system.publishPresentation([
+			{
+				...sample,
+				articulatedPose: {
+					authoredRootTransform: null,
+					partToObjectTransforms: composed,
+				},
+			},
+		]);
+		const hand = system.requestPartNode(root, 15);
+		if (hand === null) throw new Error("Humanoid fixture has no hand frame.");
+		expect(scene.getResolvedPlacement(hand)?.localToLandblock).toEqual(
+			composed[15],
+		);
+		const bounds = system.getPublishedRigidPresentationBounds(root);
+		const broadphase = scene.getNode(root)?.localBounds;
+		if (!bounds || !broadphase)
+			throw new Error("Humanoid fixture has no published bounds.");
+		expect(bounds.min.x).toBeGreaterThan(90);
+		expect(broadphase.max.x).toBeGreaterThanOrEqual(bounds.max.x);
+		expect(broadphase.min.x).toBeLessThanOrEqual(bounds.min.x);
+		expect(system.getPreparedAnimation(root)?.localBounds).toEqual(
+			authoredBounds,
+		);
+		const replacement = await system.stageVisualReplacement(
+			"owner",
+			root,
+			original.source,
+		);
+		if (replacement.kind !== "staged")
+			throw new Error("Compatible fixture replacement was rejected.");
+		replacement.commit();
+		replacement.release();
+		expect(system.getPreparedAnimation(root)?.localBounds).toEqual(
+			authoredBounds,
+		);
+		expect(scene.getNode(root)?.localBounds?.max.x).toBeGreaterThanOrEqual(
+			bounds.max.x,
+		);
+		system.updateRootScale(root, 2);
+		expect(scene.getNode(root)?.localBounds?.max.x).toBeGreaterThanOrEqual(
+			bounds.max.x,
+		);
+		expect(system.getPreparedAnimation(root)?.localBounds).toEqual(
+			authoredBounds,
+		);
+	});
+
 	it("initializes a late part request from the current pose and retains its frame until eviction", async () => {
 		const { system, scene } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -1121,7 +1200,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toBe(0);
 	});
 
-	it("publishes pose-local bounds without changing swept scene bounds", async () => {
+	it("retains conservative scene coverage when pose-local bounds shrink", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
 			new FixtureAnimationSource(2),

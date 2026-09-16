@@ -8,6 +8,7 @@ use holtburger_content::{
     ui_assets::{UiAssetReader, UiAssets},
 };
 use holtburger_dat::file_type::SpellTable;
+use holtburger_world::spell::SpellCastingRoute;
 use serde::{Deserialize, Serialize};
 
 use crate::{shared_host_content::SharedHostContent, ui_icons::UiIconSpec};
@@ -56,6 +57,8 @@ pub enum SpellArtwork {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpellDetails {
+    /// Shared ordinary-cast recipient selection, independent of authored recipient masks.
+    pub casting_route: SpellCastingRoute,
     /// Static discovery classifications, independent of artwork.
     pub classification: holtburger_content::spells::classification::SpellClassification,
     /// Authored description.
@@ -122,6 +125,10 @@ fn project_references(
                 id,
                 name: spell.name.to_owned(),
                 details: SpellDetails {
+                    casting_route: SpellCastingRoute::from_decoded_formula(
+                        spell.flags,
+                        spell.components,
+                    ),
                     classification: spell.classification,
                     description: spell.description.to_owned(),
                     school: spell.school,
@@ -207,8 +214,12 @@ pub fn load_spell_components(content: &SharedHostContent) -> Result<Vec<SpellCom
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_content::ui_assets::{UiAssetError, UiImage};
+    use holtburger_content::{
+        spells::classification::SpellRecipientAssociation,
+        ui_assets::{UiAssetError, UiImage},
+    };
     use holtburger_dat::file_type::spell_table::SpellBase;
+    use holtburger_world::spell::SpellInfo;
     use std::{collections::HashMap, sync::Arc};
 
     struct Mappings;
@@ -240,6 +251,7 @@ mod tests {
             id: 1,
             name: "Spell".into(),
             details: SpellDetails {
+                casting_route: SpellCastingRoute::Untargeted,
                 classification: holtburger_content::spells::classification::classify(
                     1,
                     &holtburger_dat::file_type::spell_table::SpellBase::default(),
@@ -258,7 +270,7 @@ mod tests {
             serde_json::to_value(reference).unwrap(),
             serde_json::json!({
                 "kind":"known", "id":1, "name":"Spell",
-                "details":{"classification":{"beneficial":false,"level":null,"target":"untargeted","fellowship":false,"damage":null},"description":"Description", "school":3, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
+                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":3, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
                     "kind":"ready", "spec":{"kind":"spell", "base":1,"background":610,"effects":702,"overlay":704}
                 }
             })
@@ -282,6 +294,62 @@ mod tests {
                     overlay: overlay.and_then(NonZeroU32::new),
                 }
             );
+        }
+    }
+
+    #[test]
+    fn reference_routes_match_casting_despite_authored_recipient_disagreements() {
+        // Synthetic decoded formulas exercise both directions of the observed
+        // Frost Blast / Flame Wave disagreement, plus self-first precedence.
+        for (flags, mask, components, route, recipient) in [
+            (
+                0,
+                0,
+                [1, 1, 1, 1, 0x31, 0, 0, 0],
+                SpellCastingRoute::SelectedTarget,
+                None,
+            ),
+            (
+                0,
+                16,
+                [1, 1, 1, 1, 0x3a, 0, 0, 0],
+                SpellCastingRoute::Untargeted,
+                Some(SpellRecipientAssociation::Creature),
+            ),
+            (
+                8,
+                16,
+                [0; 8],
+                SpellCastingRoute::SelfTarget,
+                Some(SpellRecipientAssociation::Creature),
+            ),
+            (
+                0,
+                6,
+                [1, 1, 1, 1, 0x39, 0, 0, 0],
+                SpellCastingRoute::SelectedTarget,
+                Some(SpellRecipientAssociation::Item),
+            ),
+        ] {
+            let definition = SpellBase {
+                bitfield: flags,
+                non_component_target_type: mask,
+                components,
+                ..SpellBase::default()
+            };
+            let casting_spell = SpellInfo::from(definition.clone());
+            let table = SpellTable {
+                id: SpellTable::FILE_ID,
+                spells: HashMap::from([(1, definition)]),
+                spell_sets: HashMap::new(),
+            };
+            let results = project_references(&table, &mut Mappings, &[1]);
+            let SpellReferenceResult::Known { details, .. } = &results[0] else {
+                panic!("Present spell definition must produce reference details");
+            };
+            assert_eq!(details.casting_route, route);
+            assert_eq!(details.casting_route, casting_spell.casting_route());
+            assert_eq!(details.classification.recipient, recipient);
         }
     }
 

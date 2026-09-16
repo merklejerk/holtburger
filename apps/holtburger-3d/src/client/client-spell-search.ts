@@ -16,10 +16,9 @@ export const SPELL_FILTER_OPTIONS = [
 	["beneficial", "Beneficial", "disposition"],
 	["harmful", "Harmful", "disposition"],
 	["self-target", "Self", "target"],
-	["other", "Other", "target"],
-	["item-target", "Item target", "target"],
+	["selected-target", "Targeted", "target"],
 	["untargeted", "Untargeted", "target"],
-	["fellowship", "Fellowship", "target"],
+	["fellowship", "Fellowship", "fellowship"],
 	["school:4", "Creature", "school"],
 	["school:2", "Life", "school"],
 	["school:3", "Item", "school"],
@@ -34,6 +33,7 @@ export const SPELL_FILTER_OPTIONS = [
 	["piercing", "Piercing", "damage"],
 	["slashing", "Slashing", "damage"],
 	["nether", "Nether", "damage"],
+	["misc", "Misc", "damage"],
 	["level:1", "Level I", "level"],
 	["level:2", "Level II", "level"],
 	["level:3", "Level III", "level"],
@@ -69,7 +69,7 @@ export function spellSearchEntry(
 		tags.add(`school:${details.school}`);
 		if (classification.level !== null)
 			tags.add(`level:${classification.level}`);
-		if (classification.target !== null) tags.add(classification.target);
+		tags.add(details.castingRoute);
 		if (classification.damage !== null) tags.add(classification.damage);
 		if (classification.fellowship) tags.add("fellowship");
 	}

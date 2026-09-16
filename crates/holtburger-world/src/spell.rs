@@ -97,7 +97,8 @@ pub struct SpellInfo {
 }
 
 /// Recipient source for an ordinary spellbook cast, independent of UI selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum SpellCastingRoute {
     /// The caster is the recipient, regardless of selection.
     SelfTarget,
@@ -108,22 +109,25 @@ pub enum SpellCastingRoute {
 }
 
 impl SpellInfo {
+    /// The shared ordinary-cast decision, also exposed to reference views.
+    pub fn casting_route(&self) -> SpellCastingRoute {
+        SpellCastingRoute::from_decoded_formula(self.bitfield, &self.components)
+    }
+}
+
+impl SpellCastingRoute {
     const SELF_TARGETED_FLAG: u32 = 0x8;
 
-    pub fn is_self_targeted(&self) -> bool {
-        self.bitfield & Self::SELF_TARGETED_FLAG != 0
-    }
-
     /// Retail acclient.c:387433 checks self before formula targeting (:429344).
-    /// Discovery's authored target mask is not the casting contract: the local
-    /// 6,266-spell census contains 46 non-self zero/nonzero disagreements.
-    pub fn casting_route(&self) -> SpellCastingRoute {
-        if self.is_self_targeted() {
-            SpellCastingRoute::SelfTarget
-        } else if formula::casting_target_type(&self.components) == 0 {
-            SpellCastingRoute::Untargeted
+    /// Use original decoded slots, never account-customized display formulas.
+    /// Authored recipient masks do not determine whether selection is required.
+    pub fn from_decoded_formula(flags: u32, components: &[u32; 8]) -> Self {
+        if flags & Self::SELF_TARGETED_FLAG != 0 {
+            Self::SelfTarget
+        } else if formula::casting_target_type(components) == 0 {
+            Self::Untargeted
         } else {
-            SpellCastingRoute::SelectedTarget
+            Self::SelectedTarget
         }
     }
 }

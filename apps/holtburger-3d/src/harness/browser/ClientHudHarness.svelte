@@ -1888,8 +1888,14 @@
 								name:
 									id === 2000
 										? "Harm Other I"
-										: `Spell ${String(id).padStart(4, "0")} ${id % 2 === 0 ? "Frost Protection Self" : "Acid Protection Other"}`,
+										: id === 2001
+											? "Impenetrability I"
+											: `Spell ${String(id).padStart(4, "0")} ${id % 2 === 0 ? "Frost Protection Self" : "Acid Protection Other"}`,
 								details: {
+									castingRoute:
+										id !== 2000 && id % 2 === 0
+											? "self-target"
+											: "selected-target",
 									description: "Fixture spell description.",
 									school: id % 2 === 0 ? 2 : 3,
 									baseMana: 10,
@@ -1898,11 +1904,16 @@
 									classification: {
 										beneficial: id !== 2000,
 										level: ((id - 1) % 8) + 1,
-										target:
-											id !== 2000 && id % 2 === 0 ? "self-target" : "other",
+										recipient: "creature",
 										fellowship: false,
 										damage:
-											id === 2000 ? "direct" : id % 2 === 0 ? "frost" : "acid",
+											id === 2000
+												? "direct"
+												: id === 2001
+													? "misc"
+													: id % 2 === 0
+														? "frost"
+														: "acid",
 									},
 								},
 								artwork: {

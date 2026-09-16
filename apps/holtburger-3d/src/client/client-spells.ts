@@ -1,12 +1,57 @@
 import type { SpellSearch } from "./client-spell-search";
 import type { SpellInspectionResult } from "./client-spell-inspection-contract";
 import type {
+	SpellDetails,
 	SpellComponentReference,
 	SpellReference,
 	SpellReferences,
 } from "../app/spell-references";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
+
+/** A list row retains identity even when its definition or artwork is unavailable. */
+export interface SpellRow {
+	/** Stable player-known spell identity. */
+	readonly id: number;
+	/** Authored name or explicit missing-definition label. */
+	readonly name: string;
+	/** Available static examination facts, independent of artwork. */
+	readonly details: SpellDetails | null;
+	/** Consumer-owned icon reference or an actionable diagnostic. */
+	readonly artwork:
+		| { readonly kind: "icon"; readonly key: string }
+		| { readonly kind: "failed"; readonly detail: string };
+}
+
+/** Resolve one compact spell row and acquire artwork for its actual display consumer. */
+export function prepareSpellRow(
+	reference: SpellReference,
+	icons: UiIconRepository,
+	owner: UiIconOwner,
+): SpellRow {
+	if (reference.kind !== "known")
+		return {
+			id: reference.id,
+			name: `Spell ${reference.id}`,
+			details: null,
+			artwork: {
+				kind: "failed",
+				detail:
+					reference.kind === "missing"
+						? "Spell definition is missing."
+						: reference.detail,
+			},
+		};
+	return {
+		id: reference.id,
+		name: reference.name,
+		details: reference.details,
+		artwork:
+			reference.artwork.kind === "ready"
+				? { kind: "icon", key: icons.retain(owner, reference.artwork.spec) }
+				: reference.artwork,
+	};
+}
 
 /** Character-bound details or an explicit query failure. */
 export type SpellInspectionDisplay =

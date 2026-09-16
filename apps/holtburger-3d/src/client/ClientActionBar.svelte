@@ -3,11 +3,10 @@
 	import { APP_INPUT } from "../lib/input/app-input";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
-	import { onDestroy, onMount } from "svelte";
+	import { onMount } from "svelte";
 	import ActionCell from "./ActionCell.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
-	import LayoutHandleIcon from "../app/LayoutHandleIcon.svelte";
-	import { trackPointerGesture } from "../app/pointer-gesture";
+	import ShortcutBarShapeToggle from "./ShortcutBarShapeToggle.svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import {
 		ACTION_SLOT_INDICES,
@@ -65,7 +64,6 @@
 	let surface: HTMLDivElement;
 	let menuOpen = $state(false);
 	let menuButton = $state<HTMLButtonElement | null>(null);
-	let cancelResize: (() => void) | null = null;
 	const grid = $derived(actionBarGrid(bar));
 	let cellSize = $state<number>(CLIENT_ACTION_BAR_TUNING.initialCellSize);
 	// Geometry follows resolved CSS lengths, including live theme changes and non-pixel units.
@@ -115,10 +113,6 @@
 	const resolved = $derived(
 		resolveClientHudPlacement(placement, viewport, minimum),
 	);
-	const resizeTowardCenter = $derived({
-		right: resolved.left + resolved.width / 2 < viewport.width / 2,
-		bottom: resolved.top + resolved.height / 2 < viewport.height / 2,
-	});
 	function activate(slot: ActionSlotIndex, alternate: boolean) {
 		keyboard.returnToGame();
 		onactivate(slot, alternate);
@@ -174,38 +168,7 @@
 				});
 		} else onmenu(operation);
 	}
-	function resize(event: PointerEvent) {
-		if (!editable || event.button !== 0) return;
-		event.preventDefault();
-		event.stopPropagation();
-		const start = bar;
-		const direction = (
-			start.orientation === "horizontal"
-				? resizeTowardCenter.bottom
-				: resizeTowardCenter.right
-		)
-			? 1
-			: -1;
-		const coordinate =
-			start.orientation === "horizontal" ? event.clientY : event.clientX;
-		cancelResize?.();
-		cancelResize = trackPointerGesture(window, event.pointerId, (next) => {
-			const delta =
-				(start.orientation === "horizontal" ? next.clientY : next.clientX) -
-				coordinate;
-			const strips =
-				(start.shape === "single" ? 1 : 2) + (direction * delta) / cellSize;
-			onchange({
-				...start,
-				shape:
-					strips >= CLIENT_ACTION_BAR_TUNING.doubleStripThreshold
-						? "double"
-						: "single",
-			});
-		});
-	}
 	onMount(() => onmount(() => ({ bounds: resolved, preferred: extent })));
-	onDestroy(() => cancelResize?.());
 </script>
 
 <ClientHudPanel
@@ -315,16 +278,15 @@
 				{/each}
 			</div>
 		</div>
-		{#if editable}<button
-				type="button"
-				class="action-resize ui-button ui-icon-button"
-				class:resize-top={bar.orientation === "horizontal" &&
-					!resizeTowardCenter.bottom}
-				class:resize-left={bar.orientation === "vertical" &&
-					!resizeTowardCenter.right}
-				aria-label={`Resize action bar ${sequence}`}
-				onpointerdown={resize}><LayoutHandleIcon action="resize" /></button
-			>{/if}
+		{#if editable}<ShortcutBarShapeToggle
+				label={`Toggle action bar shape ${sequence}`}
+				topInset={0}
+				orientation={bar.orientation}
+				shape={bar.shape}
+				bounds={resolved}
+				{viewport}
+				onchange={(shape) => onchange({ ...bar, shape })}
+			/>{/if}
 	</div>
 </ClientHudPanel>
 {#if menuOpen && menuButton !== null}
@@ -393,22 +355,6 @@
 			padding: 0;
 			border-radius: 0;
 			font-weight: bold;
-		}
-		.action-resize {
-			position: absolute;
-			right: 2px;
-			bottom: 2px;
-			width: 22px;
-			height: 22px;
-			cursor: nwse-resize;
-		}
-		.resize-top {
-			top: 2px;
-			bottom: auto;
-		}
-		.resize-left {
-			left: 2px;
-			right: auto;
 		}
 	}
 </style>

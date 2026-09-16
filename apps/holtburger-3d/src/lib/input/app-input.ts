@@ -35,6 +35,21 @@ export class AppInput {
 		return matchesKey(event, this.configuration.client[action]);
 	}
 
+	/** Resolve spell intent only after keyboard ownership admits game input. */
+	spellBarCommand(event: InputKeyEvent): {
+		readonly kind: "tabs" | "cells";
+		readonly index: InputDigitIndex;
+	} | null {
+		const indices: readonly InputDigitIndex[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+		for (const kind of ["tabs", "cells"] as const) {
+			const index = indices.find((index) =>
+				matchesKey(event, this.configuration.spellBar[kind][index]),
+			);
+			if (index !== undefined) return { kind, index };
+		}
+		return null;
+	}
+
 	/** Resolve a numbered bar's focus chord using the shared installation configuration. */
 	actionBarFocus(index: InputDigitIndex, event: InputKeyEvent): boolean {
 		return matchesKey(event, this.configuration.actionBars.focus[index]);

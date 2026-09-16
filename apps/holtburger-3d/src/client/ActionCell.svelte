@@ -70,7 +70,7 @@
 
 <button
 	type="button"
-	class="action-cell ui-item-cell ui-item-selection ui-hud-button"
+	class="action-cell ui-shortcut-cell ui-item-cell ui-item-selection ui-hud-button"
 	data-action-bar={bar}
 	data-action-cell={digit}
 	style:anchor-name={anchorName}
@@ -110,22 +110,11 @@
 			</svg>
 		</span>{/if}
 	<ItemCountOverlay count={visibleCount} besideStructure={false} />
-	<span class="action-digit" aria-hidden="true">{digit}</span>
+	<span class="ui-shortcut-digit" aria-hidden="true">{digit}</span>
 </button>
 
 <style>
 	@layer components {
-		.action-cell {
-			display: block;
-			overflow: hidden;
-			position: relative;
-			width: 100%;
-			height: 100%;
-			min-width: 0;
-			min-height: 0;
-			padding: var(--ui-item-cell-padding);
-			user-select: none;
-		}
 		.action-equipped {
 			position: absolute;
 			right: 1px;
@@ -171,15 +160,6 @@
 		.action-alternate .alternate-outline {
 			stroke: var(--ui-action-alternate-outline-color);
 			stroke-width: var(--ui-action-alternate-outline-width);
-		}
-		.action-digit {
-			position: absolute;
-			left: 2px;
-			top: 0;
-			font-size: 10px;
-			color: var(--ui-color-text);
-			text-shadow: 0 1px 2px black;
-			pointer-events: none;
 		}
 	}
 </style>

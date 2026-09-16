@@ -1,4 +1,10 @@
 <script lang="ts">
+	import {
+		initialSpellBar,
+		type ClientSpellBarState,
+	} from "./client-spell-bar-state";
+	import type { InputDigitIndex } from "../lib/input/input-contract";
+	import { handleSpellBarKeydown } from "./client-spell-bar-input";
 	import { SpellReferences } from "../app/spell-references";
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientItemInteractions } from "./client-item-interactions";
@@ -101,9 +107,33 @@
 	);
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
+	/** Cold configuration shared by keyboard dispatch and the mounted HUD. */
+	let spellBar = $state<ClientSpellBarState>(initialSpellBar());
+	let hudMode = $state<"runtime" | "layout">("runtime");
+	let spellBarPlayer: number | null = null;
+	function acceptSpellBarPlayer(player: number | null): void {
+		if (player === null || player === spellBarPlayer) return;
+		if (spellBarPlayer !== null) spellBar = initialSpellBar();
+		spellBarPlayer = player;
+	}
+	function selectSpellTab(selected: InputDigitIndex): void {
+		spellBar = { ...spellBar, selected };
+	}
+	function activateSpellCell(slot: InputDigitIndex): void {
+		if (!spellBarEnabled) return;
+		const id = spellBar.tabs[spellBar.selected][slot];
+		if (id !== null && session?.state().knownSpells?.includes(id))
+			void castSpell(id);
+	}
 	let spells = $state<ClientSpellServices | null>(null);
-	/** Event-driven stance consumed only by the shortcut dock. */
+	/** Event-driven stance consumed by combat controls and spell shortcuts. */
 	let combatMode = $state<ClientCombatMode>("unknown");
+	const spellBarEnabled = $derived(
+		lifecycle.kind === "in-world" &&
+			combatMode === "magic" &&
+			hudMode === "runtime",
+	);
+
 	let inventory = $state<ClientInventoryState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
@@ -276,6 +306,7 @@
 				combatMode = event.mode;
 				return;
 			case "current-state":
+				acceptSpellBarPlayer(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
@@ -325,6 +356,9 @@
 				return;
 			case "world-name":
 				worldName = event.name;
+				return;
+			case "local-player-established":
+				acceptSpellBarPlayer(event.identity.playerGuid);
 				return;
 			case "player-entered":
 				if (event.player.playerGuid === session?.state().playerGuid) {
@@ -436,6 +470,15 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (
+			handleSpellBarKeydown(
+				event,
+				spellBarEnabled,
+				selectSpellTab,
+				activateSpellCell,
+			)
+		)
+			return;
 		if (APP_INPUT.shortcut("toggleCombat", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) void toggleCombatMode();
@@ -903,6 +946,8 @@
 			spellState.destroy();
 			spellReferences.dispose();
 			spells = null;
+			spellBar = initialSpellBar();
+			spellBarPlayer = null;
 			inventoryOwner.destroy();
 			inventory = null;
 			icons.dispose();
@@ -952,6 +997,13 @@
 
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
+		{hudMode}
+		onHudModeChange={(mode) => (hudMode = mode)}
+		{spellBar}
+		onSpellBarChange={(value) => (spellBar = value)}
+		{spellBarEnabled}
+		onSelectSpellTab={selectSpellTab}
+		onActivateSpellCell={activateSpellCell}
 		{combatMode}
 		combatEnabled={lifecycle.kind === "in-world"}
 		onToggleCombat={() => void toggleCombatMode()}

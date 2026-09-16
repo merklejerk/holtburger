@@ -103,6 +103,11 @@ export interface InputConfiguration {
 	readonly client: InputBindings<ClientShortcut>;
 	/** Numbered bar/cell bindings and their scoped navigation and modifier policy. */
 	readonly actionBars: ActionBarInputConfiguration;
+	/** Gameplay-only spell shortcuts; focused UI scopes retain priority. */
+	readonly spellBar: {
+		readonly tabs: NumberedInputBindings;
+		readonly cells: NumberedInputBindings;
+	};
 	/** Browser pointer buttons assigned to each viewport gesture. */
 	readonly pointer: Readonly<Record<ViewportPointerAction, readonly number[]>>;
 }

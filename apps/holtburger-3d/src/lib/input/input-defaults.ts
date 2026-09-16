@@ -84,6 +84,73 @@ export const INPUT_DEFAULTS = {
 		/** Scroll toward later messages while chat owns focus. */
 		chatNextPage: [{ key: "PageDown" }],
 	},
+	/** Exact modifier chords for gameplay spell tabs and casting. */
+	spellBar: {
+		tabs: {
+			0: [
+				{ code: "Digit1", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			1: [
+				{ code: "Digit2", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			2: [
+				{ code: "Digit3", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			3: [
+				{ code: "Digit4", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			4: [
+				{ code: "Digit5", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			5: [
+				{ code: "Digit6", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			6: [
+				{ code: "Digit7", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			7: [
+				{ code: "Digit8", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			8: [
+				{ code: "Digit9", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			9: [
+				{ code: "Digit0", shift: true, ctrl: false, alt: false, meta: false },
+			],
+		},
+		cells: {
+			0: [
+				{ code: "Digit1", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			1: [
+				{ code: "Digit2", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			2: [
+				{ code: "Digit3", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			3: [
+				{ code: "Digit4", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			4: [
+				{ code: "Digit5", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			5: [
+				{ code: "Digit6", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			6: [
+				{ code: "Digit7", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			7: [
+				{ code: "Digit8", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			8: [
+				{ code: "Digit9", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			9: [
+				{ code: "Digit0", shift: false, ctrl: false, alt: false, meta: false },
+			],
+		},
+	},
 	/** Action bar shortcuts. Numbered entries use zero-based positions (0 is bar/cell 1, 9 is 0).
 	 * Physical codes keep digits addressable while Shift changes their printed characters.
 	 * Cell/confirm bindings allow modifiers so the alternate-side modifier can be remapped freely.

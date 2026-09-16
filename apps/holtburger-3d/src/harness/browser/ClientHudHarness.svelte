@@ -1,4 +1,11 @@
 <script lang="ts">
+	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
+	import type { InputDigitIndex } from "../../lib/input/input-contract";
+	import {
+		bindSpellCell,
+		initialSpellBar,
+	} from "../../client/client-spell-bar-state";
+
 	import { z } from "zod";
 	import { spellInspectionQuerySchema } from "../../client/client-spell-inspection-contract";
 	import { SpellReferences } from "../../app/spell-references";
@@ -71,6 +78,106 @@
 		type ClientToast,
 	} from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
+
+	let spellBar = $state(initialSpellBar());
+	let hudMode = $state<"runtime" | "layout">("runtime");
+	let spellCombatMode = $state<"peace" | "magic">("peace");
+	const spellBarEnabled = $derived(
+		spellCombatMode === "magic" && hudMode === "runtime",
+	);
+	function selectSpellTab(selected: InputDigitIndex): void {
+		spellBar = { ...spellBar, selected };
+	}
+	function activateSpellCell(slot: InputDigitIndex): void {
+		const id = spellBar.tabs[spellBar.selected][slot];
+		if (
+			spellBarEnabled &&
+			id !== null &&
+			interactionLifecycle.state().knownSpells?.includes(id)
+		)
+			void interactionLifecycle.castSpell(id, selectedGuid);
+	}
+	let releaseSpellKeys: (() => void) | null = null;
+	let releaseSpellReferenceGate: (() => void) | null = null;
+	let closeSpellModal: (() => void) | null = null;
+	const spellBarProbe = {
+		begin: () => {
+			spellBar = initialSpellBar();
+			hudMode = "runtime";
+			spellCombatMode = "magic";
+			emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+			emitInteractionEvent("client-combat-mode-updated", { mode: "magic" });
+			emitInteractionEvent("client-player-spells-updated", {
+				spellIds: [1, 2, 3],
+			});
+			releaseSpellKeys = keyboard.bindGame({
+				keydown: (event) => {
+					handleSpellBarKeydown(
+						event,
+						spellBarEnabled,
+						selectSpellTab,
+						activateSpellCell,
+					);
+				},
+				keyup: () => {},
+				cancel: () => {},
+			});
+			keyboard.returnToGame();
+		},
+		mode: (mode: "peace" | "magic") => {
+			spellCombatMode = mode;
+			emitInteractionEvent("client-combat-mode-updated", { mode });
+		},
+		knowledge: (spellIds: readonly number[]) =>
+			emitInteractionEvent("client-player-spells-updated", { spellIds }),
+		select: (guid: number | null) => {
+			selectedGuid = guid;
+		},
+		bindings: () => spellBar,
+		deferBoundSpell: async () => {
+			releaseSpellReferenceGate = holdSpellReferences();
+			emitInteractionEvent("client-player-spells-updated", {
+				spellIds: [1, 2, 3, 1800],
+			});
+			spellBar = bindSpellCell(spellBar, { tab: 0, slot: 9 }, 1800);
+			await tick();
+		},
+		releaseBoundSpell: async () => {
+			if (releaseSpellReferenceGate === null || spells === null)
+				throw new Error("No deferred spell reference");
+			releaseSpellReferenceGate();
+			releaseSpellReferenceGate = null;
+			await spells.load([1800]);
+			await tick();
+		},
+		modal: (open: boolean) => {
+			if (!open) {
+				closeSpellModal?.();
+				closeSpellModal = null;
+				return;
+			}
+			const element = document.createElement("dialog");
+			element.textContent = "Spell input modal fixture";
+			document.body.append(element);
+			const modal = keyboard.modal(element);
+			closeSpellModal = () => {
+				modal.destroy();
+				element.remove();
+			};
+		},
+		theme: async (standard: boolean) => {
+			if (standard) await uiThemes.replace(defaultUiThemeUrl, null);
+			else await uiThemes.dispose();
+		},
+		end: () => {
+			releaseSpellKeys?.();
+			releaseSpellKeys = null;
+			spellCombatMode = "peace";
+			hudMode = "runtime";
+			emitInteractionEvent("client-combat-mode-updated", { mode: "peace" });
+		},
+	};
+
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 
 	interface ClientHudHarnessRectangle {
@@ -462,6 +569,8 @@
 		readonly probeInventory: typeof probeInventory;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
+		/** Production spell shortcut dispatch and session requests under browser input. */
+		readonly spellBarProbe: typeof spellBarProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
 		/** Controlled viewport answers exercise production drag ownership. */
@@ -1961,6 +2070,7 @@
 				if (activeItemUseProbe === null) throw new Error("No item-use probe");
 				return activeItemUseProbe;
 			},
+			spellBarProbe,
 			probeSpells: () =>
 				probeClientSpells(
 					emitInteractionEvent,
@@ -2041,10 +2151,17 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
-		combatMode="peace"
-		combatEnabled={false}
+		{hudMode}
+		onHudModeChange={(mode) => (hudMode = mode)}
+		{spellBar}
+		onSpellBarChange={(state) => (spellBar = state)}
+		{spellBarEnabled}
+		onSelectSpellTab={selectSpellTab}
+		onActivateSpellCell={activateSpellCell}
+		combatMode={spellCombatMode}
+		combatEnabled={true}
 		onToggleCombat={() => {}}
-		onCastSpell={() => {}}
+		onCastSpell={(id) => void interactionLifecycle.castSpell(id, selectedGuid)}
 		{itemInteractions}
 		entityMetadata={{
 			status: "available",

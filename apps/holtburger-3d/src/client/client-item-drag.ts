@@ -3,7 +3,6 @@ import type {
 	ClientViewportTargetResult,
 } from "./client-pointer-selection-controller";
 import { bindingAction } from "./client-action-item";
-import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { nextInventoryPreviewSequence } from "./client-inventory-contract";
 import type { ClientInventoryState } from "./client-inventory-state";
 import type {
@@ -80,7 +79,6 @@ export class ClientItemDrag {
 	readonly #ghost: HTMLElement;
 	readonly #abort = new AbortController();
 	readonly #unsubscribe: () => void;
-	readonly #releaseEscape: () => void;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#gesture: Gesture | null = null;
 	#cursor = { x: 0, y: 0 };
@@ -95,7 +93,6 @@ export class ClientItemDrag {
 		root: HTMLElement,
 		inventory: ClientInventoryState,
 		private readonly bindings: ActionDragBindings,
-		keyboard: KeyboardInputPolicy,
 		/** Actual dragging supersedes pending item target acquisition. */
 		private readonly cancelInteraction: () => boolean,
 		/** Inventory drags select their source; binding rearrangements do not. */
@@ -108,7 +105,7 @@ export class ClientItemDrag {
 		this.#root = root;
 		this.#inventory = inventory;
 		this.#ghost = document.createElement("div");
-		this.#ghost.className = "item-drag-ghost";
+		this.#ghost.className = "item-drag-ghost ui-drag-ghost";
 		// The top layer escapes panel backdrop-filter containing blocks and clipping.
 		this.#ghost.popover = "manual";
 		this.#ghost.setAttribute("aria-hidden", "true");
@@ -120,11 +117,6 @@ export class ClientItemDrag {
 		window.addEventListener("pointerup", this.#up, options);
 		window.addEventListener("pointercancel", this.#cancelPointer, options);
 		window.addEventListener("blur", this.#cancel, options);
-		this.#releaseEscape = keyboard.bindEscapeCancellation(() => {
-			if (this.#gesture === null) return this.cancelInteraction();
-			this.#cancel();
-			return true;
-		});
 		root.addEventListener("click", this.#click, { ...options, capture: true });
 		root.addEventListener("dblclick", this.#doubleClick, {
 			...options,
@@ -177,11 +169,16 @@ export class ClientItemDrag {
 		}, CLIENT_TUNING.inventory.displayIntervalMs);
 	}
 
+	/** Cancel only a pointer gesture; the HUD owns fallback interaction cancellation. */
+	cancel(): boolean {
+		if (this.#gesture === null) return false;
+		this.#cancel();
+		return true;
+	}
 	destroy(): void {
 		this.#cancel();
 		this.#abort.abort();
 		this.#unsubscribe();
-		this.#releaseEscape();
 		clearInterval(this.#timer);
 		this.#ghost.remove();
 	}

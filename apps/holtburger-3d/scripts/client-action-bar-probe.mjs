@@ -195,7 +195,7 @@ export async function probeActionBars(
    const deadline = performance.now() + 5000;
    while (performance.now() < deadline) {
     const cell = document.querySelector(${JSON.stringify(cell(1, 0))});
-    const marked = cell.querySelector('.action-equipped') !== null;
+    const marked = cell.querySelector('.item-equipped') !== null;
     if (marked === ${expected}) return { marked, label: cell.getAttribute('aria-label') };
     await new Promise(requestAnimationFrame);
    }

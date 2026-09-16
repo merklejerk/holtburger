@@ -1,17 +1,24 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
-	import ItemCountOverlay from "./ItemCountOverlay.svelte";
-	import { formatItemQuantity } from "./item-quantity";
-	import { itemStructureDisplay, type ItemStructure } from "./item-structure";
+	import type { ItemCapacity } from "./item-capacity";
+	import ItemCellVisual from "./ItemCellVisual.svelte";
+	import { itemCellPresentation } from "./item-cell-presentation";
+	import type { UiIconDisplay } from "./ui-icon-repository";
+	import type { ItemStructure } from "./item-structure";
 	interface Props {
 		/** Stable accessible name and tooltip, also used when no visual is supplied. */
 		readonly label: string;
-		/** Decorative content receives the full cell label for any nested diagnostic tooltip. */
-		readonly visual?: Snippet<[label: string]>;
+		/** Leased artwork rendered by the shared item composition. */
+		readonly display: UiIconDisplay | undefined;
+		/** Confirmed equipment location controls both the marker and tooltip. */
+		readonly equipped: boolean;
+		/** Equipment slots can suppress the checkmark while retaining equipped status in the label. */
+		readonly showEquipped?: boolean;
 		/** Entity quantity, independent of artwork; only counts above one are displayed. */
 		readonly count?: number | null;
 		/** Optional structure properties; incomplete or full values have no indicator. */
 		readonly structure?: ItemStructure | null;
+		/** Known ordinary-slot occupancy; container capacity takes precedence over structure. */
+		readonly capacity?: ItemCapacity | null;
 		/** Null represents an unoccupied slot. No runtime entity contract is required. */
 		readonly itemGuid: number | null;
 		/** Selection and admission are controlled by the consuming UI. */
@@ -29,27 +36,21 @@
 		dimmed = false,
 		disabled,
 		onselect,
-		visual,
+		display,
+		equipped,
+		showEquipped = true,
 		count,
 		structure = null,
+		capacity = null,
 	}: Props = $props();
-	const visibleCount = $derived(
-		itemGuid !== null && count !== undefined && count !== null && count > 1
-			? count
-			: null,
-	);
-	const structureDisplay = $derived(
-		itemGuid === null ? null : itemStructureDisplay(structure),
-	);
-	const quantityLabel = $derived(
-		visibleCount === null
-			? label
-			: `${label} (quantity: ${formatItemQuantity(visibleCount)})`,
-	);
-	const accessibleLabel = $derived(
-		structureDisplay === null
-			? quantityLabel
-			: `${quantityLabel} ${structureDisplay.label}`,
+	const presentation = $derived(
+		itemCellPresentation({
+			label,
+			count: itemGuid === null ? null : (count ?? null),
+			structure: itemGuid === null ? null : structure,
+			capacity: itemGuid === null ? null : capacity,
+			equipped: itemGuid !== null && equipped,
+		}),
 	);
 </script>
 
@@ -59,29 +60,20 @@
 	data-empty={itemGuid === null}
 	data-dimmed={dimmed}
 	data-item-guid={itemGuid}
-	title={accessibleLabel}
-	aria-label={accessibleLabel}
+	title={presentation.label}
+	aria-label={presentation.label}
 	aria-pressed={selected}
 	disabled={disabled || itemGuid === null}
 	onclick={onselect}
 >
 	{#if itemGuid !== null}
-		{#if visual}<span class="item-grid-cell-visual"
-				>{@render visual(accessibleLabel)}</span
-			>{:else}<span>{label}</span>{/if}
-		<ItemCountOverlay
-			count={visibleCount}
-			besideStructure={structureDisplay !== null}
+		<ItemCellVisual
+			{display}
+			name={label}
+			{presentation}
+			{showEquipped}
+			tooltipLabel={presentation.label}
 		/>
-		{#if structureDisplay !== null}
-			<span class="item-grid-cell-structure" aria-hidden="true">
-				<span
-					class="item-grid-cell-structure-fill"
-					style:height={`${structureDisplay.fraction * 100}%`}
-					style:background-color={`hsl(${structureDisplay.fraction * 120} 100% 45%)`}
-				></span>
-			</span>
-		{/if}
 	{/if}
 </button>
 
@@ -96,32 +88,6 @@
 			min-height: 0;
 			padding: var(--ui-item-cell-padding);
 			overflow: hidden;
-		}
-		.item-grid-cell-visual {
-			position: absolute;
-			inset: var(--ui-item-cell-padding);
-			display: grid;
-			place-items: center;
-		}
-		.item-grid-cell-structure {
-			position: absolute;
-			top: var(--ui-item-structure-inset);
-			right: var(--ui-item-structure-inset);
-			bottom: var(--ui-item-structure-inset);
-			width: var(--ui-item-structure-width);
-			background: var(--ui-item-structure-background);
-			pointer-events: none;
-		}
-		.item-grid-cell-structure-fill {
-			position: absolute;
-			bottom: 0;
-			width: 100%;
-		}
-		span {
-			display: block;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
 		}
 	}
 </style>

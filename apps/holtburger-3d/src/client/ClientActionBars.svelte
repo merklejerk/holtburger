@@ -211,6 +211,11 @@
 								facts?.description.kind === "known"
 									? facts.description.stackCount
 									: null,
+							structure:
+								facts?.description.kind === "known"
+									? facts.description.structure
+									: null,
+							capacity: view.capacities.get(content.item) ?? null,
 							actionKind: action?.kind ?? null,
 							alternateLabel:
 								action?.kind === "targeted"

@@ -249,6 +249,35 @@ export async function probeItemUse(client, evaluateExpression) {
 		});
 		await reply({ kind: "executed" });
 		await bind(tool, 95);
+		for (const current of [40, 10, 0, 50, null]) {
+			await read(api + `.itemUseProbe().setToolStructure(${current}, 50)`);
+			await read(api + ".itemUseProbe().ready()");
+			const overlays = await read(`(() => {
+				return [${JSON.stringify(action)}, ${JSON.stringify(tool)}].map(selector => {
+					const cell = document.querySelector(selector);
+					const fill = cell.querySelector('.item-cell-meter-fill');
+					const equipped = cell.querySelector('.item-equipped');
+					const count = cell.querySelector('.item-count-overlay');
+					return { title: cell.title, height: fill?.style.height ?? null, equipped: equipped !== null,
+						overlaps: fill !== null && ((equipped !== null && equipped.getBoundingClientRect().right > fill.getBoundingClientRect().left) || count.getBoundingClientRect().right > fill.getBoundingClientRect().left) };
+				});
+			})()`);
+			for (const [index, overlay] of overlays.entries()) {
+				assert.equal(overlay.equipped, index === 0);
+				assert.equal(
+					overlay.height,
+					current === null || current === 50
+						? null
+						: `${(current / 50) * 100}%`,
+				);
+				assert.equal(
+					overlay.title.includes(`[${current}/50]`),
+					current !== null && current !== 50,
+				);
+				assert.equal(overlay.overlaps, false);
+			}
+		}
+
 		await click(action);
 		await resolveTarget(true);
 		assert.deepEqual((await state()).request.intent, {

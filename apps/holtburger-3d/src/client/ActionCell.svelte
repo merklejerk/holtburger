@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { APP_INPUT } from "../lib/input/app-input";
-	import ItemCountOverlay from "../app/ItemCountOverlay.svelte";
-	import { formatItemQuantity } from "../app/item-quantity";
-	import UiIcon from "../app/UiIcon.svelte";
+	import ItemCellVisual from "../app/ItemCellVisual.svelte";
+	import { itemCellPresentation } from "../app/item-cell-presentation";
+	import type { ItemStructure } from "../app/item-structure";
+	import type { ItemCapacity } from "../app/item-capacity";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { ActionContent } from "./client-action-bar-state";
 	interface Props {
@@ -18,6 +19,10 @@
 		display: UiIconDisplay | undefined;
 		/** Bound stack quantity; single items have no visible count. */
 		count: number | null;
+		/** Remaining uses or durability of the bound item. */
+		structure: ItemStructure | null;
+		/** Known occupancy for a bound container. */
+		capacity: ItemCapacity | null;
 		/** Availability is presentation; activation still revalidates. */
 		available: boolean;
 		/** Confirmed equipment state controls the overlay and accessible status. */
@@ -36,6 +41,8 @@
 		label,
 		display,
 		count,
+		structure,
+		capacity,
 		available,
 		equipped,
 		selected,
@@ -49,22 +56,20 @@
 		// The top layer escapes the bar's scroll clipping; removing the marker closes its popover.
 		element.showPopover();
 	}
-	const visibleCount = $derived(
-		content !== null && count !== null && count > 1 ? count : null,
-	);
-	const quantityLabel = $derived(
-		visibleCount === null
-			? label
-			: `${label} (quantity: ${formatItemQuantity(visibleCount)})`,
+	const presentation = $derived(
+		itemCellPresentation({
+			label,
+			count: content === null ? null : count,
+			structure: content === null ? null : structure,
+			capacity: content === null ? null : capacity,
+			equipped: content !== null && equipped,
+		}),
 	);
 	const activeAlternate = $derived(available ? alternateLabel : null);
-	const equipmentLabel = $derived(
-		equipped ? `${quantityLabel} (Equipped)` : quantityLabel,
-	);
 	const statusLabel = $derived(
 		activeAlternate === null
-			? equipmentLabel
-			: `${equipmentLabel} (${activeAlternate})`,
+			? presentation.label
+			: `${presentation.label} (${activeAlternate})`,
 	);
 </script>
 
@@ -82,16 +87,14 @@
 	aria-pressed={selected}
 	onclick={(event) => onactivate(APP_INPUT.actionBarAlternate(event))}
 >
-	{#if content !== null}<UiIcon
+	{#if content !== null}
+		<ItemCellVisual
 			{display}
 			name={label}
+			{presentation}
 			tooltipLabel={statusLabel}
-		/>{/if}
-	{#if equipped}<span
-			class="action-equipped"
-			class:above-count={visibleCount !== null}
-			aria-hidden="true">✓</span
-		>{/if}
+		/>
+	{/if}
 	{#if activeAlternate !== null}<span
 			class="action-alternate"
 			popover="manual"
@@ -109,27 +112,11 @@
 				<path d={alternateArrowPath} />
 			</svg>
 		</span>{/if}
-	<ItemCountOverlay count={visibleCount} besideStructure={false} />
 	<span class="ui-shortcut-digit" aria-hidden="true">{digit}</span>
 </button>
 
 <style>
 	@layer components {
-		.action-equipped {
-			position: absolute;
-			right: 1px;
-			bottom: 1px;
-			padding: 0 2px;
-			border-radius: 2px;
-			background: var(--ui-action-equipped-background, #000b);
-			color: var(--ui-action-equipped-color, #4ade80);
-			font: bold var(--ui-action-equipped-font-size, 16px) / 1.2 sans-serif;
-			pointer-events: none;
-		}
-		.action-equipped.above-count {
-			top: 1px;
-			bottom: auto;
-		}
 		.action-alternate {
 			position: fixed;
 			position-area: top;

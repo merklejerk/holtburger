@@ -1,3 +1,5 @@
+import type { ItemStructure } from "../app/item-structure";
+import type { ItemCapacity } from "../app/item-capacity";
 import type { UiIconDisplay } from "../app/ui-icon-repository";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 
@@ -46,6 +48,10 @@ export interface ActionItemDisplay {
 	readonly label: string;
 	/** Current bound stack quantity, independent of artwork and replacement identity. */
 	readonly stackCount: number | null;
+	/** Current bound-item structure, independent of artwork. */
+	readonly structure: ItemStructure | null;
+	/** Known container occupancy from the inventory baseline. */
+	readonly capacity: ItemCapacity | null;
 	/** Current binding kind; each cell compares this against its retained action. */
 	readonly actionKind: ActionContent["kind"] | null;
 	/** Available alternate behavior, consumed by focused action-cell modifier hints. */

@@ -1,7 +1,7 @@
 <script lang="ts">
+	import type { ItemCapacity } from "../app/item-capacity";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
-	import UiIcon from "../app/UiIcon.svelte";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { InventoryEquipment } from "./client-inventory-equipment";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
@@ -9,6 +9,8 @@
 	interface Props {
 		/** Sampled slot projection; unknown occupancy must not be labeled empty. */
 		readonly equipment: InventoryEquipment;
+		/** Known container occupancy from the same accepted inventory baseline. */
+		readonly capacities: ReadonlyMap<number, ItemCapacity>;
 		readonly pending: boolean;
 		/** Same display leases and selection owner as the contents panel. */
 		readonly iconFor: (guid: number) => UiIconDisplay | undefined;
@@ -19,6 +21,7 @@
 	}
 	const {
 		equipment,
+		capacities,
 		pending,
 		iconFor,
 		selectedGuid,
@@ -46,6 +49,10 @@
 				<ItemGridCell
 					label={`${slot.label}: ${item === null ? (updating ? "Updating equipment…" : "Empty") : name}`}
 					itemGuid={item?.guid ?? null}
+					display={item === null ? undefined : iconFor(item.guid)}
+					equipped={item?.location.kind === "equipped"}
+					showEquipped={false}
+					capacity={item === null ? null : capacities.get(item.guid)}
 					count={description?.kind === "known" ? description.stackCount : null}
 					structure={description?.kind === "known"
 						? description.structure
@@ -55,15 +62,7 @@
 					onselect={() => {
 						if (item !== null) onSelectItem(item.guid);
 					}}
-				>
-					{#snippet visual(tooltipLabel: string)}
-						<UiIcon
-							display={item === null ? undefined : iconFor(item.guid)}
-							{name}
-							{tooltipLabel}
-						/>
-					{/snippet}
-				</ItemGridCell>
+				></ItemGridCell>
 			</div>
 		{/each}
 	</ItemGridStrip>

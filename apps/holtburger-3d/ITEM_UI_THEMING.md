@@ -72,8 +72,8 @@ require changing the scroll implementation.
 cells. Quantity is an entity fact, independent of prepared artwork and its cache key.
 The bottom-right overlay does not consume pointer events or alter cell geometry and
 sits above artwork/selection. The button's accessible label and tooltip contain the
-full quantity. Its visual snippet receives that full label, so a `UiIcon` diagnostic
-tooltip can preserve quantity while the fallback text keeps the item name.
+full quantity. `ItemCellVisual` receives the same composed label, so a `UiIcon`
+diagnostic tooltip preserves item status while fallback text keeps the item name.
 
 Defaults are declared in `ui-base.css`:
 
@@ -93,10 +93,20 @@ adjust the shared cell-size basis or count font/inset when more room is needed.
 
 ## Icon artwork and ownership
 
-`ItemGridCell` accepts a decorative `visual` snippet while retaining the accessible
-name and tooltip on its button. `UiIcon` displays a prepared 32×32 PNG or the item
-name while loading/unavailable. Degraded/failed visuals include diagnostic detail
-in their tooltip; the button keeps the item name as its accessible label. Empty slots render neither art nor fallback text.
+`ItemGridCell` and `ActionCell` use `itemCellPresentation` and `ItemCellVisual` for
+artwork, stack count, structure/capacity bars, and equipped markers. Buttons retain
+their own selection, activation, and action-only hints. `UiIcon` displays a prepared
+32×32 PNG or the item name while loading/unavailable. Diagnostic tooltips preserve
+the composed item status. Empty slots render neither art nor fallback text.
+
+Structure bars show remaining uses and disappear at full structure. Container bars
+show occupied ordinary slots, disappear when empty, and fill from green toward red
+as capacity is consumed. Container tooltips always retain `[used / capacity]` when
+occupancy is known. Equipped markers move above stack counts and beside bars to
+avoid overlap. Equipment-strip slots suppress the redundant checkmark while retaining
+equipped status in their accessible labels and tooltips. Their theme variables are `--ui-item-equipped-background`,
+`--ui-item-equipped-color`, and `--ui-item-equipped-font-size`.
+
 `--ui-icon-rendering` defaults to `pixelated`; themes may select another CSS
 `image-rendering` value. Cell padding and size control enlargement without changing
 prepared-image identity or baking selection decoration into the image.

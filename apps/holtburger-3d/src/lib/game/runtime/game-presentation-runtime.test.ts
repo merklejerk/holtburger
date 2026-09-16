@@ -1077,7 +1077,89 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
-	it("prepares live cues in server order for one entity", async () => {
+	it.each(["install", "clear", "retire"] as const)(
+		"prepares cue assets during visual installation: %s",
+		async (outcome) => {
+			const tableId: DatAssetId = "0x34000001";
+			const scriptId: DatAssetId = "0x33000001";
+			const animationReady = controlledPromise<void>();
+			const loadTable = vi.fn(async () => ({
+				id: tableId,
+				cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
+			}));
+			const loadScript = vi.fn(
+				scalePhysicsScriptSource(scriptId, 2).loadPhysicsScript,
+			);
+			const runtime = await buildSpawnRuntime(
+				{
+					load: async () => {
+						const visual = spawnedVisual();
+						return {
+							...visual,
+							behavior: {
+								...visual.behavior,
+								kind: "animation-and-script",
+								animationId: "0x03000001",
+								physicsScriptId: null,
+								physicsScriptTableId: tableId,
+							},
+						};
+					},
+				},
+				{
+					...ANIMATION_SOURCE,
+					async loadAnimation(id) {
+						await animationReady.promise;
+						return ANIMATION_SOURCE.loadAnimation(id);
+					},
+				},
+				undefined,
+				{ destroy() {}, loadPhysicsScript: loadScript },
+				{ destroy() {}, loadPhysicsScriptTable: loadTable },
+			);
+			const cue = { guid: 7, generation: 3, cue: 7, intensity: 0.5 };
+			runtime.playDynamicEntityScriptCue(cue);
+			const installation = runtime.replaceDynamicEntitySnapshot([
+				spawnedEntity(7, 3),
+			]);
+			await vi.waitFor(() => expect(loadScript).toHaveBeenCalledTimes(1));
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.activeOwnerCount,
+			).toBe(0);
+			if (outcome === "clear") runtime.clearDynamicEntityCues();
+			if (outcome === "retire") await runtime.replaceDynamicEntitySnapshot([]);
+			animationReady.resolve();
+			await installation;
+			if (outcome === "install") {
+				await vi.waitFor(() =>
+					expect(
+						runtime.getAuthoredDynamicRuntimeDiagnostics()
+							.worldScalePhysicsScripts.activeOwnerCount,
+					).toBe(1),
+				);
+				await runtime.replaceDynamicEntitySnapshot([]);
+				await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 4)]);
+				runtime.playDynamicEntityScriptCue({ ...cue, generation: 4 });
+				await vi.waitFor(() =>
+					expect(
+						runtime.getAuthoredDynamicRuntimeDiagnostics()
+							.worldScalePhysicsScripts.activeOwnerCount,
+					).toBe(1),
+				);
+				expect(loadTable).toHaveBeenCalledTimes(1);
+				expect(loadScript).toHaveBeenCalledTimes(1);
+			} else {
+				expect(
+					runtime.getAuthoredDynamicRuntimeDiagnostics()
+						.worldScalePhysicsScripts.activeOwnerCount,
+				).toBe(0);
+			}
+			await runtime.destroy();
+		},
+	);
+
+	it("prepares live cues concurrently but executes in server order", async () => {
 		const tableId = "0x34000001" as DatAssetId;
 		const firstScriptId = "0x33000001" as DatAssetId;
 		const secondScriptId = "0x33000002" as DatAssetId;
@@ -1097,7 +1179,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					if (scriptId === firstScriptId) return firstScript.promise;
 					if (scriptId !== secondScriptId)
 						throw new Error(`Unexpected physics script ${scriptId}.`);
-					return { id: scriptId, lengthSeconds: 0, records: [] };
+					return scalePhysicsScriptSource(scriptId, 2).loadPhysicsScript(
+						scriptId,
+					);
 				},
 			},
 			{
@@ -1139,16 +1223,37 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			cue: 8,
 			intensity: 0.5,
 		});
-		await vi.waitFor(() => expect(requestedScripts).toEqual([firstScriptId]));
-		firstScript.resolve({
-			id: firstScriptId,
-			lengthSeconds: 0,
-			records: [],
-		});
+		await vi.waitFor(() =>
+			expect(requestedScripts).toEqual([firstScriptId, secondScriptId]),
+		);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				.activeOwnerCount,
+		).toBe(0);
+		firstScript.resolve(
+			await scalePhysicsScriptSource(firstScriptId, 2).loadPhysicsScript(
+				firstScriptId,
+			),
+		);
 		await vi.waitFor(() =>
 			expect(requestedScripts).toEqual([firstScriptId, secondScriptId]),
 		);
 
+		await vi.waitFor(() =>
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.pendingActivationCount,
+			).toBe(1),
+		);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+		expect(
+			runtime
+				.getAuthoredDynamicRuntimeDiagnostics()
+				.worldScaleBehavior.observations.map(
+					(observation) => observation.provenance.assetId,
+				),
+		).toEqual([firstScriptId, secondScriptId]);
 		await runtime.destroy();
 	});
 

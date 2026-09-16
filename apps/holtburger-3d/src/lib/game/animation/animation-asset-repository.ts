@@ -75,6 +75,7 @@ export class AnimationAssetRepository extends PreparedAssetRepository<
 
 	constructor(source: AnimationAssetSource) {
 		super({
+			retention: "referenced",
 			destroySource: () => source.destroy(),
 			label: "Animation",
 			load: (animationId) => source.loadAnimation(animationId),

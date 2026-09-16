@@ -52,6 +52,7 @@ export class PhysicsScriptRepository extends PreparedAssetRepository<
 > {
 	constructor(source: PhysicsScriptSource) {
 		super({
+			retention: "session",
 			destroySource: () => source.destroy(),
 			label: "PhysicsScript",
 			load: (scriptId) => source.loadPhysicsScript(scriptId),
@@ -78,26 +79,25 @@ export class PhysicsScriptRepository extends PreparedAssetRepository<
 			handles.clear();
 		};
 		try {
-			const pending: DatAssetId[] = [rootId];
+			let pending = [rootId];
 			while (pending.length > 0) {
-				const scriptId = pending.pop()!;
-				if (handles.has(scriptId)) continue;
-				let handle: PreparedPhysicsScriptHandle;
-				try {
-					handle = await this.acquire(scriptId);
-				} catch (cause) {
-					throw new Error(
-						`Physics script closure for ${rootId} could not stage ${scriptId}.`,
-						{ cause },
-					);
-				}
-				// Record before recursing so a cycle back to this script terminates.
-				handles.set(scriptId, handle);
-				pending.push(...handle.asset.dependencies.scriptIds);
+				// Each frontier loads concurrently; recording it before following edges closes cycles.
+				const acquired = await this.acquireAll(pending);
+				for (const [id, handle] of acquired) handles.set(id, handle);
+				pending = [
+					...new Set(
+						[...acquired.values()].flatMap(
+							(handle) => handle.asset.dependencies.scriptIds,
+						),
+					),
+				].filter((id) => !handles.has(id));
 			}
 		} catch (cause) {
 			releaseAll();
-			throw cause;
+			throw new Error(
+				`Physics script closure for ${rootId} could not stage its dependencies.`,
+				{ cause },
+			);
 		}
 
 		const scripts = new Map<DatAssetId, PreparedPhysicsScript>(

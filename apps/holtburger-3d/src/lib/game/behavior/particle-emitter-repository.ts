@@ -54,6 +54,7 @@ export class ParticleEmitterRepository extends PreparedAssetRepository<
 > {
 	constructor(source: ParticleEmitterSource) {
 		super({
+			retention: "session",
 			destroySource: () => source.destroy(),
 			label: "ParticleEmitterInfo",
 			load: (emitterInfoId) => source.loadParticleEmitter(emitterInfoId),

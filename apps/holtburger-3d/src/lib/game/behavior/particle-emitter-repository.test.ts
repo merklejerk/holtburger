@@ -201,6 +201,11 @@ describe("ParticleEmitterRepository", () => {
 		expect(first.asset.mesh).toEqual({ id: "0x01000ff4", radius: 2.5 });
 		first.release();
 		second.release();
+		const again = await repository.acquire("0x3200020c");
+		expect(again.asset).toBe(first.asset);
+		expect(source.loads).toBe(1);
+		again.release();
+		repository.destroy();
 		expect(repository.getDiagnostics().assetCount).toBe(0);
 	});
 

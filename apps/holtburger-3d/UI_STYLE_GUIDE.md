@@ -114,6 +114,26 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
+Spell shortcuts use the same transparent cell face and feathered `ui-hud-button`
+backing as action cells. Their blue palette is independent of the mana meter:
+
+| Property                                                                            | Purpose                                                                      |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `--ui-spell-bar-color`                                                              | Spell shortcut palette; changing `--ui-color-mana` does not change it.       |
+| `--ui-spell-cell-background-opacity`                                                | Opacity of the palette-derived cell backing.                                 |
+| `--ui-spell-cell-background`                                                        | Optional complete cell backing (color or gradient).                          |
+| `--ui-spell-tab-height`, `--ui-spell-tab-font-size`                                 | Compact tab geometry and typography; HUD extent follows the measured height. |
+| `--ui-spell-tab-background-opacity`, `--ui-spell-tab-active-background-opacity`     | Default tab backing opacity for inactive and selected tabs.                  |
+| `--ui-spell-tab-background`, `--ui-spell-tab-active-background`                     | Optional complete tab backings.                                              |
+| `--ui-spell-tab-color`, `--ui-spell-tab-active-color`, `--ui-spell-tab-hover-color` | Tab text colors; fall back to the shared palette.                            |
+| `--ui-spell-tab-border`, `--ui-spell-tab-radius`, `--ui-spell-tab-active-shadow`    | Tab decoration and selected indicator.                                       |
+| `--ui-spell-drop-outline`                                                           | Drop-target feedback.                                                        |
+
+Cell size follows `--ui-item-cell-min-size`, just like action bars. Both bars use
+the same inward-facing grid button: click to toggle between one ten-cell strip
+and two five-cell strips. Spell tabs retain their compact ten-button
+row in either shape; toggling shape preserves spell addresses and selected tab.
+
 Chat retains independent `--ui-chat-<category>-text` colors for `system`, `npc`,
 `error`, `combat`, `trade`, `emote`, `party`, `tell`, `guild`, and `society`.
 Ordinary speech inherits the chat's text color. These are data categories, not

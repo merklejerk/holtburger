@@ -127,6 +127,4 @@ export const CLIENT_ACTION_BAR_TUNING = {
 	initialCellSize: 36,
 	/** Minimum spacing between a new clone and existing action bars. */
 	cloneGap: 4,
-	/** Midpoint between one and two strips used by the snapping resize gesture. */
-	doubleStripThreshold: 1.5,
 } as const;

@@ -147,7 +147,7 @@ export class KeyboardInputPolicy {
 		};
 	}
 
-	/** Register the app item-gesture cancellation edge; true means a gesture was cancelled. */
+	/** Register the app gesture cancellation edge; true means a gesture was cancelled. */
 	bindEscapeCancellation(cancel: () => boolean): () => void {
 		if (this.#escapeCancellation !== null)
 			throw new Error("Escape cancellation is already registered.");

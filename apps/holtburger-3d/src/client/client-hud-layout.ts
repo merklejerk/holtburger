@@ -255,6 +255,7 @@ export function createClientHudLayout(
 		createClientHudPanelPlacement(panel, viewport, shortcutCount);
 	return {
 		character: place(defaults.character),
+		spellBar: place(defaults.spellBar),
 		chat: place(defaults.chat),
 		inventory: place(defaults.inventory),
 		spells: place(defaults.spells),

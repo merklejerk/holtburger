@@ -1,4 +1,10 @@
 <script lang="ts">
+	import { ClientSpellDrag } from "./client-spell-drag";
+	import type { ClientItemDrag } from "./client-item-drag";
+	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
+	import type { ClientSpellBarState } from "./client-spell-bar-state";
+	import type { InputDigitIndex } from "../lib/input/input-contract";
+	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
 	import type {
 		ClientItemInteractions,
@@ -56,9 +62,19 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** App-owned layout mode also gates gameplay shortcuts. */
+		readonly hudMode: "runtime" | "layout";
+		readonly onHudModeChange: (mode: "runtime" | "layout") => void;
+		/** Session-local bindings shared with game dispatch. */
+		readonly spellBar: ClientSpellBarState;
+		readonly onSpellBarChange: (value: ClientSpellBarState) => void;
+		/** App-owned casting availability, independent of membership. */
+		readonly spellBarEnabled: boolean;
+		readonly onSelectSpellTab: (tab: InputDigitIndex) => void;
+		readonly onActivateSpellCell: (slot: InputDigitIndex) => void;
 		/** Server-confirmed stance for the dock, independent of open panels. */
 		readonly combatMode: ClientCombatMode;
-		/** Shared casting action also usable by future spell shortcuts. */
+		/** Shared normal casting action used by the spell browser. */
 		readonly onCastSpell: (spellId: number) => void;
 		/** Gameplay lifecycle admits stance commands. */
 		readonly combatEnabled: boolean;
@@ -121,6 +137,13 @@
 	}
 
 	let {
+		hudMode,
+		onHudModeChange,
+		spellBar,
+		onSpellBarChange,
+		spellBarEnabled,
+		onSelectSpellTab,
+		onActivateSpellCell,
 		combatMode,
 		onCastSpell,
 		combatEnabled,
@@ -204,16 +227,64 @@
 			itemInteraction = state;
 		});
 	});
+	let itemDrag: ClientItemDrag | null = null;
+	let spellDrag: ClientSpellDrag | null = null;
+	onMount(() =>
+		keyboard.bindEscapeCancellation(
+			() =>
+				spellDrag?.cancel() ||
+				itemDrag?.cancel() ||
+				itemInteractions?.cancel() ||
+				false,
+		),
+	);
+	$effect(() => {
+		const root = worldElement;
+		if (root === null) return;
+		const owner = new ClientSpellDrag(root, {
+			read: (cell) => spellBar.tabs[cell.tab][cell.slot],
+			bind: (cell, spell) =>
+				onSpellBarChange(bindSpellCell(spellBar, cell, spell)),
+			transfer: (source, target) =>
+				onSpellBarChange(
+					target === null
+						? bindSpellCell(spellBar, source, null)
+						: swapSpellCells(spellBar, source, target),
+				),
+			begin: () => {
+				itemDrag?.cancel();
+				itemInteractions?.cancel();
+			},
+			available: () => spellBarEnabled || hudMode === "layout",
+		});
+		spellDrag = owner;
+		return () => {
+			owner.destroy();
+			if (spellDrag === owner) spellDrag = null;
+		};
+	});
+	$effect(() => {
+		// Cold identity/visibility changes cancel before a hidden tab or retired source can commit.
+		spellBar;
+		spellBarEnabled;
+		hudMode;
+		spells;
+		spellDrag?.cancel();
+	});
 	onMount(() => keyboard.mount(document));
 	onMount(() => inputGate.attach(cancelViewportGesture));
+	onMount(() =>
+		inputGate.attach(() => {
+			spellDrag?.cancel();
+		}),
+	);
 
 	const initialViewport: ClientHudViewport = {
 		width: window.innerWidth,
 		height: window.innerHeight,
 	};
-	/** Cold client presentation policy: runtime visibility or explicit HUD layout editing. */
-	type ClientHudMode = "runtime" | "layout";
-	let hudMode = $state<ClientHudMode>("runtime");
+	/** HUD shape is independent of selected spell tab and casting stance. */
+	let spellBarShape = $state<"single" | "double">("single");
 	let activePanel = $state<ClientSystemPanel | null>(null);
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
@@ -445,7 +516,8 @@
 		aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
 		aria-pressed={hudMode === "layout"}
 		title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
-		onclick={() => (hudMode = hudMode === "runtime" ? "layout" : "runtime")}
+		onclick={() =>
+			onHudModeChange(hudMode === "runtime" ? "layout" : "runtime")}
 	>
 		<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
 	</button>
@@ -462,6 +534,7 @@
 	{#if inventory !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
+				onDragOwner={(owner) => (itemDrag = owner)}
 				{onPickInventoryTarget}
 				{onInventoryNotice}
 				interactions={itemInteractions}
@@ -472,6 +545,23 @@
 				editable={hudMode === "layout"}
 			/>
 		{/key}
+	{/if}
+
+	{#if spells !== null && (spellBarEnabled || hudMode === "layout")}
+		<ClientSpellBar
+			{spells}
+			configuration={spellBar}
+			enabled={spellBarEnabled}
+			placement={hudLayout.spellBar}
+			shape={spellBarShape}
+			editable={hudMode === "layout"}
+			{viewport}
+			onPlacementChange={(placement) =>
+				(hudLayout = { ...hudLayout, spellBar: placement })}
+			onShapeChange={(shape) => (spellBarShape = shape)}
+			onSelectTab={onSelectSpellTab}
+			onActivateCell={onActivateSpellCell}
+		/>
 	{/if}
 
 	<ClientHudPanel

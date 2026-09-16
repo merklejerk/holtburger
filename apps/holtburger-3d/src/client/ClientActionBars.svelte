@@ -7,7 +7,6 @@
 		sameConsumableIdentity,
 		type ActionItemDisplay,
 	} from "./client-action-item";
-	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { onMount, tick } from "svelte";
 	import ClientActionBarView from "./ClientActionBar.svelte";
 	import { ClientItemDrag } from "./client-item-drag";
@@ -33,6 +32,8 @@
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	interface Props {
+		/** Expose the mounted item gesture owner to common HUD cancellation. */
+		onDragOwner: (owner: ClientItemDrag | null) => void;
 		/** Resolve world inventory destinations without changing selection. */
 		onPickInventoryTarget: ClientViewportTargetPicker;
 		/** Ordinary inventory refusal feedback. */
@@ -51,6 +52,7 @@
 	}
 	let {
 		root,
+		onDragOwner,
 		inventory,
 		interactions,
 		editable,
@@ -69,7 +71,6 @@
 			throw new Error(`Missing action bar geometry ${id}`);
 		return read();
 	}
-	const { keyboard } = useAppInputPolicy();
 	/** Bounded UI sample; the inventory owner retains authoritative item facts. */
 	let items = $state<ReadonlyMap<number, ActionItemDisplay>>(new Map());
 	/** Fresh identities retire mounted focus, menus, geometry readers, and drag-source elements together. */
@@ -165,12 +166,12 @@
 							: swapActionCells(bars, source, target);
 				},
 			},
-			keyboard,
 			() => interactions.cancel(),
 			onSelectDragItem,
 			onPickInventoryTarget,
 			onInventoryNotice,
 		);
+		onDragOwner(drag);
 		const repository = inventory.icons;
 		const owner = repository.createOwner("display");
 		let retained = new Set<string>();
@@ -263,6 +264,7 @@
 			disposed = true;
 			clearInterval(timer);
 			unsubscribe();
+			onDragOwner(null);
 			drag.destroy();
 			void tick().then(() => repository.releaseOwner(owner));
 		};
@@ -291,18 +293,6 @@
 
 <style>
 	@layer components {
-		:global(.item-drag-ghost) {
-			position: fixed;
-			inset: 0 auto auto 0;
-			z-index: 10000;
-			pointer-events: none;
-			margin: 0;
-			padding: 0;
-			border: 0;
-			background: transparent;
-			opacity: 0.8;
-			color: var(--ui-color-text);
-		}
 		:global([data-inventory-drop="pending"]) {
 			outline: 2px dashed var(--ui-color-muted);
 		}

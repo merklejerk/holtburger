@@ -1,3 +1,5 @@
+import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
+import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 import type { ClientUiDefaults } from "./client-ui-contract";
 
 /**
@@ -6,6 +8,19 @@ import type { ClientUiDefaults } from "./client-ui-contract";
  * Fitting and user edits live in client-hud-layout; visibility stays in Svelte.
  */
 export const CLIENT_UI_DEFAULTS = {
+	spellBar: {
+		anchor: "center",
+		offset: { x: 0, y: CLIENT_ACTION_BAR_TUNING.initialCellSize + 96 },
+		size: {
+			width:
+				CLIENT_ACTION_BAR_TUNING.initialCellSize * SPELL_BAR_INDICES.length,
+			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
+		},
+		minSize: {
+			width: CLIENT_ACTION_BAR_TUNING.initialCellSize,
+			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
+		},
+	},
 	character: {
 		anchor: "top-left",
 		offset: { x: 16, y: 16 },

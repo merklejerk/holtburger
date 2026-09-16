@@ -33,6 +33,13 @@
 		--ui-color-health: #dc796a;
 		--ui-color-stamina: #dfbd63;
 		--ui-color-mana: #87bddd;
+		/* Spell shortcuts have their own palette and backing opacity, independent of vitals. */
+		--ui-spell-bar-color: #87bddd;
+		--ui-spell-cell-background-opacity: 27%;
+		--ui-spell-tab-height: 16px;
+		--ui-spell-tab-font-size: 10px;
+		--ui-spell-tab-background-opacity: 15%;
+		--ui-spell-tab-active-background-opacity: 55%;
 		--ui-font-body: Arial, Helvetica, sans-serif;
 		--ui-font-heading: Georgia, "Times New Roman", serif;
 		--ui-font-mono: "Courier New", monospace;
@@ -607,5 +614,42 @@
 	.ui-theme :is(.ui-item-selection, .ui-item-strip-arrow):focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: -2px;
+	}
+}
+
+/* Shared shortcut geometry and pointer artwork; binding behavior remains app-owned. */
+@layer components {
+	.ui-drag-ghost {
+		position: fixed;
+		inset: 0 auto auto 0;
+		z-index: 10000;
+		pointer-events: none;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		opacity: 0.8;
+		color: var(--ui-color-text);
+	}
+	.ui-theme .ui-shortcut-cell {
+		box-sizing: border-box;
+		display: block;
+		overflow: hidden;
+		position: relative;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		padding: var(--ui-item-cell-padding);
+		user-select: none;
+	}
+	.ui-shortcut-digit {
+		position: absolute;
+		left: 2px;
+		top: 0;
+		font-size: 10px;
+		color: var(--ui-color-text);
+		text-shadow: 0 1px 2px black;
+		pointer-events: none;
 	}
 }

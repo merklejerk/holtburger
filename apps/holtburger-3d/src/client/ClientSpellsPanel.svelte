@@ -8,29 +8,17 @@
 		matchesSpellSearch,
 		type SpellSearch,
 	} from "./client-spell-search";
-	import type { SpellDetails } from "../app/spell-references";
 	import ClientSpellFormula from "./ClientSpellFormula.svelte";
 	import UiIcon from "../app/UiIcon.svelte";
 	import type { UiIconDisplay, UiIconOwner } from "../app/ui-icon-repository";
-	import type {
-		ClientSpellServices,
-		SpellInspectionDisplay,
+	import {
+		prepareSpellRow,
+		type SpellRow,
+		type ClientSpellServices,
+		type SpellInspectionDisplay,
 	} from "./client-spells";
 	import { CLIENT_TUNING } from "./client-tuning";
 
-	/** A list row retains identity even when its definition or artwork is unavailable. */
-	interface SpellRow {
-		/** Stable player-known spell identity. */
-		readonly id: number;
-		/** Authored name or explicit missing-definition label. */
-		readonly name: string;
-		/** Available static examination facts, independent of artwork. */
-		readonly details: SpellDetails | null;
-		/** Consumer-owned icon reference or an actionable diagnostic. */
-		readonly artwork:
-			| { readonly kind: "icon"; readonly key: string }
-			| { readonly kind: "failed"; readonly detail: string };
-	}
 	const {
 		spells,
 		castEnabled,
@@ -138,33 +126,7 @@
 			owners.add(owner);
 			currentOwner = owner;
 			rows = references
-				.map((reference): SpellRow => {
-					if (reference.kind !== "known")
-						return {
-							id: reference.id,
-							name: `Spell ${reference.id}`,
-							details: null,
-							artwork: {
-								kind: "failed",
-								detail:
-									reference.kind === "missing"
-										? "Spell definition is missing."
-										: reference.detail,
-							},
-						};
-					return {
-						id: reference.id,
-						name: reference.name,
-						details: reference.details,
-						artwork:
-							reference.artwork.kind === "ready"
-								? {
-										kind: "icon",
-										key: spells.icons.retain(owner, reference.artwork.spec),
-									}
-								: reference.artwork,
-					};
-				})
+				.map((reference) => prepareSpellRow(reference, spells.icons, owner))
 				.sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 			status = "ready";
 			revision = -1;
@@ -269,6 +231,7 @@
 					>
 						<button
 							class="spell-header"
+							data-spell-drag-source={row.id}
 							type="button"
 							aria-expanded={expandedId === row.id}
 							onclick={() => {

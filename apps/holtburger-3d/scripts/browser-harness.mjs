@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { probeItemUse } from "./client-item-use-probe.mjs";
+import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { existsSync } from "node:fs";
@@ -4624,6 +4625,11 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSpells",
 			[],
 		);
+		inventory.spellBar = await probeSpellBar(
+			client,
+			evaluateExpression,
+			options.screenshotPath,
+		);
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,
@@ -4715,6 +4721,7 @@ function assertClientHudHarness(evidence) {
 	].toSorted();
 	const layoutLabels = [
 		...runtimeLabels,
+		"Spell bar",
 		"Jump power",
 		"Notifications",
 		"Selected entity",

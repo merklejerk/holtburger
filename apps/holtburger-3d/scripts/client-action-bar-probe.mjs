@@ -298,13 +298,14 @@ export async function probeActionBars(
 	await read(
 		`document.querySelector('button[aria-label="Unlock UI layout"]').click()`,
 	);
-	const cellExtent = await read(
-		`document.querySelector(".action-cell").getBoundingClientRect().width`,
-	);
-	const resize = await point('button[aria-label="Resize action bar 1"]');
-	await mouse("mousePressed", resize, 1);
-	await mouse("mouseMoved", { x: resize.x, y: resize.y - cellExtent }, 1);
-	await mouse("mouseReleased", { x: resize.x, y: resize.y - cellExtent }, 0);
+	const toggleShape = async () => {
+		const handle = await point(
+			'button[aria-label="Toggle action bar shape 1"]',
+		);
+		await mouse("mousePressed", handle, 1);
+		await mouse("mouseReleased", handle, 0);
+	};
+	await toggleShape();
 	const positions = () =>
 		read(
 			`Array.from(document.querySelectorAll('.action-cell'), (element) => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y }; })`,
@@ -316,6 +317,10 @@ export async function probeActionBars(
 		grid[5].y > grid[0].y,
 		"Double horizontal shape has two five-cell rows",
 	);
+	await toggleShape();
+	grid = await positions();
+	assert.equal(new Set(grid.map((cell) => cell.y)).size, 1);
+	await toggleShape();
 	await key("1", "Digit1", 2);
 	await key("ArrowUp", "ArrowUp");
 	assert.equal(await selected(), "6");
@@ -527,7 +532,7 @@ export async function probeActionBars(
 		cancellation: true,
 		sequencing: true,
 		mandatoryBar: true,
-		discreteResize: true,
+		shapeToggle: true,
 		rotation: true,
 		gridNavigation: true,
 		blurCancellation: true,

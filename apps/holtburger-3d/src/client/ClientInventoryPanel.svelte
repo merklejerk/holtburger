@@ -37,6 +37,9 @@
 	/** Footer artwork follows the same bounded display sampling as the inventory cells. */
 	const pyrealDisplay = $derived(displays.get(inventory.pyrealIconKey));
 	const sections = $derived(view?.sections ?? []);
+	const capacities = $derived<ClientInventoryView["capacities"]>(
+		view?.capacities ?? new Map(),
+	);
 	const packSlots = $derived(view?.packSlots ?? []);
 	const pending = $derived(view?.pending ?? true);
 	const sortMode = $derived(view?.sortMode ?? "native");
@@ -213,6 +216,9 @@
 		{#each items as item (item.guid)}
 			<ItemGridCell
 				itemGuid={item.guid}
+				display={iconFor(item.guid)}
+				equipped={item.location.kind === "equipped"}
+				capacity={capacities.get(item.guid)}
 				label={itemName(item)}
 				structure={item.description.kind === "known"
 					? item.description.structure
@@ -230,13 +236,7 @@
 					)}
 				disabled={pending || item.description.kind === "pending"}
 				onselect={() => onSelectItem(item.guid)}
-			>
-				{#snippet visual(tooltipLabel: string)}<UiIcon
-						{tooltipLabel}
-						display={iconFor(item.guid)}
-						name={itemName(item)}
-					/>{/snippet}
-			</ItemGridCell>
+			></ItemGridCell>
 		{/each}
 	</div>
 {/snippet}
@@ -250,6 +250,7 @@
 	<div class="inventory-layout" inert={splitRequest !== null}>
 		<aside class="inventory-equipment-strip" aria-label="Equipped items">
 			<InventoryEquipmentStrip
+				{capacities}
 				equipment={view?.equipment ?? { rows: [], pending: true }}
 				{pending}
 				{iconFor}
@@ -378,6 +379,9 @@
 				{#each packSlots as item, index (index)}
 					<ItemGridCell
 						itemGuid={item?.guid ?? null}
+						display={item === null ? undefined : iconFor(item.guid)}
+						equipped={item?.location.kind === "equipped"}
+						capacity={item === null ? null : capacities.get(item.guid)}
 						structure={index !== 0 && item?.description.kind === "known"
 							? item.description.structure
 							: null}
@@ -396,19 +400,7 @@
 						onselect={() => {
 							if (item !== null) selectPack(item.guid);
 						}}
-					>
-						{#snippet visual(tooltipLabel: string)}
-							<UiIcon
-								{tooltipLabel}
-								display={item === null ? undefined : iconFor(item.guid)}
-								name={index === 0
-									? "Main Pack"
-									: item === null
-										? ""
-										: itemName(item)}
-							/>
-						{/snippet}
-					</ItemGridCell>
+					></ItemGridCell>
 				{/each}
 			</ItemGridStrip>
 		</aside>

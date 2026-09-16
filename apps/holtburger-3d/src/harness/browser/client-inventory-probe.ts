@@ -283,6 +283,58 @@ export async function probeClientInventory(options: {
 	if (button("Inventory").getAttribute("aria-pressed") !== "true")
 		button("Inventory").click();
 	await sample();
+	const containerCell = () => {
+		const element = document.querySelector<HTMLButtonElement>(
+			'.item-grid-cell[data-item-guid="30"]',
+		);
+		if (element === null) throw new Error("Container cell missing.");
+		return element;
+	};
+	const containerRecord = records.find((record) => record.guid === 30);
+	if (containerRecord?.storage.kind !== "container")
+		throw new Error("Capacity probe requires a container.");
+	for (const max of [24, 1, 0, null]) {
+		update({
+			...containerRecord,
+			storage: { ...containerRecord.storage, itemCapacity: max },
+		});
+		await sample();
+		const fill = containerCell().querySelector<HTMLElement>(
+			".item-cell-meter-fill",
+		);
+		if (max === null) {
+			if (fill !== null || containerCell().title.includes("["))
+				throw new Error("Unknown container capacity displayed an indicator.");
+		} else if (
+			!containerCell().title.endsWith(`[1 / ${max}]`) ||
+			fill === null ||
+			Math.abs(
+				Number.parseFloat(fill.style.height) -
+					(max === 0 ? 100 : Math.min(1, 1 / max) * 100),
+			) > 0.01
+		) {
+			throw new Error("Container capacity label or fullness bar is incorrect.");
+		}
+	}
+	// The same container must retain its indicator in an ordinary item cell.
+	update({
+		...containerRecord,
+		location: {
+			kind: "contained",
+			parentGuid: 1,
+			slot: { kind: "item", index: 9 },
+		},
+	});
+	await sample();
+	if (
+		!containerCell().title.endsWith("[1 / 24]") ||
+		containerCell().closest(".inventory-grid") === null
+	)
+		throw new Error(
+			"Container capacity did not follow the item into the contents grid.",
+		);
+	update(containerRecord);
+	await sample();
 	const burdenIndicator =
 		document.querySelector<HTMLElement>(".inventory-burden");
 	if (burdenIndicator === null)
@@ -1068,12 +1120,8 @@ export async function probeClientInventory(options: {
 				selectedHeading()?.textContent !== `Inventory item 22 (20,100) ${label}`
 			)
 				throw new Error("Structure values did not reach both item labels.");
-			const track = cell(22).querySelector<HTMLElement>(
-				".item-grid-cell-structure",
-			);
-			const fill = cell(22).querySelector<HTMLElement>(
-				".item-grid-cell-structure-fill",
-			);
+			const track = cell(22).querySelector<HTMLElement>(".item-cell-meter");
+			const fill = cell(22).querySelector<HTMLElement>(".item-cell-meter-fill");
 			if (track === null || fill === null)
 				throw new Error("Structure bar missing.");
 			const trackRect = track.getBoundingClientRect();
@@ -1120,7 +1168,7 @@ export async function probeClientInventory(options: {
 			setStructure(structure);
 			await sample();
 			if (
-				cell(22).querySelector(".item-grid-cell-structure") !== null ||
+				cell(22).querySelector(".item-cell-meter") !== null ||
 				cell(22).title !== "Inventory item 22 (quantity: 20,100)" ||
 				selectedHeading()?.textContent !== "Inventory item 22 (20,100)"
 			)
@@ -1330,6 +1378,16 @@ export async function probeClientInventory(options: {
 		document.querySelector('.inventory-sections [data-item-guid="91"]') !== null
 	)
 		throw new Error("Equipped item still occupies inventory contents");
+	if (
+		equippedCells.some(
+			(cell) =>
+				cell.querySelector(".item-equipped") !== null ||
+				!cell.title.includes("(Equipped)"),
+		)
+	)
+		throw new Error(
+			"Equipment slots must retain equipped labels without redundant checkmarks.",
+		);
 	const equipmentUrls = equippedCells.map(
 		(cell) => cell.querySelector("img")?.src,
 	);
@@ -1369,6 +1427,12 @@ export async function probeClientInventory(options: {
 		document.querySelector('.inventory-sections [data-item-guid="91"]') === null
 	)
 		throw new Error("Unequipped item did not move back into contents");
+	if (
+		document.querySelector(
+			'.inventory-sections .item-grid-cell[data-item-guid="91"] .item-equipped',
+		) !== null
+	)
+		throw new Error("Unequipped item retained its equipment marker.");
 	records = [
 		root,
 		{ ...armor, location: { kind: "equipped", wearerGuid: 1, mask: null } },

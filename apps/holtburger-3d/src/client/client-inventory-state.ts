@@ -1,3 +1,4 @@
+import type { ItemCapacity } from "../app/item-capacity";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
 import type { UiIconSpec } from "../app/ui-icon-source";
 import type { ClientEntityRead } from "./client-entity-mirror";
@@ -51,6 +52,8 @@ interface ClientInventoryItems {
 	readonly playerGuid: number | null;
 	/** Only currently usable owned items; bindings keep missing identities themselves. */
 	readonly items: ReadonlyMap<number, ClientEntityFacts>;
+	/** Known container occupancy shared by every item-cell consumer. */
+	readonly capacities: ReadonlyMap<number, ItemCapacity>;
 	/** Prepared persistent artwork belonging to the same accepted baseline. */
 	readonly iconKeys: ReadonlyMap<number, string>;
 }
@@ -59,6 +62,8 @@ interface ClientInventoryItems {
 interface InventoryBaseline {
 	/** Owned item lookup shared by inventory and action binding consumers. */
 	readonly items: ReadonlyMap<number, ClientEntityFacts>;
+	/** Known container occupancy shared by every item-cell consumer. */
+	readonly capacities: ReadonlyMap<number, ItemCapacity>;
 	readonly equipment: InventoryEquipment;
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
@@ -78,6 +83,8 @@ export interface ClientInventoryView {
 	readonly currenciesPending: boolean;
 	readonly pending: boolean;
 	readonly sortMode: InventorySortMode;
+	/** Known ordinary-slot occupancy for every displayed container, including nested ones. */
+	readonly capacities: ReadonlyMap<number, ItemCapacity>;
 	readonly sections: readonly ClientInventorySection[];
 	readonly packSlots: readonly (ClientEntityFacts | null)[];
 	readonly iconKeys: ReadonlyMap<number, string>;
@@ -147,6 +154,7 @@ export class ClientInventoryState {
 			pending: this.#pending,
 			sortMode: this.#sortMode,
 			sections,
+			capacities: this.#baseline?.capacities ?? new Map(),
 			packSlots: clientInventoryPackSlots(membership),
 			iconKeys: this.#baseline?.iconKeys ?? new Map(),
 		});
@@ -164,7 +172,12 @@ export class ClientInventoryState {
 	readItems(): ClientInventoryItems {
 		this.#refresh();
 		if (this.#pending || this.#baseline === null)
-			return { playerGuid: null, items: new Map(), iconKeys: new Map() };
+			return {
+				playerGuid: null,
+				items: new Map(),
+				iconKeys: new Map(),
+				capacities: new Map(),
+			};
 		return this.#baseline;
 	}
 
@@ -238,7 +251,24 @@ export class ClientInventoryState {
 		);
 		for (const { item } of equipment.rows)
 			if (item !== null) visibleEntities.set(item.guid, item);
+		const capacities = new Map<number, ItemCapacity>();
 		for (const entity of visibleEntities.values()) {
+			const storage = entity.storage;
+			const children = membership?.children.get(entity.guid) ?? [];
+			// Unresolved placement cannot tell us whether a child consumes an item or pack slot.
+			if (
+				storage.kind === "container" &&
+				storage.roster === "announced" &&
+				storage.itemCapacity !== null &&
+				!children.some((child) => child.location.slot.kind === "pending")
+			) {
+				capacities.set(entity.guid, {
+					used: children.filter((child) => child.location.slot.kind === "item")
+						.length,
+					max: storage.itemCapacity,
+				});
+			}
+
 			const description = entity.description;
 			if (description.kind !== "known") continue;
 			const { overlay, underlay, uiEffects, base } = description.icon;
@@ -263,6 +293,7 @@ export class ClientInventoryState {
 		}
 		this.#baseline = {
 			items: visibleEntities,
+			capacities,
 			equipment,
 			currencies,
 			currenciesPending: currencyTotals.pending,

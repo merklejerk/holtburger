@@ -504,6 +504,28 @@
 					removed: [],
 				});
 			},
+			/** Change bound equipment structure without replacing its icon or action identity. */
+			setToolStructure: (current: number | null, max: number | null) => {
+				const read = interactionLifecycle.entities.read();
+				if (read.kind !== "current")
+					throw new Error("Expected current inventory");
+				const item = read.level.entities.get(95);
+				if (item?.description.kind !== "known")
+					throw new Error("Expected tool fixture");
+				emitInteractionEvent("client-entity-facts-changed", {
+					upserts: [
+						{
+							...item,
+							description: {
+								...item.description,
+								stackCount: 2,
+								structure: { current, max },
+							},
+						},
+					],
+					removed: [],
+				});
+			},
 			hoverWorld: (guid: number | null) => (hoveredGuid = guid),
 			queryCommands: () =>
 				interactionCommands.filter(

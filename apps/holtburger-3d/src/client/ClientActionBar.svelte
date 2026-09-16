@@ -259,6 +259,8 @@
 								: (item?.label ?? `Unavailable item ${content.item}`)}
 							display={item?.display}
 							count={item?.stackCount ?? null}
+							structure={item?.structure ?? null}
+							capacity={item?.capacity ?? null}
 							available={content !== null &&
 								item?.actionKind === content.kind &&
 								(content.replacement === null ||

@@ -1,3 +1,4 @@
+use super::pose_orientation::recover_pose_orientation;
 use super::*;
 use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 use crate::spatial::{
@@ -643,6 +644,18 @@ impl WorldState {
             .or_else(|| self.entities.get(guid).map(|entity| entity.position))
             .unwrap_or_default();
 
+        let bootstrap_position = if data.pos.is_some() {
+            recover_pose_orientation(
+                guid,
+                bootstrap_position,
+                self.entities
+                    .get(guid)
+                    .map(|entity| entity.position.rotation),
+            )
+        } else {
+            bootstrap_position
+        };
+
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.properties = properties;
             entity.position = bootstrap_position;
@@ -733,6 +746,13 @@ impl WorldState {
                 .apply_remote_position_sequence_only(pos_pack.position_sequence);
             return true;
         }
+        let pos = recover_pose_orientation(
+            guid,
+            pos_pack.pos,
+            self.entities
+                .get(guid)
+                .map(|entity| entity.position.rotation),
+        );
         if missing_runtime_cell {
             self.ensure_runtime_body(body_id);
         }
@@ -750,19 +770,19 @@ impl WorldState {
             .and_then(crate::motion::BodyMotionRuntime::adjusted_max_speed_mps);
         let effect = if teleported {
             AuthoritativePoseEffect::Reset {
-                pose: pos_pack.pos,
+                pose: pos,
                 cause: AuthoritativePoseResetCause::Teleport,
             }
         } else if missing_runtime_cell {
             AuthoritativePoseEffect::Reset {
-                pose: pos_pack.pos,
+                pose: pos,
                 cause: AuthoritativePoseResetCause::MissingCellRecovery,
             }
         } else if viewer_distance >= RETAIL_INTERPOLATION_SNAP_DISTANCE_M {
-            AuthoritativePoseEffect::Snap { pose: pos_pack.pos }
+            AuthoritativePoseEffect::Snap { pose: pos }
         } else {
             AuthoritativePoseEffect::Interpolate {
-                pose: pos_pack.pos,
+                pose: pos,
                 keep_heading,
                 adjusted_max_speed_mps,
             }
@@ -773,7 +793,7 @@ impl WorldState {
             .get_mut(guid)
             .expect("entity admitted from this world turn must remain present");
         entity.apply_remote_position_sample(
-            pos_pack.pos,
+            pos,
             pos_pack.instance_sequence,
             pos_pack.position_sequence,
             pos_pack.teleport_sequence,
@@ -830,15 +850,16 @@ impl WorldState {
             return false;
         };
 
-        let pos = data.position;
-        let accepted = entity.apply_server_autonomous_position_update(
-            pos,
+        let accepted = entity.admit_server_autonomous_position_sequences(
             data.instance_sequence,
             data.teleport_sequence,
             data.force_position_sequence,
             data.server_control_sequence,
         );
         if accepted {
+            let pos =
+                recover_pose_orientation(data.guid, data.position, Some(entity.position.rotation));
+            entity.position = pos;
             self.emit_entity_pose_effect(
                 data.guid,
                 AuthoritativePoseEffect::Reset {
@@ -878,18 +899,11 @@ impl WorldState {
             return None;
         }
 
-        let mut pos = effect.pose();
-
-        if !pos.rotation.w.is_finite()
-            || !pos.rotation.x.is_finite()
-            || !pos.rotation.y.is_finite()
-            || !pos.rotation.z.is_finite()
-        {
-            pos.rotation = self
-                .player_position()
-                .map(|current| current.rotation)
-                .unwrap_or_default();
-        }
+        let pos = recover_pose_orientation(
+            guid,
+            effect.pose(),
+            self.player_position().map(|current| current.rotation),
+        );
 
         self.player_entity_mut()?.position = pos;
         let (velocity, omega) = self
@@ -1036,6 +1050,7 @@ impl WorldState {
                 return false;
             };
 
+            let position = recover_pose_orientation(guid, position, Some(entity.position.rotation));
             entity.position = position;
             entity.placement_intent = crate::EntityPlacementIntent::Independent;
             self.emit_entity_pose_effect(

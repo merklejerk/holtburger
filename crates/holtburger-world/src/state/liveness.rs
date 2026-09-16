@@ -6,6 +6,7 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::object::messages::description::ObjDescEventData;
 use holtburger_protocol::messages::object::types::ModelData;
 
+use super::pose_orientation::recover_pose_orientation;
 use crate::WorldEvent;
 use crate::context::WorldContextExt;
 use crate::entity::Entity;
@@ -568,6 +569,15 @@ impl WorldState {
         events: &mut Vec<WorldEvent>,
     ) -> EntityCreateDisposition {
         let guid = entity.guid;
+        if entity.position.landblock_id != Guid::NULL {
+            entity.position = recover_pose_orientation(
+                guid,
+                entity.position,
+                self.entities
+                    .get(guid)
+                    .map(|current| current.position.rotation),
+            );
+        }
         self.reconcile_pending_visual_description_for_create(&mut entity);
         // A public object description does not replace the local player's private qualities.
         if guid == self.player.guid

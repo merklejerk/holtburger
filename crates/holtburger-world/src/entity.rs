@@ -1521,10 +1521,9 @@ impl Entity {
         true
     }
 
-    /// Applies the quarantined server-to-client autonomous-position path as a discontinuity.
-    pub fn apply_server_autonomous_position_update(
+    /// Admits autonomous-position timestamps before world policy commits the received pose.
+    pub(crate) fn admit_server_autonomous_position_sequences(
         &mut self,
-        position: WorldPosition,
         instance_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
@@ -1536,7 +1535,6 @@ impl Entity {
             return false;
         }
 
-        self.position = position;
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
         self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
         self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX] = force_position_sequence;

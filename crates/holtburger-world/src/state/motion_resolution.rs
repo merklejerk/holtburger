@@ -191,6 +191,29 @@ pub enum LocalAuthoredMotionActionError {
 pub(crate) const STICKY_TARGET_CLEARANCE_M: f32 = 0.3;
 
 impl WorldState {
+    /// Acknowledges a controller-declined local object turn without installing its playback.
+    /// The controller owns the reason for declining; normal self authority rejects stale packets.
+    pub fn acknowledge_local_object_turn(
+        &mut self,
+        data: &holtburger_protocol::messages::MovementEventData,
+    ) -> bool {
+        if data.guid.is_null()
+            || data.guid != self.player.guid
+            || data.is_autonomous
+            || !matches!(
+                data.data,
+                holtburger_protocol::messages::MovementTypeData::TurnToObject(_)
+            )
+            || !self.player.apply_self_update_motion(data)
+        {
+            return false;
+        }
+        if let Some(entity) = self.entities.get_mut(data.guid) {
+            entity.acknowledge_local_movement(data);
+        }
+        true
+    }
+
     /// Sample explicit sticky commands before the collection mutates any target pose.
     /// This transient map is consumed once by physical input preparation, never by contact passes.
     pub fn prepare_sticky_body_targets(

@@ -107,7 +107,7 @@ impl ClientRuntime {
             .take()
             .expect("busy operation should still exist when timing out");
         self.emit_busy_state_updated();
-        self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
+        self.emit_busy_operation_finished(pending.operation.kind(), BusyOperationResult::TimedOut);
     }
 
     pub(super) fn emit_runtime_body_snapshot(&self) {

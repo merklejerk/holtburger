@@ -169,7 +169,7 @@ pub fn select_action(
     if action_end == action_start {
         ActionSelectionOutcome::CompletedWithoutClips
     } else {
-        sequence.mark_action_completion(action_end - 1);
+        sequence.mark_action_range(action_start, action_end);
         ActionSelectionOutcome::Selected
     }
 }

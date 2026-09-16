@@ -90,11 +90,37 @@ const INTERPRETED_COMMAND_PREFIX_RUNS: &[(u16, u16, u16)] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MotionCommand(pub u32);
 
+/// Recognized gesture families eligible for independent manual movement.
+/// Unknown and custom commands deliberately retain ordinary motion policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionGesture {
+    /// Scarab-selected spell preparation action.
+    Windup,
+    /// Talisman-selected spell release substate.
+    Release,
+    /// Pickup/drop reach substate; does not imply an inventory transaction.
+    Reach,
+}
+
 impl MotionCommand {
     const STYLE: u32 = 0x8000_0000;
     const SUBSTATE: u32 = 0x4000_0000;
     const MODIFIER: u32 = 0x2000_0000;
     const ACTION: u32 = 0x1000_0000;
+
+    /// Classifies the spell/reach allowlist for independent manual movement, not all gestures.
+    /// Shipped component gestures (ACE SpellFormula.cs) and inventory reach variants
+    /// (Player_Inventory.cs). Arbitrary UseUserAnimation overrides are not inferred.
+    pub const fn movement_override_gesture(self) -> Option<MotionGesture> {
+        match self.0 {
+            0x1000_0070 | 0x1000_0072 | 0x1000_0074 | 0x1000_0076 | 0x1000_0078 | 0x1000_0132 => {
+                Some(MotionGesture::Windup)
+            }
+            0x4000_002b..=0x4000_0031 | 0x4000_0033..=0x4000_0039 => Some(MotionGesture::Release),
+            0x4000_0018 | 0x4000_0136..=0x4000_0139 => Some(MotionGesture::Reach),
+            _ => None,
+        }
+    }
 
     pub const fn raw(self) -> u32 {
         self.0

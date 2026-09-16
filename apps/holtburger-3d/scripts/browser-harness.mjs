@@ -2417,6 +2417,19 @@ async function runSpawnedSelectionProbe(client, spawned, activateAnimation) {
 		);
 	let motion = null;
 	if (activateAnimation) {
+		// The outdoor camera can spawn a body above support. Continue the host clock through
+		// falling/landing before asking the renderer to prove an advancing ground cycle.
+		let grounded = false;
+		for (let tick = 0; tick < 480; tick += 1) {
+			await invoke("tickExplorerEntities", [1000 / 30]);
+			const entity = exactHarnessEntity(await invoke("state"), spawned);
+			if (entity.placement.contact === "grounded") {
+				grounded = true;
+				break;
+			}
+		}
+		if (!grounded)
+			throw new Error("Selection fixture did not reach grounded support.");
 		const possession = await invoke("possessExplorerEntity", [
 			spawned.identity.guid,
 		]);
@@ -2437,10 +2450,19 @@ async function runSpawnedSelectionProbe(client, spawned, activateAnimation) {
 		if (result !== "accepted") {
 			throw new Error(`Selection animation intent returned ${result}.`);
 		}
-		for (let tick = 0; tick < 3; tick += 1) {
+		for (let tick = 0; tick < 120; tick += 1) {
 			await invoke("tickPossession", [1000 / 30]);
+			motion = await invoke("possessionMotionProbe");
+			if (
+				motion?.motion?.activity === "locomotion" &&
+				motion.motion.locomotion?.clip.completion === "loop"
+			)
+				break;
 		}
-		motion = await invoke("possessionMotionProbe");
+		if (motion?.motion?.activity !== "locomotion")
+			throw new Error(
+				`Selection fixture retained explicit motion: ${JSON.stringify(motion)}.`,
+			);
 	}
 	const state = await invoke("state");
 	const targets = [];
@@ -2487,7 +2509,9 @@ function assertSpawnedSelectionProbe(probe, expectsAnimation) {
 			(target) => target.placementKind === "world",
 		);
 		if (
-			probe.motion?.motion?.kind !== "playing" ||
+			![probe.motion?.motion?.ordinary, probe.motion?.motion?.locomotion].some(
+				(layer) => layer?.clip.kind === "playing",
+			) ||
 			root === undefined ||
 			Math.abs(
 				root.evidence.second.geometry.transformChecksum -
@@ -2811,15 +2835,15 @@ async function runPossessionScenario(
 	let backwardEntry = await advance(1);
 	for (let tick = 1; tick < transitionTimeoutTicks; tick += 1) {
 		if (
-			backwardEntry.probe?.motion?.kind === "playing" &&
-			backwardEntry.probe.motion.completion === "loop"
+			backwardEntry.probe?.motion?.ordinary?.clip.kind === "playing" &&
+			backwardEntry.probe.motion.ordinary.clip.completion === "loop"
 		)
 			break;
 		backwardEntry = await advance(1);
 	}
 	if (
-		backwardEntry.probe?.motion?.kind !== "playing" ||
-		backwardEntry.probe.motion.completion !== "loop"
+		backwardEntry.probe?.motion?.ordinary?.clip.kind !== "playing" ||
+		backwardEntry.probe.motion.ordinary.clip.completion !== "loop"
 	) {
 		throw new Error(
 			`Possessed S did not reach its reversed cyclic motion: ${JSON.stringify(backwardEntry.probe)}.`,

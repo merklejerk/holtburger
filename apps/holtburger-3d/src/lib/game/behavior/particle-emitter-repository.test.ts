@@ -15,7 +15,7 @@ function emitter(
 	return {
 		a: acVector3([0, 0, 0]),
 		b: acVector3([0, 0, 0]),
-		birthrateSeconds: 0.25,
+		birthrate: 0.25,
 		c: acVector3([0, 0, 0]),
 		emitsPerMeter: false,
 		emitsPerSecond: true,

@@ -169,21 +169,28 @@ describe("dynamic-entity view contract", () => {
 		).toThrow();
 	});
 
-	it("preserves an exact settled motion pose", () => {
-		const decoded = decodeDynamicEntityView({
-			...entity(1, 1),
-			motion: {
-				kind: "settled",
-				animationId: 0x03000559,
-				frame: 31,
+	it("preserves independent tracks and an exact settled pose", () => {
+		const motion = {
+			ordinary: {
+				playbackId: "9007199254740993",
+				clip: { kind: "settled", animationId: 0x03000559, frame: 31 },
 			},
-		});
-
-		expect(decoded.motion).toEqual({
-			kind: "settled",
-			animationId: 0x03000559,
-			frame: 31,
-		});
+			locomotion: {
+				playbackId: "2",
+				clip: {
+					kind: "playing",
+					animationId: 0x03000001,
+					lowFrame: 0,
+					highFrame: 7,
+					framerate: 30,
+					completion: "loop",
+				},
+			},
+			activity: "gesture",
+		};
+		expect(decodeDynamicEntityView({ ...entity(1, 1), motion }).motion).toEqual(
+			motion,
+		);
 	});
 
 	it("requires and preserves the producer-resolved presentation class", () => {

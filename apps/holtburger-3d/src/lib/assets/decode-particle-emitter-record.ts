@@ -22,7 +22,7 @@ const manifestSchema = z.object({
 			radius: finite.nonnegative(),
 		})
 		.nullable(),
-	birthrateSeconds: finite.nonnegative(),
+	birthrate: finite.nonnegative(),
 	maxParticles: z.number().int().nonnegative(),
 	initialParticles: z.number().int().nonnegative(),
 	totalParticles: z.number().int().nonnegative(),

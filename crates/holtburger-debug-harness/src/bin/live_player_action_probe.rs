@@ -9,8 +9,8 @@ use holtburger_common::Guid;
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{
     ClientCommand, ClientLifecycleState, ClientRuntimeBuilder, ClientViewEvent,
-    ContentAssetService, ContentClientCollisionSource, DynamicEntityClipCompletion,
-    DynamicEntityEvent, DynamicEntityMotion,
+    ContentAssetService, ContentClientCollisionSource, DynamicEntityClip,
+    DynamicEntityClipCompletion, DynamicEntityEvent,
 };
 use holtburger_protocol::messages::combat::CombatMode;
 use std::sync::Arc;
@@ -62,7 +62,8 @@ impl From<CombatModeArg> for CombatMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct ObservedMotion(Option<DynamicEntityMotion>);
+/// Ordinary command playback, independent of any concurrently observed locomotion.
+struct ObservedMotion(Option<DynamicEntityClip>);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -227,7 +228,7 @@ async fn wait_for_combat_stance(
             && motion.0.is_some_and(|motion| {
                 matches!(
                     motion,
-                    DynamicEntityMotion::Playing {
+                    DynamicEntityClip::Playing {
                         completion: DynamicEntityClipCompletion::Loop,
                         ..
                     }
@@ -430,14 +431,19 @@ fn player_motion_from_event(event: &ClientViewEvent, guid: Guid) -> Option<Obser
             .find(|entity| entity.identity.guid == guid),
         _ => None,
     }?;
-    Some(ObservedMotion(view.motion))
+    Some(ObservedMotion(
+        view.motion
+            .as_ref()
+            .and_then(|motion| motion.ordinary.as_ref())
+            .map(|layer| layer.clip),
+    ))
 }
 
-fn describe_motion(motion: Option<DynamicEntityMotion>) -> String {
+fn describe_motion(motion: Option<DynamicEntityClip>) -> String {
     motion.map_or_else(
         || "none".to_owned(),
         |motion| match motion {
-            DynamicEntityMotion::Playing {
+            DynamicEntityClip::Playing {
                 animation_id,
                 completion,
                 framerate,
@@ -447,7 +453,7 @@ fn describe_motion(motion: Option<DynamicEntityMotion>) -> String {
                 "0x{:08X} rate={} frames={}..={} completion={:?}",
                 animation_id, framerate, low_frame, high_frame, completion
             ),
-            DynamicEntityMotion::Settled {
+            DynamicEntityClip::Settled {
                 animation_id,
                 frame,
             } => format!("0x{animation_id:08X} settled frame={frame}"),

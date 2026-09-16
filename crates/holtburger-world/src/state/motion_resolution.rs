@@ -159,9 +159,9 @@ pub enum AuthoredMotionDriveError {
 /// Complete authored-motion result for one body advanced by the world clock.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthoredBodyMotionTick {
-    /// Body whose sole authored cursor produced this tick.
+    /// Body whose motion runtime composed this physical interval.
     pub guid: Guid,
-    /// Root contribution, ordered hooks, and action completion from that cursor advance.
+    /// Selected root contribution, body-semantic hooks, and ordinary action completion.
     pub tick: SequenceTick,
 }
 
@@ -263,12 +263,12 @@ impl WorldState {
         targets
     }
 
-    /// Retains locomotion presentation only while this authority can publish local character motion.
+    /// Retains locomotion only while this authority can simulate local character motion.
     /// Run before authored advancement so leaving physics reveals the uninterrupted authored cursor.
-    pub fn retain_locomotion_presentation(&mut self, collision_enabled: bool) {
+    pub fn retain_locomotion(&mut self, collision_enabled: bool) {
         let scene = &self.scene;
         let entities = &self.entities;
-        self.motion_runtimes.retain_locomotion_presentation(|guid| {
+        self.motion_runtimes.retain_locomotion(|guid| {
             if !collision_enabled {
                 return false;
             }
@@ -427,7 +427,7 @@ impl WorldState {
             .ok_or(PlayerMotionTableLookupError::MotionTableAbsentFromContract { motion_table_id })
     }
 
-    /// Drives one named body's sole authored playback cursor and returns its complete tick.
+    /// Drives one named body's ordinary authored playback and returns its complete tick.
     ///
     /// The world owns table selection and cursor state. Callers own only the semantic order, so
     /// presentation and root motion cannot accidentally advance different playback instances.
@@ -455,6 +455,57 @@ impl WorldState {
             .motion_runtimes
             .drive(table, guid, order, quantum)
             .clone())
+    }
+
+    /// Advances manual locomotion and accepted gestures, returning their selected physical contribution.
+    pub fn drive_manual_motion_for_body(
+        &mut self,
+        guid: Guid,
+        order: MotionOrder,
+        presentation: CharacterMotionPresentation,
+        dt: Duration,
+    ) -> Result<SequenceTick, AuthoredMotionDriveError> {
+        let source = self.motion_table_source_for_guid(guid).ok_or(
+            AuthoredMotionDriveError::MotionTableSourceUnavailable {
+                guid: u32::from(guid),
+            },
+        )?;
+        let motion_table_id = motion_table_id_for_source(source);
+        let table = self.motion_sequences.table(motion_table_id).ok_or(
+            AuthoredMotionDriveError::MotionTableUnavailable {
+                guid: u32::from(guid),
+                motion_table_id,
+            },
+        )?;
+        Ok(self
+            .motion_runtimes
+            .drive_manual(table, guid, order, presentation, dt.as_secs_f32())
+            .clone())
+    }
+
+    /// Whether accepted gesture/idle playback permits retaining manual input on this packet.
+    /// Approach directives are resolved separately by the core movement adapter.
+    pub fn permits_manual_gesture_input(&self, guid: Guid) -> bool {
+        let Some(runtime) = self.motion_runtimes.get(guid) else {
+            return false;
+        };
+        self.motion_sequences
+            .table(runtime.motion_table_id())
+            .is_some_and(|table| runtime.permits_manual_gesture_input(table))
+    }
+
+    /// A retained manual sequence needs one physical advancement even after input stops.
+    pub fn has_manual_locomotion(&self, guid: Guid) -> bool {
+        self.motion_runtimes
+            .get(guid)
+            .is_some_and(|runtime| runtime.has_manual_locomotion())
+    }
+
+    /// Keeps the local physical adapter advancing an accepted gesture without manual input.
+    pub fn has_pending_motion_gesture(&self, guid: Guid) -> bool {
+        self.motion_runtimes
+            .get(guid)
+            .is_some_and(|runtime| runtime.has_pending_gesture())
     }
 
     /// Predicts one client-authored command-list edge into the local body's sole runtime.
@@ -571,7 +622,7 @@ impl WorldState {
         })
     }
 
-    /// Whether the local adapter must advance this body's sole authored cursor for an action.
+    /// Whether the local adapter must advance this body's ordinary playback for an action.
     pub fn has_authored_motion_actions(&self, guid: Guid) -> bool {
         self.motion_runtimes.has_actions(guid)
     }

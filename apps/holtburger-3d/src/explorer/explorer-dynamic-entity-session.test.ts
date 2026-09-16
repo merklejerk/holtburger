@@ -456,12 +456,19 @@ describe("possession", () => {
 		const transport = new RecordingTransport();
 		transport.responses.set("explorer_possession_motion_probe", {
 			motion: {
-				animationId: 0x03000002,
-				completion: "loop",
-				framerate: 40,
-				highFrame: 3,
-				kind: "playing",
-				lowFrame: 0,
+				activity: "locomotion",
+				locomotion: null,
+				ordinary: {
+					playbackId: "1",
+					clip: {
+						animationId: 0x03000002,
+						completion: "loop",
+						framerate: 40,
+						highFrame: 3,
+						kind: "playing",
+						lowFrame: 0,
+					},
+				},
 			},
 			entityGeneration: 7,
 			effectivePlanarSpeed: 7.68,

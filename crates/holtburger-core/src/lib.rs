@@ -108,9 +108,10 @@ pub use dynamic_entity::{
     set_dynamic_entity_physical_configuration,
 };
 pub use dynamic_entity_view::{
-    DynamicEntityAdvance, DynamicEntityClipCompletion, DynamicEntityContactView,
+    DynamicEntityAdvance, DynamicEntityClip, DynamicEntityClipCompletion, DynamicEntityContactView,
     DynamicEntityDisplayView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
-    DynamicEntityMotion, DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
+    DynamicEntityMotion, DynamicEntityMotionActivity, DynamicEntityMotionLayer,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
     DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView,
     DynamicEntityPresentationView, DynamicEntitySampleModeView, DynamicEntitySnapshot,
     DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,

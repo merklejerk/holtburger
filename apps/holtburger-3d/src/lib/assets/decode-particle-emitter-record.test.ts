@@ -5,7 +5,7 @@ function encode(overrides: Record<string, unknown> = {}): Uint8Array {
 	const manifest = {
 		a: [0, 0, 0],
 		b: [0, 0, 0],
-		birthrateSeconds: 0.25,
+		birthrate: 0.25,
 		byteOrder: "little-endian",
 		c: [0, 0, 0],
 		emitsPerMeter: false,

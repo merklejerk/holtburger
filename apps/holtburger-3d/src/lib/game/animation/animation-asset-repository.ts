@@ -1,3 +1,4 @@
+import { collectEmitterInfoIds } from "../behavior/behavior-dependencies";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type {
 	DecodedAnimationAsset,
@@ -46,6 +47,8 @@ export interface PreparedAnimation {
 	 */
 	readonly authoredRootTranslates: boolean;
 	readonly hooks: readonly DecodedAnimationHook[];
+	/** Direct hook assets, shared with script dependency discovery. */
+	readonly emitterInfoIds: readonly DatAssetId[];
 }
 
 export type PreparedAnimationHandle = PreparedAssetHandle<PreparedAnimation>;
@@ -171,6 +174,7 @@ export function prepareAnimation(
 		frameCount: decoded.frameCount,
 		framesPerSecond,
 		hooks: decoded.hooks,
+		emitterInfoIds: collectEmitterInfoIds(decoded.hooks),
 		id: decoded.id,
 		partCount: decoded.partCount,
 		partFrames: decoded.partFrames.map(prepareAnimationFrame),

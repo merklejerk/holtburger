@@ -1244,6 +1244,10 @@ mod tests {
         };
         let cycles = HashMap::from([
             (
+                MotionTable::cycle_key(style, 0x4000_002b),
+                cycle(JUMP_FIXTURE_STAND_ANIMATION, None, None),
+            ),
+            (
                 MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
                 cycle(JUMP_FIXTURE_STAND_ANIMATION, None, None),
             ),
@@ -1412,10 +1416,13 @@ mod tests {
                 ),
                 (
                     MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
-                    HashMap::from([(
-                        JUMP_FIXTURE_ACTION_COMMAND,
-                        clip(JUMP_FIXTURE_ACTION_ANIMATION),
-                    )]),
+                    HashMap::from([
+                        (
+                            JUMP_FIXTURE_ACTION_COMMAND,
+                            clip(JUMP_FIXTURE_ACTION_ANIMATION),
+                        ),
+                        (0x1000_0070, clip(JUMP_FIXTURE_ACTION_ANIMATION)),
+                    ]),
                 ),
             ]),
         };
@@ -1520,8 +1527,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_ACTION_ANIMATION),
         );
         assert!(
@@ -1563,8 +1572,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_ACTION_ANIMATION),
         );
     }
@@ -1813,7 +1824,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_release_keeps_authored_presentation_through_the_final_moving_stop_tick() {
+    async fn manual_movement_preserves_windup_and_applies_one_locomotion_and_stop_displacement() {
         const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
@@ -1872,6 +1883,41 @@ mod tests {
             client.world.scene.body(body_id).unwrap().contact,
             holtburger_world::ContactState::Grounded
         );
+        assert!(client.arm_busy_operation(BusyOperationKind::SpellCast));
+        let message =
+            encoded_game_message(GameMessage::UpdateMotion(Box::new(MovementEventData {
+                guid,
+                object_instance_sequence: client.world.player.instance_sequence,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::Invalid(MovementInvalid {
+                    state: InterpretedMotionState {
+                        flags: MovementStateFlags::CURRENT_STYLE
+                            | MovementStateFlags::FORWARD_COMMAND,
+                        current_style: Some(MotionStance::NonCombat.interpreted()),
+                        forward_command: Some(InterpretedMotionCommand(0x70)),
+                        ..Default::default()
+                    },
+                    sticky_object: None,
+                }),
+            })));
+        client.world.handle_message(&message);
+        let GameMessage::UpdateMotion(data) = message else {
+            unreachable!()
+        };
+        simulation::handle_server_controlled_movement(
+            &data,
+            &mut client.movement,
+            &mut client.world,
+            &mut client.session,
+        )
+        .await
+        .unwrap();
+        assert!(client.world.has_authored_motion_actions(guid));
         for drive in [
             movement_types::CharacterDrive::builder()
                 .run()
@@ -1907,7 +1953,10 @@ mod tests {
                 .tick(now, &mut client.world, &mut client.session)
                 .await
                 .unwrap();
+            let start_pose = client.world.scene.body(body_id).unwrap().pose;
+            let mut authored_translation = Vector3::zero();
             let mut saw_stop = false;
+            let mut saw_gesture = false;
             let mut saw_idle = false;
             let mut moving_idle_boundary = false;
             for _ in 0..observation_ticks {
@@ -1919,7 +1968,13 @@ mod tests {
                     Some(&collision),
                 )
                 .unwrap();
+                saw_gesture |= client.world.has_authored_motion_actions(guid);
+                assert_eq!(
+                    client.active_busy_operation(),
+                    Some(BusyOperationKind::SpellCast)
+                );
                 let runtime = client.world.motion_runtimes.get(guid).unwrap();
+                authored_translation = authored_translation + runtime.tick().offset.translation;
                 let holtburger_world::motion::AuthoredCollisionPose::Animation {
                     animation_id: authored,
                     ..
@@ -1927,15 +1982,25 @@ mod tests {
                 else {
                     panic!("fixture must retain authored animation");
                 };
-                assert_eq!(
-                    runtime.motion_presentation().unwrap().animation_id(),
-                    authored
-                );
                 saw_stop |= authored == STOP_FIXTURE_ANIMATION;
                 saw_idle |= authored == JUMP_FIXTURE_STAND_ANIMATION;
                 moving_idle_boundary |= authored == JUMP_FIXTURE_STAND_ANIMATION
                     && runtime.tick().offset.translation.length_squared() > 0.0;
                 now += dt;
+            }
+            let displacement =
+                client.world.scene.body(body_id).unwrap().pose.coords - start_pose.coords;
+            assert!(
+                (displacement.y - authored_translation.y).abs() < 0.001,
+                "flat collision solve must apply exactly one authored displacement: {displacement:?} versus {authored_translation:?}"
+            );
+            assert!(displacement.y > 0.0);
+            if !drive.is_stationary() {
+                assert!(saw_gesture, "manual movement must preserve the windup");
+                assert!(
+                    !client.world.has_authored_motion_actions(guid),
+                    "windup must finish at its authored boundary"
+                );
             }
             if drive.is_stationary() {
                 assert!(saw_stop, "release must play the authored stop transition");
@@ -1949,7 +2014,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_tick_commits_one_grounded_jump_from_the_release_origin() {
+    async fn fixed_tick_commits_one_midcast_grounded_jump_from_the_release_origin() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let release_pose = WorldPosition {
@@ -1973,7 +2038,7 @@ mod tests {
         seed_test_self_movement_capabilities(&mut client);
         seed_test_jump_authority(&mut client);
         client.world.player.instance_sequence = 11;
-        client.world.player.server_control_sequence = 12;
+        client.world.player.server_control_sequence = 11;
         client.world.player.teleport_sequence = 13;
         client.world.player.force_position_sequence = 14;
 
@@ -2037,7 +2102,47 @@ mod tests {
             Some(&collision),
         )
         .unwrap();
-        let clip_before_rejected_launch = client.world.motion_runtimes.playing_clip(guid);
+        assert!(client.arm_busy_operation(BusyOperationKind::SpellCast));
+        let message =
+            encoded_game_message(GameMessage::UpdateMotion(Box::new(MovementEventData {
+                guid,
+                object_instance_sequence: 11,
+                movement_sequence: 1,
+                server_control_sequence: 12,
+                is_autonomous: false,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::Invalid(MovementInvalid {
+                    state: InterpretedMotionState {
+                        flags: MovementStateFlags::CURRENT_STYLE
+                            | MovementStateFlags::FORWARD_COMMAND,
+                        current_style: Some(MotionStance::NonCombat.interpreted()),
+                        forward_command: Some(InterpretedMotionCommand(0x2b)),
+                        ..Default::default()
+                    },
+                    sticky_object: None,
+                }),
+            })));
+        client.world.handle_message(&message);
+        let GameMessage::UpdateMotion(data) = message else {
+            unreachable!()
+        };
+        simulation::handle_server_controlled_movement(
+            &data,
+            &mut client.movement,
+            &mut client.world,
+            &mut client.session,
+        )
+        .await
+        .unwrap();
+        assert!(client.world.has_pending_motion_gesture(guid));
+        let clip_before_rejected_launch = client
+            .world
+            .motion_runtimes
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip);
         let grounded_release_pose = client.world.scene.body(body_id).unwrap().pose;
 
         client
@@ -2093,7 +2198,12 @@ mod tests {
         assert!(no_replay.committed_jump.is_none());
         assert!(no_replay.character_motion_feedback.is_none());
         assert_eq!(
-            client.world.motion_runtimes.playing_clip(guid),
+            client
+                .world
+                .motion_runtimes
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip),
             clip_before_rejected_launch,
             "a rejected launch must not replace the grounded clip"
         );
@@ -2130,8 +2240,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION),
             "retail Ready and Stand must resolve through their shared motion-table row"
         );
@@ -2166,6 +2278,11 @@ mod tests {
             .committed_jump
             .expect("supported local launch should commit exactly once");
 
+        assert_eq!(
+            client.active_busy_operation(),
+            Some(BusyOperationKind::SpellCast)
+        );
+        assert!(!client.world.has_pending_motion_gesture(guid));
         assert_eq!(committed.position, grounded_release_pose);
         assert_eq!(committed.resolved.extent(), JumpExtent::new(0.75).unwrap());
         assert_eq!(
@@ -2198,8 +2315,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
             "accepted launch must begin the table-authored Ready-to-Falling transition"
         );
@@ -2218,8 +2337,10 @@ mod tests {
             if client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_FALLING_ANIMATION)
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .is_some_and(|clip| clip.animation_id() == JUMP_FIXTURE_FALLING_ANIMATION)
             {
                 assert_eq!(
                     client.world.scene.body(body_id).unwrap().contact,
@@ -2261,8 +2382,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_LANDING_ANIMATION),
             "support recovery must begin the table-authored landing transition"
         );
@@ -2278,8 +2401,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION),
             "the authored landing transition must complete into idle"
         );
@@ -2316,16 +2441,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            client.world.motion_runtimes.state(guid).unwrap().substate,
-            holtburger_world::motion::MotionCommand::RUN_FORWARD,
-            "moving charge must retain locomotion presentation rather than select Ready"
-        );
-        assert_eq!(
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.locomotion)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_RUN_ANIMATION),
             "fractional run-frame movement must already produce locomotion presentation"
         );
@@ -2372,8 +2494,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
             "moving takeoff must use the authored run-to-Falling transition"
         );
@@ -2391,8 +2515,10 @@ mod tests {
             if client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_FALLING_ANIMATION)
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .is_some_and(|clip| clip.animation_id() == JUMP_FIXTURE_FALLING_ANIMATION)
             {
                 assert_eq!(
                     client.world.scene.body(body_id).unwrap().contact,
@@ -2423,16 +2549,15 @@ mod tests {
         }
         let moving_landing_step =
             moving_landing_step.expect("moving jump should return to flat support");
-        assert_eq!(
-            client.world.motion_runtimes.state(guid).unwrap().substate,
-            holtburger_world::motion::MotionCommand::RUN_FORWARD
-        );
+        assert!(client.world.has_manual_locomotion(guid));
         assert_eq!(
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_LANDING_ANIMATION)
         );
         simulation::tick(
@@ -2447,8 +2572,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(guid)
+                .and_then(|motion| motion.locomotion)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_RUN_ANIMATION),
             "held locomotion must resume after the authored landing transition"
         );
@@ -2634,8 +2761,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_RUN_ANIMATION)
         );
         let pose_before_stop = world
@@ -2661,8 +2790,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION),
             "an admitted empty update must retire the prior run cycle"
         );
@@ -2688,8 +2819,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_FALLING_ANIMATION),
             "fixture setup must reach the unsupported cycle before landing"
         );
@@ -2701,8 +2834,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_LANDING_ANIMATION),
             "grounded support must actively retire Falling into authored landing"
         );
@@ -2711,8 +2846,10 @@ mod tests {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION),
             "initialized idle authority must complete landing into the stance default"
         );
@@ -2777,7 +2914,9 @@ mod tests {
         assert_eq!(
             before[0]
                 .motion
-                .map(crate::DynamicEntityMotion::animation_id),
+                .as_ref()
+                .and_then(|motion| motion.ordinary.as_ref())
+                .map(|layer| layer.clip.animation_id()),
             Some(JUMP_FIXTURE_RUN_ANIMATION)
         );
 
@@ -2815,7 +2954,9 @@ mod tests {
         assert_eq!(
             batch.updates[0]
                 .motion
-                .map(crate::DynamicEntityMotion::animation_id),
+                .as_ref()
+                .and_then(|motion| motion.ordinary.as_ref())
+                .map(|layer| layer.clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION)
         );
     }
@@ -2927,8 +3068,10 @@ mod tests {
                 && client
                     .world
                     .motion_runtimes
-                    .playing_clip(remote_guid)
-                    .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_RUN_ANIMATION)
+                    .motion_playback(remote_guid)
+                    .and_then(|motion| motion.ordinary)
+                    .map(|layer| layer.clip)
+                    .is_some_and(|clip| clip.animation_id() == JUMP_FIXTURE_RUN_ANIMATION)
             {
                 break;
             }
@@ -2943,8 +3086,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_RUN_ANIMATION)
         );
 
@@ -3027,8 +3172,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
             "the observer must enter the table-authored takeoff transition independently from its arc"
         );
@@ -3098,8 +3245,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_TAKEOFF_ANIMATION)
         );
 
@@ -3116,8 +3265,10 @@ mod tests {
             if client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_FALLING_ANIMATION)
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .is_some_and(|clip| clip.animation_id() == JUMP_FIXTURE_FALLING_ANIMATION)
             {
                 assert_eq!(
                     client.world.scene.body(body_id).unwrap().contact,
@@ -3133,8 +3284,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_FALLING_ANIMATION),
             "the observer must visibly play Falling instead of sliding in its run cycle"
         );
@@ -3173,8 +3326,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_LANDING_ANIMATION),
             "remote support recovery must start the authored landing transition"
         );
@@ -3190,8 +3345,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
+                .motion_playback(remote_guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_RUN_ANIMATION),
             "the authored landing transition must complete into the server's held run"
         );

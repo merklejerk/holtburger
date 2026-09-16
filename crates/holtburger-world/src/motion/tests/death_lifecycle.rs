@@ -71,14 +71,24 @@ fn establishment_selects_authored_destination_without_entry_hooks() {
         let catalog = death_catalog(rate);
         let table = catalog.table(TABLE).unwrap();
         let mut body = BodyMotionRuntime::establish(table, dead_order());
-        assert_eq!(body.playing_clip().unwrap().animation_id, REST);
+        assert_eq!(
+            body.motion_playback()
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .unwrap()
+                .animation_id(),
+            REST
+        );
         assert_eq!(
             body.sequence().current_frame(),
             if rate < 0.0 { 3 } else { 0 }
         );
         assert_eq!(body.sequence().clips().len(), 1);
         assert!(body.drive(table, dead_order(), 0.25).hooks.is_empty());
-        assert_eq!(body.playing_clip().unwrap().framerate, rate);
+        assert_eq!(
+            body.sequence().current_clip().unwrap().node.framerate(),
+            rate
+        );
     }
 }
 
@@ -93,14 +103,23 @@ fn accepted_death_cancels_active_and_queued_actions_but_ticks_preserve_transitio
     assert_eq!(body.action_count(), 2);
     body.accept_order(table, dead_order());
     assert_eq!(body.action_count(), 0);
-    assert_eq!(body.playing_clip().unwrap().animation_id, HOOK_ANIM);
+    assert_eq!(
+        body.motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        HOOK_ANIM
+    );
     body.drive(table, dead_order(), 0.25);
     assert_eq!(body.sequence().current_frame(), 1);
     body.drive(table, dead_order(), 0.25);
     assert_eq!(body.sequence().current_frame(), 2);
     body.drive(table, dead_order(), 2.0);
     assert_eq!(
-        body.motion_presentation(),
+        body.motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip),
         Some(MotionPresentation::Settled(SettledMotionPose {
             animation_id: REST,
             frame: 0
@@ -116,7 +135,14 @@ fn fresh_identical_death_retires_entry_without_traversing_its_hooks() {
     body.accept_order(table, dead_order());
     body.drive(table, dead_order(), 0.25);
     body.accept_order(table, dead_order());
-    assert_eq!(body.playing_clip().unwrap().animation_id, REST);
+    assert_eq!(
+        body.motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        REST
+    );
     assert!(body.drive(table, dead_order(), 1.0).hooks.is_empty());
 }
 
@@ -146,7 +172,14 @@ fn table_rebinding_reconstructs_destination_without_prior_actions() {
     replacement.id += 1;
     let tick = body.drive(&replacement, dead_order(), 0.0);
     assert!(tick.hooks.is_empty());
-    assert_eq!(body.playing_clip().unwrap().animation_id, REST);
+    assert_eq!(
+        body.motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        REST
+    );
     assert_eq!(body.action_count(), 0);
 }
 
@@ -170,9 +203,11 @@ fn local_epoch_reconstruction_retires_actions_and_establishes_replacement() {
     assert_eq!(
         world
             .motion_runtimes
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         REST
     );
 }
@@ -207,9 +242,11 @@ fn world_creation_update_and_replacement_have_distinct_playback_lifetimes() {
     assert_eq!(
         world
             .motion_runtimes
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         HOOK_ANIM
     );
     let parent = Guid(0x7000_0002);
@@ -257,7 +294,11 @@ fn world_creation_update_and_replacement_have_distinct_playback_lifetimes() {
     );
     world.upsert_entity_from_create(entity(dead), &mut Vec::new());
     assert_eq!(
-        world.motion_runtimes.motion_presentation(guid),
+        world
+            .motion_runtimes
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip),
         Some(MotionPresentation::Settled(SettledMotionPose {
             animation_id: REST,
             frame: 0

@@ -40,6 +40,70 @@ interface AnimationRecord {
 	readonly retainedPartToObjectTransforms: readonly Mat4[];
 }
 
+/** A clip update already classified against its accepted host occurrence. */
+export type AnimationLayerUpdate =
+	| { readonly kind: "unchanged" }
+	| { readonly kind: "remove" }
+	| { readonly kind: "install"; readonly clip: PlayingClip }
+	| { readonly kind: "retime"; readonly framesPerSecond: number };
+
+/** Shared semantic activity; visibility priority is applied here in the frontend. */
+export type AnimationMotionActivity = "locomotion" | "gesture" | "explicit";
+
+interface OrdinaryPlayback {
+	/** Currently traversed ordinary clip, including a naturally retiring gesture. */
+	readonly current: AnimationRecord;
+	/** An accepted successor waits without advancing until the final gesture clip finishes. */
+	readonly successor: { readonly record: AnimationRecord | null } | null;
+}
+
+/** A node always has at least one playable track. Both tracks share one entity lifetime. */
+type NodeAnimation = { readonly activity: AnimationMotionActivity } & (
+	| { readonly kind: "ordinary"; readonly ordinary: OrdinaryPlayback }
+	| { readonly kind: "locomotion"; readonly locomotion: AnimationRecord }
+	| {
+			readonly kind: "layered";
+			readonly ordinary: OrdinaryPlayback;
+			readonly locomotion: AnimationRecord;
+	  }
+);
+
+function ordinaryPlayback(node: NodeAnimation): OrdinaryPlayback | null {
+	return node.kind === "locomotion" ? null : node.ordinary;
+}
+
+function locomotionPlayback(node: NodeAnimation): AnimationRecord | null {
+	return node.kind === "ordinary" ? null : node.locomotion;
+}
+
+function selectedPlayback(node: NodeAnimation): AnimationRecord {
+	if (node.kind === "ordinary") return node.ordinary.current;
+	if (node.kind === "locomotion") return node.locomotion;
+	return node.activity !== "locomotion" || node.ordinary.successor !== null
+		? node.ordinary.current
+		: node.locomotion;
+}
+
+function composePlayback(
+	ordinary: OrdinaryPlayback | null,
+	locomotion: AnimationRecord | null,
+	activity: AnimationMotionActivity,
+): NodeAnimation | null {
+	if (ordinary !== null && locomotion !== null)
+		return { kind: "layered", ordinary, locomotion, activity };
+	if (ordinary !== null) return { kind: "ordinary", ordinary, activity };
+	if (locomotion !== null) return { kind: "locomotion", locomotion, activity };
+	return null;
+}
+
+function canFinishGesture(record: AnimationRecord): boolean {
+	if (record.clip.completion !== "hold" || record.clip.framesPerSecond === 0)
+		return false;
+	return record.clip.framesPerSecond > 0
+		? record.framePosition < record.clip.highFrame
+		: record.framePosition > record.clip.lowFrame;
+}
+
 export interface AnimationRuntimeDiagnostics {
 	readonly activePlaybackCount: number;
 	readonly discontinuityCount: number;
@@ -76,7 +140,7 @@ export interface StagedAnimationOwner {
 export class AnimationSystem<TOwnerId extends string> {
 	readonly #effects: EffectSystem;
 	readonly #router: BehaviorEventRouter;
-	readonly #records = new Map<SceneNodeId, AnimationRecord>();
+	readonly #records = new Map<SceneNodeId, NodeAnimation>();
 	readonly #owners = new Map<TOwnerId, Set<SceneNodeId>>();
 	readonly #stagedNodeIds = new Set<SceneNodeId>();
 	#destroyed = false;
@@ -105,20 +169,135 @@ export class AnimationSystem<TOwnerId extends string> {
 		const nodeId = sceneNodeIdOf(target.targetId);
 		if (nodeId === null) return false;
 		const record = this.#records.get(nodeId);
-		return record?.target.generation === target.generation;
+		return (
+			record !== undefined &&
+			selectedPlayback(record).target.generation === target.generation
+		);
 	}
 
-	/** Change an installed clip's cadence without restarting its phase or clock. */
-	setPlaybackRate(target: BehaviorTarget, framesPerSecond: number): void {
-		if (!Number.isFinite(framesPerSecond))
-			throw new Error("Animation playback rate must be finite.");
+	/** Apply both host track updates atomically. Visibility switches retain existing clocks. */
+	applyMotion(
+		ownerId: TOwnerId,
+		target: BehaviorTarget,
+		activity: AnimationMotionActivity,
+		ordinaryUpdate: AnimationLayerUpdate,
+		locomotionUpdate: AnimationLayerUpdate,
+		initialPartToObjectTransforms: readonly Mat4[],
+	): void {
+		if (this.#destroyed)
+			throw new Error("Cannot play a clip on destroyed animation playback.");
 		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
-		const record = this.#records.get(nodeId);
-		if (!record || record.target.generation !== target.generation)
+		const existing = this.#records.get(nodeId);
+		if (
+			existing &&
+			selectedPlayback(existing).target.generation !== target.generation
+		)
 			throw new Error(
-				`Animation rate update has no matching playback for ${nodeId}.`,
+				`Clip for ${nodeId} names generation ${target.generation}, but its playback holds ${selectedPlayback(existing).target.generation}.`,
 			);
-		// Consume the already-sampled fraction at the old rate before changing cadence.
+		const oldOrdinary = existing ? ordinaryPlayback(existing) : null;
+		const oldLocomotion = existing ? locomotionPlayback(existing) : null;
+		// Retiming consumes time accumulated before this update. Its hooks belong to the
+		// previous visibility, even when this same update reveals or hides that track.
+		const previouslyVisible = existing ? selectedPlayback(existing) : null;
+		const finishing =
+			oldOrdinary !== null &&
+			(existing?.activity === "gesture" || oldOrdinary.successor !== null) &&
+			activity === "locomotion" &&
+			canFinishGesture(oldOrdinary.current);
+		const acceptedOrdinary =
+			oldOrdinary === null
+				? null
+				: oldOrdinary.successor === null
+					? oldOrdinary.current
+					: oldOrdinary.successor.record;
+		const ordinaryRecord = this.#updateLayer(
+			// A replacement inherits the pose actually being traversed, not the dormant successor.
+			ordinaryUpdate.kind === "install" && oldOrdinary !== null
+				? oldOrdinary.current
+				: acceptedOrdinary,
+			ordinaryUpdate,
+			target,
+			initialPartToObjectTransforms,
+			acceptedOrdinary !== null && acceptedOrdinary === previouslyVisible,
+		);
+		const locomotion = this.#updateLayer(
+			oldLocomotion,
+			locomotionUpdate,
+			target,
+			initialPartToObjectTransforms,
+			oldLocomotion !== null && oldLocomotion === previouslyVisible,
+		);
+		const ordinary: OrdinaryPlayback | null =
+			finishing && oldOrdinary !== null
+				? {
+						current: oldOrdinary.current,
+						successor: { record: ordinaryRecord },
+					}
+				: ordinaryRecord === null
+					? null
+					: { current: ordinaryRecord, successor: null };
+		const node = composePlayback(ordinary, locomotion, activity);
+		if (node === null) {
+			this.#records.delete(nodeId);
+		} else {
+			// A newly visible track may have render-only fractional time accumulated while
+			// hidden. Consume it silently before any future visible semantic step.
+			const selected = selectedPlayback(node);
+			if (existing && selected !== selectedPlayback(existing))
+				this.#consumeFraction(selected, false);
+			this.#records.set(nodeId, node);
+			let nodes = this.#owners.get(ownerId);
+			if (!nodes) {
+				nodes = new Set();
+				this.#owners.set(ownerId, nodes);
+			}
+			nodes.add(nodeId);
+		}
+		this.#latestAdvancedFrame = null;
+	}
+
+	#updateLayer(
+		existing: AnimationRecord | null,
+		update: AnimationLayerUpdate,
+		target: BehaviorTarget,
+		initialPose: readonly Mat4[],
+		visible: boolean,
+	): AnimationRecord | null {
+		switch (update.kind) {
+			case "unchanged":
+				return existing;
+			case "remove":
+				return null;
+			case "retime":
+				if (existing === null)
+					throw new Error("Animation rate update has no installed track.");
+				this.#retime(existing, update.framesPerSecond, visible);
+				return existing;
+			case "install": {
+				const retained =
+					existing === null
+						? cloneCompletePose(initialPose)
+						: this.#samplePartPose(existing);
+				return this.#createRecord(target, update.clip, 0, retained);
+			}
+		}
+	}
+
+	/** Snapshot this track's complete current pose for a partial-part successor. */
+	#samplePartPose(record: AnimationRecord): readonly Mat4[] {
+		return sampleAnimationPoseOver(
+			record.clip,
+			advancePlayingFrame(
+				record.clip,
+				record.framePosition,
+				record.fractionalSeconds,
+			).framePosition,
+			record.retainedPartToObjectTransforms,
+		);
+	}
+
+	#consumeFraction(record: AnimationRecord, visible: boolean): void {
 		const advance = advancePlayingFrame(
 			record.clip,
 			record.framePosition,
@@ -126,61 +305,19 @@ export class AnimationSystem<TOwnerId extends string> {
 		);
 		record.framePosition = advance.framePosition;
 		record.fractionalSeconds = 0;
-		this.#dispatchDepartedFrames(record, advance.departedFrames, "live");
-		record.clip = { ...record.clip, framesPerSecond };
-		this.#latestAdvancedFrame = null;
+		if (visible)
+			this.#dispatchDepartedFrames(record, advance.departedFrames, "live");
 	}
 
-	/**
-	 * Install or replace the clip one node plays, entering at the clip's own starting frame.
-	 *
-	 * Motion-driven entities activate with no playback at all and receive their first clip from a
-	 * host projection, so installing and swapping are the same operation. Playback is entered
-	 * rather than resumed: host and receiver both advance by rate x dt from the same entry frame,
-	 * so neither accumulates a phase offset against the other, and no frame number is exchanged.
-	 *
-	 * A clip naming a generation the node no longer holds is a defect rather than a race: the
-	 * caller resolves the target from the same presentation record the staging used, and both
-	 * change only inside one synchronous commit. Rejecting loudly surfaces a drift between the
-	 * entity generation and the dynamics owner generation, which are separate counters.
-	 */
-	playClip(
-		ownerId: TOwnerId,
-		target: BehaviorTarget,
-		clip: PlayingClip,
-		initialPartToObjectTransforms: readonly Mat4[],
+	#retime(
+		record: AnimationRecord,
+		framesPerSecond: number,
+		visible: boolean,
 	): void {
-		if (this.#destroyed)
-			throw new Error("Cannot play a clip on destroyed animation playback.");
-		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
-		const existing = this.#records.get(nodeId);
-		if (existing && existing.target.generation !== target.generation) {
-			throw new Error(
-				`Clip for ${nodeId} names generation ${target.generation}, but its playback holds ${existing.target.generation}.`,
-			);
-		}
-		const retainedPartToObjectTransforms = existing
-			? sampleAnimationPoseOver(
-					existing.clip,
-					advancePlayingFrame(
-						existing.clip,
-						existing.framePosition,
-						existing.fractionalSeconds,
-					).framePosition,
-					existing.retainedPartToObjectTransforms,
-				)
-			: cloneCompletePose(initialPartToObjectTransforms);
-		this.#records.set(
-			nodeId,
-			this.#createRecord(target, clip, 0, retainedPartToObjectTransforms),
-		);
-		let nodes = this.#owners.get(ownerId);
-		if (!nodes) {
-			nodes = new Set();
-			this.#owners.set(ownerId, nodes);
-		}
-		nodes.add(nodeId);
-		this.#latestAdvancedFrame = null;
+		if (!Number.isFinite(framesPerSecond))
+			throw new Error("Animation playback rate must be finite.");
+		this.#consumeFraction(record, visible);
+		record.clip = { ...record.clip, framesPerSecond };
 	}
 
 	/** Advance every active playback's semantic state at the fixed 30 Hz behavior cadence. */
@@ -191,8 +328,47 @@ export class AnimationSystem<TOwnerId extends string> {
 			throw new Error("Animation time must be finite.");
 		const startedAt = performance.now();
 		let semanticStepCount = 0;
-		for (const [nodeId, record] of this.#records) {
-			semanticStepCount += this.#advanceRecord(nodeId, record, timeSeconds);
+		let activePlaybackCount = 0;
+		for (const [nodeId, node] of this.#records) {
+			const visible = selectedPlayback(node);
+			const ordinary = ordinaryPlayback(node);
+			const locomotion = locomotionPlayback(node);
+			for (const record of [ordinary?.current, locomotion]) {
+				if (record) {
+					activePlaybackCount += 1;
+					semanticStepCount += this.#advanceRecord(
+						nodeId,
+						record,
+						timeSeconds,
+						record === visible,
+					);
+				}
+			}
+			if (ordinary?.successor && !canFinishGesture(ordinary.current)) {
+				const pending = ordinary.successor.record;
+				// Untouched parts inherit the finishing pose, rather than the earlier pose at
+				// which the host announced retirement. The pending clip has never advanced.
+				const successor =
+					pending === null
+						? null
+						: this.#createRecord(
+								pending.target,
+								pending.clip,
+								0,
+								this.#samplePartPose(ordinary.current),
+							);
+				if (successor !== null) successor.lastTimeSeconds = timeSeconds;
+				const next = composePlayback(
+					successor === null ? null : { current: successor, successor: null },
+					locomotion,
+					node.activity,
+				);
+				if (next === null) this.#records.delete(nodeId);
+				else {
+					this.#consumeFraction(selectedPlayback(next), false);
+					this.#records.set(nodeId, next);
+				}
+			}
 		}
 		const frame: AdvancedAnimationFrame = Object.freeze({
 			activeNodeIds: Object.freeze([...this.#records.keys()]),
@@ -201,7 +377,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		this.#latestAdvancedFrame = frame;
 		this.#diagnostics = {
 			...this.#diagnostics,
-			activePlaybackCount: this.#records.size,
+			activePlaybackCount,
 			lastAdvancementDurationMs: performance.now() - startedAt,
 			lastSemanticStepCount: semanticStepCount,
 		};
@@ -226,7 +402,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			const record = this.#records.get(nodeId);
 			if (!record)
 				throw new Error(`Animation sample request contains unknown ${nodeId}.`);
-			return this.#sample(nodeId, record);
+			return this.#sample(nodeId, selectedPlayback(record));
 		});
 		this.#diagnostics = {
 			...this.#diagnostics,
@@ -252,7 +428,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	): StagedAnimationOwner {
 		if (this.#destroyed)
 			throw new Error("Cannot stage destroyed animation playback.");
-		const records = new Map<SceneNodeId, AnimationRecord>();
+		const records = new Map<SceneNodeId, NodeAnimation>();
 		const samples: DynamicPresentationSample[] = [];
 		try {
 			for (const installation of installations) {
@@ -272,7 +448,11 @@ export class AnimationSystem<TOwnerId extends string> {
 					),
 					cloneCompletePose(installation.initialPartToObjectTransforms),
 				);
-				records.set(nodeId, record);
+				records.set(nodeId, {
+					kind: "ordinary",
+					ordinary: { current: record, successor: null },
+					activity: "explicit",
+				});
 				this.#stagedNodeIds.add(nodeId);
 				samples.push(this.#sample(nodeId, record));
 			}
@@ -331,6 +511,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		nodeId: SceneNodeId,
 		record: AnimationRecord,
 		timeSeconds: number,
+		visible: boolean,
 	): number {
 		const previousTime = record.lastTimeSeconds;
 		record.lastTimeSeconds = timeSeconds;
@@ -351,7 +532,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			BEHAVIOR_STEP_SECONDS
 		) {
 			semanticStepCount += 1;
-			this.#advanceSemanticStep(nodeId, record, "live");
+			this.#advanceSemanticStep(nodeId, record, visible ? "live" : "hidden");
 			record.fractionalSeconds = Math.max(
 				0,
 				record.fractionalSeconds - BEHAVIOR_STEP_SECONDS,
@@ -390,8 +571,8 @@ export class AnimationSystem<TOwnerId extends string> {
 	 * Build a record at its clip's entry frame, then replay `phaseSeconds` of it.
 	 *
 	 * Phase is the caller's policy rather than the record's: a setup-default resident desyncs from
-	 * its neighbours by an identity-derived offset, while a host-projected clip must start exactly
-	 * where the host started it and so replays nothing.
+	 * its neighbours by an identity-derived offset, while a host-projected clip enters at its
+	 * authored boundary on receipt. No missed host phase is reconstructed.
 	 */
 	#createRecord(
 		target: BehaviorTarget,
@@ -420,7 +601,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	#advanceSemanticStep(
 		nodeId: SceneNodeId,
 		record: AnimationRecord,
-		mode: "initial-state" | "live",
+		mode: "initial-state" | "live" | "hidden",
 	): void {
 		// Live steps ride the shared effect clock. An initial-state replay does not: it is catching
 		// one new node up to its authored phase, which a global cadence cannot express.
@@ -431,7 +612,8 @@ export class AnimationSystem<TOwnerId extends string> {
 			BEHAVIOR_STEP_SECONDS,
 		);
 		record.framePosition = advance.framePosition;
-		this.#dispatchDepartedFrames(record, advance.departedFrames, mode);
+		if (mode !== "hidden")
+			this.#dispatchDepartedFrames(record, advance.departedFrames, mode);
 	}
 
 	/**

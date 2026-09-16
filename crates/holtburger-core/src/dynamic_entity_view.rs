@@ -4,7 +4,10 @@ use crate::placed_motion::{interpolate_rotation, present_placed_motion_pose};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, ParentLocation, Placement, Quaternion};
-use holtburger_world::motion::{MotionClipCompletion, MotionPresentation};
+use holtburger_world::motion::{
+    MotionClipCompletion, MotionPlayback, MotionPlaybackLayer, MotionPresentation,
+    OrdinaryMotionActivity,
+};
 use holtburger_world::{
     ContactState, EffectiveEntityPhysicsState, EntityAppearance, EntityPlacement,
     PhysicalBodyParticipation, SpatialSampleMode,
@@ -176,7 +179,7 @@ pub struct DynamicEntityViewSource {
     /// Current mutually exclusive solver state or parent-owned attachment.
     pub placement: EntityPlacement<DynamicEntityWorldProjection>,
     /// Current motion-derived presentation level.
-    pub motion: Option<MotionPresentation>,
+    pub motion: Option<MotionPlayback>,
 }
 
 impl DynamicEntityViewSource {
@@ -188,7 +191,7 @@ impl DynamicEntityViewSource {
         generation: u64,
         presentation_class: DynamicEntityPresentationClass,
         input: DynamicEntityProjectionInput,
-        motion: Option<MotionPresentation>,
+        motion: Option<MotionPlayback>,
     ) -> Self {
         Self {
             generation,
@@ -360,6 +363,60 @@ pub struct DynamicEntityAdvance {
     pub path: DynamicEntityPlacedPath,
 }
 
+/// Independent playback descriptions; visual priority and clocks remain frontend-owned.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityMotion {
+    /// Accepted ordinary command/action playback.
+    pub ordinary: Option<DynamicEntityMotionLayer>,
+    /// Independent locomotion, including while hidden by a gesture.
+    pub locomotion: Option<DynamicEntityMotionLayer>,
+    /// Semantic activity consumed by frontend visual priority.
+    pub activity: DynamicEntityMotionActivity,
+}
+
+/// Source-owned meaning of the ordinary track, not a selected visual layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DynamicEntityMotionActivity {
+    Locomotion,
+    Gesture,
+    Explicit,
+}
+
+/// One clip occurrence with receiver-owned phase.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityMotionLayer {
+    /// Opaque decimal identity avoids narrowing a host u64 through JavaScript numbers.
+    pub playback_id: String,
+    /// Complete current clip description.
+    pub clip: DynamicEntityClip,
+}
+
+impl From<MotionPlaybackLayer> for DynamicEntityMotionLayer {
+    fn from(layer: MotionPlaybackLayer) -> Self {
+        Self {
+            playback_id: layer.playback_id.to_string(),
+            clip: layer.clip.into(),
+        }
+    }
+}
+
+impl From<MotionPlayback> for DynamicEntityMotion {
+    fn from(playback: MotionPlayback) -> Self {
+        Self {
+            ordinary: playback.ordinary.map(Into::into),
+            locomotion: playback.locomotion.map(Into::into),
+            activity: match playback.activity {
+                OrdinaryMotionActivity::Locomotion => DynamicEntityMotionActivity::Locomotion,
+                OrdinaryMotionActivity::Gesture => DynamicEntityMotionActivity::Gesture,
+                OrdinaryMotionActivity::Explicit => DynamicEntityMotionActivity::Explicit,
+            },
+        }
+    }
+}
+
 /// Current motion-derived presentation level.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -367,7 +424,7 @@ pub struct DynamicEntityAdvance {
     rename_all = "kebab-case",
     rename_all_fields = "camelCase"
 )]
-pub enum DynamicEntityMotion {
+pub enum DynamicEntityClip {
     /// Advancing clip whose local phase is intentionally not synchronized frame-by-frame.
     Playing {
         animation_id: u32,
@@ -383,7 +440,7 @@ pub enum DynamicEntityMotion {
     Settled { animation_id: u32, frame: i32 },
 }
 
-impl DynamicEntityMotion {
+impl DynamicEntityClip {
     /// Animation shared by either the moving or settled presentation state.
     pub const fn animation_id(self) -> u32 {
         match self {
@@ -392,7 +449,7 @@ impl DynamicEntityMotion {
     }
 }
 
-impl From<MotionPresentation> for DynamicEntityMotion {
+impl From<MotionPresentation> for DynamicEntityClip {
     fn from(presentation: MotionPresentation) -> Self {
         match presentation {
             MotionPresentation::Playing(clip) => Self::Playing {

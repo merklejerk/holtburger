@@ -4,6 +4,7 @@ pub mod fellowship;
 pub mod liveness;
 pub mod motion_resolution;
 pub mod mutations;
+mod pose_orientation;
 mod scene_placement;
 mod selection;
 pub mod self_movement;

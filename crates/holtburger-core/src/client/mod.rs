@@ -2965,6 +2965,199 @@ mod tests {
     }
 
     #[test]
+    fn remote_airborne_casting_preserves_playback_and_ballistic_motion() {
+        let mut trajectories = Vec::new();
+        // No cast, cast before takeoff, and a fresh cast after Falling is already selected.
+        for cast_step in [None, Some(0), Some(2)] {
+            let mut client = builder::build_test_client(ClientState::InWorld);
+            let player_guid = Guid(0x0102_2300);
+            let remote_guid = Guid(0x0102_2301);
+            let motion_table_id = 0x0900_0041;
+            let pose = WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::new(48.0, 48.0, 0.0),
+                rotation: Quaternion::identity(),
+            };
+            client
+                .world
+                .set_motion_sequences(jump_presentation_motion_catalog(motion_table_id));
+            client
+                .world
+                .seed_local_player_entity(player_guid, "Player", pose);
+            let mut remote = Entity::new(
+                remote_guid,
+                "Remote".into(),
+                WorldPosition {
+                    coords: Vector3::new(52.0, 48.0, 0.0),
+                    ..pose
+                },
+            );
+            remote.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            remote
+                .physics
+                .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                    PhysicsState::GRAVITY,
+                ));
+            remote
+                .properties
+                .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+            remote.acceleration = Vector3::new(0.0, 0.0, -9.8);
+            client.world.add_entity(remote);
+            let packet = |command, movement_sequence| {
+                encoded_game_message(GameMessage::UpdateMotion(Box::new(MovementEventData {
+                    guid: remote_guid,
+                    object_instance_sequence: 0,
+                    movement_sequence,
+                    server_control_sequence: 0,
+                    is_autonomous: true,
+                    movement_type: MovementType::Invalid,
+                    motion_flags: 0,
+                    current_style: MotionStance::NonCombat.interpreted(),
+                    data: MovementTypeData::Invalid(MovementInvalid {
+                        state: InterpretedMotionState {
+                            flags: MovementStateFlags::CURRENT_STYLE
+                                | MovementStateFlags::FORWARD_COMMAND,
+                            current_style: Some(MotionStance::NonCombat.interpreted()),
+                            forward_command: Some(command),
+                            ..Default::default()
+                        },
+                        sticky_object: None,
+                    }),
+                })))
+            };
+            client
+                .world
+                .handle_message(&packet(InterpretedMotionCommand::RUN_FORWARD, 1));
+            let body_id = holtburger_world::SpatialBodyId::Entity(remote_guid);
+            client
+                .world
+                .scene
+                .set_dynamic_physical_body(
+                    body_id,
+                    Some(stable_dynamic_body_definition()),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            let interest =
+                SimulationSceneInterest::prefetch_neighborhood(pose, CLIENT_COLLISION_OWNER_RADIUS)
+                    .unwrap();
+            let collision = collision_snapshot(
+                interest.clone(),
+                flat_collision_scene_for_interest(&interest),
+            );
+            let mut now = Instant::now();
+            let dt = Duration::from_millis(PHYSICS_TICK_MS);
+            for _ in 0..60 {
+                simulation::tick(
+                    now,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+                now += dt;
+                if client.world.scene.body(body_id).unwrap().contact
+                    == holtburger_world::ContactState::Grounded
+                {
+                    break;
+                }
+            }
+            assert_eq!(
+                client.world.scene.body(body_id).unwrap().contact,
+                holtburger_world::ContactState::Grounded
+            );
+            let release = packet(
+                InterpretedMotionCommand(JUMP_FIXTURE_RELEASE_COMMAND as u16),
+                2,
+            );
+            if cast_step == Some(0) {
+                client.world.handle_message(&release);
+            }
+            let origin = client.world.scene.body(body_id).unwrap().pose.coords;
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::VectorUpdate(Box::new(
+                    VectorUpdateData {
+                        guid: remote_guid,
+                        velocity: Vector3::new(2.0, 1.0, 5.0),
+                        omega: Vector3::zero(),
+                        instance_sequence: 0,
+                        vector_sequence: 1,
+                    },
+                ))));
+            let mut trajectory = Vec::new();
+            let mut landed = false;
+            for step in 1..=120 {
+                if cast_step == Some(step) {
+                    client.world.handle_message(&release);
+                }
+                now += dt;
+                simulation::tick(
+                    now,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+                let body = client.world.scene.body(body_id).unwrap();
+                let playback = client
+                    .world
+                    .motion_runtimes
+                    .motion_playback(remote_guid)
+                    .unwrap();
+                if cast_step.is_some_and(|start| step >= start) {
+                    assert_eq!(
+                        playback.activity,
+                        holtburger_world::motion::OrdinaryMotionActivity::Gesture
+                    );
+                    assert_eq!(
+                        client
+                            .world
+                            .motion_runtimes
+                            .state(remote_guid)
+                            .unwrap()
+                            .substate
+                            .raw(),
+                        JUMP_FIXTURE_RELEASE_COMMAND
+                    );
+                    assert_eq!(
+                        playback.ordinary.unwrap().clip.animation_id(),
+                        JUMP_FIXTURE_STAND_ANIMATION
+                    );
+                }
+                if body.contact == holtburger_world::ContactState::Grounded {
+                    landed = true;
+                    break;
+                }
+                assert_eq!(body.contact, holtburger_world::ContactState::Airborne);
+                assert_eq!(
+                    playback.locomotion.unwrap().clip.animation_id(),
+                    JUMP_FIXTURE_FALLING_ANIMATION
+                );
+                trajectory.push((
+                    body.pose.coords - origin,
+                    body.pose.rotation,
+                    body.retained.velocity,
+                ));
+            }
+            assert!(landed);
+            assert!(trajectory.len() > 2);
+            trajectories.push(trajectory);
+        }
+        assert_eq!(
+            trajectories[0], trajectories[1],
+            "casting before takeoff must preserve the physical arc and heading"
+        );
+        assert_eq!(
+            trajectories[0], trajectories[2],
+            "casting received airborne must preserve the physical arc and heading"
+        );
+    }
+
+    #[test]
     fn fixed_tick_remote_upward_vector_launches_once_and_selects_falling() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_2300);

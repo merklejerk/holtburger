@@ -69,16 +69,21 @@ therefore do not independently enable footstep hooks. Releasing movement immedia
 the full gesture on the ground; airborne/sliding contact keeps the support pose in the lower
 body even without directional input. There is no additional crossfade or foot-placement solver.
 
-Recognized casting gestures keep their authored clocks through manual jump/fall transitions.
+Recognized casting gestures keep their authored clocks through local and remote jump/fall transitions.
 The independent locomotion track selects the support pose, while the gesture retains action
 completion and body-hook ownership. Other actions keep existing contact interruption priority.
 Both the per-tick driver and committed contact edges preserve these gestures. Packet admission
-also retains the actual accepted command when manual locomotion owns support presentation, so
-casts arriving midair remain gestures instead of being reclassified as falling.
-Landing without movement restores the full gesture. This extends gesture/manual coexistence to
+also retains eligible accepted casting commands and windup batches for remote characters, so
+casts arriving midair remain gestures instead of being reclassified as falling. A fresh airborne
+cast discards an obsolete takeoff transition before selecting its own entry. Existing gesture
+entries and queues retain their clocks. Server-directed movement keeps its existing priority.
+Landing without movement restores the full gesture. This extends gesture/locomotion coexistence to
 unsupported travel; it does not authorize new spell casts. Gesture hooks and collision poses
-remain gesture-owned rather than being retired at takeoff. The jump solver still owns trajectory;
-skipped locomotion transition clips no longer contribute their authored offsets.
+remain gesture-owned rather than being retired at takeoff. The jump solver still owns trajectory:
+unsupported character translation uses ballistic motion, while authored rotation can still affect
+heading. Landing restores ordinary supported movement.
+Skipped locomotion transition clips no longer contribute their authored offsets. The remote
+locomotion presentation track never changes the physical source sample or dispatches body hooks.
 
 While airborne, a locomotion stance change discards its grounded transition route and selects
 the destination Falling cycle directly. The player motion table `0x09000001` routes style changes

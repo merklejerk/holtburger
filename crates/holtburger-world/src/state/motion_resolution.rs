@@ -483,15 +483,15 @@ impl WorldState {
             .clone())
     }
 
-    /// Whether accepted gesture/idle playback permits retaining manual input on this packet.
+    /// Whether accepted gesture/idle playback permits independent locomotion.
     /// Approach directives are resolved separately by the core movement adapter.
-    pub fn permits_manual_gesture_input(&self, guid: Guid) -> bool {
+    pub fn permits_gesture_locomotion(&self, guid: Guid) -> bool {
         let Some(runtime) = self.motion_runtimes.get(guid) else {
             return false;
         };
         self.motion_sequences
             .table(runtime.motion_table_id())
-            .is_some_and(|table| runtime.permits_manual_gesture_input(table))
+            .is_some_and(|table| runtime.permits_gesture_locomotion(table))
     }
 
     /// A retained manual sequence needs one physical advancement even after input stops.
@@ -922,7 +922,7 @@ impl WorldState {
         Ok(())
     }
 
-    /// Apply walkable-bit interruption for gravity-enabled creatures, preserving manual gestures.
+    /// Apply walkable-bit interruption for gravity-enabled creatures, preserving eligible gestures.
     /// acclient.c:306805,330655,330680 route takeoff/landing through RemoveLinkAnimations.
     /// Unknown contact is hydration, not an observed physical edge. Sliding is non-walkable.
     pub(crate) fn interrupt_motion_on_support_change(
@@ -939,12 +939,21 @@ impl WorldState {
             return;
         }
         // RETAIL DIVERGENCE: takeoff/landing removes pending animations in retail
-        // (acclient.c:306805,330655,330680). Independent manual playback keeps accepted
-        // gestures alive on these edges, just as drive_manual does between edges. Restoring
+        // (acclient.c:306805,330655,330680). Independent gesture playback keeps accepted
+        // gestures alive on these edges for both manual and remote locomotion. Restoring
         // unconditional removal cancels the cast before the frontend can compose it. This
         // uses the existing gesture allowlist; visual scope is the 22 humanoid CharGen entries
         // in docs/animation_composition.md. Other actions retain retail interruption.
-        if self.has_manual_locomotion(guid) && self.permits_manual_gesture_input(guid) {
+        if self.motion_runtimes.get(guid).is_some_and(|runtime| {
+            self.motion_sequences
+                .table(runtime.motion_table_id())
+                .is_some_and(|table| runtime.has_layerable_gesture(table))
+        }) && self.entities.get(guid).is_some_and(|entity| {
+            entity
+                .network_motion
+                .snapshot()
+                .is_none_or(|snapshot| snapshot.directive.is_none())
+        }) {
             return;
         }
         if self.entities.get(guid).is_some_and(|entity| {

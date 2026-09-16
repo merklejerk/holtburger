@@ -552,9 +552,26 @@ impl BodyMotionRuntime {
         Some(multiplier * RETAIL_RUN_FORWARD_BASE_SPEED_MPS)
     }
 
-    /// Recognized gestures and their idle return may coexist with retained manual input.
+    /// Recognized gestures and their idle return may coexist with independent locomotion.
     /// Unmodelled channels and unrelated actions keep their existing server-control policy.
-    pub fn permits_manual_gesture_input(&self, table: &MotionSequenceTable) -> bool {
+    pub fn permits_gesture_locomotion(&self, table: &MotionSequenceTable) -> bool {
+        self.gesture_actions_allow_locomotion()
+            && (self.pending_gesture.is_some()
+                || self.state.substate.movement_override_gesture().is_some()
+                || table.is_default_cycle(self.state.style.raw(), self.state.substate.raw())
+                || self.state.substate == MotionCommand::READY)
+    }
+
+    /// A recognized gesture currently owns playback, rather than only an eligible idle state.
+    pub fn has_layerable_gesture(&self, table: &MotionSequenceTable) -> bool {
+        self.permits_gesture_locomotion(table)
+            && (self.pending_gesture.is_some()
+                || self.action_count() != 0
+                || self.state.substate.movement_override_gesture().is_some())
+    }
+
+    /// Unrelated queued actions and unsupported playback retain exclusive body ownership.
+    fn gesture_actions_allow_locomotion(&self) -> bool {
         self.unmodelled == UnmodelledMotionChannels::default()
             && self
                 .active_action
@@ -563,10 +580,6 @@ impl BodyMotionRuntime {
                 .all(|action| {
                     action.command.movement_override_gesture() == Some(super::MotionGesture::Windup)
                 })
-            && (self.pending_gesture.is_some()
-                || self.state.substate.movement_override_gesture().is_some()
-                || table.is_default_cycle(self.state.style.raw(), self.state.substate.raw())
-                || self.state.substate == MotionCommand::READY)
     }
 
     /// Whether an accepted reach/release still owns its entry, hold, or return playback.
@@ -627,7 +640,7 @@ impl BodyMotionRuntime {
             // on takeoff. Support still owns locomotion displacement, and other actions retain
             // interruption priority. The visual layout census covers 22 humanoid CharGen entries
             // (docs/animation_composition.md); this does not admit new cast commands.
-            if !(self.permits_manual_gesture_input(table) && self.ordinary_owns_body_semantics()) {
+            if !(self.permits_gesture_locomotion(table) && self.ordinary_owns_body_semantics()) {
                 self.interrupt_transitions();
                 self.select_order(table, order, false);
             }
@@ -645,7 +658,7 @@ impl BodyMotionRuntime {
                 },
                 false,
             );
-        } else if !self.permits_manual_gesture_input(table) {
+        } else if !self.permits_gesture_locomotion(table) {
             // Unknown/custom actions keep ordinary authored arbitration.
             return self.drive(table, order, quantum);
         }

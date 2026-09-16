@@ -3,7 +3,7 @@
 use super::{BodyMotionRuntime, MotionRuntimeRegistry};
 use crate::entity::{EntityMotionAction, EntityMotionDirective, EntityMotionSnapshot};
 use crate::motion::{
-    CharacterMotionPresentation, MotionContact, MotionOrder, SequenceTick,
+    CharacterMotionPresentation, MotionContact, MotionGesture, MotionOrder, SequenceTick,
     ServerDirectedMotionResolution, ServerDirectedMotionState, ServerDirectedTarget,
     begin_server_directed_motion, resolve_server_directed_motion,
 };
@@ -163,19 +163,12 @@ impl MotionRuntimeRegistry {
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
         runtime.bind_table(table);
-        let remote = runtime
-            .remote_motion
-            .get_or_insert_with(|| RemoteMotionState::new(input.pose.rotation));
-        let snapshot = input.snapshot;
-        let order = remote.order(guid, input, &mut runtime.sticky);
-        // Manual locomotion applies support presentation on its own track. Admit the actual
-        // command here so airborne windup/release packets remain recognizable gestures.
-        // Directed movement still owns its resolved order and source-takeover semantics.
-        let order = if runtime.has_manual_locomotion() && snapshot.directive.is_none() {
-            MotionOrder::from_snapshot(snapshot)
-        } else {
-            order
-        };
+        let actions: Vec<_> = actions.into_iter().collect();
+        let incoming_windups = !actions.is_empty()
+            && actions.iter().all(|action| {
+                action.command.movement_override_gesture() == Some(MotionGesture::Windup)
+            });
+        let order = runtime.remote_order(table, guid, input, incoming_windups);
         let previous_unmodelled = runtime.unmodelled;
         runtime.accept_order(table, order);
         for action in actions {
@@ -210,10 +203,7 @@ impl MotionRuntimeRegistry {
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
         runtime.bind_table(table);
-        let remote = runtime
-            .remote_motion
-            .get_or_insert_with(|| RemoteMotionState::new(input.pose.rotation));
-        let order = remote.order(guid, input, &mut runtime.sticky);
+        let order = runtime.remote_order(table, guid, input, false);
         runtime.drive_for_guid(table, guid, order, quantum)
     }
 
@@ -248,6 +238,59 @@ impl MotionRuntimeRegistry {
 }
 
 impl BodyMotionRuntime {
+    /// Resolve physical remote intent while retaining eligible gestures on ordinary playback.
+    /// Incoming windups matter before packet admission has populated the action queue.
+    fn remote_order(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        input: RemoteMotionInput,
+        incoming_windups: bool,
+    ) -> MotionOrder {
+        let unsupported = input
+            .contact
+            .presentation(CharacterMotionPresentation::Grounded)
+            == CharacterMotionPresentation::Falling;
+        let snapshot = input.snapshot;
+        let commanded = MotionOrder::from_snapshot(snapshot);
+        let remote = self
+            .remote_motion
+            .get_or_insert_with(|| RemoteMotionState::new(input.pose.rotation));
+        let resolved = remote.order(guid, input, &mut self.sticky);
+        if snapshot.directive.is_some() {
+            return resolved;
+        }
+        // RETAIL DIVERGENCE: support replaces ordinary commands with Falling in retail
+        // (acclient.c:330148-330178,330390-330453). Retaining accepted gestures permits
+        // remote airborne composition; reverting this erases casts at admission or next tick.
+        // Scope is the existing gesture allowlist and 22 humanoid CharGen layouts documented
+        // in docs/animation_composition.md. Physical support still selects the lower-body pose.
+        let style = commanded.style.unwrap_or(self.state.style);
+        // Eligibility is based on executable content, not just a recognized command number.
+        // An unsupported cast must not discard the observer's current takeoff transition.
+        let gesture_command = commanded.forward.is_some_and(|(command, _)| {
+            command.movement_override_gesture().is_some()
+                && table.cycle(style.raw(), command.raw()).is_some()
+        });
+        let gesture_return = commanded.forward.is_none_or(|(command, _)| {
+            command == super::MotionCommand::READY
+                || table.is_default_cycle(style.raw(), command.raw())
+        });
+        let ongoing_gesture = self.has_layerable_gesture(table);
+        let preserve_gesture = self.gesture_actions_allow_locomotion()
+            && (gesture_command || (gesture_return && (incoming_windups || ongoing_gesture)));
+        if self.has_manual_locomotion() || preserve_gesture {
+            // A cast received during takeoff must not sit behind the old locomotion entry.
+            // Existing casting entries and queued windups retain their clocks and hooks.
+            if unsupported && preserve_gesture && !ongoing_gesture {
+                self.sequence.remove_transition_prefix();
+            }
+            commanded
+        } else {
+            resolved
+        }
+    }
+
     pub(super) fn retain_sticky_heading(&mut self, heading: f32) {
         if let Some(remote) = &mut self.remote_motion {
             remote.rotation = Quaternion::from_heading(heading);

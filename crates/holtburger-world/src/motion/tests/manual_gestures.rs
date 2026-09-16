@@ -555,3 +555,27 @@ fn admitted_windups_and_release_preserve_running_locomotion() {
         assert_eq!(registry.get(caster).unwrap().action_count(), 0);
     }
 }
+
+#[test]
+fn retained_locomotion_does_not_report_active_commands_after_release() {
+    let catalog = build_gesture_catalog(true);
+    let table = catalog.table(0x0900_0001).unwrap();
+    for manual in [false, true] {
+        let mut runtime = BodyMotionRuntime::new(table);
+        runtime.accept_order(table, order(RELEASE));
+        for (input, active) in [
+            (order(WALK), true),
+            (MotionOrder::default(), false),
+            (order(WALK), true),
+        ] {
+            if manual {
+                runtime.drive_manual(table, input, CharacterMotionPresentation::Grounded, 0.1);
+            } else {
+                runtime.present_locomotion(table, input, 0.1);
+            }
+            let playback = runtime.motion_playback().unwrap();
+            assert!(playback.locomotion.is_some());
+            assert_eq!(playback.locomotion_command_active, active);
+        }
+    }
+}

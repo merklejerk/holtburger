@@ -336,6 +336,7 @@ function createWallVisual(): DecodedStaticPresentation {
 
 function createVisual(): DecodedStaticPresentation {
 	return {
+		partParents: [],
 		behavior: {
 			animationId: null,
 			kind: "none",

@@ -176,6 +176,8 @@ const dynamicEntityMotionLayerSchema = z.object({
 /** Both available tracks and source-owned activity; the frontend selects visibility. */
 export const dynamicEntityMotionSchema = z
 	.object({
+		/** Source-owned movement intent; idle/stop playback alone does not enable blending. */
+		locomotionCommandActive: z.boolean(),
 		ordinary: dynamicEntityMotionLayerSchema.nullable(),
 		locomotion: dynamicEntityMotionLayerSchema.nullable(),
 		activity: z.enum(["locomotion", "gesture", "explicit"]),

@@ -180,6 +180,7 @@ function fixtureVisual(): DecodedStaticPresentation {
 			sortingBounds: null,
 			sourceAssetId: "setup-model/0x02000001",
 		},
+		partParents: [],
 		setupId: "0x02000001",
 	};
 }

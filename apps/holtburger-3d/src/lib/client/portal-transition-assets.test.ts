@@ -122,6 +122,7 @@ function visual(): DecodedStaticPresentation {
 			sortingBounds: null,
 			sourceAssetId: SETUP,
 		},
+		partParents: [],
 		setupId: SETUP,
 		sourceByteLength: 100,
 	};

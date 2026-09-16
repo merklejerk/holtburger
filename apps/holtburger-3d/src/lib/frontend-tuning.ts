@@ -15,6 +15,10 @@ export const SHARED_FRONTEND_TUNING = {
 		distanceSpacingMultiplier: 1,
 	},
 	animationPresentation: {
+		/** Compose active player locomotion with gestures on compatible humanoid setups. */
+		splitPlayerBody: true,
+		/** Chest rotation toward locomotion: 0 keeps the aligned gesture, 1 follows locomotion. */
+		chestLocomotionWeight: 0.5,
 		/** Visual sampling cadence for animated roots omitted by the previous rendered frame. */
 		offscreenSampleIntervalSeconds: 0.1,
 	},

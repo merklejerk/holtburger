@@ -206,6 +206,8 @@ const setupDefinition = z.object({
 	parts: z.array(setupPart),
 	lights: z.array(setupLight),
 	holdingLocations: z.array(holdingLocation),
+	/** Setup-authored parent indices; 0xffffffff denotes a root, empty means absent. */
+	partParents: z.array(z.number().int().min(0).max(0xffffffff)),
 	placementFrames: z.array(setupPlacementFrames),
 	defaultAnimationId: datId.nullable(),
 	defaultMotionTableId: datId.nullable(),
@@ -273,6 +275,8 @@ export interface DecodedStaticPresentation {
 	readonly presentation: ResolvedObjectPresentation;
 	readonly localBounds: AABB3 | null;
 	readonly setupId: string | null;
+	/** Authored setup hierarchy used to recognize compatible animation layouts. */
+	readonly partParents: readonly number[];
 	readonly behavior: import("../game/resolution/landblock-layer").ResolvedObjectBehavior;
 	/** Complete host envelope bytes retained for construction diagnostics when this is a standalone source. */
 	readonly sourceByteLength?: number;
@@ -854,6 +858,8 @@ export function decodeStaticPresentation(
 	return {
 		localBounds: presentationBounds,
 		setupId: definition.kind === "setup-model" ? definition.setupId : null,
+		partParents:
+			definition.kind === "setup-model" ? definition.partParents : [],
 		behavior,
 		presentation: {
 			appearanceKey: definition.appearanceKey,

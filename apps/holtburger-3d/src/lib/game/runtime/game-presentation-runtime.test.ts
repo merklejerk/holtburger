@@ -1959,6 +1959,31 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			]);
 			runtime.render(0.375);
 			expect(partX()).toBeCloseTo(gestureX);
+			// Support alone enables composition in flight; landing restores the full gesture.
+			if (updated.placement.kind !== "world")
+				throw new Error("Expected world placement");
+			for (const contact of ["airborne", "sliding", "grounded"] as const) {
+				await runtime.replaceDynamicEntitySnapshot([
+					{
+						...updated,
+						placement: { ...updated.placement, contact },
+						motion: {
+							activity: "gesture",
+							ordinary,
+							locomotion: changed,
+							locomotionCommandActive: false,
+						},
+					},
+				]);
+				runtime.render(0.375);
+				expect(partX()).toBeCloseTo(
+					splitBody && contact !== "grounded"
+						? gestureX -
+								3 +
+								(change === "retime" ? 2 : change === "reverse" ? 3 : 1)
+						: gestureX,
+				);
+			}
 			const revealed: DynamicEntityView = {
 				...entity,
 				motion: {

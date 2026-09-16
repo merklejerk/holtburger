@@ -175,3 +175,65 @@ fn published_contact_event_retires_existing_playback() {
     world.apply_spatial_body_event(&event(ContactState::Grounded));
     assert_eq!(world.motion_runtimes.get(guid).unwrap().action_count(), 0);
 }
+
+#[test]
+fn published_contact_edges_preserve_manual_casts_but_interrupt_other_actions() {
+    for command in [WINDUP, ACTION] {
+        let motion_catalog = catalog();
+        let table = motion_catalog.table(0x0900_0001).unwrap();
+        let mut world = crate::WorldState::synthetic();
+        world.set_motion_sequences(catalog());
+        let guid = holtburger_common::Guid(1);
+        let mut entity = crate::entity::Entity::new(
+            guid,
+            "Caster".into(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: holtburger_common::Guid(0x1234_0000),
+                ..Default::default()
+            },
+        );
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        entity
+            .physics
+            .reconcile(crate::resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
+        world.add_entity(entity);
+        let event = |contact| crate::SpatialBodyEvent::ContactChanged {
+            body_id: crate::SpatialBodyId::Entity(guid),
+            contact,
+        };
+        world.apply_spatial_body_event(&event(ContactState::Grounded));
+        world.motion_runtimes.drive_manual(
+            table,
+            guid,
+            MotionOrder::default(),
+            CharacterMotionPresentation::Grounded,
+            0.0,
+        );
+        for sequence in 1..=2 {
+            world.motion_runtimes.enqueue_action(
+                table,
+                guid,
+                EntityMotionAction {
+                    command: MotionCommand(command),
+                    ..action(sequence)
+                },
+            );
+        }
+        world.motion_runtimes.drive_manual(
+            table,
+            guid,
+            MotionOrder::default(),
+            CharacterMotionPresentation::Grounded,
+            0.01,
+        );
+        for contact in [ContactState::Airborne, ContactState::Grounded] {
+            world.apply_spatial_body_event(&event(contact));
+            assert_eq!(
+                world.motion_runtimes.get(guid).unwrap().action_count(),
+                if command == WINDUP { 2 } else { 0 }
+            );
+        }
+    }
+}

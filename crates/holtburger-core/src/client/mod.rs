@@ -1197,6 +1197,7 @@ mod tests {
         SelfMovementCapabilities, SelfMovementKinematics,
     };
 
+    const JUMP_FIXTURE_RELEASE_COMMAND: u32 = 0x4000_002b;
     const JUMP_FIXTURE_STAND_ANIMATION: u32 = 0x0300_1001;
     const JUMP_FIXTURE_RUN_ANIMATION: u32 = 0x0300_1002;
     const JUMP_FIXTURE_TAKEOFF_ANIMATION: u32 = 0x0300_1004;
@@ -1244,7 +1245,7 @@ mod tests {
         };
         let cycles = HashMap::from([
             (
-                MotionTable::cycle_key(style, 0x4000_002b),
+                MotionTable::cycle_key(style, JUMP_FIXTURE_RELEASE_COMMAND),
                 cycle(JUMP_FIXTURE_STAND_ANIMATION, None, None),
             ),
             (
@@ -2118,7 +2119,9 @@ mod tests {
                         flags: MovementStateFlags::CURRENT_STYLE
                             | MovementStateFlags::FORWARD_COMMAND,
                         current_style: Some(MotionStance::NonCombat.interpreted()),
-                        forward_command: Some(InterpretedMotionCommand(0x2b)),
+                        forward_command: Some(InterpretedMotionCommand(
+                            JUMP_FIXTURE_RELEASE_COMMAND as u16,
+                        )),
                         ..Default::default()
                     },
                     sticky_object: None,
@@ -2234,14 +2237,14 @@ mod tests {
         assert!(charging.committed_jump.is_none());
         assert_eq!(
             client.world.motion_runtimes.state(guid).unwrap().substate,
-            holtburger_world::motion::MotionCommand::READY
+            holtburger_world::motion::MotionCommand(JUMP_FIXTURE_RELEASE_COMMAND)
         );
         assert_eq!(
             client
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION),
@@ -2282,7 +2285,7 @@ mod tests {
             client.active_busy_operation(),
             Some(BusyOperationKind::SpellCast)
         );
-        assert!(!client.world.has_pending_motion_gesture(guid));
+        assert!(client.world.has_pending_motion_gesture(guid));
         assert_eq!(committed.position, grounded_release_pose);
         assert_eq!(committed.resolved.extent(), JumpExtent::new(0.75).unwrap());
         assert_eq!(
@@ -2308,15 +2311,15 @@ mod tests {
         );
         assert_eq!(
             client.world.motion_runtimes.state(guid).unwrap().substate,
-            holtburger_world::motion::MotionCommand::FALLING,
-            "accepted launch and airborne presentation must commit in the same fixed tick"
+            holtburger_world::motion::MotionCommand(JUMP_FIXTURE_RELEASE_COMMAND),
+            "accepted launch must preserve the ordinary release gesture"
         );
         assert_eq!(
             client
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
@@ -2338,7 +2341,7 @@ mod tests {
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .is_some_and(|clip| clip.animation_id() == JUMP_FIXTURE_FALLING_ANIMATION)
             {
@@ -2375,15 +2378,15 @@ mod tests {
         assert!(landed, "local jump should return to flat support");
         assert_eq!(
             client.world.motion_runtimes.state(guid).unwrap().substate,
-            holtburger_world::motion::MotionCommand(FIXTURE_STAND_COMMAND),
-            "landing should reapply current grounded movement without another playback quantum"
+            holtburger_world::motion::MotionCommand(JUMP_FIXTURE_RELEASE_COMMAND),
+            "landing must preserve the ordinary release gesture"
         );
         assert_eq!(
             client
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_LANDING_ANIMATION),
@@ -2402,7 +2405,7 @@ mod tests {
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_STAND_ANIMATION),
@@ -2488,14 +2491,14 @@ mod tests {
         );
         assert_eq!(
             client.world.motion_runtimes.state(guid).unwrap().substate,
-            holtburger_world::motion::MotionCommand::FALLING
+            holtburger_world::motion::MotionCommand(JUMP_FIXTURE_RELEASE_COMMAND)
         );
         assert_eq!(
             client
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
@@ -2516,7 +2519,7 @@ mod tests {
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .is_some_and(|clip| clip.animation_id() == JUMP_FIXTURE_FALLING_ANIMATION)
             {
@@ -2555,7 +2558,7 @@ mod tests {
                 .world
                 .motion_runtimes
                 .motion_playback(guid)
-                .and_then(|motion| motion.ordinary)
+                .and_then(|motion| motion.locomotion)
                 .map(|layer| layer.clip)
                 .map(|clip| clip.animation_id()),
             Some(JUMP_FIXTURE_LANDING_ANIMATION)

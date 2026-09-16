@@ -31,11 +31,11 @@ struct ParticleEmitterRecordManifest {
     /// `null` for a `ParticleType` no shipped emitter authors; consumers report rather than guess.
     motion_type: Option<u8>,
     emits_per_second: bool,
-    /// Distance trigger flag; the frontend applies its documented, user-approved spacing approximation.
+    /// Distance trigger flag; the frontend owns admission cadence and the spacing multiplier.
     emits_per_meter: bool,
     /// The mesh each particle draws, or `null` when retail rejects the zero hardware DID.
     hardware_mesh: Option<ParticleEmitterHardwareMeshManifest>,
-    /// Authored trigger value: seconds for time emission; distance units remain unrecovered.
+    /// Authored minimum interval in seconds or minimum linear displacement, depending on trigger.
     birthrate: f64,
     max_particles: i32,
     initial_particles: i32,

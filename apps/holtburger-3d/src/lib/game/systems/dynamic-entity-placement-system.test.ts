@@ -276,6 +276,7 @@ function dynamicEntity(
 			sampleMode: "simulating-velocity",
 		},
 		presentation: {
+			placementFrame: 0,
 			entityClass: "other",
 			appearance: {
 				paletteDid: null,

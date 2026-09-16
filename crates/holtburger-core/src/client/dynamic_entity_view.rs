@@ -119,6 +119,7 @@ pub fn project_client_dynamic_entity(
         },
         appearance: entity.appearance.clone(),
         object_scale,
+        placement_frame: entity.placement_frame,
         translucency,
         physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
@@ -629,6 +630,26 @@ mod tests {
     }
 
     #[test]
+    fn client_projection_preserves_independent_placement_keys() {
+        let guid = Guid(0x7000_0001);
+        for requested in [0, u32::MAX] {
+            let pose = WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                coords: Vector3::new(12.0, 24.0, 3.0),
+                rotation: Quaternion::identity(),
+            };
+            let mut entity = projectable_entity(guid, pose);
+            entity.placement_frame = requested;
+            let mut world = WorldState::synthetic();
+            world.add_entity(entity);
+            let view = project_client_dynamic_entity(&world, guid)
+                .unwrap()
+                .expect("resolved fixture");
+            assert_eq!(view.presentation.placement_frame, requested);
+        }
+    }
+
+    #[test]
     fn client_projection_publishes_world_owned_absolute_script_scale() {
         let guid = Guid(0x7000_0001);
         let pose = WorldPosition {
@@ -641,6 +662,8 @@ mod tests {
         );
         let appearance = EntityAppearance::default();
         let mut entity = projectable_entity(guid, pose);
+        // Compare producers with the same requested pose; Explorer explicitly requests Resting.
+        entity.placement_frame = holtburger_common::Placement::Resting as u32;
         entity.physics.reconcile(physics);
         entity.appearance = appearance.clone();
         entity

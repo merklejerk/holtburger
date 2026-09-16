@@ -309,109 +309,120 @@ fn contact_correction_preserves_protected_ledge_footing() {
 
 #[test]
 fn contact_advance_keeps_projectile_speed_and_sweeps_small_mobile_targets() {
-    for hit_target in [false, true] {
-        let now = Instant::now();
-        let collision = flat_collision_scene();
-        let mut scene = SpatialScene::new();
-        let projectile = SpatialBodyId::Entity(Guid(1));
-        let target = SpatialBodyId::LocalPlayer(Guid(2));
-        let radius = 0.05;
-        let speed = 50.0;
-        for (id, x, velocity) in [
-            (projectile, 90.0, Vector3::new(speed, 0.0, 0.0)),
-            (
-                target,
-                if hit_target { 90.25 } else { 92.0 },
-                Vector3::zero(),
-            ),
-        ] {
-            install_free_dynamic_with_radius(
-                &mut scene,
-                id,
-                Vector3::new(x, 96.0, 1.0),
-                velocity,
-                radius,
-                fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                    center: Vector3::zero(),
+    for direction in [
+        Vector3::new(1.0, 0.0, 0.0),
+        Vector3::new(1.0, 1.0, 1.0).normalize(),
+        Vector3::new(-1.0, 1.0, -1.0).normalize(),
+        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(0.0, 0.0, -1.0),
+    ] {
+        for hit_target in [false, true] {
+            let now = Instant::now();
+            let collision = flat_collision_scene();
+            let mut scene = SpatialScene::new();
+            let projectile = SpatialBodyId::Entity(Guid(1));
+            let target = SpatialBodyId::LocalPlayer(Guid(2));
+            let radius = 0.05;
+            let speed = 50.0;
+            let origin = Vector3::new(90.0, 96.0, 10.0);
+            for (id, position, velocity) in [
+                (projectile, origin, direction * speed),
+                (
+                    target,
+                    origin + direction * if hit_target { 0.25 } else { 2.0 },
+                    Vector3::zero(),
+                ),
+            ] {
+                install_free_dynamic_with_radius(
+                    &mut scene,
+                    id,
+                    position,
+                    velocity,
                     radius,
-                }))),
-                now,
+                    fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                        center: Vector3::zero(),
+                        radius,
+                    }))),
+                    now,
+                );
+            }
+            let physical = scene
+                .body_mut(projectile)
+                .unwrap()
+                .physical
+                .as_mut()
+                .unwrap();
+            physical
+                .dynamic
+                .as_mut()
+                .unwrap()
+                .collision
+                .dynamic_collision
+                .missile = true;
+            physical.response_policy.restitution = PhysicalRestitution::Inelastic;
+            physical.response_policy.align_path = true;
+            let bodies = scene
+                .body_store
+                .bodies
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let duration = crate::spatial::MOBILE_CONTACT_TICK_SECONDS;
+            let updates = crate::spatial::advance_body_contacts(
+                &collision,
+                &bodies,
+                Guid(0xda55_ffff),
+                duration,
+                |_, _| crate::spatial::ContactStepActuation::ballistic(Vector3::zero()),
+            )
+            .unwrap();
+            let shot = updates
+                .iter()
+                .find(|update| update.body_id == projectile)
+                .unwrap();
+            let forward = shot.rotation.rotate_vector(Vector3::new(0.0, 1.0, 0.0));
+            assert!(
+                (forward - direction).length() < 0.0001,
+                "{direction:?}: {forward:?}"
             );
-        }
-        let physical = scene
-            .body_mut(projectile)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap();
-        physical
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .collision
-            .dynamic_collision
-            .missile = true;
-        physical.response_policy.restitution = PhysicalRestitution::Inelastic;
-        physical.response_policy.align_path = true;
-        let bodies = scene
-            .body_store
-            .bodies
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        let duration = crate::spatial::MOBILE_CONTACT_TICK_SECONDS;
-        let updates = crate::spatial::advance_body_contacts(
-            &collision,
-            &bodies,
-            Guid(0xda55_ffff),
-            duration,
-            |_, _| crate::spatial::ContactStepActuation::ballistic(Vector3::zero()),
-        )
-        .unwrap();
-        let shot = updates
-            .iter()
-            .find(|update| update.body_id == projectile)
-            .unwrap();
-        let direction = Vector3::new(1.0, 0.0, 0.0);
-        let expected = Quaternion::from_heading(Vector3::zero().heading_to(&direction));
-        assert!(
-            (shot.rotation.rotate_vector(direction) - expected.rotate_vector(direction)).length()
-                < 0.0001
-        );
 
-        let target_update = updates
-            .iter()
-            .find(|update| update.body_id == target)
-            .unwrap();
-        assert_eq!(target_update.displacement, Vector3::zero());
-        assert_eq!(target_update.velocity, Vector3::zero());
-        assert!(shot.unavailable_owner.is_none());
-        let travel = shot
-            .motion
-            .iter()
-            .filter(|segment| {
-                matches!(segment, crate::spatial::ContactMotionSegment::Travel { .. })
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(travel.len(), 1);
-        assert_eq!(
-            shot.motion.iter().any(|segment| matches!(
-                segment,
-                crate::spatial::ContactMotionSegment::Impact { .. }
-            )),
-            hit_target
-        );
-        if hit_target {
-            assert!(matches!(shot.projectile_impact,
+            let target_update = updates
+                .iter()
+                .find(|update| update.body_id == target)
+                .unwrap();
+            assert_eq!(target_update.displacement, Vector3::zero());
+            assert_eq!(target_update.velocity, Vector3::zero());
+            assert!(shot.unavailable_owner.is_none());
+            let travel = shot
+                .motion
+                .iter()
+                .filter(|segment| {
+                    matches!(segment, crate::spatial::ContactMotionSegment::Travel { .. })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(travel.len(), 1);
+            assert_eq!(
+                shot.motion.iter().any(|segment| matches!(
+                    segment,
+                    crate::spatial::ContactMotionSegment::Impact { .. }
+                )),
+                hit_target
+            );
+            if hit_target {
+                assert!(matches!(shot.projectile_impact,
                 Some(crate::spatial::HardSphereSweepHit::Entity { body_id, .. }) if body_id == target));
-            assert!((shot.displacement.x - (0.25 - 2.0 * radius + CONTACT_EPSILON)).abs() < 0.0001);
-            assert_eq!(shot.velocity, Vector3::zero());
-            assert!(travel[0].end_fraction() < 1.0);
-        } else {
-            assert!(shot.projectile_impact.is_none());
-            assert!((shot.displacement.x - speed * duration).abs() < 0.0001);
-            assert_eq!(shot.velocity, Vector3::new(speed, 0.0, 0.0));
-            assert_eq!(travel[0].end_fraction(), 1.0);
+                assert!(
+                    (shot.displacement.length() - (0.25 - 2.0 * radius + CONTACT_EPSILON)).abs()
+                        < 0.0001
+                );
+                assert_eq!(shot.velocity, Vector3::zero());
+                assert!(travel[0].end_fraction() < 1.0);
+            } else {
+                assert!(shot.projectile_impact.is_none());
+                assert!((shot.displacement.length() - speed * duration).abs() < 0.0001);
+                assert_eq!(shot.velocity, direction * speed);
+                assert_eq!(travel[0].end_fraction(), 1.0);
+            }
         }
     }
 }

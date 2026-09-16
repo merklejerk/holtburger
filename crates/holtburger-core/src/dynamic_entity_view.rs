@@ -67,6 +67,8 @@ pub struct DynamicEntityPresentationView {
     pub appearance: EntityAppearance,
     /// Uniform root presentation scale.
     pub object_scale: f32,
+    /// Requested setup placement, falling back to Default when the asset has no such key.
+    pub placement_frame: u32,
     /// Producer-resolved radar presentation facts consumed by overhead-map blips.
     pub radar: crate::DynamicEntityRadarFacts,
 }
@@ -170,6 +172,8 @@ pub struct DynamicEntityViewSource {
     pub appearance: EntityAppearance,
     /// Validated root scale.
     pub object_scale: f32,
+    /// Requested setup placement, falling back to Default when the asset has no such key.
+    pub placement_frame: u32,
     /// Validated current whole-object translucency in the inclusive unit interval.
     pub translucency: f32,
     /// Complete semantic physics state and once-derived consequences.
@@ -208,6 +212,11 @@ impl DynamicEntityViewSource {
             content: input.content,
             appearance: input.appearance,
             object_scale: input.object_scale,
+            // Explorer world objects retain their explicit resting-pose policy.
+            placement_frame: match &input.placement {
+                EntityPlacement::World(_) => holtburger_common::Placement::Resting as u32,
+                EntityPlacement::Attached(attachment) => attachment.placement as u32,
+            },
             translucency: input.translucency,
             physics: input.physics,
             radar: input.radar,
@@ -587,6 +596,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             content: source.content,
             appearance: source.appearance,
             object_scale: source.object_scale,
+            placement_frame: source.placement_frame,
             radar: source.radar,
         },
         physics: DynamicEntityPhysicsView {

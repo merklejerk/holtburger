@@ -210,6 +210,8 @@ const dynamicEntityViewSchema = z.object({
 		}),
 		appearance: appearanceSchema,
 		objectScale: finiteNumber.positive(),
+		/** Lossless requested setup placement key, independent of world position. */
+		placementFrame: guid,
 		/** Producer-resolved overhead-map visibility and semantic category facts. */
 		radar: z.object({
 			/** Producer-resolved semantic marker category, independent from authored color. */

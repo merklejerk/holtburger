@@ -43,6 +43,63 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it.each([0, 101, 0xffff])(
+		"uses requested placement %s and updates a resident pose",
+		async (requested) => {
+			const { system, scene } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+			);
+			const base = source("placement");
+			const defaultPose = Mat4.identity();
+			defaultPose.m41 = 2;
+			const restingPose = Mat4.identity();
+			restingPose.m41 = 7;
+			const original: PlacedDynamicPresentationSource = {
+				...base,
+				source: {
+					...base.source,
+					placementFrame: requested,
+					behavior: {
+						kind: "none",
+						animationId: null,
+						physicsScriptId: null,
+						physicsScriptTableId: null,
+						motionTableId: null,
+						soundTableId: null,
+					},
+					presentation: {
+						...base.source.presentation,
+						placementPoses: new Map([
+							[0, { placementId: 0, partTransforms: [defaultPose] }],
+							[101, { placementId: 101, partTransforms: [restingPose] }],
+						]),
+					},
+				},
+			};
+			const installation = system.replaceOwner("owner", [original]);
+			await installation.ready;
+			commit(installation);
+			const root = requiredAt(installation.nodeIds, 0);
+			const part = system.requestPartNode(root, 0);
+			if (part === null) throw new Error("Fixture part missing.");
+			expect(scene.getResolvedPlacement(part)?.localToLandblock.m41).toBe(
+				requested === 101 ? 7 : 2,
+			);
+			const replacement = await system.stageVisualReplacement("owner", root, {
+				...original.source,
+				placementFrame: requested === 101 ? 0 : 101,
+			});
+			if (replacement.kind !== "staged")
+				throw new Error("Fixture replacement rejected.");
+			replacement.commit();
+			replacement.release();
+			expect(scene.getResolvedPlacement(part)?.localToLandblock.m41).toBe(
+				requested === 101 ? 2 : 7,
+			);
+			system.destroy();
+		},
+	);
+
 	it("publishes composed attachment transforms and expands broadphase coverage", async () => {
 		const { system, scene } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -1604,6 +1661,7 @@ function source(
 			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		},
 		source: {
+			placementFrame: 0,
 			entityClass: "other",
 			nameplate: null,
 			behavior: {

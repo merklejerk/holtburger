@@ -34,6 +34,7 @@ export function targetingEntity(
 				partChanges: [],
 			},
 			objectScale: 1,
+			placementFrame: 0,
 			radar: {
 				behavior: null,
 				category: "other",

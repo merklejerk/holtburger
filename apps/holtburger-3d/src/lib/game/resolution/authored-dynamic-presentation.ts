@@ -1,3 +1,4 @@
+import { RESTING_PLACEMENT_KEY } from "./presentation";
 import type { AuthoredDynamicSource } from "./landblock-layer";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import { scopeFor } from "../scene/scope";
@@ -32,6 +33,7 @@ export function adaptAuthoredDynamicPresentation(
 			identity: authored.identity.sourceId,
 			localBounds: authored.localBounds,
 			presentation: authored.presentation,
+			placementFrame: RESTING_PLACEMENT_KEY,
 			scale: authored.scale,
 			setupId: authored.setupId,
 		},

@@ -115,6 +115,9 @@
 		/** Explicit local override of authored useability for diagnostic requests. */
 		readonly unrestrictedUse: boolean;
 		readonly onUnrestrictedUseChange: (enabled: boolean) => void;
+		/** Session-local spacing override for distance-triggered particles. */
+		readonly particleDistanceSpacingMultiplier: number;
+		readonly onParticleDistanceSpacingChange: (multiplier: number) => void;
 		readonly showRetailHiddenGeometry: boolean;
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
@@ -170,6 +173,8 @@
 		onEntityCollisionDisabledChange,
 		unrestrictedUse,
 		onUnrestrictedUseChange,
+		particleDistanceSpacingMultiplier,
+		onParticleDistanceSpacingChange,
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 		playerName,
@@ -748,6 +753,8 @@
 						{onEntityCollisionDisabledChange}
 						{unrestrictedUse}
 						{onUnrestrictedUseChange}
+						{particleDistanceSpacingMultiplier}
+						{onParticleDistanceSpacingChange}
 						{showRetailHiddenGeometry}
 						{onShowRetailHiddenGeometryChange}
 					/>

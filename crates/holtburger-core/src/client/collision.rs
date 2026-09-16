@@ -69,6 +69,8 @@ pub struct ClientEntityBodyFacts {
     pub motion_table_did: Option<u32>,
     /// Current world-owned scale joined only when the prepared unit body is installed.
     pub object_scale: f32,
+    /// Requested setup pose retained as a geometry-preparation input.
+    pub placement_frame: u32,
     /// Optional authored surface friction.
     pub friction: Option<f32>,
     /// Optional authored elasticity.
@@ -92,6 +94,7 @@ impl ClientEntityBodyFacts {
             && self.wcid == other.wcid
             && self.appearance == other.appearance
             && self.setup_did == other.setup_did
+            && self.placement_frame == other.placement_frame
             && self.motion_table_did == other.motion_table_did
             && option_f32_eq(self.friction, other.friction)
             && option_f32_eq(self.elasticity, other.elasticity)
@@ -153,6 +156,7 @@ pub fn client_entity_body_facts(
         setup_did,
         motion_table_did: world.effective_motion_table_id_for_guid(guid),
         object_scale: entity.scale.effective(),
+        placement_frame: entity.placement_frame,
         friction: property_f32(&entity.properties, PropertyFloat::Friction),
         elasticity: property_f32(&entity.properties, PropertyFloat::Elasticity),
     })
@@ -219,6 +223,7 @@ impl ClientCollisionSource for ContentClientCollisionSource {
                 setup_did: facts.setup_did,
                 motion_table_did: facts.motion_table_did,
                 appearance: facts.appearance,
+                placement_frame: facts.placement_frame,
                 friction: facts.friction,
                 elasticity: facts.elasticity,
                 physics: facts.physics,
@@ -2104,7 +2109,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn delayed_body_completion_installs_against_the_live_pose() {
+    async fn delayed_body_completion_installs_against_the_live_pose_and_scale() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x5000_0001);
         let requested = position(0x1234_0001);
@@ -2137,6 +2142,10 @@ mod tests {
                 4,
             ),
         );
+        // The script may resolve while unit-body preparation is still in flight.
+        world
+            .apply_entity_script_scale(guid, 2.0, 0.0, 1.0)
+            .unwrap();
         release_tx.send(()).unwrap();
         wait_for_readiness(&mut coordinator, &mut world, |readiness| {
             matches!(readiness, ClientBodyReadiness::Ready { .. })
@@ -2148,6 +2157,16 @@ mod tests {
             .body(SpatialBodyId::LocalPlayer(guid))
             .expect("live local-player body must remain registered");
         assert_eq!(body.pose, live);
+        assert_eq!(
+            body.physical
+                .as_ref()
+                .unwrap()
+                .definition
+                .spheres()
+                .primary()
+                .radius,
+            1.0
+        );
         let physics = world.entities.get(guid).unwrap().physics.effective();
         let retained = body
             .physical
@@ -2431,6 +2450,10 @@ mod tests {
             position(0x1234_0003),
         ));
         facts(&mut world, second_guid);
+        // Scale is instance state, not a reason to restart unit-geometry preparation.
+        world
+            .apply_entity_script_scale(first_guid, 2.0, 0.0, 1.0)
+            .unwrap();
         let _ = coordinator.observe(&mut world);
         release_tx.send(()).unwrap();
 
@@ -2452,6 +2475,25 @@ mod tests {
             SpatialBodyId::LocalPlayer(player_guid),
         )
         .await;
+        let installed_radius = |world: &WorldState| {
+            world
+                .scene
+                .body(SpatialBodyId::Entity(first_guid))
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .definition
+                .spheres()
+                .primary()
+                .radius
+        };
+        assert_eq!(installed_radius(&world), 1.0);
+        world
+            .apply_entity_script_scale(first_guid, 3.0, 0.0, 2.0)
+            .unwrap();
+        assert_eq!(installed_radius(&world), 1.5);
+        let _ = coordinator.observe(&mut world);
         assert_eq!(source.prepared.load(Ordering::SeqCst), 3);
     }
 

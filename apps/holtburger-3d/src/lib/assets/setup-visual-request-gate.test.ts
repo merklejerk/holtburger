@@ -65,6 +65,7 @@ function view(guid: number, generation: number): DynamicEntityView {
 		identity: { guid, wcid: 42 },
 		display: { name: `Entity ${guid}`, level: null },
 		presentation: {
+			placementFrame: 0,
 			entityClass: "other",
 			content: {
 				motionTableDid: null,

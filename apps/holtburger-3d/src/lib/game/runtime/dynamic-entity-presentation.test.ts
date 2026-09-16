@@ -217,6 +217,7 @@ function fixtureEntity(): DynamicEntityView {
 			sampleMode: "authoritative-only",
 		},
 		presentation: {
+			placementFrame: 0,
 			entityClass: "mob",
 			appearance: {
 				paletteDid: null,

@@ -2400,6 +2400,7 @@ export class GamePresentationRuntime {
 		installed: DynamicEntityPresentationRecord,
 		motion: DynamicEntityMotion | null,
 		entityClass: DynamicEntityView["presentation"]["entityClass"],
+		placement: DynamicEntityView["placement"],
 	): void {
 		if (motion === null && installed.motionState === null) return;
 		const ordinary = this.#resolveMotionLayer(
@@ -2423,7 +2424,10 @@ export class GamePresentationRuntime {
 			locomotion.update,
 			this.#dynamics.getPartToObjectTransforms(installed.nodeId),
 			SHARED_FRONTEND_TUNING.animationPresentation.splitPlayerBody &&
-				motion?.locomotionCommandActive === true &&
+				(motion?.locomotionCommandActive === true ||
+					(placement.kind === "world" &&
+						(placement.contact === "airborne" ||
+							placement.contact === "sliding"))) &&
 				entityClass === "player" &&
 				installed.bodyLayout !== null
 				? {
@@ -2676,6 +2680,7 @@ export class GamePresentationRuntime {
 			installed,
 			entity.motion,
 			entity.presentation.entityClass,
+			entity.placement,
 		);
 	}
 

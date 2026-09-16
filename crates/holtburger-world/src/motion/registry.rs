@@ -621,10 +621,16 @@ impl BodyMotionRuntime {
         let moving = order.forward.is_some() || order.sidestep.is_some() || order.turn.is_some();
         let order = order.with_character_presentation(presentation);
         if !grounded {
-            // Jump/contact retains its existing interruption priority, independently of manual
-            // planar motion. A new authoritative gesture can be admitted after this boundary.
-            self.interrupt_transitions();
-            self.select_order(table, order, false);
+            // RETAIL DIVERGENCE: retail contact arbitration replaces unsupported forward
+            // motion (acclient.c:330148-330178,330390-330453). Preserve already accepted
+            // gestures on their independent clock; restoring interruption would cancel casting
+            // on takeoff. Support still owns locomotion displacement, and other actions retain
+            // interruption priority. The visual layout census covers 22 humanoid CharGen entries
+            // (docs/animation_composition.md); this does not admit new cast commands.
+            if !(self.permits_manual_gesture_input(table) && self.ordinary_owns_body_semantics()) {
+                self.interrupt_transitions();
+                self.select_order(table, order, false);
+            }
         } else if self.has_manual_locomotion()
             && matches!(
                 self.state.substate,
@@ -651,12 +657,24 @@ impl BodyMotionRuntime {
         let locomotion = self.locomotion.get_or_insert_with(|| {
             LocomotionPlayback::new(table, LocomotionAuthority::Manual { displacing: false })
         });
+        let previous_style = locomotion.state.style;
         let unmodelled = apply_order(
             table,
             &mut locomotion.state,
             &mut locomotion.sequence,
             order,
         );
+        if presentation == super::CharacterMotionPresentation::Falling
+            && locomotion.state.style != previous_style
+            && locomotion.state.substate == MotionCommand::FALLING
+        {
+            // RETAIL DIVERGENCE: style selection routes through the default substate
+            // (acclient.c:324245-324330). Player table 0x09000001 contains landing and magic
+            // stance links on that route (docs/animation_composition.md). Keeping them would
+            // play grounded poses in flight; retain the successfully selected Falling cycle.
+            // Same-style takeoff still traverses its authored transition normally.
+            locomotion.sequence.remove_transition_prefix();
+        }
         locomotion.command_active = moving;
         // Inspect the transition before advancing: its final moving interval still belongs to
         // locomotion even if advancement reaches the idle cycle in this tick.

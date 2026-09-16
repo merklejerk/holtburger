@@ -922,7 +922,7 @@ impl WorldState {
         Ok(())
     }
 
-    /// Match retail's walkable-bit edges for gravity-enabled creatures.
+    /// Apply walkable-bit interruption for gravity-enabled creatures, preserving manual gestures.
     /// acclient.c:306805,330655,330680 route takeoff/landing through RemoveLinkAnimations.
     /// Unknown contact is hydration, not an observed physical edge. Sliding is non-walkable.
     pub(crate) fn interrupt_motion_on_support_change(
@@ -936,6 +936,15 @@ impl WorldState {
             return;
         };
         if previous == current_walkable {
+            return;
+        }
+        // RETAIL DIVERGENCE: takeoff/landing removes pending animations in retail
+        // (acclient.c:306805,330655,330680). Independent manual playback keeps accepted
+        // gestures alive on these edges, just as drive_manual does between edges. Restoring
+        // unconditional removal cancels the cast before the frontend can compose it. This
+        // uses the existing gesture allowlist; visual scope is the 22 humanoid CharGen entries
+        // in docs/animation_composition.md. Other actions retain retail interruption.
+        if self.has_manual_locomotion(guid) && self.permits_manual_gesture_input(guid) {
             return;
         }
         if self.entities.get(guid).is_some_and(|entity| {

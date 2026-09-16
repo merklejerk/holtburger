@@ -13,7 +13,8 @@ Composition changes only the rendered pose.
 - On visual installation/replacement, the frontend recognizes a supported humanoid layout
   from the complete part count and parent topology. It does not select layouts by race IDs.
 - The presentation runtime chooses ordinary playback or humanoid composition. Composition
-  requires a player, a compatible layout, active movement intent, and enabled frontend tuning.
+  requires a player, a compatible layout, enabled frontend tuning, and either active movement
+  intent or unsupported physical contact (airborne/sliding).
 - `AnimationSystem` advances both tracks and keeps existing hook ownership. It composes only
   a displayed gesture (including a locally finishing gesture) with an available locomotion track.
 - The pure compositor receives complete sampled poses, the verified layout, and chest weight.
@@ -65,4 +66,22 @@ root-scale preparation rebuilds it.
 
 Hook dispatch follows the semantic selected track, not per-part blend weights. Composed legs
 therefore do not independently enable footstep hooks. Releasing movement immediately restores
-the full gesture; there is no additional crossfade or foot-placement solver.
+the full gesture on the ground; airborne/sliding contact keeps the support pose in the lower
+body even without directional input. There is no additional crossfade or foot-placement solver.
+
+Recognized casting gestures keep their authored clocks through manual jump/fall transitions.
+The independent locomotion track selects the support pose, while the gesture retains action
+completion and body-hook ownership. Other actions keep existing contact interruption priority.
+Both the per-tick driver and committed contact edges preserve these gestures. Packet admission
+also retains the actual accepted command when manual locomotion owns support presentation, so
+casts arriving midair remain gestures instead of being reclassified as falling.
+Landing without movement restores the full gesture. This extends gesture/manual coexistence to
+unsupported travel; it does not authorize new spell casts. Gesture hooks and collision poses
+remain gesture-owned rather than being retired at takeoff. The jump solver still owns trajectory;
+skipped locomotion transition clips no longer contribute their authored offsets.
+
+While airborne, a locomotion stance change discards its grounded transition route and selects
+the destination Falling cycle directly. The player motion table `0x09000001` routes style changes
+through a Falling-to-Stand landing clip (`0x030004a6`) and magic stance clips (`0x03000598`);
+playing those links in flight hid the intended lower-body pose. Same-style takeoff retains its
+authored transition. Ordinary casting transitions continue independently.

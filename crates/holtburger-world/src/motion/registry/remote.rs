@@ -166,7 +166,16 @@ impl MotionRuntimeRegistry {
         let remote = runtime
             .remote_motion
             .get_or_insert_with(|| RemoteMotionState::new(input.pose.rotation));
+        let snapshot = input.snapshot;
         let order = remote.order(guid, input, &mut runtime.sticky);
+        // Manual locomotion applies support presentation on its own track. Admit the actual
+        // command here so airborne windup/release packets remain recognizable gestures.
+        // Directed movement still owns its resolved order and source-takeover semantics.
+        let order = if runtime.has_manual_locomotion() && snapshot.directive.is_none() {
+            MotionOrder::from_snapshot(snapshot)
+        } else {
+            order
+        };
         let previous_unmodelled = runtime.unmodelled;
         runtime.accept_order(table, order);
         for action in actions {

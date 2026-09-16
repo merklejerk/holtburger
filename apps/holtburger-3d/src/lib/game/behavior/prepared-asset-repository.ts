@@ -31,6 +31,8 @@ export interface PreparedAssetDiagnostics {
 export interface PreparedAssetRepositoryOptions<TSource, TPrepared> {
 	/** Asset-family name used verbatim in error messages, e.g. `"Animation"`. */
 	readonly label: string;
+	/** Ready data lives either with active handles or until repository teardown. */
+	readonly retention: "referenced" | "session";
 	readonly load: (id: DatAssetId) => Promise<TSource>;
 	/** Validate and freeze one loaded source into its immutable prepared form. */
 	readonly prepare: (source: TSource, id: DatAssetId) => TPrepared;
@@ -41,14 +43,9 @@ export interface PreparedAssetRepositoryOptions<TSource, TPrepared> {
 /**
  * Shares immutable asset transfer/preparation and owns exact acquired-handle lifetimes.
  *
- * Deliberately family-agnostic: animations and physics scripts are two producers of the same
- * behavior vocabulary with identical residency rules, so they share one lifecycle rather than two
- * copies that can drift. Everything family-specific arrives through {@link
- * PreparedAssetRepositoryOptions}.
- *
- * Preparation is shared by id, so N owners of one asset cause exactly one transfer. A ready entry
- * is dropped once its last handle releases; a failed entry is retained so repeated acquisitions
- * fail fast rather than re-hammering a broken source, until {@link evictFailed} allows a retry.
+ * Asset families choose residency separately from active handle ownership. Preparation is shared
+ * by id; session-retained definitions survive their last release until repository destruction.
+ * Failed entries remain cached until explicit eviction, preventing repeated failed transfers.
  */
 export class PreparedAssetRepository<TSource, TPrepared> {
 	readonly #options: PreparedAssetRepositoryOptions<TSource, TPrepared>;
@@ -86,6 +83,37 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 				this.#release(entry);
 			},
 		};
+	}
+
+	/** Acquire independent assets concurrently; release every success if any acquisition fails. */
+	async acquireAll(
+		ids: Iterable<DatAssetId>,
+	): Promise<ReadonlyMap<DatAssetId, PreparedAssetHandle<TPrepared>>> {
+		const results = await Promise.allSettled(
+			[...new Set(ids)].map(async (id) => {
+				try {
+					return [id, await this.acquire(id)] as const;
+				} catch (cause) {
+					throw new Error(`${this.#options.label} ${id} acquisition failed.`, {
+						cause,
+					});
+				}
+			}),
+		);
+		const handles = new Map<DatAssetId, PreparedAssetHandle<TPrepared>>();
+		const failures: unknown[] = [];
+		for (const result of results) {
+			if (result.status === "fulfilled") handles.set(...result.value);
+			else failures.push(result.reason);
+		}
+		if (failures.length > 0) {
+			for (const handle of handles.values()) handle.release();
+			throw new AggregateError(
+				failures,
+				`${this.#options.label} batch acquisition failed.`,
+			);
+		}
+		return handles;
 	}
 
 	/**
@@ -183,7 +211,11 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 				`${this.#options.label} ${entry.id} has no reference to release.`,
 			);
 		entry.referenceCount -= 1;
-		if (entry.referenceCount === 0 && entry.state.kind === "ready")
+		if (
+			entry.referenceCount === 0 &&
+			entry.state.kind === "ready" &&
+			this.#options.retention === "referenced"
+		)
 			this.#entries.delete(entry.id);
 	}
 }

@@ -1295,9 +1295,9 @@ export class DynamicEntitySystem<
 					(script) => script.dependencies.emitterInfoIds,
 				),
 			]);
-			for (const emitterInfoId of emitterIds) {
-				emitterHandles.push(await this.#emitters.acquire(emitterInfoId));
-			}
+			emitterHandles.push(
+				...(await this.#emitters.acquireAll(emitterIds)).values(),
+			);
 			// The table is the *object's*, installed from its setup, so it is staged per resident
 			// rather than per script: two residents running one script may resolve a key to
 			// different sounds.

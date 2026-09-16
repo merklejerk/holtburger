@@ -9,6 +9,7 @@ export class SoundTableRepository extends PreparedAssetRepository<
 > {
 	constructor(source: SoundTableSource) {
 		super({
+			retention: "referenced",
 			destroySource: () => source.destroy(),
 			label: "SoundTable",
 			load: (soundTableId) => source.loadSoundTable(soundTableId),

@@ -405,8 +405,6 @@ interface DynamicEntityPresentationRecord {
 	readonly behaviorGeneration: number;
 	readonly nodeId: SceneNodeId;
 	readonly ownerId: DynamicEntityOwnerId;
-	/** Effective explicit-or-setup PhysicsScriptTable used by live high-level cues. */
-	readonly physicsScriptTableId: DatAssetId | null;
 	/** Appearance currently committed to the retained root and part targets. */
 	visualKey: string;
 	/** Last world-owned absolute scale applied to the installed visual root. */
@@ -450,6 +448,7 @@ type DynamicEntityCue =
 			readonly expiresAtMs: number;
 	  } & DynamicEntitySoundCue);
 
+/** Script and emitter leases owned by staging, then by the installed entity. */
 interface DynamicCueAssets {
 	readonly closure: PreparedPhysicsScriptClosure;
 	readonly emitterHandles: readonly PreparedAssetHandle<PreparedParticleEmitter>[];
@@ -485,6 +484,8 @@ interface DesiredDynamicEntityRecord {
 	placementIdentity: string;
 	/** Current missing prerequisite, or null while eligible/installed. */
 	deferral: DynamicEntityDeferral | null;
+	/** Effective cue table: undefined until visual metadata resolves; null means no table. */
+	scriptTableId: DatAssetId | null | undefined;
 	/** Exact asynchronous realization owned by this desired record. */
 	realization: Promise<void> | null;
 }
@@ -1835,51 +1836,81 @@ export class GamePresentationRuntime {
 		else this.#pendingDynamicEntityCues.set(guid, retained);
 	}
 
-	/** Start queued cue preparation only after its exact visual target is installed. */
+	/** Prepare cues concurrently with installation; serialize only their execution. */
 	#drainDynamicEntityCues(guid: number): void {
+		const desired = this.#spawnedDesiredEntities.get(guid);
+		if (desired === undefined || desired.scriptTableId === undefined) return;
 		const installed = this.#spawnedPresentations.get(guid);
-		if (installed === undefined) return;
+		const ready =
+			desired.realization ??
+			(installed?.generation === desired.entity.generation
+				? Promise.resolve()
+				: null);
+		if (ready === null) return;
 		const queued = this.#pendingDynamicEntityCues.get(guid);
 		if (queued === undefined) return;
 		const current = queued.filter(
-			(cue) => cue.generation === installed.generation,
+			(cue) => cue.generation === desired.entity.generation,
 		);
 		const epoch = this.#entityCueEpoch;
 		this.#pendingDynamicEntityCues.delete(guid);
 		let tail = this.#dynamicCuePreparations.get(guid) ?? Promise.resolve();
 		for (const cue of current) {
-			tail = tail
-				.then(() => {
+			// Handle failure immediately even when an earlier cue or installation is still pending.
+			const preparation = (
+				cue.kind === "script"
+					? this.#prepareDynamicScriptCue(desired.scriptTableId, cue)
+					: Promise.resolve(null)
+			).catch((error: unknown) => {
+				this.#dynamicRealizationFailures.push(error);
+				return null;
+			});
+			const predecessors = Promise.allSettled([tail, ready]);
+			tail = (async () => {
+				const assets = await preparation;
+				let transferred = false;
+				try {
+					const settled = await predecessors;
+					const target = this.#spawnedPresentations.get(guid);
 					if (
+						settled.some((result) => result.status === "rejected") ||
 						epoch !== this.#entityCueEpoch ||
-						this.#spawnedPresentations.get(guid) !== installed ||
+						this.#spawnedDesiredEntities.get(guid) !== desired ||
+						target === undefined ||
+						target.generation !== cue.generation ||
+						(installed !== undefined && target !== installed) ||
 						!this.#isEntityCueTimely(cue)
 					)
 						return;
-					if (cue.kind === "script")
-						return this.#prepareDynamicScriptCue(installed, cue, epoch);
+					if (cue.kind === "script") {
+						if (assets !== null)
+							transferred = this.#appendDynamicScriptCue(target, assets);
+						return;
+					}
 					// acclient.c:366946: explicit packet volume replaces stdata.volume_; selection and
 					// probability still come from the sound table. Liveness also gates cold-buffer replay.
 					const outcome = this.#playSoundTableKey(
 						{
-							targetId: behaviorTargetId(installed.nodeId),
-							generation: installed.behaviorGeneration,
+							targetId: behaviorTargetId(target.nodeId),
+							generation: target.behaviorGeneration,
 						},
 						cue.soundId,
 						{
 							volume: cue.volume,
 							canReplay: () =>
 								epoch === this.#entityCueEpoch &&
-								this.#spawnedPresentations.get(guid) === installed &&
+								this.#spawnedPresentations.get(guid) === target &&
 								this.#audioListenerEnabled &&
 								this.#isEntityCueTimely(cue),
 						},
 					);
 					if (outcome === "unprepared") this.#unpreparedServerSoundCount += 1;
-				})
-				.catch((error: unknown) => {
-					this.#dynamicRealizationFailures.push(error);
-				});
+				} finally {
+					if (assets !== null && !transferred) releaseCueAssets(assets);
+				}
+			})().catch((error: unknown) => {
+				this.#dynamicRealizationFailures.push(error);
+			});
 		}
 		this.#dynamicCuePreparations.set(guid, tail);
 		void tail.finally(() => {
@@ -1889,14 +1920,12 @@ export class GamePresentationRuntime {
 		});
 	}
 
-	/** Resolve and append one cue without allowing late assets to target a successor generation. */
+	/** Stage an immutable effect closure without needing a live target. */
 	async #prepareDynamicScriptCue(
-		installed: DynamicEntityPresentationRecord,
+		tableId: DatAssetId | null,
 		cue: DynamicEntityScriptCue,
-		epoch: number,
-	): Promise<void> {
-		const tableId = installed.physicsScriptTableId;
-		if (tableId === null) return;
+	): Promise<DynamicCueAssets | null> {
+		if (tableId === null) return null;
 		const tableHandle = await this.#physicsScriptTables.acquire(tableId);
 		let rootId: DatAssetId | null;
 		try {
@@ -1904,7 +1933,7 @@ export class GamePresentationRuntime {
 		} finally {
 			tableHandle.release();
 		}
-		if (rootId === null) return;
+		if (rootId === null) return null;
 		const closure = await this.#physicsScripts.acquireClosure(rootId);
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		try {
@@ -1913,47 +1942,50 @@ export class GamePresentationRuntime {
 					(script) => script.dependencies.emitterInfoIds,
 				),
 			);
-			for (const emitterId of emitterIds)
-				emitterHandles.push(await this.#particleEmitters.acquire(emitterId));
+			emitterHandles.push(
+				...(await this.#particleEmitters.acquireAll(emitterIds)).values(),
+			);
 			await this.#stageParticleMeshes(
 				emitterHandles.map((handle) => handle.asset),
 			);
-			const current = this.#spawnedPresentations.get(cue.guid);
-			// RETAIL DIVERGENCE: retail appends immediately to the object's ScriptManager
-			// (`acclient.c:316331-316389`); the browser appends only after its immutable script,
-			// emitter, and mesh closure is ready. Backdating would lose or reorder time-zero effects
-			// unless we added a cross-process recovery ledger. The archive census found 10,377 of
-			// 10,743 CreateParticle hooks at time zero, so starting at readiness preserves the common
-			// effect while accepting host/browser activation skew.
-			if (
-				epoch !== this.#entityCueEpoch ||
-				current !== installed ||
-				current.generation !== cue.generation ||
-				!this.#worldScalePhysicsScriptSystem.appendRoot(
-					current.ownerId,
-					{
-						generation: current.behaviorGeneration,
-						targetId: behaviorTargetId(current.nodeId),
-					},
-					closure,
-					this.#lastFrameTimeSeconds,
-				)
-			) {
-				for (const handle of emitterHandles) handle.release();
-				closure.release();
-				return;
-			}
-			let assets = this.#dynamicCueAssets.get(current.ownerId);
-			if (assets === undefined) {
-				assets = [];
-				this.#dynamicCueAssets.set(current.ownerId, assets);
-			}
-			assets.push({ closure, emitterHandles });
+			return { closure, emitterHandles };
 		} catch (cause) {
 			for (const handle of emitterHandles) handle.release();
 			closure.release();
 			throw cause;
 		}
+	}
+
+	/** Transfer a prepared cue to its installed owner only when execution reaches its turn. */
+	#appendDynamicScriptCue(
+		current: DynamicEntityPresentationRecord,
+		assets: DynamicCueAssets,
+	): boolean {
+		// RETAIL DIVERGENCE: retail appends immediately to the object's ScriptManager
+		// (`acclient.c:316331-316389`); the browser appends only after its immutable script,
+		// emitter, and mesh closure is ready. Backdating would lose or reorder time-zero effects
+		// unless we added a cross-process recovery ledger. The archive census found 10,377 of
+		// 10,743 CreateParticle hooks at time zero, so starting at readiness preserves the common
+		// effect while accepting host/browser activation skew.
+		if (
+			!this.#worldScalePhysicsScriptSystem.appendRoot(
+				current.ownerId,
+				{
+					generation: current.behaviorGeneration,
+					targetId: behaviorTargetId(current.nodeId),
+				},
+				assets.closure,
+				this.#lastFrameTimeSeconds,
+			)
+		)
+			return false;
+		let owned = this.#dynamicCueAssets.get(current.ownerId);
+		if (owned === undefined) {
+			owned = [];
+			this.#dynamicCueAssets.set(current.ownerId, owned);
+		}
+		owned.push(assets);
+		return true;
 	}
 
 	/** Revisit desired authority only at an explicit scene-readiness boundary. */
@@ -2127,6 +2159,7 @@ export class GamePresentationRuntime {
 			entity,
 			placementIdentity,
 			realization: null,
+			scriptTableId: undefined,
 			visualKey,
 		};
 		this.#spawnedDesiredEntities.set(guid, record);
@@ -2515,6 +2548,8 @@ export class GamePresentationRuntime {
 			resolved,
 			stagingPlacement,
 		);
+		record.scriptTableId = source.source.behavior.physicsScriptTableId;
+		this.#drainDynamicEntityCues(guid);
 		const live = this.#spawnedPresentations.get(guid);
 		if (live?.generation === entity.generation) {
 			const replacement = await this.#dynamics.stageVisualReplacement(
@@ -2575,7 +2610,6 @@ export class GamePresentationRuntime {
 			generation: entity.generation,
 			nodeId,
 			ownerId,
-			physicsScriptTableId: preparedEntity.source.behavior.physicsScriptTableId,
 			placementIdentity: record.placementIdentity,
 			motionState: null,
 			objectScale: entity.presentation.objectScale,
@@ -4424,8 +4458,7 @@ export class GamePresentationRuntime {
 	/** Cue asset leases belong to the retired behavior owner, not its successor's incarnation ID. */
 	#releaseDynamicCueAssets(ownerId: DynamicOwnerId): void {
 		for (const assets of this.#dynamicCueAssets.get(ownerId) ?? []) {
-			for (const handle of assets.emitterHandles) handle.release();
-			assets.closure.release();
+			releaseCueAssets(assets);
 		}
 		this.#dynamicCueAssets.delete(ownerId);
 	}
@@ -4581,4 +4614,10 @@ function createLandblockPlacement(
 		landblockId,
 		localTransform: Mat4.identity(),
 	};
+}
+
+/** Release a cue whose staging or entity ownership has ended. */
+function releaseCueAssets(assets: DynamicCueAssets): void {
+	for (const handle of assets.emitterHandles) handle.release();
+	assets.closure.release();
 }

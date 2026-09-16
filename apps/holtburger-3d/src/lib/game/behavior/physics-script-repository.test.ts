@@ -125,6 +125,8 @@ describe("PhysicsScriptRepository", () => {
 
 		expect(closures).toHaveLength(AUTHORED_SCRIPT_ROOT_IDS.length);
 		for (const closure of closures) closure.release();
+		expect(repository.getDiagnostics().referenceCount).toBe(0);
+		repository.destroy();
 		expect(repository.getDiagnostics().assetCount).toBe(0);
 	});
 
@@ -139,7 +141,7 @@ describe("PhysicsScriptRepository", () => {
 		};
 
 		await expect(repository.acquireClosure("0x330003d8")).rejects.toThrow(
-			"could not stage 0x330003cc",
+			"could not stage its dependencies",
 		);
 
 		// No handle survives a partial closure, so nothing can activate half-staged.

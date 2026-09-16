@@ -1,7 +1,7 @@
 # Spell missile movement and presentation investigation
 
 Status: **Scale, placement, particle cadence, and sloped-flight alignment fixes accepted
-by the user. Effect loading and retention strategy agreed; implementation pending.** Updated 2026-09-16. Initial investigation used
+by the user. Effect loading and retention implemented and accepted by the user.** Updated 2026-09-16. Initial investigation used
 working-tree HEAD `39e04918`. The existing ACE and ACViewer submodules had untracked
 content; neither was modified. Earlier findings below are chronological evidence;
 the cadence follow-up supersedes the previously unresolved distance predicate.
@@ -825,7 +825,81 @@ cache-budget subsystem is justified by the definition census at this stage.
 This section records the agreed design; no loading or retention implementation has
 been made as part of this documentation update.
 
-## Pre-commit code-quality review (2026-09-16)
+### Implementation follow-up
+
+The subsequently authorized implementation makes retention explicit in the shared
+frontend prepared-asset repository. Physics scripts, script tables, and particle
+emitter definitions remain resident until repository teardown; animations and sound
+tables retain their existing last-handle-release policy. Active handles still prevent
+repository destruction, and failed loads still require explicit eviction to retry.
+
+Batch acquisition loads independent IDs concurrently, shares duplicate requests,
+and waits for all results before releasing successes on partial failure. Script
+closure traversal uses concurrent dependency frontiers with cycle detection. Both
+default entity behavior and live cues use the same batch acquisition for emitters.
+
+Cue table identity now belongs to the desired presentation record and becomes
+available when its visual metadata resolves, before animation, behavior, and mesh
+installation finish. Cue asset preparation overlaps that remaining installation work
+and other queued cue preparations. Only execution waits for installation and earlier
+cues. Epoch, desired-record, entity-generation, and installed-target checks prevent
+late work from reaching a replacement target; abandoned staging releases its handles.
+Successful execution transfers those handles to the existing entity owner. Execution
+still starts at readiness rather than backdating time-zero hooks.
+
+Validation includes focused tests for retention versus active ownership, shared
+requests, partial batch failure and retry, cyclic script closures, preparation during
+blocked visual installation, repeat reuse after entity retirement, cue clearing,
+retirement/generation replacement, and execution order despite out-of-order asset
+readiness. These tests use checked-in or synthetic fixtures, not local DAT assets.
+All 159 focused tests passed, including animation repository regression coverage.
+Full frontend/type checks, ESLint, dead-code checks, and diff whitespace checks passed.
+
+A non-visual browser smoke run used real content at `0xda55ffff`, radii 1 for
+buildings/explicit/generated objects, and a two-second measurement window:
+`npm run harness:browser -- --brief --measure-ms 2000 --landblock 0xda55ffff --building-radius 1 --explicit-object-radius 1 --generated-object-radius 1`.
+It completed successfully with 93 dynamic entities and 57 live emitters. This checks
+the shared asset-loading/rendering path, not connected-client cue latency or visual
+acceptance. No new cold/warm launch latency or retained-heap measurements have been
+made, and the earlier 645-ms observation must not be treated as an after-change result.
+
+Requested user-owned gate: reload the frontend, compare first and repeated casts,
+and observe effects from other players or creatures as available. Check launch
+timing and preservation of the accepted trails/orientations. No host rebuild is
+required for this frontend-only change. Further memory budgeting or speculative
+preloading remains deferred pending evidence.
+
+The user subsequently accepted this change ("lgtm") and requested review and commit.
+
+### Effect loading and retention code-quality review
+
+Reviewed the working-tree diff against HEAD, including the new repository tests.
+The review covered repository policy producers (scripts, tables, emitters, animations,
+and sounds), batch acquisition and closure traversal, default entity staging, live
+cue preparation/publication, generation replacement, and runtime shutdown. The host
+script adapter and the behavior adapter's explicit-versus-setup table selection were
+also inspected. This is not a whole-renderer, host-cache, or GPU-memory audit.
+
+One bounded finding was corrected: concurrent batch failures preserved their causes
+but no longer guaranteed the failed dependency's ID in the error chain. Batch
+acquisition now attaches the family and requested ID to each failure before aggregating
+them. This retains actionable diagnostics without caller-specific error reconstruction.
+
+No remaining blocking design findings were identified in these seams. Asset families
+own residency policy; the generic repository owns sharing and reference accounting;
+the presentation runtime owns cue ordering, target eligibility, and transfer of asset
+leases. The former installed-record table copy was removed when identity moved to the
+desired record. The new batch primitive is shared by closure traversal, default
+behavior, and live cues rather than duplicated at each caller. Added orchestration
+and tests are justified by concurrent preparation and its cleanup obligations; no
+production capture hooks or speculative spell-bar preparation were added.
+
+Accepted costs remain session memory growth for encountered definitions and waiting
+for outstanding acquisitions during teardown. Cold first use and real retained heap
+size have not been benchmarked. Visual acceptance belongs to the user's recorded
+result; this review does not infer measured latency improvements from code shape.
+
+## Earlier missile-fix pre-commit code-quality review (2026-09-16)
 
 Reviewed the accumulated missile diff against the current HEAD, including changed
 callers, test fixtures, the investigation document, and its evidence artifacts.

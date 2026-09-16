@@ -9,6 +9,7 @@ export class PhysicsScriptTableRepository extends PreparedAssetRepository<
 > {
 	constructor(source: PhysicsScriptTableSource) {
 		super({
+			retention: "session",
 			destroySource: () => source.destroy(),
 			label: "PhysicsScriptTable",
 			load: (tableId) => source.loadPhysicsScriptTable(tableId),

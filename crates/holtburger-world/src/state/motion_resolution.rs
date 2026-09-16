@@ -574,29 +574,33 @@ impl WorldState {
     }
 
     /// Applies one accepted remote state and its action batch to the sole playback owner.
+    /// Returns whether the published playback description changed during admission. A transient
+    /// action can start without changing the persistent network motion snapshot.
     pub(crate) fn accept_entity_motion(
         &mut self,
         guid: Guid,
         snapshot: EntityMotionSnapshot,
         actions: impl IntoIterator<Item = crate::entity::EntityMotionAction>,
         sticky_target: Option<Guid>,
-    ) {
+    ) -> bool {
         let Some(source) = self.motion_table_source_for_guid(guid) else {
             log::warn!("body 0x{guid:08X} cannot apply admitted motion: no motion table source");
-            return;
+            return false;
         };
         let motion_table_id = motion_table_id_for_source(source);
         let Some(table) = self.motion_sequences.table(motion_table_id) else {
             log::warn!(
                 "body 0x{guid:08X} cannot apply admitted motion: table 0x{motion_table_id:08X} is absent from content"
             );
-            return;
+            return false;
         };
         let Some(input) = self.remote_motion_input(guid, snapshot) else {
-            return;
+            return false;
         };
+        let before = self.motion_runtimes.motion_playback(guid);
         self.motion_runtimes
             .accept_remote(table, guid, input, actions, sticky_target);
+        before != self.motion_runtimes.motion_playback(guid)
     }
 
     /// Captures source facts consistently for packet admission and continuous resolution.

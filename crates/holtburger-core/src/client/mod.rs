@@ -991,6 +991,9 @@ impl ClientRuntime {
                     });
                 self.emit_dynamic_entity_upsert(*guid);
             }
+            WorldEvent::EntityMotionPlaybackChanged { guid } => {
+                self.emit_dynamic_entity_upsert(*guid);
+            }
             WorldEvent::PlayerGroundedUpdated { grounded } => {
                 let _ = self
                     .client_view_event_tx
@@ -1438,6 +1441,308 @@ mod tests {
             [],
         )
         .expect("local authored motion fixture should assemble")
+    }
+
+    /// Stationary, projectable actor with executable transient-action content.
+    fn motion_publication_client() -> (ClientRuntime, Guid) {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x7000_0042);
+        let table_id = 0x0900_0042;
+        client
+            .world
+            .set_motion_sequences(local_authored_motion_catalog(table_id));
+        let mut entity = Entity::new(
+            guid,
+            "Stationary attacker".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..Default::default()
+            },
+        );
+        entity.wcid = Some(42);
+        entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        entity.set_did_prop(PropertyDataId::MotionTable, Guid(table_id));
+        client.world.add_entity(entity);
+        (client, guid)
+    }
+
+    /// Observe the real packet-to-client-event boundary, without advancing a simulation tick.
+    async fn publish_motion_packet(
+        client: &mut ClientRuntime,
+        guid: Guid,
+        sequence: u16,
+        command: Option<InterpretedMotionCommand>,
+        sticky: bool,
+        autonomous: bool,
+    ) -> Vec<Box<crate::DynamicEntityView>> {
+        let mut events = client.subscribe_client_view_events();
+        let message = GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid,
+            object_instance_sequence: 0,
+            movement_sequence: sequence,
+            server_control_sequence: 0,
+            is_autonomous: autonomous,
+            movement_type: MovementType::Invalid,
+            motion_flags: u8::from(sticky),
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::CURRENT_STYLE
+                        | if command.is_some() {
+                            MovementStateFlags::FORWARD_COMMAND
+                        } else {
+                            MovementStateFlags::empty()
+                        },
+                    current_style: Some(MotionStance::NonCombat.interpreted()),
+                    forward_command: command,
+                    ..Default::default()
+                },
+                sticky_object: sticky.then_some(Guid(0x5000_0001)),
+            }),
+        }));
+        let mut bytes = Vec::new();
+        message.pack(&mut bytes);
+        let world_events = client.handle_message(&bytes).await.unwrap();
+        assert!(
+            world_events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    WorldEvent::EntityMotionUpdated { .. }
+                        | WorldEvent::EntityMotionPlaybackChanged { .. }
+                ))
+                .count()
+                <= 1,
+            "one admission must choose one motion notification route"
+        );
+        std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| match event {
+                ClientViewEvent::DynamicEntity(crate::DynamicEntityEvent::Upserted { entity })
+                    if entity.identity.guid == guid =>
+                {
+                    Some(entity)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn stationary_action_publication_precedes_ticks_and_repeats_without_movement() {
+        for sticky in [false, true] {
+            let (mut client, guid) = motion_publication_client();
+            publish_motion_packet(&mut client, guid, 1, None, false, false).await;
+            let mut previous_playback = None;
+            for sequence in 2..=3 {
+                let views = publish_motion_packet(
+                    &mut client,
+                    guid,
+                    sequence,
+                    Some(InterpretedMotionCommand(JUMP_FIXTURE_ACTION_COMMAND as u16)),
+                    sticky,
+                    false,
+                )
+                .await;
+                assert_eq!(
+                    views.len(),
+                    1,
+                    "an action-only admission must publish immediately"
+                );
+                let motion = views[0].motion.as_ref().unwrap();
+                assert_eq!(
+                    motion.activity,
+                    crate::DynamicEntityMotionActivity::Explicit
+                );
+                let layer = motion.ordinary.as_ref().unwrap();
+                assert_eq!(layer.clip.animation_id(), JUMP_FIXTURE_ACTION_ANIMATION);
+                assert_ne!(previous_playback.as_ref(), Some(&layer.playback_id));
+                previous_playback = Some(layer.playback_id.clone());
+
+                // The next tick starts after admission. Its unchanged clip cannot rescue a
+                // missed packet publication; only completion produces another changed level.
+                let before = client.current_dynamic_entity_views();
+                client
+                    .world
+                    .advance_authored_motion(Duration::from_millis(10));
+                assert_eq!(before, client.current_dynamic_entity_views());
+                client.world.advance_authored_motion(Duration::from_secs(1));
+                let batch = client
+                    .dynamic_entity_tick_batch(
+                        before,
+                        client.current_dynamic_entity_views(),
+                        DynamicEntityHostTime::new(f64::from(sequence)).unwrap(),
+                        1000.0,
+                        &Default::default(),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert!(batch.advances.is_empty());
+                assert_eq!(batch.updates.len(), 1);
+                assert_eq!(
+                    batch.updates[0]
+                        .motion
+                        .as_ref()
+                        .unwrap()
+                        .ordinary
+                        .as_ref()
+                        .unwrap()
+                        .clip
+                        .animation_id(),
+                    JUMP_FIXTURE_STAND_ANIMATION
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn queued_action_publication_waits_for_its_playback_start() {
+        let (mut client, guid) = motion_publication_client();
+        publish_motion_packet(&mut client, guid, 1, None, false, false).await;
+        let action = Some(InterpretedMotionCommand(JUMP_FIXTURE_ACTION_COMMAND as u16));
+        let first = publish_motion_packet(&mut client, guid, 2, action, false, false).await;
+        assert_eq!(first.len(), 1);
+        let first_motion = first[0].motion.as_ref().unwrap();
+        assert!(
+            publish_motion_packet(&mut client, guid, 3, action, false, false)
+                .await
+                .is_empty()
+        );
+        let before = client.current_dynamic_entity_views();
+        client.world.advance_authored_motion(Duration::from_secs(1));
+        let batch = client
+            .dynamic_entity_tick_batch(
+                before,
+                client.current_dynamic_entity_views(),
+                DynamicEntityHostTime::new(1.0).unwrap(),
+                1000.0,
+                &Default::default(),
+            )
+            .unwrap()
+            .unwrap();
+        let next = batch.updates[0].motion.as_ref().unwrap();
+        assert_eq!(next.activity, crate::DynamicEntityMotionActivity::Explicit);
+        assert_eq!(
+            next.ordinary.as_ref().unwrap().clip.animation_id(),
+            JUMP_FIXTURE_ACTION_ANIMATION
+        );
+        assert_ne!(
+            next.ordinary.as_ref().unwrap().playback_id,
+            first_motion.ordinary.as_ref().unwrap().playback_id
+        );
+        assert!(
+            publish_motion_packet(&mut client, guid, 3, action, false, false)
+                .await
+                .is_empty(),
+            "a stale packet must not publish or enqueue another attack"
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .get(guid)
+                .unwrap()
+                .action_count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn network_motion_change_already_publishes_the_admitted_action() {
+        let (mut client, guid) = motion_publication_client();
+        publish_motion_packet(
+            &mut client,
+            guid,
+            1,
+            Some(InterpretedMotionCommand::RUN_FORWARD),
+            false,
+            false,
+        )
+        .await;
+        let events = publish_motion_packet(
+            &mut client,
+            guid,
+            2,
+            Some(InterpretedMotionCommand(JUMP_FIXTURE_ACTION_COMMAND as u16)),
+            false,
+            false,
+        )
+        .await;
+        assert!(
+            !events.is_empty(),
+            "the network-motion notification must publish playback"
+        );
+        assert!(
+            events
+                .iter()
+                .all(|view| view.motion.as_ref().unwrap().activity
+                    == crate::DynamicEntityMotionActivity::Explicit)
+        );
+    }
+
+    #[tokio::test]
+    async fn local_action_echo_preserves_predicted_playback_without_republication() {
+        let (mut client, guid) = motion_publication_client();
+        publish_motion_packet(&mut client, guid, 1, None, false, false).await;
+        client.world.player.guid = guid;
+        let command = InterpretedMotionCommand(JUMP_FIXTURE_ACTION_COMMAND as u16);
+        client
+            .world
+            .enqueue_local_authored_motion_action(command, 1.0, 1)
+            .unwrap();
+        client.world.advance_authored_motion(Duration::ZERO);
+        let predicted = client.world.motion_runtimes.motion_playback(guid).unwrap();
+        assert_eq!(
+            predicted.ordinary.unwrap().clip.animation_id(),
+            JUMP_FIXTURE_ACTION_ANIMATION
+        );
+        assert!(
+            publish_motion_packet(&mut client, guid, 2, Some(command), true, true)
+                .await
+                .is_empty()
+        );
+        assert_eq!(
+            client.world.motion_runtimes.motion_playback(guid),
+            Some(predicted)
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .get(guid)
+                .unwrap()
+                .action_count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn unmodelled_action_does_not_publish_unchanged_playback() {
+        let (mut client, guid) = motion_publication_client();
+        publish_motion_packet(&mut client, guid, 1, None, false, false).await;
+        let idle = client.world.motion_runtimes.motion_playback(guid);
+        // AttackHigh1 is a valid action, but this fixture only authors the named fixture action.
+        assert!(
+            publish_motion_packet(
+                &mut client,
+                guid,
+                2,
+                Some(InterpretedMotionCommand(0x62)),
+                false,
+                false
+            )
+            .await
+            .is_empty()
+        );
+        assert_eq!(client.world.motion_runtimes.motion_playback(guid), idle);
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .get(guid)
+                .unwrap()
+                .action_count(),
+            0
+        );
     }
 
     /// Routes a constructed message through the same pack/unpack boundary as an ACE datagram.

@@ -1255,11 +1255,17 @@ async function main() {
 					.filter(
 						(sample, index, samples) =>
 							index === 0 ||
-							sample.motion?.animationId !==
-								samples[index - 1].motion?.animationId,
+							sample.motion?.ordinary?.playbackId !==
+								samples[index - 1].motion?.ordinary?.playbackId ||
+							sample.motion?.locomotion?.playbackId !==
+								samples[index - 1].motion?.locomotion?.playbackId,
 					)
 					.map((sample) => ({
-						animationId: sample.motion?.animationId ?? null,
+						ordinaryAnimationId:
+							sample.motion?.ordinary?.clip.animationId ?? null,
+						locomotionAnimationId:
+							sample.motion?.locomotion?.clip.animationId ?? null,
+						activity: sample.motion?.activity ?? null,
 						contact: sample.contact,
 					}));
 				const contactTransitions = trajectoryStates.filter(

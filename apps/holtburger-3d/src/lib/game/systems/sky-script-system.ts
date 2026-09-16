@@ -1,3 +1,5 @@
+import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
+import type { PreparedParticleEmitter } from "../behavior/particle-emitter-repository";
 import {
 	createSkyBehaviorTarget,
 	skyBehaviorTargetId,
@@ -22,12 +24,12 @@ export interface SkyScriptSystemDependencies {
 		scriptId: DatAssetId,
 	) => Promise<PreparedPhysicsScriptClosure>;
 	/** Stage one emitter definition the closure can reach. */
-	readonly acquireEmitter: (emitterInfoId: DatAssetId) => Promise<{
-		release: () => void;
-	}>;
-	/** Make every particle mesh a staged closure can name resident. */
+	readonly acquireEmitter: (
+		emitterInfoId: DatAssetId,
+	) => Promise<PreparedAssetHandle<PreparedParticleEmitter>>;
+	/** Make every mesh named by the prepared emitters resident. */
 	readonly installMeshes: (
-		closure: PreparedPhysicsScriptClosure,
+		emitters: readonly PreparedParticleEmitter[],
 	) => Promise<void>;
 	readonly installScript: (
 		target: BehaviorTarget,
@@ -55,7 +57,7 @@ interface ActiveSkyScript {
 /** One script's staged assets, shared by every target running it and released only at destroy. */
 interface StagedSkyAssets {
 	readonly closure: PreparedPhysicsScriptClosure;
-	readonly emitterHandles: readonly { release: () => void }[];
+	readonly emitterHandles: readonly PreparedAssetHandle<PreparedParticleEmitter>[];
 }
 
 /**
@@ -212,7 +214,7 @@ export class SkyScriptSystem {
 
 	async #stageFresh(scriptId: DatAssetId): Promise<StagedSkyAssets> {
 		const closure = await this.#dependencies.acquireClosure(scriptId);
-		const emitterHandles: { release: () => void }[] = [];
+		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		try {
 			const emitterIds = new Set(
 				[...closure.scripts.values()].flatMap(
@@ -224,7 +226,9 @@ export class SkyScriptSystem {
 					await this.#dependencies.acquireEmitter(emitterInfoId),
 				);
 			}
-			await this.#dependencies.installMeshes(closure);
+			await this.#dependencies.installMeshes(
+				emitterHandles.map((handle) => handle.asset),
+			);
 		} catch (cause) {
 			for (const handle of emitterHandles) handle.release();
 			closure.release();

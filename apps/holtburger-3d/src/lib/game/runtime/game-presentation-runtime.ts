@@ -79,7 +79,10 @@ import {
 	type ObjectVisualTemplateRepositoryDiagnostics,
 } from "../systems/object-visual-template-repository";
 import { EnvCellSystem } from "../systems/env-cell-system";
-import { AnimationSystem } from "../systems/animation-system";
+import {
+	AnimationSystem,
+	type AnimationLayerUpdate,
+} from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { PhysicsScriptTableSource } from "../../assets/physics-script-table-source";
 import { selectPhysicsScript } from "../../assets/decode-physics-script-table-record";
@@ -220,6 +223,7 @@ import {
 } from "./dynamic-entity-presentation";
 import type {
 	DynamicEntityMotion,
+	DynamicEntityMotionLayer,
 	DynamicEntityTickBatch,
 	DynamicEntityView,
 } from "./dynamic-entity-feed";
@@ -406,12 +410,14 @@ interface DynamicEntityPresentationRecord {
 	/** Mutable visibility/lighting level already applied to the dynamic system. */
 	presentationStateIdentity: string;
 	/**
-	 * Motion level this presentation last accepted, so a restated level is not re-entered.
+	 * Accepted levels and installation outcomes for each track, so restated levels are not re-entered.
 	 *
 	 * Mutable because it tracks playback state independently from appearance replacement.
 	 */
-	/** Accepted host motion level and whether it successfully reached frontend playback. */
-	motionState: DynamicEntityMotionState | null;
+	motionState: {
+		ordinary: DynamicEntityMotionState | null;
+		locomotion: DynamicEntityMotionState | null;
+	} | null;
 }
 
 /** Transient high-level PlayScript input bound to one authoritative entity generation. */
@@ -808,37 +814,19 @@ export class GamePresentationRuntime {
 	#ambientScanCellZ: number | null = null;
 	/** EnvCell the last ambient refresh ran under, part of the same numeric trigger. */
 	#ambientScanEnvCellId: EnvCellId | null = null;
-	/**
-	 * Make every mesh this generation's emitters can name resident.
-	 *
-	 * Deliberately fire-and-forget: a resident activates immediately and its first particles may
-	 * miss a frame or two while meshes land, which the draw pass counts as unresolved ranges.
-	 * Blocking activation on mesh residency would hold back correct script, audio, and animation
-	 * behavior for a purely visual dependency.
-	 */
+	/** Stage drawable meshes before activating any producer of particle hooks. */
 	async #stageParticleMeshes(
-		prepared: readonly {
-			readonly scriptClosure: PreparedPhysicsScriptClosure | null;
-		}[],
+		emitters: readonly PreparedParticleEmitter[],
 	): Promise<void> {
-		const emitterInfoIds = new Set<DatAssetId>();
-		for (const entity of prepared) {
-			if (entity.scriptClosure === null) continue;
-			for (const script of entity.scriptClosure.scripts.values()) {
-				for (const id of script.dependencies.emitterInfoIds)
-					emitterInfoIds.add(id);
-			}
-		}
-		if (emitterInfoIds.size === 0) return;
-		const meshIds = [...emitterInfoIds].flatMap((id) => {
-			const emitter = this.#particleEmitters.getReady(id);
-			return emitter?.kind === "drawable" ? [emitter.mesh.id] : [];
-		});
+		const meshIds = [
+			...new Set(
+				emitters.flatMap((emitter) =>
+					emitter.kind === "drawable" ? [emitter.mesh.id] : [],
+				),
+			),
+		];
 		if (meshIds.length === 0) return;
-		const batch = await this.#particleMeshes.prepare(meshIds);
-		// Only a newly loaded batch reaches residency; already-known meshes never re-upload.
-		if (batch !== null)
-			await this.#renderer?.particles?.install(batch, this.#texturePreparer);
+		await this.#particleMeshes.prepare(meshIds);
 	}
 
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
@@ -1343,6 +1331,9 @@ export class GamePresentationRuntime {
 		this.#soundTables = new SoundTableRepository(dependencies.soundTableSource);
 		this.#particleMeshes = new ParticleMeshCache(
 			dependencies.particleMeshSource,
+			async (batch) => {
+				await this.#renderer?.particles?.install(batch, this.#texturePreparer);
+			},
 		);
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
@@ -1354,6 +1345,8 @@ export class GamePresentationRuntime {
 			dependencies.particleEmitterSource,
 		);
 		this.#particles = new ParticleSystem({
+			distanceSpacingMultiplier:
+				SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier,
 			clock: () => this.#lastFrameTimeSeconds,
 			// Reads an already-staged definition; an unstaged id returns null rather than starting
 			// a load inside the frame.
@@ -1516,8 +1509,7 @@ export class GamePresentationRuntime {
 				this.#physicsScripts.acquireClosure(scriptId),
 			acquireEmitter: (emitterInfoId) =>
 				this.#particleEmitters.acquire(emitterInfoId),
-			installMeshes: (closure) =>
-				this.#stageParticleMeshes([{ scriptClosure: closure }]),
+			installMeshes: (emitters) => this.#stageParticleMeshes(emitters),
 			installScript: (target, closure, timeSeconds) =>
 				this.#physicsScriptSystem.install(
 					SKY_OWNER_ID,
@@ -1916,7 +1908,9 @@ export class GamePresentationRuntime {
 			);
 			for (const emitterId of emitterIds)
 				emitterHandles.push(await this.#particleEmitters.acquire(emitterId));
-			await this.#stageParticleMeshes([{ scriptClosure: closure }]);
+			await this.#stageParticleMeshes(
+				emitterHandles.map((handle) => handle.asset),
+			);
 			const current = this.#spawnedPresentations.get(cue.guid);
 			// RETAIL DIVERGENCE: retail appends immediately to the object's ScriptManager
 			// (`acclient.c:316331-316389`); the browser appends only after its immutable script,
@@ -2308,6 +2302,18 @@ export class GamePresentationRuntime {
 		);
 	}
 
+	/** A parent snap also moves attached children and every emitter riding their parts. */
+	#reanchorDynamicParticles(guid: number): void {
+		const installed = this.#spawnedPresentations.get(guid);
+		if (installed !== undefined)
+			this.#particles.reanchor({
+				targetId: behaviorTargetId(installed.nodeId),
+				generation: installed.behaviorGeneration,
+			});
+		for (const child of this.#spawnedDesiredChildren.get(guid) ?? [])
+			this.#reanchorDynamicParticles(child);
+	}
+
 	/** Accept tick state immediately; only changed visual requests start asynchronous realization. */
 	applyDynamicEntityTick(
 		batch: DynamicEntityTickBatch,
@@ -2332,6 +2338,7 @@ export class GamePresentationRuntime {
 				batch.durationMs,
 				receivedAtMs,
 			);
+			if (advance.kind !== "integrated") this.#reanchorDynamicParticles(guid);
 			installed.placementIdentity = desired.placementIdentity;
 		}
 		for (const entity of batch.updates) {
@@ -2379,58 +2386,74 @@ export class GamePresentationRuntime {
 		return record;
 	}
 
-	/**
-	 * Apply one entity's current motion-derived presentation level.
-	 *
-	 * An advancing clip owns its frontend phase. A matching settled successor therefore confirms
-	 * the terminal frame without reinstalling playback: the local clip finishes and holds naturally,
-	 * avoiding a network-jitter pop. A settled initial level or contradictory correction installs a
-	 * one-frame clip so late realization still reconstructs the authoritative pose exactly.
-	 *
-	 * A `null` level names an entity with no playback at all, and there is no stop: the host drops
-	 * an entity's playback only along with the entity, so nothing that has played can reach one.
-	 *
-	 * The level is recorded before the clip resolves, so an unplayable one is refused once rather
-	 * than re-attempted on every view that restates it.
+	/** Apply each accepted track independently; the animation system owns clocks and visibility.
+	 * Matching settled poses confirm a local hold, while absent tracks retire their ownership.
+	 * Unplayable clips retain the previous track and are refused once per accepted description.
 	 */
 	#applyDynamicEntityMotion(
 		installed: DynamicEntityPresentationRecord,
 		motion: DynamicEntityMotion | null,
 	): void {
-		if (motion === null) return;
-		const update = classifyDynamicEntityMotionUpdate(
-			installed.motionState,
-			motion,
+		if (motion === null && installed.motionState === null) return;
+		const ordinary = this.#resolveMotionLayer(
+			installed,
+			installed.motionState?.ordinary ?? null,
+			motion?.ordinary ?? null,
 		);
-		if (update === "unchanged") return;
-		if (update === "confirm") {
-			installed.motionState = { level: motion, playback: "installed" };
-			return;
-		}
+		const locomotion = this.#resolveMotionLayer(
+			installed,
+			installed.motionState?.locomotion ?? null,
+			motion?.locomotion ?? null,
+		);
+		this.#animation.applyMotion(
+			installed.ownerId,
+			{
+				generation: installed.behaviorGeneration,
+				targetId: behaviorTargetId(installed.nodeId),
+			},
+			motion?.activity ?? "locomotion",
+			ordinary.update,
+			locomotion.update,
+			this.#dynamics.getPartToObjectTransforms(installed.nodeId),
+		);
+		installed.motionState =
+			motion === null
+				? null
+				: { ordinary: ordinary.state, locomotion: locomotion.state };
+	}
+
+	/** Resolve each track independently so a hidden locomotion update cannot replace a gesture. */
+	#resolveMotionLayer(
+		installed: DynamicEntityPresentationRecord,
+		current: DynamicEntityMotionState | null,
+		next: DynamicEntityMotionLayer | null,
+	): { state: DynamicEntityMotionState | null; update: AnimationLayerUpdate } {
+		if (next === null) return { state: null, update: { kind: "remove" } };
+		const update = classifyDynamicEntityMotionUpdate(current, next);
+		if (update === "unchanged")
+			return { state: current, update: { kind: "unchanged" } };
+		if (update === "confirm")
+			return {
+				state: { level: next, playback: "installed" },
+				update: { kind: "unchanged" },
+			};
 		const animation = this.#dynamics.getMotionClip(
 			installed.nodeId,
-			datAssetId(motion.animationId),
+			datAssetId(next.clip.animationId),
 		);
-		if (animation === null) {
-			installed.motionState = { level: motion, playback: "unplayable" };
-			return;
-		}
-		const clip = playingClipForDynamicEntityMotion(animation, motion);
-		const target = {
-			generation: installed.behaviorGeneration,
-			targetId: behaviorTargetId(installed.nodeId),
+		if (animation === null)
+			return {
+				state: { level: next, playback: "unplayable" },
+				update: { kind: "unchanged" },
+			};
+		const clip = playingClipForDynamicEntityMotion(animation, next.clip);
+		return {
+			state: { level: next, playback: "installed" },
+			update:
+				update === "retime"
+					? { kind: "retime", framesPerSecond: clip.framesPerSecond }
+					: { kind: "install", clip },
 		};
-		if (update === "retime") {
-			this.#animation.setPlaybackRate(target, clip.framesPerSecond);
-		} else {
-			this.#animation.playClip(
-				installed.ownerId,
-				target,
-				clip,
-				this.#dynamics.getPartToObjectTransforms(installed.nodeId),
-			);
-		}
-		installed.motionState = { level: motion, playback: "installed" };
 	}
 
 	/** Revalidate asynchronous publication against current authority and residency/parent lifetime. */
@@ -2574,6 +2597,8 @@ export class GamePresentationRuntime {
 				installed.nodeId,
 				dynamicEntityPlacement(entity),
 			);
+			// Snapshot/upsert placement has no traversed path; it is a new baseline.
+			this.#reanchorDynamicParticles(entity.identity.guid);
 			installed.placementIdentity = record.placementIdentity;
 		}
 		this.#applySpawnedPresentationState(installed, entity);
@@ -4198,7 +4223,9 @@ export class GamePresentationRuntime {
 				),
 			);
 			// Particle meshes are part of an emitter's drawable closure, not a post-publish warmup.
-			await this.#stageParticleMeshes(prepared);
+			await this.#stageParticleMeshes(
+				prepared.flatMap((entity) => entity.emitters),
+			);
 			installation.prepareCommit(animationStage.samples);
 		} catch (cause) {
 			animationStage.release();

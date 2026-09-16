@@ -1,3 +1,4 @@
+import { collectEmitterInfoIds } from "./behavior-dependencies";
 import type {
 	DecodedPhysicsScript,
 	DecodedPhysicsScriptRecord,
@@ -136,7 +137,7 @@ function preparePhysicsScript(
 }
 
 /**
- * Derive one script's direct asset references from its own records.
+ * Derive one command sequence's direct asset references from its own records.
  *
  * Deliberately derived rather than transported: a separate dependency list in the manifest could
  * disagree with the records it describes, and there is exactly one right answer.
@@ -145,17 +146,14 @@ function collectDependencies(
 	records: readonly DecodedPhysicsScriptRecord[],
 ): PhysicsScriptDependencies {
 	const scriptIds = new Set<DatAssetId>();
-	const emitterInfoIds = new Set<DatAssetId>();
 	const soundIds = new Set<DatAssetId>();
 	for (const record of records) {
 		if (record.kind === "call-pes") scriptIds.add(record.scriptId);
-		if (record.kind === "create-particle")
-			emitterInfoIds.add(record.emitterInfoId);
 		if (record.kind === "sound" || record.kind === "sound-tweaked")
 			soundIds.add(record.soundId);
 	}
 	return {
-		emitterInfoIds: [...emitterInfoIds],
+		emitterInfoIds: collectEmitterInfoIds(records),
 		scriptIds: [...scriptIds],
 		soundIds: [...soundIds],
 	};

@@ -27,9 +27,14 @@ function buildAnimationSystem() {
 	const play = (nodeId: string, ownerId = "owner") => {
 		const target = testTarget(nodeId);
 		installEffectState(effects, target.targetId);
-		system.playClip(ownerId, target, wholeAnimationClip(testAnimation()), [
-			Mat4.identity(),
-		]);
+		system.applyMotion(
+			ownerId,
+			target,
+			"explicit",
+			{ kind: "install", clip: wholeAnimationClip(testAnimation()) },
+			{ kind: "remove" },
+			[Mat4.identity()],
+		);
 	};
 	return { play, system };
 }

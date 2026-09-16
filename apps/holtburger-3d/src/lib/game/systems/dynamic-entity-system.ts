@@ -208,6 +208,8 @@ interface StagedBehaviorAssets {
 }
 
 interface PreparedDynamicEntity {
+	/** Complete emitter definitions retained until this resident is released. */
+	readonly emitters: readonly PreparedParticleEmitter[];
 	readonly animation: PreparedDynamicAnimation;
 	/** Complete setup pose retained beneath any partial-part animation clip. */
 	readonly initialPartToObjectTransforms: readonly Mat4[];
@@ -337,30 +339,38 @@ export class DynamicEntitySystem<
 			| "superseded"
 			| "committed"
 			| "released" = "preparing";
+		const animationPreparations = entities.map((entity) =>
+			entity.source.behavior.animationId === null
+				? Promise.resolve(null)
+				: this.#animations.acquire(entity.source.behavior.animationId),
+		);
+		const motionPreparations = entities.map((entity) =>
+			entity.source.behavior.motionTableId === null
+				? Promise.resolve(null)
+				: this.#animations.acquireMotionClosure(
+						entity.source.behavior.motionTableId,
+					),
+		);
+		const behaviorPreparations = entities.map((entity, index) =>
+			Promise.all([
+				animationPreparations[index],
+				motionPreparations[index],
+			]).then(([animation, motion]) =>
+				this.#stageBehaviorAssets(entity, [
+					...(animation ? [animation.asset] : []),
+					...(motion?.animations.values() ?? []),
+				]),
+			),
+		);
 		const preparationPromise = this.#prepareOwner(
 			ownerId,
 			generation,
 			entities,
 			templatePreparation,
 			templateOwnerId,
-			entities.map((entity) =>
-				// A script-only resident has no playback to prepare, only behavior.
-				entity.source.behavior.animationId === null
-					? Promise.resolve(null)
-					: this.#animations.acquire(entity.source.behavior.animationId),
-			),
-			// Transitive `CallPES` and emitter staging happens here, before activation, so nothing
-			// reached mid-playback can trigger a load at frame time.
-			entities.map((entity) => this.#stageBehaviorAssets(entity)),
-			// The motion table's whole closure stages on the same terms: a body transitions into
-			// clips it has not played, and a transition must not trigger a load at frame time.
-			entities.map((entity) =>
-				entity.source.behavior.motionTableId === null
-					? Promise.resolve(null)
-					: this.#animations.acquireMotionClosure(
-							entity.source.behavior.motionTableId,
-						),
-			),
+			animationPreparations,
+			behaviorPreparations,
+			motionPreparations,
 		);
 		this.#pendingPreparations.add(preparationPromise);
 		const ready = preparationPromise
@@ -415,6 +425,7 @@ export class DynamicEntitySystem<
 						);
 					return {
 						animation: entity.preparedAnimation,
+						emitters: entity.emitterHandles.map((handle) => handle.asset),
 						initialPartToObjectTransforms:
 							entity.articulatedPose.partToObjectTransforms,
 						nodeId: entity.rootNodeId,
@@ -1254,7 +1265,7 @@ export class DynamicEntitySystem<
 	}
 
 	/**
-	 * Stage one resident's script closure and every emitter definition it can reach.
+	 * Stage one resident's script closure and emitters referenced by scripts and animations.
 	 *
 	 * Emitters are staged in the same lane as the closure rather than a parallel one, because the
 	 * emitter set is only knowable once the closure has resolved. A failure part-way releases what
@@ -1262,6 +1273,7 @@ export class DynamicEntitySystem<
 	 */
 	async #stageBehaviorAssets(
 		entity: DynamicEntityRecord,
+		animations: readonly PreparedAnimation[],
 	): Promise<StagedBehaviorAssets> {
 		const scriptId = entity.source.behavior.physicsScriptId;
 		const closure =
@@ -1269,11 +1281,12 @@ export class DynamicEntitySystem<
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		let soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null = null;
 		try {
-			const emitterIds = new Set(
-				[...(closure?.scripts.values() ?? [])].flatMap(
+			const emitterIds = new Set([
+				...animations.flatMap((animation) => animation.emitterInfoIds),
+				...[...(closure?.scripts.values() ?? [])].flatMap(
 					(script) => script.dependencies.emitterInfoIds,
 				),
-			);
+			]);
 			for (const emitterInfoId of emitterIds) {
 				emitterHandles.push(await this.#emitters.acquire(emitterInfoId));
 			}

@@ -116,7 +116,7 @@ fn install_manual_drive(
     until: Option<Instant>,
 ) {
     movement.character_motion.replace_drive(drive);
-    movement.active_movement = Some(ActiveMovement::Manual { until });
+    movement.acquire_manual_control(until);
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
     movement.process_control_commands(Instant::now(), &mut world);
     assert!(matches!(
         movement.active_movement,
-        Some(ActiveMovement::Manual { .. })
+        Some(ActiveMovement::Manual)
     ));
     movement.take_character_motion_feedback();
 
@@ -143,7 +143,7 @@ fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
     movement.process_control_commands(Instant::now(), &mut world);
     assert!(matches!(
         movement.active_movement,
-        Some(ActiveMovement::Manual { .. })
+        Some(ActiveMovement::Manual)
     ));
     assert!(movement.take_character_motion_feedback().is_empty());
 
@@ -698,7 +698,7 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
     );
     assert!(matches!(
         movement.active_movement,
-        Some(ActiveMovement::Manual { .. })
+        Some(ActiveMovement::Manual)
     ));
     assert_eq!(movement.character_motion.effective_drive().gait, Gait::Run);
     assert_eq!(
@@ -964,10 +964,7 @@ fn manual_motion_resolves_one_authored_offset_for_diagonal_and_turning_axes() {
         world.motion_runtimes.authored_offset(guid),
         Some(turn.offset)
     );
-    assert_eq!(
-        world.motion_runtimes.state(guid).unwrap().substate,
-        holtburger_world::motion::MotionCommand(MotionTable::TURN_RIGHT_COMMAND)
-    );
+    assert!(world.has_manual_locomotion(guid));
 }
 
 #[test]
@@ -1675,7 +1672,7 @@ async fn manual_motion_updates_server_motion_tracking_state() {
 }
 
 #[test]
-fn sequential_position_confirmations_preserve_manual_playback_cursor() {
+fn sequential_position_confirmations_preserve_manual_displacement() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_3306);
     let pose = WorldPosition {
@@ -1699,14 +1696,7 @@ fn sequential_position_confirmations_preserve_manual_playback_cursor() {
         .expect("initial authored playback should resolve")
         .expect("held forward input should produce an offset");
     assert!(first.offset.translation.x > 0.0);
-    assert_eq!(
-        world
-            .motion_runtimes
-            .state(guid)
-            .expect("local root motion must install presentation-visible playback")
-            .substate,
-        holtburger_world::motion::MotionCommand::RUN_FORWARD
-    );
+    assert!(world.has_manual_locomotion(guid));
 
     for sample in 1..=5 {
         let confirmed = WorldPosition {
@@ -1722,7 +1712,7 @@ fn sequential_position_confirmations_preserve_manual_playback_cursor() {
             .advance_local_authored_motion(&mut world, quantum)
             .expect("confirmation must not invalidate authored playback")
             .expect("held forward input should continue after confirmation");
-        assert!(offset.offset.translation.x > 0.0);
+        assert_eq!(offset.offset, first.offset);
     }
 }
 
@@ -2441,4 +2431,141 @@ fn manual_acquisition_retires_pending_controller_arrival() {
     assert!(movement.pending_arrival_pose.is_none());
     assert!(movement.pending_snap_facing.is_none());
     assert!(movement.has_active_manual_drive());
+}
+
+#[tokio::test]
+async fn gesture_packets_preserve_held_input_through_release_and_reach() {
+    use holtburger_protocol::messages::movement::{InterpretedMotionState, MovementStateFlags};
+    const RELEASE: u32 = 0x4000_002b;
+    const REACH: u32 = 0x4000_0018;
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3010);
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        [
+            FixtureCycle::moving(
+                MotionCommand::WALK_FORWARD.raw(),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+            FixtureCycle::moving(RELEASE, Vector3::new(0.0, 0.5, 0.0)),
+            FixtureCycle::moving(REACH, Vector3::zero()),
+        ],
+        [],
+    ));
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().walk().forward().build(),
+        None,
+    );
+    movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+        .unwrap()
+        .unwrap();
+    assert!(world.has_manual_locomotion(guid));
+    // Retained manual playback resolves Ready to the stance's idle command.
+    for (sequence, command, expected_substate) in [
+        (1, RELEASE, RELEASE),
+        (2, MotionCommand::READY.raw(), FIXTURE_STAND_COMMAND),
+        (3, REACH, REACH),
+    ] {
+        let data = MovementEventData {
+            guid,
+            object_instance_sequence: 0,
+            movement_sequence: sequence,
+            server_control_sequence: sequence,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::CURRENT_STYLE | MovementStateFlags::FORWARD_COMMAND,
+                    current_style: Some(MotionStance::NonCombat.interpreted()),
+                    forward_command: Some(InterpretedMotionCommand(command as u16)),
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        };
+        let before_admission = session.game_action_sequence;
+        world.handle_message(&GameMessage::UpdateMotion(Box::new(data.clone())));
+        assert!(world.has_manual_locomotion(guid));
+        crate::client::simulation::handle_server_controlled_movement(
+            &data,
+            &mut movement,
+            &mut world,
+            &mut session,
+        )
+        .await
+        .unwrap();
+        assert!(movement.has_active_manual_drive());
+        assert!(world.has_manual_locomotion(guid));
+        assert_eq!(
+            session.game_action_sequence, before_admission,
+            "admission itself sends no fabricated command"
+        );
+        movement
+            .tick(Instant::now(), &mut world, &mut session)
+            .await
+            .unwrap();
+        assert!(
+            session.game_action_sequence > before_admission,
+            "unchanged held drive must be republished after server control"
+        );
+        let published = session.game_action_sequence;
+        movement
+            .tick(Instant::now(), &mut world, &mut session)
+            .await
+            .unwrap();
+        assert_eq!(
+            session.game_action_sequence, published,
+            "ordinary unchanged ticks remain deduplicated"
+        );
+        let tick = movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand(expected_substate)
+        );
+        assert!(tick.offset.translation.x > 0.0);
+        assert_eq!(
+            tick.offset.translation.y, 0.0,
+            "gesture displacement must not be added to walking"
+        );
+    }
+    movement.admit_server_controlled_motion(None, Instant::now(), &mut world);
+    assert!(!movement.has_active_manual_drive());
+    assert!(!world.has_manual_locomotion(guid));
+}
+
+#[test]
+fn gesture_admission_resumes_held_input_but_never_revives_an_expired_pulse() {
+    let mut world = WorldState::synthetic();
+    let now = Instant::now();
+    for (until, resumes) in [(None, true), (Some(now + Duration::from_millis(10)), false)] {
+        let mut movement = MovementSystem::new();
+        install_manual_drive(
+            &mut movement,
+            CharacterDrive::builder().walk().forward().build(),
+            until,
+        );
+        movement.admit_server_controlled_motion(None, now, &mut world);
+        assert!(!movement.has_active_manual_drive());
+        movement.admit_server_gesture(now + Duration::from_millis(20), &mut world);
+        assert_eq!(movement.has_active_manual_drive(), resumes);
+    }
 }

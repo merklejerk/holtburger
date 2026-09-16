@@ -6,6 +6,8 @@ mod contact_eligibility;
 mod contact_interruption;
 #[path = "tests/death_lifecycle.rs"]
 mod death_lifecycle;
+#[path = "tests/manual_gestures.rs"]
+mod manual_gestures;
 use crate::entity::{
     EntityMotionAction, EntityMotionActionSource, EntityMotionAdmission, EntityMotionSnapshot,
     OrderedMotionScalar,
@@ -24,6 +26,14 @@ use holtburger_dat::graphics::Frame;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::collections::HashMap;
 
+/// Require an advancing description where a fixture asserts its traversal bounds or rate.
+fn expect_advancing(presentation: MotionPresentation) -> PlayingMotionClip {
+    match presentation {
+        MotionPresentation::Playing(clip) => clip,
+        MotionPresentation::Settled(pose) => panic!("expected advancing clip, got {pose:?}"),
+    }
+}
+
 const STYLE: u32 = 0x8000_003D;
 const COMBAT_STYLE: u32 = 0x8000_003C;
 const STAND: u32 = 0x4500_0003;
@@ -35,6 +45,7 @@ const SECOND_MODIFIER: u32 = 0x2000_0022;
 const DUAL_TURN: u32 = MotionTable::TURN_RIGHT_COMMAND;
 const HOOKED: u32 = 0x4500_0009;
 const ACTION: u32 = 0x1000_004A;
+const WINDUP: u32 = 0x1000_0070;
 
 const STAND_ANIM: u32 = 0x0300_0001;
 const WALK_ANIM: u32 = 0x0300_0002;
@@ -313,6 +324,7 @@ fn catalog_with_action_animation(
             (RUN, motion(vec![clip(LINK_ANIM, 2.0)], None, None)),
             (COMBAT_STYLE, motion(vec![clip(LINK_ANIM, 2.0)], None, None)),
             (ACTION, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
+            (WINDUP, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
         ]);
     links
         .entry(MotionTable::cycle_key(STYLE, WALK))
@@ -1559,7 +1571,7 @@ mod actuation {
     }
 }
 
-mod playing_clip {
+mod playback_projection {
     use super::*;
     use crate::motion::{MotionClipCompletion, MotionRuntimeRegistry, set_default_state};
 
@@ -1581,7 +1593,9 @@ mod playing_clip {
         let (registry, guid) = possessed(&catalog);
 
         let clip = registry
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| expect_advancing(layer.clip))
             .expect("a standing body plays its idle");
 
         assert_eq!(clip.animation_id, STAND_ANIM);
@@ -1597,7 +1611,10 @@ mod playing_clip {
         let (registry, guid) = possessed(&catalog);
 
         assert_eq!(
-            registry.motion_presentation(guid),
+            registry
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip),
             Some(MotionPresentation::Settled(SettledMotionPose {
                 animation_id: STAND_ANIM,
                 frame: 0,
@@ -1630,7 +1647,10 @@ mod playing_clip {
         );
 
         assert_eq!(
-            registry.motion_presentation(guid),
+            registry
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip),
             Some(MotionPresentation::Settled(SettledMotionPose {
                 animation_id: STAND_ANIM,
                 frame: reached_frame,
@@ -1644,7 +1664,12 @@ mod playing_clip {
         let catalog = catalog();
         let table = catalog.table(0x0900_0001).expect("table");
         let (mut registry, guid) = possessed(&catalog);
-        let idle = registry.playing_clip(guid).expect("idle").animation_id;
+        let idle = registry
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .expect("idle")
+            .animation_id();
 
         registry.drive(
             table,
@@ -1659,7 +1684,9 @@ mod playing_clip {
         );
 
         let clip = registry
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| expect_advancing(layer.clip))
             .expect("a walking body plays a clip");
         assert_ne!(clip.animation_id, idle);
         assert_eq!(clip.animation_id, LINK_ANIM, "the transition plays first");
@@ -1676,23 +1703,36 @@ mod playing_clip {
             },
             1.1,
         );
-        let cycle = registry.playing_clip(guid).expect("walk cycle");
+        let cycle = registry
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| expect_advancing(layer.clip))
+            .expect("walk cycle");
         assert_eq!(cycle.animation_id, WALK_ANIM);
         assert_eq!(cycle.completion, MotionClipCompletion::Loop);
     }
 
-    /// The projection deliberately carries no frame number: host and frontend advance at the same
-    /// rate, so a phase offset never accumulates and there is nothing to re-anchor.
+    /// Advancing simulation time does not change the projected description or restart a receiver.
     #[test]
     fn advancing_the_host_does_not_change_the_projected_clip_while_it_keeps_playing() {
         let catalog = catalog();
         let table = catalog.table(0x0900_0001).expect("table");
         let (mut registry, guid) = possessed(&catalog);
-        let before = registry.playing_clip(guid).expect("idle");
+        let before = registry
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .expect("idle");
 
         registry.drive(table, guid, MotionOrder::default(), 0.05);
 
-        assert_eq!(registry.playing_clip(guid), Some(before));
+        assert_eq!(
+            registry
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip),
+            Some(before)
+        );
         assert!(
             registry
                 .get(guid)
@@ -1713,7 +1753,13 @@ mod playing_clip {
         let guid = holtburger_common::Guid(0xf000_0002);
         let _ = (&catalog, &mut registry, guid, set_default_state);
 
-        assert!(registry.playing_clip(guid).is_none());
+        assert!(
+            registry
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .is_none()
+        );
     }
 
     /// Standard non-combat sidestep is a dual-class command whose authored row resolves as a
@@ -1795,11 +1841,21 @@ mod playing_clip {
         assert_eq!(observed.sidestep, Some((MotionCommand::SIDESTEP, 2.0)));
         assert!(registry.present_locomotion(table, guid, observed, 1.0));
         assert_eq!(
-            registry.playing_clip(guid).unwrap().animation_id,
+            registry
+                .motion_playback(guid)
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
+                .unwrap()
+                .animation_id(),
             SIDESTEP_ANIM
         );
         assert_eq!(
-            registry.playing_clip(guid).unwrap().framerate,
+            registry
+                .motion_playback(guid)
+                .and_then(|motion| motion.locomotion)
+                .map(|layer| expect_advancing(layer.clip))
+                .unwrap()
+                .framerate,
             FRAMERATE * 2.0
         );
         assert_eq!(registry.get(guid).unwrap().tick(), &authored_tick);
@@ -1838,7 +1894,15 @@ fn observed_locomotion_cannot_replace_actions_or_change_authored_ticks() {
         ..MotionOrder::default()
     };
     assert!(observed.present_locomotion(table, walking, 1.5));
-    assert_eq!(observed.playing_clip().unwrap().animation_id, WALK_ANIM);
+    assert_eq!(
+        observed
+            .motion_playback()
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        WALK_ANIM
+    );
     assert_eq!(observed.tick(), nominal.tick());
     assert_eq!(observed.state().substate, nominal.state().substate);
     assert_eq!(
@@ -1861,17 +1925,41 @@ fn observed_locomotion_cannot_replace_actions_or_change_authored_ticks() {
         assert_eq!(observed.tick(), &expected);
         assert_eq!(observed.active_action(), nominal.active_action());
         if observed.active_action().is_some() {
-            assert_eq!(observed.playing_clip().unwrap().animation_id, ACTION_ANIM);
+            assert_eq!(
+                observed
+                    .motion_playback()
+                    .and_then(|motion| motion.ordinary)
+                    .map(|layer| layer.clip)
+                    .unwrap()
+                    .animation_id(),
+                ACTION_ANIM
+            );
         } else {
             completed |= actual.action_completed;
-            assert_eq!(observed.playing_clip().unwrap().animation_id, WALK_ANIM);
+            assert_eq!(
+                observed
+                    .motion_playback()
+                    .and_then(|motion| motion.locomotion)
+                    .map(|layer| layer.clip)
+                    .unwrap()
+                    .animation_id(),
+                WALK_ANIM
+            );
         }
     }
     assert!(
         completed,
         "fixture did not cross the action return boundary"
     );
-    assert_eq!(nominal.playing_clip().unwrap().animation_id, STAND_ANIM);
+    assert_eq!(
+        nominal
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        STAND_ANIM
+    );
     // Not every explicit animation is a queued action: a steady special pose also wins.
     let explicit = MotionOrder {
         forward: Some((MotionCommand(HOOKED), 1.0)),
@@ -1882,8 +1970,14 @@ fn observed_locomotion_cannot_replace_actions_or_change_authored_ticks() {
     assert!(observed.active_action().is_none());
     assert!(observed.present_locomotion(table, walking, 0.25));
     assert_eq!(
-        observed.motion_presentation(),
-        nominal.motion_presentation()
+        observed
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip),
+        nominal
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
     );
     assert_eq!(observed.tick(), nominal.tick());
     // Dispatch flags can differ while selecting the same idle cycle; that still permits walking.
@@ -1894,7 +1988,15 @@ fn observed_locomotion_cannot_replace_actions_or_change_authored_ticks() {
     nominal.drive(table, ready, 0.0);
     observed.drive(table, ready, 0.0);
     assert!(observed.present_locomotion(table, walking, 0.0));
-    assert_eq!(observed.playing_clip().unwrap().animation_id, WALK_ANIM);
+    assert_eq!(
+        observed
+            .motion_playback()
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        WALK_ANIM
+    );
     assert_eq!(observed.tick(), nominal.tick());
 }
 
@@ -1910,7 +2012,15 @@ fn missing_falling_content_keeps_resolved_locomotion_presentation() {
     runtime.drive(table, running, 1.0);
     assert_eq!(runtime.state().substate, MotionCommand::RUN_FORWARD);
     assert!(runtime.present_locomotion(table, MotionOrder::default(), 0.0));
-    assert_eq!(runtime.playing_clip().unwrap().animation_id, STAND_ANIM);
+    assert_eq!(
+        runtime
+            .motion_playback()
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        STAND_ANIM
+    );
     let unsupported = running.with_character_presentation(CharacterMotionPresentation::Falling);
     runtime.drive(table, unsupported, 0.0);
     assert!(
@@ -1919,7 +2029,15 @@ fn missing_falling_content_keeps_resolved_locomotion_presentation() {
             .is_none()
     );
     assert_eq!(runtime.state().substate, MotionCommand::RUN_FORWARD);
-    assert_eq!(runtime.playing_clip().unwrap().animation_id, STAND_ANIM);
+    assert_eq!(
+        runtime
+            .motion_playback()
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
+        STAND_ANIM
+    );
 }
 
 #[test]
@@ -2119,7 +2237,7 @@ fn retiring_observations_preserves_authored_cursor_actions_and_ticks() {
         registry.drive(table, guid, MotionOrder::default(), 0.25);
     }
     let before = registry.get(retired).unwrap().clone();
-    registry.retain_locomotion_presentation(|guid| guid == retained);
+    registry.retain_locomotion(|guid| guid == retained);
     let after = registry.get(retired).unwrap();
     assert_eq!(after.tick(), before.tick());
     assert_eq!(
@@ -2129,7 +2247,12 @@ fn retiring_observations_preserves_authored_cursor_actions_and_ticks() {
     assert_eq!(after.active_action(), before.active_action());
     assert_eq!(after.action_count(), before.action_count());
     assert_eq!(
-        registry.playing_clip(retired).unwrap().animation_id,
+        registry
+            .motion_playback(retired)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
         ACTION_ANIM
     );
     let expected = registry
@@ -2141,11 +2264,21 @@ fn retiring_observations_preserves_authored_cursor_actions_and_ticks() {
     assert_eq!(actual, expected);
     assert!(actual.action_completed);
     assert_eq!(
-        registry.playing_clip(retained).unwrap().animation_id,
+        registry
+            .motion_playback(retained)
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
         WALK_ANIM
     );
     assert_eq!(
-        registry.playing_clip(retired).unwrap().animation_id,
+        registry
+            .motion_playback(retired)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
+            .unwrap()
+            .animation_id(),
         STAND_ANIM
     );
     assert_eq!(registry.len(), 2);
@@ -2208,9 +2341,11 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
     assert_eq!(
         world
             .motion_runtimes
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         WALK_ANIM
     );
     // Zero physical travel under an active command must keep cycling for many loops,
@@ -2231,7 +2366,12 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
                 std::time::Duration::from_millis(125),
             )
             .unwrap();
-        let clip = world.motion_runtimes.playing_clip(guid).unwrap();
+        let clip = world
+            .motion_runtimes
+            .motion_playback(guid)
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| expect_advancing(layer.clip))
+            .unwrap();
         assert_eq!(clip.animation_id, RUN_ANIM);
         assert!(clip.framerate > 0.0);
         assert_eq!(clip.completion, MotionClipCompletion::Loop);
@@ -2259,9 +2399,11 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
         assert_eq!(
             world
                 .motion_runtimes
-                .playing_clip(guid)
+                .motion_playback(guid)
+                .and_then(|motion| motion.locomotion)
+                .map(|layer| layer.clip)
                 .unwrap()
-                .animation_id,
+                .animation_id(),
             STAND_ANIM
         );
     }
@@ -2276,9 +2418,11 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
     assert_eq!(
         world
             .motion_runtimes
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.locomotion)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         STAND_ANIM
     );
     world.motion_runtimes.enqueue_action(table, guid, action(1));
@@ -2297,9 +2441,11 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
     assert_eq!(
         world
             .motion_runtimes
-            .playing_clip(guid)
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         ACTION_ANIM
     );
     assert_eq!(world.motion_runtimes.get(guid).unwrap().tick(), &authored);
@@ -2596,13 +2742,78 @@ fn recovered_body_publication_preserves_action_and_playback_phase() {
     let active = before.active_action();
     assert!(active.is_some());
     let frame = before.sequence().frame_number();
-    let clip = before.playing_clip();
+    let clip = before
+        .motion_playback()
+        .and_then(|motion| motion.ordinary)
+        .map(|layer| layer.clip);
     let events = world.apply_recovered_body(id).unwrap();
     let after = world.motion_runtimes.get(guid).unwrap();
     assert_eq!(after.active_action(), active);
     assert_eq!(after.sequence().frame_number(), frame);
-    assert_eq!(after.playing_clip(), clip);
+    assert_eq!(
+        after
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip),
+        clip
+    );
     assert!(
         matches!(events.as_slice(), [crate::WorldEvent::RuntimeBodyAdvanced { body_id, kind: crate::RuntimeBodyAdvanceKind::CorrectionSnap }] if *body_id == id)
     );
+}
+
+#[test]
+fn movement_override_gesture_classification_excludes_unknown_variants() {
+    assert_eq!(
+        MotionCommand(WINDUP).movement_override_gesture(),
+        Some(MotionGesture::Windup)
+    );
+    assert_eq!(
+        MotionCommand(0x1000_0132).movement_override_gesture(),
+        Some(MotionGesture::Windup)
+    );
+    assert_eq!(
+        MotionCommand(0x4000_002b).movement_override_gesture(),
+        Some(MotionGesture::Release)
+    );
+    assert_eq!(
+        MotionCommand(0x4000_0039).movement_override_gesture(),
+        Some(MotionGesture::Release)
+    );
+    assert_eq!(
+        MotionCommand(0x4000_0018).movement_override_gesture(),
+        Some(MotionGesture::Reach)
+    );
+    assert_eq!(
+        MotionCommand(0x4000_0139).movement_override_gesture(),
+        Some(MotionGesture::Reach)
+    );
+    for raw in [0x8000_0000, 0x1000_0071, 0x4000_0032, 0x4000_0135, ACTION] {
+        assert_eq!(MotionCommand(raw).movement_override_gesture(), None);
+    }
+}
+
+#[test]
+fn repeated_substate_cannot_collapse_across_an_active_action() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut runtime = BodyMotionRuntime::new(table);
+    let walk = MotionOrder {
+        forward: Some((MotionCommand(WALK), 1.0)),
+        ..MotionOrder::default()
+    };
+    runtime.drive(table, walk, 0.1);
+    let active = action(1);
+    runtime.enqueue_action(active);
+    runtime.drive(table, walk, 0.0);
+    runtime.accept_order(table, MotionOrder::default());
+    runtime.accept_order(table, walk);
+    assert!(animation_ids(runtime.sequence()).contains(&ACTION_ANIM));
+    assert_eq!(runtime.active_action(), Some(active));
+    let mut completed = false;
+    for _ in 0..20 {
+        completed |= runtime.drive(table, walk, 0.5).action_completed;
+    }
+    assert!(completed);
+    assert_eq!(runtime.action_count(), 0);
 }

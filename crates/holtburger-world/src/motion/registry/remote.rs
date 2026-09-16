@@ -177,7 +177,10 @@ impl MotionRuntimeRegistry {
                 );
             }
         }
-        runtime.drive(table, order, 0.0);
+        // Packet admission updates ordinary playback without taking ownership of displacement.
+        // The local controller decides whether this is a gesture or an actual source takeover;
+        // retaining manual playback here preserves its cursor across windup/release packets.
+        runtime.advance_authored(table, order, 0.0);
         runtime.report_selection(table, guid, previous_unmodelled);
         // Retail move_to_interpreted_state applies motion before re-establishing packet sticky.
         runtime

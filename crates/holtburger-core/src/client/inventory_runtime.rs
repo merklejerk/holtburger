@@ -179,8 +179,17 @@ mod tests {
         equipment_plan::tests::{event, outfit},
     };
     use super::*;
-    use holtburger_common::properties::InventoryEntryKind;
+    use holtburger_common::Vector3;
+    use holtburger_common::properties::{
+        InventoryEntryKind, PropertyDataId, WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_protocol::messages::{GameEvent, InventoryPutObjInContainerEventData};
+    use holtburger_world::motion::{
+        BodyMotionRuntime, CharacterMotionPresentation, MotionCommand, MotionOrder,
+    };
+    use holtburger_world::state::motion_resolution::test_support::{
+        FixtureCycle, explicit_motion_catalog,
+    };
     use holtburger_world::{WorldState, context::WorldContext};
 
     const PLAYER: Guid = Guid(1);
@@ -224,6 +233,57 @@ mod tests {
             },
             deadline: now + PACK_EXCHANGE_TIMEOUT,
         });
+    }
+
+    /// Move during a retained reach through production world arbitration.
+    fn move_during_reach(world: &mut WorldState) {
+        const TABLE: u32 = 0x0900_0020;
+        const REACH: u32 = 0x4000_0018;
+        let catalog = explicit_motion_catalog(
+            TABLE,
+            0x8000_003d,
+            [
+                FixtureCycle::moving(REACH, Vector3::zero()),
+                FixtureCycle::moving(
+                    MotionCommand::WALK_FORWARD.raw(),
+                    Vector3::new(1.0, 0.0, 0.0),
+                ),
+            ],
+            [],
+        );
+        let table = catalog.table(TABLE).unwrap();
+        let mut runtime = BodyMotionRuntime::new(table);
+        runtime.accept_order(
+            table,
+            MotionOrder {
+                forward: Some((MotionCommand(REACH), 1.0)),
+                ..Default::default()
+            },
+        );
+        world.set_motion_sequences(catalog);
+        world
+            .player_entity_mut()
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+        world.motion_runtimes.replace_body(PLAYER, runtime);
+        let order = MotionOrder {
+            forward: Some((MotionCommand::WALK_FORWARD, 1.0)),
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            world
+                .drive_manual_motion_for_body(
+                    PLAYER,
+                    order,
+                    CharacterMotionPresentation::Grounded,
+                    std::time::Duration::from_millis(100),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            world.motion_runtimes.state(PLAYER).unwrap().substate,
+            MotionCommand(REACH)
+        );
     }
 
     #[tokio::test]
@@ -335,12 +395,23 @@ mod tests {
             })
             .await
             .expect("drop");
+        move_during_reach(&mut client.world);
         assert_eq!(client.session.game_action_sequence, before + 1);
         assert!(client.pack_exchange.is_none());
         assert!(
             client.world.equipment_mask(equipped).is_some(),
             "no optimistic removal"
         );
+        event(
+            &mut client.world,
+            GameEvent::InventoryPutObjectIn3D(Box::new(
+                holtburger_protocol::messages::InventoryPutObjectIn3DEventData {
+                    object_guid: equipped,
+                },
+            )),
+        );
+        assert!(client.world.equipment_mask(equipped).is_none());
+        assert_eq!(client.session.game_action_sequence, before + 1);
         client
             .submit_inventory_intent(InventoryIntent {
                 item: Guid(3),
@@ -365,6 +436,7 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         let now = Instant::now();
         pending_swap(&mut client, now);
+        move_during_reach(&mut client.world);
         client.advance_pack_exchange(now).await.expect("waiting");
         assert!(client.pack_exchange.is_some());
         place(&mut client.world, SOURCE, 4);
@@ -416,6 +488,8 @@ mod tests {
             .expect("blocked use");
         assert_eq!(client.session.game_action_sequence, 0);
         assert!(client.pack_exchange.is_some());
+        move_during_reach(&mut client.world);
+        assert!(client.pack_exchange.is_some());
         client.reject_pack_exchange_item(SOURCE);
         place(&mut client.world, SOURCE, 4);
         client
@@ -439,5 +513,33 @@ mod tests {
             .expect("changed target");
         assert!(client.pack_exchange.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[tokio::test]
+    async fn item_disappearance_during_moving_reach_times_out_without_sending_continuation() {
+        let mut client = build_test_client(ClientState::InWorld);
+        let now = Instant::now();
+        pending_swap(&mut client, now);
+        move_during_reach(&mut client.world);
+        place(&mut client.world, SOURCE, 4);
+        client.world.handle_message(
+            &holtburger_protocol::messages::GameMessage::InventoryRemoveObject(Box::new(
+                holtburger_protocol::messages::InventoryRemoveObjectData {
+                    object_guid: TARGET,
+                },
+            )),
+        );
+        // Removal compacts pack slots, so the first move is no longer confirmed at its
+        // requested index. Existing timeout policy retires the unsent continuation.
+        client
+            .advance_pack_exchange(now + PACK_EXCHANGE_TIMEOUT)
+            .await
+            .unwrap();
+        assert!(client.pack_exchange.is_none());
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(
+            client.world.motion_runtimes.state(PLAYER).unwrap().substate,
+            MotionCommand(0x4000_0018)
+        );
     }
 }

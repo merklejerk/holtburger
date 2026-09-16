@@ -136,7 +136,7 @@ pub fn project_client_dynamic_entity(
             entity.get_float_prop(PropertyFloat::ObviousRadarRange),
         ),
         placement,
-        motion: world.motion_runtimes.motion_presentation(guid),
+        motion: world.motion_runtimes.motion_playback(guid),
     })))
 }
 
@@ -705,7 +705,7 @@ mod tests {
                     participation: PhysicalBodyParticipation::PoseOnly,
                 }),
             },
-            world.motion_runtimes.motion_presentation(guid),
+            world.motion_runtimes.motion_playback(guid),
         ));
 
         assert_eq!(client, explorer);

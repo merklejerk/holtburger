@@ -45,7 +45,7 @@ function prepared(
 	const info: DrawableParticleEmitter["info"] = {
 		a: acVector3([1, 0, 0]),
 		b: acVector3([0, 0, 0]),
-		birthrateSeconds: 1,
+		birthrate: 1,
 		c: acVector3([0, 0, 0]),
 		emitsPerMeter: false,
 		emitsPerSecond: true,
@@ -98,6 +98,7 @@ const runtime = (
 	overrides: Partial<ConstructorParameters<typeof ParticleSystem>[0]> = {},
 ) =>
 	new ParticleSystem({
+		distanceSpacingMultiplier: 1,
 		clock: () => 0,
 		sceneOriginOf: () => ORIGIN,
 		targetLives: () => true,
@@ -276,7 +277,7 @@ describe("ParticleSystem", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 1 }),
+			prepared({ birthrate: 1 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -299,7 +300,7 @@ describe("ParticleSystem", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 0, maxParticles: 3 }),
+			prepared({ birthrate: 0, maxParticles: 3 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -315,7 +316,7 @@ describe("ParticleSystem", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
+			prepared({ birthrate: 100, initialParticles: 1, lifespan: 2 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -333,7 +334,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({
-				birthrateSeconds: 0,
+				birthrate: 0,
 				isPersistent: false,
 				lifespan: 1,
 				totalParticles: 2,
@@ -509,7 +510,7 @@ describe("ParticleSystem", () => {
 		});
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 100, initialParticles: 1 }),
+			prepared({ birthrate: 100, initialParticles: 1 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -535,7 +536,7 @@ describe("ParticleSystem", () => {
 		});
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 1, initialParticles: 0, maxParticles: 8 }),
+			prepared({ birthrate: 1, initialParticles: 0, maxParticles: 8 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -567,7 +568,7 @@ describe("ParticleSystem", () => {
 				const particles = runtime();
 				particles.create(
 					TARGET,
-					prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan }),
+					prepared({ birthrate: 100, initialParticles: 1, lifespan }),
 					NO_OFFSET,
 					0,
 					0,
@@ -584,7 +585,7 @@ describe("ParticleSystem", () => {
 			const particles = runtime();
 			particles.create(
 				TARGET,
-				prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
+				prepared({ birthrate: 100, initialParticles: 1, lifespan: 2 }),
 				NO_OFFSET,
 				0,
 				0,
@@ -609,7 +610,7 @@ describe("ParticleSystem", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 100, initialParticles: 1, lifespan: 2 }),
+			prepared({ birthrate: 100, initialParticles: 1, lifespan: 2 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -634,7 +635,7 @@ describe("ParticleSystem", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 0 }),
+			prepared({ birthrate: 0 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -657,7 +658,7 @@ describe("ParticleSystem", () => {
 		particles.create(
 			TARGET,
 			prepared({
-				birthrateSeconds: 1,
+				birthrate: 1,
 				isPersistent: false,
 				lifespan: 100,
 				totalParticles: 4,
@@ -1090,7 +1091,7 @@ describe("ParticleSystem", () => {
 		});
 		particles.create(
 			TARGET,
-			prepared({ birthrateSeconds: 100, initialParticles: 4 }),
+			prepared({ birthrate: 100, initialParticles: 4 }),
 			NO_OFFSET,
 			0,
 			0,
@@ -1249,20 +1250,189 @@ describe("ParticleSystem", () => {
 		expect(record.a).toEqual(renderVector3([1, 0, 0]));
 	});
 
-	it("refuses to invent a cadence for a purely per-meter emitter", () => {
-		const particles = runtime();
+	it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+		"rejects invalid distance spacing multiplier %s",
+		(distanceSpacingMultiplier) => {
+			expect(() => runtime({ distanceSpacingMultiplier })).toThrow(
+				"finite and positive",
+			);
+		},
+	);
+
+	it("uses endpoint displacement from the last birth, scaled spacing, and no catch-up bursts", () => {
+		let origin = ORIGIN;
+		const particles = runtime({
+			sceneOriginOf: () => origin,
+			distanceSpacingMultiplier: 2,
+		});
 		particles.create(
 			TARGET,
-			prepared({ emitsPerMeter: true, emitsPerSecond: false }),
+			prepared({ emitsPerMeter: true, emitsPerSecond: false, birthrate: 0.5 }),
 			NO_OFFSET,
+			1,
 			0,
-			0,
-			ORIGIN,
+			origin,
 		);
+		const move = (x: number, time: number) => {
+			origin = sceneVector3([x, 0, 0]);
+			particles.advance(time);
+		};
+		move(0, 0);
+		move(0.75, 0.1);
+		move(0, 0.2); // Returning does not accumulate the path length.
+		move(1, 0.3); // Equal spacing is not enough.
+		expect(particles.getDiagnostics().emittedTotal).toBe(0);
+		move(1.1, 0.4);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		move(2, 0.5);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		move(100, 0.6);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+	});
 
-		particles.advance(100);
+	it("emits with a stationary owner when the attached part or its authored offset moves", () => {
+		const part = { ...TARGET, targetId: behaviorTargetId("hand") };
+		let handOrigin = ORIGIN;
+		let rotation = UNROTATED;
+		const emitter = prepared({
+			emitsPerMeter: true,
+			emitsPerSecond: false,
+			birthrate: 0.5,
+		});
+		const particles = runtime({
+			resolveEmitter: () => emitter,
+			partFrameOf: () => part,
+			sceneOriginOf: (target) =>
+				target.targetId === part.targetId ? handOrigin : ORIGIN,
+			sceneRotationOf: () => rotation,
+		});
+		expect(
+			particles.createEmitter(TARGET, {
+				emitterInfoId: emitter.id,
+				emitterId: 1,
+				partIndex: 12,
+				offsetOrigin: acVector3([1, 0, 0]),
+			}),
+		).toBe("created");
+		particles.advance(0);
+		expect(particles.getDiagnostics().emittedTotal).toBe(0);
+		handOrigin = sceneVector3([0.6, 0, 0]);
+		particles.advance(0.1);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		rotation = YAWED_QUARTER_TURN;
+		particles.advance(0.2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+	});
 
-		// The retail per-meter predicate is unrecovered, so emitting anything would be a guess.
-		expect(particles.getDiagnostics().particleCount).toBe(0);
+	it("reanchors discontinuities by exact owner generation while preserving existing particles", () => {
+		let origin = ORIGIN;
+		const particles = runtime({ sceneOriginOf: () => origin });
+		particles.create(
+			TARGET,
+			prepared({
+				emitsPerMeter: true,
+				emitsPerSecond: false,
+				birthrate: 0,
+				initialParticles: 1,
+			}),
+			NO_OFFSET,
+			1,
+			0,
+			origin,
+		);
+		origin = sceneVector3([100, 0, 0]);
+		particles.reanchor(TARGET);
+		particles.advance(0.1);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		expect(storedRecord(particles).localOrigin).toEqual(ORIGIN);
+		origin = sceneVector3([100.01, 0, 0]);
+		particles.advance(0.2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		origin = sceneVector3([200, 0, 0]);
+		particles.reanchor({ ...TARGET, generation: TARGET.generation + 1 });
+		particles.advance(0.3);
+		expect(particles.getDiagnostics().emittedTotal).toBe(3);
+	});
+
+	it("preserves capacity, total budget, and stop-with-drain for distance emission", () => {
+		let origin = ORIGIN;
+		const particles = runtime({ sceneOriginOf: () => origin });
+		particles.create(
+			TARGET,
+			prepared({
+				emitsPerMeter: true,
+				emitsPerSecond: false,
+				birthrate: 0,
+				initialParticles: 1,
+				maxParticles: 1,
+				totalParticles: 2,
+				isPersistent: false,
+				lifespan: 1,
+			}),
+			NO_OFFSET,
+			1,
+			0,
+			origin,
+		);
+		origin = sceneVector3([1, 0, 0]);
+		particles.advance(0.5);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		particles.advance(1);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		origin = sceneVector3([2, 0, 0]);
+		particles.advance(2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
+		particles.create(
+			TARGET,
+			prepared({
+				emitsPerMeter: true,
+				emitsPerSecond: false,
+				initialParticles: 1,
+			}),
+			NO_OFFSET,
+			1,
+			2,
+			origin,
+		);
+		particles.stop(TARGET, 1);
+		origin = sceneVector3([10, 0, 0]);
+		particles.advance(3);
+		expect(particles.getDiagnostics().emittedTotal).toBe(3);
+		expect(particles.getDiagnostics().particleCount).toBe(1);
+	});
+
+	it("honors distance emitter duration and time-trigger precedence", () => {
+		let origin = ORIGIN;
+		const particles = runtime({ sceneOriginOf: () => origin });
+		particles.create(
+			TARGET,
+			prepared({
+				emitsPerMeter: true,
+				emitsPerSecond: false,
+				totalSeconds: 1,
+				isPersistent: false,
+			}),
+			NO_OFFSET,
+			1,
+			0,
+			origin,
+		);
+		origin = sceneVector3([100, 0, 0]);
+		particles.advance(2);
+		expect(particles.getDiagnostics().emittedTotal).toBe(0);
+		particles.create(
+			TARGET,
+			prepared({ emitsPerMeter: true, emitsPerSecond: true, birthrate: 1 }),
+			NO_OFFSET,
+			1,
+			2,
+			origin,
+		);
+		particles.advance(2);
+		origin = sceneVector3([200, 0, 0]);
+		particles.advance(2.5);
+		expect(particles.getDiagnostics().emittedTotal).toBe(1);
+		particles.advance(3);
+		expect(particles.getDiagnostics().emittedTotal).toBe(2);
 	});
 });

@@ -122,9 +122,11 @@ fn support_edges_interrupt_cast_backlog_without_replaying_hooks() {
             assert_eq!(
                 world
                     .motion_runtimes
-                    .playing_clip(guid)
+                    .motion_playback(guid)
+                    .and_then(|motion| motion.ordinary)
+                    .map(|layer| layer.clip)
                     .unwrap()
-                    .animation_id,
+                    .animation_id(),
                 STAND_ANIM
             );
             // A later server gesture is fresh work; a repeated contact level must not retire it.

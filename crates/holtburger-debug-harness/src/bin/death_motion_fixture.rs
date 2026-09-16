@@ -96,7 +96,7 @@ fn capture(
 ) -> Result<Sample> {
     let motion = world
         .motion_runtimes
-        .motion_presentation(guid)
+        .motion_playback(guid)
         .context("world produced no motion")?;
     println!("{label}: {motion:?}");
     Ok(Sample {

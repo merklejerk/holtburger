@@ -10,6 +10,10 @@ import type { FrontendTuning } from "./frontend-tuning-contract";
  * here.
  */
 export const SHARED_FRONTEND_TUNING = {
+	particles: {
+		/** Positive multiplier for the approved authored-birthrate distance-spacing approximation. */
+		distanceSpacingMultiplier: 1,
+	},
 	animationPresentation: {
 		/** Visual sampling cadence for animated roots omitted by the previous rendered frame. */
 		offscreenSampleIntervalSeconds: 0.1,

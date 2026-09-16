@@ -1,3 +1,4 @@
+import { PARTICLE_RECORD_STRIDE_FLOATS } from "../behavior/particle-record-slots";
 import { acVector3, sceneVec3, sceneVector3 } from "../../assets/ac-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
@@ -34,7 +35,11 @@ import {
 	type GamePresentationRuntimeRenderDevice,
 } from "./game-presentation-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
-import { cellId, type DynamicEntityView } from "./dynamic-entity-feed";
+import {
+	cellId,
+	type DynamicEntityClip,
+	type DynamicEntityView,
+} from "./dynamic-entity-feed";
 import type { Camera } from "./types";
 import type { DatAssetId, LandblockOwnerId } from "../game-types";
 import type { SetupVisualSource } from "../../assets/setup-visual-source";
@@ -1208,6 +1213,162 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
+	it.each(
+		["default", "motion-table"].flatMap((lane) =>
+			["ready", "failed", "superseded"].map((outcome) => ({ lane, outcome })),
+		),
+	)(
+		"prepares animation-only particles for $lane playback through $outcome mesh staging",
+		async ({ lane, outcome }) => {
+			let submittedParticles: Float32Array = new Float32Array();
+			const emitterId = "0x32000001" as DatAssetId;
+			const meshId = "0x01000001" as DatAssetId;
+			const meshReady = controlledPromise<void>();
+			const install = vi.fn(async () => {
+				await meshReady.promise;
+				if (outcome === "failed")
+					throw new Error("Fixture mesh upload failed.");
+			});
+			const loadEmitter = vi.fn(async () => ({
+				...particleEmitterInfo(emitterId, meshId),
+				birthrate: 0.05,
+			}));
+			const loadMeshes = vi.fn(async () => ({
+				presentations: new Map([
+					[
+						meshId,
+						{
+							orientation: "authored" as const,
+							presentation: spawnedVisual(),
+						},
+					],
+				]),
+				textureDependencies: [],
+			}));
+			const runtime = await buildSpawnRuntime(
+				{ load: async () => spawnedVisual() },
+				{
+					...MOTION_TABLE_ANIMATION_SOURCE,
+					async loadAnimation(id) {
+						const animation = await ANIMATION_SOURCE.loadAnimation(id);
+						return {
+							...animation,
+							frameCount: 2,
+							partFrames: [Mat4.identity(), Mat4.identity()],
+							hooks: [
+								{
+									authoredOrder: 0,
+									frameIndex: 0,
+									direction: "both" as const,
+									kind: "create-particle" as const,
+									emitterInfoId: emitterId,
+									emitterId: 1,
+									partIndex: 0,
+									offsetOrigin: acVector3([0, 0, 0]),
+								},
+							],
+						};
+					},
+				},
+				testRenderer({
+					drawFrame(frame) {
+						return {
+							...EMPTY_RENDERER_FRAME_FEEDBACK,
+							selectedDynamicNodeIds:
+								frame.selectionTarget === null
+									? []
+									: [frame.selectionTarget.nodeId],
+						};
+					},
+					particles: {
+						install,
+						submit(_sources, records) {
+							submittedParticles = records.data.slice();
+						},
+						clear() {},
+					},
+				}),
+				undefined,
+				undefined,
+				{ destroy() {}, loadParticleEmitter: loadEmitter },
+				{ destroy() {}, loadParticleMeshes: loadMeshes },
+			);
+			const entity =
+				lane === "default"
+					? spawnedEntity(1, 1)
+					: motionDrivenEntity(1, {
+							kind: "playing",
+							animationId: Number(IDLE_ANIMATION_ID),
+							completion: "loop",
+							framerate: 4,
+							highFrame: 1,
+							lowFrame: 0,
+						});
+			if (entity.motion?.ordinary) {
+				entity.motion = {
+					...entity.motion,
+					activity: "gesture",
+					locomotion: { ...entity.motion.ordinary, playbackId: "2" },
+				};
+			}
+			const activation = runtime.replaceDynamicEntitySnapshot([entity]);
+			await vi.waitFor(() => expect(install).toHaveBeenCalledTimes(1));
+			expect([...runtime.listPresentedSpawnedEntities()]).toHaveLength(0);
+			expect(loadEmitter).toHaveBeenCalledTimes(1);
+			expect(loadMeshes).toHaveBeenCalledWith([meshId]);
+			if (outcome === "failed") {
+				const rejected = expect(activation).rejects.toThrow();
+				meshReady.resolve();
+				await rejected;
+			} else {
+				if (outcome === "superseded") runtime.removeDynamicEntity(1, 1);
+				meshReady.resolve();
+				await activation;
+			}
+			runtime.setSelectedEntityGuid(entity.identity.guid);
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			runtime.render(0);
+			runtime.render(0.3);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(outcome === "ready" ? 1 : 0);
+			if (lane === "motion-table" && outcome === "ready") {
+				if (entity.placement.kind !== "world")
+					throw new Error("Fixture must have world placement.");
+				const firstBirthX = submittedParticles[0];
+				expect(firstBirthX).toBe(entity.placement.pose.coords.x);
+				const travelled = 3;
+				await runtime.replaceDynamicEntitySnapshot([
+					{
+						...entity,
+						placement: {
+							...entity.placement,
+							pose: {
+								...entity.placement.pose,
+								coords: {
+									...entity.placement.pose.coords,
+									x: entity.placement.pose.coords.x + travelled,
+								},
+							},
+						},
+					},
+				]);
+				runtime.render(0.4);
+				// The same gesture emitter keeps its old world-space particle and births the next
+				// one from the moving character's sampled part, through production hook dispatch.
+				expect(
+					runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+				).toBe(1);
+				expect(submittedParticles[0]).toBe(firstBirthX);
+				expect(submittedParticles[PARTICLE_RECORD_STRIDE_FLOATS]).toBe(
+					entity.placement.pose.coords.x + travelled,
+				);
+			}
+
+			await runtime.destroy();
+		},
+	);
+
 	it.each([-1, 0])(
 		"preserves a cue emitter on frame %s across part geometry replacement and retires it on setup replacement",
 		async (partIndex) => {
@@ -1673,6 +1834,109 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		).toBe(1);
 		await runtime.destroy();
 	});
+
+	it.each(["retime", "reverse", "stop"] as const)(
+		"preserves independent hidden locomotion through %s and snapshots, then reveals its local cursor",
+		async (change) => {
+			const runtime = await buildSpawnRuntime(
+				{ load: async () => appearanceVisual(1) },
+				{
+					...MOTION_TABLE_ANIMATION_SOURCE,
+					async loadAnimation(id) {
+						return {
+							id,
+							frameCount: 4,
+							partCount: 1,
+							positionFrames: [],
+							hooks: [],
+							partFrames: [0, 1, 2, 3].map((x) => {
+								const frame = Mat4.identity();
+								frame.m41 = x;
+								return frame;
+							}),
+						};
+					},
+				},
+			);
+			// The test renderer reports no visible nodes. Use full sampling cadence so assertions
+			// after same-time snapshots inspect the newly selected pose rather than an offscreen cache.
+			runtime.setOffscreenAnimationSampleIntervalSeconds(0);
+			const locomotion = {
+				playbackId: "2",
+				clip: {
+					kind: "playing" as const,
+					animationId: Number(IDLE_ANIMATION_ID),
+					completion: "loop" as const,
+					framerate: 4,
+					highFrame: 3,
+					lowFrame: 0,
+				},
+			};
+			const ordinary = {
+				playbackId: "1",
+				clip: {
+					kind: "settled" as const,
+					animationId: Number(IDLE_ANIMATION_ID),
+					frame: 3,
+				},
+			};
+			const entity: DynamicEntityView = {
+				...motionDrivenEntity(1, null),
+				motion: { activity: "gesture", ordinary, locomotion },
+			};
+			const partX = () => {
+				const selected = runtime.selectedEntityPresentationState(
+					entity.identity.guid,
+				);
+				if (selected.kind !== "realized")
+					throw new Error("Layered playback fixture lost its entity.");
+				return selected.frame.localBounds.min.x;
+			};
+			await runtime.replaceDynamicEntitySnapshot([entity]);
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			runtime.render(0);
+			const gestureX = partX();
+			runtime.render(0.25);
+			expect(partX()).toBeCloseTo(gestureX);
+			const changed = {
+				playbackId: change === "retime" ? locomotion.playbackId : "3",
+				clip: {
+					...locomotion.clip,
+					framerate: change === "reverse" ? -8 : 8,
+					completion: change === "stop" ? ("hold" as const) : ("loop" as const),
+				},
+			};
+			const updated: DynamicEntityView = {
+				...entity,
+				motion: { activity: "gesture", ordinary, locomotion: changed },
+			};
+			await runtime.replaceDynamicEntitySnapshot([updated]);
+			runtime.render(0.25);
+			runtime.render(0.375);
+			expect(partX()).toBeCloseTo(gestureX);
+			const revealed: DynamicEntityView = {
+				...entity,
+				motion: { activity: "locomotion", ordinary: null, locomotion: changed },
+			};
+			await runtime.replaceDynamicEntitySnapshot([revealed]);
+			runtime.render(0.375);
+			expect(partX()).toBeCloseTo(
+				gestureX - 3 + (change === "retime" ? 2 : change === "reverse" ? 3 : 1),
+			);
+			await runtime.replaceDynamicEntitySnapshot([revealed]);
+			runtime.render(0.5);
+			expect(partX()).toBeCloseTo(gestureX - 3 + (change === "retime" ? 3 : 2));
+			runtime.render(0.875);
+			if (change === "stop") expect(partX()).toBeCloseTo(gestureX);
+			await runtime.replaceDynamicEntitySnapshot([]);
+			await runtime.replaceDynamicEntitySnapshot([revealed]);
+			runtime.render(0.875);
+			expect(partX()).toBeCloseTo(
+				change === "reverse" ? gestureX : gestureX - 3,
+			);
+			await runtime.destroy();
+		},
+	);
 
 	/// The control for the test above: playback comes from the stated level and nothing else, so an
 	/// entity stating none is realized silent rather than incidentally animated.
@@ -2579,7 +2843,7 @@ function particleEmitterInfo(
 	return {
 		a: acVector3([0, 0, 0]),
 		b: acVector3([0, 0, 0]),
-		birthrateSeconds: 0.25,
+		birthrate: 0.25,
 		c: acVector3([0, 0, 0]),
 		emitsPerMeter: false,
 		emitsPerSecond: true,
@@ -2666,12 +2930,19 @@ const SPAWN_TEST_CAMERA: Camera = {
 /// An entity that animates from a table, optionally already playing a clip when it is realized.
 function motionDrivenEntity(
 	guid: number,
-	motion: DynamicEntityView["motion"],
+	motion: DynamicEntityClip | null,
 ): DynamicEntityView {
 	const entity = spawnedEntity(guid, 1);
 	return {
 		...entity,
-		motion,
+		motion:
+			motion === null
+				? null
+				: {
+						ordinary: { playbackId: "1", clip: motion },
+						locomotion: null,
+						activity: "explicit",
+					},
 		presentation: {
 			...entity.presentation,
 			content: {

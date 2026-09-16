@@ -94,15 +94,12 @@ fn main() -> Result<()> {
         let established = BodyMotionRuntime::establish(table, order);
         println!(
             "sample {id:#010x} established={:?}",
-            established.motion_presentation()
+            established.motion_playback()
         );
         runtime.accept_order(table, order);
-        println!(
-            "sample {id:#010x} start={:?}",
-            runtime.motion_presentation()
-        );
+        println!("sample {id:#010x} start={:?}", runtime.motion_playback());
         runtime.drive(table, order, 30.0);
-        println!("sample {id:#010x} end={:?}", runtime.motion_presentation());
+        println!("sample {id:#010x} end={:?}", runtime.motion_playback());
     }
     Ok(())
 }

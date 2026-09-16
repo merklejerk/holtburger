@@ -5,6 +5,7 @@ import type {
 } from "../../assets/ac-frame";
 import {
 	acVector3,
+	acVectorToRender,
 	landblockVector3,
 	renderVector3,
 	rotateAcVector,
@@ -48,6 +49,8 @@ export type UniformRoll = () => number;
 /** Everything the runtime needs from the rest of the app, injected once at construction. */
 export interface ParticleSystemDependencies {
 	readonly roll: UniformRoll;
+	/** Finite positive scale applied to authored distance-trigger spacing. */
+	readonly distanceSpacingMultiplier: number;
 	/** Resolve an authored emitter DID to its staged definition, or `null` if none is staged. */
 	readonly resolveEmitter: (
 		emitterInfoId: DatAssetId,
@@ -57,10 +60,9 @@ export interface ParticleSystemDependencies {
 	 *
 	 * Scene frame rather than anchor-relative because particle origins are retained across frames.
 	 *
-	 * **Spawn-tier, not frame-tier.** Only emission and range collection read an origin; the
-	 * per-frame emitter loop must not, because resolving one costs a walk up the scene hierarchy
-	 * and this runs for every resident emitter whether or not it is drawn. Liveness questions go
-	 * to {@link ParticleSystemDependencies.targetLives} instead.
+	 * Time-triggered emitters resolve origins only at emission or range collection. Visible
+	 * distance-triggered emitters also resolve their attached origin to test displacement.
+	 * Hidden emitters use {@link ParticleSystemDependencies.targetLives} without resolving frames.
 	 */
 	readonly sceneOriginOf: (target: BehaviorTarget) => SceneVector3 | null;
 	/**
@@ -68,7 +70,7 @@ export interface ParticleSystemDependencies {
 	 *
 	 * Exactly the condition under which {@link ParticleSystemDependencies.sceneOriginOf} yields a
 	 * value: every registered target publishes an origin, so a live target always has one. The
-	 * emitter loop asks this per frame and pays for an origin only when a particle actually spawns.
+	 * emitter loop asks this per frame without resolving hidden emitters' transforms.
 	 */
 	readonly targetLives: (target: BehaviorTarget) => boolean;
 	/**
@@ -346,6 +348,13 @@ interface EmitterInstance {
 	readonly hookOffset: AcVector3;
 	readonly startTime: number;
 	lastEmissionTime: number | null;
+	/** Distance-only trigger state; time-trigger precedence leaves this absent. */
+	readonly distanceEmission: {
+		/** Squared spacing computed once from authored birthrate and shared tuning. */
+		readonly spacingSquared: number;
+		/** Attached origin at initialization, last actual birth, or explicit discontinuity. */
+		lastOrigin: SceneVector3;
+	} | null;
 	emittedCount: number;
 	/** Stopped emitters release no further particles but let live ones finish their lifespans. */
 	stopped: boolean;
@@ -531,6 +540,14 @@ export class ParticleSystem {
 	#replacedEmitterTotal = 0;
 
 	constructor(dependencies: ParticleSystemDependencies) {
+		if (
+			!Number.isFinite(dependencies.distanceSpacingMultiplier) ||
+			dependencies.distanceSpacingMultiplier <= 0
+		) {
+			throw new Error(
+				"Particle distance spacing multiplier must be finite and positive.",
+			);
+		}
 		this.#dependencies = dependencies;
 		this.#roll = dependencies.roll;
 	}
@@ -614,6 +631,20 @@ export class ParticleSystem {
 			hookOffset,
 			hiddenSince: null,
 			lastEmissionTime: null,
+			distanceEmission:
+				!emitter.info.emitsPerSecond && emitter.info.emitsPerMeter
+					? {
+							spacingSquared:
+								(emitter.info.birthrate *
+									this.#dependencies.distanceSpacingMultiplier) **
+								2,
+							lastOrigin: this.#attachedOrigin(
+								frameTarget,
+								hookOffset,
+								parentOrigin,
+							),
+						}
+					: null,
 			nextDeathTime: Number.POSITIVE_INFINITY,
 			particles: [],
 			startTime: timeSeconds,
@@ -667,10 +698,8 @@ export class ParticleSystem {
 	/**
 	 * Advance every emitter to `timeSeconds`.
 	 *
-	 * Deliberately resolves no origins: emitters follow published transforms, but only a spawn
-	 * needs to know where its owner *is*, and spawns are interval-gated while this loop runs for
-	 * every resident emitter every frame. The loop asks only whether each target still exists;
-	 * {@link ParticleSystem.#emitDue} resolves the origin once it knows a particle is due.
+	 * Hidden emitters pay only liveness checks. Visible time emitters resolve frames once due;
+	 * visible distance emitters resolve their attached origin to decide whether a birth is due.
 	 */
 	advance(
 		timeSeconds: number,
@@ -905,8 +934,8 @@ export class ParticleSystem {
 		// A finite emitter's hidden emissions are analytic: elapsed / interval, capped by its
 		// remaining budget. Retail would have released them one frame at a time.
 		const info = instance.emitter.info;
-		if (info.emitsPerSecond && info.birthrateSeconds > 0 && !instance.stopped) {
-			const due = Math.floor(hiddenSeconds / info.birthrateSeconds);
+		if (info.emitsPerSecond && info.birthrate > 0 && !instance.stopped) {
+			const due = Math.floor(hiddenSeconds / info.birthrate);
 			const remaining =
 				info.totalParticles > 0
 					? Math.max(0, info.totalParticles - instance.emittedCount)
@@ -1021,32 +1050,41 @@ export class ParticleSystem {
 	}
 
 	/**
-	 * Release at most one particle, and only once the minimum interval has elapsed.
+	 * Release at most one particle once the selected time or distance trigger qualifies.
 	 *
-	 * RETAIL QUIRK: `birthrate` is a **minimum interval**, not a rate, and retail emits at most one particle per
+	 * RETAIL QUIRK: for time triggers, `birthrate` is a **minimum interval**, not a rate. Retail emits at most one particle per
 	 * update with no catch-up (acclient.c:312447-312476, 318289). Reproduced deliberately: emitting
 	 * a burst to "catch up" a slow frame would change authored density.
 	 */
 	#emitDue(instance: EmitterInstance, timeSeconds: number): void {
 		const info = instance.emitter.info;
-		// The per-meter predicate is unrecovered from the decompile, so a purely per-meter emitter
-		// must report rather than guess an emission cadence.
-		if (!info.emitsPerSecond) return;
 		if (instance.particles.length >= info.maxParticles) return;
-		if (
-			instance.lastEmissionTime !== null &&
-			timeSeconds - instance.lastEmissionTime < info.birthrateSeconds
-		) {
-			return;
-		}
-		// Every gate has passed, so this emitter is spawning and now needs to know where it is.
-		const parentOrigin = this.#dependencies.sceneOriginOf(instance.frameTarget);
-		// `advance` proved this target live earlier in the same iteration, and a live target always
-		// publishes an origin, so a missing one is a broken contract rather than a departed target.
-		if (parentOrigin === null) {
-			throw new Error(
-				`Emitter frame ${instance.frameTarget.targetId} is live but published no origin.`,
+		if (info.emitsPerSecond) {
+			if (
+				instance.lastEmissionTime !== null &&
+				timeSeconds - instance.lastEmissionTime < info.birthrate
+			)
+				return;
+		} else if (instance.distanceEmission === null) return;
+		const parentOrigin = this.#liveOriginOf(instance);
+		if (instance.distanceEmission !== null) {
+			const origin = this.#attachedOrigin(
+				instance.frameTarget,
+				instance.hookOffset,
+				parentOrigin,
 			);
+			const previous = instance.distanceEmission.lastOrigin;
+			const displacementSquared =
+				(origin[0] - previous[0]) ** 2 +
+				(origin[1] - previous[1]) ** 2 +
+				(origin[2] - previous[2]) ** 2;
+			// User-approved approximation, not a recovered retail correction: acclient.c:312447
+			// loses the distance comparison to undefined x87 flags. Across 202 distance-only
+			// emitters, use authored birthrate as spacing times one positive tuning multiplier.
+			// Endpoint displacement (including articulated motion and hook offset), time precedence,
+			// and at most one birth per update follow retail; exact threshold units remain unknown.
+			if (displacementSquared <= instance.distanceEmission.spacingSquared)
+				return;
 		}
 		this.#emit(instance, timeSeconds, parentOrigin);
 	}
@@ -1148,6 +1186,13 @@ export class ParticleSystem {
 		instance.emittedCount += 1;
 		this.#emittedTotal += 1;
 		instance.lastEmissionTime = timeSeconds;
+		if (instance.distanceEmission !== null) {
+			instance.distanceEmission.lastOrigin = attachedEmitterOrigin(
+				parentOrigin,
+				instance.hookOffset,
+				rotation,
+			);
+		}
 	}
 
 	/**
@@ -1207,6 +1252,37 @@ export class ParticleSystem {
 				`Emitter frame ${instance.frameTarget.targetId} published an origin but no rotation.`,
 			);
 		}
+	}
+
+	/** Re-anchor distance tests after an authoritative snap without moving existing particles. */
+	reanchor(target: BehaviorTarget): void {
+		for (const instance of this.#instances) {
+			if (
+				instance.target.targetId !== target.targetId ||
+				instance.target.generation !== target.generation ||
+				instance.distanceEmission === null
+			)
+				continue;
+			instance.distanceEmission.lastOrigin = this.#attachedOrigin(
+				instance.frameTarget,
+				instance.hookOffset,
+				this.#liveOriginOf(instance),
+			);
+		}
+	}
+
+	/** Resolve the authored offset in the live attached frame, excluding random spawn offsets. */
+	#attachedOrigin(
+		target: BehaviorTarget,
+		hookOffset: AcVector3,
+		parentOrigin: SceneVector3,
+	): SceneVector3 {
+		const rotation = this.#dependencies.sceneRotationOf(target);
+		if (rotation === null)
+			throw new Error(
+				`Emitter frame ${target.targetId} published an origin but no rotation.`,
+			);
+		return attachedEmitterOrigin(parentOrigin, hookOffset, rotation);
 	}
 
 	/**
@@ -1328,4 +1404,18 @@ export class ParticleSystem {
 /** Scale an authored motion constant, which never leaves AC axes before evaluation. */
 function scaledVector(vector: AcVector3, scale: number): AcVector3 {
 	return acVector3([vector[0] * scale, vector[1] * scale, vector[2] * scale]);
+}
+
+/** Authored emitter frame used by distance emission, distinct from random particle spawn offsets. */
+function attachedEmitterOrigin(
+	parentOrigin: SceneVector3,
+	hookOffset: AcVector3,
+	rotation: ResolvedFrameRotation,
+): SceneVector3 {
+	const offset = acVectorToRender(rotateAcVector(rotation.ac, hookOffset));
+	return sceneVector3([
+		parentOrigin[0] + offset[0],
+		parentOrigin[1] + offset[1],
+		parentOrigin[2] + offset[2],
+	]);
 }

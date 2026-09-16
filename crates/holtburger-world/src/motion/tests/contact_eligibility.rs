@@ -137,7 +137,13 @@ fn unrestricted_entities_open_and_close_through_repeated_remote_ticks() {
                 [],
                 None,
             );
-            let clip = registry.get(entity.guid).unwrap().playing_clip().unwrap();
+            let clip = registry
+                .get(entity.guid)
+                .unwrap()
+                .motion_playback()
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| expect_advancing(layer.clip))
+                .unwrap();
             assert_eq!(clip.animation_id, DOOR);
             assert_eq!(clip.framerate, rate);
             // Repeated selection must preserve the transition rather than replacing or restarting it.
@@ -150,7 +156,10 @@ fn unrestricted_entities_open_and_close_through_repeated_remote_ticks() {
                 );
             }
             assert_eq!(
-                registry.motion_presentation(entity.guid),
+                registry
+                    .motion_playback(entity.guid)
+                    .and_then(|motion| motion.ordinary)
+                    .map(|layer| layer.clip),
                 Some(MotionPresentation::Settled(SettledMotionPose {
                     animation_id: DOOR,
                     frame
@@ -179,9 +188,11 @@ fn creature_support_and_gravity_changes_reselect_remote_motion() {
             registry
                 .get(entity.guid)
                 .unwrap()
-                .playing_clip()
+                .motion_playback()
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip)
                 .unwrap()
-                .animation_id,
+                .animation_id(),
             FALL
         );
     }
@@ -195,9 +206,11 @@ fn creature_support_and_gravity_changes_reselect_remote_motion() {
         registry
             .get(entity.guid)
             .unwrap()
-            .playing_clip()
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         DOOR
     );
     registry.drive_remote(
@@ -217,9 +230,11 @@ fn creature_support_and_gravity_changes_reselect_remote_motion() {
         registry
             .get(entity.guid)
             .unwrap()
-            .playing_clip()
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         DOOR
     );
     set_gravity(&mut entity, true);
@@ -233,9 +248,11 @@ fn creature_support_and_gravity_changes_reselect_remote_motion() {
         registry
             .get(entity.guid)
             .unwrap()
-            .playing_clip()
+            .motion_playback()
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id,
+            .animation_id(),
         FALL
     );
 }
@@ -253,7 +270,13 @@ fn world_support_reconciliation_preserves_door_transition() {
         EntityNetworkMotion::Initialized(snapshot(OPEN));
     world.reconcile_authored_motion_support(guid, ContactState::Airborne);
     assert_eq!(
-        world.motion_runtimes.playing_clip(guid).unwrap().framerate,
+        world
+            .motion_runtimes
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| expect_advancing(layer.clip))
+            .unwrap()
+            .framerate,
         RATE
     );
     for _ in 0..FRAMES * 2 {
@@ -261,7 +284,11 @@ fn world_support_reconciliation_preserves_door_transition() {
         world.reconcile_authored_motion_support(guid, ContactState::Airborne);
     }
     assert_eq!(
-        world.motion_runtimes.motion_presentation(guid),
+        world
+            .motion_runtimes
+            .motion_playback(guid)
+            .and_then(|motion| motion.ordinary)
+            .map(|layer| layer.clip),
         Some(MotionPresentation::Settled(SettledMotionPose {
             animation_id: DOOR,
             frame: FRAMES as i32 - 1

@@ -133,7 +133,7 @@ pub(super) fn tick_with_precise_jump(
         });
     }
 
-    world.retain_locomotion_presentation(collision.is_some());
+    world.retain_locomotion(collision.is_some());
 
     // Authored playback advances once per tick, before any basis is read from it. A held local
     // drive advances its world-owned cursor explicitly below; excluding it here prevents that
@@ -147,7 +147,9 @@ pub(super) fn tick_with_precise_jump(
         .is_some_and(|snapshot| snapshot.indicates_death_motion());
     let excluded = (!local_dead
         && (movement.drives_local_authored_playback_this_tick()
-            || world.has_authored_motion_actions(local_guid)))
+            || world.has_authored_motion_actions(local_guid)
+            || world.has_manual_locomotion(local_guid)
+            || world.has_pending_motion_gesture(local_guid)))
     .then_some(local_guid)
     .filter(|guid| !guid.is_null());
     let mut authored_ticks = world.advance_authored_motion_except(dt, excluded);
@@ -461,12 +463,10 @@ fn tick_physical_entities(
     } else {
         None
     };
-    // Manual, server-directed, and idle local presentation use the authored cursor. Retire an
-    // earlier client-directed cursor before publication, even if this body produces no solve tick.
-    if local_locomotion.is_none() {
-        world
-            .motion_runtimes
-            .clear_locomotion_presentation(world.player.guid);
+    // Observed/client-directed presentation retires with its source. Manual locomotion has a
+    // separate pre-solve owner and must survive through stop transitions and idle gestures.
+    if local_locomotion.is_none() && !world.has_manual_locomotion(world.player.guid) {
+        world.motion_runtimes.clear_locomotion(world.player.guid);
     }
     let sticky_targets = world.prepare_sticky_body_targets();
     let projection = BodyProjectionResolver::new(&world.entities, &world.motion_runtimes);
@@ -540,7 +540,13 @@ fn tick_physical_entities(
             let input = holtburger_world::PhysicalBodyInput::referenced(
                 actuation,
                 match sticky_targets.get(&guid) {
-                    Some(target) if body.id != local_body_id || player_launch.is_none() => {
+                    Some(target)
+                        if body.id != local_body_id
+                            || (player_launch.is_none()
+                                && !motion_runtimes
+                                    .get(guid)
+                                    .is_some_and(|runtime| runtime.manual_displacement())) =>
+                    {
                         holtburger_world::PhysicalReferenceInput::Sticky(*target)
                     }
                     _ => match remote_sample {
@@ -605,7 +611,8 @@ fn tick_physical_entities(
         let post_solve_contact = update.current_contact;
         if update.previous_contact != post_solve_contact {
             if body_id == SpatialBodyId::LocalPlayer(world.player.guid)
-                && movement.drives_local_authored_playback_this_tick()
+                && (movement.drives_local_authored_playback_this_tick()
+                    || world.has_manual_locomotion(world.player.guid))
             {
                 movement.advance_local_authored_motion(world, Duration::ZERO)?;
             } else if let Some(guid) = body_id.authoritative_guid() {
@@ -785,7 +792,13 @@ pub(super) async fn handle_server_controlled_movement(
         data.server_control_sequence
     );
     let motion = build_server_controlled_motion(data, world);
-    movement.admit_server_controlled_motion(motion, Instant::now(), world);
+    if EntityMotionDirective::from_movement_event(data).is_none()
+        && world.permits_manual_gesture_input(world.player.guid)
+    {
+        movement.admit_server_gesture(Instant::now(), world);
+    } else {
+        movement.admit_server_controlled_motion(motion, Instant::now(), world);
+    }
     Ok(Vec::new())
 }
 

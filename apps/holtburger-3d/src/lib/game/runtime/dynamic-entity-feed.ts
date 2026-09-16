@@ -149,7 +149,7 @@ const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 ]);
 
 /** Current motion-derived presentation level selected by the authoritative host cursor. */
-export const dynamicEntityMotionSchema = z.discriminatedUnion("kind", [
+const dynamicEntityClipSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("playing"),
 		animationId: guid,
@@ -166,6 +166,23 @@ export const dynamicEntityMotionSchema = z.discriminatedUnion("kind", [
 		frame: z.number().int(),
 	}),
 ]);
+
+/** One clip occurrence; visual phase stays in the frontend. */
+const dynamicEntityMotionLayerSchema = z.object({
+	playbackId: z.string().regex(/^[1-9][0-9]*$/),
+	clip: dynamicEntityClipSchema,
+});
+
+/** Both available tracks and source-owned activity; the frontend selects visibility. */
+export const dynamicEntityMotionSchema = z
+	.object({
+		ordinary: dynamicEntityMotionLayerSchema.nullable(),
+		locomotion: dynamicEntityMotionLayerSchema.nullable(),
+		activity: z.enum(["locomotion", "gesture", "explicit"]),
+	})
+	.refine((motion) => motion.ordinary !== null || motion.locomotion !== null, {
+		message: "Motion playback must contain at least one clip.",
+	});
 
 const dynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
@@ -302,6 +319,10 @@ export type DynamicEntityAttachedPlacement = Extract<
 	{ kind: "attached" }
 >;
 export type DynamicEntityAdvance = z.infer<typeof dynamicEntityAdvanceSchema>;
+export type DynamicEntityClip = z.infer<typeof dynamicEntityClipSchema>;
+export type DynamicEntityMotionLayer = z.infer<
+	typeof dynamicEntityMotionLayerSchema
+>;
 export type DynamicEntityMotion = z.infer<typeof dynamicEntityMotionSchema>;
 export type DynamicEntityTickBatch = z.infer<
 	typeof dynamicEntityTickBatchSchema

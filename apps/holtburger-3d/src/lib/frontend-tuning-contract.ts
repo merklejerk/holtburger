@@ -332,6 +332,11 @@ interface FrontendRenderingTuning {
 
 /** Exhaustive contract for values shared by the browser frontend compositions. */
 export interface FrontendTuning {
+	/** Shared authored particle emission policy. */
+	readonly particles: {
+		/** Finite positive multiplier for the approved distance-spacing approximation. */
+		readonly distanceSpacingMultiplier: number;
+	};
 	/** Sampling policy for animated roots omitted by the previous frame. */
 	readonly animationPresentation: {
 		/** Maximum interval between offscreen animation samples. */

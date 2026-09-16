@@ -41,8 +41,13 @@ pub fn compose_spell(
 
 /// Retail compares all four channels and copies the same-coordinate effect pixel.
 fn replace_white(pixels: &mut [u8], effects: &[u8]) {
-    for (pixel, effect) in pixels.chunks_exact_mut(4).zip(effects.chunks_exact(4)) {
-        if pixel == [255, 255, 255, 255] {
+    for (pixel, effect) in pixels
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(effects.as_chunks::<4>().0)
+    {
+        if *pixel == [255, 255, 255, 255] {
             pixel.copy_from_slice(effect);
         }
     }
@@ -131,8 +136,8 @@ fn blend(destination: &mut [u8], source: &[u8], four_channels: bool) {
 /// Retail component transform (acclient.c:386923); availability is a separate UI overlay.
 pub fn compose_spell_component(base: &UiImage) -> Result<Vec<u8>> {
     let mut output = canvas(base)?;
-    for pixel in output.chunks_exact_mut(4) {
-        if pixel == [255, 255, 255, 255] {
+    for pixel in output.as_chunks_mut::<4>().0 {
+        if *pixel == [255, 255, 255, 255] {
             pixel.copy_from_slice(&[0, 0, 0, 255]);
         }
     }

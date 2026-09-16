@@ -515,8 +515,8 @@ impl MotionHookDirection {
 /// not carry variants nothing produces. A future consumer would reach those through setup defaults
 /// or physics scripts instead.
 ///
-/// Both variants below are carried and unconsumed: combat and collision-state systems are future
-/// work, and preserving the hooks now means that work needs no re-plumbing.
+/// World simulation consumes `Ethereal` for collision-state changes. Attack and object replacement
+/// remain lossless authored data for their respective consumers; visual dispatch is separate.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MotionHookEffect {
     Attack(AttackConeHookPayload),

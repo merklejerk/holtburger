@@ -31,12 +31,12 @@ struct ParticleEmitterRecordManifest {
     /// `null` for a `ParticleType` no shipped emitter authors; consumers report rather than guess.
     motion_type: Option<u8>,
     emits_per_second: bool,
-    /// Retail's per-meter predicate is unrecovered, so a consumer must refuse rather than guess.
+    /// Distance trigger flag; the frontend applies its documented, user-approved spacing approximation.
     emits_per_meter: bool,
     /// The mesh each particle draws, or `null` when retail rejects the zero hardware DID.
     hardware_mesh: Option<ParticleEmitterHardwareMeshManifest>,
-    /// Minimum interval between emissions in seconds, not a rate.
-    birthrate_seconds: f64,
+    /// Authored trigger value: seconds for time emission; distance units remain unrecovered.
+    birthrate: f64,
     max_particles: i32,
     initial_particles: i32,
     total_particles: i32,
@@ -120,7 +120,7 @@ pub(crate) fn serialize_particle_emitter_record_binary(
         emits_per_second: info.trigger.per_second(),
         emits_per_meter: info.trigger.per_meter(),
         hardware_mesh,
-        birthrate_seconds: info.birthrate,
+        birthrate: info.birthrate,
         max_particles: info.max_particles,
         initial_particles: info.initial_particles,
         total_particles: info.total_particles,

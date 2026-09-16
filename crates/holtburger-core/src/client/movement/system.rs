@@ -178,6 +178,8 @@ pub(crate) struct MovementSystem {
     pending_snap_facing: Option<f32>,
     /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
     active_movement: Option<ActiveMovement>,
+    /// Lifetime of manual input, retained independently while server playback owns movement.
+    manual_input: ManualInputLifetime,
     /// One local authored stop order awaiting the simulation tick that owns cursor advancement.
     pending_manual_playback_stop: bool,
     /// Last successfully published movement, independent of the selected simulation source.
@@ -209,12 +211,20 @@ enum QueuedControlCommand {
 /// A selected movement source owns only the data needed by its execution mechanism.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ActiveMovement {
-    /// Held drive lives in the character controller; only a manual pulse has an expiry.
-    Manual { until: Option<Instant> },
+    /// Drive values live in the character controller; input lifetime is independently retained.
+    Manual,
     /// Client-produced displacement for the current simulation tick.
     ClientDirected(Option<AutonomousDriveIntent>),
     /// Server approach/turn state, including its receipt-time target facts and progress.
     ServerDirected(ServerDirectedMotionState),
+}
+
+/// Input lifetime survives temporary server ownership without turning expired pulses into holds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ManualInputLifetime {
+    None,
+    Held,
+    Pulse { until: Instant },
 }
 
 /// A transient publication invalidates drive deduplication without inventing a drive snapshot.
@@ -255,6 +265,7 @@ impl MovementSystem {
             pending_arrival_pose: None,
             pending_snap_facing: None,
             active_movement: None,
+            manual_input: ManualInputLifetime::None,
             pending_manual_playback_stop: false,
             published_motion: None,
             movement_publication_required: false,
@@ -274,6 +285,27 @@ impl MovementSystem {
         self.queued_control_commands
             .push(QueuedControlCommand::ServerDirective(motion));
         self.process_control_commands(now, world);
+    }
+
+    /// Gesture packets retire automatic approach without discarding the latest held input or
+    /// jump charge. Playback arbitration decides whether that input can move the body now.
+    pub(crate) fn admit_server_gesture(&mut self, now: Instant, world: &mut WorldState) {
+        self.process_control_commands(now, world);
+        self.expire_active_movement(now);
+        if !self.has_active_manual_drive() {
+            self.active_movement = None;
+            if self.manual_input != ManualInputLifetime::None
+                && !self.character_motion.effective_drive().is_stationary()
+            {
+                self.active_movement = Some(ActiveMovement::Manual);
+            }
+        }
+        // ACE can stop physics at a gesture boundary even when the held axes are unchanged.
+        // Publish this manual takeover once with the newly admitted server-control sequence.
+        self.movement_publication_required |= self.has_active_manual_drive();
+        self.pending_arrival_pose = None;
+        self.pending_snap_facing = None;
+        self.pending_transient_motion = None;
     }
 
     fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
@@ -302,6 +334,7 @@ impl MovementSystem {
     pub(crate) fn retire_movement_epoch(&mut self) {
         self.queued_control_commands.clear();
         self.character_motion.clear();
+        self.manual_input = ManualInputLifetime::None;
         self.pending_jump_attempt = None;
         self.character_motion_feedback.clear();
         self.pending_transient_motion = None;
@@ -316,7 +349,7 @@ impl MovementSystem {
     }
 
     pub(crate) fn has_active_manual_drive(&self) -> bool {
-        matches!(self.active_movement, Some(ActiveMovement::Manual { .. }))
+        matches!(self.active_movement, Some(ActiveMovement::Manual))
     }
 
     /// Whether the local adapter, rather than the authoritative snapshot scan, drives this tick.
@@ -375,14 +408,18 @@ impl MovementSystem {
     /// A semantic acquisition replaces the selected source and owns its mandatory notification.
     fn acquire_manual_control(&mut self, until: Option<Instant>) {
         self.movement_publication_required |= self.has_server_controlled_motion();
-        self.active_movement = Some(ActiveMovement::Manual { until });
+        self.manual_input = match until {
+            Some(until) => ManualInputLifetime::Pulse { until },
+            None => ManualInputLifetime::Held,
+        };
+        self.active_movement = Some(ActiveMovement::Manual);
         self.pending_arrival_pose = None;
         self.pending_snap_facing = None;
         self.pending_manual_playback_stop = false;
     }
 
     fn ingest_drive_intent(&mut self, command: PlayerDriveIntent, now: Instant) {
-        let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual { .. }));
+        let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual));
         match command {
             PlayerDriveIntent::SynchronizeHeld(state) => {
                 self.character_motion.replace_drive(state);
@@ -406,6 +443,7 @@ impl MovementSystem {
                 self.pending_snap_facing = Some(heading);
             }
             PlayerDriveIntent::Stop => {
+                self.manual_input = ManualInputLifetime::None;
                 let had_server_directive = self.has_server_controlled_motion();
                 self.movement_publication_required |= had_server_directive;
                 self.pending_manual_playback_stop |= had_server_directive;
@@ -464,15 +502,18 @@ impl MovementSystem {
     }
 
     fn expire_active_movement(&mut self, now: Instant) {
-        match self.active_movement {
-            Some(ActiveMovement::ClientDirected(_)) => {
-                self.active_movement = Some(ActiveMovement::ClientDirected(None));
-            }
-            Some(ActiveMovement::Manual { until: Some(until) }) if now >= until => {
+        if matches!(
+            self.active_movement,
+            Some(ActiveMovement::ClientDirected(_))
+        ) {
+            self.active_movement = Some(ActiveMovement::ClientDirected(None));
+        }
+        if matches!(self.manual_input, ManualInputLifetime::Pulse { until } if now >= until) {
+            self.manual_input = ManualInputLifetime::None;
+            if self.has_active_manual_drive() {
                 self.active_movement = None;
                 self.pending_manual_playback_stop = true;
             }
-            _ => {}
         }
     }
 
@@ -532,8 +573,7 @@ impl MovementSystem {
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
-        let had_active_manual_motion =
-            matches!(self.active_movement, Some(ActiveMovement::Manual { .. }));
+        let had_active_manual_motion = matches!(self.active_movement, Some(ActiveMovement::Manual));
 
         self.expire_active_movement(now);
 
@@ -575,7 +615,7 @@ impl MovementSystem {
 
         if !transient_sent {
             match self.active_movement {
-                Some(ActiveMovement::Manual { .. }) => events.extend(
+                Some(ActiveMovement::Manual) => events.extend(
                     self.execute_motion_state_at(
                         self.character_motion.effective_drive(),
                         world,
@@ -636,6 +676,12 @@ impl MovementSystem {
                     }
                     explicit_stop_requested |= matches!(command, PlayerDriveIntent::Stop);
                     self.ingest_drive_intent(command, now);
+                    if matches!(
+                        self.active_movement,
+                        Some(ActiveMovement::ClientDirected(_))
+                    ) {
+                        world.motion_runtimes.clear_locomotion(world.player.guid);
+                    }
                 }
                 QueuedControlCommand::Transient(intent) => {
                     world.admit_entity_sticky_target(world.player.guid, None);
@@ -645,6 +691,7 @@ impl MovementSystem {
                     self.process_character_motion_event(input, world);
                 }
                 QueuedControlCommand::ServerDirective(motion) => {
+                    world.motion_runtimes.clear_locomotion(world.player.guid);
                     self.select_server_directive(motion);
                     explicit_stop_requested = false;
                 }
@@ -666,8 +713,8 @@ impl MovementSystem {
 
         let reset = matches!(input.event, CharacterMotionEvent::Reset);
         if reset {
-            let had_manual_drive =
-                matches!(self.active_movement, Some(ActiveMovement::Manual { .. }));
+            self.manual_input = ManualInputLifetime::None;
+            let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual));
             if had_manual_drive {
                 self.active_movement = None;
                 self.pending_manual_playback_stop = true;
@@ -740,7 +787,7 @@ impl MovementSystem {
 
         let intent = match self.active_movement? {
             ActiveMovement::ClientDirected(intent) => intent?,
-            ActiveMovement::Manual { .. } | ActiveMovement::ServerDirected(_) => return None,
+            ActiveMovement::Manual | ActiveMovement::ServerDirected(_) => return None,
         };
 
         Some(LocalDriveControl {
@@ -801,10 +848,9 @@ impl MovementSystem {
 
     /// Advances the held local drive's authored motion once and returns that complete tick.
     ///
-    /// Local prediction begins immediately while the authoritative snapshot may arrive later, but
-    /// both root actuation and presentation read the same world-owned cursor. No velocity is
-    /// reconstructed here; physical actuation consumes the tick's offset while host semantics
-    /// consume its ordered hooks.
+    /// Manual locomotion and accepted gestures advance independently in the world runtime.
+    /// Physical actuation consumes one selected offset; body semantics consume one hook stream.
+    /// Retained manual playback continues after input stops so authored stop links finish.
     pub(crate) fn advance_local_authored_motion(
         &mut self,
         world: &mut WorldState,
@@ -870,7 +916,8 @@ impl MovementSystem {
         }
         if !self.has_active_manual_drive()
             && !self.pending_manual_playback_stop
-            && world.has_authored_motion_actions(guid)
+            && !world.has_manual_locomotion(guid)
+            && (world.has_authored_motion_actions(guid) || world.has_pending_motion_gesture(guid))
         {
             // A server-authored local action owns the same cursor as every other source. The local
             // player is excluded from remote projection because this adapter alone may feed its
@@ -888,19 +935,21 @@ impl MovementSystem {
             return Ok(Some(tick));
         }
         let (state, run_rate) = match self.active_movement {
-            Some(ActiveMovement::Manual { .. }) => {
+            Some(ActiveMovement::Manual) => {
                 let run_rate = world
                     .player_run_rate()
                     .ok_or_else(|| anyhow::anyhow!("manual local run-rate is unavailable"))?;
                 (self.character_motion.effective_drive(), run_rate)
             }
-            _ if std::mem::take(&mut self.pending_manual_playback_stop) => {
+            _ if std::mem::take(&mut self.pending_manual_playback_stop)
+                || world.has_manual_locomotion(guid) =>
+            {
                 (CharacterDrive::builder().walk().build(), 1.0)
             }
             _ => return Ok(None),
         };
 
-        let (stance, mut order) = Self::local_drive_order(world, state, run_rate)?;
+        let (stance, order) = Self::local_drive_order(world, state, run_rate)?;
         let body_id = SpatialBodyId::LocalPlayer(guid);
         let contact = world
             .runtime_body_view(body_id)
@@ -930,11 +979,10 @@ impl MovementSystem {
         }
         // Retail accepts turn-in-place while unsupported but replaces planar locomotion with
         // `Falling` until walkable contact returns (`CMotionInterp::apply_interpreted_movement`,
-        // `acclient.c:330390-330453`).
-        order = order.with_character_presentation(presentation);
-
+        // `acclient.c:330390-330453`). World arbitration applies this presentation after resolving
+        // gesture ownership.
         let tick = world
-            .drive_authored_motion_for_body(guid, order, dt)
+            .drive_manual_motion_for_body(guid, order, presentation, dt)
             .map_err(|error| anyhow::anyhow!("manual local authored playback failed: {error}"))?;
         Ok(Some(tick))
     }

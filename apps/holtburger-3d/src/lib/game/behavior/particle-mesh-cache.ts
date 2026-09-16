@@ -1,7 +1,4 @@
-import type {
-	DecodedParticleMesh,
-	ParticleMeshPresentations,
-} from "../../assets/decode-particle-mesh-record";
+import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { DatAssetId } from "../game-types";
 
@@ -15,24 +12,26 @@ import type { DatAssetId } from "../game-types";
  */
 export class ParticleMeshCache {
 	readonly #source: ParticleMeshSource;
-	readonly #presentations = new Map<DatAssetId, DecodedParticleMesh>();
+	readonly #resident = new Set<DatAssetId>();
+	/** Shared readiness includes texture and GPU installation, not only transfer/decode. */
+	readonly #install: (batch: ParticleMeshPresentations) => Promise<void>;
 	readonly #inFlight = new Map<DatAssetId, Promise<void>>();
 	#destroyed = false;
 
-	constructor(source: ParticleMeshSource) {
+	constructor(
+		source: ParticleMeshSource,
+		install: (batch: ParticleMeshPresentations) => Promise<void>,
+	) {
 		this.#source = source;
+		this.#install = install;
 	}
 
 	/**
 	 * Load every named mesh that is not already resident or in flight.
 	 *
-	 * Returns the newly loaded batch so its caller can hand it to renderer residency, or `null`
-	 * when everything was already known — that distinction is what keeps the renderer from
-	 * re-uploading meshes it already holds.
+	 * Every caller awaits the same transfer, decode, and installation promise for shared meshes.
 	 */
-	async prepare(
-		hwGfxObjIds: readonly DatAssetId[],
-	): Promise<ParticleMeshPresentations | null> {
+	async prepare(hwGfxObjIds: readonly DatAssetId[]): Promise<void> {
 		if (this.#destroyed)
 			throw new Error(
 				"Cannot prepare meshes on a destroyed particle mesh cache.",
@@ -41,7 +40,7 @@ export class ParticleMeshCache {
 			...new Set(hwGfxObjIds.map((id) => id.toLowerCase())),
 		].filter(
 			(id) =>
-				!this.#presentations.has(id as DatAssetId) &&
+				!this.#resident.has(id as DatAssetId) &&
 				!this.#inFlight.has(id as DatAssetId),
 		) as DatAssetId[];
 		const pending = hwGfxObjIds
@@ -49,47 +48,46 @@ export class ParticleMeshCache {
 			.filter((entry): entry is Promise<void> => entry !== undefined);
 		if (wanted.length === 0) {
 			await Promise.all(pending);
-			return null;
+			return;
 		}
 		const load = this.#source
 			.loadParticleMeshes(wanted)
-			.then((batch) => {
-				if (this.#destroyed) return null;
-				for (const [id, presentation] of batch.presentations) {
-					this.#presentations.set(id, presentation);
+			.then(async (batch) => {
+				if (this.#destroyed)
+					throw new Error(
+						"Particle mesh cache was destroyed during preparation.",
+					);
+				for (const id of wanted) {
+					if (!batch.presentations.has(id))
+						throw new Error(
+							`Particle mesh batch omitted requested mesh ${id}.`,
+						);
 				}
-				return batch;
+				await this.#install(batch);
+				if (this.#destroyed)
+					throw new Error(
+						"Particle mesh cache was destroyed during installation.",
+					);
+				for (const id of batch.presentations.keys()) this.#resident.add(id);
 			})
 			.finally(() => {
 				for (const id of wanted) this.#inFlight.delete(id);
 			});
-		for (const id of wanted)
-			this.#inFlight.set(
-				id,
-				load.then(() => undefined),
-			);
-		const [batch] = await Promise.all([load, ...pending]);
-		return batch;
-	}
-
-	/** Read a resident mesh without loading; `null` keeps frame-time IO impossible. */
-	get(hwGfxObjId: DatAssetId): DecodedParticleMesh | null {
-		return (
-			this.#presentations.get(hwGfxObjId.toLowerCase() as DatAssetId) ?? null
-		);
+		for (const id of wanted) this.#inFlight.set(id, load);
+		await Promise.all([load, ...pending]);
 	}
 
 	getDiagnostics() {
 		return {
 			inFlightMeshCount: this.#inFlight.size,
-			residentMeshCount: this.#presentations.size,
+			residentMeshCount: this.#resident.size,
 		};
 	}
 
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
-		this.#presentations.clear();
+		this.#resident.clear();
 		this.#inFlight.clear();
 		this.#source.destroy();
 	}

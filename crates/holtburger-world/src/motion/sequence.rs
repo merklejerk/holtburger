@@ -9,6 +9,7 @@
 use holtburger_common::{Quaternion, RigidTransform, Vector3};
 use holtburger_content::{MotionClip, MotionHook, MotionHookDirection};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{MotionAnimationRef, MotionCommand};
 
@@ -51,14 +52,24 @@ const FRAMERATE_EPSILON: f32 = 0.000_2;
 /// `acclient.c:327394-327405`). That is why the bounds are signed here and unsigned in the contract.
 #[derive(Debug, Clone)]
 pub struct SequenceNode {
+    /// Host-process occurrence identity; cloning provisional playback preserves it, while a new
+    /// installation differs even if its animation/window matches. Presentation uses it to restart.
+    playback_id: u64,
     animation: MotionAnimationRef,
     low_frame: i32,
     high_frame: i32,
     framerate: f32,
     /// Same-style substate selection that installed this live clip, when one exists.
     substate_selection: Option<SubstateSelection>,
-    /// Whether leaving this clip completes the active transient action.
-    action_completion: bool,
+    /// Position within the active action, used for exact completion and safe transition reduction.
+    action_position: Option<ActionClipPosition>,
+}
+
+/// Only the last action clip reports completion; all action clips retire on interruption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionClipPosition {
+    Continuing,
+    Last,
 }
 
 impl SequenceNode {
@@ -68,14 +79,24 @@ impl SequenceNode {
     /// (`MotionTable.add_motion` building an `AnimData` at `speed`); a negative speed therefore
     /// plays the same window backwards rather than inverting it.
     pub fn install(clip: &MotionClip, speed: f32) -> Self {
+        static NEXT_PLAYBACK_ID: AtomicU64 = AtomicU64::new(1);
+        let playback_id = NEXT_PLAYBACK_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("motion playback identity exhausted");
         Self {
+            playback_id,
             animation: Arc::clone(&clip.animation),
             low_frame: clip.low_frame as i32,
             high_frame: clip.high_frame as i32,
             framerate: clip.framerate * speed,
             substate_selection: None,
-            action_completion: false,
+            action_position: None,
         }
+    }
+
+    /// Stable identity of this installed clip, independent of its rate and current frame.
+    pub(super) fn playback_id(&self) -> u64 {
+        self.playback_id
     }
 
     pub fn animation(&self) -> &MotionAnimationRef {
@@ -355,12 +376,13 @@ impl MotionSequenceRuntime {
         self.nodes.len()
     }
 
-    /// Marks the exact last clip owned by one newly installed transient action.
-    pub(super) fn mark_action_completion(&mut self, index: usize) {
-        self.nodes
-            .get_mut(index)
-            .expect("action completion index must name an installed clip")
-            .action_completion = true;
+    /// Marks the complete range installed by the active action, excluding its cyclic tail.
+    pub(super) fn mark_action_range(&mut self, start: usize, end: usize) {
+        assert!(start < end && end <= self.nodes.len());
+        for node in &mut self.nodes[start..end] {
+            node.action_position = Some(ActionClipPosition::Continuing);
+        }
+        self.nodes[end - 1].action_position = Some(ActionClipPosition::Last);
     }
 
     /// Prevents a later return to a style from collapsing through the intervening style change.
@@ -384,9 +406,16 @@ impl MotionSequenceRuntime {
         let Some(first_cyclic) = self.first_cyclic else {
             return;
         };
-        let Some(retain_through) = self.nodes[..appended_from]
+        // A repeated destination cannot collapse across an intervening action: doing so
+        // would silently erase both its remaining playback and its completion boundary.
+        let search_start = self.nodes[..appended_from]
+            .iter()
+            .rposition(|node| node.action_position.is_some())
+            .map_or(0, |index| index + 1);
+        let Some(retain_through) = self.nodes[search_start..appended_from]
             .iter()
             .rposition(|node| node.substate_selection == Some(selection))
+            .map(|index| search_start + index)
         else {
             return;
         };
@@ -665,7 +694,7 @@ impl MotionSequenceRuntime {
                 tick,
                 frame_forward,
             );
-            tick.action_completed |= leaving.action_completion;
+            tick.action_completed |= leaving.action_position == Some(ActionClipPosition::Last);
         }
 
         let next = if forward {

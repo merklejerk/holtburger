@@ -56,7 +56,7 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 	return system;
 }
 
-/** Stage one owner and commit it, which is the only way production installs playback. */
+/** Stage and commit setup-default playback through the production owner API. */
 function install(
 	system: AnimationSystem<string>,
 	ownerId: string,
@@ -373,10 +373,15 @@ describe("AnimationSystem", () => {
 		const system = buildAnimationSystemOver(effects);
 		const target = testTarget("scene-node:1");
 		installEffectState(effects, target.targetId);
-		system.playClip(
+		system.applyMotion(
 			"owner",
 			target,
-			playingClip(testAnimation(Vec3.zero()), 0, 3, 30, "loop"),
+			"explicit",
+			{
+				kind: "install",
+				clip: playingClip(testAnimation(Vec3.zero()), 0, 3, 30, "loop"),
+			},
+			{ kind: "remove" },
 			initialPose(),
 		);
 		advanceAndSample(system, 0);
@@ -390,7 +395,14 @@ describe("AnimationSystem", () => {
 				5,
 			);
 			speed = frame % 2 === 0 ? 30 : 30.01;
-			system.setPlaybackRate(target, speed);
+			system.applyMotion(
+				"owner",
+				target,
+				"explicit",
+				{ kind: "retime", framesPerSecond: speed },
+				{ kind: "unchanged" },
+				initialPose(),
+			);
 		}
 	});
 
@@ -402,10 +414,15 @@ describe("AnimationSystem", () => {
 		installEffectState(effects, target.targetId);
 
 		expect(advanceAndSample(system, 0)).toEqual([]);
-		system.playClip(
+		system.applyMotion(
 			"owner",
 			target,
-			playingClip(testAnimation(Vec3.zero()), 1, 2, 30, "loop"),
+			"explicit",
+			{
+				kind: "install",
+				clip: playingClip(testAnimation(Vec3.zero()), 1, 2, 30, "loop"),
+			},
+			{ kind: "remove" },
 			initialPose(),
 		);
 
@@ -420,10 +437,12 @@ describe("AnimationSystem", () => {
 		const target = testTarget("scene-node:1");
 		installEffectState(effects, target.targetId, 2);
 		const play = (animation: PreparedAnimation) =>
-			system.playClip(
+			system.applyMotion(
 				"owner",
 				target,
-				playingClip(animation, 0, 0, 30, "loop"),
+				"explicit",
+				{ kind: "install", clip: playingClip(animation, 0, 0, 30, "loop") },
+				{ kind: "remove" },
 				initialPose(2),
 			);
 
@@ -462,10 +481,12 @@ describe("AnimationSystem", () => {
 		advanceAndSample(system, 0);
 		advanceAndSample(system, 2 / 30);
 
-		system.playClip(
+		system.applyMotion(
 			"owner",
 			target,
-			playingClip(animation, 0, 3, -30, "loop"),
+			"explicit",
+			{ kind: "install", clip: playingClip(animation, 0, 3, -30, "loop") },
+			{ kind: "remove" },
 			initialPose(),
 		);
 
@@ -486,10 +507,12 @@ describe("AnimationSystem", () => {
 			],
 		};
 		installEffectState(effects, target.targetId);
-		system.playClip(
+		system.applyMotion(
 			"owner",
 			target,
-			playingClip(animation, 0, 3, -30, "hold"),
+			"explicit",
+			{ kind: "install", clip: playingClip(animation, 0, 3, -30, "hold") },
+			{ kind: "remove" },
 			initialPose(),
 		);
 
@@ -514,10 +537,12 @@ describe("AnimationSystem", () => {
 		]);
 
 		expect(() =>
-			system.playClip(
+			system.applyMotion(
 				"owner",
 				{ ...target, generation: target.generation + 1 },
-				playingClip(animation, 1, 1, 30, "loop"),
+				"explicit",
+				{ kind: "install", clip: playingClip(animation, 1, 1, 30, "loop") },
+				{ kind: "remove" },
 				initialPose(),
 			),
 		).toThrow("names generation");
@@ -534,10 +559,12 @@ describe("AnimationSystem", () => {
 		]);
 		const frame = system.advance(0);
 
-		system.playClip(
+		system.applyMotion(
 			"owner",
 			target,
-			playingClip(animation, 0, 1, 30, "loop"),
+			"explicit",
+			{ kind: "install", clip: playingClip(animation, 0, 1, 30, "loop") },
+			{ kind: "remove" },
 			initialPose(),
 		);
 
@@ -730,3 +757,342 @@ function animationWithInitialTransparency(): PreparedAnimation {
 		],
 	};
 }
+
+describe("independent gesture and locomotion playback", () => {
+	it("reveals the running locomotion cursor without dispatching its hidden hooks", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId);
+		const gesture = playingClip(
+			fixedPoseAnimation("0x03000020", [10]),
+			0,
+			0,
+			0,
+			"hold",
+		);
+		const locomotion = playingClip(
+			testAnimation(Vec3.zero()),
+			0,
+			3,
+			30,
+			"loop",
+		);
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "install", clip: gesture },
+			{ kind: "install", clip: locomotion },
+			initialPose(),
+		);
+		advanceAndSample(system, 0);
+		const hidden = requiredAt(advanceAndSample(system, 0.2), 0);
+		expect(hidden.articulatedPose.partToObjectTransforms[0]?.m41).toBe(10);
+		expect(observations()).toHaveLength(0);
+		system.applyMotion(
+			"owner",
+			target,
+			"locomotion",
+			{ kind: "remove" },
+			{ kind: "unchanged" },
+			initialPose(),
+		);
+		const revealed = requiredAt(advanceAndSample(system, 0.2), 0);
+		expect(revealed.articulatedPose.partToObjectTransforms[0]?.m41).toBeCloseTo(
+			2,
+		);
+		expect(observations()).toHaveLength(0);
+		advanceAndSample(system, 0.34);
+		expect(observations().length).toBeGreaterThan(0);
+		system.removeOwner("owner");
+		expect(system.holds(target)).toBe(false);
+		expect(advanceAndSample(system, 0.4)).toEqual([]);
+	});
+
+	it("replaces hidden locomotion for reversal and stop without restarting the gesture", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId);
+		const animation = testAnimation(Vec3.zero());
+		const gesture = playingClip({ ...animation, hooks: [] }, 0, 3, 1, "hold");
+		const forward = playingClip(animation, 0, 3, 10, "loop");
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "install", clip: gesture },
+			{ kind: "install", clip: forward },
+			initialPose(),
+		);
+		advanceAndSample(system, 0);
+		advanceAndSample(system, 0.1);
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "unchanged" },
+			{ kind: "install", clip: playingClip(animation, 0, 3, -10, "loop") },
+			initialPose(),
+		);
+		advanceAndSample(system, 0.1);
+		const stillGesture = requiredAt(advanceAndSample(system, 0.2), 0);
+		expect(
+			stillGesture.articulatedPose.partToObjectTransforms[0]?.m41,
+		).toBeCloseTo(0.2);
+		expect(observations()).toHaveLength(0);
+		// Contact replacement reveals the running reversed track immediately; its high-frame
+		// entry has already advanced backwards by one frame while hidden.
+		system.applyMotion(
+			"owner",
+			target,
+			"explicit",
+			{ kind: "remove" },
+			{ kind: "unchanged" },
+			initialPose(),
+		);
+		expect(
+			requiredAt(advanceAndSample(system, 0.2), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBeCloseTo(3);
+		// A new gesture hides the stop transition; it finishes while the gesture keeps playing.
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "install", clip: gesture },
+			{ kind: "install", clip: playingClip(animation, 0, 3, 10, "hold") },
+			initialPose(),
+		);
+		advanceAndSample(system, 0.2);
+		advanceAndSample(system, 0.6);
+		system.applyMotion(
+			"owner",
+			target,
+			"explicit",
+			{ kind: "remove" },
+			{ kind: "unchanged" },
+			initialPose(),
+		);
+		expect(
+			requiredAt(advanceAndSample(system, 0.6), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBe(3);
+		expect(observations()).toHaveLength(0);
+	});
+
+	it("finishes the local gesture after host retirement while locomotion keeps advancing", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId);
+		const animation = { ...testAnimation(Vec3.zero()), hooks: [] };
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "install", clip: playingClip(animation, 0, 3, 10, "hold") },
+			{ kind: "install", clip: playingClip(animation, 0, 3, 6, "loop") },
+			initialPose(),
+		);
+		advanceAndSample(system, 0);
+		advanceAndSample(system, 0.1);
+		system.applyMotion(
+			"owner",
+			target,
+			"locomotion",
+			{
+				kind: "install",
+				clip: playingClip(
+					fixedPoseAnimation("0x03000021", [20]),
+					0,
+					0,
+					0,
+					"hold",
+				),
+			},
+			{ kind: "unchanged" },
+			initialPose(),
+		);
+		expect(
+			requiredAt(advanceAndSample(system, 0.2), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBeCloseTo(2);
+		expect(
+			requiredAt(advanceAndSample(system, 0.4), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBeCloseTo(2.4);
+	});
+
+	it.each(["natural", "replacement"] as const)(
+		"retains the current ordinary part pose through %s retirement",
+		(retirement) => {
+			const effects = new EffectSystem();
+			const system = buildAnimationSystemOver(effects);
+			const target = testTarget("scene-node:1");
+			installEffectState(effects, target.targetId, 2);
+			const gesture = prepareAnimation(
+				{
+					id: "0x03000030",
+					frameCount: 4,
+					partCount: 2,
+					hooks: [],
+					positionFrames: [],
+					partFrames: [0, 1, 2, 3].flatMap((x) =>
+						[x, x].map((translation) => {
+							const pose = Mat4.identity();
+							pose.m41 = translation;
+							return pose;
+						}),
+					),
+				},
+				"0x03000030",
+				10,
+			);
+			const partial = playingClip(
+				fixedPoseAnimation("0x03000031", [9]),
+				0,
+				0,
+				0,
+				"hold",
+			);
+			system.applyMotion(
+				"owner",
+				target,
+				"gesture",
+				{ kind: "install", clip: playingClip(gesture, 0, 3, 10, "hold") },
+				{ kind: "remove" },
+				initialPose(2),
+			);
+			advanceAndSample(system, 0);
+			advanceAndSample(system, 0.1);
+			system.applyMotion(
+				"owner",
+				target,
+				"locomotion",
+				{ kind: "install", clip: partial },
+				{ kind: "remove" },
+				initialPose(2),
+			);
+			advanceAndSample(system, 0.2);
+			if (retirement === "replacement") {
+				system.applyMotion(
+					"owner",
+					target,
+					"explicit",
+					{ kind: "install", clip: partial },
+					{ kind: "remove" },
+					initialPose(2),
+				);
+			}
+			const sample = requiredAt(
+				advanceAndSample(system, retirement === "natural" ? 0.4 : 0.2),
+				0,
+			);
+			expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).toBe(9);
+			expect(sample.articulatedPose.partToObjectTransforms[1]?.m41).toBeCloseTo(
+				retirement === "natural" ? 3 : 2,
+			);
+		},
+	);
+
+	it("applies a genuine replacement immediately even while a gesture is finishing", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId);
+		const animation = { ...testAnimation(Vec3.zero()), hooks: [] };
+		system.applyMotion(
+			"owner",
+			target,
+			"gesture",
+			{ kind: "install", clip: playingClip(animation, 0, 3, 10, "hold") },
+			{ kind: "install", clip: playingClip(animation, 0, 3, 6, "loop") },
+			initialPose(),
+		);
+		advanceAndSample(system, 0);
+		advanceAndSample(system, 0.1);
+		system.applyMotion(
+			"owner",
+			target,
+			"locomotion",
+			{ kind: "remove" },
+			{ kind: "unchanged" },
+			initialPose(),
+		);
+		const replacement = playingClip(
+			fixedPoseAnimation("0x03000022", [9]),
+			0,
+			0,
+			0,
+			"hold",
+		);
+		system.applyMotion(
+			"owner",
+			target,
+			"explicit",
+			{ kind: "install", clip: replacement },
+			{ kind: "unchanged" },
+			initialPose(),
+		);
+		expect(
+			requiredAt(advanceAndSample(system, 0.1), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBe(9);
+	});
+
+	it.each(["gesture", "locomotion"] as const)(
+		"retimes hidden locomotion while selecting %s without replaying hidden hooks",
+		(activity) => {
+			const effects = new EffectSystem();
+			const system = buildAnimationSystemOver(effects);
+			const target = testTarget("scene-node:1");
+			installEffectState(effects, target.targetId);
+			system.applyMotion(
+				"owner",
+				target,
+				"gesture",
+				{
+					kind: "install",
+					clip: playingClip(
+						fixedPoseAnimation("0x03000023", [10]),
+						0,
+						0,
+						0,
+						"hold",
+					),
+				},
+				{
+					kind: "install",
+					clip: playingClip(testAnimation(Vec3.zero()), 0, 3, 60, "loop"),
+				},
+				initialPose(),
+			);
+			advanceAndSample(system, 0);
+			advanceAndSample(system, 0.02);
+			system.applyMotion(
+				"owner",
+				target,
+				activity,
+				{ kind: "unchanged" },
+				{ kind: "retime", framesPerSecond: 30 },
+				initialPose(),
+			);
+			expect(observations()).toHaveLength(0);
+			system.applyMotion(
+				"owner",
+				target,
+				"locomotion",
+				{ kind: "remove" },
+				{ kind: "unchanged" },
+				initialPose(),
+			);
+			expect(
+				requiredAt(advanceAndSample(system, 0.02), 0).articulatedPose
+					.partToObjectTransforms[0]?.m41,
+			).toBeCloseTo(1.2);
+			expect(observations()).toHaveLength(0);
+		},
+	);
+});

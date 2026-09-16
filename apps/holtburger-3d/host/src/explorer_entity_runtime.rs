@@ -1,5 +1,7 @@
 //! Explorer-local dynamic-entity identity, semantic lifetime, and ordered body orchestration.
 
+#[cfg(test)]
+use holtburger_world::motion::MotionPresentation;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -19,7 +21,7 @@ use holtburger_core::{
     dynamic_entity_projection_input_from_body, resolve_character_jump,
 };
 use holtburger_world::motion::{
-    BodyMotionRuntime, CharacterMotionPresentation, MotionOrder, MotionPresentation,
+    BodyMotionRuntime, CharacterMotionPresentation, MotionOrder, MotionPlayback,
     MotionRuntimeRegistry, observed_locomotion_order,
 };
 use holtburger_world::{
@@ -282,7 +284,7 @@ pub struct ExplorerEntityProjection {
     /// Source-neutral semantic facts joined with the current canonical body view.
     pub input: DynamicEntityProjectionInput,
     /// Motion presentation held now, read from the same locked registry transaction.
-    pub motion: Option<holtburger_world::motion::MotionPresentation>,
+    pub motion: Option<holtburger_world::motion::MotionPlayback>,
 }
 
 /// One accepted fixed-tick body path paired with its still-current semantic generation.
@@ -290,7 +292,7 @@ pub struct ExplorerEntityPhysicalTick {
     /// Whether frontend entity presentation consumes this tick; host-side followers ignore this.
     pub publish: bool,
     /// Motion presentation held at the end of this tick, changed or not.
-    pub motion: Option<holtburger_world::motion::MotionPresentation>,
+    pub motion: Option<holtburger_world::motion::MotionPlayback>,
     /// Possession lifecycle edges committed with this exact body solve.
     pub possession_event_outcomes: Vec<PossessionEventOutcome>,
     /// Current instance generation held stable across the collection transaction.
@@ -413,7 +415,7 @@ struct ExplorerMotionState {
     active: Option<ActivePossession>,
     /// Motion level each body's most recent publication carried, so unchanged state costs no
     /// traffic.
-    published: BTreeMap<Guid, MotionPresentation>,
+    published: BTreeMap<Guid, MotionPlayback>,
     /// Latest accepted physical result for the active possession, including bounded prefixes.
     last_physical_status: Option<ExplorerPossessionPhysicalStatus>,
     /// Planar speed achieved by the latest accepted body tick, for clamp diagnostics.
@@ -432,15 +434,15 @@ impl ExplorerMotionState {
     /// into it. Playback alone does not schedule a body: an idle contributes no motion, so a
     /// settled entity would otherwise have no tick to carry its level on.
     fn motion_awaits_publication(&self, guid: Guid) -> bool {
-        self.playback.motion_presentation(guid) != self.published.get(&guid).copied()
+        self.playback.motion_playback(guid) != self.published.get(&guid).copied()
     }
 
     /// Commits the motion presentation one body's publication carries, reporting whether it changed.
     ///
     /// Only a body that actually produced a tick commits. A body with no tick this epoch has
     /// nothing to carry its level, so it stays pending and re-offers the change on its next one.
-    fn commit_published_motion(&mut self, guid: Guid) -> (Option<MotionPresentation>, bool) {
-        let motion = self.playback.motion_presentation(guid);
+    fn commit_published_motion(&mut self, guid: Guid) -> (Option<MotionPlayback>, bool) {
+        let motion = self.playback.motion_playback(guid);
         let changed = match motion {
             Some(motion) => self.published.insert(guid, motion) != Some(motion),
             None => self.published.remove(&guid).is_some(),
@@ -462,7 +464,7 @@ impl ExplorerMotionState {
                 matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
             })
         {
-            self.playback.clear_locomotion_presentation(guid);
+            self.playback.clear_locomotion(guid);
             return Ok(());
         }
         let Some(table) = definition
@@ -1309,7 +1311,7 @@ impl ExplorerEntityRuntime {
             self.simulation
                 .replace_dynamic_entity(&prepared.definition, initial, physical)?;
         registry.motion.retire_target(guid, expected_generation);
-        registry.motion.playback.clear_locomotion_presentation(guid);
+        registry.motion.playback.clear_locomotion(guid);
         if let Some(playback) = initial_playback {
             registry.motion.playback.replace_body(guid, playback);
         }
@@ -1522,7 +1524,7 @@ impl ExplorerEntityRuntime {
             generation: instance.generation,
             presentation_class: instance.presentation_class,
             input,
-            motion: registry.motion.playback.motion_presentation(guid),
+            motion: registry.motion.playback.motion_playback(guid),
         })
     }
 
@@ -1545,7 +1547,7 @@ impl ExplorerEntityRuntime {
                     motion: registry
                         .motion
                         .playback
-                        .motion_presentation(instance.definition.identity.guid),
+                        .motion_playback(instance.definition.identity.guid),
                 })
             })
             .collect()
@@ -1770,7 +1772,7 @@ impl ExplorerEntityRuntime {
         let motion = registry
             .motion
             .playback
-            .motion_presentation(active.guid)
+            .motion_playback(active.guid)
             .map(holtburger_core::DynamicEntityMotion::from);
         Some(ExplorerPossessionMotionProbe {
             guid: active.guid,
@@ -1930,16 +1932,13 @@ impl ExplorerEntityRuntime {
             registry.motion.release();
         }
         let entities = &registry.entities;
-        registry
-            .motion
-            .playback
-            .retain_locomotion_presentation(|guid| {
-                entities.get(&guid).is_some_and(|instance| {
-                    instance.physical_demand.integration
-                        == holtburger_world::LocalIntegrationDemand::Eligible
-                        && !instance.definition.physics.dynamic_collision.missile
-                })
-            });
+        registry.motion.playback.retain_locomotion(|guid| {
+            entities.get(&guid).is_some_and(|instance| {
+                instance.physical_demand.integration
+                    == holtburger_world::LocalIntegrationDemand::Eligible
+                    && !instance.definition.physics.dynamic_collision.missile
+            })
+        });
         let possessed = registry.motion.active.as_ref().map(|active| active.guid);
         let driving: Vec<(Guid, u32)> = registry
             .entities
@@ -2165,7 +2164,7 @@ impl ExplorerEntityRuntime {
             })
             .collect();
         for &guid in &uncovered {
-            registry.motion.playback.clear_locomotion_presentation(guid);
+            registry.motion.playback.clear_locomotion(guid);
         }
         let live: BTreeSet<Guid> = registry.entities.keys().copied().collect();
         registry.motion.retain_published(&live);
@@ -3485,7 +3484,8 @@ mod tests {
             .into_iter()
             .find(|tick| tick.solved.current.id == SpatialBodyId::Entity(guid))
             .unwrap();
-        let MotionPresentation::Playing(clip) = tick.motion.unwrap() else {
+        let MotionPresentation::Playing(clip) = tick.motion.unwrap().locomotion.unwrap().clip
+        else {
             panic!("accepted walking must present a gait");
         };
         assert_eq!(clip.animation_id, WALK_ANIM);
@@ -3519,7 +3519,13 @@ mod tests {
             .unwrap();
         let after = registry.motion.playback.get(guid).unwrap();
         assert_eq!(
-            after.motion_presentation().unwrap().animation_id(),
+            after
+                .motion_playback()
+                .unwrap()
+                .locomotion
+                .unwrap()
+                .clip
+                .animation_id(),
             STAND_ANIM
         );
         assert_eq!(after.tick(), before.tick());
@@ -3528,10 +3534,16 @@ mod tests {
             after.sequence().frame_number(),
             before.sequence().frame_number()
         );
-        registry.motion.playback.clear_locomotion_presentation(guid);
+        registry.motion.playback.clear_locomotion(guid);
         let restored = registry.motion.playback.get(guid).unwrap();
         assert_eq!(
-            restored.motion_presentation().unwrap().animation_id(),
+            restored
+                .motion_playback()
+                .unwrap()
+                .ordinary
+                .unwrap()
+                .clip
+                .animation_id(),
             WALK_ANIM
         );
         assert_eq!(restored.tick(), before.tick());
@@ -3778,6 +3790,9 @@ mod tests {
             probe
                 .motion
                 .expect("run playback must be committed")
+                .ordinary
+                .unwrap()
+                .clip
                 .animation_id(),
             RUN_ANIM
         );
@@ -3821,7 +3836,11 @@ mod tests {
         assert!(
             first.ticks.iter().any(|tick| {
                 tick.publish
-                    && tick.motion.map(MotionPresentation::animation_id) == Some(STAND_ANIM)
+                    && tick
+                        .motion
+                        .and_then(|motion| motion.ordinary)
+                        .map(|layer| layer.clip.animation_id())
+                        == Some(STAND_ANIM)
             }),
             "the first tick publishes the idle the entity is already playing"
         );
@@ -3842,6 +3861,9 @@ mod tests {
                     levels.push(
                         tick.motion
                             .expect("a stated motion presentation")
+                            .ordinary
+                            .unwrap()
+                            .clip
                             .animation_id(),
                     );
                 }
@@ -3916,7 +3938,8 @@ mod tests {
                 .project(guid)
                 .expect("the spawned entity must project")
                 .motion
-                .map(MotionPresentation::animation_id),
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip.animation_id()),
             Some(STAND_ANIM),
             "a projection taken long after spawn still states the idle"
         );
@@ -3928,7 +3951,8 @@ mod tests {
                 .find(|projection| projection.input.identity.guid == guid)
                 .expect("the spawned entity must appear in its snapshot")
                 .motion
-                .map(MotionPresentation::animation_id),
+                .and_then(|motion| motion.ordinary)
+                .map(|layer| layer.clip.animation_id()),
             Some(STAND_ANIM),
             "a complete snapshot reconstructs playback without replaying history"
         );
@@ -4000,6 +4024,9 @@ mod tests {
                 .unwrap()
                 .motion
                 .unwrap()
+                .ordinary
+                .unwrap()
+                .clip
                 .animation_id(),
             STAND_ANIM,
             "the settled body is still on the first clip of its idle"
@@ -4016,7 +4043,7 @@ mod tests {
                 .filter(|tick| tick.publish)
                 .find_map(|tick| tick.motion)
             {
-                published = Some(clip.animation_id());
+                published = clip.ordinary.map(|layer| layer.clip.animation_id());
                 break;
             }
         }
@@ -4312,7 +4339,8 @@ mod tests {
             }
             restored_walk_clip |= ticks.ticks.iter().any(|tick| {
                 tick.motion
-                    .is_some_and(|motion| motion.animation_id() == WALK_ANIM)
+                    .and_then(|motion| motion.locomotion)
+                    .is_some_and(|layer| layer.clip.animation_id() == WALK_ANIM)
             });
             if body.contact == ContactState::Grounded && step > 3 {
                 landed = true;
@@ -4426,7 +4454,8 @@ mod tests {
             .unwrap();
         assert!(charged.ticks.iter().any(|tick| {
             tick.motion
-                .is_some_and(|motion| motion.animation_id() == READY_ANIM)
+                .and_then(|motion| motion.ordinary)
+                .is_some_and(|layer| layer.clip.animation_id() == READY_ANIM)
         }));
 
         runtime
@@ -4447,7 +4476,8 @@ mod tests {
             .unwrap();
         assert!(launched.ticks.iter().any(|tick| {
             tick.motion
-                .is_some_and(|motion| motion.animation_id() == FALLING_ANIM)
+                .and_then(|motion| motion.ordinary)
+                .is_some_and(|layer| layer.clip.animation_id() == FALLING_ANIM)
         }));
     }
 

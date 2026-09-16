@@ -18,6 +18,7 @@ function matchesSpellSearch(
 }
 
 const details: SpellDetails = {
+	castingRoute: "self-target",
 	description: "",
 	school: 2,
 	baseMana: 10,
@@ -26,13 +27,61 @@ const details: SpellDetails = {
 	classification: {
 		beneficial: true,
 		level: 7,
-		target: "self-target",
+		recipient: "creature",
 		fellowship: true,
 		damage: "acid",
 	},
 };
 
 describe("spell discovery matching", () => {
+	it("filters casting routes independently from authored recipients", () => {
+		const selected = spellSearchEntry("Frost Blast", {
+			...details,
+			castingRoute: "selected-target",
+			classification: {
+				...details.classification,
+				recipient: null,
+				fellowship: false,
+			},
+		});
+		expect(matchesSpellSearch(selected, [], ["selected-target"])).toBe(true);
+		expect(matchesSpellSearch(selected, [], ["untargeted"])).toBe(false);
+		const untargeted = spellSearchEntry("Flame Wave", {
+			...details,
+			castingRoute: "untargeted",
+			classification: { ...details.classification, fellowship: false },
+		});
+		expect(matchesSpellSearch(untargeted, [], ["untargeted"])).toBe(true);
+		expect(matchesSpellSearch(untargeted, [], ["selected-target"])).toBe(false);
+		expect(
+			matchesSpellSearch(untargeted, [], ["untargeted", "fellowship"]),
+		).toBe(false);
+		expect(
+			matchesSpellSearch(untargeted, [], ["self-target", "untargeted"]),
+		).toBe(true);
+	});
+	it("unions Misc with elemental tags while excluding unclassified utility spells", () => {
+		const armor = spellSearchEntry("Armor Self", {
+			...details,
+			classification: { ...details.classification, damage: "misc" },
+		});
+		const utility = spellSearchEntry("Recall", {
+			...details,
+			classification: { ...details.classification, damage: null },
+		});
+		expect(matchesSpellSearch(armor, [], ["misc", "fire", "beneficial"])).toBe(
+			true,
+		);
+		expect(matchesSpellSearch(armor, [], ["misc", "harmful"])).toBe(false);
+		expect(matchesSpellSearch(utility, [], ["misc"])).toBe(false);
+		expect(
+			matchesSpellSearch(
+				spellSearchEntry("Acid Protection", details),
+				[],
+				["misc", "acid"],
+			),
+		).toBe(true);
+	});
 	it("combines Direct with damage alternatives and other categories", () => {
 		const entry = spellSearchEntry("Harm Other I", {
 			...details,
@@ -40,7 +89,7 @@ describe("spell discovery matching", () => {
 				...details.classification,
 				damage: "direct",
 				beneficial: false,
-				target: "other",
+				recipient: "creature",
 			},
 		});
 		expect(

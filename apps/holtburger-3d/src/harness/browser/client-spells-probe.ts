@@ -60,6 +60,23 @@ export async function probeClientSpells(
 		if (element === undefined) throw new Error(`Missing ${label} filter.`);
 		element.click();
 	};
+	// Casting routes select predictable subsets and union within their category.
+	pill("Targeted");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length / 2
+	)
+		throw new Error("Selected target filter did not select targeted spells.");
+	pill("Self");
+	await tick();
+	if (
+		document.querySelectorAll("[data-spell-id]:not([hidden])").length !==
+		ids.length
+	)
+		throw new Error("Casting route alternatives did not union.");
+	button("Reset spell search and filters");
+	await tick();
 	const timings: number[] = [];
 	const longTasks: number[] = [];
 	const observer = new PerformanceObserver((list) => {
@@ -205,6 +222,12 @@ export async function probeClientSpells(
 	if (
 		!document
 			.querySelector('[data-spell-id="1"] .spell-details')
+			?.textContent?.includes("Authored recipient: Creature")
+	)
+		throw new Error("Expanded spell omitted authored recipient metadata.");
+	if (
+		!document
+			.querySelector('[data-spell-id="1"] .spell-details')
 			?.textContent?.includes("Range: 27.3 yds.")
 	)
 		throw new Error("Expanded spell omitted character-derived range.");
@@ -311,6 +334,28 @@ export async function probeClientSpells(
 	await searchFor("harm");
 	if (document.querySelectorAll("[data-spell-id]:not([hidden])").length !== 1)
 		throw new Error("Direct damage did not match Harm.");
+	button("Reset spell search and filters");
+	await tick();
+	emit("client-player-spells-updated", { spellIds: [2000, 2001] });
+	await waitFor(
+		() => document.querySelector('[data-spell-id="2001"] img') !== null,
+	);
+	pill("Misc");
+	await tick();
+	const visibleIds = () =>
+		[...document.querySelectorAll("[data-spell-id]:not([hidden])")].map((row) =>
+			row.getAttribute("data-spell-id"),
+		);
+	if (visibleIds().join(",") !== "2001")
+		throw new Error("Misc did not select the armor effect.");
+	pill("Direct");
+	await tick();
+	if (visibleIds().length !== 2)
+		throw new Error("Misc and Direct did not union.");
+	pill("Beneficial");
+	await tick();
+	if (visibleIds().join(",") !== "2001")
+		throw new Error("Misc union did not intersect disposition.");
 	button("Reset spell search and filters");
 	await tick();
 	emit("client-player-spells-updated", { spellIds: [] });

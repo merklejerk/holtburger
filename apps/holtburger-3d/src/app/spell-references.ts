@@ -26,17 +26,21 @@ const referenceSchema = z.discriminatedUnion("kind", [
 			name: z.string(),
 			details: z
 				.object({
+					castingRoute: z.enum([
+						"self-target",
+						"untargeted",
+						"selected-target",
+					]),
 					classification: z
 						.object({
 							beneficial: z.boolean(),
 							level: z.number().int().min(1).max(8).nullable(),
-							target: z
-								.enum(["self-target", "other", "item-target", "untargeted"])
-								.nullable(),
+							recipient: z.enum(["creature", "item"]).nullable(),
 							fellowship: z.boolean(),
 							damage: z
 								.enum([
 									"direct",
+									"misc",
 									"acid",
 									"bludgeoning",
 									"frost",

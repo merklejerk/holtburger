@@ -336,6 +336,16 @@
 												: `${Math.floor(row.details.durationSeconds)} sec.`}
 										</div>
 									{/if}
+									{#if row.details.classification.recipient !== null}
+										<div
+											title="Authored spell metadata; casting requirements and valid targets may differ."
+										>
+											Authored recipient: {row.details.classification
+												.recipient === "creature"
+												? "Creature"
+												: "Item"}
+										</div>
+									{/if}
 									<p>{row.details.description}</p>
 									{#if inspection.kind === "ready"}
 										{#if inspection.formula.kind === "ready"}
@@ -427,7 +437,8 @@
 		[data-filter-category="disposition"] {
 			--filter-color: var(--ui-spell-filter-disposition-color);
 		}
-		[data-filter-category="target"] {
+		[data-filter-category="target"],
+		[data-filter-category="fellowship"] {
 			--filter-color: var(--ui-spell-filter-target-color);
 		}
 		[data-filter-category="school"] {

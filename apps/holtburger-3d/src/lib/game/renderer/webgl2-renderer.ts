@@ -4491,6 +4491,10 @@ export class WebGL2Renderer implements Renderer {
 			uniforms.detailFadeFar,
 			SHARED_FRONTEND_TUNING.rendering.terrainDetailFade.far,
 		);
+		gl.uniform1f(
+			uniforms.terrainPointLightIntensityScale,
+			SHARED_FRONTEND_TUNING.rendering.terrainPointLightIntensityScale,
+		);
 		bindWebGL2DynamicLights(
 			gl,
 			uniforms,

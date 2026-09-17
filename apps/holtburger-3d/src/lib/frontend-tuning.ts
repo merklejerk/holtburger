@@ -701,6 +701,12 @@ export const SHARED_FRONTEND_TUNING = {
 			 */
 			minimumResponse: 0.15,
 		},
+		/**
+		 * Terrain-only response to dynamic and authored point lights, applied after each light's
+		 * falloff and smooth roll-off so tuning brightness does not change the pool's shape or radius.
+		 * A value of 1 preserves the evaluated light.
+		 */
+		terrainPointLightIntensityScale: 0.33,
 		terrainDetailFade: {
 			/** World distance where terrain detail-texture fading begins. */
 			near: 10,

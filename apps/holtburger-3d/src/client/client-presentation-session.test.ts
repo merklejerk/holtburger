@@ -1270,8 +1270,6 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.#nextUpsertRealization = { kind: "failure", error };
 	}
 
-	setParticleDistanceSpacingMultiplier = vi.fn<(multiplier: number) => void>();
-
 	setFrameSettings(
 		settings: Parameters<ClientPresentationRuntime["setFrameSettings"]>[0],
 	): void {

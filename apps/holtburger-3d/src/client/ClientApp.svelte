@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import {
 		initialSpellBar,
 		type ClientSpellBarState,
@@ -155,15 +154,6 @@
 	let cameraController = $state<ClientPresentationCameraController | null>(
 		null,
 	);
-	/** Session-local debug policy, updated only by the spacing control. */
-	let particleDistanceSpacingMultiplier = $state<number>(
-		SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier,
-	);
-	function setParticleDistanceSpacingMultiplier(multiplier: number): void {
-		presentationSession?.setParticleDistanceSpacingMultiplier(multiplier);
-		particleDistanceSpacingMultiplier = multiplier;
-	}
-
 	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
 	let presentationSession: ClientPresentationSession | null = null;
 	let frameRateSampler: FrameRateSampler | null = null;
@@ -698,9 +688,6 @@
 		// Frame settings are cold presentation policy, not renderer identity. The control handler
 		// updates the live owner directly; this snapshot only initializes a genuinely new owner.
 		presentation.setFrameSettings(untrack(() => frameSettings));
-		presentation.setParticleDistanceSpacingMultiplier(
-			untrack(() => particleDistanceSpacingMultiplier),
-		);
 		const currentFrameRateSampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
@@ -1038,8 +1025,6 @@
 		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}
-		{particleDistanceSpacingMultiplier}
-		onParticleDistanceSpacingChange={setParticleDistanceSpacingMultiplier}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
 		onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
 		{entityCollisionDisabled}

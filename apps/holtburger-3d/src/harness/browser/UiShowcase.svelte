@@ -27,11 +27,6 @@
 	import type { ClientChatLine } from "../../client/client-chat-policy";
 	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
 
-	/** Interactive preview of the session-local spacing control. */
-	let particleDistanceSpacingMultiplier = $state<number>(
-		SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier,
-	);
-
 	provideAppInputPolicy();
 	/** Showcase geometry follows the available stage, independently of client placement defaults. */
 	let stageWidth = $state(960);
@@ -428,10 +423,6 @@
 							/>
 						{:else if tab === "diagnostics"}
 							<ClientDebugPanel
-								{particleDistanceSpacingMultiplier}
-								onParticleDistanceSpacingChange={(value) => {
-									particleDistanceSpacingMultiplier = value;
-								}}
 								entityMetadata={{
 									status: "available",
 									path: "fixture.hwc",

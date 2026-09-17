@@ -306,6 +306,33 @@ mod tests {
         })
     }
 
+    #[test]
+    fn container_access_crosses_snapshot_and_delta_projection_without_a_second_event() {
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        let access = holtburger_world::state::WorldContainerState::Open { root: Guid(10) };
+        snapshot.entities.world_container = access;
+        let current = ClientCurrentState::from(&snapshot);
+        assert_eq!(
+            serde_json::to_value(current).unwrap()["entities"]["worldContainer"],
+            serde_json::json!({"kind": "open", "root": 10})
+        );
+        let event = project_client_event(ClientViewEvent::EntityFactsChanged(
+            holtburger_core::ClientEntityDelta {
+                world_container: Some(holtburger_world::state::WorldContainerState::Closed),
+                ..Default::default()
+            },
+        ));
+        let Some(ClientHostEvent::EntityFactsChanged(delta)) = event else {
+            panic!("semantic delta projection");
+        };
+        assert_eq!(
+            serde_json::to_value(delta).unwrap()["worldContainer"],
+            serde_json::json!({"kind": "closed"})
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn forwards_during_a_busy_authority_turn_and_drains_before_exit() {
         let (event_tx, events) = broadcast::channel(8);

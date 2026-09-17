@@ -40,6 +40,8 @@ pub(crate) struct EntityLifecycleState {
     pub prune_deadline: Option<f64>,
     pub trade_preview: bool,
     pub container_preview: bool,
+    /// Dispatched transfers awaiting an item-scoped result; retains this item and its subtree.
+    pub inventory_transfer_requests: u32,
     /// Complete appearance for a not-yet-materialized future object incarnation.
     pub pending_visual_description: Option<PendingVisualDescription>,
 }
@@ -57,6 +59,7 @@ impl EntityLifecycleState {
             && self.prune_deadline.is_none()
             && !self.trade_preview
             && !self.container_preview
+            && self.inventory_transfer_requests == 0
             && self.pending_visual_description.is_none()
     }
 }
@@ -125,6 +128,8 @@ pub(crate) struct EntityRetentionSnapshot {
     pub has_parent_owner: bool,
     pub trade_preview: bool,
     pub container_preview: bool,
+    /// Description retention only; never grants ownership, access, or semantic admission.
+    pub inventory_transfer_pending: bool,
     /// Whether current deletion authority applies to this entity's exact incarnation.
     pub current_instance_delete_requested: bool,
     pub prune_deadline_expired: bool,
@@ -136,7 +141,8 @@ impl EntityRetentionSnapshot {
     }
 
     pub fn has_nonworld_retention(self) -> bool {
-        self.held_by_player
+        self.inventory_transfer_pending
+            || self.held_by_player
             || self.equipped_by_player
             || self.inside_open_container
             || self.has_container_owner
@@ -156,7 +162,9 @@ impl EntityRetentionSnapshot {
     }
 
     pub fn is_retained(self) -> bool {
-        self.has_authoritative_retention() || self.has_preview_retention()
+        self.has_authoritative_retention()
+            || self.has_preview_retention()
+            || self.inventory_transfer_pending
     }
 }
 
@@ -296,7 +304,7 @@ impl WorldState {
 
     pub(crate) fn mark_entity_explicit_delete(&mut self, guid: Guid) {
         // Accepted deletion retires storage immediately, before deferred scene eviction.
-        self.storage.retire(guid);
+        self.retire_entity_storage(guid);
         self.entity_lifecycle
             .get_or_default_mut(guid)
             .delete_request = Some(EntityDeleteRequest::Unconditional);
@@ -339,7 +347,7 @@ impl WorldState {
             Some(EntityDeleteRequest::Instance(_)) => {}
         }
         if disposition == EntityInstanceDeleteDisposition::Applied {
-            self.storage.retire(guid);
+            self.retire_entity_storage(guid);
         }
         disposition
     }
@@ -368,7 +376,7 @@ impl WorldState {
         }
         self.entity_lifecycle.compact(guid);
         if applies_to_instance {
-            self.storage.retire(guid);
+            self.retire_entity_storage(guid);
         }
         applies_to_instance
     }
@@ -410,6 +418,72 @@ impl WorldState {
         self.entity_lifecycle.compact(guid);
     }
 
+    /// Preserve a known item involved in external storage until its dispatched move resolves.
+    /// ACE pickup completion sends containment, not a replacement item description.
+    pub fn retain_inventory_transfer(&mut self, guid: Guid) {
+        self.entity_lifecycle
+            .get_or_default_mut(guid)
+            .inventory_transfer_requests += 1;
+    }
+
+    /// Release one request after success, rejection, or failed send. Other requests still retain it.
+    pub fn finish_inventory_transfer(&mut self, guid: Guid) {
+        let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) else {
+            return;
+        };
+        if state.inventory_transfer_requests == 0 {
+            return;
+        }
+        state.inventory_transfer_requests -= 1;
+        if state.inventory_transfer_requests != 0 {
+            return;
+        }
+        self.prune_finished_inventory_transfer(guid);
+    }
+
+    fn prune_finished_inventory_transfer(&mut self, guid: Guid) {
+        self.entity_lifecycle.compact(guid);
+        let contents: Vec<_> = std::iter::once(guid)
+            .chain(self.storage.owned_items(guid))
+            .collect();
+        self.mark_container_preview_entities_for_prune(&contents);
+    }
+
+    /// Character/session teardown abandons requests that can no longer complete here.
+    pub fn clear_inventory_transfers(&mut self) {
+        let pending: Vec<_> = self
+            .entity_lifecycle
+            .by_guid
+            .iter()
+            .filter_map(|(&guid, state)| (state.inventory_transfer_requests != 0).then_some(guid))
+            .collect();
+        for guid in pending {
+            self.entity_lifecycle
+                .get_or_default_mut(guid)
+                .inventory_transfer_requests = 0;
+            self.prune_finished_inventory_transfer(guid);
+        }
+    }
+
+    fn has_pending_inventory_transfer(&self, guid: Guid) -> bool {
+        let mut current = Some(guid);
+        while let Some(guid) = current {
+            if self
+                .entity_lifecycle
+                .get(guid)
+                .is_some_and(|state| state.inventory_transfer_requests != 0)
+            {
+                return true;
+            }
+            // Follow accepted storage links; no separate request-owned containment graph.
+            current = self
+                .storage
+                .location(guid)
+                .map(|location| location.parent());
+        }
+        false
+    }
+
     pub(crate) fn retention_snapshot(
         &self,
         guid: Guid,
@@ -417,8 +491,7 @@ impl WorldState {
     ) -> Option<EntityRetentionSnapshot> {
         let entity = self.entities.get(guid)?;
         let container_id = entity.container_id();
-        let open_container =
-            container_id.is_some_and(|container| self.open_containers.contains(&container));
+        let open_container = self.is_world_container_content(guid);
         let lifecycle = self.entity_lifecycle.get(guid);
         let container_preview = lifecycle.is_some_and(|state| state.container_preview);
 
@@ -436,6 +509,7 @@ impl WorldState {
             has_parent_owner: entity.attachment().is_some_and(|_| in_world),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,
+            inventory_transfer_pending: self.has_pending_inventory_transfer(guid),
             current_instance_delete_requested: self.current_instance_delete_requested(guid),
             prune_deadline_expired: lifecycle
                 .and_then(|state| state.prune_deadline)
@@ -588,16 +662,15 @@ impl WorldState {
                 .retain_into(&current.properties, &mut entity.properties);
         }
 
-        let preserve_container_preview = entity
-            .container_id()
-            .is_some_and(|container| self.open_containers.contains(&container))
-            || self
-                .entities
-                .get(guid)
-                .and_then(|existing| existing.container_id())
-                .is_some_and(|container| self.open_containers.contains(&container));
+        let preserve_container_preview = self
+            .entity_lifecycle
+            .get(guid)
+            .is_some_and(|state| state.container_preview)
+            || self.is_world_container_content(guid);
 
-        self.clear_entity_prune_deadline(guid);
+        if !preserve_container_preview || self.is_world_container_content(guid) {
+            self.clear_entity_prune_deadline(guid);
+        }
         if !self.trade_contains_item(guid) {
             self.clear_trade_preview(guid);
         }

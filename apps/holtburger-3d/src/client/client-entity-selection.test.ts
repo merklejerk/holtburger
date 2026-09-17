@@ -509,7 +509,7 @@ describe("ClientEntitySelection", () => {
 			);
 			const changes: Array<number | null> = [];
 			selection.subscribe((guid) => changes.push(guid));
-			selection.selectInventoryItem(12, "toggle");
+			selection.selectContentsItem(12, "toggle");
 			lifecycle.update(
 				[entityFacts(12, { scenePlacement: "unavailable" })],
 				[],
@@ -542,21 +542,21 @@ describe("ClientEntitySelection", () => {
 			location: { kind: "contained", parentGuid: 1, slot: { kind: "pending" } },
 		});
 		lifecycle.update([{ ...owned, description: { kind: "pending" } }], []);
-		selection.selectInventoryItem(12, "toggle");
+		selection.selectContentsItem(12, "toggle");
 		expect(selection.selectedGuid()).toBeNull();
 		lifecycle.update([owned], []);
-		selection.selectInventoryItem(12, "select");
+		selection.selectContentsItem(12, "select");
 		expect(selection.selectedGuid()).toBe(12);
-		selection.selectInventoryItem(12, "select");
+		selection.selectContentsItem(12, "select");
 		expect(selection.selectedGuid()).toBe(12);
-		selection.selectInventoryItem(12, "toggle");
+		selection.selectContentsItem(12, "toggle");
 		expect(selection.selectedGuid()).toBeNull();
-		selection.selectInventoryItem(12, "toggle");
+		selection.selectContentsItem(12, "toggle");
 		expect(selection.selectedGuid()).toBe(12);
 		lifecycle.entities.awaitSnapshot();
 		lifecycle.emit({ type: "resyncing" });
 		selection.maintainSelection();
-		selection.selectInventoryItem(7, "toggle");
+		selection.selectContentsItem(7, "toggle");
 		expect(selection.selectedGuid()).toBe(12);
 		selection.destroy();
 	});
@@ -586,7 +586,7 @@ describe("ClientEntitySelection", () => {
 			],
 			[],
 		);
-		selection.selectInventoryItem(12, "toggle");
+		selection.selectContentsItem(12, "toggle");
 		lifecycle.update(
 			[
 				entityFacts(12, {
@@ -679,13 +679,20 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 	constructor() {
 		this.entities.commit(
 			this.entities.prepareSnapshot(
-				{ entities: [1, 4, 7, 8, 9, 12, 77].map((guid) => entityFacts(guid)) },
+				{
+					worldContainer: { kind: "closed" },
+					entities: [1, 4, 7, 8, 9, 12, 77].map((guid) => entityFacts(guid)),
+				},
 				1,
 			),
 		);
 	}
 	update(upserts: ClientEntityFacts[], removed: number[]): void {
-		const prepared = this.entities.prepareDelta({ upserts, removed });
+		const prepared = this.entities.prepareDelta({
+			worldContainer: null,
+			upserts,
+			removed,
+		});
 		if (prepared === null) throw new Error("Fixture requires current state.");
 		this.entities.commit(prepared);
 		this.emit({ type: "entities" });

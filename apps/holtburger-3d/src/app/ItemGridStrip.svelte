@@ -4,18 +4,29 @@
 	interface Props {
 		/** Rows supplied by the consuming UI; scrolling advances by one row. */
 		readonly children: Snippet;
+		/** Axis belongs to the consuming panel; inventory stays vertical. */
+		readonly orientation?: "vertical" | "horizontal";
 	}
-	const { children }: Props = $props();
+	const { children, orientation = "vertical" }: Props = $props();
 	let viewport = $state<HTMLDivElement | null>(null);
 	let cells = $state<HTMLDivElement | null>(null);
-	let canScrollUp = $state(false);
-	let canScrollDown = $state(false);
+	let canScrollBack = $state(false);
+	let canScrollForward = $state(false);
 
 	function updateEdges(): void {
 		if (viewport === null) return;
-		canScrollUp = viewport.scrollTop > 0;
-		canScrollDown =
-			viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1;
+		const offset =
+			orientation === "horizontal" ? viewport.scrollLeft : viewport.scrollTop;
+		const size =
+			orientation === "horizontal"
+				? viewport.clientWidth
+				: viewport.clientHeight;
+		const extent =
+			orientation === "horizontal"
+				? viewport.scrollWidth
+				: viewport.scrollHeight;
+		canScrollBack = offset > 0;
+		canScrollForward = offset + size < extent - 1;
 	}
 
 	onMount(() => {
@@ -38,11 +49,16 @@
 		for (const cell of candidates) {
 			const rect = cell.getBoundingClientRect();
 			const distance =
-				direction === "up"
-					? rect.top - bounds.top
-					: rect.bottom - bounds.bottom;
+				orientation === "horizontal"
+					? direction === "up"
+						? rect.left - bounds.left
+						: rect.right - bounds.right
+					: direction === "up"
+						? rect.top - bounds.top
+						: rect.bottom - bounds.bottom;
 			if (direction === "up" ? distance < -1 : distance > 1) {
-				viewport.scrollTop += distance;
+				if (orientation === "horizontal") viewport.scrollLeft += distance;
+				else viewport.scrollTop += distance;
 				updateEdges();
 				return;
 			}
@@ -50,7 +66,7 @@
 	}
 </script>
 
-<div class="item-grid-strip">
+<div class="item-grid-strip" class:horizontal={orientation === "horizontal"}>
 	<div
 		class="item-grid-strip-viewport"
 		bind:this={viewport}
@@ -60,21 +76,25 @@
 			{@render children()}
 		</div>
 	</div>
-	{#if canScrollUp}
+	{#if canScrollBack}
 		<button
 			class="strip-arrow strip-arrow-up ui-item-strip-arrow ui-hud-button"
 			type="button"
-			aria-label="Scroll items up"
+			aria-label={orientation === "horizontal"
+				? "Scroll items left"
+				: "Scroll items up"}
 			onclick={() => scrollCell("up")}
 			><span class="strip-arrow-glyph strip-arrow-glyph-up" aria-hidden="true"
 			></span></button
 		>
 	{/if}
-	{#if canScrollDown}
+	{#if canScrollForward}
 		<button
 			class="strip-arrow strip-arrow-down ui-item-strip-arrow ui-hud-button"
 			type="button"
-			aria-label="Scroll items down"
+			aria-label={orientation === "horizontal"
+				? "Scroll items right"
+				: "Scroll items down"}
 			onclick={() => scrollCell("down")}
 			><span class="strip-arrow-glyph strip-arrow-glyph-down" aria-hidden="true"
 			></span></button
@@ -132,6 +152,41 @@
 		}
 		.strip-arrow-down {
 			bottom: var(--ui-item-strip-block-inset);
+		}
+		.horizontal {
+			width: 100%;
+			height: auto;
+			padding: var(--ui-item-strip-inset);
+		}
+		.horizontal .item-grid-strip-viewport {
+			overflow-x: auto;
+			overflow-y: hidden;
+			padding: 0;
+		}
+		.horizontal .item-grid-strip-cells {
+			grid-auto-flow: column;
+			grid-auto-columns: var(--ui-item-cell-min-size);
+			grid-template-columns: none;
+			width: max-content;
+			min-width: 100%;
+		}
+		.horizontal .strip-arrow {
+			top: var(--ui-item-strip-inset);
+			bottom: var(--ui-item-strip-inset);
+			height: auto;
+			width: var(--ui-item-strip-arrow-height);
+		}
+		.horizontal .strip-arrow-up {
+			left: var(--ui-item-strip-inset);
+			right: auto;
+		}
+		.horizontal .strip-arrow-down {
+			right: var(--ui-item-strip-inset);
+			left: auto;
+		}
+		.horizontal .strip-arrow-glyph {
+			display: inline-block;
+			transform: rotate(-90deg);
 		}
 	}
 </style>

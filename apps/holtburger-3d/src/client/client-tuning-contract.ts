@@ -89,6 +89,19 @@ export interface ClientTuning {
 			readonly glowBlurCssPixels: number;
 		};
 	};
+	/** Bounded external-storage display pulls; access still commits at session cadence. */
+	readonly worldContainer: {
+		readonly displayIntervalMs: number;
+		/** Bounds for the initial grid footprint before the container is shown. */
+		readonly openingGrid: {
+			/** Small containers reserve one row at this width. */
+			readonly minColumns: number;
+			/** Wider containers stop growing horizontally at this count. */
+			readonly maxColumns: number;
+			/** Additional items and pack headings scroll beyond this row budget. */
+			readonly maxRows: number;
+		};
+	};
 	/** Mounted inventory display sampling policy. */
 	readonly inventory: {
 		/** Pointer travel required before an inventory selection becomes a drag. */

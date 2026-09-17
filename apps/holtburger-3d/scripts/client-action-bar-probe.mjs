@@ -177,7 +177,8 @@ export async function probeActionBars(
 	assert.equal(await openMenu(), false);
 
 	await assertStrip("horizontal");
-	const source = '.inventory-sections .item-grid-cell[data-item-guid="91"]';
+	const source =
+		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="91"]';
 	const mutations = async () =>
 		(await commands()).filter((entry) =>
 			["submit_client_inventory", "equip_client_item"].includes(entry.command),
@@ -396,7 +397,7 @@ export async function probeActionBars(
 	assert.equal(await equipCount(), modifierCommands + 4);
 	// A targeted stack has an alternate target; the armor in slot 6 and empty cells do not.
 	await drag(
-		'.inventory-sections .item-grid-cell[data-item-guid="94"]',
+		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="94"]',
 		cell(1, 3),
 	);
 	await read(`(async () => {

@@ -22,7 +22,7 @@ use crate::state::motion_resolution::test_support::{
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WorldObjectExt as _,
+    PhysicsState, PropertyBool, PropertyFloat, PropertyInt, PropertyInt64, WorldObjectExt as _,
     WorldObjectProperties, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{
@@ -3695,6 +3695,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
             ),
             target_geometry: Arc::new(crate::PreparedEntityTargetGeometry {
                 setup_radius: 0.5,
+                setup_height: 1.0,
                 collision_animations: Default::default(),
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
@@ -4737,379 +4738,6 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
 }
 
 #[test]
-fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000150);
-    let item_guid = Guid(0x60000150);
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
-            container: container_guid,
-            items: vec![ViewContentsEventItem {
-                guid: item_guid,
-                container_type: holtburger_common::properties::InventoryEntryKind::Item,
-            }],
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.open_containers.contains(&container_guid));
-    assert!(state.entities.get(item_guid).is_none());
-    assert!(state.entity_lifecycle_state(item_guid).is_none());
-    assert!(events.iter().any(
-        |event| matches!(event, WorldEvent::ContainerOpened(guid) if *guid == container_guid)
-    ));
-    assert!(!events.iter().any(
-        |event| matches!(event, WorldEvent::EntitySpawned(entity) if entity.guid == item_guid)
-    ));
-}
-
-#[test]
-fn test_view_contents_marks_existing_entity_as_container_preview() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000157);
-    let item_guid = Guid(0x60000157);
-
-    state.entities.insert(Entity::new(
-        item_guid,
-        "Known Item".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
-            container: container_guid,
-            items: vec![ViewContentsEventItem {
-                guid: item_guid,
-                container_type: holtburger_common::properties::InventoryEntryKind::Item,
-            }],
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.open_containers.contains(&container_guid));
-    assert_eq!(
-        state
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.container_id()),
-        Some(container_guid)
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-    assert!(events.iter().any(
-        |event| matches!(event, WorldEvent::ContainerOpened(guid) if *guid == container_guid)
-    ));
-}
-
-#[test]
-fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000151);
-    let item_guid = Guid(0x60000151);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.open_containers.insert(container_guid);
-
-    let mut entity = Entity::new(
-        item_guid,
-        "PreviewItem".to_string(),
-        WorldPosition::default(),
-    );
-    entity.set_container_id(Some(container_guid));
-    entity.position.landblock_id = Guid::NULL;
-    state.entities.insert(entity);
-    state.mark_container_preview(item_guid);
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-    let deadline = state
-        .entity_lifecycle_state(item_guid)
-        .and_then(|state| state.prune_deadline)
-        .expect("expected preview-only container entity to become sweep-eligible");
-
-    assert!(!state.open_containers.contains(&container_guid));
-    assert!(state.entities.get(item_guid).is_some());
-    assert_eq!(
-        state
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.prune_deadline.is_some())
-    );
-    assert!(!events.iter().any(
-        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
-    ));
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: deadline + 1.0,
-        local_time: Instant::now(),
-    });
-
-    let tick_events = state.tick();
-    assert!(state.entities.get(item_guid).is_none());
-    assert!(tick_events.iter().any(
-        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
-    ));
-}
-
-#[test]
-fn test_reopening_container_does_not_reactivate_stale_preview_contents() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000158);
-    let old_item_guid = Guid(0x60000159);
-    let new_item_guid = Guid(0x6000015A);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.open_containers.insert(container_guid);
-
-    let mut old_item = Entity::new(
-        old_item_guid,
-        "Old Preview Item".to_string(),
-        WorldPosition::default(),
-    );
-    old_item.position.landblock_id = Guid::NULL;
-    old_item.set_container_id(Some(container_guid));
-    state.entities.insert(old_item);
-    state.mark_container_preview(old_item_guid);
-
-    let close_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let _ = state.handle_message(&close_msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(old_item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-
-    state.entities.insert(Entity::new(
-        new_item_guid,
-        "New Preview Item".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let reopen_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
-            container: container_guid,
-            items: vec![ViewContentsEventItem {
-                guid: new_item_guid,
-                container_type: holtburger_common::properties::InventoryEntryKind::Item,
-            }],
-        })),
-    }));
-
-    let _ = state.handle_message(&reopen_msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(old_item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-    assert!(
-        !state
-            .entity_lifecycle_state(old_item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-    assert_eq!(
-        state
-            .entities
-            .get(new_item_guid)
-            .and_then(|entity| entity.container_id()),
-        Some(container_guid)
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(new_item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-}
-
-#[test]
-fn test_late_container_item_arrival_is_marked_preview_and_pruned_on_close() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x7000015B);
-    let item_guid = Guid(0x6000015B);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.open_containers.insert(container_guid);
-
-    state.entities.insert(Entity::new(
-        item_guid,
-        "Late Chest Item".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let update_msg =
-        GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
-            sequence: 0,
-            guid: item_guid,
-            property: PropertyInstanceId::Container as u32,
-            value: container_guid,
-        }));
-
-    let _ = state.handle_message(&update_msg);
-
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-
-    let close_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let _ = state.handle_message(&close_msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
-            .is_some()
-    );
-}
-
-#[test]
-fn test_closed_container_update_preserves_preview_provenance_and_prune_deadline() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x7000015C);
-    let item_guid = Guid(0x6000015C);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-
-    let mut item = Entity::new(
-        item_guid,
-        "Late Closed Chest Item".to_string(),
-        WorldPosition::default(),
-    );
-    item.position.landblock_id = Guid::NULL;
-    item.set_container_id(Some(container_guid));
-    state.entities.insert(item);
-    state.mark_container_preview(item_guid);
-    state.set_entity_prune_deadline(item_guid, 125.0);
-
-    let update_msg =
-        GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
-            sequence: 0,
-            guid: item_guid,
-            property: PropertyInstanceId::Container as u32,
-            value: container_guid,
-        }));
-
-    let _ = state.handle_message(&update_msg);
-
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
-            .is_some()
-    );
-}
-
-#[test]
-fn test_close_ground_container_preserves_entity_with_other_retention() {
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000153);
-    let container_guid = Guid(0x70000153);
-    let item_guid = Guid(0x60000153);
-
-    state.player.guid = player_guid;
-    state.open_containers.insert(container_guid);
-
-    let mut entity = Entity::new(
-        item_guid,
-        "RetainedItem".to_string(),
-        WorldPosition::default(),
-    );
-    entity.set_container_id(Some(container_guid));
-    entity.position.landblock_id = Guid::NULL;
-    state.entities.insert(entity);
-    state.mark_container_preview(item_guid);
-    state
-        .storage
-        .announce_container(item_guid, state.player.guid);
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.entities.get(item_guid).is_some());
-    assert!(state.entity_lifecycle_state(item_guid).is_none());
-    assert!(state.storage.owned_by(item_guid, state.player.guid));
-    assert!(!events.iter().any(
-        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
-    ));
-}
-
-#[test]
 fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_container_retention()
  {
     let mut state = WorldState::synthetic();
@@ -5163,7 +4791,10 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     preview_entity.position.landblock_id = Guid::NULL;
     preview_entity.set_container_id(Some(container_guid));
     state.add_entity(preview_entity);
-    state.open_containers.insert(container_guid);
+    state
+        .storage
+        .announce_container(preview_guid, container_guid);
+    state.confirm_world_container(container_guid);
     state.mark_container_preview(preview_guid);
 
     let events = state.tick();
@@ -6025,4 +5656,77 @@ fn login_combat_mode_defaults_to_peace_without_overriding_explicit_server_modes(
             .set_int_prop(PropertyInt::CombatMode, mode as i32);
         assert_eq!(state.player_combat_mode(), mode);
     }
+}
+
+#[test]
+fn world_container_range_uses_scaled_canonical_bodies_and_tolerates_pending_geometry() {
+    let mut world = WorldState::synthetic();
+    let actor = Guid(0x5000_0201);
+    let target = Guid(0x8000_0202);
+    world.player.guid = actor;
+    let pose = WorldPosition {
+        landblock_id: Guid(0xda55_0020),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    world.add_entity(Entity::new(actor, "Actor".into(), pose));
+    world.add_entity(Entity::new(
+        target,
+        "Chest".into(),
+        WorldPosition {
+            coords: Vector3::new(2.0, 0.0, 0.0),
+            ..pose
+        },
+    ));
+    world.confirm_world_container(target);
+    assert_eq!(world.within_use_radius(actor, target), None);
+    let configuration = set_state_dynamic_definition();
+    for guid in [actor, target] {
+        world
+            .scene
+            .set_dynamic_physical_body(
+                world.authoritative_body_id_for_guid(guid).unwrap(),
+                Some(configuration.clone()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+    // Two half-metre radii leave a metre of separation, beyond ACE's absent-property default.
+    assert_eq!(world.within_use_radius(actor, target), Some(false));
+    world
+        .apply_entity_script_scale(target, 2.0, 0.0, 1.0)
+        .unwrap();
+    assert_eq!(world.within_use_radius(actor, target), Some(true));
+    // An authored radius replaces the protocol default, including a zero radius.
+    world
+        .entities
+        .get_mut(target)
+        .unwrap()
+        .properties
+        .floats
+        .insert(PropertyFloat::UseRadius, 0.0);
+    assert_eq!(world.within_use_radius(actor, target), Some(false));
+    world
+        .entities
+        .get_mut(target)
+        .unwrap()
+        .properties
+        .floats
+        .insert(PropertyFloat::UseRadius, 1.0);
+    assert_eq!(world.within_use_radius(actor, target), Some(true));
+    // Semantic/server placement can lag simulation; it must not replace the canonical body pose.
+    world.entities.get_mut(target).unwrap().position.coords.x = 100.0;
+    assert_eq!(world.within_use_radius(actor, target), Some(true));
+    world
+        .scene
+        .set_dynamic_physical_body(
+            SpatialBodyId::Entity(target),
+            None,
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    assert_eq!(world.within_use_radius(actor, target), None);
+    assert_eq!(world.world_container().root(), Some(target));
 }

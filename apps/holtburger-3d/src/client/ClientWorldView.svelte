@@ -1,4 +1,7 @@
 <script lang="ts">
+	import type { ItemDragSession } from "./client-item-drag";
+	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
+	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientSpellDrag } from "./client-spell-drag";
 	import type { ClientItemDrag } from "./client-item-drag";
 	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
@@ -97,9 +100,13 @@
 		readonly spells: ClientSpellServices | null;
 		/** Session-owned inventory state, independent of floating-panel mounts. */
 		readonly inventory: ClientInventoryState | null;
+		/** Direct authority for cross-panel item gestures. */
+		readonly itemSession: ItemDragSession | null;
+		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
+		readonly worldContainer: ClientWorldContainerPanelState | null;
 		/** Shared use/combining owner for all mounted entry points. */
 		readonly itemInteractions: ClientItemInteractions | null;
-		readonly onSelectInventoryItem: (
+		readonly onSelectContentsItem: (
 			guid: number,
 			mode: "toggle" | "select",
 		) => void;
@@ -161,8 +168,10 @@
 		readSelectedEntityDisplay,
 		spells,
 		inventory,
+		itemSession,
+		worldContainer,
 		itemInteractions,
-		onSelectInventoryItem,
+		onSelectContentsItem,
 		onPickInventoryTarget,
 		onInventoryNotice,
 		onInteractEntity,
@@ -534,14 +543,16 @@
 		onStateChange={updateMinimap}
 		{onSelectEntity}
 	/>
-	{#if inventory !== null && worldElement !== null && itemInteractions !== null}
+	{#if inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
+				session={itemSession}
+				{worldContainer}
 				onDragOwner={(owner) => (itemDrag = owner)}
 				{onPickInventoryTarget}
 				{onInventoryNotice}
 				interactions={itemInteractions}
-				onSelectDragItem={(guid) => onSelectInventoryItem(guid, "select")}
+				onSelectDragItem={(guid) => onSelectContentsItem(guid, "select")}
 				root={worldElement}
 				{inventory}
 				{viewport}
@@ -702,6 +713,21 @@
 			onToggle={(panel) => (activePanel = activePanel === panel ? null : panel)}
 		/>
 	</ClientHudPanel>
+	{#if worldContainer !== null && itemInteractions !== null}
+		{#key worldContainer}
+			<ClientWorldContainerWindow
+				model={worldContainer}
+				interactions={itemInteractions}
+				selectedGuid={selectedEntityGuid}
+				onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
+				placement={hudLayout.worldContainer}
+				{viewport}
+				onPlacementChange={(placement) =>
+					(hudLayout = { ...hudLayout, worldContainer: placement })}
+			/>
+		{/key}
+	{/if}
+
 	{#if activePanel !== null}
 		{@const panel = activePanel}
 		{#key panel}
@@ -733,7 +759,7 @@
 								interactions={itemInteractions}
 								{inventory}
 								selectedGuid={selectedEntityGuid}
-								onSelectItem={(guid) => onSelectInventoryItem(guid, "toggle")}
+								onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
 							/>
 						{/key}
 					{/if}

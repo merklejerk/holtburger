@@ -331,6 +331,11 @@ impl StorageState {
 }
 
 impl super::WorldState {
+    /// Accepted ancestry used by transfer planning to reject containment cycles.
+    pub fn is_stored_within(&self, guid: Guid, ancestor: Guid) -> bool {
+        self.storage.owned_by(guid, ancestor)
+    }
+
     /// Drain record invalidation from storage statements, including statements for missing entities.
     /// Core also compares old/new owned closures to include descendants of changed ancestors.
     pub fn take_storage_changes(&mut self) -> BTreeSet<Guid> {

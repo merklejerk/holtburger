@@ -67,7 +67,8 @@ pub struct WorldState {
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
-    pub open_containers: std::collections::HashSet<Guid>,
+    /// Confirmed external storage access; roster receipt does not mutate this state.
+    pub(crate) world_container: super::WorldContainerState,
     /// Attachment admission, pending dependencies and scene transition history.
     pub(crate) attachments: super::attachment_lifecycle::AttachmentLifecycle,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
@@ -277,6 +278,13 @@ impl WorldState {
         self.seed_scene_placements();
         let mut events = Vec::new();
         crate::handlers::handle_message(self, msg, &mut events);
+        if self
+            .world_container
+            .root()
+            .is_some_and(|root| self.storage_location(root).is_some())
+        {
+            self.close_world_container();
+        }
         self.reconcile_scene_placements(&mut events);
         events
     }
@@ -406,7 +414,7 @@ impl WorldState {
             vendor: None,
             fellowship: None,
             trade: None,
-            open_containers: std::collections::HashSet::new(),
+            world_container: super::WorldContainerState::Closed,
             attachments: super::attachment_lifecycle::AttachmentLifecycle::default(),
             entity_lifecycle: EntityLifecycleStore::default(),
             self_movement_capabilities_override: None,
@@ -460,7 +468,7 @@ impl WorldState {
             // Accepted deletion already retired the old relationships. Later declarations must
             // survive eviction of that description and await their own hydration.
             if !deletion_already_retired_storage {
-                self.storage.retire(guid);
+                self.retire_entity_storage(guid);
             }
             // Pending links live only as long as the entities at either end of them.
             self.attachments.announcements.remove(&guid);

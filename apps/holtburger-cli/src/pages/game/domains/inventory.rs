@@ -115,23 +115,15 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 amount,
             });
         }
-        AppAction::PickUp {
-            item: guid,
-            container: preferred_container_id,
-        } => {
-            if let Some(container_id) = state.data.find_non_full_pack(guid, preferred_container_id)
-            {
-                result.commands.push(ClientCommand::MoveItem {
-                    item: guid,
-                    container: container_id,
-                    placement: 0,
-                });
-            } else {
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::system(),
-                    message: "No space left.".to_string(),
-                });
-            }
+        AppAction::PickUp { item, container } => {
+            result.commands.push(ClientCommand::SubmitInventory(
+                holtburger_core::client::inventory_plan::InventoryIntent {
+                    item,
+                    target: holtburger_core::client::inventory_plan::InventoryTarget::Pickup {
+                        container,
+                    },
+                },
+            ));
         }
         AppAction::Give {
             item,

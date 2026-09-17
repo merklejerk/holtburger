@@ -4,7 +4,7 @@ use std::vec;
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::Guid;
 use holtburger_common::properties::{PseudoEquipMask, WorldObjectExt as _};
-use holtburger_world::context::{WorldContext, WorldContextExt};
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -34,7 +34,6 @@ pub struct NearbyTab {
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     let entities = &data.entities;
     let player_pos = data.runtime_player_position();
-    let open_containers = &data.open_containers;
 
     let candidates: Vec<_> = entities
         .values()
@@ -42,15 +41,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
             let loc = e.valid_locations();
             let is_combat_implement = (loc.bits() & PseudoEquipMask::COMBAT_IMPLEMENTS.bits()) != 0;
 
-            let in_open_container = if let Some(cid) = e.container_id() {
-                // Container must be in world (not one of our pack slots).
-                open_containers.contains(&cid)
-                    && data
-                        .get_entity(cid)
-                        .is_some_and(|container| container.position.landblock_id != Guid::NULL)
-            } else {
-                false
-            };
+            let in_open_container = data.is_world_container_content(e.guid);
 
             (e.position.landblock_id != Guid::NULL
                 || (e.wielder_id().is_some() && is_combat_implement)
@@ -317,13 +308,10 @@ impl TabController for NearbyTab {
         if let Some(guid) = target_guid {
             let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
-            let _is_open_container = data.open_containers.contains(&e.guid);
-
-            // Item must not be stuck and is either on the ground or in an open container to be pickable.
-            if !e.is_stuck()
-                && (e.is_root()
-                    || e.container_id()
-                        .is_some_and(|c| data.open_containers.contains(&c)))
+            if data
+                .entity_facts
+                .get(&e.guid)
+                .is_some_and(|facts| facts.can_pick_up)
             {
                 verbs.push(Verb::new(
                     vec![AppAction::PickUp {
@@ -395,13 +383,13 @@ impl TabController for NearbyTab {
                     verbs.push(Verb::new(AppAction::Attack { guid: e.guid }, 'k', "Attack"));
                 }
                 EntityClass::Chest | EntityClass::Container => {
-                    if data.open_containers.contains(&e.guid) {
+                    if data.current_open_container() == Some(e.guid) {
                         verbs.push(Verb::new(
                             vec![AppAction::Close { guid: e.guid }],
                             'o',
                             "Close",
                         ));
-                    } else if data.can_use(e.guid) {
+                    } else if !data.is_world_container_content(e.guid) && data.can_use(e.guid) {
                         verbs.push(Verb::new(
                             vec![AppAction::Use { guid: e.guid }],
                             'o',

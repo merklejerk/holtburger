@@ -960,15 +960,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             }))
         }
         ClientViewEvent::EntityUseFeedback(feedback) => {
-            let (progress, detail) = format_entity_use_feedback(&feedback);
-            // The app's latest-wins toast favors the specific notice from this same use attempt.
-            let (message, tone) = match detail {
-                Some(message) => (message, ClientActionFeedbackTone::Warning),
-                None => (progress, ClientActionFeedbackTone::Status),
-            };
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
-                message,
-                tone,
+                message: format_entity_use_feedback(&feedback),
+                tone: ClientActionFeedbackTone::Status,
             }))
         }
         ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
@@ -1113,21 +1107,19 @@ mod tests {
     use holtburger_protocol::messages::combat::AttackConditions;
 
     #[test]
-    fn local_use_prefers_specific_container_notice_without_calling_generic_use_a_failure() {
+    fn local_use_reports_progress_without_predicting_server_rejection() {
         use holtburger_world::interaction::EntityUseFeedback;
         for (feedback, expected, warning) in [
             (
                 EntityUseFeedback::Using {
                     name: "Chest".into(),
-                    locked_container: true,
                 },
-                "The Chest is locked",
-                true,
+                "Using the Chest",
+                false,
             ),
             (
                 EntityUseFeedback::Using {
                     name: "Door".into(),
-                    locked_container: false,
                 },
                 "Using the Door",
                 false,

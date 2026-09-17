@@ -1,19 +1,18 @@
+import { retainContentsVisuals } from "./client-contents-visuals";
+import { clientInventoryMembership } from "./client-inventory-sections";
 import type { ItemCapacity } from "../app/item-capacity";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
-import type { UiIconSpec } from "../app/ui-icon-source";
 import type { ClientEntityRead } from "./client-entity-mirror";
 import type { ClientLifecycle } from "./client-host-contract";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 import {
-	clientInventoryMembership,
-	clientInventorySections,
-	clientInventoryPackSlots,
-	sortInventoryItems,
-	nextInventorySortMode,
-	type ClientInventoryMembership,
-	type ClientInventorySection,
-	type InventorySortMode,
-} from "./client-inventory-sections";
+	contentsSections,
+	contentsPackSlots,
+	nextContentsSortMode,
+	type ClientContentsMembership,
+	type ClientContentsSection,
+	type ContentsSortMode,
+} from "./client-container-contents";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import { CLIENT_TUNING } from "./client-tuning";
 import { PYREAL_ICON_SPEC } from "./client-inventory-art";
@@ -34,7 +33,7 @@ export interface InventoryCurrencyRow extends Omit<
 	readonly iconKey: string;
 }
 
-/** Session commands and results used by the mounted inventory drag owner. */
+/** Session commands and results used by the inventory split dialog. */
 export type InventoryInteractionSession = Pick<
 	ClientLifecycleSession,
 	"previewInventory" | "submitInventory" | "subscribe"
@@ -69,7 +68,7 @@ interface InventoryBaseline {
 	readonly currenciesPending: boolean;
 	readonly worldRevision: number;
 	readonly playerGuid: number | null;
-	readonly membership: ClientInventoryMembership | null;
+	readonly membership: ClientContentsMembership | null;
 	readonly iconKeys: ReadonlyMap<number, string>;
 	readonly retainedKeys: ReadonlySet<string>;
 }
@@ -82,10 +81,10 @@ export interface ClientInventoryView {
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
 	readonly pending: boolean;
-	readonly sortMode: InventorySortMode;
+	readonly sortMode: ContentsSortMode;
 	/** Known ordinary-slot occupancy for every displayed container, including nested ones. */
 	readonly capacities: ReadonlyMap<number, ItemCapacity>;
-	readonly sections: readonly ClientInventorySection[];
+	readonly sections: readonly ClientContentsSection[];
 	readonly packSlots: readonly (ClientEntityFacts | null)[];
 	readonly iconKeys: ReadonlyMap<number, string>;
 }
@@ -95,7 +94,7 @@ export class ClientInventoryState {
 	readonly icons: UiIconRepository;
 	/** App-owned toast delivery for rejected gestures and transport failures. */
 	readonly reportFailure: (message: string) => void;
-	/** Session capability consumed by the mounted imperative drag owner. */
+	/** Session capability consumed by the inventory split dialog. */
 	readonly interactions: InventoryInteractionSession;
 	/** Static footer artwork retained across panel closure and inventory resynchronization. */
 	readonly pyrealIconKey: string;
@@ -105,7 +104,7 @@ export class ClientInventoryState {
 	readonly #timer: ReturnType<typeof setInterval>;
 	#baseline: InventoryBaseline | null = null;
 	#pending = true;
-	#sortMode: InventorySortMode = "native";
+	#sortMode: ContentsSortMode = "native";
 	#view: ClientInventoryView | null = null;
 	#disposed = false;
 
@@ -140,12 +139,7 @@ export class ClientInventoryState {
 	read(): ClientInventoryView {
 		if (this.#view !== null) return this.#view;
 		const membership = this.#baseline?.membership ?? null;
-		const sections = clientInventorySections(membership).map((section) => ({
-			...section,
-			items: sortInventoryItems(section.items, this.#sortMode),
-			packs: sortInventoryItems(section.packs, this.#sortMode),
-			unslotted: sortInventoryItems(section.unslotted, this.#sortMode),
-		}));
+		const sections = contentsSections(membership, "pack-slots", this.#sortMode);
 		this.#view = Object.freeze({
 			equipment: this.#baseline?.equipment ?? { rows: [], pending: true },
 			currencies: this.#baseline?.currencies ?? [],
@@ -155,17 +149,10 @@ export class ClientInventoryState {
 			sortMode: this.#sortMode,
 			sections,
 			capacities: this.#baseline?.capacities ?? new Map(),
-			packSlots: clientInventoryPackSlots(membership),
+			packSlots: contentsPackSlots(membership),
 			iconKeys: this.#baseline?.iconKeys ?? new Map(),
 		});
 		return this.#view;
-	}
-
-	/** Authoritative ownership and hydration for binding reconciliation, never retained display data. */
-	readEntities(): ClientEntityRead {
-		return this.#lifecycle.state().lifecycle?.kind === "in-world"
-			? this.#lifecycle.entities.read()
-			: { kind: "pending" };
 	}
 
 	/** Action bars consume item facts without building hidden inventory sections. */
@@ -188,7 +175,7 @@ export class ClientInventoryState {
 	}
 
 	cycleSort(): void {
-		this.#sortMode = nextInventorySortMode(this.#sortMode);
+		this.#sortMode = nextContentsSortMode(this.#sortMode);
 		this.#view = null;
 	}
 
@@ -235,7 +222,6 @@ export class ClientInventoryState {
 			this.#reset();
 		const membership = clientInventoryMembership(level);
 		const equipment = inventoryEquipment(level);
-		const iconKeys = new Map<number, string>();
 		const retainedKeys = new Set<string>();
 		const currencyTotals = inventoryCurrencyTotals(level);
 		const currencies = currencyTotals.totals.map(({ base, ...total }) => {
@@ -251,42 +237,15 @@ export class ClientInventoryState {
 		);
 		for (const { item } of equipment.rows)
 			if (item !== null) visibleEntities.set(item.guid, item);
-		const capacities = new Map<number, ItemCapacity>();
-		for (const entity of visibleEntities.values()) {
-			const storage = entity.storage;
-			const children = membership?.children.get(entity.guid) ?? [];
-			// Unresolved placement cannot tell us whether a child consumes an item or pack slot.
-			if (
-				storage.kind === "container" &&
-				storage.roster === "announced" &&
-				storage.itemCapacity !== null &&
-				!children.some((child) => child.location.slot.kind === "pending")
-			) {
-				capacities.set(entity.guid, {
-					used: children.filter((child) => child.location.slot.kind === "item")
-						.length,
-					max: storage.itemCapacity,
-				});
-			}
-
-			const description = entity.description;
-			if (description.kind !== "known") continue;
-			const { overlay, underlay, uiEffects, base } = description.icon;
-			const spec: UiIconSpec =
-				entity.guid === level.playerGuid
-					? { kind: "main-pack", overlay, underlay, uiEffects }
-					: {
-							kind: "item",
-							base,
-							itemType: description.itemType,
-							overlay,
-							underlay,
-							uiEffects,
-						};
-			const key = this.icons.retain(this.#owner, spec);
-			iconKeys.set(entity.guid, key);
-			retainedKeys.add(key);
-		}
+		const visuals = retainContentsVisuals(
+			visibleEntities.values(),
+			membership,
+			level.playerGuid,
+			this.icons,
+			this.#owner,
+		);
+		const { capacities, iconKeys } = visuals;
+		for (const key of visuals.retainedKeys) retainedKeys.add(key);
 		// Acquiring the entire new membership first prevents same-icon A-to-B eviction.
 		for (const key of this.#baseline?.retainedKeys ?? []) {
 			if (!retainedKeys.has(key)) this.icons.release(this.#owner, key);

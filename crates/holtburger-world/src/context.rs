@@ -137,7 +137,7 @@ impl WorldContext for WorldState {
     }
 
     fn is_open_container(&self, guid: Guid) -> bool {
-        self.open_containers.contains(&guid)
+        self.has_world_container_access(guid)
     }
 
     fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
@@ -731,7 +731,7 @@ mod tests {
         inventory: HashSet<Guid>,
         // Explicit order lets tests exercise partially hydrated equipment in either order.
         equipment: Vec<Guid>,
-        open_containers: HashSet<Guid>,
+        accessible_containers: HashSet<Guid>,
         player_attributes: HashMap<AttributeType, u32>,
         player_skills: HashMap<SkillType, u32>,
         player_int_properties: Vec<(PropertyInt, i32)>,
@@ -769,7 +769,7 @@ mod tests {
         }
 
         fn is_open_container(&self, guid: Guid) -> bool {
-            self.open_containers.contains(&guid)
+            self.accessible_containers.contains(&guid)
         }
 
         fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
@@ -1308,7 +1308,7 @@ mod tests {
         let mut world = TestWorld {
             player_guid: Some(player_guid),
             inventory: HashSet::from([source_guid]),
-            open_containers: HashSet::from([container_guid]),
+            accessible_containers: HashSet::from([container_guid]),
             ..Default::default()
         };
 
@@ -1340,7 +1340,7 @@ mod tests {
 
         assert!(world.can_use_with(source_guid, target_guid));
 
-        world.open_containers.clear();
+        world.accessible_containers.clear();
         assert!(!world.can_use_with(source_guid, target_guid));
     }
 

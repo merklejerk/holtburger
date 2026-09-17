@@ -11,10 +11,7 @@ use holtburger_world::item_use::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{
-    ClientRuntime, ClientState,
-    types::{BusyOperationKind, ClientViewEvent},
-};
+use super::{ClientRuntime, ClientState, types::ClientViewEvent};
 
 /// Read-only compatibility query for one considered combine target.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -153,13 +150,19 @@ impl ClientRuntime {
 
     /// Common wire dispatch and busy admission for guarded and existing callers.
     pub(super) async fn dispatch_item_use(&mut self, intent: &ItemUseIntent) -> Result<bool> {
+        if self.active_busy_operation.is_some() {
+            return Ok(false);
+        }
+        if let ItemUseIntent::Direct { source, .. } = intent {
+            self.prepare_container_use(*source).await?;
+        }
         let (operation, action) = match intent {
             ItemUseIntent::Direct { source, .. } => (
-                BusyOperationKind::Use,
+                super::PendingOperation::Use { source: *source },
                 GameAction::Use(Box::new(UseActionData { guid: *source })),
             ),
             ItemUseIntent::Targeted { source, target } => (
-                BusyOperationKind::UseWithTarget,
+                super::PendingOperation::UseWithTarget,
                 GameAction::UseWithTarget(Box::new(UseWithTargetActionData {
                     item_guid: *source,
                     target_guid: *target,
@@ -171,7 +174,10 @@ impl ClientRuntime {
         }
         // Retail submits Use before progress feedback (acclient.c:414515). Cached lock state
         // must not suppress dispatch or imply a server-side activation failure.
-        self.send_game_action(action).await?;
+        if let Err(error) = self.send_game_action(action).await {
+            self.clear_busy_operation();
+            return Err(error);
+        }
         if let ItemUseIntent::Direct { source, .. } = intent
             && let Some(feedback) =
                 holtburger_world::interaction::describe_entity_use(&self.world, *source)

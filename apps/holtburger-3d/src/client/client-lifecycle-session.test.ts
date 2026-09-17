@@ -66,6 +66,84 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("commits container access with pending contents and replaces it coherently after loss", async () => {
+		const transport = new FakeClientTransport();
+		const player = 1;
+		const root = 10;
+		const pack = 11;
+		const child = 12;
+		const contents = [
+			entityFacts(player),
+			entityFacts(root),
+			...[pack, child].map((guid) =>
+				entityFacts(guid, {
+					description: { kind: "pending" },
+					worldContainerContent: true,
+					location: {
+						kind: "contained",
+						parentGuid: guid === pack ? root : pack,
+						slot: { kind: "pending" },
+					},
+				}),
+			),
+		];
+		const opened: ClientCurrentState = {
+			...currentState(player),
+			entities: { worldContainer: { kind: "open", root }, entities: contents },
+		};
+		transport.setCurrentState(opened);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const initial = session.entities.read();
+		if (initial.kind !== "current")
+			throw new Error("Expected replacement baseline.");
+		expect(initial.level.worldContainer).toEqual({ kind: "open", root });
+		expect(initial.level.entities.get(child)?.description.kind).toBe("pending");
+		expect(initial.level.entities.get(child)?.canPickUp).toBe(false);
+		let coherentCloseNotifications = 0;
+		const unsubscribe = session.subscribe((event) => {
+			if (event.type !== "entities") return;
+			const read = session.entities.read();
+			if (read.kind !== "current") throw new Error("Expected committed delta.");
+			expect(read.level.worldContainer.kind).toBe("closed");
+			expect(read.level.entities.has(child)).toBe(false);
+			coherentCloseNotifications++;
+		});
+		transport.emit("client-entity-facts-changed", {
+			worldContainer: { kind: "closed" },
+			upserts: [],
+			removed: [pack, child],
+		});
+		expect(coherentCloseNotifications).toBe(1);
+		unsubscribe();
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-entity-facts-changed", {
+			worldContainer: { kind: "open", root },
+			upserts: contents,
+			removed: [],
+		});
+		expect(session.entities.read().kind).toBe("pending");
+		transport.emit("client-current-state", opened);
+		const recovered = session.entities.read();
+		if (recovered.kind !== "current")
+			throw new Error("Expected recovered baseline.");
+		expect(recovered.level.entities.get(child)?.description.kind).toBe(
+			"pending",
+		);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", currentState(player));
+		const closed = session.entities.read();
+		if (closed.kind !== "current") throw new Error("Expected closed baseline.");
+		expect(closed.level.worldContainer.kind).toBe("closed");
+		expect(closed.level.entities.has(child)).toBe(false);
+		await session.closeContainer(root);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "close_client_container",
+			args: { guid: root },
+		});
+		session.stop();
+	});
+
 	it("casts only in confirmed magic and forwards each captured selection", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -281,7 +359,7 @@ describe("ClientLifecycleSession", () => {
 		const startup = currentState(9);
 		startup.lifecycle = { kind: "character-selection", characters: [] };
 		startup.localPlayerGuid = null;
-		startup.entities = { entities: [] };
+		startup.entities = { worldContainer: { kind: "closed" }, entities: [] };
 		startup.dynamic.entities = [];
 		transport.setCurrentState(startup);
 		const session = new ClientLifecycleSession(transport);
@@ -305,6 +383,7 @@ describe("ClientLifecycleSession", () => {
 			const baseline = currentState(playerGuid);
 			baseline.entities.entities.push(item);
 			transport.emit("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: baseline.entities.entities,
 				removed: [],
 			});
@@ -312,6 +391,7 @@ describe("ClientLifecycleSession", () => {
 			transport.emit("client-lifecycle-changed", { kind: "in-world" });
 			transport.emit("client-current-state", baseline);
 			transport.emit("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [
 					entityFacts(item.guid, {
 						...item,
@@ -403,6 +483,7 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.handlers.size).toBe(0);
 		const replacement = currentState(9);
 		replacement.entities = {
+			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(9, {
 					description: {
@@ -482,6 +563,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-state-resyncing", null);
 		expect(session.entities.read().kind).toBe("pending");
 		transport.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: playerEntitySnapshot(9).entities,
 			removed: [],
 		});

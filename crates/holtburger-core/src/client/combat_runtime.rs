@@ -471,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn new_character_entry_releases_previous_operation() {
         let mut client = client(0);
-        client.arm_busy_operation(BusyOperationKind::SpellCast);
+        client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None });
         client.character_selection.character_id = Some(Guid(2));
         client.begin_world_entry_transition().await.unwrap();
         assert!(client.active_busy_operation.is_none());

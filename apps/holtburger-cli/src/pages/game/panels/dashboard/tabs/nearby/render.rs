@@ -67,7 +67,7 @@ fn get_list_items(
             *depth,
             i == selected_index,
             container_count,
-            data.open_containers.contains(&e.guid),
+            data.current_open_container() == Some(e.guid),
             data.has_opened_container_before(e.guid),
             active_subject_guid == Some(e.guid),
         ));

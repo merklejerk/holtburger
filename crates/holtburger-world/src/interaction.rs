@@ -7,9 +7,9 @@ use holtburger_common::properties::{
 
 use crate::context::WorldContextExt;
 
-/// Known loose object eligible for a pickup attempt, with its storage-category facts.
+/// Known loose object or accessible external contents eligible for a pickup attempt.
 /// ACE Player_Inventory.cs:831 rejects static objects, creatures, and Stuck objects.
-/// Storage and independent placement restrict this affordance to loose world items;
+/// Accepted root access admits stored items; otherwise independent world placement is required;
 /// burden, busy state, and other server restrictions can still reject the attempt.
 pub fn pickup_candidate(world: &crate::WorldState, guid: Guid) -> Option<&crate::entity::Entity> {
     let entity = world.get_visible_entity(guid)?;
@@ -19,9 +19,10 @@ pub fn pickup_candidate(world: &crate::WorldState, guid: Guid) -> Option<&crate:
         && !entity.is_creature()
         && !entity.is_stuck()
         && !world.is_owned_by_player(guid)
-        && world.storage_location(guid).is_none()
-        && entity.placement_intent == crate::EntityPlacementIntent::Independent
-        && entity.position.landblock_id != Guid::NULL)
+        && (world.is_world_container_content(guid)
+            || (world.storage_location(guid).is_none()
+                && entity.placement_intent == crate::EntityPlacementIntent::Independent
+                && entity.position.landblock_id != Guid::NULL)))
         .then_some(entity)
 }
 
@@ -76,12 +77,10 @@ pub fn entity_use_rejection(
 pub enum EntityUseFeedback {
     /// Retail describes using a creature as approaching it, regardless of current distance.
     Approaching { name: String },
-    /// An object use may also have a specific cached container notice.
+    /// Progress for an object use; the server owns lock and access failures.
     Using {
         /// Authoritative target name captured for this command.
         name: String,
-        /// Non-owned, non-creature container lacking the cached Openable flag.
-        locked_container: bool,
     },
 }
 
@@ -100,22 +99,11 @@ pub fn describe_entity_use(world: &impl WorldContextExt, guid: Guid) -> Option<E
     if entity.is_creature() {
         return Some(EntityUseFeedback::Approaching { name });
     }
-    // acclient.c:210543: RequiresPackSlot or either capacity. IDA prints the 0x00800000 mask as
-    // aActivationType; statics.txt:9005 proves that symbol's address. Doors alone are not containers.
-    let container = entity
-        .flags
-        .contains(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
-        || entity.items_capacity().is_some_and(|capacity| capacity > 0)
-        || entity
-            .containers_capacity()
-            .is_some_and(|capacity| capacity > 0);
-    let locked_container = container
-        && !world.is_owned_by_player(guid)
-        && !entity.flags.contains(ObjectDescriptionFlag::OPENABLE);
-    Some(EntityUseFeedback::Using {
-        name,
-        locked_container,
-    })
+    // RETAIL DIVERGENCE: acclient.c:413273 emits a locked notice from missing OPENABLE.
+    // ACE key/lockpick updates Locked without refreshing that flag. Census: direct uses of
+    // non-owned pack-slot/capacity containers; creatures and owned inventory were excluded.
+    // Omitting this prediction removes stale warnings; server rejection feedback still applies.
+    Some(EntityUseFeedback::Using { name })
 }
 
 #[cfg(test)]
@@ -258,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn container_feedback_respects_openability_ownership_targeting_and_creature_exception() {
+    fn use_progress_is_independent_of_cached_lock_flags_and_ownership() {
         let mut world = WorldState::synthetic();
         world.player.guid = Guid(1);
         let guid = Guid(7);
@@ -275,7 +263,6 @@ mod tests {
             describe_entity_use(&world, guid),
             Some(EntityUseFeedback::Using {
                 name: "Chest".into(),
-                locked_container: true
             })
         );
         world.storage.announce_container(guid, world.player.guid);
@@ -283,7 +270,6 @@ mod tests {
             describe_entity_use(&world, guid),
             Some(EntityUseFeedback::Using {
                 name: "Chest".into(),
-                locked_container: false
             })
         );
         world.storage.withdraw(guid);
@@ -293,7 +279,6 @@ mod tests {
             describe_entity_use(&world, guid),
             Some(EntityUseFeedback::Using {
                 name: "Chest".into(),
-                locked_container: false
             })
         );
         entity.flags.remove(ObjectDescriptionFlag::OPENABLE);
@@ -317,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn capacity_only_containers_get_feedback_but_locked_doors_do_not_inherit_the_rule() {
+    fn use_progress_requires_a_known_directly_usable_object() {
         let mut world = WorldState::synthetic();
         let guid = Guid(7);
         let mut entity = Entity::new(guid, "Door".into(), WorldPosition::default());
@@ -327,7 +312,6 @@ mod tests {
             describe_entity_use(&world, guid),
             Some(EntityUseFeedback::Using {
                 name: "Door".into(),
-                locked_container: false
             })
         );
         entity.flags = ObjectDescriptionFlag::empty();
@@ -340,7 +324,6 @@ mod tests {
             describe_entity_use(&world, guid),
             Some(EntityUseFeedback::Using {
                 name: "Door".into(),
-                locked_container: true
             })
         );
         entity

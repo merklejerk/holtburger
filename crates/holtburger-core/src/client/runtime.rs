@@ -94,6 +94,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
+        self.poll_container_close_timeout(now);
         let Some(pending) = self.active_busy_operation.as_ref() else {
             return;
         };
@@ -225,6 +226,12 @@ impl ClientRuntime {
                     }
 
                     self.poll_busy_timeout(now);
+                    if let Err(error) = self.maintain_container_range().await {
+                        self.emit_action_result(
+                            super::types::ActionResultSource::Client,
+                            super::types::ActionResultReason::General(format!("Could not close out-of-range container: {error:#}")),
+                        );
+                    }
                     self.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {

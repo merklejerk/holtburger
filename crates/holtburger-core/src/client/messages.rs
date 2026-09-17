@@ -100,6 +100,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.reset_container_access();
         self.clear_busy_operation();
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
@@ -130,7 +131,10 @@ impl ClientRuntime {
         Ok(())
     }
 
-    async fn handle_world_events(&mut self, initial_events: Vec<WorldEvent>) -> Result<()> {
+    pub(super) async fn handle_world_events(
+        &mut self,
+        initial_events: Vec<WorldEvent>,
+    ) -> Result<()> {
         let mut pending_events = initial_events;
 
         while !pending_events.is_empty() {
@@ -282,6 +286,15 @@ impl ClientRuntime {
             self.entity_cue_inbox.remove(data.guid);
         }
 
+        if let GameMessage::GameEvent(event) = &message
+            && let GameEvent::PlayerDescription(description) = &event.event
+            && description.guid != self.world.player.guid
+        {
+            self.clear_busy_operation();
+            self.reset_container_access();
+        }
+        let previous_container_root = self.world.world_container().root();
+
         // Pass to world state for tracking positioning and spawning
         let world_events = if let GameMessage::UpdateMotion(data) = &message
             && self.suppresses_cast_turn(data)
@@ -306,6 +319,8 @@ impl ClientRuntime {
             self.known_spells_character = Some(description.guid);
         }
         self.handle_world_events(world_events.clone()).await?;
+        self.observe_container_message(&message, previous_container_root)
+            .await?;
 
         match message {
             GameMessage::UpdatePosition(_) => Ok(()),
@@ -1260,13 +1275,17 @@ mod tests {
             .await
             .unwrap();
         assert!(client.movement.has_server_controlled_motion());
-        assert!(client.arm_busy_operation(BusyOperationKind::SpellCast));
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None })
+        );
         assert!(
             !client.suppresses_cast_turn(&turn),
             "untargeted casts cannot correlate turns"
         );
         client.clear_busy_operation();
-        assert!(client.arm_busy_operation(BusyOperationKind::Use));
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::Use { source: Guid::NULL })
+        );
         assert!(!client.suppresses_cast_turn(&turn));
     }
 
@@ -1802,7 +1821,7 @@ mod tests {
     async fn use_done_finishes_busy_operation_with_weenie_hint() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(BusyOperationKind::Sell);
+        client.arm_busy_operation(crate::client::PendingOperation::Sell);
 
         let encoded_error = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -1848,7 +1867,7 @@ mod tests {
     async fn use_done_with_explicit_error_finishes_busy_operation_directly() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(BusyOperationKind::Buy);
+        client.arm_busy_operation(crate::client::PendingOperation::Buy);
 
         let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,

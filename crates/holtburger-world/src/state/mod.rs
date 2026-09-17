@@ -13,6 +13,8 @@ pub mod storage;
 pub mod tests;
 pub mod trade;
 pub mod types;
+mod world_container;
+pub use world_container::WorldContainerState;
 
 pub use fellowship::{
     FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,

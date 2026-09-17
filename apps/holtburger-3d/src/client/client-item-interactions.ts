@@ -130,7 +130,10 @@ export class ClientItemInteractions {
 			if (item.canPickUp) {
 				this.cancel();
 				void this.#session
-					.submitInventory({ item: selected, target: { kind: "pickup" } })
+					.submitInventory({
+						item: selected,
+						target: { kind: "pickup", container: null },
+					})
 					.catch((error: unknown) => this.#failure(String(error)));
 			} else this.use(selected, unrestricted);
 		}

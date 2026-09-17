@@ -5,7 +5,10 @@ import type {
 
 /** Minimal established player root for transport fixtures unrelated to inventory. */
 export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
-	return { entities: [entityFacts(playerGuid)] };
+	return {
+		worldContainer: { kind: "closed" },
+		entities: [entityFacts(playerGuid)],
+	};
 }
 
 /** Known non-creature fixture; each scenario explicitly supplies its storage relationship. */
@@ -16,6 +19,7 @@ export function entityFacts(
 	return {
 		guid,
 		canPickUp: false,
+		worldContainerContent: false,
 		canReceiveGive: false,
 		description: {
 			kind: "known",

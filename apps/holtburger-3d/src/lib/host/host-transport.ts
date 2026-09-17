@@ -99,6 +99,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"query_client_entity_health",
 	"preview_client_inventory",
 	"submit_client_inventory",
+	"close_client_container",
 	"equip_client_item",
 	"submit_client_item_use",
 	"query_client_item_use_target",

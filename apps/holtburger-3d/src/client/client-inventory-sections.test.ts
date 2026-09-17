@@ -1,3 +1,4 @@
+import { clientInventoryMembership } from "./client-inventory-sections";
 import { describe, expect, it } from "vitest";
 import {
 	ClientEntityMirror,
@@ -5,11 +6,10 @@ import {
 } from "./client-entity-mirror";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import {
-	clientInventorySections,
-	clientInventoryMembership,
-	clientInventoryPackSlots,
-	sortInventoryItems,
-} from "./client-inventory-sections";
+	contentsSections,
+	contentsPackSlots,
+	sortContentsItems,
+} from "./client-container-contents";
 
 /** Explicit received slot kind; storage capability is supplied independently. */
 function child(
@@ -34,11 +34,12 @@ function child(
 	});
 }
 
-describe("clientInventorySections", () => {
+describe("contentsSections", () => {
 	it("uses server order and separates foci, ordinary-slot storage, and direct pack sections", () => {
 		const mirror = new ClientEntityMirror();
 		const prepared = mirror.prepareSnapshot(
 			{
+				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
 					child(20, 1, { kind: "pack", index: 1, entryKind: "foci" }),
@@ -65,7 +66,7 @@ describe("clientInventorySections", () => {
 		expect(
 			membership?.members.map((item) => item.guid).sort((a, b) => a - b),
 		).toEqual([1, 10, 20, 30, 40, 50, 60]);
-		const sections = clientInventorySections(membership);
+		const sections = contentsSections(membership, "pack-slots", "native");
 		expect(sections.map((section) => section.container.guid)).toEqual([
 			1, 30, 10,
 		]);
@@ -76,12 +77,12 @@ describe("clientInventorySections", () => {
 			sections.map((section) => section.packs.map((item) => item.guid)),
 		).toEqual([[], [], []]);
 		expect(
-			clientInventoryPackSlots(membership).map((item) => item?.guid ?? null),
+			contentsPackSlots(membership).map((item) => item?.guid ?? null),
 		).toEqual([1, 10, 20]);
 		expect(
 			sections.map((section) => section.unslotted.map((item) => item.guid)),
 		).toEqual([[60], [], []]);
-		expect(sections.map((section) => section.mainPack)).toEqual([
+		expect(sections.map((section) => section.rootSection)).toEqual([
 			true,
 			false,
 			false,
@@ -105,6 +106,7 @@ describe("clientInventorySections", () => {
 		};
 		const prepared = mirror.prepareSnapshot(
 			{
+				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
 					pending,
@@ -114,15 +116,17 @@ describe("clientInventorySections", () => {
 			},
 			1,
 		);
-		const sections = clientInventorySections(
+		const sections = contentsSections(
 			clientInventoryMembership(prepared.level),
+			"pack-slots",
+			"native",
 		);
 		expect(sections.map((section) => section.container.guid)).toEqual([
 			1, 3, 4,
 		]);
 		expect(sections[0]?.packs).toEqual([]);
 		expect(
-			clientInventoryPackSlots(clientInventoryMembership(prepared.level)),
+			contentsPackSlots(clientInventoryMembership(prepared.level)),
 		).toContain(pending);
 		expect(sections[1]?.container.storage).toEqual({
 			kind: "container",
@@ -134,7 +138,7 @@ describe("clientInventorySections", () => {
 	});
 });
 
-describe("clientInventoryPackSlots", () => {
+describe("contentsPackSlots", () => {
 	it("keeps Main Pack first, groups foci after containers, and leaves free capacity last", () => {
 		const root = entityFacts(1, {
 			storage: {
@@ -154,11 +158,14 @@ describe("clientInventoryPackSlots", () => {
 		const ordinary = child(4, 1, { kind: "item", index: 0 }, true);
 		const mirror = new ClientEntityMirror();
 		const { level } = mirror.prepareSnapshot(
-			{ entities: [root, bag, foci, ordinary] },
+			{
+				worldContainer: { kind: "closed" },
+				entities: [root, bag, foci, ordinary],
+			},
 			1,
 		);
 		expect(
-			clientInventoryPackSlots(clientInventoryMembership(level)).map(
+			contentsPackSlots(clientInventoryMembership(level)).map(
 				(item) => item?.guid ?? null,
 			),
 		).toEqual([1, 2, 3, null, null]);
@@ -171,9 +178,12 @@ describe("clientInventoryPackSlots", () => {
 				packCapacity: null,
 			},
 		};
-		const pending = mirror.prepareSnapshot({ entities: [unknown, bag] }, 1);
+		const pending = mirror.prepareSnapshot(
+			{ worldContainer: { kind: "closed" }, entities: [unknown, bag] },
+			1,
+		);
 		expect(
-			clientInventoryPackSlots(clientInventoryMembership(pending.level)).map(
+			contentsPackSlots(clientInventoryMembership(pending.level)).map(
 				(item) => item?.guid ?? null,
 			),
 		).toEqual([1, 2, null, null]);
@@ -193,6 +203,7 @@ describe("clientInventoryPackSlots", () => {
 		const mirror = new ClientEntityMirror();
 		const { level } = mirror.prepareSnapshot(
 			{
+				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
 					pack(2, 3, 24),
@@ -205,14 +216,14 @@ describe("clientInventoryPackSlots", () => {
 			1,
 		);
 		expect(
-			clientInventoryPackSlots(clientInventoryMembership(level)).map(
+			contentsPackSlots(clientInventoryMembership(level)).map(
 				(item) => item?.guid ?? null,
 			),
 		).toEqual([1, 4, 3, 2, 5, 6, null]);
 	});
 });
 
-describe("sortInventoryItems", () => {
+describe("sortContentsItems", () => {
 	it("sorts names and types without changing native order or placing unknown names first", () => {
 		const named = (guid: number, name: string, itemType: number) => ({
 			...child(guid, 1, { kind: "item" as const, index: guid }),
@@ -247,12 +258,12 @@ describe("sortInventoryItems", () => {
 			},
 		];
 		expect(
-			sortInventoryItems(native, "alphabetical").map((item) => item.guid),
+			sortContentsItems(native, "alphabetical").map((item) => item.guid),
 		).toEqual([3, 4, 2, 5]);
 		expect(
-			sortInventoryItems(native, "item-type").map((item) => item.guid),
+			sortContentsItems(native, "item-type").map((item) => item.guid),
 		).toEqual([4, 2, 3, 5]);
-		expect(sortInventoryItems(native, "native")).toBe(native);
+		expect(sortContentsItems(native, "native")).toBe(native);
 		expect(native.map((item) => item.guid)).toEqual([2, 3, 4, 5]);
 	});
 });
@@ -291,13 +302,13 @@ describe("inventory type precedence", () => {
 			classified(8, "Apple", 2, "Food", 10),
 		];
 		expect(
-			sortInventoryItems([...items].reverse(), "item-type").map(
+			sortContentsItems([...items].reverse(), "item-type").map(
 				(item) => item.guid,
 			),
 		).toEqual([1, 7, 8, 2, 3, 6, 4, 5]);
 		expect(
-			sortInventoryItems(items, "alphabetical").map((item) => item.guid),
+			sortContentsItems(items, "alphabetical").map((item) => item.guid),
 		).toEqual([4, 3, 7, 8, 1, 6, 5, 2]);
-		expect(sortInventoryItems(items, "native")).toBe(items);
+		expect(sortContentsItems(items, "native")).toBe(items);
 	});
 });

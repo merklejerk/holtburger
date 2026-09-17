@@ -61,6 +61,7 @@ async function fixture() {
 		activeConfirmation: null,
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
 		entities: {
+			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
 				targeted,
@@ -135,7 +136,11 @@ describe("shared frontend item interaction flow", () => {
 				useCapability: "targeted",
 			},
 		};
-		f.emit("client-entity-facts-changed", { upserts: [caster], removed: [] });
+		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
+			upserts: [caster],
+			removed: [],
+		});
 		f.emit("client-player-spells-updated", { spellIds: [] });
 		f.select(3);
 		f.interactions.castWieldedSpell(2);
@@ -161,6 +166,7 @@ describe("shared frontend item interaction flow", () => {
 		f.interactions.castWieldedSpell(2);
 		expect(f.interactions.snapshot().kind).toBe("acquiring");
 		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: [
 				{
 					...caster,
@@ -186,6 +192,7 @@ describe("shared frontend item interaction flow", () => {
 			.spyOn(f.lifecycle, "submitInventory")
 			.mockResolvedValue(undefined);
 		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: [entityFacts(4, { canReceiveGive: true })],
 			removed: [],
 		});
@@ -198,7 +205,11 @@ describe("shared frontend item interaction flow", () => {
 			item: 2,
 			target: { kind: "give", guid: 4 },
 		});
-		f.emit("client-entity-facts-changed", { upserts: [], removed: [4] });
+		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
+			upserts: [],
+			removed: [4],
+		});
 		f.interactions.giveSelected();
 		expect(give).toHaveBeenCalledTimes(1);
 		expect(f.failure).toHaveBeenLastCalledWith(
@@ -213,6 +224,7 @@ describe("shared frontend item interaction flow", () => {
 			.spyOn(f.lifecycle, "submitInventory")
 			.mockResolvedValue(undefined);
 		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: [entityFacts(4, { canPickUp: true })],
 			removed: [],
 		});
@@ -220,7 +232,7 @@ describe("shared frontend item interaction flow", () => {
 		f.interactions.interactSelected(false);
 		expect(inventory).toHaveBeenCalledExactlyOnceWith({
 			item: 4,
-			target: { kind: "pickup" },
+			target: { kind: "pickup", container: null },
 		});
 		expect(f.submit).not.toHaveBeenCalled();
 		f.interactions.use(2, false);
@@ -244,6 +256,7 @@ describe("shared frontend item interaction flow", () => {
 			unrestricted: false,
 		});
 		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: [entityFacts(4, { canPickUp: true })],
 			removed: [],
 		});
@@ -462,7 +475,11 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		const id = question();
-		f.emit("client-entity-facts-changed", { upserts: [], removed: [2] });
+		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
+			upserts: [],
+			removed: [2],
+		});
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		f.interactions.respond(id, true);
 		expect(f.submit).toHaveBeenCalledTimes(2);

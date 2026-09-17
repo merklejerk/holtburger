@@ -4,7 +4,10 @@ import type {
 } from "./client-pointer-selection-controller";
 import { bindingAction } from "./client-action-item";
 import { nextInventoryPreviewSequence } from "./client-inventory-contract";
-import type { ClientInventoryState } from "./client-inventory-state";
+import type { ClientLifecycleSession } from "./client-lifecycle-session";
+import type { ClientEntityRead } from "./client-entity-mirror";
+import type { ContentsSortMode } from "./client-container-contents";
+
 import type {
 	ClientInventoryIntent,
 	ClientInventoryPreviewResult,
@@ -16,6 +19,27 @@ import type {
 	ActionContent,
 } from "./client-action-bar-state";
 import { actionDigitIndex } from "./client-action-bar-state";
+
+/** Direct session authority consumed by item gestures, independent of panel models. */
+export interface ItemDragSession extends Pick<
+	ClientLifecycleSession,
+	"previewInventory" | "submitInventory" | "subscribe" | "state"
+> {
+	/** Coherent world facts; gestures never read retained display records. */
+	readonly entities: { read(): ClientEntityRead };
+}
+/** Current presentation policy of one mounted contents root. */
+export interface ContentsDragView {
+	/** Recovery disables all gestures on this surface. */
+	readonly pending: boolean;
+	/** Only native order admits positional destinations. */
+	readonly sortMode: ContentsSortMode;
+}
+/** Root and policy captured together for a particular preview destination. */
+interface ContentsSurface {
+	readonly root: number;
+	readonly view: ContentsDragView;
+}
 
 /** Local binding edits supplied by the action-bar collection owner. */
 export interface ActionDragBindings {
@@ -31,12 +55,16 @@ interface DragSource {
 	readonly item: number;
 	/** Gesture origin is fixed even if authoritative rendering moves or detaches the cell. */
 	readonly origin: "contents" | "equipment" | "pack" | ActionCellAddress;
+	/** Captured surface identity prevents root replacement from retargeting a gesture. */
+	readonly root: number | null;
 	readonly element: HTMLElement;
 }
 interface InventoryDragTarget {
 	readonly kind: "inventory";
 	readonly element: HTMLElement;
 	readonly intent: ClientInventoryIntent;
+	/** Destination context is checked again when asynchronous previews arrive. */
+	readonly surface: ContentsSurface | null;
 	readonly sequence: number;
 }
 /** Viewport resolution belongs to one exact pointer sample, never cached hover authority. */
@@ -75,15 +103,14 @@ type Gesture =
 /** Imperative pointer owner: only semantic target changes cross the host boundary. */
 export class ClientItemDrag {
 	readonly #root: HTMLElement;
-	readonly #inventory: ClientInventoryState;
 	readonly #ghost: HTMLElement;
 	readonly #abort = new AbortController();
 	readonly #unsubscribe: () => void;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#gesture: Gesture | null = null;
 	#cursor = { x: 0, y: 0 };
-	/** Last active gesture view; idle world clicks do not prepare inventory sections. */
-	#view: ReturnType<ClientInventoryState["read"]> | null = null;
+	/** Last active gesture views; idle world clicks do not prepare contents sections. */
+	#views: readonly unknown[] = [];
 	/** Current host-owned merge eligibility queries, retired on view changes or drag end. */
 	readonly #mergeHints = new Map<number, HTMLElement>();
 	#suppressClick = false;
@@ -91,11 +118,13 @@ export class ClientItemDrag {
 
 	constructor(
 		root: HTMLElement,
-		inventory: ClientInventoryState,
+		private readonly session: ItemDragSession,
+		private readonly readContents: (root: number) => ContentsDragView | null,
+		private readonly reportFailure: (message: string) => void,
 		private readonly bindings: ActionDragBindings,
 		/** Actual dragging supersedes pending item target acquisition. */
 		private readonly cancelInteraction: () => boolean,
-		/** Inventory drags select their source; binding rearrangements do not. */
+		/** Item drags select their source; binding rearrangements do not. */
 		private readonly selectDragItem: (guid: number) => void,
 		/** Shared exact picker; the gesture owns completion and invalidation. */
 		private readonly pickWorldTarget: ClientViewportTargetPicker,
@@ -103,7 +132,6 @@ export class ClientItemDrag {
 		private readonly reportNotice: (message: string) => void,
 	) {
 		this.#root = root;
-		this.#inventory = inventory;
 		this.#ghost = document.createElement("div");
 		this.#ghost.className = "item-drag-ghost ui-drag-ghost";
 		// The top layer escapes panel backdrop-filter containing blocks and clipping.
@@ -133,16 +161,10 @@ export class ClientItemDrag {
 			},
 			options,
 		);
-		this.#unsubscribe = inventory.interactions.subscribe((event) => {
+		this.#unsubscribe = this.session.subscribe((event) => {
 			if (event.type === "inventory-preview") this.#preview(event.result);
 			else if (event.type === "entities") {
-				const source = this.#gesture?.source;
-				if (
-					source !== undefined &&
-					typeof source.origin === "string" &&
-					!this.#worldEntity(source.item)?.ownedByPlayer
-				)
-					this.#cancel();
+				this.#validateGesture();
 			} else if (
 				event.type === "resyncing" ||
 				event.type === "current-state" ||
@@ -153,19 +175,16 @@ export class ClientItemDrag {
 		});
 		this.#timer = setInterval(() => {
 			if (this.#gesture === null) return;
-			const view = inventory.read();
-			if (
-				view.pending ||
-				this.#root.querySelector('[data-inventory-modal="true"]') !== null
-			) {
-				this.#cancel();
-				return;
-			}
+			if (!this.#validateGesture()) return;
+			const views = this.#readViews();
+			const changed =
+				views.length !== this.#views.length ||
+				views.some((view, index) => view !== this.#views[index]);
 			if (this.#gesture?.kind === "dragging") {
-				if (view !== this.#view) this.#dimDropCandidates();
-				this.#target(view !== this.#view);
+				if (changed) this.#dimDropCandidates();
+				this.#target(changed);
 			}
-			this.#view = view;
+			this.#views = views;
 		}, CLIENT_TUNING.inventory.displayIntervalMs);
 	}
 
@@ -199,34 +218,46 @@ export class ClientItemDrag {
 					)
 				: null;
 		if (element === null || !this.#root.contains(element)) return;
-		if (this.#inventory.read().pending) return;
+		if (this.session.entities.read().kind !== "current") return;
 		const actionCell = this.#actionCell(element);
+		const surface = this.#surface(element);
+		if (
+			actionCell === null &&
+			surface === null &&
+			element.closest(".equipment-row") === null
+		)
+			return;
 		const bound = actionCell === null ? null : this.bindings.read(actionCell);
 		if (actionCell !== null && bound === null) return;
 		const item = bound === null ? Number(element.dataset.itemGuid) : bound.item;
 		const origin =
 			actionCell !== null
 				? actionCell
-				: element.closest(".inventory-pack-strip") !== null
+				: element.closest(".contents-packs") !== null
 					? "pack"
 					: element.closest(".equipment-row") !== null
 						? "equipment"
 						: "contents";
-		if (origin === "pack") {
-			const facts = this.#inventory
-				.read()
-				.packSlots.find((entry) => entry?.guid === item);
+		if (actionCell === null) {
+			const facts = this.#worldEntity(item);
 			if (
-				facts?.location.kind !== "contained" ||
-				facts.location.slot.kind !== "pack" ||
-				facts.location.slot.entryKind !== "container"
+				facts?.description.kind !== "known" ||
+				!(facts.ownedByPlayer || facts.worldContainerContent)
+			)
+				return;
+			if (surface?.root === item) return;
+			if (
+				origin === "pack" &&
+				(facts.location.kind !== "contained" ||
+					facts.location.slot.kind !== "pack" ||
+					facts.location.slot.entryKind !== "container")
 			)
 				return;
 		}
 		this.#cancel();
 		this.#gesture = {
 			kind: "pressed",
-			source: { item, origin, element },
+			source: { item, origin, element, root: surface?.root ?? null },
 			pointer: event.pointerId,
 			x: event.clientX,
 			y: event.clientY,
@@ -235,6 +266,7 @@ export class ClientItemDrag {
 	};
 
 	#move = (event: PointerEvent): void => {
+		if (!this.#validateGesture()) return;
 		let gesture = this.#gesture;
 		if (
 			gesture === null ||
@@ -272,7 +304,7 @@ export class ClientItemDrag {
 			this.#ghost.showPopover();
 			this.#root.dataset.itemDragging = "true";
 			// Initial hints already describe this view; the timer must not retire them as stale.
-			this.#view = this.#inventory.read();
+			this.#views = this.#readViews();
 			this.#dimDropCandidates();
 		}
 		event.preventDefault();
@@ -289,18 +321,19 @@ export class ClientItemDrag {
 			typeof gesture.source.origin !== "string"
 		)
 			return;
-		const blocksContents =
-			this.#inventory.read().sortMode !== "native" &&
-			gesture.source.origin === "contents";
 		this.#mergeHints.clear();
 		for (const cell of this.#root.querySelectorAll<HTMLElement>(
-			".inventory-sections .item-grid-cell",
+			".contents-scroll .item-grid-cell[data-item-guid]:not(:disabled)",
 		)) {
-			if (blocksContents && cell !== gesture.source.element) {
+			if (
+				gesture.source.origin !== "equipment" &&
+				this.#surface(cell)?.view.sortMode !== "native" &&
+				cell !== gesture.source.element
+			) {
 				cell.dataset.inventoryDimmed = "true";
 				const sequence = nextInventoryPreviewSequence();
 				this.#mergeHints.set(sequence, cell);
-				void this.#inventory.interactions
+				void this.session
 					.previewInventory({
 						sequence,
 						intent: {
@@ -313,10 +346,7 @@ export class ClientItemDrag {
 					});
 			} else delete cell.dataset.inventoryDimmed;
 		}
-		const source = this.#inventory
-			.read()
-			.sections.flatMap((section) => section.items)
-			.find((item) => item.guid === gesture.source.item);
+		const source = this.#worldEntity(gesture.source.item);
 		const locations =
 			source?.description.kind === "known"
 				? source.description.equipLocations
@@ -328,7 +358,8 @@ export class ClientItemDrag {
 				delete row.dataset.inventoryDimmed;
 			else
 				row.dataset.inventoryDimmed = String(
-					locations === null ||
+					!source.ownedByPlayer ||
+						locations === null ||
 						(locations & Number(row.dataset.equipmentSlot)) === 0,
 				);
 		}
@@ -384,46 +415,71 @@ export class ClientItemDrag {
 		let element: HTMLElement | null = null;
 		let target: ClientInventoryIntent["target"] | null = null;
 		if (hit !== null && this.#root.contains(hit)) {
-			// Sorted contents allow equipment and merge-only targets, but no inventory moves.
-			const allowsInventoryDrop =
-				this.#inventory.read().sortMode === "native" ||
-				gesture.source.origin !== "contents";
+			const source = this.#worldEntity(gesture.source.item);
+			const surface = this.#surface(hit);
 			const equipment = hit.closest<HTMLElement>("[data-equipment-slot]");
-			const cell = hit.closest<HTMLElement>(".item-grid-cell[data-item-guid]");
-			const header = hit.closest<HTMLElement>(
-				".inventory-header[data-item-guid]",
+			const cell = hit.closest<HTMLElement>(
+				".item-grid-cell[data-item-guid]:not(:disabled)",
 			);
-			if (hit instanceof HTMLElement && hit.matches("[data-game-viewport]")) {
+			const header = hit.closest<HTMLElement>(
+				".contents-header[data-item-guid]:not(:disabled)",
+			);
+			if (
+				hit instanceof HTMLElement &&
+				hit.matches("[data-game-viewport]") &&
+				source?.ownedByPlayer
+			) {
 				this.#worldTarget(hit, force);
 				return;
-			} else if (gesture.source.origin === "pack") {
-				if (cell?.closest(".inventory-pack-strip")) {
-					element = cell;
-					target = { kind: "pack", guid: Number(cell.dataset.itemGuid) };
-				}
-			} else if (equipment !== null) {
+			} else if (equipment !== null && source?.ownedByPlayer) {
 				element = equipment;
 				target = {
 					kind: "equipment",
 					mask: Number(equipment.dataset.equipmentSlot),
 				};
-			} else if (allowsInventoryDrop && header !== null) {
+			} else if (surface !== null && header !== null) {
 				element = header;
 				target = { kind: "container", guid: Number(header.dataset.itemGuid) };
-			} else if (cell?.closest(".inventory-sections")) {
+			} else if (surface !== null && cell !== null) {
 				element = cell;
-				const container = cell.closest<HTMLElement>("[data-container-guid]");
-				target =
-					this.#inventory.read().sortMode === "native"
-						? { kind: "item", guid: Number(cell.dataset.itemGuid) }
-						: !allowsInventoryDrop
-							? { kind: "stack", guid: Number(cell.dataset.itemGuid) }
-							: container === null
-								? null
-								: {
-										kind: "container",
-										guid: Number(container.dataset.containerGuid),
-									};
+				const guid = Number(cell.dataset.itemGuid);
+				if (cell.closest(".contents-packs")) {
+					// Only rearranging carried pack-strip entries uses the two-command swap.
+					const read = this.session.entities.read();
+					const carriedSwap =
+						gesture.source.origin === "pack" &&
+						source?.ownedByPlayer &&
+						read.kind === "current" &&
+						surface.root === read.level.playerGuid;
+					target = { kind: carriedSwap ? "pack" : "container", guid };
+				} else {
+					const container = cell.closest<HTMLElement>("[data-container-guid]");
+					target =
+						surface.view.sortMode !== "native" &&
+						gesture.source.origin === "equipment" &&
+						container !== null
+							? {
+									kind: "container",
+									guid: Number(container.dataset.containerGuid),
+								}
+							: {
+									kind: surface.view.sortMode === "native" ? "item" : "stack",
+									guid,
+								};
+				}
+			} else if (surface !== null && hit.closest(".item-grid-cell") === null) {
+				// Section background appends regardless of display sorting. Disabled item
+				// cells still own their footprint; they must not become background targets.
+				const section = hit.closest<HTMLElement>(
+					".contents-scroll [data-container-guid]",
+				);
+				if (section !== null) {
+					element = section;
+					target = {
+						kind: "container",
+						guid: Number(section.dataset.containerGuid),
+					};
+				}
 			}
 		}
 		if (
@@ -444,8 +500,67 @@ export class ClientItemDrag {
 		});
 	}
 
+	/** Resolve presentation from its owner and access from the current session level. */
+	#surface(element: Element): ContentsSurface | null {
+		const owner = element.closest<HTMLElement>("[data-contents-root]");
+		if (owner === null || !owner.isConnected || !this.#root.contains(owner))
+			return null;
+		const root = Number(owner.dataset.contentsRoot);
+		const read = this.session.entities.read();
+		if (
+			read.kind !== "current" ||
+			(read.level.playerGuid !== root &&
+				(read.level.worldContainer.kind !== "open" ||
+					read.level.worldContainer.root !== root))
+		)
+			return null;
+		const view = this.readContents(root);
+		return view === null || view.pending ? null : { root, view };
+	}
+	#readViews(): readonly unknown[] {
+		const read = this.session.entities.read();
+		return [
+			read.kind === "current" ? read.level : null,
+			...Array.from(
+				this.#root.querySelectorAll("[data-contents-root]"),
+				(element) => this.#surface(element)?.view,
+			),
+		];
+	}
+	/** Closing/recovery invalidates unsent work even before the sampled DOM catches up. */
+	#validateGesture(): boolean {
+		const gesture = this.#gesture;
+		if (gesture === null) return false;
+		const source = gesture.source;
+		const facts = this.#worldEntity(source.item);
+		const invalidSource =
+			typeof source.origin === "string" &&
+			(facts?.description.kind !== "known" ||
+				!(facts.ownedByPlayer || facts.worldContainerContent) ||
+				(source.origin === "equipment" && !facts.ownedByPlayer) ||
+				(source.root !== null &&
+					this.#surface(source.element)?.root !== source.root));
+		const target = gesture.kind === "pressed" ? null : gesture.target;
+		const invalidTarget =
+			target?.kind === "inventory" &&
+			target.surface !== null &&
+			this.#surface(target.element)?.root !== target.surface.root;
+		if (
+			invalidSource ||
+			invalidTarget ||
+			!source.element.isConnected ||
+			this.session.state().lifecycle?.kind !== "in-world" ||
+			this.session.entities.read().kind !== "current" ||
+			this.#root.querySelector('[data-inventory-modal="true"]') !== null
+		) {
+			this.#cancel();
+			return false;
+		}
+		return true;
+	}
+
 	#worldEntity(guid: number) {
-		const read = this.#inventory.readEntities();
+		const read = this.session.entities.read();
 		return read.kind === "current" ? read.level.entities.get(guid) : undefined;
 	}
 
@@ -544,9 +659,10 @@ export class ClientItemDrag {
 			element,
 			intent,
 			sequence: nextInventoryPreviewSequence(),
+			surface: this.#surface(element),
 		};
 		element.dataset.inventoryDrop = "pending";
-		void this.#inventory.interactions
+		void this.session
 			.previewInventory({ sequence: target.sequence, intent })
 			.catch((error: unknown) => {
 				const gesture = this.#gesture;
@@ -577,19 +693,18 @@ export class ClientItemDrag {
 		)
 			return;
 		const target = gesture.target;
-		if (
-			gesture.kind === "released" &&
-			(target.intent.target.kind === "item" ||
-				(gesture.source.origin === "contents" &&
-					target.intent.target.kind !== "equipment" &&
-					target.intent.target.kind !== "ground" &&
-					target.intent.target.kind !== "give" &&
-					target.intent.target.kind !== "stack")) &&
-			this.#inventory.read().sortMode !== "native"
-		) {
-			// Sorting changed after release; retire the stale positional intent.
-			this.#cancel();
-			return;
+		if (!this.#validateGesture()) return;
+		if (target.surface !== null) {
+			const current = this.#surface(target.element);
+			if (
+				current === null ||
+				current.root !== target.surface.root ||
+				(target.intent.target.kind === "item" &&
+					current.view.sortMode !== "native")
+			) {
+				this.#cancel();
+				return;
+			}
 		}
 		const rejected = result.preview.kind === "rejected";
 		target.element.dataset.inventoryDrop = rejected ? "rejected" : "accepted";
@@ -605,22 +720,21 @@ export class ClientItemDrag {
 		const intent = target.intent;
 		this.#finishGesture();
 		if (result.preview.kind === "rejected") {
-			this.#inventory.reportFailure(
+			this.reportFailure(
 				`${result.preview.reason}${intent.target.kind === "stack" ? " Positional drops require Native sorting." : ""}`,
 			);
 		}
 		if (!rejected && result.preview.kind !== "noop") {
-			void this.#inventory.interactions
+			void this.session
 				.submitInventory(intent)
 				.catch((error: unknown) =>
-					this.#inventory.reportFailure(
-						`Inventory request failed: ${String(error)}`,
-					),
+					this.reportFailure(`Inventory request failed: ${String(error)}`),
 				);
 		}
 	}
 
 	#up = (event: PointerEvent): void => {
+		if (!this.#validateGesture()) return;
 		const gesture = this.#gesture;
 		if (
 			gesture === null ||
@@ -651,9 +765,7 @@ export class ClientItemDrag {
 			// Automatic supply replacement may change the binding during this pointer gesture.
 			if (this.bindings.read(source)?.item !== gesture.source.item) {
 				this.#cancel();
-				this.#inventory.reportFailure(
-					"The action cell changed while dragging.",
-				);
+				this.reportFailure("The action cell changed while dragging.");
 				return;
 			}
 			this.#finishGesture();
@@ -664,10 +776,10 @@ export class ClientItemDrag {
 			const target = gesture.target.cell;
 			const item = gesture.source.item;
 			this.#finishGesture();
-			const content = bindingAction(this.#inventory.readItem(item));
+			const content = bindingAction(this.#worldEntity(item));
 			if (content !== null) this.bindings.bind(target, content);
 			else
-				this.#inventory.reportFailure(
+				this.reportFailure(
 					"Only owned equippable or usable items can be bound to an action cell.",
 				);
 			return;
@@ -696,7 +808,7 @@ export class ClientItemDrag {
 		return { bar, slot };
 	}
 	#bindable(item: number): boolean {
-		return bindingAction(this.#inventory.readItem(item)) !== null;
+		return bindingAction(this.#worldEntity(item)) !== null;
 	}
 
 	#clearHighlight(): void {
@@ -710,7 +822,7 @@ export class ClientItemDrag {
 	#finishGesture(): void {
 		this.#clearDimming();
 		this.#gesture = null;
-		this.#view = null;
+		this.#views = [];
 		this.#ghost.hidden = true;
 		this.#ghost.hidePopover();
 		delete this.#root.dataset.itemDragging;
@@ -726,7 +838,7 @@ export class ClientItemDrag {
 	};
 	#failure(error: unknown): void {
 		this.#cancel();
-		this.#inventory.reportFailure(`Inventory request failed: ${String(error)}`);
+		this.reportFailure(`Inventory request failed: ${String(error)}`);
 	}
 	#cancelPointer = (event: PointerEvent): void => {
 		if (

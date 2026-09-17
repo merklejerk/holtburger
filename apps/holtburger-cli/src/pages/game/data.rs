@@ -297,6 +297,8 @@ pub struct GameData {
     pub skill_table: Option<Arc<SkillTable>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
+    /// Shared semantic records consumed by Nearby membership and pickup verbs.
+    pub entity_facts: HashMap<Guid, holtburger_world::entity_facts::ClientEntityFacts>,
     /// Server name (e.g. "Morningthaw").
     pub world_name: String,
     /// Current combat stances.
@@ -313,8 +315,8 @@ pub struct GameData {
     pub trade: Option<holtburger_world::state::TradeState>,
     /// Current fellowship or party state projected from the core client.
     pub party: Option<FellowshipState>,
-    /// Currently open containers in the world.
-    pub open_containers: HashSet<Guid>,
+    /// Confirmed external root projected by core, independent of roster history.
+    pub world_container: holtburger_world::state::WorldContainerState,
     /// Recently opened world containers retained for nearby-tab labeling.
     opened_container_history: VecDeque<Guid>,
     opened_container_history_set: HashSet<Guid>,
@@ -343,6 +345,7 @@ impl Default for GameData {
             spell_catalog: None,
             skill_table: None,
             entities: HashMap::new(),
+            entity_facts: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
             combat_runtime: CombatRuntimeState::default(),
@@ -351,7 +354,7 @@ impl Default for GameData {
             equipment: HashMap::new(),
             trade: None,
             party: None,
-            open_containers: HashSet::new(),
+            world_container: holtburger_world::state::WorldContainerState::Closed,
             opened_container_history: VecDeque::new(),
             opened_container_history_set: HashSet::new(),
         }
@@ -491,9 +494,7 @@ impl GameData {
             .map(|position| position.rotation.to_heading())
     }
 
-    pub fn track_container_opened(&mut self, guid: Guid) {
-        self.open_containers.insert(guid);
-
+    pub fn record_container_history(&mut self, guid: Guid) {
         if self.opened_container_history_set.contains(&guid) {
             self.opened_container_history
                 .retain(|existing| *existing != guid);
@@ -510,16 +511,15 @@ impl GameData {
         }
     }
 
-    pub fn track_container_closed(&mut self, guid: Guid) {
-        self.open_containers.remove(&guid);
+    pub fn current_open_container(&self) -> Option<Guid> {
+        self.world_container.root()
     }
 
-    pub fn current_open_container(&self) -> Option<Guid> {
-        self.opened_container_history
-            .iter()
-            .rev()
-            .copied()
-            .find(|guid| self.open_containers.contains(guid))
+    /// Read shared access rather than walking raw parent properties in the frontend.
+    pub fn is_world_container_content(&self, guid: Guid) -> bool {
+        self.entity_facts
+            .get(&guid)
+            .is_some_and(|facts| facts.world_container_content)
     }
 
     pub fn has_opened_container_before(&self, guid: Guid) -> bool {
@@ -561,7 +561,7 @@ impl WorldContext for GameData {
     }
 
     fn is_open_container(&self, guid: Guid) -> bool {
-        self.open_containers.contains(&guid)
+        self.world_container.root() == Some(guid) || self.is_world_container_content(guid)
     }
 
     fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
@@ -628,7 +628,7 @@ mod tests {
         let mut data = GameData::default();
 
         for raw in 1..=(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1) {
-            data.track_container_opened(Guid(raw));
+            data.record_container_history(Guid(raw));
         }
 
         assert!(!data.has_opened_container_before(Guid(1)));
@@ -641,14 +641,14 @@ mod tests {
         let mut data = GameData::default();
         let first = Guid(1);
 
-        data.track_container_opened(first);
+        data.record_container_history(first);
 
         for raw in 2..=(OPENED_CONTAINER_HISTORY_LIMIT as u32) {
-            data.track_container_opened(Guid(raw));
+            data.record_container_history(Guid(raw));
         }
 
-        data.track_container_opened(first);
-        data.track_container_opened(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
+        data.record_container_history(first);
+        data.record_container_history(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
 
         assert!(data.has_opened_container_before(first));
         assert!(!data.has_opened_container_before(Guid(2)));

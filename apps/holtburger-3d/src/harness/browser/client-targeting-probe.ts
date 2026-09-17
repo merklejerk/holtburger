@@ -166,6 +166,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		entities.commit(
 			entities.prepareSnapshot(
 				{
+					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(1, { targeting: "creature" }),
 						...records.map((record) =>

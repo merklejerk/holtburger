@@ -4,7 +4,7 @@ const unsigned = z.number().int().min(0).max(0xffff_ffff);
 
 /** Identity-based destinations mirror the shared core intent, never browser array indices. */
 const inventoryTargetSchema = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("pickup") }),
+	z.object({ kind: z.literal("pickup"), container: unsigned.nullable() }),
 	z.object({ kind: z.literal("ground") }),
 	z.object({ kind: z.literal("give"), guid: unsigned }),
 	z.object({ kind: z.literal("split"), amount: unsigned.positive() }),

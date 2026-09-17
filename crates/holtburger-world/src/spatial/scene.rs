@@ -2139,6 +2139,7 @@ mod physical_body_tests {
             align_path,
             PreparedEntityTargetGeometry {
                 setup_radius: 0.5,
+                setup_height: 1.0,
                 collision_animations: Default::default(),
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
@@ -2255,6 +2256,7 @@ mod physical_body_tests {
     fn fallback_target(shape: Arc<CollisionShape>) -> PreparedEntityTargetGeometry {
         PreparedEntityTargetGeometry {
             setup_radius: 0.5,
+            setup_height: 1.0,
             collision_animations: Default::default(),
             physics_bsp_parts: Vec::new(),
             fallback_setup_did: 0x0200_0001,
@@ -3722,6 +3724,7 @@ mod physical_body_tests {
                     false,
                     PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        setup_height: 1.0,
                         collision_animations: Default::default(),
                         physics_bsp_parts: vec![PreparedEntityBspPart {
                             part_index: 0,
@@ -3821,6 +3824,7 @@ mod physical_body_tests {
                     false,
                     PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        setup_height: 1.0,
                         collision_animations: Default::default(),
                         physics_bsp_parts: vec![PreparedEntityBspPart {
                             part_index: 0,
@@ -3868,6 +3872,7 @@ mod physical_body_tests {
                     false,
                     PreparedEntityTargetGeometry {
                         setup_radius: 0.5,
+                        setup_height: 1.0,
                         collision_animations: Default::default(),
                         physics_bsp_parts: Vec::new(),
                         fallback_setup_did: 0x0200_0002,

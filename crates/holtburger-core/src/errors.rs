@@ -339,19 +339,13 @@ pub fn format_action_result_message(reason: &ActionResultReason) -> String {
     }
 }
 
-/// Format progress and optional specific local feedback separately; frontends choose presentation.
+/// Format local use progress; rejection messages come from the server.
 pub fn format_entity_use_feedback(
     feedback: &holtburger_world::interaction::EntityUseFeedback,
-) -> (String, Option<String>) {
+) -> String {
     match feedback {
-        EntityUseFeedback::Approaching { name } => (format!("Approaching {name}"), None),
-        EntityUseFeedback::Using {
-            name,
-            locked_container,
-        } => (
-            format!("Using the {name}"),
-            locked_container.then(|| format!("The {name} is locked")),
-        ),
+        EntityUseFeedback::Approaching { name } => format!("Approaching {name}"),
+        EntityUseFeedback::Using { name } => format!("Using the {name}"),
     }
 }
 

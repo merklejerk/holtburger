@@ -118,12 +118,10 @@ impl ChatState {
                 self.log_with_channel(None, chat_tags, msg.clone(), false);
             }
             ClientViewEvent::EntityUseFeedback(feedback) => {
-                let (progress, detail) =
-                    holtburger_core::errors::format_entity_use_feedback(feedback);
-                self.log(ChatMessageTags::system(), progress);
-                if let Some(message) = detail {
-                    self.log(ChatMessageTags::system(), message);
-                }
+                self.log(
+                    ChatMessageTags::system(),
+                    holtburger_core::errors::format_entity_use_feedback(feedback),
+                );
             }
             ClientViewEvent::TransientString { message }
             | ClientViewEvent::PopupString { message } => {

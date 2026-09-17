@@ -1405,7 +1405,7 @@ impl WorldState {
                 if property == PropertyInstanceId::Container {
                     if value == Guid::NULL {
                         self.clear_container_preview(target_guid);
-                    } else if self.open_containers.contains(&value) {
+                    } else if self.has_world_container_access(value) {
                         self.mark_container_preview(target_guid);
                     }
                 }
@@ -1596,23 +1596,6 @@ impl WorldState {
         item_guids
     }
 
-    pub(crate) fn current_container_preview_item_guids(&self, container_guid: Guid) -> Vec<Guid> {
-        let mut item_guids: Vec<_> = self
-            .entities
-            .iter()
-            .filter(|entity| entity.container_id() == Some(container_guid))
-            .filter(|entity| {
-                self.entity_lifecycle_state(entity.guid)
-                    .is_some_and(|state| state.container_preview)
-            })
-            .map(|entity| entity.guid)
-            .collect();
-
-        item_guids.sort_unstable_by_key(|guid| guid.0);
-        item_guids.dedup();
-        item_guids
-    }
-
     pub(crate) fn mark_trade_preview_entities_for_prune(&mut self, item_guids: &[Guid]) {
         for &guid in item_guids {
             self.clear_trade_preview(guid);
@@ -1622,24 +1605,17 @@ impl WorldState {
 
     pub(crate) fn mark_container_preview_entities_for_prune(&mut self, item_guids: &[Guid]) {
         let now = self.current_server_time();
-
         for &guid in item_guids {
-            let Some(snapshot) = self.reconcile_entity_retention(guid) else {
-                continue;
-            };
-
-            if snapshot.has_authoritative_retention() {
+            self.mark_container_preview(guid);
+            if self
+                .retention_snapshot(guid, now)
+                .is_some_and(|snapshot| snapshot.has_authoritative_retention())
+            {
                 self.clear_container_preview(guid);
-                let _ = self.reconcile_entity_retention(guid);
-                continue;
+            } else {
+                // Preserve preview provenance through descriptions arriving after closure.
+                self.set_entity_prune_deadline(guid, now);
             }
-
-            if let Some(entity) = self.entities.get_mut(guid) {
-                entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
-            }
-
-            self.clear_container_preview(guid);
-            self.set_entity_prune_deadline(guid, now);
         }
     }
 

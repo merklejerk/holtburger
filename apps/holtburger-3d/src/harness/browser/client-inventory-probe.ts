@@ -15,6 +15,7 @@ function item(
 	return {
 		guid,
 		canPickUp: false,
+		worldContainerContent: false,
 		canReceiveGive: false,
 		description: {
 			kind: "known",
@@ -110,7 +111,7 @@ export async function probeClientInventory(options: {
 	};
 	const squares = () => {
 		const rects = Array.from(
-			document.querySelectorAll(".inventory-grid .item-grid-cell"),
+			document.querySelectorAll(".contents-grid .item-grid-cell"),
 		).map((element) => element.getBoundingClientRect());
 		if (
 			rects.length === 0 ||
@@ -229,13 +230,17 @@ export async function probeClientInventory(options: {
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
-			entities: { entities: records },
+			entities: { worldContainer: { kind: "closed" }, entities: records },
 		});
 	const update = (record: ClientEntityFacts) => {
 		records = records.map((previous) =>
 			previous.guid === record.guid ? record : previous,
 		);
-		emit("client-entity-facts-changed", { upserts: [record], removed: [] });
+		emit("client-entity-facts-changed", {
+			worldContainer: null,
+			upserts: [record],
+			removed: [],
+		});
 	};
 	update({
 		...owned(20, 1, 0),
@@ -333,7 +338,7 @@ export async function probeClientInventory(options: {
 	await sample();
 	if (
 		!containerCell().title.endsWith("[1 / 24]") ||
-		containerCell().closest(".inventory-grid") === null
+		containerCell().closest(".contents-grid") === null
 	)
 		throw new Error(
 			"Container capacity did not follow the item into the contents grid.",
@@ -389,9 +394,7 @@ export async function probeClientInventory(options: {
 	}
 	const firstMainItem = () =>
 		document
-			.querySelector(
-				'[data-container-guid="1"] .inventory-grid .item-grid-cell',
-			)
+			.querySelector('[data-container-guid="1"] .contents-grid .item-grid-cell')
 			?.getAttribute("data-item-guid");
 	if (
 		!document
@@ -490,7 +493,12 @@ export async function probeClientInventory(options: {
 	await sample();
 	if (firstMainItem() !== "20")
 		throw new Error("Native sort did not restore server slot order.");
-	if (!cell(1).textContent?.replace(/\s+/g, " ").includes("Main Pack (9 / 24)"))
+	if (
+		!document
+			.querySelector('.client-inventory .contents-header[data-item-guid="1"]')
+			?.textContent?.replace(/\s+/g, " ")
+			.includes("Main Pack (9 / 24)")
+	)
 		throw new Error(
 			"Main Pack did not display ordinary item usage and capacity.",
 		);
@@ -499,7 +507,7 @@ export async function probeClientInventory(options: {
 		throw new Error("Main Pack did not select the local player.");
 	selection.select(7);
 	const strip = document.querySelector<HTMLElement>(
-		".inventory-pack-strip .item-grid-strip-viewport",
+		".client-inventory .contents-packs .item-grid-strip-viewport",
 	);
 	if (strip === null) throw new Error("Inventory container strip is missing.");
 	const stripRoot = strip.closest<HTMLElement>(".item-grid-strip");
@@ -553,7 +561,9 @@ export async function probeClientInventory(options: {
 		throw new Error(
 			"Container strip cells must be square without horizontal overflow.",
 		);
-	const contents = document.querySelector<HTMLElement>(".inventory-sections");
+	const contents = document.querySelector<HTMLElement>(
+		".client-inventory .contents-scroll",
+	);
 	const bagSection = document.querySelector<HTMLElement>(
 		'[data-container-guid="30"]',
 	);
@@ -646,7 +656,7 @@ export async function probeClientInventory(options: {
 		throw new Error("Pack strip has no next clipped cell.");
 	const packArrow = (direction: "up" | "down") => {
 		const arrow = document.querySelector<HTMLButtonElement>(
-			`.inventory-pack-strip button[aria-label="Scroll items ${direction}"]`,
+			`.client-inventory .contents-packs button[aria-label="Scroll items ${direction}"]`,
 		);
 		if (arrow === null)
 			throw new Error(`Pack strip ${direction} arrow missing`);
@@ -942,7 +952,11 @@ export async function probeClientInventory(options: {
 		throw new Error("Recovery did not install current container membership.");
 
 	records = records.filter((record) => record.guid !== 21);
-	emit("client-entity-facts-changed", { upserts: [], removed: [21] });
+	emit("client-entity-facts-changed", {
+		worldContainer: null,
+		upserts: [],
+		removed: [21],
+	});
 	await sample();
 	if (
 		selection.selectedGuid() !== null ||
@@ -1382,7 +1396,9 @@ export async function probeClientInventory(options: {
 			"Equipment strip did not preserve slots and repeat coverage",
 		);
 	if (
-		document.querySelector('.inventory-sections [data-item-guid="91"]') !== null
+		document.querySelector(
+			'.client-inventory .contents-scroll [data-item-guid="91"]',
+		) !== null
 	)
 		throw new Error("Equipped item still occupies inventory contents");
 	if (
@@ -1431,12 +1447,14 @@ export async function probeClientInventory(options: {
 	await sample();
 	if (
 		equipmentCells().length !== 0 ||
-		document.querySelector('.inventory-sections [data-item-guid="91"]') === null
+		document.querySelector(
+			'.client-inventory .contents-scroll [data-item-guid="91"]',
+		) === null
 	)
 		throw new Error("Unequipped item did not move back into contents");
 	if (
 		document.querySelector(
-			'.inventory-sections .item-grid-cell[data-item-guid="91"] .item-equipped',
+			'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="91"] .item-equipped',
 		) !== null
 	)
 		throw new Error("Unequipped item retained its equipment marker.");
@@ -1468,7 +1486,7 @@ export async function probeClientInventory(options: {
 	const dimmed = () =>
 		[
 			...document.querySelectorAll<HTMLElement>(
-				'.inventory-sections .item-grid-cell[data-dimmed="true"]',
+				'.client-inventory .contents-scroll .item-grid-cell[data-dimmed="true"]',
 			),
 		].map((cell) => cell.dataset.itemGuid);
 	const selectedBeforeHover = selection.selectedGuid();

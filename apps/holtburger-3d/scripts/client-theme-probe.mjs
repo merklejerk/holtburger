@@ -26,7 +26,9 @@ export async function probeClientTheme(
 			),
 	);
 	const windowBefore = await read(() => {
-		const box = document.querySelector(".hud-window").getBoundingClientRect();
+		const box = document
+			.querySelector('.hud-window[aria-label="Client diagnostics"]')
+			.getBoundingClientRect();
 		return {
 			left: box.left,
 			top: box.top,
@@ -73,7 +75,9 @@ export async function probeClientTheme(
 		16,
 	);
 	const windowAfter = await read(() => {
-		const box = document.querySelector(".hud-window").getBoundingClientRect();
+		const box = document
+			.querySelector('.hud-window[aria-label="Client diagnostics"]')
+			.getBoundingClientRect();
 		return {
 			left: box.left,
 			top: box.top,

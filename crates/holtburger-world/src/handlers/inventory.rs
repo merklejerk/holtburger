@@ -49,12 +49,7 @@ pub(crate) fn handle_message(
             state.admit_entity_sticky_target(guid, sticky_target);
             state.retain_announced_children(guid, data.children.as_deref());
             state.resolve_announced_attachment(guid, data.animation_frame.unwrap_or(0));
-            if state
-                .entities
-                .get(guid)
-                .and_then(|entity| entity.container_id())
-                .is_some_and(|container| state.open_containers.contains(&container))
-            {
+            if state.is_world_container_content(guid) {
                 state.mark_container_preview(guid);
             }
             if state
@@ -117,23 +112,31 @@ pub(crate) fn handle_event(
                 data.container_guid,
                 crate::state::storage::StorageSlot::from_entry(data.container_type, data.slot),
             );
-            state.move_entity_into_container(data.item_guid, data.container_guid, events)
+            let handled =
+                state.move_entity_into_container(data.item_guid, data.container_guid, events);
+            state.finish_inventory_transfer(data.item_guid);
+            handled
+        }
+        GameEvent::InventoryServerSaveFailed(data) => {
+            state.finish_inventory_transfer(data.item_guid);
+            false
         }
         GameEvent::InventoryPutObjectIn3D(data) => {
             state.move_entity_into_world(data.object_guid, events)
         }
         GameEvent::ViewContents(data) => {
+            // Replacing a roster can revoke access to an entire formerly nested pack.
+            let previous: Vec<_> = state.storage.owned_items(data.container).collect();
             let entries: Vec<_> = data
                 .items
                 .iter()
                 .map(|item| (item.guid, item.container_type))
                 .collect();
             state.storage.replace_contents(data.container, &entries);
-            state.open_containers.insert(data.container);
-            events.push(WorldEvent::ContainerOpened(data.container));
 
             for item in &data.items {
                 let guid = item.guid;
+                state.mark_container_preview(guid);
                 if let Some(entity) = state.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
                     if old_lb != Guid::NULL || entity.container_id() != Some(data.container) {
@@ -153,18 +156,19 @@ pub(crate) fn handle_event(
                         });
                     }
 
-                    state.mark_container_preview(guid);
                     let _ = state.reconcile_entity_retention(guid);
                 }
             }
+            state.mark_container_preview_entities_for_prune(&previous);
+            let announced: Vec<_> = data.items.iter().map(|item| item.guid).collect();
+            state.mark_container_preview_entities_for_prune(&announced);
 
             true
         }
         GameEvent::CloseGroundContainer(data) => {
-            let item_guids = state.current_container_preview_item_guids(data.container_guid);
-            state.open_containers.remove(&data.container_guid);
-            events.push(WorldEvent::ContainerClosed(data.container_guid));
-            state.mark_container_preview_entities_for_prune(&item_guids);
+            if state.world_container().root() == Some(data.container_guid) {
+                state.close_world_container();
+            }
             true
         }
         GameEvent::IdentifyObjectResponse(data) => {

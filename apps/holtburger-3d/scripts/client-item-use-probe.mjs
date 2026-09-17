@@ -52,7 +52,8 @@ export async function probeItemUse(client, evaluateExpression) {
 			`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence: pending.sequence, eligible })})`,
 		);
 	};
-	const food = '.inventory-sections .item-grid-cell[data-item-guid="91"]';
+	const food =
+		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="91"]';
 	const tool = '.equipment-row .item-grid-cell[data-item-guid="95"]';
 	await read(api + ".beginItemUseProbe()");
 	await read(api + ".itemUseProbe().ready()");

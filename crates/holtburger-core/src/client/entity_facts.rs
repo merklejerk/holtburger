@@ -4,14 +4,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use holtburger_common::Guid;
 use holtburger_world::{
-    WorldEvent, WorldState, entity_facts::ClientEntityFacts, state::ScenePlacementError,
+    WorldEvent, WorldState,
+    entity_facts::{ClientEntityFacts, EntityStorageLocation},
+    state::{ScenePlacementError, WorldContainerState},
 };
 use serde::{Deserialize, Serialize};
 
 /// Complete retained semantic baseline used by initial connection and recovery.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientEntitySnapshot {
-    /// Deterministically GUID-ordered entity records, including pending owned identities.
+    /// Confirmed access published together with its descendant records.
+    pub world_container: WorldContainerState,
+    /// GUID-ordered records, including pending owned and accessible external identities.
     pub entities: Vec<ClientEntityFacts>,
 }
 
@@ -24,13 +29,19 @@ impl ClientEntitySnapshot {
                 entities.push(record);
             }
         }
-        Ok(Self { entities })
+        Ok(Self {
+            world_container: world.world_container(),
+            entities,
+        })
     }
 }
 
 /// One change to the semantic mirror, never a transaction across separate server messages.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientEntityDelta {
+    /// Replacement access when changed; None keeps the previously accepted level.
+    pub world_container: Option<WorldContainerState>,
     /// Complete replacement records, applied together before observers run.
     pub upserts: Vec<ClientEntityFacts>,
     /// Accepted identities leaving the retained semantic domain, not renderer removals.
@@ -43,6 +54,8 @@ pub(super) struct EntityFactsPublication {
     records: BTreeMap<Guid, ClientEntityFacts>,
     dirty: BTreeSet<Guid>,
     owner: Option<Guid>,
+    /// Access changes invalidate eligibility even when no item changes parent.
+    container: WorldContainerState,
 }
 
 impl EntityFactsPublication {
@@ -76,25 +89,34 @@ impl EntityFactsPublication {
         world: &mut WorldState,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
         let storage_changes = world.take_storage_changes();
+        let mut delta = ClientEntityDelta::default();
+        if self.container != world.world_container() {
+            self.dirty.extend(self.records.keys().copied());
+            self.dirty.extend(world.client_entity_guids());
+            delta.world_container = Some(world.world_container());
+        }
         if self.owner != Some(world.player.guid) {
             self.dirty.extend(self.records.keys().copied());
             self.dirty.extend(world.client_entity_guids());
             self.owner = Some(world.player.guid);
         } else if !storage_changes.is_empty() {
-            // A changed container affects ownership of descendants as well as its own record.
+            // Ancestor moves affect ownership/access even when descendants did not move.
             self.dirty.extend(
                 self.records
                     .values()
-                    .filter(|record| record.owned_by_player)
+                    .filter(|record| {
+                        record.owned_by_player
+                            || matches!(record.location, EntityStorageLocation::Contained { .. })
+                    })
                     .map(|record| record.guid),
             );
             self.dirty
                 .extend(holtburger_world::context::WorldContext::iter_inventory(
                     world,
                 ));
+            self.dirty.extend(world.world_container_contents());
         }
         self.dirty.extend(storage_changes);
-        let mut delta = ClientEntityDelta::default();
         // Prepare before mutating the published cache so invalid world graphs fail coherently.
         let mut prepared = Vec::new();
         for guid in &self.dirty {
@@ -127,6 +149,7 @@ impl EntityFactsPublication {
             }
         }
         self.dirty.clear();
+        self.container = world.world_container();
         Ok(delta)
     }
 }
@@ -138,7 +161,8 @@ impl super::ClientRuntime {
             .entity_facts
             .collect(&mut self.world)
             .expect("accepted world relationships must project into coherent entity facts");
-        if !delta.upserts.is_empty() || !delta.removed.is_empty() {
+        if delta.world_container.is_some() || !delta.upserts.is_empty() || !delta.removed.is_empty()
+        {
             // Storage-only messages can change foci readiness without a separate world event.
             self.refresh_spell_inspection_context();
             let _ = self
@@ -213,6 +237,79 @@ mod tests {
                 equipped_objects: Vec::new(),
             },
         )))
+    }
+
+    #[test]
+    fn ancestor_roster_updates_admit_and_withdraw_pending_pack_contents() {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let root = Guid(0x8000_0080);
+        let pack = Guid(0x8000_0081);
+        let item = Guid(0x8000_0082);
+        world.confirm_world_container(root);
+        world.handle_message(&place(item, pack, InventoryEntryKind::Item));
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        world.handle_message(&place(pack, root, InventoryEntryKind::Container));
+        let admitted = publication.collect(&mut world).unwrap();
+        assert!(admitted.upserts.iter().any(|entry| entry.guid == item));
+        world.handle_message(&event(GameEvent::ViewContents(Box::new(
+            ViewContentsEventData {
+                container: root,
+                items: Vec::new(),
+            },
+        ))));
+        let withdrawn = publication.collect(&mut world).unwrap();
+        assert!(withdrawn.removed.contains(&item));
+        assert!(withdrawn.removed.contains(&pack));
+    }
+
+    #[test]
+    fn access_transitions_publish_pending_contents_and_revoke_eligibility_without_moves() {
+        use holtburger_common::properties::ItemType;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let root = Guid(0x8000_0070);
+        let item = Guid(0x8000_0071);
+        world.handle_message(&place(item, root, InventoryEntryKind::Item));
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        world.confirm_world_container(root);
+        let opened = publication.collect(&mut world).unwrap();
+        assert_eq!(
+            opened.world_container,
+            Some(WorldContainerState::Open { root })
+        );
+        assert_eq!(
+            ClientEntitySnapshot::from_world(&world)
+                .unwrap()
+                .world_container,
+            WorldContainerState::Open { root }
+        );
+        let pending = opened
+            .upserts
+            .iter()
+            .find(|entry| entry.guid == item)
+            .expect("pending external record");
+        assert!(!pending.can_pick_up);
+        let mut description = ObjectDescriptionData::with_guid(item);
+        description.public_weenie_desc.name = Some("Loot".into());
+        description.public_weenie_desc.item_type = ItemType::MISC.bits();
+        description.public_weenie_desc.container_id = Some(root);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publication.observe(&event);
+        }
+        let hydrated = publication.collect(&mut world).unwrap();
+        assert!(
+            hydrated
+                .upserts
+                .iter()
+                .any(|entry| entry.guid == item && entry.can_pick_up)
+        );
+        world.close_world_container();
+        let closed = publication.collect(&mut world).unwrap();
+        assert_eq!(closed.world_container, Some(WorldContainerState::Closed));
+        assert!(closed.removed.contains(&item));
     }
 
     #[test]

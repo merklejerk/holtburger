@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
 	import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
 	import type { InputDigitIndex } from "../../lib/input/input-contract";
@@ -36,6 +37,7 @@
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
+	import { probeWorldContainer } from "./client-world-container-probe";
 	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
 	import { mapBlipFillStyle } from "../../lib/game/map/map-appearance";
@@ -123,6 +125,7 @@
 				throw new Error("Caster fixture required");
 			savedCaster = source;
 			emitInteractionEvent("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [
 					{
 						...source,
@@ -161,6 +164,7 @@
 			if (savedCaster === null) throw new Error("No saved caster fixture");
 			itemInteractions.cancel();
 			emitInteractionEvent("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [savedCaster],
 				removed: [],
 			});
@@ -421,7 +425,9 @@
 			await new Promise<void>((resolve) =>
 				requestAnimationFrame(() => resolve()),
 			);
-			const panel = document.querySelector(".hud-window");
+			const panel = document.querySelector(
+				'.hud-window[aria-label="Client diagnostics"]',
+			);
 			if (panel === null)
 				throw new Error("Theme probe requires an open diagnostic window.");
 			const stable =
@@ -454,6 +460,7 @@
 			return { ...item, description: item.description };
 		});
 		emitInteractionEvent("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: saved.map((item, index) => ({
 				...item,
 				description: {
@@ -516,6 +523,7 @@
 				)
 					throw new Error("Expected bound supply");
 				emitInteractionEvent("client-entity-facts-changed", {
+					worldContainer: null,
 					upserts: [
 						{
 							...item,
@@ -542,6 +550,7 @@
 			},
 			removeSupply: () =>
 				emitInteractionEvent("client-entity-facts-changed", {
+					worldContainer: null,
 					upserts: [],
 					removed: [995],
 				}),
@@ -554,6 +563,7 @@
 				if (item?.description.kind !== "known")
 					throw new Error("Expected food fixture");
 				emitInteractionEvent("client-entity-facts-changed", {
+					worldContainer: null,
 					upserts: [
 						{
 							...item,
@@ -572,6 +582,7 @@
 				if (item?.description.kind !== "known")
 					throw new Error("Expected tool fixture");
 				emitInteractionEvent("client-entity-facts-changed", {
+					worldContainer: null,
 					upserts: [
 						{
 							...item,
@@ -614,6 +625,7 @@
 				dialogOwner = null;
 				dialogPresentation = null;
 				emitInteractionEvent("client-entity-facts-changed", {
+					worldContainer: null,
 					upserts: saved,
 					removed: [995],
 				});
@@ -654,6 +666,7 @@
 		>;
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
+		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
 		/** Production spell shortcut dispatch and session requests under browser input. */
@@ -770,6 +783,7 @@
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
+	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	function readInventoryEntities() {
 		inventorySampleCount += 1;
 		return interactionLifecycle.entities.read();
@@ -801,6 +815,7 @@
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
+				worldContainer: { kind: "closed" },
 				entities: [1, 7, 8].map((guid) => ({
 					guid,
 					description: {
@@ -826,6 +841,7 @@
 					location: { kind: "none" },
 					ownedByPlayer: false,
 					canPickUp: false,
+					worldContainerContent: false,
 					canReceiveGive: false,
 					targeting: "non-creature",
 					scenePlacement: "available",
@@ -920,6 +936,7 @@
 			if (recipient?.description.kind !== "known")
 				throw new Error("Give fixture recipient missing");
 			emitInteractionEvent("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [
 					{
 						...recipient,
@@ -959,6 +976,7 @@
 			if (source === undefined)
 				throw new Error("Source removal requires an existing source");
 			emitInteractionEvent("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [],
 				removed: [guid],
 			});
@@ -966,6 +984,7 @@
 		},
 		restoreSource: (source: ClientEntityFacts) =>
 			emitInteractionEvent("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [source],
 				removed: [],
 			}),
@@ -980,6 +999,7 @@
 		},
 		end: () => {
 			emitInteractionEvent("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [],
 				removed: [7],
 			});
@@ -2049,6 +2069,12 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		inventory = inventoryOwner;
+		const containerOwner = new ClientWorldContainerPanelState(
+			interactionLifecycle,
+			icons,
+			(message) => inventoryToasts.publish({ message, tone: "warning" }),
+		);
+		worldContainer = containerOwner;
 		let spellReferenceRequests = 0;
 		const references = new SpellReferences({
 			invoke: async (command, args) => {
@@ -2151,6 +2177,23 @@
 				return keyboardFixture;
 			},
 			probeInventory,
+			probeWorldContainer: async () => {
+				// Match ClientApp's feedback composition for server-refused transfer fixtures.
+				const unsubscribe = interactionLifecycle.subscribe((event) => {
+					if (event.type === "action-feedback")
+						inventoryToasts.publish(event.feedback);
+				});
+				try {
+					return await probeWorldContainer({
+						emit: emitInteractionEvent,
+						selection,
+						interactions: itemInteractions,
+						commands: interactionCommands,
+					});
+				} finally {
+					unsubscribe();
+				}
+			},
 			beginItemUseProbe: () => {
 				beginItemUseProbe();
 			},
@@ -2211,6 +2254,8 @@
 			references.dispose();
 			spells = null;
 			inventoryOwner.destroy();
+			containerOwner.destroy();
+			worldContainer = null;
 			unsubscribeInventoryToasts();
 			inventoryToasts.destroy();
 			inventory = null;
@@ -2239,6 +2284,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		itemSession={interactionLifecycle}
 		{particleDistanceSpacingMultiplier}
 		onParticleDistanceSpacingChange={(value) => {
 			particleDistanceSpacingMultiplier = value;
@@ -2304,8 +2350,9 @@
 		readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
 		{spells}
 		{inventory}
-		onSelectInventoryItem={(guid, mode) =>
-			selection.selectInventoryItem(guid, mode)}
+		{worldContainer}
+		onSelectContentsItem={(guid, mode) =>
+			selection.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}
 		selectedEntityGuid={selectedGuid}
 		hoveredEntityGuid={hoveredGuid}

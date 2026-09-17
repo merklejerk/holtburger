@@ -35,6 +35,12 @@ export const CLIENT_UI_DEFAULTS = {
 		minSize: { width: 280, height: 240 },
 		resizable: true,
 	},
+	worldContainer: {
+		anchor: "top-left",
+		offset: { x: 370, y: 170 },
+		size: { width: 370, height: 330 },
+		minSize: { width: 240, height: 190 },
+	},
 	inventory: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },

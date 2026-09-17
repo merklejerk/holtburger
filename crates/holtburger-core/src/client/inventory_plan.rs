@@ -22,8 +22,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum InventoryTarget {
-    /// Acquire a loose ground object into automatically allocated carried storage.
-    Pickup,
+    /// Acquire a loose world item or accessible external contents into carried storage.
+    Pickup {
+        /// Optional carried-container preference from scripting; allocation may use other packs.
+        container: Option<Guid>,
+    },
     /// Drop an owned carried or equipped object near the character.
     Ground,
     /// Give the whole source stack to a plausible world recipient.
@@ -45,7 +48,7 @@ pub enum InventoryTarget {
 /// One desired inventory interaction, re-evaluated against current world state on submission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventoryIntent {
-    /// Source identity; pickup alone accepts an unowned ground object.
+    /// Source identity; container transfers also accept accessible external contents.
     pub item: Guid,
     /// User-selected target identity or equipment location.
     pub target: InventoryTarget,
@@ -110,7 +113,10 @@ pub enum InventoryPlanError {
     /// Source must be carried or equipped by this player.
     #[error("Item is not owned by the player")]
     NotOwned,
-    /// Current authority does not establish a loose pickup candidate.
+    /// Contents transfers require ownership or current external-container access.
+    #[error("This item is no longer accessible")]
+    NotAccessible,
+    /// Current authority does not establish an eligible pickup candidate.
     #[error("This object cannot currently be picked up")]
     NotPickable,
     /// Recipient must be a distinct plausible world recipient.
@@ -154,18 +160,34 @@ pub fn plan_inventory_intent(
     world: &WorldState,
     intent: InventoryIntent,
 ) -> Result<InventoryPlan, InventoryPlanError> {
-    if intent.target != InventoryTarget::Pickup && !world.is_owned_by_player(intent.item) {
-        return Err(InventoryPlanError::NotOwned);
+    match intent.target {
+        InventoryTarget::Pickup { .. } => {}
+        InventoryTarget::Container { .. }
+        | InventoryTarget::Item { .. }
+        | InventoryTarget::Stack { .. } => {
+            require_accessible_item(world, intent.item)?;
+            if !world.is_owned_by_player(intent.item)
+                && holtburger_world::interaction::pickup_candidate(world, intent.item).is_none()
+            {
+                return Err(InventoryPlanError::NotPickable);
+            }
+        }
+        _ if !world.is_owned_by_player(intent.item) => return Err(InventoryPlanError::NotOwned),
+        _ => {}
     }
     match intent.target {
-        InventoryTarget::Pickup => {
+        InventoryTarget::Pickup { container } => {
             let entity = holtburger_world::interaction::pickup_candidate(world, intent.item)
                 .ok_or(InventoryPlanError::NotPickable)?;
-            let destinations = allocate_storage(
-                world,
-                world.player.guid,
-                &[entity.uses_player_container_slot()],
-            )?;
+            let preferred = match container {
+                Some(guid) if guid != world.player.guid && !world.is_owned_by_player(guid) => {
+                    return Err(InventoryPlanError::InvalidContainer);
+                }
+                Some(guid) => guid,
+                None => world.player.guid,
+            };
+            let destinations =
+                allocate_storage(world, preferred, &[entity.uses_player_container_slot()])?;
             let destination = destinations[0];
             Ok(InventoryPlan::Move(InventoryMove {
                 item: intent.item,
@@ -180,8 +202,7 @@ pub fn plan_inventory_intent(
                 return Err(InventoryPlanError::InvalidRecipient);
             }
             let entity = world
-                .entities
-                .get(intent.item)
+                .get_visible_entity(intent.item)
                 .ok_or(InventoryPlanError::Pending(intent.item))?;
             if entity.get_string_prop(PropertyString::Name).is_none()
                 || entity.item_type().is_none()
@@ -207,8 +228,7 @@ pub fn plan_inventory_intent(
         InventoryTarget::Ground => Ok(InventoryPlan::Drop { item: intent.item }),
         InventoryTarget::Split { amount } => {
             let entity = world
-                .entities
-                .get(intent.item)
+                .get_visible_entity(intent.item)
                 .ok_or(InventoryPlanError::Pending(intent.item))?;
             let quantity = entity.stack_size();
             if !entity.is_stackable() || amount == 0 || amount > quantity {
@@ -250,16 +270,12 @@ pub fn plan_inventory_intent(
             if intent.item == guid {
                 return Ok(InventoryPlan::Noop);
             }
-            if !world.is_owned_by_player(guid) {
-                return Err(InventoryPlanError::NotOwned);
-            }
+            require_accessible_item(world, guid)?;
             let source = world
-                .entities
-                .get(intent.item)
+                .get_visible_entity(intent.item)
                 .ok_or(InventoryPlanError::Pending(intent.item))?;
             let target = world
-                .entities
-                .get(guid)
+                .get_visible_entity(guid)
                 .ok_or(InventoryPlanError::Pending(guid))?;
             let source_template = source
                 .wcid
@@ -291,6 +307,17 @@ pub fn plan_inventory_intent(
     }
 }
 
+/// Access is distinct from ownership; the root is a destination, not a movable contents item.
+fn require_accessible_item(world: &WorldState, guid: Guid) -> Result<(), InventoryPlanError> {
+    if !world.is_owned_by_player(guid) && !world.is_world_container_content(guid) {
+        return Err(InventoryPlanError::NotAccessible);
+    }
+    if world.get_visible_entity(guid).is_none() {
+        return Err(InventoryPlanError::Pending(guid));
+    }
+    Ok(())
+}
+
 fn contained(world: &WorldState, guid: Guid) -> Result<(Guid, StorageSlot), InventoryPlanError> {
     match world.storage_location(guid) {
         Some(StorageLocation::Contained { parent, slot }) if slot != StorageSlot::Pending => {
@@ -314,7 +341,11 @@ fn plan_move(
     container: Guid,
     before: Option<StorageSlot>,
 ) -> Result<InventoryMove, InventoryPlanError> {
-    if item == container || (container != world.player.guid && !world.is_owned_by_player(container))
+    if item == container
+        || world.is_stored_within(container, item)
+        || (container != world.player.guid
+            && !world.is_owned_by_player(container)
+            && !world.has_world_container_access(container))
     {
         return Err(InventoryPlanError::InvalidContainer);
     }
@@ -322,17 +353,13 @@ fn plan_move(
         return Err(InventoryPlanError::Pending(container));
     }
     let source = world
-        .entities
-        .get(item)
+        .get_visible_entity(item)
         .ok_or(InventoryPlanError::Pending(item))?;
     let destination = world
-        .entities
-        .get(container)
+        .get_visible_entity(container)
         .ok_or(InventoryPlanError::Pending(container))?;
-    // ACE Player_Inventory rejects containers inside ordinary carried packs.
-    if source.can_hold_items() && container != world.player.guid {
-        return Err(InventoryPlanError::InvalidContainer);
-    }
+    // ACE owns corpse/hook/nesting rules. Storage coverage and capacity establish local
+    // placement feasibility; they do not promise that the server will permit the transfer.
     let source_location = world
         .storage_location(item)
         .ok_or(InventoryPlanError::Pending(item))?;
@@ -564,6 +591,270 @@ mod tests {
         world
     }
 
+    const EXTERNAL: Guid = Guid(0x8000_0100);
+    const EXTERNAL_PACK: Guid = Guid(0x8000_0101);
+    const LOOT: Guid = Guid(0x8000_0102);
+    const OTHER_LOOT: Guid = Guid(0x8000_0103);
+
+    fn external_storage() -> WorldState {
+        use holtburger_common::properties::ItemType;
+        use holtburger_protocol::messages::{ViewContentsEventData, ViewContentsEventItem};
+        let mut world = inventory();
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 8);
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 4);
+        for (guid, container) in [
+            (EXTERNAL, true),
+            (EXTERNAL_PACK, true),
+            (LOOT, false),
+            (OTHER_LOOT, false),
+        ] {
+            let mut entity = Entity::new(guid, "External contents".into(), Default::default());
+            entity.wcid = Some(guid.0);
+            entity.properties.ints.insert(
+                PropertyInt::ItemType,
+                if container {
+                    ItemType::CONTAINER
+                } else {
+                    ItemType::MISC
+                }
+                .bits() as i32,
+            );
+            if container {
+                entity.properties.ints.insert(PropertyInt::ItemsCapacity, 8);
+                entity
+                    .properties
+                    .ints
+                    .insert(PropertyInt::ContainersCapacity, 4);
+            }
+            world.add_entity(entity);
+        }
+        for (container, entries) in [
+            (
+                EXTERNAL,
+                vec![
+                    (EXTERNAL_PACK, InventoryEntryKind::Container),
+                    (LOOT, InventoryEntryKind::Item),
+                    (OTHER_LOOT, InventoryEntryKind::Item),
+                ],
+            ),
+            (EXTERNAL_PACK, vec![]),
+        ] {
+            event(
+                &mut world,
+                GameEvent::ViewContents(Box::new(ViewContentsEventData {
+                    container,
+                    items: entries
+                        .into_iter()
+                        .map(|(guid, container_type)| ViewContentsEventItem {
+                            guid,
+                            container_type,
+                        })
+                        .collect(),
+                })),
+            );
+        }
+        world.confirm_world_container(EXTERNAL);
+        world
+    }
+
+    #[test]
+    fn explicit_container_transfers_resolve_both_directions_and_external_native_order() {
+        let world = external_storage();
+        for (item, target, container, placement) in [
+            (
+                SOURCE,
+                InventoryTarget::Container { guid: EXTERNAL },
+                EXTERNAL,
+                2,
+            ),
+            (LOOT, InventoryTarget::Container { guid: PACK }, PACK, 3),
+            (
+                LOOT,
+                InventoryTarget::Container {
+                    guid: EXTERNAL_PACK,
+                },
+                EXTERNAL_PACK,
+                0,
+            ),
+            (
+                OTHER_LOOT,
+                InventoryTarget::Item { guid: LOOT },
+                EXTERNAL,
+                0,
+            ),
+            (
+                LOOT,
+                InventoryTarget::Container { guid: EXTERNAL },
+                EXTERNAL,
+                1,
+            ),
+            (
+                EXTERNAL_PACK,
+                InventoryTarget::Container { guid: PLAYER },
+                PLAYER,
+                1,
+            ),
+            (
+                PACK,
+                InventoryTarget::Container { guid: EXTERNAL },
+                EXTERNAL,
+                1,
+            ),
+        ] {
+            assert_eq!(
+                plan_inventory_intent(&world, InventoryIntent { item, target }),
+                Ok(InventoryPlan::Move(InventoryMove {
+                    item,
+                    container,
+                    placement
+                }))
+            );
+        }
+        // Preview/planning never changes either endpoint's authoritative membership.
+        assert!(world.is_owned_by_player(SOURCE));
+        assert!(world.is_world_container_content(LOOT));
+    }
+
+    #[test]
+    fn transfers_require_current_access_complete_placement_and_acyclic_storage() {
+        let mut world = external_storage();
+        let move_to = |item, guid| InventoryIntent {
+            item,
+            target: InventoryTarget::Container { guid },
+        };
+        assert_eq!(
+            plan_inventory_intent(&world, move_to(EXTERNAL_PACK, EXTERNAL_PACK)),
+            Err(InventoryPlanError::InvalidContainer)
+        );
+        place(
+            &mut world,
+            EXTERNAL_PACK,
+            PACK,
+            0,
+            InventoryEntryKind::Container,
+        );
+        assert_eq!(
+            plan_inventory_intent(&world, move_to(PACK, EXTERNAL_PACK)),
+            Err(InventoryPlanError::InvalidContainer)
+        );
+        world.close_world_container();
+        assert_eq!(
+            plan_inventory_intent(&world, move_to(SOURCE, EXTERNAL)),
+            Err(InventoryPlanError::InvalidContainer)
+        );
+        assert_eq!(
+            plan_inventory_intent(&world, move_to(LOOT, PACK)),
+            Err(InventoryPlanError::NotAccessible)
+        );
+        world.confirm_world_container(EXTERNAL);
+        world
+            .entities
+            .get_mut(EXTERNAL)
+            .unwrap()
+            .properties
+            .ints
+            .0
+            .remove(&PropertyInt::ItemsCapacity);
+        assert_eq!(
+            plan_inventory_intent(&world, move_to(SOURCE, EXTERNAL)),
+            Err(InventoryPlanError::Pending(EXTERNAL))
+        );
+        let pending = Guid(0x8000_0104);
+        place(&mut world, pending, EXTERNAL, 2, InventoryEntryKind::Item);
+        assert_eq!(
+            plan_inventory_intent(&world, move_to(pending, PACK)),
+            Err(InventoryPlanError::Pending(pending))
+        );
+    }
+
+    #[test]
+    fn external_access_does_not_grant_specialized_owned_item_actions() {
+        let world = external_storage();
+        for target in [
+            InventoryTarget::Ground,
+            InventoryTarget::Split { amount: 1 },
+            InventoryTarget::Give { guid: PLAYER },
+            InventoryTarget::Equipment {
+                mask: EquipMask::MELEE_WEAPON.bits(),
+            },
+            InventoryTarget::Pack { guid: PACK },
+        ] {
+            assert_eq!(
+                plan_inventory_intent(&world, InventoryIntent { item: LOOT, target }),
+                Err(InventoryPlanError::NotOwned)
+            );
+        }
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: EXTERNAL,
+                    target: InventoryTarget::Container { guid: PLAYER }
+                }
+            ),
+            Err(InventoryPlanError::NotAccessible)
+        );
+    }
+
+    #[test]
+    fn external_stack_targets_keep_merge_only_semantics() {
+        let mut world = external_storage();
+        for (guid, quantity) in [(SOURCE, 8), (LOOT, 15)] {
+            let entity = world.entities.get_mut(guid).unwrap();
+            entity.wcid = Some(1);
+            entity
+                .properties
+                .ints
+                .insert(PropertyInt::StackSize, quantity);
+            entity.properties.ints.insert(PropertyInt::MaxStackSize, 20);
+        }
+        for (source, destination, amount) in [(SOURCE, LOOT, 5), (LOOT, SOURCE, 12)] {
+            assert_eq!(
+                plan_inventory_intent(
+                    &world,
+                    InventoryIntent {
+                        item: source,
+                        target: InventoryTarget::Stack { guid: destination }
+                    }
+                ),
+                Ok(InventoryPlan::Merge {
+                    source,
+                    destination,
+                    amount
+                })
+            );
+        }
+        world
+            .entities
+            .get_mut(LOOT)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::StackSize, 20);
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: SOURCE,
+                    target: InventoryTarget::Stack { guid: LOOT }
+                }
+            ),
+            Err(InventoryPlanError::StackFull)
+        );
+    }
+
     #[test]
     fn give_resolves_source_quantity_and_revalidates_both_identities() {
         use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
@@ -655,6 +946,150 @@ mod tests {
     }
 
     #[test]
+    fn external_pickup_requires_current_access_and_uses_existing_storage_allocation() {
+        use holtburger_common::properties::ItemType;
+        let root = Guid(0x8000_0060);
+        let item = Guid(0x8000_0061);
+        let mut world = super::super::equipment_plan::tests::outfit(1, 1);
+        let mut entity = Entity::new(item, "Loot".into(), Default::default());
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::MISC.bits() as i32);
+        world.add_entity(entity);
+        place(&mut world, item, root, 0, InventoryEntryKind::Item);
+        let intent = InventoryIntent {
+            item,
+            target: InventoryTarget::Pickup { container: None },
+        };
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::NotPickable)
+        );
+        world.confirm_world_container(root);
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item,
+                    target: InventoryTarget::Pickup {
+                        container: Some(root)
+                    }
+                }
+            ),
+            Err(InventoryPlanError::InvalidContainer),
+        );
+        let preferred_pack = world
+            .container_contents(PLAYER)
+            .find_map(|(guid, slot)| {
+                matches!(
+                    slot,
+                    StorageSlot::Pack {
+                        kind: PackEntryKind::Container,
+                        ..
+                    }
+                )
+                .then_some(guid)
+            })
+            .expect("owned fixture pack");
+        world
+            .entities
+            .get_mut(preferred_pack)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 2);
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item,
+                    target: InventoryTarget::Pickup {
+                        container: Some(preferred_pack)
+                    }
+                }
+            ),
+            Ok(InventoryPlan::Move(InventoryMove {
+                item,
+                container: preferred_pack,
+                placement: 1
+            })),
+        );
+        world
+            .entities
+            .get_mut(preferred_pack)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 1);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Move(InventoryMove {
+                item,
+                container: PLAYER,
+                placement: 0,
+            }))
+        );
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 0);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::Storage(StorageAllocationError::NoSpace))
+        );
+        world.close_world_container();
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::NotPickable)
+        );
+    }
+
+    #[test]
+    fn external_pack_pickup_allocates_a_player_pack_slot() {
+        use holtburger_common::properties::{ItemType, PropertyBool};
+        let root = Guid(0x8000_0060);
+        let pack = Guid(0x8000_0061);
+        let mut world = super::super::equipment_plan::tests::outfit(1, 1);
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 2);
+        let mut entity = Entity::new(pack, "Loot pack".into(), Default::default());
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CONTAINER.bits() as i32);
+        entity
+            .properties
+            .bools
+            .insert(PropertyBool::RequiresBackpackSlot, true);
+        world.add_entity(entity);
+        place(&mut world, pack, root, 0, InventoryEntryKind::Container);
+        world.confirm_world_container(root);
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: pack,
+                    target: InventoryTarget::Pickup { container: None }
+                }
+            ),
+            Ok(InventoryPlan::Move(InventoryMove {
+                item: pack,
+                container: PLAYER,
+                placement: 1
+            }))
+        );
+    }
+
+    #[test]
     fn pickup_uses_pack_slots_and_requires_known_storage_capacity() {
         use holtburger_common::properties::{ItemType, PropertyBool};
         let mut world = super::super::equipment_plan::tests::outfit(0, 0);
@@ -671,7 +1106,7 @@ mod tests {
         world.add_entity(bag);
         let intent = InventoryIntent {
             item: ground,
-            target: InventoryTarget::Pickup,
+            target: InventoryTarget::Pickup { container: None },
         };
         world
             .entities
@@ -718,7 +1153,7 @@ mod tests {
         world.add_entity(entity);
         let intent = InventoryIntent {
             item: ground,
-            target: InventoryTarget::Pickup,
+            target: InventoryTarget::Pickup { container: None },
         };
         assert_eq!(
             plan_inventory_intent(&world, intent),

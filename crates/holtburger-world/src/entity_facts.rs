@@ -201,8 +201,10 @@ pub struct ClientEntityFacts {
     pub location: EntityStorageLocation,
     /// Accepted recursive ownership, including unhydrated declarations.
     pub owned_by_player: bool,
-    /// Shared loose-object pickup admission consumed by ordinary interaction.
+    /// Shared loose-world or external-contents pickup admission.
     pub can_pick_up: bool,
+    /// Accepted descendant of the confirmed external root, including pending contents.
+    pub world_container_content: bool,
     /// Coarse recipient admission consumed by give gestures; server acceptance may differ.
     pub can_receive_give: bool,
     /// Scene capability independent of loaded renderer assets.
@@ -221,6 +223,7 @@ impl WorldState {
             .map(|entity| entity.guid)
             .collect();
         guids.extend(self.storage.owned_items(self.player.guid));
+        guids.extend(self.world_container_contents());
         if self.player.guid != Guid::NULL {
             guids.insert(self.player.guid);
         }
@@ -236,7 +239,23 @@ impl WorldState {
         let owned_by_player = self.storage.owned_by(guid, self.player.guid);
         // Deletion retires the old storage links at acceptance. Any later owned declaration
         // establishes a pending identity even while its deleted description awaits eviction.
-        if entity.is_none() && !owned_by_player && (guid == Guid::NULL || guid != self.player.guid)
+        let external = self.is_world_container_content(guid);
+        let retired_preview = self
+            .entity_lifecycle_state(guid)
+            .is_some_and(|state| state.container_preview)
+            && !external
+            && !owned_by_player
+            && !self
+                .retention_snapshot(guid, self.current_server_time())
+                // An in-flight pickup retains its description, not access to closed contents.
+                .is_some_and(|snapshot| {
+                    snapshot.has_authoritative_retention() || snapshot.has_preview_retention()
+                });
+        if retired_preview
+            || (entity.is_none()
+                && !owned_by_player
+                && !external
+                && (guid == Guid::NULL || guid != self.player.guid))
         {
             return Ok(None);
         }
@@ -374,6 +393,7 @@ impl WorldState {
             location,
             owned_by_player,
             can_pick_up: crate::interaction::pickup_candidate(self, guid).is_some(),
+            world_container_content: external,
             can_receive_give: crate::interaction::give_recipient_candidate(self, guid),
             scene_placement,
             targeting,

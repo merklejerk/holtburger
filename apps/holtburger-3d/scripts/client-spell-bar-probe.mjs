@@ -448,6 +448,64 @@ export async function probeSpellBar(
 			Buffer.from(shot.data, "base64"),
 		);
 	}
+	// Built-in spells remain usable without learned-spell membership and follow equipment updates.
+	await read(`${probe}.knowledge([])`);
+	const casterGuid = await read(`${probe}.caster(1, true)`);
+	const waitCaster = (condition) =>
+		read(`new Promise((resolve,reject)=>{
+		const start=performance.now(); const timer=setInterval(()=>{
+			if (${condition}) {clearInterval(timer);resolve(true);}
+			else if(performance.now()-start>5000){clearInterval(timer);reject(new Error('Caster display did not settle'));}
+		},20);
+	})`);
+	await waitCaster(
+		`document.querySelector('[data-caster-spell="1"] img') !== null`,
+	);
+	assert.equal(
+		await read(
+			`document.querySelector('[data-caster-spell] button').getAttribute('aria-disabled')`,
+		),
+		"false",
+	);
+	const casterGeometry = await read(`(() => {
+		const caster=document.querySelector('[data-caster-spell] button').getBoundingClientRect();
+		const first=document.querySelector('[data-spell-cell="0"]').getBoundingClientRect();
+		return {left:caster.right <= first.left, square:Math.abs(caster.width-caster.height)<1};
+	})()`);
+	assert.deepEqual(casterGeometry, { left: true, square: true });
+	await click("[data-caster-spell] button");
+	await read(`${probe}.resolveCaster()`);
+	const itemCast = await read(
+		`${api}.inventoryDragCommands().filter(c=>c.command==='submit_client_item_use').at(-1)`,
+	);
+	assert.deepEqual(itemCast.args.request.intent, {
+		kind: "targeted",
+		source: casterGuid,
+		target: 7,
+	});
+	if (screenshotPath) {
+		const shot = await client.send("Page.captureScreenshot", {
+			format: "png",
+			captureBeyondViewport: false,
+		});
+		await writeFile(
+			`${screenshotPath}.caster-spell.png`,
+			Buffer.from(shot.data, "base64"),
+		);
+	}
+	await read(`${probe}.caster(2, true)`);
+	await waitCaster(
+		`document.querySelector('[data-caster-spell="2"] img') !== null`,
+	);
+	await read(`${probe}.caster(2, false)`);
+	await waitCaster(`document.querySelector('[data-caster-spell]') === null`);
+	await read(`${probe}.caster(null, true)`);
+	await settled();
+	assert.equal(
+		await read(`document.querySelector('[data-caster-spell]') === null`),
+		true,
+	);
+	await read(`${probe}.restoreCaster()`);
 	await read(`${probe}.end()`);
 	return {
 		drag: true,
@@ -455,5 +513,6 @@ export async function probeSpellBar(
 		focusPriority: true,
 		layout: true,
 		knowledge: true,
+		caster: true,
 	};
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClientItemInteractions } from "./client-item-interactions";
+import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import type { ClientEntityFacts } from "./client-entity-mirror";
@@ -118,6 +119,67 @@ async function fixture() {
 }
 
 describe("shared frontend item interaction flow", () => {
+	it("casts an equipped item's unlearned spell using the selected target and rejects stale equipment", async () => {
+		const f = await fixture();
+		const source = entityFacts(2);
+		if (source.description.kind !== "known")
+			throw new Error("Known fixture required");
+		const caster: ClientEntityFacts = {
+			...source,
+			ownedByPlayer: true,
+			location: { kind: "equipped", wearerGuid: 1, mask: CASTER_EQUIP_MASK },
+			description: {
+				...source.description,
+				builtInSpell: 42,
+				equipLocations: CASTER_EQUIP_MASK,
+				useCapability: "targeted",
+			},
+		};
+		f.emit("client-entity-facts-changed", { upserts: [caster], removed: [] });
+		f.emit("client-player-spells-updated", { spellIds: [] });
+		f.select(3);
+		f.interactions.castWieldedSpell(2);
+		expect(f.query).not.toHaveBeenCalled();
+		expect(f.failure).toHaveBeenLastCalledWith(
+			"Enter magic stance before casting.",
+		);
+		f.emit("client-combat-mode-updated", { mode: "magic" });
+		f.interactions.castWieldedSpell(2);
+		expect(f.query).toHaveBeenCalledWith({
+			sequence: expect.any(Number),
+			source: 2,
+			target: 3,
+		});
+		f.resolveTarget(true);
+		expect(f.request().intent).toEqual({
+			kind: "targeted",
+			source: 2,
+			target: 3,
+		});
+		f.result({ kind: "executed" });
+		f.select(null);
+		f.interactions.castWieldedSpell(2);
+		expect(f.interactions.snapshot().kind).toBe("acquiring");
+		f.emit("client-entity-facts-changed", {
+			upserts: [
+				{
+					...caster,
+					location: {
+						kind: "contained",
+						parentGuid: 1,
+						slot: { kind: "item", index: 0 },
+					},
+				},
+			],
+			removed: [],
+		});
+		f.interactions.castWieldedSpell(2);
+		expect(f.failure).toHaveBeenLastCalledWith(
+			"The caster spell is no longer wielded.",
+		);
+		expect(f.submit).toHaveBeenCalledTimes(1);
+		f.destroy();
+	});
 	it("gives the selected item to the previous recipient and cancels use targeting", async () => {
 		const f = await fixture();
 		const give = vi
@@ -317,7 +379,7 @@ describe("shared frontend item interaction flow", () => {
 		if (!first) throw new Error("Expected target query");
 		f.interactions.consider(3);
 		expect(f.query).toHaveBeenCalledTimes(1);
-		f.interactions.consider("self");
+		f.interactions.consider(1);
 		const second = f.query.mock.calls.at(-1)?.[0];
 		if (!second) throw new Error("Expected self query");
 		expect(second.target).toBe(1);

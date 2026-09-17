@@ -66,6 +66,8 @@ const clientEntityFactsSchema = z
 						"direct",
 						"targeted",
 					]),
+					/** Public activation spell; independent of the player's spellbook. */
+					builtInSpell: guid.positive().nullable(),
 					/** World-derived template equivalence and remaining supply. */
 					consumable: z
 						.object({

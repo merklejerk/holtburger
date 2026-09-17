@@ -314,6 +314,8 @@ interface FrontendRenderingTuning {
 		/** Lamp fraction retained in full daylight. */
 		readonly minimumResponse: number;
 	};
+	/** Terrain-only scale applied after individual point-light falloff and roll-off. */
+	readonly terrainPointLightIntensityScale: number;
 	/** Camera interval over which terrain detail textures fade. */
 	readonly terrainDetailFade: {
 		/** Distance where detail fading begins. */

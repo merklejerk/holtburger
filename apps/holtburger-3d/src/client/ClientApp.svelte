@@ -90,6 +90,7 @@
 	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
 	import { ClientEntitySelection } from "./client-entity-selection";
 	import { ClientPointerSelectionController } from "./client-pointer-selection-controller";
+	import { resolveClientSpellCastAim } from "./client-spell-casting";
 	import {
 		ClientCycleSelectionController,
 		sampleCycleCandidates,
@@ -447,10 +448,19 @@
 	}
 
 	async function castSpell(spellId: number): Promise<void> {
-		if (session === null) return;
+		const currentSession = session;
+		if (currentSession === null) return;
 		const selection = entitySelection?.selectedGuid() ?? null;
 		try {
-			await session.castSpell(spellId, selection);
+			const reference =
+				selection === null && spells !== null
+					? await spells.reference(spellId)
+					: null;
+			const details = reference?.kind === "known" ? reference.details : null;
+			await currentSession.castSpell(
+				spellId,
+				resolveClientSpellCastAim(details, selection),
+			);
 		} catch (error) {
 			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
 		}

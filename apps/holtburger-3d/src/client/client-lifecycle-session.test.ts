@@ -144,15 +144,20 @@ describe("ClientLifecycleSession", () => {
 		session.stop();
 	});
 
-	it("casts only in confirmed magic and forwards each captured selection", async () => {
+	it("casts only in confirmed magic and forwards each caller-owned aim", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
-		await expect(session.castSpell(42, 7)).rejects.toThrow("Spell session");
+		const targeted = { kind: "normal", selection: 7 } as const;
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"Spell session",
+		);
 		await session.start();
-		await expect(session.castSpell(42, 7)).rejects.toThrow("magic stance");
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"magic stance",
+		);
 		transport.emit("client-combat-mode-updated", { mode: "magic" });
-		await session.castSpell(42, 7);
-		await session.castSpell(42, null);
+		await session.castSpell(42, targeted);
+		await session.castSpell(42, { kind: "untargeted" });
 		expect(
 			transport.invocations.filter(
 				(call) => call.command === "cast_client_spell",
@@ -164,13 +169,17 @@ describe("ClientLifecycleSession", () => {
 			},
 			{
 				command: "cast_client_spell",
-				args: { spellId: 42, aim: { kind: "normal", selection: null } },
+				args: { spellId: 42, aim: { kind: "untargeted" } },
 			},
 		]);
 		transport.emit("client-current-state", currentState(1));
-		await expect(session.castSpell(42, 7)).rejects.toThrow("magic stance");
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"magic stance",
+		);
 		session.stop();
-		await expect(session.castSpell(42, 7)).rejects.toThrow("Spell session");
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"Spell session",
+		);
 	});
 
 	it("toggles only in world and reconciles stance through events and replacement snapshots", async () => {

@@ -296,6 +296,16 @@ export async function probeSpellBar(
 		"Unknown spell cannot cast",
 	);
 	assert.equal(await binding(1), 1, "Knowledge loss preserves binding");
+	await read(`${probe}.knowledge([1,2,3,2000])`);
+	await read(`${probe}.bind(0,2000)`);
+	await settled();
+	await click(cell(0));
+	assert.equal((await casts()).length, initialCasts + 3);
+	assert.deepEqual((await casts()).at(-1).args, {
+		spellId: 2000,
+		aim: { kind: "untargeted" },
+	});
+	await read(`${probe}.bind(0,null)`);
 	await read(`${probe}.knowledge([1,2,3])`);
 	await read(`${probe}.deferBoundSpell()`);
 	await key("@", "Digit2", 8);

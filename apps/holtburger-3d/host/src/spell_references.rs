@@ -65,6 +65,8 @@ pub struct SpellDetails {
     pub description: String,
     /// Authored school ID; unknown values remain distinguishable.
     pub school: u32,
+    /// Whether ACE executes the spell through a projectile handler.
+    pub uses_projectile_handler: bool,
     /// Base mana before economy adjustments.
     pub base_mana: u32,
     /// Additional mana per target.
@@ -132,6 +134,7 @@ fn project_references(
                     classification: spell.classification,
                     description: spell.description.to_owned(),
                     school: spell.school,
+                    uses_projectile_handler: spell.uses_projectile_handler,
                     base_mana: spell.base_mana,
                     mana_per_target: spell.mana_mod,
                     duration_seconds: spell.duration_seconds,
@@ -222,6 +225,8 @@ mod tests {
     use holtburger_world::spell::SpellInfo;
     use std::{collections::HashMap, sync::Arc};
 
+    const PROJECTILE_META_SPELL_TYPE: u32 = 2;
+
     struct Mappings;
     impl UiAssets for Mappings {
         fn enum_did(&mut self, group: u32, entry: u32) -> Result<u32, UiAssetError> {
@@ -258,6 +263,7 @@ mod tests {
                 ),
                 description: "Description".into(),
                 school: 3,
+                uses_projectile_handler: false,
                 base_mana: 10,
                 mana_per_target: 2,
                 duration_seconds: Some(60.0),
@@ -270,7 +276,7 @@ mod tests {
             serde_json::to_value(reference).unwrap(),
             serde_json::json!({
                 "kind":"known", "id":1, "name":"Spell",
-                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":3, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
+                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":3, "usesProjectileHandler":false, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
                     "kind":"ready", "spec":{"kind":"spell", "base":1,"background":610,"effects":702,"overlay":704}
                 }
             })
@@ -301,11 +307,12 @@ mod tests {
     fn reference_routes_match_casting_despite_authored_recipient_disagreements() {
         // Synthetic decoded formulas exercise both directions of the observed
         // Frost Blast / Flame Wave disagreement, plus self-first precedence.
-        for (flags, mask, components, route, recipient) in [
+        for (flags, mask, components, meta_spell_type, route, recipient) in [
             (
                 0,
                 0,
                 [1, 1, 1, 1, 0x31, 0, 0, 0],
+                PROJECTILE_META_SPELL_TYPE,
                 SpellCastingRoute::SelectedTarget,
                 None,
             ),
@@ -313,6 +320,7 @@ mod tests {
                 0,
                 16,
                 [1, 1, 1, 1, 0x3a, 0, 0, 0],
+                1,
                 SpellCastingRoute::Untargeted,
                 Some(SpellRecipientAssociation::Creature),
             ),
@@ -320,6 +328,7 @@ mod tests {
                 8,
                 16,
                 [0; 8],
+                1,
                 SpellCastingRoute::SelfTarget,
                 Some(SpellRecipientAssociation::Creature),
             ),
@@ -327,6 +336,7 @@ mod tests {
                 0,
                 6,
                 [1, 1, 1, 1, 0x39, 0, 0, 0],
+                1,
                 SpellCastingRoute::SelectedTarget,
                 Some(SpellRecipientAssociation::Item),
             ),
@@ -335,6 +345,7 @@ mod tests {
                 bitfield: flags,
                 non_component_target_type: mask,
                 components,
+                meta_spell_type,
                 ..SpellBase::default()
             };
             let casting_spell = SpellInfo::from(definition.clone());
@@ -350,6 +361,10 @@ mod tests {
             assert_eq!(details.casting_route, route);
             assert_eq!(details.casting_route, casting_spell.casting_route());
             assert_eq!(details.classification.recipient, recipient);
+            assert_eq!(
+                details.uses_projectile_handler,
+                meta_spell_type == PROJECTILE_META_SPELL_TYPE
+            );
         }
     }
 

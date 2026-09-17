@@ -1617,6 +1617,7 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 		"frontierMatchesOracle",
 		"junctionZeroThicknessTransitMatchesOracle",
 		"junctionAbsentEqualDepthIsRejected",
+		"materialBearingCoplanarSurfaceOccludesMask",
 		"nearPlaneStraddleMatchesOracle",
 		"nearPlaneStraddleOrdinaryPolicyIsRejected",
 		"opaqueOcclusionMatchesOracle",

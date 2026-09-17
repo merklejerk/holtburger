@@ -29,11 +29,13 @@ import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
 	PORTAL_ARRIVAL_METADATA_JUNCTION_OFFSET_BYTES,
+	PORTAL_ARRIVAL_METADATA_RECORD_BYTES,
 	PORTAL_ARRIVAL_METADATA_RECIPROCAL_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES,
 } from "./portal-arrival-metadata";
 import {
 	PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL,
+	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
 	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
 	PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
@@ -127,6 +129,8 @@ export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly expectedJunctionPixels: readonly number[];
 	/** Without a junction id, the same equal-depth advance stays rejected (today's behavior). */
 	readonly junctionAbsentEqualDepthIsRejected: boolean;
+	/** A coplanar source surface owns transform-rounding and raster-coverage seam pixels. */
+	readonly materialBearingCoplanarSurfaceOccludesMask: boolean;
 	readonly strictPixels: readonly number[];
 	readonly expectedStrictPixels: readonly number[];
 	readonly straddlePixels: readonly number[];
@@ -157,6 +161,8 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			`Portal shader fixture requires a ${DRAWING_EXTENT.width}x${DRAWING_EXTENT.height} drawing buffer.`,
 		);
 	}
+	const materialBearingCoplanarSurfaceOccludesMask =
+		runMaterialBearingCoplanarFixture(gl);
 	const state = captureState(gl, METADATA_BINDING_POINT);
 	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
 	const executor = new WebGL2PortalScopeAtlasExecutor(
@@ -354,6 +360,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				strictPixels,
 				expectedStrictPixels,
 			),
+			materialBearingCoplanarSurfaceOccludesMask,
 			strictPixels: [...strictPixels],
 			expectedStrictPixels: [...expectedStrictPixels],
 			opaqueOcclusionMatchesOracle: pixelsMatch(
@@ -624,6 +631,107 @@ function createPropagationStream(): PortalCrossingTriangleStreamView &
 	};
 }
 
+/**
+ * Model the production CellStruct seam where an aperture transform lands fractionally nearer than
+ * the opaque polygon authored on the same plane.
+ */
+function createMaterialBearingCoplanarStream(
+	arrivalPlaneNormalZ: -1 | 1,
+): PortalCrossingTriangleStreamView & PortalPropagationMetadataStreamView {
+	const arena = new ArrayBuffer(
+		6 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	);
+	const floats = new Float32Array(arena);
+	const uints = new Uint32Array(arena);
+	const slotsPerVertex =
+		PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES /
+		Uint32Array.BYTES_PER_ELEMENT;
+	for (const [vertex, position] of crossingPositions(-0.0001).entries()) {
+		const output = vertex * slotsPerVertex;
+		const [x, y, z] = position;
+		floats[output] = x;
+		floats[output + 1] = y;
+		floats[output + 2] = z;
+		uints[output + 3] = 2;
+		uints[output + 4] = 0;
+		uints[output + 5] = PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL;
+	}
+	const metadata = createMetadata(4);
+	writeArrivalPlane(
+		new Float32Array(metadata.buffer),
+		1,
+		arrivalPlaneNormalZ,
+		0,
+	);
+	return {
+		arrivalMetadataStateCount: 2,
+		bytes: new Uint8Array(arena),
+		propagationMetadataBytes: metadata,
+		renderDomainMetadataStateCount: 2,
+		usedByteLength: arena.byteLength,
+		usedPropagationMetadataByteLength:
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+		vertexCount: 6,
+	};
+}
+
+/** Run the coplanar depth/coverage regression without changing the main fixture's atlas history. */
+function runMaterialBearingCoplanarFixture(
+	gl: WebGL2RenderingContext,
+): boolean {
+	const state = captureState(gl, METADATA_BINDING_POINT);
+	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
+	const executor = new WebGL2PortalScopeAtlasExecutor(
+		gl,
+		6,
+		METADATA_BINDING_POINT,
+	);
+	try {
+		const targets = targetOwner.resize({
+			atlas: ATLAS_EXTENT,
+			drawingBuffer: DRAWING_EXTENT,
+		});
+		seedSceneAtlas(gl, targets, 0.5);
+		for (const arrivalPlaneNormalZ of [-1, 1] as const) {
+			clearOutput(gl);
+			executor.execute({
+				outputExtent: DRAWING_EXTENT,
+				outputFramebuffer: null,
+				stream: createMaterialBearingCoplanarStream(arrivalPlaneNormalZ),
+				targets,
+				traversalDepth: 1,
+			});
+			if (!pixelsMatch(readOutput(gl), solidPixels(ROOT_COLOR))) return false;
+		}
+		// Reproduce the one-pixel coverage crack made by independently triangulating the shell and
+		// its aperture. Neighboring coplanar depth must conservatively retain source ownership.
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
+		gl.enable(gl.SCISSOR_TEST);
+		gl.scissor(
+			Math.floor(DRAWING_EXTENT.width / 2),
+			0,
+			1,
+			DRAWING_EXTENT.height,
+		);
+		gl.clearBufferfv(gl.DEPTH, 0, new Float32Array([1]));
+		gl.disable(gl.SCISSOR_TEST);
+		clearOutput(gl);
+		executor.execute({
+			outputExtent: DRAWING_EXTENT,
+			outputFramebuffer: null,
+			stream: createMaterialBearingCoplanarStream(1),
+			targets,
+			traversalDepth: 1,
+		});
+		if (!pixelsMatch(readOutput(gl), solidPixels(ROOT_COLOR))) return false;
+		return true;
+	} finally {
+		executor.destroy();
+		targetOwner.destroy();
+		restoreState(gl, state, METADATA_BINDING_POINT);
+	}
+}
+
 /** Seed the shared atlas, then order the junction chain's tiles by strictly decreasing depth. */
 function seedJunctionSceneAtlas(
 	gl: WebGL2RenderingContext,
@@ -673,7 +781,7 @@ function createJunctionStream(
 	const metadataUints = new Uint32Array(metadata.buffer);
 	// Both arrivals cross the same z = 0 plane; rewrite record 1's plane from the chain default.
 	const metadataFloats = new Float32Array(metadata.buffer);
-	writeArrivalPlane(metadataFloats, 1, 0);
+	writeArrivalPlane(metadataFloats, 1, 1, 0);
 	if (tagJunction) {
 		const junction = 7;
 		for (const record of [1, 2]) {
@@ -753,11 +861,11 @@ function createMetadata(scopeCount: 1 | 4): Uint8Array {
 	writeArrivalRoute(uints, 0, 0, 0, 0);
 	if (scopeCount === 4) {
 		writeArrivalRoute(uints, 1, 1, 0, PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE);
-		writeArrivalPlane(floats, 1, 0.4);
+		writeArrivalPlane(floats, 1, 1, 0.4);
 		writeArrivalRoute(uints, 2, 2, 0, PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE);
-		writeArrivalPlane(floats, 2, 0);
+		writeArrivalPlane(floats, 2, 1, 0);
 		writeArrivalRoute(uints, 3, 3, 0, PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE);
-		writeArrivalPlane(floats, 3, -0.4);
+		writeArrivalPlane(floats, 3, 1, -0.4);
 	}
 	const scopeOffset =
 		PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES /
@@ -792,12 +900,14 @@ function createMetadata(scopeCount: 1 | 4): Uint8Array {
 function writeArrivalPlane(
 	metadata: Float32Array,
 	recordOrdinal: number,
+	normalZ: -1 | 1,
 	d: number,
 ): void {
 	const floatOffset =
-		(PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES + recordOrdinal * 32) /
+		(PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES +
+			recordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES) /
 		Float32Array.BYTES_PER_ELEMENT;
-	metadata[floatOffset + 2] = 1;
+	metadata[floatOffset + 2] = normalZ;
 	metadata[floatOffset + 3] = d;
 }
 
@@ -809,7 +919,8 @@ function writeArrivalRoute(
 	flags: number,
 ): void {
 	const byteOffset =
-		PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES + recordOrdinal * 32;
+		PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES +
+		recordOrdinal * PORTAL_ARRIVAL_METADATA_RECORD_BYTES;
 	metadata[
 		(byteOffset + PORTAL_ARRIVAL_METADATA_SCOPE_OFFSET_BYTES) /
 			Uint32Array.BYTES_PER_ELEMENT

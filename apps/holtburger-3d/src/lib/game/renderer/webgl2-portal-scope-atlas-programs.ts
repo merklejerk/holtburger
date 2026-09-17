@@ -47,9 +47,8 @@ void main() {
 		// afterward (acclient.c:433600-433663, 441221-441228). Our independently rendered scopes
 		// cannot reproduce that ordering for a material-free building transition, so move only that
 		// synthetic aperture's generated depth one retail portal-plane tolerance into its target
-		// domain. Material-bearing CellStruct transitions use reject-equal policy and retain their
-		// authored depth. X/y coverage remains exact; a coplanar door therefore wins ordinary depth
-		// while geometry genuinely behind the transition does not.
+		// domain. Material-bearing CellStruct transitions retain their authored propagation depth;
+		// their source-occlusion comparison applies the tolerance without moving the frontier.
 		PortalArrivalMetadata outputArrival = uArrivals[aOutputArrival - 1u];
 		vec3 depthBias = outputArrival.entryPlane.xyz * ${PORTAL_QUERY_EPSILON};
 		vec4 biasedClipPosition = uClipFromAnchor * vec4(aPosition + depthBias, 1.0);
@@ -381,8 +380,37 @@ void main() {
 		+ screenPixel - ivec2(screenOrigin);
 	if ((vPolicy & ${PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG}u) == 0u) {
 		float localOpaqueDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
+		float sourceOcclusionDepth = gl_FragCoord.z;
+		if (vPolicy == ${PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL}u) {
+			// The visible shell and its synthetic aperture can reach this comparison through
+			// different transforms. Treat the portal plane as a tolerance-thick slab and compare its
+			// far side, independent of authored plane orientation, so transform rounding cannot let a
+			// coplanar mask leak through its own surface as the camera moves.
+			PortalArrivalMetadata outputArrival = uArrivals[vOutputArrival - 1u];
+			vec3 depthBias = outputArrival.entryPlane.xyz * ${PORTAL_QUERY_EPSILON};
+			vec4 positiveClipPosition = uClipFromAnchor * vec4(vAnchorPosition + depthBias, 1.0);
+			vec4 negativeClipPosition = uClipFromAnchor * vec4(vAnchorPosition - depthBias, 1.0);
+			float positiveDepth = positiveClipPosition.z / positiveClipPosition.w * 0.5 + 0.5;
+			float negativeDepth = negativeClipPosition.z / negativeClipPosition.w * 0.5 + 0.5;
+			sourceOcclusionDepth = max(positiveDepth, negativeDepth);
+			// Independently triangulated shell and aperture edges do not have identical raster
+			// coverage. Conservatively dilate source opaque depth by one pixel so a subpixel coverage
+			// crack cannot expose the destination through a material-bearing portal.
+			ivec2 atlasMinimum = ivec2(scope.atlasAndScreenOrigin.xy);
+			ivec2 atlasMaximum = atlasMinimum + ivec2(extent) - ivec2(1);
+			for (int y = -1; y <= 1; y += 1) {
+				for (int x = -1; x <= 1; x += 1) {
+					if (x == 0 && y == 0) continue;
+					ivec2 samplePixel = clamp(atlasPixel + ivec2(x, y), atlasMinimum, atlasMaximum);
+					localOpaqueDepth = min(
+						localOpaqueDepth,
+						texelFetch(uSceneDepth, samplePixel, 0).r
+					);
+				}
+			}
+		}
 		bool occluded = vPolicy == ${PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL}u
-			? gl_FragCoord.z >= localOpaqueDepth
+			? sourceOcclusionDepth >= localOpaqueDepth
 			: gl_FragCoord.z > localOpaqueDepth;
 		if (occluded) discard;
 	}

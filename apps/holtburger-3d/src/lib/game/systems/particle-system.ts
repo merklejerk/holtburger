@@ -355,7 +355,7 @@ interface EmitterInstance {
 	lastEmissionTime: number | null;
 	/** Distance-only trigger state; time-trigger precedence leaves this absent. */
 	readonly distanceEmission: {
-		/** Linear spacing recomputed when the live spacing policy changes. */
+		/** Linear spacing fixed when this emitter is created from immutable runtime tuning. */
 		spacing: number;
 		/** Last sampled attached origin and time, including frames with no births. */
 		lastOrigin: SceneVector3;
@@ -550,32 +550,19 @@ export class ParticleSystem {
 	#reapedEmitterCount = 0;
 	/** Nonzero authored identity replacements. */
 	#replacedEmitterTotal = 0;
+	/** Immutable spacing policy shared by every distance-triggered emitter. */
+	readonly #distanceSpacingMultiplier: number;
 
 	constructor(dependencies: ParticleSystemDependencies) {
 		this.#dependencies = dependencies;
 		this.#roll = dependencies.roll;
-		this.setDistanceSpacingMultiplier(dependencies.distanceSpacingMultiplier);
-	}
-
-	/** Current spacing policy for new emitters; existing emitters update on the same change. */
-	#distanceSpacingMultiplier = 1;
-
-	/** Change future birth spacing without moving or removing existing particles. */
-	setDistanceSpacingMultiplier(multiplier: number): void {
+		const multiplier = dependencies.distanceSpacingMultiplier;
 		if (!Number.isFinite(multiplier) || multiplier <= 0) {
 			throw new Error(
 				"Particle distance spacing multiplier must be finite and positive.",
 			);
 		}
 		this.#distanceSpacingMultiplier = multiplier;
-		for (const instance of this.#instances) {
-			if (instance.distanceEmission !== null) {
-				instance.distanceEmission.spacing =
-					instance.emitter.info.birthrate * multiplier;
-				instance.distanceEmission.lastBirthOrigin =
-					instance.distanceEmission.lastOrigin;
-			}
-		}
 	}
 
 	/**

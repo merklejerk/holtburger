@@ -417,18 +417,6 @@ controls or automated casts were issued.
 - Do not modify the retail decompile, run the TUI, or retain tests requiring untracked runtime assets.
 - Authorized implementation follow-ups are recorded below. No commits or staging were performed.
 
-## Live tuning control
-
-The connected client's Debug panel now exposes **Particle trail spacing**, 0.1×–30×,
-with reset to the shared configured default. The override applies to current and new
-distance emitters without deleting existing particles or changing time emitters. It
-lasts until app reload; it does not persist a new default or claim retail parity.
-
-Validation: frontend type checks and lint passed; 88 focused particle/session tests
-passed. A focused browser interaction confirmed default 1×, changing to 12.5×, and
-reset. The broader showcase run stopped on character-list keyboard navigation before
-the slider check; that broader failure was not diagnosed as part of this change.
-
 ## Frame-rate normalization follow-up
 
 The user's provisional visual reference was **approximately 10× at 144 FPS**, with
@@ -913,7 +901,7 @@ Contract coverage:
 | --- | --- | --- |
 | Requested setup placement | Protocol description hydration → world entity → core client projection → host event passthrough → frontend schema/adaptation → visual key and dynamic entity pose | Independent placement remains lossless through the boundary; asset lookup owns Default fallback. Explorer/scenery retain explicit Resting policy. Resident replacement preserves animated poses; attachment placement remains separately applied by the attachment path. |
 | Collision preparation | Client body facts and preparation equality → core unit geometry and script classifier → world installation and later scale updates | Placement invalidates geometry preparation; instance scale does not. Scale support reuses existing world execution instead of adding a second scale owner. Other unsupported collision-mutating hooks remain rejected. |
-| Particle spacing and lifecycle | Cold Svelte control → presentation session/owner construction → runtime → particle system → stored particle records | Session policy survives asynchronous construction without owning renderer lifetime. Distance sampling, birth admission, historical expiry, and snap/visibility resets are particle-system responsibilities. Existing particles retain their birth state. |
+| Particle spacing and lifecycle | Shared frontend tuning → runtime construction → particle system → stored particle records | Spacing is immutable for one runtime. Distance sampling, birth admission, historical expiry, and snap/visibility resets are particle-system responsibilities. |
 | Path alignment | Shared facing helper → free-flight prediction and contact angular solver | Pitch reaches both immediate consumers; accepted-travel facing and angular-clearance policy remain intact. Existing collision-order differences from retail are explicitly outside this fix. |
 
 The added placement plumbing carries a previously discarded fact rather than
@@ -921,7 +909,7 @@ reconstructing it downstream. The additional particle clock state is justified b
 render-independent admission, chronological capacity, and discontinuity handling;
 sampled position and last admitted birth position have distinct lifetimes. No new
 per-spell branches, cache framework, or production capture hooks were introduced.
-The requested live spacing control is retained functionality, while replay scripts
+Particle spacing remains a code-surfaced frontend tuning value, while replay scripts
 and captures remain investigation evidence outside production code.
 
 Validation during this review: 209 focused frontend tests, 466 core tests, and 839

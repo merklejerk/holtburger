@@ -1354,7 +1354,7 @@ export class GamePresentationRuntime {
 		);
 		this.#particles = new ParticleSystem({
 			distanceSpacingMultiplier:
-				SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier,
+				SHARED_FRONTEND_TUNING.particleDistanceSpacingMultiplier,
 			clock: () => this.#lastFrameTimeSeconds,
 			// Reads an already-staged definition; an unstaged id returns null rather than starting
 			// a load inside the frame.
@@ -3080,11 +3080,6 @@ export class GamePresentationRuntime {
 	 */
 	async installSky(source: SkySourcePresentations): Promise<void> {
 		await this.#renderer?.sky?.install(source, this.#texturePreparer);
-	}
-
-	/** Live diagnostic spacing policy shared by all distance-triggered effects. */
-	setParticleDistanceSpacingMultiplier(multiplier: number): void {
-		this.#particles.setDistanceSpacingMultiplier(multiplier);
 	}
 
 	/** Replace frontend-selected dynamic display choices without altering world data. */

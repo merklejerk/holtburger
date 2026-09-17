@@ -334,11 +334,8 @@ interface FrontendRenderingTuning {
 
 /** Exhaustive contract for values shared by the browser frontend compositions. */
 export interface FrontendTuning {
-	/** Shared authored particle emission policy. */
-	readonly particles: {
-		/** Finite positive multiplier for the authored minimum distance between particle births. */
-		readonly distanceSpacingMultiplier: number;
-	};
+	/** Finite positive multiplier for the authored minimum distance between particle births. */
+	readonly particleDistanceSpacingMultiplier: number;
 	/** Sampling policy for animated roots omitted by the previous frame. */
 	readonly animationPresentation: {
 		/** Enable humanoid player gesture and locomotion pose composition. */

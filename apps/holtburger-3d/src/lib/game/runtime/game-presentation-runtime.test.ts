@@ -32,6 +32,8 @@ import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import {
 	GamePresentationRuntime,
+	RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
+	RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
 	type GamePresentationRuntimeDependencies,
 	type GamePresentationRuntimeRenderDevice,
 } from "./game-presentation-runtime";
@@ -1074,6 +1076,145 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScaleBehavior
 				.outcomeCounts,
 		).toEqual({ "owned-by-world": 1 });
+		await runtime.destroy();
+	});
+
+	it("reconciles intrinsic Hidden and UnHide cues without replaying unchanged levels", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const hiddenScriptId = "0x33000001" as DatAssetId;
+		const unhideScriptId = "0x33000002" as DatAssetId;
+		const loadScript = vi.fn(async (scriptId: DatAssetId) => {
+			if (scriptId === hiddenScriptId)
+				return scalePhysicsScriptSource(scriptId, 2).loadPhysicsScript(
+					scriptId,
+				);
+			if (scriptId === unhideScriptId)
+				return scalePhysicsScriptSource(scriptId, 3).loadPhysicsScript(
+					scriptId,
+				);
+			throw new Error(`Unexpected physics script ${scriptId}.`);
+		});
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			{ destroy() {}, loadPhysicsScript: loadScript },
+			{
+				destroy() {},
+				async loadPhysicsScriptTable() {
+					return {
+						id: tableId,
+						cues: new Map([
+							[
+								RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
+								[{ maximumIntensity: 1, scriptId: unhideScriptId }],
+							],
+							[
+								RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
+								[{ maximumIntensity: 1, scriptId: hiddenScriptId }],
+							],
+						]),
+					};
+				},
+			},
+		);
+		const entity = (hidden: boolean): DynamicEntityView => {
+			return withPhysicsEffectTable(spawnedEntity(7, 3, { hidden }), tableId);
+		};
+
+		await runtime.replaceDynamicEntitySnapshot([entity(true)]);
+		await vi.waitFor(() => expect(loadScript).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() =>
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.activeScriptCount,
+			).toBe(1),
+		);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+		expect(
+			runtime
+				.getAuthoredDynamicRuntimeDiagnostics()
+				.worldScaleBehavior.observations.map(
+					(observation) => observation.provenance.assetId,
+				),
+		).toEqual([hiddenScriptId]);
+
+		await runtime.upsertDynamicEntity(entity(true));
+		runtime.render(0);
+		expect(loadScript).toHaveBeenCalledTimes(1);
+
+		await runtime.upsertDynamicEntity(entity(false));
+		await vi.waitFor(() => expect(loadScript).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() =>
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.pendingActivationCount,
+			).toBe(1),
+		);
+		runtime.render(0);
+		expect(
+			runtime
+				.getAuthoredDynamicRuntimeDiagnostics()
+				.worldScaleBehavior.observations.map(
+					(observation) => observation.provenance.assetId,
+				),
+		).toEqual([hiddenScriptId, unhideScriptId]);
+		await runtime.destroy();
+	});
+
+	it("cancels an intrinsic Hidden cue that finishes after visibility returns", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const hiddenScriptId = "0x33000001" as DatAssetId;
+		const delayedHidden =
+			controlledPromise<
+				Awaited<ReturnType<PhysicsScriptSource["loadPhysicsScript"]>>
+			>();
+		const loadScript = vi.fn(() => delayedHidden.promise);
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			{ destroy() {}, loadPhysicsScript: loadScript },
+			{
+				destroy() {},
+				async loadPhysicsScriptTable() {
+					return {
+						id: tableId,
+						cues: new Map([
+							[
+								RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
+								[{ maximumIntensity: 1, scriptId: hiddenScriptId }],
+							],
+						]),
+					};
+				},
+			},
+		);
+		const entity = (hidden: boolean): DynamicEntityView => {
+			return withPhysicsEffectTable(spawnedEntity(7, 3, { hidden }), tableId);
+		};
+
+		await runtime.replaceDynamicEntitySnapshot([entity(true)]);
+		await vi.waitFor(() => expect(loadScript).toHaveBeenCalledOnce());
+		await runtime.upsertDynamicEntity(entity(false));
+		delayedHidden.resolve({
+			id: hiddenScriptId,
+			lengthSeconds: 0,
+			records: [],
+		});
+		await vi.waitFor(() =>
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.pendingActivationCount,
+			).toBe(0),
+		);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScaleBehavior
+				.observations,
+		).toEqual([]);
 		await runtime.destroy();
 	});
 
@@ -3297,6 +3438,22 @@ function spawnedEntity(
 				behavior: null,
 				category: "other",
 				obviousRange: null,
+			},
+		},
+	};
+}
+
+function withPhysicsEffectTable(
+	entity: DynamicEntityView,
+	tableId: DatAssetId,
+): DynamicEntityView {
+	return {
+		...entity,
+		presentation: {
+			...entity.presentation,
+			content: {
+				...entity.presentation.content,
+				physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
 			},
 		},
 	};

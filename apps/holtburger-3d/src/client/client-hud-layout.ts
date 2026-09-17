@@ -258,6 +258,7 @@ export function createClientHudLayout(
 		spellBar: place(defaults.spellBar),
 		chat: place(defaults.chat),
 		inventory: place(defaults.inventory),
+		worldContainer: place(defaults.worldContainer),
 		spells: place(defaults.spells),
 		debug: place(defaults.debug),
 		frameRate: place(defaults.frameRate),

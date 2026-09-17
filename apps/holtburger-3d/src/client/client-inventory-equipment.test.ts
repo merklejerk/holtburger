@@ -18,6 +18,7 @@ const equipped = (guid: number, mask: number | null, wearerGuid = 1) =>
 	});
 const project = (...entities: ClientEntityFacts[]) =>
 	inventoryEquipment({
+		worldContainer: { kind: "closed" },
 		playerGuid: 1,
 		revision: 1,
 		entities: new Map(entities.map((entity) => [entity.guid, entity])),

@@ -32,6 +32,7 @@ function carried(
 }
 const total = (...items: ClientEntityFacts[]) =>
 	inventoryCurrencyTotals({
+		worldContainer: { kind: "closed" },
 		playerGuid: 1,
 		revision: 1,
 		entities: new Map(

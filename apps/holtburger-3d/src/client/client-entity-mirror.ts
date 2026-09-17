@@ -2,6 +2,18 @@ import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
+/** Confirmed world access; loading descriptions never imply opening or closing. */
+const worldContainerSchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("closed") })
+		.strict()
+		.readonly(),
+	z
+		.object({ kind: z.literal("open"), root: guid })
+		.strict()
+		.readonly(),
+]);
+export type WorldContainerState = z.infer<typeof worldContainerSchema>;
 const slotSchema = z.discriminatedUnion("kind", [
 	z
 		.object({ kind: z.literal("pending") })
@@ -127,6 +139,8 @@ const clientEntityFactsSchema = z
 		]),
 		ownedByPlayer: z.boolean(),
 		canPickUp: z.boolean(),
+		/** Shared descendant membership; presentation must not reconstruct access. */
+		worldContainerContent: z.boolean(),
 		canReceiveGive: z.boolean(),
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
@@ -154,11 +168,18 @@ const clientEntityFactsSchema = z
 
 /** Complete semantic domain for initial connection or replacement after receiver loss. */
 export const clientEntitySnapshotSchema = z
-	.object({ entities: z.array(clientEntityFactsSchema) })
+	.object({
+		entities: z.array(clientEntityFactsSchema),
+		worldContainer: worldContainerSchema,
+	})
 	.strict();
 /** One affected-record update of the semantic domain, not a render transaction. */
 export const clientEntityDeltaSchema = z
-	.object({ upserts: z.array(clientEntityFactsSchema), removed: z.array(guid) })
+	.object({
+		upserts: z.array(clientEntityFactsSchema),
+		removed: z.array(guid),
+		worldContainer: worldContainerSchema.nullable(),
+	})
 	.strict();
 
 export type ClientEntityFacts = z.infer<typeof clientEntityFactsSchema>;
@@ -167,6 +188,8 @@ export type ClientEntityDelta = z.infer<typeof clientEntityDeltaSchema>;
 
 /** An immutable accepted level; the UI groups it without another mutable inventory cache. */
 export interface ClientEntityLevel {
+	/** Access accepted in the same commit as contents and their pickup eligibility. */
+	readonly worldContainer: WorldContainerState;
 	/** Local display invalidation only; not a wire sequence or transport identity. */
 	readonly revision: number;
 	/** GUID-keyed accepted facts; this map is never mutated after publication. */
@@ -244,12 +267,23 @@ export class ClientEntityMirror {
 	): PreparedClientEntities {
 		const entities = indexEntities(snapshot.entities);
 		validateLevel(entities, playerGuid);
-		return { level: { entities, playerGuid, revision: this.#revision + 1 } };
+		return {
+			level: {
+				entities,
+				playerGuid,
+				worldContainer: snapshot.worldContainer,
+				revision: this.#revision + 1,
+			},
+		};
 	}
 
 	prepareDelta(delta: ClientEntityDelta): PreparedClientEntities | null {
 		if (this.#read.kind === "pending") return null;
-		if (delta.upserts.length === 0 && delta.removed.length === 0)
+		if (
+			delta.worldContainer === null &&
+			delta.upserts.length === 0 &&
+			delta.removed.length === 0
+		)
 			throw new Error("Empty semantic entity delta.");
 		const upserts = indexEntities(delta.upserts);
 		const removals = new Set<number>();
@@ -268,6 +302,10 @@ export class ClientEntityMirror {
 		return {
 			level: {
 				entities,
+				worldContainer:
+					delta.worldContainer === null
+						? level.worldContainer
+						: delta.worldContainer,
 				playerGuid: level.playerGuid,
 				revision: this.#revision + 1,
 			},

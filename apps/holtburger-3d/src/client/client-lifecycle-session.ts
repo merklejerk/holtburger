@@ -119,6 +119,7 @@ type ClientCommandName = Extract<
 	| "query_client_entity_health"
 	| "preview_client_inventory"
 	| "submit_client_inventory"
+	| "close_client_container"
 	| "equip_client_item"
 	| "query_client_item_use_target"
 	| "query_client_spell_inspection"
@@ -449,6 +450,11 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("submit_client_inventory", {
 			intent: inventoryIntentSchema.parse(intent),
 		});
+	}
+
+	/** Identity-specific close; late window disposal cannot close a replacement root. */
+	async closeContainer(guid: number): Promise<void> {
+		await this.#transport.invoke("close_client_container", { guid });
 	}
 
 	/** Request character-bound spell facts independently of panel visibility. */

@@ -64,6 +64,7 @@ pub(crate) fn handle_message(
             false
         }
         GameMessage::PlayerTeleport(data) => {
+            state.close_world_container();
             state.player.set_teleport_sequence(data.teleport_sequence);
             events
                 .extend(state.suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset));
@@ -211,6 +212,9 @@ pub(crate) fn handle_event(
 ) -> bool {
     match &event.event {
         GameEvent::PlayerDescription(data) => {
+            if data.guid != state.player.guid {
+                state.close_world_container();
+            }
             state.player.hydrate_from_player_description(
                 data,
                 &state.xp_table,

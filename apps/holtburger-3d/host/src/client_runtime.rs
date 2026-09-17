@@ -152,6 +152,10 @@ pub enum ClientHostCommand {
     SubmitClientInventory {
         intent: holtburger_core::client::inventory_plan::InventoryIntent,
     },
+    /// Close only the named confirmed external root through shared coordination.
+    CloseClientContainer {
+        guid: holtburger_common::Guid,
+    },
     /// Shared, mutation-free evaluation of an inventory target.
     PreviewClientInventory {
         request: holtburger_core::client::inventory_plan::InventoryPreviewRequest,
@@ -229,6 +233,7 @@ pub enum ClientHostCommand {
 
 /// Exact wire names owned by the client dispatcher.
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
+    "close_client_container",
     "preview_client_inventory",
     "submit_client_inventory",
     "equip_client_item",
@@ -611,6 +616,11 @@ pub async fn dispatch_client(
                 item: guid,
                 slot: Some(holtburger_core::client::types::TargetSlot::PreferredSide { alternate }),
             })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CloseClientContainer { guid } => runtime
+            .send_command(ClientCommand::CloseContainer(guid))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

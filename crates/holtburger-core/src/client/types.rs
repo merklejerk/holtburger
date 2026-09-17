@@ -754,12 +754,6 @@ pub enum ClientViewEvent {
     TradeStateUpdated {
         trade: Option<TradeState>,
     },
-    ContainerOpened {
-        guid: Guid,
-    },
-    ContainerClosed {
-        guid: Guid,
-    },
     ItemManaResponse {
         target: Guid,
         mana: f32,

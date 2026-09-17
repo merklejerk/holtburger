@@ -191,8 +191,6 @@ pub enum WorldEvent {
     UseDone {
         error: WeenieError,
     },
-    ContainerOpened(Guid),
-    ContainerClosed(Guid),
     VendorStateUpdated(Option<vendor::VendorState>),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
     FellowshipStateUpdated(Option<state::FellowshipState>),

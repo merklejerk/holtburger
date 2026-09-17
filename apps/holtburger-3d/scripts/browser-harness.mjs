@@ -4630,6 +4630,22 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			evaluateExpression,
 			options.screenshotPath,
 		);
+		inventory.worldContainer = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeWorldContainer",
+			[],
+		);
+		if (options.screenshotPath) {
+			const shot = await client.send("Page.captureScreenshot", {
+				format: "png",
+				captureBeyondViewport: false,
+			});
+			await writeFile(
+				`${options.screenshotPath}.world-container.png`,
+				Buffer.from(shot.data, "base64"),
+			);
+		}
+
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,
@@ -4642,6 +4658,7 @@ async function runStandaloneUiHarness({ viteUrl }) {
 			},
 			viteUrl,
 		);
+
 		const clientHud = {
 			breadcrumbAfterDiscontinuity,
 			breadcrumbAfterIdentityChange,

@@ -44,6 +44,7 @@ function read(items: ClientEntityFacts[]): ClientEntityRead {
 	return {
 		kind: "current",
 		level: {
+			worldContainer: { kind: "closed" },
 			revision: 1,
 			playerGuid: 1,
 			entities: new Map(

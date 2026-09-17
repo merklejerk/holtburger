@@ -24,7 +24,12 @@ import { ClientSelectionInput } from "./client-selection-input";
 const POLICY = { radiusMeters: 20, idleResetMs: 100, viewMarginMeters: 2 };
 function fixture() {
 	const entities = new ClientEntityMirror();
-	entities.commit(entities.prepareSnapshot({ entities: [entityFacts(1)] }, 1));
+	entities.commit(
+		entities.prepareSnapshot(
+			{ worldContainer: { kind: "closed" }, entities: [entityFacts(1)] },
+			1,
+		),
+	);
 	const selection = new ClientEntitySelection({
 		lifecycle: { entities, subscribe: () => () => {} },
 		presentation: () => null,
@@ -209,6 +214,7 @@ describe("on-demand accepted candidate geometry", () => {
 		entities.commit(
 			entities.prepareSnapshot(
 				{
+					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(1, { targeting: "creature" }),
 						entityFacts(2, { targeting: "creature" }),
@@ -254,7 +260,10 @@ describe("on-demand accepted candidate geometry", () => {
 		const entities = new ClientEntityMirror();
 		entities.commit(
 			entities.prepareSnapshot(
-				{ entities: [entityFacts(1), entityFacts(2)] },
+				{
+					worldContainer: { kind: "closed" },
+					entities: [entityFacts(1), entityFacts(2)],
+				},
 				1,
 			),
 		);
@@ -283,7 +292,10 @@ describe("on-demand accepted candidate geometry", () => {
 		const entities = new ClientEntityMirror();
 		entities.commit(
 			entities.prepareSnapshot(
-				{ entities: [entityFacts(1), entityFacts(2)] },
+				{
+					worldContainer: { kind: "closed" },
+					entities: [entityFacts(1), entityFacts(2)],
+				},
 				1,
 			),
 		);

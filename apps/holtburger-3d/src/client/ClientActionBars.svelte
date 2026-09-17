@@ -9,6 +9,8 @@
 	} from "./client-action-item";
 	import { onMount, tick } from "svelte";
 	import ClientActionBarView from "./ClientActionBar.svelte";
+	import type { ItemDragSession } from "./client-item-drag";
+	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientItemDrag } from "./client-item-drag";
 	import {
 		initialActionBar,
@@ -44,6 +46,9 @@
 		root: HTMLElement;
 		/** Session-owned retained items and interaction capability. */
 		inventory: ClientInventoryState;
+		/** Shared command/fact authority for gestures and binding reconciliation. */
+		session: ItemDragSession;
+		worldContainer: ClientWorldContainerPanelState | null;
 		/** Session use flow shared with inventory and selected-entity controls. */
 		interactions: ClientItemInteractions;
 		/** Current layout editing policy and usable extent. */
@@ -54,6 +59,8 @@
 		root,
 		onDragOwner,
 		inventory,
+		session,
+		worldContainer,
 		interactions,
 		editable,
 		viewport,
@@ -147,13 +154,20 @@
 			)
 		)
 			return;
-		bars = reconcileActionBars(bars, inventory.readEntities());
+		bars = reconcileActionBars(bars, session.entities.read());
 	}
 
 	onMount(() => {
 		const drag = new ClientItemDrag(
 			root,
-			inventory,
+			session,
+			(root) => {
+				const owned = inventory.read();
+				if (owned.sections[0]?.container.guid === root) return owned;
+				const external = worldContainer?.read();
+				return external?.root.guid === root ? external : null;
+			},
+			inventory.reportFailure,
 			{
 				read: (cell) => requireActionBar(bars, cell.bar).slots[cell.slot],
 				bind: (cell, content) => {
@@ -249,7 +263,7 @@
 		const timer = window.setInterval(() => {
 			void sample();
 		}, CLIENT_TUNING.inventory.displayIntervalMs);
-		const unsubscribe = inventory.interactions.subscribe((event) => {
+		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "current-state")
 				acceptPlayer(event.state.localPlayerGuid);
 			if (

@@ -29,6 +29,7 @@ fn animated_panel_configuration() -> (u32, DynamicPhysicalBodyConfiguration) {
     };
     let geometry = PreparedEntityTargetGeometry {
         setup_radius: 2.0,
+        setup_height: 1.0,
         collision_animations: CollisionPoseLibrary::project([Arc::new(animation)], &[0]).unwrap(),
         physics_bsp_parts: vec![crate::PreparedEntityBspPart {
             part_index: 0,

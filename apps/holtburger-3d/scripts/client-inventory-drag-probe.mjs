@@ -34,8 +34,10 @@ export async function probeInventoryDrag(client, evaluateExpression) {
         }
         return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
 	})()`);
-	const source = '.inventory-sections .item-grid-cell[data-item-guid="91"]';
-	const target = '.inventory-sections .item-grid-cell[data-item-guid="94"]';
+	const source =
+		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="91"]';
+	const target =
+		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="94"]';
 	const begin = async (sourceSelector, targetSelector) => {
 		const from = await point(sourceSelector);
 		const selected = await read(`${api}.capture().selectedGuid`);
@@ -126,7 +128,9 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	if ((await read(`${api}.capture().selectedGuid`)) !== 91)
 		throw new Error("Drag release changed selection away from its source");
 
-	await read(`document.querySelector('.inventory-sort').click()`);
+	await read(
+		`document.querySelector('.client-inventory .contents-sort').click()`,
+	);
 	const sortedPosition = await begin(source, target);
 	if (
 		await read(
@@ -139,7 +143,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	if (
 		!(await read(`(() => {
 		const source = document.querySelector(${JSON.stringify(source)});
-		return Array.from(document.querySelectorAll('.inventory-sections .item-grid-cell')).every(cell => (cell.dataset.inventoryDimmed === 'true') === (cell !== source));
+		return Array.from(document.querySelectorAll('.client-inventory .contents-scroll .item-grid-cell')).every(cell => (cell.dataset.inventoryDimmed === 'true') === (cell !== source));
 	})()`))
 	)
 		throw new Error(
@@ -171,7 +175,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error("Rejected merge submitted a move");
 	// Restore native ordering for the remaining contents-source gestures.
 	await read(
-		`(async () => { const button = document.querySelector('.inventory-sort'); for (let i = 0; i < 10 && !button.getAttribute('aria-label').includes('Native'); i++) { button.click(); await new Promise(resolve => setTimeout(resolve, 0)); } })()`,
+		`(async () => { const button = document.querySelector('.client-inventory .contents-sort'); for (let i = 0; i < 10 && !button.getAttribute('aria-label').includes('Native'); i++) { button.click(); await new Promise(resolve => setTimeout(resolve, 0)); } })()`,
 	);
 
 	const cancelledPosition = await begin(target, source);
@@ -202,7 +206,8 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error("Cancelled gesture submitted a late preview");
 	if (await read(`document.querySelector('[data-item-dragging]') !== null`))
 		throw new Error("Cancelled drag retained pointer visuals");
-	const header = '.inventory-header[data-item-guid="1"]';
+	const header =
+		'.client-inventory .contents-scroll .contents-header[data-item-guid="1"]';
 	const headerPosition = await begin(source, header);
 	await release(headerPosition);
 	const headerDrop = await lastPreview();
@@ -216,7 +221,9 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error("Header append was not submitted");
 
 	const equipment = '.equipment-row[aria-label="Chest armor"]';
-	await read(`document.querySelector('.inventory-sort').click()`);
+	await read(
+		`document.querySelector('.client-inventory .contents-sort').click()`,
+	);
 	const equipmentPosition = await begin(source, equipment);
 	const equipmentHover = await lastPreview();
 	if (equipmentHover.intent.target.kind !== "equipment")
@@ -242,7 +249,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	const unequipPosition = await begin(worn, target);
 	if (
 		await read(
-			`document.querySelector('.inventory-sections [data-inventory-dimmed="true"]') !== null`,
+			`document.querySelector('.client-inventory .contents-scroll [data-inventory-dimmed="true"]') !== null`,
 		)
 	)
 		throw new Error("Sorted unequip drag dimmed allowed inventory targets");
@@ -395,7 +402,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	for (const sourceSelector of [
 		source,
 		worn,
-		'.inventory-pack-strip .item-grid-cell[data-item-guid="96"]',
+		'.client-inventory .contents-packs .item-grid-cell[data-item-guid="96"]',
 	]) {
 		const before = (await submissions()).length;
 		const to = await begin(sourceSelector, viewport);
@@ -422,7 +429,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			throw new Error("Ground drop changed selection away from its source");
 	}
 	const beforeOverlay = (await submissions()).length;
-	const overlay = await begin(source, ".inventory-sort");
+	const overlay = await begin(source, ".client-inventory .contents-sort");
 	await release(overlay);
 	if ((await submissions()).length !== beforeOverlay)
 		throw new Error("Overlay release dropped an item");

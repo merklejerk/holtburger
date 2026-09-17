@@ -31,3 +31,6 @@ holtburger-session.workspace = true
 bitflags.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
+
+[dev-dependencies]
+holtburger-world = { workspace = true, features = ["test-support"] }

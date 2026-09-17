@@ -316,7 +316,7 @@ mod tests {
         client
             .submit_inventory_intent(InventoryIntent {
                 item: ground,
-                target: InventoryTarget::Pickup,
+                target: InventoryTarget::Pickup { container: None },
             })
             .await
             .expect("pickup");

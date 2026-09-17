@@ -34,7 +34,11 @@ function commit(
 	upserts: ReturnType<typeof entityFacts>[],
 	removed: number[] = [],
 ): void {
-	const prepared = mirror.prepareDelta({ upserts, removed });
+	const prepared = mirror.prepareDelta({
+		worldContainer: null,
+		upserts,
+		removed,
+	});
 	if (prepared === null)
 		throw new Error("Fixture requires current semantic state.");
 	mirror.commit(prepared);
@@ -65,7 +69,10 @@ describe("ClientEntityMirror", () => {
 		store.awaitSnapshot();
 		store.commit(
 			store.prepareSnapshot(
-				{ entities: [entityFacts(player), updated] },
+				{
+					worldContainer: { kind: "closed" },
+					entities: [entityFacts(player), updated],
+				},
 				player,
 			),
 		);
@@ -96,6 +103,7 @@ describe("ClientEntityMirror", () => {
 		const store = mirror();
 		const before = store.read();
 		const next = store.prepareDelta({
+			worldContainer: null,
 			upserts: [owned(item, pack), owned(pack, player)],
 			removed: [],
 		});
@@ -126,15 +134,26 @@ describe("ClientEntityMirror", () => {
 		const before = store.read();
 		expect(() =>
 			store.prepareSnapshot(
-				{ entities: [entityFacts(player), entityFacts(player)] },
+				{
+					worldContainer: { kind: "closed" },
+					entities: [entityFacts(player), entityFacts(player)],
+				},
 				player,
 			),
 		).toThrow("Duplicate");
 		expect(() =>
-			store.prepareDelta({ upserts: [owned(item, player)], removed: [item] }),
+			store.prepareDelta({
+				worldContainer: null,
+				upserts: [owned(item, player)],
+				removed: [item],
+			}),
 		).toThrow("both upserted and removed");
 		expect(() =>
-			store.prepareDelta({ upserts: [owned(item, pack)], removed: [] }),
+			store.prepareDelta({
+				worldContainer: null,
+				upserts: [owned(item, pack)],
+				removed: [],
+			}),
 		).toThrow("missing parent");
 		expect(store.read()).toBe(before);
 	});
@@ -145,7 +164,11 @@ describe("ClientEntityMirror", () => {
 		store.awaitSnapshot();
 		expect(store.read().kind).toBe("pending");
 		expect(
-			store.prepareDelta({ upserts: [owned(pack, player)], removed: [] }),
+			store.prepareDelta({
+				worldContainer: null,
+				upserts: [owned(pack, player)],
+				removed: [],
+			}),
 		).toBeNull();
 		store.commit(store.prepareSnapshot(playerEntitySnapshot(player), player));
 		const read = store.read();

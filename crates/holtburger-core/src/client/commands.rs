@@ -1,6 +1,5 @@
 use crate::client::types::{
-    ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, ClientExitCause,
-    ClientViewEvent,
+    ActionResultReason, ActionResultSource, ClientCommand, ClientExitCause, ClientViewEvent,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
@@ -281,7 +280,25 @@ impl ClientRuntime {
     }
 
     pub(super) async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
-        self.session.send_action(action).await
+        let transfer = match &action {
+            GameAction::PutItemInContainer(data)
+                if self.world.is_world_container_content(data.item_guid)
+                    || self.world.has_world_container_access(data.container_guid) =>
+            {
+                Some(data.item_guid)
+            }
+            _ => None,
+        };
+        if let Some(item) = transfer {
+            self.world.retain_inventory_transfer(item);
+        }
+        let result = self.session.send_action(action).await;
+        if result.is_err()
+            && let Some(item) = transfer
+        {
+            self.world.finish_inventory_transfer(item);
+        }
+        result
     }
 
     async fn handle_auth_command(&mut self, cmd: ClientCommand) -> Result<()> {
@@ -546,7 +563,7 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::Buy { vendor, items } => {
-                if !self.arm_busy_operation(BusyOperationKind::Buy) {
+                if !self.arm_busy_operation(crate::client::PendingOperation::Buy) {
                     return Ok(());
                 }
                 self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
@@ -556,7 +573,7 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::Sell { vendor, items } => {
-                if !self.arm_busy_operation(BusyOperationKind::Sell) {
+                if !self.arm_busy_operation(crate::client::PendingOperation::Sell) {
                     return Ok(());
                 }
                 self.send_game_action(GameAction::Sell(Box::new(SellActionData {
@@ -612,16 +629,7 @@ impl ClientRuntime {
                 })))
                 .await
             }
-            ClientCommand::CloseContainer(guid) => {
-                log::info!(">>> Closing container: 0x{:08X}", guid);
-
-                self.send_game_action(GameAction::NoLongerViewingContents(Box::new(
-                    NoLongerViewingContentsActionData {
-                        container_guid: guid,
-                    },
-                )))
-                .await
-            }
+            ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
             ClientCommand::SetCharacterOption { option, value } => {
                 log::info!(">>> Setting character option {:?} to {}", option, value);
                 self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
@@ -1264,7 +1272,9 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 0);
 
         client.state = ClientState::InWorld;
-        assert!(client.arm_busy_operation(BusyOperationKind::Use));
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::Use { source: Guid::NULL })
+        );
         client
             .handle_command(ClientCommand::ToggleCombatMode)
             .await
@@ -1571,7 +1581,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn locked_container_feedback_follows_use_without_suppressing_the_wire_command() {
+    async fn container_use_reports_progress_and_sends_the_wire_command() {
         let mut client = build_test_client();
         let guid = Guid(7);
         let mut entity = Entity::new(guid, "Locked chest".into(), WorldPosition::default());
@@ -1592,10 +1602,7 @@ mod tests {
             std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
                 event,
                 ClientViewEvent::EntityUseFeedback(
-                    holtburger_world::interaction::EntityUseFeedback::Using {
-                        locked_container: true,
-                        ..
-                    }
+                    holtburger_world::interaction::EntityUseFeedback::Using { .. }
                 )
             ))
         );

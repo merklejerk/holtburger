@@ -41,6 +41,7 @@ function fixture(
 		mirror.commit(
 			mirror.prepareSnapshot(
 				{
+					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(player, {
 							storage: {

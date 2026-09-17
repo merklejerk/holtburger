@@ -44,6 +44,7 @@ pub mod selection_query;
 mod simulation;
 pub mod spell_inspection;
 pub mod types;
+mod world_container;
 pub use builder::ClientRuntimeBuilder;
 use camera::ClientCameraSettlement;
 pub use camera::{
@@ -76,9 +77,11 @@ const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 /// Operation context retained until completion, failure, timeout, or world reset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PendingOperation {
-    Use,
+    /// Direct-use source retained until the server completes the operation.
+    Use {
+        source: Guid,
+    },
     UseWithTarget,
-    Salvage,
     /// Resolved wire target; untargeted casts cannot correlate automatic turns.
     SpellCast {
         target: Option<Guid>,
@@ -90,25 +93,11 @@ pub(super) enum PendingOperation {
 impl PendingOperation {
     fn kind(self) -> BusyOperationKind {
         match self {
-            Self::Use => BusyOperationKind::Use,
+            Self::Use { .. } => BusyOperationKind::Use,
             Self::UseWithTarget => BusyOperationKind::UseWithTarget,
-            Self::Salvage => BusyOperationKind::Salvage,
             Self::SpellCast { .. } => BusyOperationKind::SpellCast,
             Self::Buy => BusyOperationKind::Buy,
             Self::Sell => BusyOperationKind::Sell,
-        }
-    }
-}
-
-impl From<BusyOperationKind> for PendingOperation {
-    fn from(kind: BusyOperationKind) -> Self {
-        match kind {
-            BusyOperationKind::Use => Self::Use,
-            BusyOperationKind::UseWithTarget => Self::UseWithTarget,
-            BusyOperationKind::Salvage => Self::Salvage,
-            BusyOperationKind::SpellCast => Self::SpellCast { target: None },
-            BusyOperationKind::Buy => Self::Buy,
-            BusyOperationKind::Sell => Self::Sell,
         }
     }
 }
@@ -134,6 +123,8 @@ pub struct ClientRuntime {
     /// Cached narrow entity records and pending semantic invalidation.
     entity_facts: entity_facts::EntityFactsPublication,
     active_busy_operation: Option<PendingBusyOperation>,
+    /// Close acknowledgements outstanding after local access has been revoked.
+    closing_containers: std::collections::BTreeMap<Guid, Instant>,
     /// Single owner of equipment mutations and their authoritative confirmations.
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
     /// Dependent pack exchange waiting to send its second insertion.
@@ -631,8 +622,7 @@ impl ClientRuntime {
         }
     }
 
-    pub(super) fn arm_busy_operation(&mut self, operation: impl Into<PendingOperation>) -> bool {
-        let operation = operation.into();
+    pub(super) fn arm_busy_operation(&mut self, operation: PendingOperation) -> bool {
         if let Some(active) = self.active_busy_operation.as_ref() {
             log::warn!(
                 "Ignoring busy-tracked {:?} while {:?} is still pending.",
@@ -737,6 +727,7 @@ impl ClientRuntime {
             self.state,
             ClientState::Disconnected | ClientState::CharacterSelection(_)
         ) {
+            self.reset_container_access();
             self.entity_cue_inbox.clear();
             if let Some(coordinator) = self.collision_coordinator.as_mut() {
                 coordinator.reset_entity_collision_override(&mut self.world);
@@ -1153,16 +1144,6 @@ impl ClientRuntime {
                     .send(ClientViewEvent::TradeStateUpdated {
                         trade: trade.clone(),
                     });
-            }
-            WorldEvent::ContainerOpened(guid) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ContainerOpened { guid: *guid });
-            }
-            WorldEvent::ContainerClosed(guid) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ContainerClosed { guid: *guid });
             }
             _ => {}
         }
@@ -1941,6 +1922,7 @@ mod tests {
                 ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     setup_radius: 0.5,
+                    setup_height: 1.0,
                     collision_animations: Default::default(),
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0,
@@ -2083,7 +2065,7 @@ mod tests {
         .unwrap()
     }
 
-    fn stable_dynamic_body_definition() -> DynamicPhysicalBodyConfiguration {
+    pub(super) fn stable_dynamic_body_definition() -> DynamicPhysicalBodyConfiguration {
         dynamic_definition(
             test_grounded_body_definition(),
             PhysicalBodyResponsePolicy {
@@ -4128,7 +4110,7 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::Connected);
         let mut events = client.subscribe_client_view_events();
 
-        assert!(client.arm_busy_operation(BusyOperationKind::Buy));
+        assert!(client.arm_busy_operation(crate::client::PendingOperation::Buy));
         client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT + Duration::from_secs(1));
 
         assert!(client.active_busy_operation.is_none());
@@ -4154,8 +4136,8 @@ mod tests {
     fn arm_busy_operation_rejects_overlap_and_preserves_original_pending_state() {
         let mut client = builder::build_test_client(ClientState::Connected);
 
-        assert!(client.arm_busy_operation(BusyOperationKind::Buy));
-        assert!(!client.arm_busy_operation(BusyOperationKind::Sell));
+        assert!(client.arm_busy_operation(crate::client::PendingOperation::Buy));
+        assert!(!client.arm_busy_operation(crate::client::PendingOperation::Sell));
 
         assert!(matches!(
             client.active_busy_operation,

@@ -109,6 +109,8 @@ impl CollisionPartPoses {
 pub struct PreparedEntityTargetGeometry {
     /// Authored setup radius at scale one, used for target-directed melee clearance.
     pub setup_radius: f32,
+    /// Authored setup height at scale one, used with radius for use-range checks.
+    pub setup_height: f32,
     /// Shared collision-part tracks prepared for the entity's effective motion sources.
     pub collision_animations: holtburger_content::collision_pose::CollisionPoseLibrary,
     /// Actual appearance-substituted BSP parts used when `HasPhysicsBSP` is set.
@@ -125,6 +127,7 @@ impl PartialEq for PreparedEntityTargetGeometry {
     fn eq(&self, other: &Self) -> bool {
         self.collision_animations == other.collision_animations
             && self.setup_radius == other.setup_radius
+            && self.setup_height == other.setup_height
             && self.physics_bsp_parts == other.physics_bsp_parts
             && self.fallback_scale == other.fallback_scale
             && self.fallback_setup_did == other.fallback_setup_did
@@ -325,6 +328,7 @@ mod tests {
     fn prepared_geometry_equality_uses_immutable_content_identity_not_arc_identity() {
         let left = PreparedEntityTargetGeometry {
             setup_radius: 0.5,
+            setup_height: 1.0,
             collision_animations: Default::default(),
             physics_bsp_parts: vec![PreparedEntityBspPart {
                 part_index: 0,
@@ -340,6 +344,7 @@ mod tests {
         };
         let right = PreparedEntityTargetGeometry {
             setup_radius: 0.5,
+            setup_height: 1.0,
             collision_animations: Default::default(),
             physics_bsp_parts: vec![PreparedEntityBspPart {
                 shape: ball_shape(),
@@ -393,6 +398,7 @@ mod tests {
                 ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     setup_radius: 0.5,
+                    setup_height: 1.0,
                     collision_animations: Default::default(),
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0,

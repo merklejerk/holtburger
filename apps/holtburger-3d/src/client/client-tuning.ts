@@ -92,6 +92,11 @@ export const CLIENT_TUNING = {
 			glowBlurCssPixels: 8,
 		},
 	},
+	worldContainer: {
+		displayIntervalMs: 100,
+		/** Initial contents footprint; window chrome is measured from the active theme. */
+		openingGrid: { minColumns: 4, maxColumns: 5, maxRows: 4 },
+	},
 	inventory: {
 		/** Pointer travel that distinguishes inventory selection from dragging. */
 		dragThresholdCssPixels: 6,

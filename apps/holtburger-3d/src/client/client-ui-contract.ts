@@ -53,6 +53,8 @@ export interface ClientUiDefaults {
 	readonly spells: Omit<ClientUiPanel, "resizable">;
 	/** Inventory window with independently retained geometry; borders always resize. */
 	readonly inventory: Omit<ClientUiPanel, "resizable">;
+	/** Independent, server-confirmed external storage window. */
+	readonly worldContainer: Omit<ClientUiPanel, "resizable">;
 	/** Diagnostics window with independently retained geometry; borders always resize. */
 	readonly debug: Omit<ClientUiPanel, "resizable">;
 	/** Frame-rate readout. */

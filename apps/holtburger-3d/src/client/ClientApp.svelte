@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import {
 		initialSpellBar,
@@ -136,6 +137,7 @@
 	);
 
 	let inventory = $state<ClientInventoryState | null>(null);
+	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
 	let commandFailure = $state<string | null>(null);
@@ -873,6 +875,12 @@
 			toastCenter.publish({ message, tone: "warning" }),
 		);
 		inventory = inventoryOwner;
+		const containerOwner = new ClientWorldContainerPanelState(
+			owner,
+			icons,
+			(message) => toastCenter.publish({ message, tone: "warning" }),
+		);
+		worldContainer = containerOwner;
 		const spellReferences = new SpellReferences(transport);
 		const spellState = new ClientSpellState(owner, spellReferences, icons);
 		spells = spellState;
@@ -962,6 +970,8 @@
 			spellBar = initialSpellBar();
 			spellBarPlayer = null;
 			inventoryOwner.destroy();
+			containerOwner.destroy();
+			worldContainer = null;
 			inventory = null;
 			icons.dispose();
 			unbindItems();
@@ -1010,6 +1020,7 @@
 
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
+		itemSession={session}
 		{hudMode}
 		onHudModeChange={(mode) => (hudMode = mode)}
 		{spellBar}
@@ -1032,9 +1043,10 @@
 		{readSelectedEntityDisplay}
 		{spells}
 		{inventory}
+		{worldContainer}
 		{itemInteractions}
-		onSelectInventoryItem={(guid, mode) =>
-			entitySelection?.selectInventoryItem(guid, mode)}
+		onSelectContentsItem={(guid, mode) =>
+			entitySelection?.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}

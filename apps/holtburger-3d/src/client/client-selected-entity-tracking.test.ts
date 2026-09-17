@@ -51,6 +51,7 @@ async function fixture() {
 		activeConfirmation: null,
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
 		entities: {
+			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
 				...[7, 8].map((guid) =>
@@ -117,6 +118,7 @@ describe("ClientSelectedEntityTracking", () => {
 		f.selection.select(11);
 		for (const useCapability of ["unsupported", "unavailable"] as const) {
 			f.emit("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [
 					{ ...item, description: { ...item.description, useCapability } },
 				],
@@ -138,6 +140,7 @@ describe("ClientSelectedEntityTracking", () => {
 		f.selection.select(11);
 		for (const canPickUp of [true, false]) {
 			f.emit("client-entity-facts-changed", {
+				worldContainer: null,
 				upserts: [
 					{
 						...item,
@@ -203,7 +206,7 @@ describe("ClientSelectedEntityTracking", () => {
 	it("queries only eligible selections and cancels once across consecutive inventory items", async () => {
 		const f = await fixture();
 		f.selection.select(7);
-		f.selection.selectInventoryItem(9, "toggle");
+		f.selection.selectContentsItem(9, "toggle");
 		expect(f.interactions.display(false)).toEqual({
 			name: "Item 9",
 			nameColor:
@@ -213,7 +216,7 @@ describe("ClientSelectedEntityTracking", () => {
 			health: { kind: "not-applicable" },
 			canInteract: true,
 		});
-		f.selection.selectInventoryItem(10, "toggle");
+		f.selection.selectContentsItem(10, "toggle");
 		f.selection.select(8);
 		expect(f.invoke.mock.calls).toEqual([
 			["query_client_entity_health", { guid: 7 }],
@@ -250,12 +253,17 @@ describe("ClientSelectedEntityTracking", () => {
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			},
 		});
-		f.emit("client-entity-facts-changed", { upserts: [creature], removed: [] });
+		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
+			upserts: [creature],
+			removed: [],
+		});
 		expect(f.interactions.display(false).nameColor).toBe(
 			SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
 		);
 		f.emit("client-entity-health-updated", { guid: 11, healthFraction: 0.5 });
 		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: [
 				{
 					...creature,
@@ -294,6 +302,7 @@ describe("ClientSelectedEntityTracking", () => {
 			canInteract: true,
 		});
 		f.emit("client-entity-facts-changed", {
+			worldContainer: null,
 			upserts: [entityFacts(11)],
 			removed: [],
 		});

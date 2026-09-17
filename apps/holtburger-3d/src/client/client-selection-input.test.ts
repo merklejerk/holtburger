@@ -29,7 +29,12 @@ function key(options: Partial<KeyboardEvent> = {}): KeyboardEvent {
 }
 function fixture() {
 	const entities = new ClientEntityMirror();
-	entities.commit(entities.prepareSnapshot({ entities: [entityFacts(1)] }, 1));
+	entities.commit(
+		entities.prepareSnapshot(
+			{ worldContainer: { kind: "closed" }, entities: [entityFacts(1)] },
+			1,
+		),
+	);
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	const selection = new ClientEntitySelection({
 		lifecycle: {

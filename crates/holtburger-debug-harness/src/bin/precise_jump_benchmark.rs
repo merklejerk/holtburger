@@ -293,6 +293,7 @@ fn add_population(
     let profile = retail_player_grounded_profile(EdgeProtection::None)?;
     let geometry = Arc::new(PreparedEntityTargetGeometry {
         setup_radius: 0.5,
+        setup_height: 1.0,
         collision_animations: Default::default(),
         physics_bsp_parts: Vec::new(),
         fallback_setup_did: 0x0200_0001,

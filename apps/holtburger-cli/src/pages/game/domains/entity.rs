@@ -5,6 +5,34 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     let mut result = UpdateResult::new();
 
     match event {
+        ClientViewEvent::ApplicationSnapshot(snapshot) => {
+            state.data.entity_facts = snapshot
+                .entities
+                .entities
+                .iter()
+                .map(|facts| (facts.guid, facts.clone()))
+                .collect();
+            state.data.world_container = snapshot.entities.world_container;
+            if let Some(root) = state.data.world_container.root() {
+                state.data.record_container_history(root);
+            }
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        ClientViewEvent::EntityFactsChanged(delta) => {
+            for guid in &delta.removed {
+                state.data.entity_facts.remove(guid);
+            }
+            for facts in &delta.upserts {
+                state.data.entity_facts.insert(facts.guid, facts.clone());
+            }
+            if let Some(access) = delta.world_container {
+                state.data.world_container = access;
+                if let Some(root) = access.root() {
+                    state.data.record_container_history(root);
+                }
+            }
+            result.request_redraw(RedrawPriority::Immediate);
+        }
         ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
             let was_ready = state.player_entity_is_ready();
             let entity_ref = entity.as_ref();
@@ -135,12 +163,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             }
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::ContainerOpened { guid } => {
-            state.data.track_container_opened(*guid);
-        }
-        ClientViewEvent::ContainerClosed { guid } => {
-            state.data.track_container_closed(*guid);
-        }
         _ => {}
     }
 
@@ -157,6 +179,136 @@ mod tests {
     use holtburger_core::ClientCommand;
     use holtburger_core::ClientViewEvent;
     use holtburger_world::entity::Entity;
+
+    #[test]
+    fn nearby_projects_nested_contents_with_shared_pickup_and_root_owned_close() {
+        use crate::pages::game::panels::dashboard::tabs::nearby::{NearbyTab, tab::get_entities};
+        use crate::types::TabController;
+        use holtburger_common::properties::InventoryEntryKind;
+        use holtburger_common::properties::{
+            ItemType, ObjectDescriptionFlag, PropertyInstanceId, PropertyInt,
+        };
+        use holtburger_core::{ClientEntityDelta, ClientEntitySnapshot};
+        use holtburger_protocol::messages::{
+            GameEvent, GameEventMessage, GameMessage, ViewContentsEventData, ViewContentsEventItem,
+        };
+        let player = Guid(0x50000001);
+        let root = Guid(0x80000001);
+        let pack = Guid(0x80000002);
+        let item = Guid(0x80000003);
+        let mut world = holtburger_world::WorldState::synthetic();
+        world.player.guid = player;
+        let mut state = GameState::new(player, "Player".into(), "World".into());
+        for (guid, parent, item_type) in [
+            (root, None, ItemType::CONTAINER),
+            (pack, Some(root), ItemType::CONTAINER),
+            (item, Some(pack), ItemType::MISC),
+        ] {
+            let mut entity = Entity::new(guid, format!("Item {guid}"), WorldPosition::default());
+            entity
+                .properties
+                .ints
+                .insert(PropertyInt::ItemType, item_type.bits() as i32);
+            if let Some(parent) = parent {
+                entity
+                    .properties
+                    .iids
+                    .insert(PropertyInstanceId::Container, parent);
+            } else {
+                entity.position.landblock_id = Guid(0x01010001);
+            }
+            if item_type == ItemType::CONTAINER {
+                entity.flags.insert(ObjectDescriptionFlag::OPENABLE);
+            }
+            world.add_entity(entity.clone());
+            reduce_view_event(
+                &mut state,
+                &ClientViewEvent::EntitySpawned {
+                    entity: Box::new(entity),
+                },
+            );
+        }
+        for (parent, child, kind) in [
+            (root, pack, InventoryEntryKind::Container),
+            (pack, item, InventoryEntryKind::Item),
+        ] {
+            world.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: player,
+                sequence: 0,
+                event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
+                    container: parent,
+                    items: vec![ViewContentsEventItem {
+                        guid: child,
+                        container_type: kind,
+                    }],
+                })),
+            })));
+        }
+        world.confirm_world_container(root);
+        let snapshot = ClientEntitySnapshot::from_world(&world).unwrap();
+        reduce_view_event(
+            &mut state,
+            &ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
+                world_container: Some(snapshot.world_container),
+                upserts: snapshot.entities,
+                removed: vec![],
+            }),
+        );
+        assert_eq!(
+            get_entities(&state.data)
+                .iter()
+                .map(|(e, _, depth)| (e.guid, *depth))
+                .collect::<Vec<_>>(),
+            vec![(root, 0), (pack, 1), (item, 2)]
+        );
+        assert_eq!(state.data.current_open_container(), Some(root));
+        for (selected_index, guid) in [(1, pack), (2, item)] {
+            let mut tab = NearbyTab::default();
+            tab.selected_index = selected_index;
+            let verbs = tab.get_verbs(&state.data, &state.view, &None);
+            let pickup = verbs
+                .iter()
+                .find(|verb| verb.label == "Pick Up")
+                .expect("shared pickup verb");
+            let result =
+                super::super::reduce::reduce_action(&mut state, pickup.action.clone()).unwrap();
+            assert!(
+                matches!(result.commands.as_slice(), [ClientCommand::SubmitInventory(intent)] if intent.item == guid && intent.target == holtburger_core::client::inventory_plan::InventoryTarget::Pickup { container: None })
+            );
+            assert!(
+                !verbs
+                    .iter()
+                    .any(|verb| verb.label == "Open" || verb.label == "Close")
+            );
+        }
+        let verbs = NearbyTab::default().get_verbs(&state.data, &state.view, &None);
+        let close = verbs
+            .iter()
+            .find(|verb| verb.label == "Close")
+            .expect("root close verb");
+        let result = super::super::reduce::reduce_action(&mut state, close.action.clone()).unwrap();
+        assert!(
+            matches!(result.commands.as_slice(), [ClientCommand::CloseContainer(guid)] if *guid == root)
+        );
+        world.close_world_container();
+        reduce_view_event(
+            &mut state,
+            &ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
+                world_container: Some(world.world_container()),
+                upserts: vec![],
+                removed: vec![pack, item],
+            }),
+        );
+        assert_eq!(state.data.current_open_container(), None);
+        assert_eq!(
+            get_entities(&state.data)
+                .iter()
+                .map(|(e, _, _)| e.guid)
+                .collect::<Vec<_>>(),
+            vec![root]
+        );
+        assert!(state.data.has_opened_container_before(root));
+    }
 
     #[test]
     fn entity_spawn_emits_player_ready_notification_when_player_appears() {

@@ -105,8 +105,8 @@ export class ClientEntitySelection {
 			this.commitAcquisition(intent, read.level.playerGuid);
 	}
 
-	/** Validate inventory selection against accepted facts; clicks toggle and drags select. */
-	selectInventoryItem(guid: number, mode: "toggle" | "select"): void {
+	/** Select owned or accessible external contents using accepted facts; no scene body is required. */
+	selectContentsItem(guid: number, mode: "toggle" | "select"): void {
 		if (this.#destroyed) return;
 		this.beginAcquisition("external");
 		const read = this.#lifecycle.entities.read();
@@ -114,7 +114,11 @@ export class ClientEntitySelection {
 		const entity = read.level.entities.get(guid);
 		if (
 			entity?.description.kind === "known" &&
-			(entity.ownedByPlayer || guid === read.level.playerGuid)
+			(entity.ownedByPlayer ||
+				entity.worldContainerContent ||
+				guid === read.level.playerGuid ||
+				(read.level.worldContainer.kind === "open" &&
+					guid === read.level.worldContainer.root))
 		)
 			this.#publish(
 				mode === "toggle" && this.#pair.current === guid ? null : guid,

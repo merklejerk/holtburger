@@ -414,6 +414,15 @@ interface DynamicEntityPresentationRecord {
 	/** Mutable visibility/lighting level already applied to the dynamic system. */
 	presentationStateIdentity: string;
 	/**
+	 * Hidden level and script lifecycle are separate from rigid visibility because the particles
+	 * intentionally remain visible while the entity mesh does not.
+	 */
+	hiddenCue: {
+		hidden: boolean;
+		phase: "idle" | "preparing-hidden" | "hidden-applied" | "preparing-unhide";
+		revision: number;
+	};
+	/**
 	 * Accepted levels and installation outcomes for each track, so restated levels are not re-entered.
 	 *
 	 * Mutable because it tracks playback state independently from appearance replacement.
@@ -453,6 +462,11 @@ interface DynamicCueAssets {
 	readonly closure: PreparedPhysicsScriptClosure;
 	readonly emitterHandles: readonly PreparedAssetHandle<PreparedParticleEmitter>[];
 }
+
+/** Retail `PS_UnHide` and `PS_Hidden`, raised locally by `CPhysicsObj::set_hidden`. */
+export const RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE = 0x75;
+export const RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE = 0x76;
+const INTRINSIC_STATE_CUE_INTENSITY = 1;
 
 /** Frame-hot realized identity and current rigid bound for selection presentation. */
 export interface SelectedDynamicEntityFrame {
@@ -1988,6 +2002,109 @@ export class GamePresentationRuntime {
 		return true;
 	}
 
+	/**
+	 * Reconcile retail's intrinsic Hidden/UnHide cues without manufacturing a server event.
+	 *
+	 * Retail resolves these synchronously from `CPhysicsObj::set_hidden` (acclient.c:310215-310277).
+	 * Browser assets are asynchronous, so a revision invalidates obsolete work: an entity that
+	 * becomes visible before Hidden finishes preparing must not acquire a late portal-space bubble.
+	 */
+	#reconcileIntrinsicHiddenCue(
+		installed: DynamicEntityPresentationRecord,
+		entity: DynamicEntityView,
+		tableId: DatAssetId | null,
+	): void {
+		const hidden = entity.physics.hidden;
+		if (installed.hiddenCue.hidden === hidden) return;
+		installed.hiddenCue.hidden = hidden;
+		const revision = ++installed.hiddenCue.revision;
+
+		if (hidden) {
+			// A not-yet-applied UnHide leaves the existing Hidden behavior active. Cancelling that
+			// preparation is sufficient; replaying Hidden would duplicate its authored emitters.
+			if (
+				installed.hiddenCue.phase === "hidden-applied" ||
+				installed.hiddenCue.phase === "preparing-unhide"
+			) {
+				installed.hiddenCue.phase = "hidden-applied";
+				return;
+			}
+			installed.hiddenCue.phase = "preparing-hidden";
+			this.#prepareIntrinsicHiddenCue(
+				installed,
+				entity,
+				tableId,
+				"hide",
+				revision,
+			);
+			return;
+		}
+
+		// If Hidden never reached playback, visibility simply cancels it. There is no authored
+		// emitter to clean up and playing UnHide later would invent a materialization effect.
+		if (installed.hiddenCue.phase === "preparing-hidden") {
+			installed.hiddenCue.phase = "idle";
+			return;
+		}
+		if (installed.hiddenCue.phase === "idle") return;
+		installed.hiddenCue.phase = "preparing-unhide";
+		this.#prepareIntrinsicHiddenCue(
+			installed,
+			entity,
+			tableId,
+			"unhide",
+			revision,
+		);
+	}
+
+	/** Prepare and conditionally append one latest-level intrinsic state cue. */
+	#prepareIntrinsicHiddenCue(
+		installed: DynamicEntityPresentationRecord,
+		entity: DynamicEntityView,
+		tableId: DatAssetId | null,
+		action: "hide" | "unhide",
+		revision: number,
+	): void {
+		const guid = entity.identity.guid;
+		const hiding = action === "hide";
+		const expectedPhase = hiding ? "preparing-hidden" : "preparing-unhide";
+		const preparation = (async () => {
+			let assets: DynamicCueAssets | null = null;
+			let transferred = false;
+			try {
+				assets = await this.#prepareDynamicScriptCue(tableId, {
+					guid,
+					generation: entity.generation,
+					cue: hiding
+						? RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE
+						: RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
+					intensity: INTRINSIC_STATE_CUE_INTENSITY,
+				});
+				if (
+					this.#destroyed ||
+					this.#spawnedPresentations.get(guid) !== installed ||
+					installed.hiddenCue.revision !== revision ||
+					installed.hiddenCue.phase !== expectedPhase
+				)
+					return;
+				if (assets !== null)
+					transferred = this.#appendDynamicScriptCue(installed, assets);
+				installed.hiddenCue.phase = hiding ? "hidden-applied" : "idle";
+			} catch (error: unknown) {
+				if (
+					this.#spawnedPresentations.get(guid) === installed &&
+					installed.hiddenCue.revision === revision
+				) {
+					installed.hiddenCue.phase = hiding ? "idle" : "hidden-applied";
+				}
+				this.#dynamicRealizationFailures.push(error);
+			} finally {
+				if (assets !== null && !transferred) releaseCueAssets(assets);
+			}
+		})();
+		this.#trackRealizationContinuation(preparation);
+	}
+
 	/** Revisit desired authority only at an explicit scene-readiness boundary. */
 	async reevaluateDynamicEntityEligibility(): Promise<DynamicEntityRealizationResults> {
 		if (this.#destroyed)
@@ -2608,6 +2725,7 @@ export class GamePresentationRuntime {
 			),
 			behaviorGeneration: activation.generation,
 			generation: entity.generation,
+			hiddenCue: { hidden: false, phase: "idle", revision: 0 },
 			nodeId,
 			ownerId,
 			placementIdentity: record.placementIdentity,
@@ -2710,6 +2828,16 @@ export class GamePresentationRuntime {
 			});
 			installed.presentationStateIdentity = identity;
 		}
+		const desired = this.#spawnedDesiredEntities.get(entity.identity.guid);
+		if (
+			desired?.entity.generation === entity.generation &&
+			desired.scriptTableId !== undefined
+		)
+			this.#reconcileIntrinsicHiddenCue(
+				installed,
+				entity,
+				desired.scriptTableId,
+			);
 		this.#dynamics.updateNameplateContent(installed.nodeId, entity.display);
 		this.#applyDynamicEntityMotion(
 			installed,

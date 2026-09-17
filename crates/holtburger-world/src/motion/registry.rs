@@ -20,8 +20,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use super::selection::{
-    ActionSelectionOutcome, select_action, select_modifier, select_motion, set_default_state,
-    stop_motion,
+    ActionSelectionOutcome, select_action, select_motion, set_default_state, stop_motion,
 };
 use super::sequence::{CurrentSequenceClip, MotionClipCompletion};
 use super::sequence::{MotionSequenceRuntime, SequenceTick};
@@ -1081,20 +1080,11 @@ fn apply_modifier(
 ) -> Option<MotionCommand> {
     match ordered {
         Some((command, speed)) => {
-            let outcome = if state
-                .modifiers()
-                .iter()
-                .any(|modifier| modifier.command == command)
-            {
-                // Retail key releases stop only the released axis; they do not reissue the
-                // other held commands. A full-order refresh must therefore keep an existing
-                // modifier in that role. Going back through generic selection after locomotion
-                // stops can promote the same turn/sidestep command into its default-state
-                // cycle while its modifier remains, stacking the authored physics twice.
-                select_modifier(table, state, sequence, command, speed)
-            } else {
-                select_motion(table, state, sequence, command, speed)
-            };
+            // Retail reapplies every interpreted channel in fixed order, so a dual-class
+            // command can become the primary cycle once an earlier channel returns to the
+            // default substate. Selection owns the invariant that one command cannot remain a
+            // modifier after that promotion.
+            let outcome = select_motion(table, state, sequence, command, speed);
             (!outcome.is_modelled()).then_some(command)
         }
         None => {

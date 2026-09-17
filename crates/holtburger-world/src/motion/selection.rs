@@ -413,6 +413,12 @@ fn select_substate(
         state.clear_modifiers();
     }
 
+    // A command carrying both substate and modifier bits layers over another active substate, but
+    // becomes the primary cycle when content permits it from the current state. The rebuilt
+    // sequence clears prior physics below, so retire the old role from semantic state before
+    // reinstalling the remaining modifiers. Otherwise one command contributes its physics twice.
+    state.remove_modifier(command);
+
     let style_default = table.style_default(state.style.raw());
     let mut link = get_link(
         table,

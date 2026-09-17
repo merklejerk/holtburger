@@ -1,4 +1,5 @@
 import { bindingAction } from "./client-action-item";
+import { wieldedCasterSpell } from "./client-inventory-equipment";
 import type { ClientEntitySelection } from "./client-entity-selection";
 import type {
 	ClientLifecycleSession,
@@ -193,6 +194,22 @@ export class ClientItemInteractions {
 		} else this.#failure("This item cannot currently be used.");
 	}
 
+	/** Retail's caster shortcut uses the selected recipient (acclient.c:237181, 414488). */
+	castWieldedSpell(source: number): void {
+		this.cancel();
+		const item = this.#item(source);
+		if (item === null) return;
+		if (this.#session.state().combatMode !== "magic") {
+			this.#failure("Enter magic stance before casting.");
+			return;
+		}
+		if (wieldedCasterSpell(item) === null) {
+			this.#failure("The caster spell is no longer wielded.");
+			return;
+		}
+		this.#useTargeted(source, this.#selection.selectedGuid());
+	}
+
 	/** Bars try self/selection when compatible, otherwise enter ordinary target acquisition. */
 	activate(
 		source: number,
@@ -221,38 +238,38 @@ export class ClientItemInteractions {
 				: read.kind === "current"
 					? read.level.playerGuid
 					: null;
-			if (target === null) {
-				this.use(source, false);
-				return;
-			}
-			const state: ItemInteractionState = {
-				kind: "resolving",
-				source,
-				sourceOwned: item.ownedByPlayer,
-				target,
-				sequence: allocateOperation(),
-			};
-			this.#set(state);
-			// Validating the player also checks the source's creature target mask in world.
-			void this.#session
-				.queryItemUseTarget({ sequence: state.sequence, source, target })
-				.catch((error: unknown) => {
-					if (this.#state !== state) return;
-					this.use(source, false);
-					this.#failure(String(error));
-				});
+			this.#useTargeted(source, target);
 		}
 	}
 
+	/** Share compatibility checks and acquisition across item and caster shortcuts. */
+	#useTargeted(source: number, target: number | null): void {
+		const item = this.#item(source);
+		if (item === null) return;
+		if (target === null) {
+			this.use(source, false);
+			return;
+		}
+		const state: ItemInteractionState = {
+			kind: "resolving",
+			source,
+			sourceOwned: item.ownedByPlayer,
+			target,
+			sequence: allocateOperation(),
+		};
+		this.#set(state);
+		// Validating the player also checks the source's creature target mask in world.
+		void this.#session
+			.queryItemUseTarget({ sequence: state.sequence, source, target })
+			.catch((error: unknown) => {
+				if (this.#state !== state) return;
+				this.use(source, false);
+				this.#failure(String(error));
+			});
+	}
+
 	/** Hover checks never submit a use action or open a confirmation. */
-	consider(candidate: number | "self" | null): void {
-		const read = this.#session.entities.read();
-		const target =
-			candidate === "self"
-				? read.kind === "current"
-					? read.level.playerGuid
-					: null
-				: candidate;
+	consider(target: number | null): void {
 		const state = this.#state;
 		if (
 			state.kind !== "acquiring" ||
@@ -281,14 +298,6 @@ export class ClientItemInteractions {
 				this.#set({ ...current, considered: null });
 				this.#failure(String(error));
 			});
-	}
-
-	/** Explicit player HUD target, independent of rendered player mesh picking. */
-	targetSelf(): void {
-		const state = this.#state;
-		const read = this.#session.entities.read();
-		if (state.kind === "acquiring" && read.kind === "current")
-			this.target(read.level.playerGuid, state.generation);
 	}
 
 	/** A stale pick cannot target a replacement operation. True consumes this target click. */

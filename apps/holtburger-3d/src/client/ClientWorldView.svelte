@@ -197,7 +197,7 @@
 	}: Props = $props();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	/** Pointer surface changes are cold; world geometry still uses the existing hover picker. */
-	let combineSurface = $state<number | "world" | "self" | null>(null);
+	let combineSurface = $state<number | "world" | null>(null);
 	function considerPointer(event: PointerEvent): void {
 		const element = event.target instanceof Element ? event.target : null;
 		const cell = element?.closest<HTMLElement>(
@@ -205,11 +205,9 @@
 		);
 		combineSurface = cell
 			? Number(cell.dataset.itemGuid)
-			: element?.closest("[data-combine-self]")
-				? "self"
-				: element?.closest(".client-canvas")
-					? "world"
-					: null;
+			: element?.closest(".client-canvas")
+				? "world"
+				: null;
 	}
 	let itemInteraction = $state<ItemInteractionState>({ kind: "idle" });
 	const combining = $derived(itemInteraction.kind === "acquiring");
@@ -555,6 +553,8 @@
 	{#if spells !== null && (spellBarEnabled || hudMode === "layout")}
 		<ClientSpellBar
 			{spells}
+			{inventory}
+			{itemInteractions}
 			configuration={spellBar}
 			enabled={spellBarEnabled}
 			placement={hudLayout.spellBar}
@@ -581,13 +581,6 @@
 		onPlacementChange={(character) => (hudLayout = { ...hudLayout, character })}
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
-		{#if itemInteraction.kind === "acquiring"}
-			<button
-				data-combine-self
-				class="ui-button"
-				onclick={() => itemInteractions?.targetSelf()}>Use on self</button
-			>
-		{/if}
 	</ClientHudPanel>
 	{#if jumpChargeActive || hudMode === "layout"}
 		<ClientHudPanel
@@ -776,8 +769,7 @@
 			--combine-cursor: url("./combine-cursor-ineligible.svg") 12 12, crosshair;
 		}
 		.client-world.combining :global(.client-canvas),
-		.client-world.combining :global(.item-grid-cell),
-		.client-world.combining [data-combine-self] {
+		.client-world.combining :global(.item-grid-cell) {
 			cursor: var(--combine-cursor);
 		}
 	}

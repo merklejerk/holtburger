@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { InputDigitIndex } from "../lib/input/input-contract";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
@@ -21,6 +21,12 @@
 		type ClientHudViewport,
 	} from "./client-hud-layout";
 	import SpellCell from "./SpellCell.svelte";
+	import type { ClientInventoryState } from "./client-inventory-state";
+	import type { ClientItemInteractions } from "./client-item-interactions";
+	import {
+		wieldedCasterSpell,
+		type WieldedCasterSpell,
+	} from "./client-inventory-equipment";
 	interface Props {
 		/** Retained HUD anchors; natural extent is derived from measured theme geometry. */
 		placement: ClientHudPlacement;
@@ -36,6 +42,10 @@
 		onShapeChange: (shape: "single" | "double") => void;
 		/** Shared reference/artwork and spellbook services. */
 		spells: ClientSpellServices;
+		/** Existing inventory owner supplies sampled, confirmed equipment. */
+		inventory: ClientInventoryState | null;
+		/** Existing item-use owner handles target acquisition and guarded dispatch. */
+		itemInteractions: ClientItemInteractions | null;
 		/** App-owned configuration survives hidden markup. */
 		configuration: ClientSpellBarState;
 		/** App-owned runtime availability. */
@@ -52,12 +62,41 @@
 		onPlacementChange,
 		onShapeChange,
 		spells,
+		inventory,
+		itemInteractions,
 		configuration,
 		enabled,
 		onSelectTab,
 		onActivateCell,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
+	/** Bounded inventory-cadence display snapshot; never subscribes to raw world publications. */
+	let caster = $state<WieldedCasterSpell | null>(null);
+	$effect(() => {
+		const owner = inventory;
+		const sample = () => {
+			let next: WieldedCasterSpell | null = null;
+			if (owner !== null) {
+				for (const item of owner.readItems().items.values()) {
+					next = wieldedCasterSpell(item);
+					if (next !== null) break;
+				}
+			}
+			if (
+				next?.item !== caster?.item ||
+				next?.spell !== caster?.spell ||
+				next?.name !== caster?.name
+			)
+				caster = next;
+		};
+		// The imperative sample must not make its display snapshot own this timer's lifetime.
+		untrack(sample);
+		const timer = setInterval(
+			sample,
+			CLIENT_TUNING.inventory.displayIntervalMs,
+		);
+		return () => clearInterval(timer);
+	});
 	/** Cold measured CSS geometry also drives HUD placement and strip geometry. */
 	let metrics = $state<{ cell: number; tabs: number }>({
 		cell: CLIENT_ACTION_BAR_TUNING.initialCellSize,
@@ -69,7 +108,7 @@
 	});
 	const naturalPlacement = $derived({
 		...placement,
-		preferredWidth: grid.columns * metrics.cell,
+		preferredWidth: (grid.columns + (caster === null ? 0 : 1)) * metrics.cell,
 		preferredHeight: grid.rows * metrics.cell + metrics.tabs,
 	});
 	const minimum = $derived({
@@ -120,7 +159,10 @@
 		const services = spells;
 		const ids = [
 			...new Set(
-				configuration.tabs[configuration.selected].filter((id) => id !== null),
+				[
+					...configuration.tabs[configuration.selected],
+					caster?.spell ?? null,
+				].filter((id) => id !== null),
 			),
 		];
 		let disposed = false;
@@ -203,47 +245,68 @@
 		<span class="spell-bar-metrics" aria-hidden="true" use:measureMetrics
 		></span>
 		<div class="spell-bar-scroll">
-			<div class="spell-tabs" role="group" aria-label="Spell bar tabs">
-				{#each SPELL_BAR_INDICES as tab}
-					<button
-						type="button"
-						class="ui-hud-button"
-						aria-label={`Spell tab ${(tab + 1) % 10}`}
-						aria-pressed={configuration.selected === tab}
-						onclick={() => {
-							keyboard.returnToGame();
-							onSelectTab(tab);
-						}}>{(tab + 1) % 10}</button
-					>
-				{/each}
-			</div>
-			<div
-				class="spell-cells"
-				style:grid-template-columns={`repeat(${grid.columns}, ${metrics.cell}px)`}
-				role="group"
-				aria-label={`Spell bar ${(configuration.selected + 1) % 10}`}
-			>
-				{#each SPELL_BAR_INDICES as slot}
-					{@const spell = configuration.tabs[configuration.selected][slot]}
-					{@const row = spell === null ? undefined : rows.get(spell)}
-					{@const available =
-						enabled && spell !== null && known?.includes(spell) === true}
+			{#if caster !== null}
+				{@const row = rows.get(caster.spell)}
+				<div class="caster-spell" data-caster-spell={caster.spell}>
 					<SpellCell
-						address={{ tab: configuration.selected, slot }}
-						{spell}
-						label={spell === null
-							? "Empty spell slot"
-							: `${row === undefined ? `Spell ${spell}` : row.artwork.kind === "failed" ? `${row.name}: ${row.artwork.detail}` : row.name}${known?.includes(spell) === true ? "" : " (unavailable)"}`}
+						address={null}
+						spell={caster.spell}
+						label={`${row?.name ?? `Spell ${caster.spell}`} (${caster.name})${row?.artwork.kind === "failed" ? `: ${row.artwork.detail}` : ""}`}
 						display={row?.artwork.kind === "icon"
 							? displays.get(row.artwork.key)
 							: undefined}
-						{available}
+						available={enabled && itemInteractions !== null}
 						onactivate={() => {
 							keyboard.returnToGame();
-							onActivateCell(slot);
+							if (caster !== null)
+								itemInteractions?.castWieldedSpell(caster.item);
 						}}
 					/>
-				{/each}
+				</div>
+			{/if}
+			<div class="spell-shortcuts">
+				<div class="spell-tabs" role="group" aria-label="Spell bar tabs">
+					{#each SPELL_BAR_INDICES as tab}
+						<button
+							type="button"
+							class="ui-hud-button"
+							aria-label={`Spell tab ${(tab + 1) % 10}`}
+							aria-pressed={configuration.selected === tab}
+							onclick={() => {
+								keyboard.returnToGame();
+								onSelectTab(tab);
+							}}>{(tab + 1) % 10}</button
+						>
+					{/each}
+				</div>
+				<div
+					class="spell-cells"
+					style:grid-template-columns={`repeat(${grid.columns}, ${metrics.cell}px)`}
+					role="group"
+					aria-label={`Spell bar ${(configuration.selected + 1) % 10}`}
+				>
+					{#each SPELL_BAR_INDICES as slot}
+						{@const spell = configuration.tabs[configuration.selected][slot]}
+						{@const row = spell === null ? undefined : rows.get(spell)}
+						{@const available =
+							enabled && spell !== null && known?.includes(spell) === true}
+						<SpellCell
+							address={{ tab: configuration.selected, slot }}
+							{spell}
+							label={spell === null
+								? "Empty spell slot"
+								: `${row === undefined ? `Spell ${spell}` : row.artwork.kind === "failed" ? `${row.name}: ${row.artwork.detail}` : row.name}${known?.includes(spell) === true ? "" : " (unavailable)"}`}
+							display={row?.artwork.kind === "icon"
+								? displays.get(row.artwork.key)
+								: undefined}
+							{available}
+							onactivate={() => {
+								keyboard.returnToGame();
+								onActivateCell(slot);
+							}}
+						/>
+					{/each}
+				</div>
 			</div>
 		</div>
 		{#if editable}<ShortcutBarShapeToggle
@@ -273,10 +336,17 @@
 			height: var(--ui-spell-tab-height);
 		}
 		.spell-bar-scroll {
+			display: flex;
 			width: 100%;
 			height: 100%;
 			overflow: auto;
 			scrollbar-width: thin;
+		}
+		.caster-spell {
+			flex: 0 0 var(--spell-cell-size);
+			width: var(--spell-cell-size);
+			height: var(--spell-cell-size);
+			margin-top: var(--ui-spell-tab-height);
 		}
 		.spell-tabs,
 		.spell-cells {

@@ -23,6 +23,7 @@ export function entityFacts(
 			healthQuery: "ineligible",
 			itemType: 0,
 			hasAlternateEquipSide: false,
+			builtInSpell: null,
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,

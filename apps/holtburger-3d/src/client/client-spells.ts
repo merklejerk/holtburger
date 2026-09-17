@@ -11,7 +11,7 @@ import type { ClientLifecycleSession } from "./client-lifecycle-session";
 
 /** A list row retains identity even when its definition or artwork is unavailable. */
 export interface SpellRow {
-	/** Stable player-known spell identity. */
+	/** Stable spell identity, including item spells outside the player's spellbook. */
 	readonly id: number;
 	/** Authored name or explicit missing-definition label. */
 	readonly name: string;

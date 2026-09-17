@@ -16,6 +16,10 @@
 	} from "../../client/client-spells";
 	import { probeClientSpells } from "./client-spells-probe";
 	import type { ClientEntityFacts } from "../../client/client-entity-mirror";
+	import {
+		CASTER_EQUIP_MASK,
+		inventoryEquipment,
+	} from "../../client/client-inventory-equipment";
 	import type {
 		ClientViewportTargetDestination,
 		ClientViewportTargetResult,
@@ -106,7 +110,62 @@
 	let releaseSpellKeys: (() => void) | null = null;
 	let releaseSpellReferenceGate: (() => void) | null = null;
 	let closeSpellModal: (() => void) | null = null;
+	let savedCaster: ClientEntityFacts | null = null;
 	const spellBarProbe = {
+		caster: (spell: number | null, wielded: boolean) => {
+			const read = interactionLifecycle.entities.read();
+			if (read.kind !== "current") throw new Error("Current entities required");
+			const source =
+				savedCaster ??
+				inventoryEquipment(read.level).rows[0]?.item ??
+				read.level.entities.get(95);
+			if (source?.description.kind !== "known")
+				throw new Error("Caster fixture required");
+			savedCaster = source;
+			emitInteractionEvent("client-entity-facts-changed", {
+				upserts: [
+					{
+						...source,
+						ownedByPlayer: true,
+						location: wielded
+							? { kind: "equipped", wearerGuid: 1, mask: CASTER_EQUIP_MASK }
+							: {
+									kind: "contained",
+									parentGuid: 1,
+									slot: { kind: "item", index: 0 },
+								},
+						description: {
+							...source.description,
+							name: "Test caster",
+							builtInSpell: spell,
+							equipLocations: CASTER_EQUIP_MASK,
+							useCapability: "targeted",
+						},
+					},
+				],
+				removed: [],
+			});
+			selection.select(7);
+			return source.guid;
+		},
+		resolveCaster: () => {
+			const state = itemInteractions.snapshot();
+			if (state.kind !== "resolving")
+				throw new Error("Caster target query required");
+			emitInteractionEvent("client-item-use-target-result", {
+				sequence: state.sequence,
+				eligible: true,
+			});
+		},
+		restoreCaster: () => {
+			if (savedCaster === null) throw new Error("No saved caster fixture");
+			itemInteractions.cancel();
+			emitInteractionEvent("client-entity-facts-changed", {
+				upserts: [savedCaster],
+				removed: [],
+			});
+			savedCaster = null;
+		},
 		begin: () => {
 			spellBar = initialSpellBar();
 			hudMode = "runtime";
@@ -750,6 +809,7 @@
 						healthQuery: "eligible",
 						itemType: 0,
 						hasAlternateEquipSide: false,
+						builtInSpell: null,
 						mapCategory: "other",
 						objectFlags: 0,
 						wcid: guid === 7 ? 42 : null,

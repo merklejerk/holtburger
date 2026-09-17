@@ -3,6 +3,39 @@ import type {
 	ClientEntityLevel,
 } from "./client-entity-mirror";
 
+/** Protocol EquipMask::CASTER, distinct from the combined main-hand display slot. */
+export const CASTER_EQUIP_MASK = 0x01000000;
+
+/** A currently wielded activation spell, independent of learned spellbook membership. */
+export interface WieldedCasterSpell {
+	/** Source instance sent with UseWithTarget. */
+	readonly item: number;
+	/** Public spell identity used to resolve local name and artwork. */
+	readonly spell: number;
+	/** Item name shown alongside its spell. */
+	readonly name: string;
+}
+
+/** Consume confirmed ownership and placement; allowed equipment locations do not imply wielding. */
+export function wieldedCasterSpell(
+	item: ClientEntityFacts,
+): WieldedCasterSpell | null {
+	if (
+		!item.ownedByPlayer ||
+		item.location.kind !== "equipped" ||
+		item.location.mask === null ||
+		(item.location.mask & CASTER_EQUIP_MASK) === 0 ||
+		item.description.kind !== "known" ||
+		item.description.builtInSpell === null
+	)
+		return null;
+	return {
+		item: item.guid,
+		spell: item.description.builtInSpell,
+		name: item.description.name,
+	};
+}
+
 /** Display order and slot masks follow gmPaperDollUI::SetUIItemIntoLocation
  * (acclient.c:211927). Clothing uses chest/upper-leg anchors for shirt/pants:
  * raw clothing-location bits are not exclusive slots. ACE checks ClothingPriority

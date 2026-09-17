@@ -338,6 +338,52 @@ mod tests {
     }
 
     #[test]
+    fn built_in_spell_survives_creation_and_public_updates() {
+        use holtburger_common::properties::{ItemType, PropertyDataId};
+        use holtburger_protocol::messages::{
+            ObjectDescriptionData, PublicUpdatePropertyDataIdData,
+        };
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Caster".into());
+        description.public_weenie_desc.item_type = ItemType::CASTER.bits();
+        description.public_weenie_desc.spell = Some(Guid(42));
+        for (message, expected) in [
+            (GameMessage::ObjectCreate(Box::new(description)), Some(42)),
+            (
+                GameMessage::PublicUpdatePropertyDataId(Box::new(PublicUpdatePropertyDataIdData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyDataId::Spell as u32,
+                    value: Guid(43),
+                })),
+                Some(43),
+            ),
+            (
+                GameMessage::PublicUpdatePropertyDataId(Box::new(PublicUpdatePropertyDataIdData {
+                    sequence: 2,
+                    guid: ITEM,
+                    property: PropertyDataId::Spell as u32,
+                    value: Guid::NULL,
+                })),
+                None,
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { built_in_spell, .. } = mirror[&ITEM].description else {
+                panic!("Known caster required");
+            };
+            assert_eq!(built_in_spell, expected);
+        }
+    }
+
+    #[test]
     fn item_use_capability_republishes_after_public_property_updates() {
         use holtburger_common::properties::{ItemType, PropertyInt, Usable};
         use holtburger_protocol::messages::{ObjectDescriptionData, PublicUpdatePropertyIntData};

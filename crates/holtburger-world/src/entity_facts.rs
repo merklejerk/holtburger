@@ -89,6 +89,9 @@ pub enum EntityDescription {
         /// Authored use shape consumed by inventory and action interaction entry points.
         #[serde(rename = "useCapability")]
         use_capability: crate::item_use::ItemUseCapability,
+        /// Public activation spell, consumed by caster shortcuts independently of learned spells.
+        #[serde(rename = "builtInSpell")]
+        built_in_spell: Option<u32>,
         /// Template identity and remaining supply for consumable consumers.
         consumable: Option<crate::item_use::ConsumableFacts>,
         /// Public object-description flags consumed by selected-entity diagnostics.
@@ -279,6 +282,7 @@ impl WorldState {
                                 != facts.preferred_side_request(true)
                         }),
                     use_capability: crate::item_use::item_use_capability(entity),
+                    built_in_spell: entity.spell().filter(|id| *id != Guid::NULL).map(|id| id.0),
                     consumable: crate::item_use::consumable_facts(entity),
                     equip_locations: entity
                         .get_int_prop(PropertyInt::ValidLocations)
@@ -650,6 +654,7 @@ mod tests {
                 equip_locations: None,
                 has_alternate_equip_side: false,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
+                built_in_spell: None,
                 consumable: None,
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
@@ -702,6 +707,7 @@ mod tests {
                 equip_locations: None,
                 has_alternate_equip_side: false,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
+                built_in_spell: None,
                 consumable: None,
                 object_flags: 0,
                 wcid: None,

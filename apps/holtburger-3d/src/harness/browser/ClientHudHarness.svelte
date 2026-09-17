@@ -14,6 +14,7 @@
 		ClientSpellState,
 		type ClientSpellServices,
 	} from "../../client/client-spells";
+	import { resolveClientSpellCastAim } from "../../client/client-spell-casting";
 	import { probeClientSpells } from "./client-spells-probe";
 	import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 	import {
@@ -101,7 +102,20 @@
 			id !== null &&
 			interactionLifecycle.state().knownSpells?.includes(id)
 		)
-			void interactionLifecycle.castSpell(id, selectedGuid);
+			void castSpell(id);
+	}
+	async function castSpell(id: number): Promise<void> {
+		const spellState = spells;
+		const selection = selectedGuid;
+		const reference =
+			selection === null && spellState !== null
+				? await spellState.reference(id)
+				: null;
+		const details = reference?.kind === "known" ? reference.details : null;
+		await interactionLifecycle.castSpell(
+			id,
+			resolveClientSpellCastAim(details, selection),
+		);
 	}
 	let releaseSpellKeys: (() => void) | null = null;
 	let releaseSpellReferenceGate: (() => void) | null = null;
@@ -193,6 +207,13 @@
 		},
 		knowledge: (spellIds: readonly number[]) =>
 			emitInteractionEvent("client-player-spells-updated", { spellIds }),
+		bind: (slot: InputDigitIndex, spell: number | null) => {
+			spellBar = bindSpellCell(
+				spellBar,
+				{ tab: spellBar.selected, slot },
+				spell,
+			);
+		},
 		select: (guid: number | null) => {
 			selectedGuid = guid;
 		},
@@ -2227,7 +2248,8 @@
 											? "self-target"
 											: "selected-target",
 									description: "Fixture spell description.",
-									school: id % 2 === 0 ? 2 : 3,
+									school: id === 2000 ? 5 : id % 2 === 0 ? 2 : 3,
+									usesProjectileHandler: id === 2000,
 									baseMana: 10,
 									manaPerTarget: 2,
 									durationSeconds: 60,
@@ -2405,7 +2427,7 @@
 		combatMode={spellCombatMode}
 		combatEnabled={true}
 		onToggleCombat={() => {}}
-		onCastSpell={(id) => void interactionLifecycle.castSpell(id, selectedGuid)}
+		onCastSpell={(id) => void castSpell(id)}
 		{itemInteractions}
 		entityMetadata={{
 			status: "available",

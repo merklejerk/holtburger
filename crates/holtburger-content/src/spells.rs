@@ -4,6 +4,10 @@ pub mod classification;
 
 use holtburger_dat::file_type::{SpellTable, spell_table::component_power_tier};
 
+const PROJECTILE_SPELL_TYPE: u32 = 2;
+const LIFE_PROJECTILE_SPELL_TYPE: u32 = 10;
+const ENCHANTMENT_PROJECTILE_SPELL_TYPE: u32 = 15;
+
 /// Static facts consumed by independent spell reference views and artwork projection.
 pub struct SpellReference<'a> {
     /// Derived static discovery facts, independent of artwork and character state.
@@ -14,6 +18,8 @@ pub struct SpellReference<'a> {
     pub description: &'a str,
     /// Authored school identity.
     pub school: u32,
+    /// Whether ACE executes this spell through one of its projectile handlers.
+    pub uses_projectile_handler: bool,
     /// Authored base mana, before casting economy adjustments.
     pub base_mana: u32,
     /// Additional authored mana per target.
@@ -37,6 +43,10 @@ pub fn spell_reference(table: &SpellTable, id: u32) -> Option<SpellReference<'_>
         name: &spell.name,
         description: &spell.description,
         school: spell.school,
+        uses_projectile_handler: matches!(
+            spell.meta_spell_type,
+            PROJECTILE_SPELL_TYPE | LIFE_PROJECTILE_SPELL_TYPE | ENCHANTMENT_PROJECTILE_SPELL_TYPE
+        ),
         base_mana: spell.base_mana,
         mana_mod: spell.mana_mod,
         duration_seconds: match spell.extras {
@@ -118,6 +128,33 @@ mod tests {
                 (3, 10, 2)
             );
             assert_eq!(reference.duration_seconds, expected);
+        }
+    }
+
+    #[test]
+    fn projectile_fact_follows_ace_spell_type_dispatch() {
+        for (meta_spell_type, expected) in [
+            (1, false),
+            (PROJECTILE_SPELL_TYPE, true),
+            (LIFE_PROJECTILE_SPELL_TYPE, true),
+            (ENCHANTMENT_PROJECTILE_SPELL_TYPE, true),
+            (8, false),
+        ] {
+            let table = SpellTable {
+                id: SpellTable::FILE_ID,
+                spells: HashMap::from([(
+                    1,
+                    SpellBase {
+                        meta_spell_type,
+                        ..SpellBase::default()
+                    },
+                )]),
+                spell_sets: HashMap::new(),
+            };
+            assert_eq!(
+                spell_reference(&table, 1).unwrap().uses_projectile_handler,
+                expected
+            );
         }
     }
 }

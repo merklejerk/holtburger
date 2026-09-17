@@ -73,6 +73,8 @@ export interface ClientSpellServices {
 	readonly icons: UiIconRepository;
 	/** Resolve static definitions and keep requested known artwork warm for this character. */
 	load(ids: readonly number[]): Promise<readonly SpellReference[]>;
+	/** Resolve one immutable definition without acquiring an additional artwork lease. */
+	reference(id: number): Promise<SpellReference>;
 	/** Resolve ordered formula slots and retain known-spell artwork across collapse. */
 	components(
 		spellId: number,
@@ -149,6 +151,14 @@ export class ClientSpellState implements ClientSpellServices {
 				);
 		}
 		return references;
+	}
+
+	async reference(id: number): Promise<SpellReference> {
+		if (this.#disposed) throw new Error("Spell state is disposed.");
+		const [reference] = await this.references.load([id]);
+		if (reference === undefined)
+			throw new Error(`Missing spell reference ${id}.`);
+		return reference;
 	}
 
 	async components(

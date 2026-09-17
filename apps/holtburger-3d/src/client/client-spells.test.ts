@@ -52,6 +52,7 @@ function fixture() {
 			details: {
 				description: "Description",
 				school: 3,
+				usesProjectileHandler: false,
 				baseMana: 10,
 				manaPerTarget: 0,
 				durationSeconds: 60,
@@ -119,6 +120,18 @@ describe("ClientSpellState artwork lifetime", () => {
 		expect(f.state.search).toEqual({ text: "", tags: [] });
 		f.state.destroy();
 	});
+
+	it("resolves casting facts without acquiring an artwork lease", async () => {
+		const f = fixture();
+		expect(await f.state.reference(1)).toMatchObject({
+			kind: "known",
+			id: 1,
+		});
+		expect(f.load).toHaveBeenCalledWith([1]);
+		expect(f.services.prepare).not.toHaveBeenCalled();
+		f.state.destroy();
+	});
+
 	it("loads lazily, survives panel close, and releases shared artwork after its last known spell", async () => {
 		const f = fixture();
 		expect(f.load).not.toHaveBeenCalled();
@@ -155,6 +168,7 @@ describe("ClientSpellState artwork lifetime", () => {
 						details: {
 							description: "Description",
 							school: 3,
+							usesProjectileHandler: false,
 							baseMana: 10,
 							manaPerTarget: 0,
 							durationSeconds: 60,

@@ -21,6 +21,7 @@ const details: SpellDetails = {
 	castingRoute: "self-target",
 	description: "",
 	school: 2,
+	usesProjectileHandler: false,
 	baseMana: 10,
 	manaPerTarget: 0,
 	durationSeconds: null,

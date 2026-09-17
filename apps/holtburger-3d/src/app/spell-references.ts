@@ -56,6 +56,7 @@ const referenceSchema = z.discriminatedUnion("kind", [
 						.readonly(),
 					description: z.string(),
 					school: z.number().int().nonnegative().max(0xffff_ffff),
+					usesProjectileHandler: z.boolean(),
 					baseMana: z.number().int().nonnegative().max(0xffff_ffff),
 					manaPerTarget: z.number().int().nonnegative().max(0xffff_ffff),
 					durationSeconds: z.number().finite().positive().nullable(),

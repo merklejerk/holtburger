@@ -106,6 +106,7 @@ import {
 	type HostEventName,
 	type HostTransport,
 } from "../lib/host/host-transport";
+import type { ClientSpellCastAim } from "./client-spell-casting";
 
 type ClientCommandName = Extract<
 	HostCommandName,
@@ -486,8 +487,8 @@ export class ClientLifecycleSession {
 		});
 	}
 
-	/** Cast using the selection captured by the caller; core resolves the spell route. */
-	async castSpell(spellId: number, selection: number | null): Promise<void> {
+	/** Cast using complete caller-owned recipient intent; core resolves normal spell routes. */
+	async castSpell(spellId: number, aim: ClientSpellCastAim): Promise<void> {
 		if (this.#unlisten === null)
 			throw new Error("Spell session is unavailable.");
 		if (
@@ -497,7 +498,7 @@ export class ClientLifecycleSession {
 			throw new Error("Enter magic stance before casting.");
 		await this.#transport.invoke("cast_client_spell", {
 			spellId,
-			aim: { kind: "normal", selection },
+			aim,
 		});
 	}
 

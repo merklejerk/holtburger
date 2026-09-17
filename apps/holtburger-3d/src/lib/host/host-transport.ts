@@ -166,6 +166,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-lifecycle-changed",
 	"client-character-motion-capabilities-updated",
 	"client-character-motion-feedback",
+	"client-server-controlled-motion",
 	"client-precise-jump-evaluation",
 	"client-precise-jump-transaction-feedback",
 	"client-entity-selection-query-result",
@@ -247,6 +248,7 @@ export interface HostEventPayloadMap {
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
 	"client-character-motion-feedback": ClientCharacterMotionFeedback;
+	"client-server-controlled-motion": null;
 	"client-precise-jump-evaluation": ClientPreciseJumpEvaluation;
 	"client-precise-jump-transaction-feedback": ClientPreciseJumpTransactionFeedback;
 	"client-entity-selection-query-result": ClientEntitySelectionQueryResult;

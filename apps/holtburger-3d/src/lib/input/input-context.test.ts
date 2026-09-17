@@ -4,6 +4,33 @@ import { AppInput } from "./app-input";
 import { INPUT_DEFAULTS } from "./input-defaults";
 
 describe("InputContext", () => {
+	it("binds auto-run to unmodified Q while permitting the walk modifier", () => {
+		const input = new AppInput(INPUT_DEFAULTS);
+		for (const shiftKey of [false, true]) {
+			expect(
+				input.shortcut("toggleAutoRun", {
+					key: "Q",
+					shiftKey,
+					ctrlKey: false,
+					altKey: false,
+					metaKey: false,
+				}),
+			).toBe(true);
+		}
+		for (const modifier of ["ctrlKey", "altKey", "metaKey"] as const) {
+			expect(
+				input.shortcut("toggleAutoRun", {
+					key: "q",
+					shiftKey: false,
+					ctrlKey: false,
+					altKey: false,
+					metaKey: false,
+					[modifier]: true,
+				}),
+			).toBe(false);
+		}
+	});
+
 	it("binds both backquote characters without consuming modified system chords", () => {
 		const input = new AppInput(INPUT_DEFAULTS);
 		for (const [key, shiftKey] of [

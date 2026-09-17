@@ -2,34 +2,52 @@ import { describe, expect, it } from "vitest";
 
 import type { CharacterAction } from "../lib/input/input-contract";
 import { ClientInputArbiter } from "./client-input-arbiter";
-import { CharacterInputController } from "../lib/game/controls/character-input-controller";
+import {
+	CharacterInputController,
+	type CharacterDriveIntent,
+} from "../lib/game/controls/character-input-controller";
 
 class FakeOrdinaryInput {
 	readonly calls: string[] = [];
+	#persistentForward = false;
 
-	applyAction(action: CharacterAction, down: boolean): void {
+	applyAction(action: CharacterAction, down: boolean): boolean {
 		this.calls.push(`${action}:${down ? "down" : "up"}`);
+		const cancelled =
+			down &&
+			this.#persistentForward &&
+			(action === "forward" || action === "backward");
+		if (cancelled) this.#persistentForward = false;
+		return cancelled;
 	}
 
 	restoreHeldAction(action: Exclude<CharacterAction, "jump">): void {
 		this.calls.push(`${action}:restore`);
 	}
 
+	setPersistentForward(enabled: boolean, intent: CharacterDriveIntent): void {
+		this.calls.push(`auto-run:${enabled ? "on" : "off"}:${intent}`);
+		this.#persistentForward = enabled;
+	}
+
 	reset(): void {
 		this.calls.push("reset");
+		this.#persistentForward = false;
 	}
 }
 
 function fixture() {
 	const ordinary = new FakeOrdinaryInput();
 	const edges: string[] = [];
+	const autoRunChanges: boolean[] = [];
 	const arbiter = new ClientInputArbiter({
 		ordinary,
 		onEnter: () => edges.push("enter"),
 		onActivate: () => edges.push("activate"),
 		onCancel: () => edges.push("cancel"),
+		onAutoRunChanged: (enabled) => autoRunChanges.push(enabled),
 	});
-	return { arbiter, edges, ordinary };
+	return { arbiter, autoRunChanges, edges, ordinary };
 }
 
 describe("ClientInputArbiter", () => {
@@ -45,6 +63,7 @@ describe("ClientInputArbiter", () => {
 			onEnter() {},
 			onActivate() {},
 			onCancel() {},
+			onAutoRunChanged() {},
 		});
 		arbiter.applyAction("turnRight", true);
 		arbiter.applyAction("turnLeft", true);
@@ -74,6 +93,79 @@ describe("ClientInputArbiter", () => {
 		expect(ordinary.calls).toEqual(["walk:down", "jump:down", "jump:up"]);
 		expect(edges).toEqual([]);
 		expect(arbiter.preciseActive).toBe(false);
+	});
+
+	it("toggles persistent forward and clears it at the hard cancellation boundary", () => {
+		const { arbiter, autoRunChanges, ordinary } = fixture();
+		expect(arbiter.toggleAutoRun()).toBe(true);
+		expect(arbiter.toggleAutoRun()).toBe(false);
+		expect(ordinary.calls).toEqual([
+			"auto-run:on:acquire",
+			"auto-run:off:synchronize",
+		]);
+		expect(autoRunChanges).toEqual([true, false]);
+
+		arbiter.toggleAutoRun();
+		ordinary.calls.length = 0;
+		arbiter.reset();
+		expect(ordinary.calls).toEqual(["reset"]);
+		expect(autoRunChanges).toEqual([true, false, true, false]);
+		expect(arbiter.toggleAutoRun()).toBe(true);
+	});
+
+	it("cancels auto-run atomically when longitudinal input acquires movement", () => {
+		const { arbiter, autoRunChanges, ordinary } = fixture();
+		arbiter.toggleAutoRun();
+		ordinary.calls.length = 0;
+
+		arbiter.applyAction("backward", true);
+
+		expect(ordinary.calls).toEqual(["backward:down"]);
+		expect(autoRunChanges).toEqual([true, false]);
+		expect(arbiter.toggleAutoRun()).toBe(true);
+	});
+
+	it("synchronizes cancellation without acquiring server-controlled motion", () => {
+		const { arbiter, autoRunChanges, ordinary } = fixture();
+		arbiter.toggleAutoRun();
+		ordinary.calls.length = 0;
+
+		expect(arbiter.cancelAutoRun()).toBe(true);
+		expect(arbiter.cancelAutoRun()).toBe(false);
+
+		expect(ordinary.calls).toEqual(["auto-run:off:synchronize"]);
+		expect(autoRunChanges).toEqual([true, false]);
+	});
+
+	it("pauses auto-run during precise jump and restores it as synchronization", () => {
+		const { arbiter, ordinary } = fixture();
+		arbiter.toggleAutoRun();
+		arbiter.applyAction("turnLeft", true);
+		ordinary.calls.length = 0;
+
+		arbiter.enterPrecise();
+		arbiter.deactivate();
+
+		expect(ordinary.calls).toEqual([
+			"reset",
+			"reset",
+			"turnLeft:restore",
+			"auto-run:on:synchronize",
+		]);
+		expect(arbiter.toggleAutoRun()).toBe(false);
+	});
+
+	it("does not restore auto-run after longitudinal input during precise jump", () => {
+		const { arbiter, autoRunChanges, ordinary } = fixture();
+		arbiter.toggleAutoRun();
+		arbiter.enterPrecise();
+		ordinary.calls.length = 0;
+
+		arbiter.applyAction("forward", true);
+		arbiter.deactivate();
+
+		expect(ordinary.calls).toEqual(["reset", "forward:restore"]);
+		expect(autoRunChanges).toEqual([true, false]);
 	});
 
 	it("activates once for each fresh jump press", () => {

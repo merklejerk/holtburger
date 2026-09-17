@@ -357,6 +357,9 @@
 					});
 				}
 				return;
+			case "server-controlled-motion":
+				inputArbiter?.cancelAutoRun();
+				return;
 			case "world-name":
 				worldName = event.name;
 				return;
@@ -491,6 +494,15 @@
 			)
 		)
 			return;
+		if (
+			APP_INPUT.shortcut("toggleAutoRun", event) &&
+			!event.isComposing &&
+			inputArbiter !== null
+		) {
+			event.preventDefault();
+			if (!event.repeat) inputArbiter.toggleAutoRun();
+			return;
+		}
 		if (APP_INPUT.shortcut("toggleCombat", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) void toggleCombatMode();
@@ -817,6 +829,11 @@
 			},
 			onActivate: () => preciseJumpSession?.activate(),
 			onCancel: () => preciseJumpSession?.cancel(),
+			onAutoRunChanged: (enabled) =>
+				toastCenter.publish({
+					message: enabled ? "AutoRun ON" : "AutoRun OFF",
+					tone: "status",
+				}),
 		});
 		inputArbiter = arbiter;
 

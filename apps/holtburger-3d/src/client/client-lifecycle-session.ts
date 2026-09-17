@@ -152,6 +152,7 @@ type ClientEventName = Extract<
 	| "client-lifecycle-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
+	| "client-server-controlled-motion"
 	| "client-precise-jump-evaluation"
 	| "client-precise-jump-transaction-feedback"
 	| "client-entity-selection-query-result"
@@ -248,6 +249,7 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "character-motion-feedback";
 			readonly feedback: ClientCharacterMotionFeedback;
 	  }
+	| { readonly type: "server-controlled-motion" }
 	| {
 			readonly type: "precise-jump-evaluation";
 			readonly evaluation: ClientPreciseJumpEvaluation;
@@ -664,6 +666,16 @@ export class ClientLifecycleSession {
 				await this.#transport.listen(
 					"client-character-motion-feedback",
 					(payload) => this.#receiveCharacterMotionFeedback(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-server-controlled-motion",
+					(payload) => {
+						if (payload !== null)
+							throw new Error("Invalid server-controlled motion notification.");
+						this.#emit({ type: "server-controlled-motion" });
+					},
 				),
 			);
 			unlisteners.push(

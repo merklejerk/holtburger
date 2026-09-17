@@ -97,6 +97,7 @@ pub enum HostEvent {
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
     ),
     ClientCharacterMotionFeedback(crate::client_projection::ClientCharacterMotionFeedbackWire),
+    ClientServerControlledMotion(()),
     ClientPreciseJumpEvaluation(crate::client_projection::ClientPreciseJumpEvaluationWire),
     ClientPreciseJumpTransactionFeedback(
         crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
@@ -398,6 +399,9 @@ impl ClientEventSink for StdioEventSink {
             ) => HostEvent::ClientCharacterMotionCapabilitiesUpdated(capabilities),
             crate::client_projection::ClientHostEvent::CharacterMotionFeedback(feedback) => {
                 HostEvent::ClientCharacterMotionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::ServerControlledMotion => {
+                HostEvent::ClientServerControlledMotion(())
             }
             crate::client_projection::ClientHostEvent::PreciseJumpEvaluation(evaluation) => {
                 HostEvent::ClientPreciseJumpEvaluation(evaluation)

@@ -29,6 +29,10 @@
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
+	import {
+		isSplittableInventoryItem,
+		type InventorySplitStart,
+	} from "./client-inventory-split";
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
@@ -284,6 +288,8 @@
 	/** HUD shape is independent of selected spell tab and casting stance. */
 	let spellBarShape = $state<"single" | "double">("single");
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	/** One selected-HUD request retained only until the inventory panel accepts it. */
+	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
@@ -319,6 +325,24 @@
 	let pointerInsideCanvas = false;
 	const HUD_PREVIEW_JUMP_EXTENT = 0.45;
 	const HUD_PREVIEW_TOAST_MESSAGE = "Notification preview";
+
+	function canSplitSelectedEntity(): boolean {
+		return (
+			selectedEntityGuid !== null &&
+			inventory !== null &&
+			isSplittableInventoryItem(inventory.readItem(selectedEntityGuid))
+		);
+	}
+
+	function splitSelectedEntity(source: HTMLButtonElement): void {
+		if (!canSplitSelectedEntity() || selectedEntityGuid === null) return;
+		requestedInventorySplit = { item: selectedEntityGuid, source };
+		activePanel = "inventory";
+	}
+
+	$effect(() => {
+		if (activePanel !== "inventory") requestedInventorySplit = null;
+	});
 
 	$effect(() => {
 		if (!preciseJumpActive) return;
@@ -666,6 +690,7 @@
 		>
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
+				readCanSplit={canSplitSelectedEntity}
 				readSelectedDisplay={() => {
 					const display = readSelectedEntityDisplay();
 					return itemInteraction.kind === "acquiring" &&
@@ -674,6 +699,7 @@
 						: display;
 				}}
 				onInteract={onInteractEntity}
+				onSplit={splitSelectedEntity}
 			/>
 		</ClientHudPanel>
 	{/if}
@@ -729,6 +755,11 @@
 								{inventory}
 								selectedGuid={selectedEntityGuid}
 								onSelectItem={(guid) => onSelectInventoryItem(guid, "toggle")}
+								requestedSplit={requestedInventorySplit}
+								onRequestedSplitConsumed={(request) => {
+									if (requestedInventorySplit === request)
+										requestedInventorySplit = null;
+								}}
 							/>
 						{/key}
 					{/if}

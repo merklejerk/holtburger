@@ -5,6 +5,7 @@
 	import {
 		ClientInventorySplit,
 		type InventorySplitRequest,
+		type InventorySplitStart,
 	} from "./client-inventory-split";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
@@ -27,9 +28,19 @@
 		readonly interactions: ClientItemInteractions;
 		readonly selectedGuid: number | null;
 		readonly onSelectItem: (guid: number) => void;
+		/** Optional request from another HUD surface, consumed after the panel owner mounts. */
+		readonly requestedSplit: InventorySplitStart | null;
+		/** Retire the exact handoff after this mounted panel accepts it. */
+		readonly onRequestedSplitConsumed: (request: InventorySplitStart) => void;
 	}
-	const { inventory, interactions, selectedGuid, onSelectItem }: Props =
-		$props();
+	const {
+		inventory,
+		interactions,
+		selectedGuid,
+		onSelectItem,
+		requestedSplit,
+		onRequestedSplitConsumed,
+	}: Props = $props();
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
@@ -68,25 +79,43 @@
 	let sampleNow: (() => void) | null = null;
 	/** Cold dialog state only; execution remains owned by core. */
 	let splitRequest = $state<InventorySplitRequest | null>(null);
-	let splitOwner: ClientInventorySplit | null = null;
+	let splitOwner = $state<ClientInventorySplit | null>(null);
+
+	$effect(() => {
+		const owner = splitOwner;
+		const request = requestedSplit;
+		if (owner === null || request === null) return;
+		owner.begin(request.item, request.source);
+		onRequestedSplitConsumed(request);
+	});
+
+	$effect(() => {
+		splitOwner?.cancelForSelection(selectedGuid);
+	});
 
 	onMount(() => {
 		const abort = new AbortController();
 		let consumedTargetSequence = false;
-		const itemGuid = (event: MouseEvent): number | null => {
+		const itemCell = (event: MouseEvent): HTMLElement | null => {
 			const cell =
 				event.target instanceof Element
 					? event.target.closest<HTMLElement>(
 							".item-grid-cell[data-item-guid]:not(:disabled)",
 						)
 					: null;
-			return cell === null ? null : Number(cell.dataset.itemGuid);
+			return cell !== null && panel.contains(cell) ? cell : null;
 		};
 		panel.addEventListener(
 			"click",
 			(event) => {
-				const guid = itemGuid(event);
-				if (guid === null) return;
+				const cell = itemCell(event);
+				if (cell === null) return;
+				const guid = Number(cell.dataset.itemGuid);
+				if (event.shiftKey && splitOwner?.begin(guid, cell) === true) {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+					return;
+				}
 				if (event.detail <= 1) consumedTargetSequence = false;
 				const state = interactions.snapshot();
 				if (event.detail > 1 || state.kind === "acquiring") {
@@ -103,8 +132,9 @@
 		panel.addEventListener(
 			"dblclick",
 			(event) => {
-				const guid = itemGuid(event);
-				if (guid === null) return;
+				const cell = itemCell(event);
+				if (cell === null) return;
+				const guid = Number(cell.dataset.itemGuid);
 				event.preventDefault();
 				event.stopImmediatePropagation();
 				if (!consumedTargetSequence) {

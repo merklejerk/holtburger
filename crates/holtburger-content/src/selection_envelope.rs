@@ -23,23 +23,24 @@ pub fn resolve_selection_envelope_profile(
     setup: &SetupModel,
     part_changes: impl IntoIterator<Item = (u8, u32)>,
     motion_table_did: Option<u32>,
-) -> Result<SelectionEnvelopeProfile> {
+) -> SelectionEnvelopeProfile {
     let mut effective_parts = setup.parts.clone();
     for (part_index, gfx_obj_did) in part_changes {
         let index = usize::from(part_index);
-        let Some(part) = effective_parts.get_mut(index) else {
-            bail!(
-                "selection profile replaces missing part {index} on SetupModel 0x{:08X}",
-                setup.id
-            );
-        };
-        *part = gfx_obj_did;
+        // RETAIL QUIRK: SetPart skips an out-of-range substitution and reports failure
+        // (`acclient.c:313502-313522`), but SetVisualDesc discards that result
+        // (`acclient.c:373471`). Treating the authored no-op as fatal here would remove the
+        // selection envelope from otherwise visible objects. Census 2026-09-17: 57 catalog
+        // templates have an own-clothing table that names a part beyond their setup.
+        if let Some(part) = effective_parts.get_mut(index) {
+            *part = gfx_obj_did;
+        }
     }
-    Ok(SelectionEnvelopeProfile {
+    SelectionEnvelopeProfile {
         setup_did: setup.id,
         effective_parts,
         motion_table_did,
-    })
+    }
 }
 
 /// Computes the smallest origin-centered radius covering every reachable part-frame sphere.
@@ -315,5 +316,16 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn selection_profile_skips_retail_ignored_out_of_range_part_changes() {
+        let mut setup = empty_setup(0x0200_0A09);
+        setup.parts = vec![0x0100_20D5];
+
+        let profile =
+            resolve_selection_envelope_profile(&setup, [(9, 0x0100_20D5), (0, 0x0100_20D6)], None);
+
+        assert_eq!(profile.effective_parts, vec![0x0100_20D6]);
     }
 }

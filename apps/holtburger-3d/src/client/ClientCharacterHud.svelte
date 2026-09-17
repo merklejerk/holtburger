@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ClientVital } from "./client-host-contract";
+	import { formatQuantity } from "../app/quantity-format";
 	import ClientHudIcon, {
 		type ClientHudIconName,
 	} from "./ClientHudIcon.svelte";
@@ -22,6 +23,7 @@
 		{ kind: "mana", label: "Mana" },
 		{ kind: "stamina", label: "Stamina" },
 	] as const;
+	let focusedKind = $state<ClientVital["kind"]>("health");
 
 	function vital(kind: ClientVital["kind"]): ClientVital | undefined {
 		return vitals.find((candidate) => candidate.kind === kind);
@@ -31,6 +33,12 @@
 		if (!value || value.maximum === 0) return 0;
 		return Math.max(0, Math.min(100, (value.current / value.maximum) * 100));
 	}
+
+	function quantity(value: ClientVital | undefined): string {
+		return value
+			? `${formatQuantity(value.current)} / ${formatQuantity(value.maximum)}`
+			: "—";
+	}
 </script>
 
 <section class="character-hud">
@@ -38,22 +46,29 @@
 		{playerName ?? "Awaiting character"}
 		<span>({worldName ?? "Unknown world"})</span>
 	</header>
-	<div class="vitals">
-		{#each bars as bar, index}
+	<div
+		class="vitals"
+		role="group"
+		aria-label="Character vitals"
+		onpointerleave={() => (focusedKind = "health")}
+	>
+		{#each bars as bar}
 			{@const value = vital(bar.kind)}
 			<div
 				class={`vital ui-meter ui-meter--${bar.kind}`}
-				style:height={`${16 - index * 4}px`}
+				data-focused={focusedKind === bar.kind}
 				role="meter"
 				aria-label={bar.label}
 				aria-valuemin="0"
 				aria-valuemax={value?.maximum ?? 0}
 				aria-valuenow={value?.current ?? 0}
+				aria-valuetext={quantity(value)}
+				onpointerenter={() => (focusedKind = bar.kind)}
 			>
 				<span class="vital-fill" style:width={`${fillPercent(value)}%`}></span>
-				{#if index === 0}<strong class="ui-readout"
-						>{value ? `${value.current} / ${value.maximum}` : "—"}</strong
-					>{/if}
+				<strong class="ui-readout" aria-hidden={focusedKind !== bar.kind}
+					>{quantity(value)}</strong
+				>
 			</div>
 		{/each}
 	</div>
@@ -88,11 +103,21 @@
 			font-weight: 500;
 		}
 		.vitals {
-			display: grid;
+			display: flex;
+			flex-direction: column;
 			gap: 2px;
+			/* One 16px focused bar, two 8px unfocused bars, and two 2px gaps. */
+			block-size: 36px;
 		}
 		.vital {
 			position: relative;
+			flex: 1 1 0;
+			min-block-size: 0;
+			height: auto;
+			transition: flex-grow 140ms var(--ui-easing);
+		}
+		.vital[data-focused="true"] {
+			flex-grow: 2;
 		}
 		.vital-fill {
 			transition: width 120ms linear;
@@ -107,6 +132,16 @@
 			padding-block: 0;
 			padding-inline: calc(14px + 3px);
 			white-space: nowrap;
+			opacity: 0;
+			visibility: hidden;
+			transition:
+				opacity 100ms linear,
+				visibility 0s 100ms;
+		}
+		.vital[data-focused="true"] strong {
+			opacity: 1;
+			visibility: visible;
+			transition-delay: 40ms, 0s;
 		}
 		.conditions {
 			display: flex;
@@ -125,7 +160,9 @@
 			padding: 6px;
 		}
 		@media (prefers-reduced-motion: reduce) {
-			.vital-fill {
+			.vital,
+			.vital-fill,
+			.vital strong {
 				transition: none;
 			}
 		}

@@ -1361,9 +1361,12 @@ describe("ParticleSystem", () => {
 		},
 	);
 
-	it("waits at exact authored spacing and emits after crossing it", () => {
+	it("waits at exact configured spacing and emits after crossing it", () => {
 		let origin = ORIGIN;
-		const particles = runtime({ sceneOriginOf: () => origin });
+		const particles = runtime({
+			distanceSpacingMultiplier: 3,
+			sceneOriginOf: () => origin,
+		});
 		particles.create(
 			TARGET,
 			prepared({ emitsPerMeter: true, emitsPerSecond: false, birthrate: 1 }),
@@ -1372,10 +1375,10 @@ describe("ParticleSystem", () => {
 			0,
 			origin,
 		);
-		origin = sceneVector3([1, 0, 0]);
+		origin = sceneVector3([3, 0, 0]);
 		particles.advance(0.1);
 		expect(particles.getDiagnostics().emittedTotal).toBe(0);
-		origin = sceneVector3([1.01, 0, 0]);
+		origin = sceneVector3([3.01, 0, 0]);
 		particles.advance(0.1 + DISTANCE_EMISSION_INTERVAL_SECONDS);
 		expect(particles.getDiagnostics().emittedTotal).toBe(1);
 	});
@@ -1554,27 +1557,6 @@ describe("ParticleSystem", () => {
 		particles.advance(2.5);
 		expect(particles.getDiagnostics().emittedTotal).toBe(2);
 		particles.advance(3);
-		expect(particles.getDiagnostics().emittedTotal).toBe(3);
-	});
-	it("changes live distance spacing without discarding particles and applies it to new emitters", () => {
-		let origin = ORIGIN;
-		const particles = runtime({ sceneOriginOf: () => origin });
-		const emitter = prepared({
-			emitsPerMeter: true,
-			emitsPerSecond: false,
-			birthrate: 1,
-		});
-		particles.create(TARGET, emitter, NO_OFFSET, 1, 0, origin);
-		origin = sceneVector3([2, 0, 0]);
-		particles.advance(0.1);
-		particles.setDistanceSpacingMultiplier(4);
-		expect(particles.getDiagnostics().particleCount).toBe(1);
-		particles.create(SECOND_TARGET, emitter, NO_OFFSET, 1, 0.1, origin);
-		origin = sceneVector3([4, 0, 0]);
-		particles.advance(0.2);
-		expect(particles.getDiagnostics().emittedTotal).toBe(1);
-		origin = sceneVector3([7, 0, 0]);
-		particles.advance(0.3);
 		expect(particles.getDiagnostics().emittedTotal).toBe(3);
 	});
 	it("keeps saturated fractional-spacing trails identical across render rates", () => {

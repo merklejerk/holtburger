@@ -421,7 +421,7 @@ The host projects current clip/pose values rather than a retained history of ges
 
 Implemented:
 
-- Distance-only emitters use squared endpoint displacement from the last actual birth, with authored birthrate times `SHARED_FRONTEND_TUNING.particles.distanceSpacingMultiplier` (initially 1). The constructor rejects nonpositive/nonfinite multipliers. Time triggers retain precedence.
+- Distance-only emitters use squared endpoint displacement from the last actual birth, with authored birthrate times `SHARED_FRONTEND_TUNING.particleDistanceSpacingMultiplier`. The constructor rejects nonpositive/nonfinite multipliers. Time triggers retain precedence.
 - The baseline includes the live attached part and rotated hook offset. Explicit placement advances other than integration, and snapshot/upsert placement replacements, re-anchor the owner and attached descendants. Existing particle records do not move.
 - Initial bursts, capacity, finite budgets/duration, particle lifespans, stop-with-drain, and at most one ongoing birth per update remain intact. No hidden gesture timeline or catch-up trail was added.
 - The app-local host/decoder contract now calls the authored field `birthrate`, removing the incorrect assumption that its unit is always seconds. The approximation is documented beside the predicate; no exact-retail claim is made.

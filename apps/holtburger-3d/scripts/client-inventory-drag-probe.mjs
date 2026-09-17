@@ -271,22 +271,23 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			"Submission optimistically changed authoritative equipment display",
 		);
 
-	// Right-click preflights capacity before opening a panel-local amount dialog.
-	const rightClick = async () => {
-		const location = await point(target);
+	// Shift+click preflights capacity before opening a panel-local amount dialog.
+	const shiftClick = async (selector = target) => {
+		const location = await point(selector);
 		for (const type of ["mousePressed", "mouseReleased"])
 			await client.send("Input.dispatchMouseEvent", {
 				type,
 				...location,
-				button: "right",
-				buttons: type === "mousePressed" ? 2 : 0,
+				button: "left",
+				buttons: type === "mousePressed" ? 1 : 0,
 				clickCount: 1,
+				modifiers: 8,
 			});
 		return lastPreview();
 	};
-	const deniedSplit = await rightClick();
+	const deniedSplit = await shiftClick();
 	if (deniedSplit.intent.target.kind !== "split")
-		throw new Error("Right-click did not preflight splitting");
+		throw new Error("Shift+click did not preflight splitting");
 	await reply(deniedSplit.sequence, {
 		kind: "rejected",
 		reason: "No open inventory slots",
@@ -299,7 +300,25 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		))
 	)
 		throw new Error("No-space split rejection did not use a toast");
-	const allowedSplit = await rightClick();
+	await read(`document.querySelector(${JSON.stringify(target)}).click()`);
+	await read(
+		`document.querySelector('button[aria-label="Inventory"]').click()`,
+	);
+	if (await read(`document.querySelector('.client-inventory') !== null`))
+		throw new Error("Inventory shortcut did not close the panel");
+	await read(`new Promise((resolve, reject) => {
+		const deadline = performance.now() + 1000;
+		const poll = () => {
+			const button = document.querySelector('button[aria-label="Split stack"]');
+			if (button) { button.click(); resolve(); }
+			else if (performance.now() >= deadline) reject(new Error('Selected stack did not expose its split action'));
+			else requestAnimationFrame(poll);
+		};
+		poll();
+	})`);
+	if (!(await read(`document.querySelector('.client-inventory') !== null`)))
+		throw new Error("Selected stack split action did not open inventory");
+	const allowedSplit = await lastPreview();
 	await reply(allowedSplit.sequence, { kind: "split", max_amount: 20 });
 	if (
 		!(await read(
@@ -354,7 +373,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		)
 	)
 		throw new Error("Split submission retained the modal");
-	const cancelSplit = await rightClick();
+	const cancelSplit = await shiftClick();
 	await reply(cancelSplit.sequence, { kind: "split", max_amount: 20 });
 	const beforeCancel = (await submissions()).length;
 	await client.send("Input.dispatchKeyEvent", {
@@ -374,6 +393,41 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		(await read(`document.querySelector('.inventory-split-dialog') !== null`))
 	)
 		throw new Error("Split cancellation submitted or retained the dialog");
+
+	const checkingSelection = await shiftClick();
+	await read(`${api}.selectInventoryItem(91)`);
+	await reply(checkingSelection.sequence, { kind: "split", max_amount: 20 });
+	if (await read(`document.querySelector('.inventory-split-dialog') !== null`))
+		throw new Error("Selection change admitted a late split preview");
+	await read(`${api}.selectInventoryItem(94)`);
+	const editingSelection = await shiftClick();
+	await reply(editingSelection.sequence, { kind: "split", max_amount: 20 });
+	await read(`${api}.selectInventoryItem(91)`);
+	if (
+		await read(
+			`document.querySelector('.inventory-split-dialog') !== null || document.querySelector('.inventory-layout').inert`,
+		)
+	)
+		throw new Error("Selection change did not cancel the split modal");
+	await read(`${api}.selectInventoryItem(94)`);
+	const panelClose = await shiftClick();
+	await reply(panelClose.sequence, { kind: "split", max_amount: 20 });
+	await read(
+		`document.querySelector('button[aria-label="Close Inventory"]').click()`,
+	);
+	if (
+		await read(
+			`document.querySelector('.inventory-split-dialog') !== null || document.querySelector('.client-inventory') !== null`,
+		)
+	)
+		throw new Error("Closing inventory retained the split flow");
+	if ((await submissions()).length !== beforeCancel)
+		throw new Error(
+			"Cancelling split through selection or panel closure submitted it",
+		);
+	await read(
+		`document.querySelector('button[aria-label="Inventory"]').click()`,
+	);
 
 	await read(`${api}.deferNextInventorySubmission()`);
 	const latePosition = await begin(source, equipment);

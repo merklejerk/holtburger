@@ -91,6 +91,7 @@ uniform sampler2DArray uRoadMasks;
 uniform sampler2D uDetail;
 uniform float uDetailFadeNear;
 uniform float uDetailFadeFar;
+uniform float uTerrainPointLightIntensityScale;
 uniform int uFogEnabled;
 uniform float uFogNear;
 uniform float uFogFar;
@@ -311,10 +312,12 @@ void main() {
 	// directional terms arrive interpolated; point lights evaluate here so a lamp produces a pool
 	// rather than a whole-quad gradient.
 	vec3 surfaceNormal = safeNormal(vSurfaceNormal);
+	vec3 runtimeLighting = uTerrainPointLightIntensityScale * (
+		evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal)
+	);
 	color *= min(
-		vAmbientSun
-			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
-			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
+		vAmbientSun + runtimeLighting,
 		vec3(1.0)
 	);
 	color = applyDistanceFog(color, vViewerDistance);
@@ -384,14 +387,10 @@ export function createTerrainFragmentShader(
 	return replaceRequiredShaderSection(
 		withVarying,
 		`color *= min(
-		vAmbientSun
-			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
-			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
+		vAmbientSun + runtimeLighting,
 		vec3(1.0)
 	);`,
-		`vec3 runtimeLighting = evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
-		+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal);
-	vec3 unshadowedLighting = min(vAmbientSun + runtimeLighting, vec3(1.0));
+		`vec3 unshadowedLighting = min(vAmbientSun + runtimeLighting, vec3(1.0));
 	vec3 lightingWithoutSun = min(vAmbientWithoutSun + runtimeLighting, vec3(1.0));
 	color *= mix(
 		lightingWithoutSun,
@@ -440,6 +439,7 @@ export interface WebGL2NearTerrainProgram {
 		readonly detail: WebGLUniformLocation;
 		readonly detailFadeFar: WebGLUniformLocation;
 		readonly detailFadeNear: WebGLUniformLocation;
+		readonly terrainPointLightIntensityScale: WebGLUniformLocation;
 		readonly fogColor: WebGLUniformLocation;
 		readonly fogEnabled: WebGLUniformLocation;
 		readonly fogFar: WebGLUniformLocation;
@@ -537,6 +537,11 @@ export function createWebGL2NearTerrainProgram(
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),
 				detailFadeFar: requireWebGL2Uniform(gl, program, "uDetailFadeFar"),
 				detailFadeNear: requireWebGL2Uniform(gl, program, "uDetailFadeNear"),
+				terrainPointLightIntensityScale: requireWebGL2Uniform(
+					gl,
+					program,
+					"uTerrainPointLightIntensityScale",
+				),
 				fogColor: requireWebGL2Uniform(gl, program, "uFogColor"),
 				fogEnabled: requireWebGL2Uniform(gl, program, "uFogEnabled"),
 				fogFar: requireWebGL2Uniform(gl, program, "uFogFar"),

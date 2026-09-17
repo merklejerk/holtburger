@@ -10,10 +10,8 @@ import type { FrontendTuning } from "./frontend-tuning-contract";
  * here.
  */
 export const SHARED_FRONTEND_TUNING = {
-	particles: {
-		/** Positive multiplier for the authored minimum distance between particle births. */
-		distanceSpacingMultiplier: 3,
-	},
+	/** Positive multiplier for the authored minimum distance between particle births. */
+	particleDistanceSpacingMultiplier: 3,
 	animationPresentation: {
 		/** Compose active player locomotion with gestures on compatible humanoid setups. */
 		splitPlayerBody: true,
@@ -701,6 +699,12 @@ export const SHARED_FRONTEND_TUNING = {
 			 */
 			minimumResponse: 0.15,
 		},
+		/**
+		 * Terrain-only response to dynamic and authored point lights, applied after each light's
+		 * falloff and smooth roll-off so tuning brightness does not change the pool's shape or radius.
+		 * A value of 1 preserves the evaluated light.
+		 */
+		terrainPointLightIntensityScale: 0.33,
 		terrainDetailFade: {
 			/** World distance where terrain detail-texture fading begins. */
 			near: 10,

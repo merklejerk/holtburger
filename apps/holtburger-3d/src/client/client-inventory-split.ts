@@ -1,5 +1,32 @@
 import type { ClientInventoryState } from "./client-inventory-state";
 import { nextInventoryPreviewSequence } from "./client-inventory-contract";
+import type { ClientEntityFacts } from "./client-entity-mirror";
+
+type SplittableInventoryItem = ClientEntityFacts & {
+	readonly description: Extract<
+		ClientEntityFacts["description"],
+		{ readonly kind: "known" }
+	>;
+};
+
+/** A stack is locally eligible when the mounted inventory can resolve more than one item. */
+export function isSplittableInventoryItem(
+	item: ClientEntityFacts | undefined,
+): item is SplittableInventoryItem {
+	return (
+		item?.description.kind === "known" &&
+		item.description.stackCount !== null &&
+		item.description.stackCount > 1
+	);
+}
+
+/** One explicit request handed from another HUD surface to the mounted inventory panel. */
+export interface InventorySplitStart {
+	/** Selected owned stack identity. */
+	readonly item: number;
+	/** Focus target restored after the inventory-owned modal closes. */
+	readonly source: HTMLElement;
+}
 
 /** Preflighted dialog bounds; submission still re-evaluates current inventory facts. */
 export interface InventorySplitRequest {
@@ -28,7 +55,6 @@ type SplitInteraction =
 
 /** Panel-owned split interaction; core owns destination allocation and execution. */
 export class ClientInventorySplit {
-	readonly #abort = new AbortController();
 	readonly #unsubscribe: () => void;
 	#interaction: SplitInteraction | null = null;
 
@@ -37,9 +63,6 @@ export class ClientInventorySplit {
 		readonly inventory: ClientInventoryState,
 		readonly onChange: (request: InventorySplitRequest | null) => void,
 	) {
-		root.addEventListener("contextmenu", this.#context, {
-			signal: this.#abort.signal,
-		});
 		this.#unsubscribe = inventory.interactions.subscribe((event) => {
 			const interaction = this.#interaction;
 			if (
@@ -73,52 +96,32 @@ export class ClientInventorySplit {
 				event.type === "exit-requested" ||
 				(event.type === "lifecycle" && event.lifecycle.kind !== "in-world")
 			)
-				this.close();
+				this.#cancel();
 		});
 	}
 
-	#context = (event: MouseEvent): void => {
-		event.preventDefault();
+	/** Preflight a known stack and report whether this gesture started a request. */
+	begin(itemGuid: number, source: HTMLElement): boolean {
 		if (
 			this.#interaction?.kind === "editing" ||
-			this.inventory.read().pending ||
 			this.root.dataset.inventoryDragging === "true"
 		)
-			return;
+			return false;
 		this.#interaction = null;
-		const cell =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>(
-						".item-grid-cell[data-item-guid]:not(:disabled)",
-					)
-				: null;
-		if (cell === null || !this.root.contains(cell)) return;
-		const view = this.inventory.read();
-		const guid = Number(cell.dataset.itemGuid);
-		const item = [
-			...view.sections.flatMap((section) => section.items),
-			...view.equipment.rows.flatMap((row) =>
-				row.item === null ? [] : [row.item],
-			),
-		].find((item) => item.guid === guid);
-		if (
-			item?.description.kind !== "known" ||
-			item.description.stackCount === null ||
-			item.description.stackCount <= 1
-		)
-			return;
+		const item = this.inventory.readItem(itemGuid);
+		if (!isSplittableInventoryItem(item)) return false;
 		const sequence = nextInventoryPreviewSequence();
 		this.#interaction = {
 			kind: "checking",
 			sequence,
-			item: guid,
+			item: itemGuid,
 			name: item.description.name,
-			source: cell,
+			source,
 		};
 		void this.inventory.interactions
 			.previewInventory({
 				sequence,
-				intent: { item: guid, target: { kind: "split", amount: 1 } },
+				intent: { item: itemGuid, target: { kind: "split", amount: 1 } },
 			})
 			.catch((error: unknown) => {
 				if (
@@ -131,7 +134,19 @@ export class ClientInventorySplit {
 					`Inventory request failed: ${String(error)}`,
 				);
 			});
-	};
+		return true;
+	}
+
+	/** Retire preflight or editing state when selection no longer names its source stack. */
+	cancelForSelection(selectedGuid: number | null): void {
+		const interaction = this.#interaction;
+		if (interaction === null) return;
+		const item =
+			interaction.kind === "checking"
+				? interaction.item
+				: interaction.request.item;
+		if (item !== selectedGuid) this.#cancel();
+	}
 
 	submit(amount: number): void {
 		const interaction = this.#interaction;
@@ -153,11 +168,21 @@ export class ClientInventorySplit {
 	}
 
 	close(): void {
+		this.#retire(true);
+	}
+
+	/** Lifecycle cancellation must not reclaim focus from the replacement interaction. */
+	#cancel(): void {
+		this.#retire(false);
+	}
+
+	#retire(restoreFocus: boolean): void {
 		const interaction = this.#interaction;
 		this.#interaction = null;
 		if (interaction?.kind !== "editing") return;
 		delete this.root.dataset.inventoryModal;
 		this.onChange(null);
+		if (!restoreFocus) return;
 		// Wait for Svelte to remove inert before restoring the dialog's source focus.
 		queueMicrotask(() => {
 			if (this.#interaction === null && interaction.source.isConnected)
@@ -166,8 +191,7 @@ export class ClientInventorySplit {
 	}
 
 	destroy(): void {
-		this.close();
-		this.#abort.abort();
+		this.#cancel();
 		this.#unsubscribe();
 	}
 }

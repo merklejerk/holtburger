@@ -234,20 +234,53 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			evaluate(`(() => {
 			const buffer = document.querySelector('.chat-buffer');
 			return { pointerEvents: getComputedStyle(buffer).pointerEvents,
+				pointerHovered: buffer.dataset.pointerHovered,
+				backgroundImage: getComputedStyle(buffer).backgroundImage,
 				pressed: document.querySelector(${JSON.stringify(historyToggle)}).getAttribute('aria-pressed') };
 		})()`);
-		assert.equal((await historyState()).pointerEvents, "none");
-		await click(historyToggle);
-		assert.equal((await capture()).focusLabel, "Chat messages");
-		assert.equal((await historyState()).pressed, "true");
-		assert.equal((await historyState()).pointerEvents, "auto");
+		const settleHistoryAnimations = () =>
+			evaluate(
+				`Promise.all(document.querySelector('.chat-buffer').getAnimations({ subtree: true }).map(animation => animation.finished))`,
+			);
 		const word = await evaluate(`(() => {
 			const span = document.querySelector('.chat-buffer p:last-child .chat-message');
 			const range = document.createRange();
 			range.selectNodeContents(span);
 			const rect = range.getClientRects()[0];
-			return { x: rect.left + 10, y: rect.top + rect.height / 2 };
+			const bufferBounds = span.closest('.chat-buffer').getBoundingClientRect();
+			return { x: rect.left + 10, y: rect.top + rect.height / 2,
+				outsideX: bufferBounds.right + 1 };
 		})()`);
+		const idleHistory = await historyState();
+		assert.equal(idleHistory.pointerEvents, "none");
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...word,
+		});
+		assert.ok(
+			await evaluate(
+				`document.querySelector('.chat-buffer').getAnimations({ subtree: true }).length > 0`,
+			),
+			"Chat hover starts a visual transition",
+		);
+		await settleHistoryAnimations();
+		const hoveredHistory = await historyState();
+		assert.equal(hoveredHistory.pointerEvents, "none");
+		assert.equal(hoveredHistory.pointerHovered, "true");
+		assert.notEqual(
+			hoveredHistory.backgroundImage,
+			idleHistory.backgroundImage,
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: word.outsideX,
+			y: word.y,
+		});
+		await settleHistoryAnimations();
+		await click(historyToggle);
+		assert.equal((await capture()).focusLabel, "Chat messages");
+		assert.equal((await historyState()).pressed, "true");
+		assert.equal((await historyState()).pointerEvents, "auto");
 		for (const type of ["mousePressed", "mouseReleased"]) {
 			await client.send("Input.dispatchMouseEvent", {
 				type,
@@ -295,11 +328,21 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		);
 		await click("#keyboard-viewport");
 		assert.equal((await capture()).gameActive, true);
-		await click(".chat-buffer");
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...word,
+		});
 		assert.equal(
-			(await capture()).focusLabel,
-			"Chat messages",
-			"An interactive buffer can reacquire keyboard ownership",
+			(await historyState()).pointerEvents,
+			"none",
+			"Hover styling must not make an unfocused chat buffer intercept pointers",
+		);
+		assert.equal(
+			await evaluate(
+				`document.elementFromPoint(${word.x}, ${word.y})?.closest('[data-game-viewport]') !== null`,
+			),
+			true,
+			"An unfocused chat buffer exposes the gameplay viewport beneath it",
 		);
 		await press("Escape", "Escape", 27);
 		assert.equal((await capture()).gameActive, true);

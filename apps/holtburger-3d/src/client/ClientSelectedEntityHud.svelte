@@ -19,6 +19,10 @@
 		readonly readCanSplit: () => boolean;
 		/** Forward the button edge to the session-owned interaction controller. */
 		readonly onInteract: () => void;
+		/** Request examination for the selection captured by the app owner. */
+		readonly onExamine: () => void;
+		/** Disable only while this same selected identity is already pending. */
+		readonly examinePending: boolean;
 		/** Open the inventory-owned split flow for the selected stack. */
 		readonly onSplit: (source: HTMLButtonElement) => void;
 	}
@@ -28,6 +32,8 @@
 		readSelectedDisplay,
 		readCanSplit,
 		onInteract,
+		onExamine,
+		examinePending,
 		onSplit,
 	}: Props = $props();
 	let display = $state<ClientSelectedEntityDisplay>(
@@ -101,8 +107,10 @@
 		<button
 			class="ui-hud-button"
 			type="button"
-			disabled
-			aria-label="Examine (not yet available)"
+			disabled={examinePending}
+			onclick={onExamine}
+			aria-label={examinePending ? "Examining selected entity" : "Examine"}
+			aria-busy={examinePending}
 		>
 			<ClientHudIcon name="examine" />
 		</button>

@@ -3,6 +3,7 @@ import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
+import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
@@ -96,6 +97,7 @@ try {
 	} else if (options.clientHud) {
 		report = {
 			clientHud: result.clientHud,
+			clientInspection: result.clientInspection,
 			clientTargeting: result.clientTargeting,
 			clientTheme: result.clientTheme,
 			clientInventory: result.clientInventory,
@@ -4625,6 +4627,17 @@ async function runClientHudHarness({ viteUrl }) {
 			);
 		}
 
+		const clientInspection = await probeObjectInspection(
+			client,
+			evaluateExpression,
+			options.screenshotPath
+				? async (name, data) =>
+						writeFile(
+							`${options.screenshotPath}.${name}.png`,
+							Buffer.from(data, "base64"),
+						)
+				: null,
+		);
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,
@@ -4682,6 +4695,7 @@ async function runClientHudHarness({ viteUrl }) {
 		};
 		return {
 			clientTheme: theme,
+			clientInspection,
 			clientTargeting: targeting,
 			clientInventory: inventory,
 			keyboardPolicy,

@@ -76,6 +76,7 @@ type ClientShortcut =
 	| "nextNonCreature"
 	| "previousNonCreature"
 	| "interact"
+	| "examine"
 	| "give"
 	| "toggleCombat"
 	| "preciseJump"
@@ -88,6 +89,7 @@ type ClientShortcut =
 /** Viewport gestures with configurable activation buttons. */
 type ViewportPointerAction =
 	| "clientInteract"
+	| "clientExamine"
 	| "preciseJumpActivate"
 	| "possessionOrbit"
 	| "flyRotate"

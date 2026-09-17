@@ -952,6 +952,11 @@ impl ClientRuntime {
                 self.observe_dynamic_scale_entity(entity.guid);
                 self.observe_selection_envelope_entity(entity.guid);
             }
+            WorldEvent::ObjectInspectionResult(result) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ObjectInspectionResult(result.clone()));
+            }
             WorldEvent::EntityAppearanceUpdated { guid } => {
                 self.emit_dynamic_entity_upsert(*guid);
                 self.observe_selection_envelope_entity(*guid);
@@ -1231,6 +1236,29 @@ mod tests {
     const JUMP_FIXTURE_ACTION_ANIMATION: u32 = 0x0300_1007;
     const STOP_FIXTURE_ANIMATION: u32 = 0x0300_1008;
     const JUMP_FIXTURE_ACTION_COMMAND: u32 = 0x1000_004A;
+
+    #[test]
+    fn object_inspection_result_is_forwarded_without_reconstruction() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let result = holtburger_world::inspection::ObjectInspectionResult {
+            guid: Guid(0x5000_0042),
+            outcome: holtburger_world::inspection::ObjectInspectionOutcome::Missing,
+        };
+
+        client.handle_world_event(&WorldEvent::ObjectInspectionResult(result.clone()));
+
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::ObjectInspectionResult(forwarded)
+                if forwarded.guid == result.guid
+                    && matches!(
+                        forwarded.outcome,
+                        holtburger_world::inspection::ObjectInspectionOutcome::Missing
+                    )
+        ));
+        assert!(events.try_recv().is_err());
+    }
 
     /// A real motion-table fixture for jump presentation tests.
     ///

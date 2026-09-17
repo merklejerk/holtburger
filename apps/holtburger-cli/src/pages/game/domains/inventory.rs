@@ -234,6 +234,7 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
             | ContextView::Book(target_guid)
             if target_guid == guid
     ) {
+        state.view.object_inspection = None;
         state.view.context_view = ContextView::Default;
         object_interaction::refresh_context_buffer(state);
     }
@@ -263,10 +264,7 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
 }
 
 pub(super) fn handle_entity_identified(state: &mut GameState, entity: &Entity) {
-    let guid = entity.guid;
-    state.data.entities.insert(guid, entity.clone());
-    state.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
-    object_interaction::refresh_context_buffer(state);
+    state.data.entities.insert(entity.guid, entity.clone());
 }
 
 pub(super) fn refresh_entity_context_if_visible(

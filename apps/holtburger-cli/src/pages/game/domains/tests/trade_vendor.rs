@@ -2,7 +2,7 @@ use super::test_support::*;
 use super::*;
 
 #[test]
-fn vendor_item_identified_refreshes_visible_assess_context() {
+fn vendor_assessment_waits_for_the_world_populated_inspection_result() {
     let player_guid = Guid(0x50000001);
     let vendor_guid = Guid(0x60000001);
     let item_guid = Guid(0x70000001);
@@ -23,25 +23,35 @@ fn vendor_item_identified_refreshes_visible_assess_context() {
 
     assert!(context_buffer_contains(
         super::super::context_buffer(&state),
-        "OLD NAME"
-    ));
-    assert!(!context_buffer_contains(
-        super::super::context_buffer(&state),
-        "NEW NAME"
+        "Awaiting appraisal details"
     ));
 
+    let identified = vendor_item_named(item_guid, 1, "New Name");
     let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified(Box::new(
-        vendor_item_named(item_guid, 1, "New Name"),
+        identified.clone(),
     )));
 
     assert!(result.redraw_requested());
     assert!(context_buffer_contains(
         super::super::context_buffer(&state),
-        "NEW NAME"
+        "Awaiting appraisal details"
     ));
-    assert!(!context_buffer_contains(
+
+    let inspection = holtburger_world::inspection::ObjectInspection::from_vendor_item(&identified)
+        .expect("vendor fixture should populate an item inspection");
+    let result = state.handle_view_event(ClientViewEvent::ObjectInspectionResult(
+        holtburger_world::inspection::ObjectInspectionResult {
+            guid: item_guid,
+            outcome: holtburger_world::inspection::ObjectInspectionOutcome::Ready {
+                inspection: Box::new(inspection),
+            },
+        },
+    ));
+
+    assert!(result.redraw_requested());
+    assert!(context_buffer_contains(
         super::super::context_buffer(&state),
-        "OLD NAME"
+        "NEW NAME"
     ));
 }
 

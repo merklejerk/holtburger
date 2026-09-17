@@ -610,6 +610,8 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// One world-populated examination outcome; presentation lifetime remains frontend-owned.
+    ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
     /// Character input invalidation for spell inspectors.
     SpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     /// Correlated character-bound spell facts.
@@ -846,6 +848,9 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::ObjectInspectionResult(result) => {
+            Some(ClientHostEvent::ObjectInspectionResult(result))
+        }
         ClientViewEvent::SpellInspectionContext(context) => {
             Some(ClientHostEvent::SpellInspectionContext(context))
         }
@@ -1105,6 +1110,87 @@ mod tests {
     use holtburger_core::client::types::ChatSpeaker;
     use holtburger_protocol::messages::ChatMessageType;
     use holtburger_protocol::messages::combat::AttackConditions;
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
+    use holtburger_world::entity::Entity;
+    use holtburger_world::inspection::{
+        ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
+    };
+
+    #[test]
+    fn object_inspection_variants_match_the_shared_browser_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-inspection-wire.json"
+        ))
+        .unwrap();
+        let item_guid = Guid(0x6000_0001);
+        let item = Entity::new(
+            item_guid,
+            "Test Item".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        let creature_guid = Guid(0x6000_0002);
+        let mut creature = Entity::new(
+            creature_guid,
+            "Test Creature".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        creature.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 25,
+            health_max: 50,
+            attributes: None,
+            buffs: None,
+        });
+        let cases = [
+            (
+                "item",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(ObjectInspection::from_entity(&item).unwrap()),
+                    },
+                },
+            ),
+            (
+                "creature",
+                ObjectInspectionResult {
+                    guid: creature_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(ObjectInspection::from_entity(&creature).unwrap()),
+                    },
+                },
+            ),
+            (
+                "rejected",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Rejected,
+                },
+            ),
+            (
+                "missing",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Missing,
+                },
+            ),
+        ];
+
+        for (name, result) in cases {
+            let projected = project_client_event(ClientViewEvent::ObjectInspectionResult(result))
+                .expect("inspection event should cross the host projection");
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("expected event frame");
+            };
+            let event = serde_json::to_value(event).unwrap();
+            assert_eq!(event["event"], "client-object-inspection-result");
+            assert_eq!(event["payload"], fixture[name]);
+        }
+    }
 
     #[test]
     fn local_use_reports_progress_without_predicting_server_rejection() {

@@ -130,6 +130,10 @@ pub struct ClientPreciseJumpCancelRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Request authoritative examination facts for one selected entity.
+    ExamineClientEntity {
+        guid: holtburger_common::Guid,
+    },
     /// Read-only spell examination against current character facts.
     QueryClientSpellInspection {
         query: holtburger_core::client::spell_inspection::SpellInspectionQuery,
@@ -233,6 +237,7 @@ pub enum ClientHostCommand {
 
 /// Exact wire names owned by the client dispatcher.
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
+    "examine_client_entity",
     "close_client_container",
     "preview_client_inventory",
     "submit_client_inventory",
@@ -576,6 +581,11 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        ExamineClientEntity { guid } => runtime
+            .send_command(ClientCommand::Identify(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         RequestClientCurrentState => runtime
             .request_current_state()
             .await
@@ -719,6 +729,36 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn examine_entity_command_requires_a_u32_guid() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "examine_client_entity",
+            "guid": 0x6000_0042_u32,
+        }))
+        .expect("valid examine command");
+        assert!(matches!(
+            command,
+            ClientHostCommand::ExamineClientEntity {
+                guid: holtburger_common::Guid(0x6000_0042)
+            }
+        ));
+
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "examine_client_entity",
+                "guid": -1,
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "examine_client_entity",
+                "entity": 0x6000_0042_u32,
+            }))
+            .is_err()
+        );
+    }
 
     fn aim_json() -> serde_json::Value {
         serde_json::json!({

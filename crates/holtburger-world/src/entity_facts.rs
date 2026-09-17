@@ -47,6 +47,22 @@ pub struct EntityIconAppearance {
     pub ui_effects: u32,
 }
 
+impl EntityIconAppearance {
+    /// Collect lossless icon-composition inputs from any retained world-object property source.
+    pub fn from_properties(object: &impl WorldObjectPropertyAccessors) -> Self {
+        Self {
+            base: object.get_data_prop(PropertyDataId::Icon).map(|id| id.0),
+            overlay: object
+                .get_data_prop(PropertyDataId::IconOverlay)
+                .map(|id| id.0),
+            underlay: object
+                .get_data_prop(PropertyDataId::IconUnderlay)
+                .map(|id| id.0),
+            ui_effects: object.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
+        }
+    }
+}
+
 /// Independently optional server structure properties, consumed by item and selected-entity UI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityStructure {
@@ -278,16 +294,7 @@ impl WorldState {
                         current: entity.structure(),
                         max: entity.max_structure(),
                     },
-                    icon: EntityIconAppearance {
-                        base: entity.get_data_prop(PropertyDataId::Icon).map(|id| id.0),
-                        overlay: entity
-                            .get_data_prop(PropertyDataId::IconOverlay)
-                            .map(|id| id.0),
-                        underlay: entity
-                            .get_data_prop(PropertyDataId::IconUnderlay)
-                            .map(|id| id.0),
-                        ui_effects: entity.get_int_prop(PropertyInt::UiEffects).unwrap_or(0) as u32,
-                    },
+                    icon: EntityIconAppearance::from_properties(entity),
                     map_category: semantic_dynamic_entity_map_blip_category(
                         entity.flags,
                         Some(item_type),

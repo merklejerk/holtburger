@@ -33,6 +33,27 @@ pub(crate) fn refresh_context_buffer(state: &mut GameState) {
     state.render_state.context_buffer = build_context_panel_content(&state.data, &state.view);
 }
 
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
+    let mut result = UpdateResult::new();
+    let ClientViewEvent::ObjectInspectionResult(inspection) = event else {
+        return result;
+    };
+    let ContextView::Assess(target) = state.view.context_view else {
+        return result;
+    };
+    let target_guid = match target {
+        InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
+    };
+    if inspection.guid != target_guid {
+        return result;
+    }
+
+    state.view.object_inspection = Some(inspection.clone());
+    refresh_context_buffer(state);
+    result.request_redraw(RedrawPriority::Immediate);
+    result
+}
+
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
@@ -42,6 +63,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
             };
             result.commands.push(ClientCommand::Identify(guid));
+            state.view.object_inspection = None;
             result.merge(ui::apply_context_view_change(
                 state,
                 ContextView::Assess(target),

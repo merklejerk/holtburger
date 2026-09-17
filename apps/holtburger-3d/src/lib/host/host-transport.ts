@@ -8,6 +8,7 @@ import type {
 } from "../../client/client-item-use-contract";
 import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 import type { ClientEntityDelta } from "../../client/client-entity-mirror";
+import type { ObjectInspectionResult } from "../../client/client-object-inspection-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
 import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
 import type { PossessionEventOutcome } from "../../explorer/explorer-entity-possession";
@@ -89,6 +90,7 @@ const EXPLORER_HOST_COMMAND_NAMES = [
 
 /** Client lifecycle and movement commands; startup remains private to Electron main. */
 const CLIENT_HOST_COMMAND_NAMES = [
+	"examine_client_entity",
 	"request_client_current_state",
 	"select_client_character",
 	"replace_client_drive",
@@ -154,6 +156,7 @@ const EXPLORER_HOST_EVENT_NAMES = [
 
 /** Client lifecycle, focused presentation, and terminal events. */
 const CLIENT_HOST_EVENT_NAMES = [
+	"client-object-inspection-result",
 	"client-current-state",
 	"client-inventory-preview",
 	"client-item-use-result",
@@ -230,6 +233,7 @@ export function hostEventNamesForMode(
 
 /** Payload map kept at the shell boundary so listeners cannot silently accept arbitrary events. */
 export interface HostEventPayloadMap {
+	"client-object-inspection-result": ObjectInspectionResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;
 	"client-item-use-result": ClientItemUseResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;

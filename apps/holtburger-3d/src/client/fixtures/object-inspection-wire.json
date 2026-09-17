@@ -1,0 +1,86 @@
+{
+	"item": {
+		"guid": 1610612737,
+		"outcome": {
+			"kind": "ready",
+			"inspection": {
+				"guid": 1610612737,
+				"name": "Test Item",
+				"description": null,
+				"level": null,
+				"details": {
+					"kind": "item",
+					"details": {
+						"artwork": {
+							"base": null,
+							"overlay": null,
+							"underlay": null,
+							"uiEffects": 0,
+							"itemType": 0
+						},
+						"value": null,
+						"burden": null,
+						"capacity": { "items": null, "containers": null },
+						"material": null,
+						"tinkering": null,
+						"spellcraft": null,
+						"mana": null,
+						"status": {
+							"bonded": null,
+							"attuned": null,
+							"retained": null,
+							"isOpen": null,
+							"isLocked": null,
+							"sellable": null,
+							"ivoryable": null
+						},
+						"stack": null,
+						"uses": null,
+						"armor": null,
+						"weapon": null,
+						"protections": null,
+						"bonuses": [],
+						"wieldRequirements": [],
+						"inscription": null,
+						"imbuedEffects": 0,
+						"effects": [],
+						"useText": null,
+						"spells": []
+					}
+				}
+			}
+		}
+	},
+	"creature": {
+		"guid": 1610612738,
+		"outcome": {
+			"kind": "ready",
+			"inspection": {
+				"guid": 1610612738,
+				"name": "Test Creature",
+				"description": null,
+				"level": null,
+				"details": {
+					"kind": "creature",
+					"details": {
+						"creatureType": null,
+						"health": {
+							"effective": { "current": 25, "max": 50 },
+							"unbuffed": null,
+							"enchantment": null
+						},
+						"attributesAndVitals": null
+					}
+				}
+			}
+		}
+	},
+	"rejected": {
+		"guid": 1610612737,
+		"outcome": { "kind": "rejected" }
+	},
+	"missing": {
+		"guid": 1610612737,
+		"outcome": { "kind": "missing" }
+	}
+}

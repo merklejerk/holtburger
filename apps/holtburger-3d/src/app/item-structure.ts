@@ -1,4 +1,4 @@
-import { formatItemQuantity } from "./item-quantity";
+import { formatQuantity } from "./quantity-format";
 
 /** Server structure properties; either value may be absent independently. */
 export interface ItemStructure {
@@ -28,7 +28,7 @@ export function itemStructureDisplay(
 	)
 		return null;
 	return {
-		label: `[${formatItemQuantity(structure.current)}/${formatItemQuantity(structure.max)}]`,
+		label: `[${formatQuantity(structure.current)}/${formatQuantity(structure.max)}]`,
 		// A zero capacity cannot define a ratio; keep its exact label and draw an empty bar.
 		fraction:
 			structure.max === 0

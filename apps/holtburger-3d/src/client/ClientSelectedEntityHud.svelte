@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
-	import { formatItemQuantity } from "../app/item-quantity";
+	import { formatQuantity } from "../app/quantity-format";
 	import { itemStructureDisplay } from "../app/item-structure";
 
 	import {
@@ -38,7 +38,7 @@
 	const displayName = $derived(
 		(display.name ?? "Selected Entity") +
 			(display.stackCount !== null && display.stackCount > 1
-				? ` (${formatItemQuantity(display.stackCount)})`
+				? ` (${formatQuantity(display.stackCount)})`
 				: "") +
 			(structureDisplay === null ? "" : ` ${structureDisplay.label}`),
 	);

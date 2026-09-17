@@ -677,6 +677,8 @@
 		readonly measureDoorBar: typeof measureDoorBar;
 		/** Exercise health presentation and use dispatch through production session owners. */
 		readonly probeSelectedInteractions: typeof probeSelectedInteractions;
+		/** Verify default and pointer focus across production vital bars. */
+		readonly probeCharacterVitals: typeof probeCharacterVitals;
 		/** Show production character selection for the theme probe. */
 		readonly previewCharacterSelection: () => void;
 		/** Exercise overlapping modal/chat ownership while a viewport gesture is pending. */
@@ -1288,6 +1290,110 @@
 			use,
 			commands: [...interactionCommands],
 		};
+	}
+
+	async function probeCharacterVitals() {
+		const vitalLabels = ["Health", "Mana", "Stamina"] as const;
+		type VitalLabel = (typeof vitalLabels)[number];
+		const bar = (label: VitalLabel): HTMLElement => {
+			const element = document.querySelector<HTMLElement>(
+				`.character-hud [role="meter"][aria-label="${label}"]`,
+			);
+			if (element === null) throw new Error(`Missing ${label} vital bar.`);
+			return element;
+		};
+		const vitalGroup = (): HTMLElement => {
+			const element = bar("Health").closest<HTMLElement>(".vitals");
+			if (element === null) throw new Error("Missing vital group.");
+			return element;
+		};
+		const snapshotBar = (label: VitalLabel) => {
+			const element = bar(label);
+			const quantity = element.querySelector<HTMLElement>("strong");
+			return {
+				focused: element.dataset.focused === "true",
+				height: element.getBoundingClientRect().height,
+				quantity: quantity?.textContent?.trim() ?? null,
+				quantityVisible:
+					quantity !== null &&
+					getComputedStyle(quantity).visibility === "visible",
+			};
+		};
+		const snapshot = () => ({
+			health: snapshotBar("Health"),
+			mana: snapshotBar("Mana"),
+			stamina: snapshotBar("Stamina"),
+		});
+		const groupHeight = (): number =>
+			vitalGroup().getBoundingClientRect().height;
+		const stackHeight = (): number =>
+			vitalLabels.reduce(
+				(total, label) => total + bar(label).getBoundingClientRect().height,
+				0,
+			);
+		const verifyStableFootprint = async (
+			expectedGroupHeight: number,
+			expectedStackHeight: number,
+		): Promise<void> => {
+			const nextFrame = () =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			await nextFrame();
+			while (true) {
+				const currentGroupHeight = groupHeight();
+				const currentStackHeight = stackHeight();
+				if (
+					currentGroupHeight !== expectedGroupHeight ||
+					Math.abs(currentStackHeight - expectedStackHeight) > 0.01
+				)
+					throw new Error(
+						`Vital footprint changed during focus transition: group ${expectedGroupHeight} -> ${currentGroupHeight}, bars ${expectedStackHeight} -> ${currentStackHeight}`,
+					);
+				if (vitalGroup().getAnimations({ subtree: true }).length === 0) return;
+				await nextFrame();
+			}
+		};
+		const initial = snapshot();
+		const initialGroupHeight = groupHeight();
+		const initialStackHeight = stackHeight();
+		if (
+			initial.health.focused !== true ||
+			initial.health.quantity !== "1,555 / 12,555" ||
+			initial.health.quantityVisible !== true ||
+			initial.health.height <= initial.mana.height ||
+			initial.stamina.quantityVisible !== false ||
+			initial.mana.quantityVisible !== false
+		)
+			throw new Error(
+				`Initial vital focus is invalid: ${JSON.stringify(initial)}`,
+			);
+		bar("Mana").dispatchEvent(new PointerEvent("pointerenter"));
+		await verifyStableFootprint(initialGroupHeight, initialStackHeight);
+		const hovered = snapshot();
+		if (
+			hovered.mana.focused !== true ||
+			hovered.mana.height !== initial.health.height ||
+			hovered.mana.quantity !== "1,302 / 4,100" ||
+			hovered.mana.quantityVisible !== true ||
+			hovered.health.height !== initial.mana.height ||
+			hovered.health.quantityVisible !== false
+		)
+			throw new Error(
+				`Hovered vital focus is invalid: ${JSON.stringify(hovered)}`,
+			);
+		vitalGroup().dispatchEvent(new PointerEvent("pointerleave"));
+		await verifyStableFootprint(initialGroupHeight, initialStackHeight);
+		const reset = snapshot();
+		if (
+			reset.health.focused !== true ||
+			reset.health.height !== initial.health.height ||
+			reset.health.quantityVisible !== true ||
+			reset.mana.height !== initial.mana.height ||
+			reset.mana.quantityVisible !== false
+		)
+			throw new Error(
+				`Vital focus did not reset after pointer exit: ${JSON.stringify(reset)}`,
+			);
+		return { initial, hovered, reset };
 	}
 	let hoveredGuid = $state<number | null>(null);
 	let hoverHitEnabled = true;
@@ -2189,6 +2295,7 @@
 			probeInteractableMarker,
 			measureDoorBar,
 			probeSelectedInteractions,
+			probeCharacterVitals,
 			previewCharacterSelection: () => {
 				previewCharacters = true;
 			},
@@ -2313,9 +2420,9 @@
 		playerName="Alice"
 		worldName="ACE Emulator"
 		vitals={[
-			{ kind: "health", current: 555, maximum: 555 },
+			{ kind: "health", current: 1_555, maximum: 12_555 },
 			{ kind: "stamina", current: 210, maximum: 245 },
-			{ kind: "mana", current: 302, maximum: 410 },
+			{ kind: "mana", current: 1_302, maximum: 4_100 },
 		]}
 		{jumpChargeActive}
 		readJumpExtent={() => jumpExtent}

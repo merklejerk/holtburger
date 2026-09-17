@@ -353,7 +353,9 @@
 						health: { kind: "known", fraction: 0.68 },
 						canInteract: true,
 					})}
+					readCanSplit={() => false}
 					onInteract={() => {}}
+					onSplit={() => {}}
 				/>{/snippet}
 			{#snippet chat()}<ClientChat {messages} onSend={send} />{/snippet}
 			{#snippet fps()}<ClientFpsCounter

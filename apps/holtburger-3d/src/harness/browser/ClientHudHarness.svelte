@@ -654,6 +654,8 @@
 		readonly spellBarProbe: typeof spellBarProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
+		/** Replace selected inventory identity while a panel interaction is active. */
+		readonly selectInventoryItem: (guid: number) => void;
 		/** Controlled viewport answers exercise production drag ownership. */
 		readonly giveProbe: typeof giveProbe;
 		/** Delay one submission acknowledgement to test gesture lifetime independence. */
@@ -1219,8 +1221,13 @@
 		const button = document.querySelector<HTMLButtonElement>(
 			'button[aria-label="Interact"]',
 		);
-		if (meter === null || button === null)
-			throw new Error("Selected entity controls are missing.");
+		const splitButton = document.querySelector(
+			'button[aria-label="Split stack"]',
+		);
+		if (meter === null || button === null || splitButton !== null)
+			throw new Error(
+				"Selected creature controls are missing or expose an ineligible split action.",
+			);
 		const unknown = meter.getAttribute("aria-valuetext");
 		emitInteractionEvent("client-entity-health-updated", {
 			guid: target,
@@ -2161,6 +2168,8 @@
 					() => spellReferenceRequests,
 				),
 			inventoryDragCommands: () => interactionCommands,
+			selectInventoryItem: (guid) =>
+				selection.selectInventoryItem(guid, "select"),
 			giveProbe,
 			deferNextInventorySubmission: () => {
 				deferInventorySubmission = true;

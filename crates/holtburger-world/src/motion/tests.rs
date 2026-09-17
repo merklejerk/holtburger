@@ -942,7 +942,7 @@ fn selecting_a_substate_reinstalls_the_active_modifiers() {
 }
 
 #[test]
-fn releasing_locomotion_keeps_an_active_turn_as_one_modifier() {
+fn releasing_forward_promotes_a_held_dual_class_command_without_duplicate_physics() {
     let catalog = catalog();
     let table = catalog.table(0x0900_0001).expect("table");
     let mut body = BodyMotionRuntime::new(table);
@@ -971,14 +971,8 @@ fn releasing_locomotion_keeps_an_active_turn_as_one_modifier() {
         0.0,
     );
 
-    assert_eq!(body.state().substate, MotionCommand(STAND));
-    assert_eq!(
-        body.state().modifiers(),
-        &[ActiveMotion {
-            command: MotionCommand(DUAL_TURN),
-            speed_mod: 1.5,
-        }]
-    );
+    assert_eq!(body.state().substate, MotionCommand(DUAL_TURN));
+    assert!(body.state().modifiers().is_empty());
     assert_eq!(body.sequence().omega(), Vector3::new(0.0, 0.0, 0.75));
 }
 
@@ -1762,17 +1756,19 @@ mod playback_projection {
         );
     }
 
-    /// Standard non-combat sidestep is a dual-class command whose authored row resolves as a
-    /// cycle. Re-applying an order must not mistake that cycle for stale forward locomotion and
-    /// restart it every host tick.
+    /// Standard non-combat sidestep is a dual-class command: it layers as a modifier while running,
+    /// then promotes to its authored cycle when forward is released. Re-applying that order must
+    /// not mistake the cycle for stale forward locomotion and restart it every host tick.
     #[test]
-    fn a_sustained_sidestep_cycle_advances_at_its_authored_rate() {
-        const SIDE: u32 = 0x6500_000F;
+    fn releasing_forward_promotes_and_sustains_the_sidestep_cycle() {
+        const SIDE: u32 = MotionCommand::SIDESTEP.raw();
         const FRAMES: usize = 10;
         const STEP: f32 = 0.1;
         const FRAMERATE: f32 = 12.0;
         const EXPECTED_METRES_PER_SECOND: f32 = 1.2;
 
+        let mut sidestep = motion(vec![clip(SIDESTEP_ANIM, FRAMERATE)], None, None);
+        sidestep.bitfield = 2;
         let table = MotionTable {
             id: 0x0900_0002,
             default_style: STYLE,
@@ -1782,18 +1778,31 @@ mod playback_projection {
                     MotionTable::cycle_key(STYLE, STAND),
                     motion(vec![clip(STAND_ANIM, 10.0)], None, None),
                 ),
+                (MotionTable::cycle_key(STYLE, SIDE), sidestep),
                 (
-                    MotionTable::cycle_key(STYLE, SIDE),
-                    motion(vec![clip(SIDESTEP_ANIM, FRAMERATE)], None, None),
+                    MotionTable::cycle_key(STYLE, RUN),
+                    motion(
+                        vec![clip(RUN_ANIM, FRAMERATE)],
+                        Some(Vector3::new(0.0, 1.0, 0.0)),
+                        None,
+                    ),
                 ),
             ]),
-            modifiers: HashMap::new(),
+            modifiers: HashMap::from([(
+                MotionTable::cycle_key(STYLE, SIDE),
+                motion(
+                    Vec::new(),
+                    Some(Vector3::new(EXPECTED_METRES_PER_SECOND, 0.0, 0.0)),
+                    None,
+                ),
+            )]),
             links: HashMap::new(),
         };
         let catalog = MotionSequenceCatalog::assemble(
             [table],
             [
                 animation(STAND_ANIM, 4, 0.0),
+                animation(RUN_ANIM, FRAMES, 0.0),
                 animation_with_step(SIDESTEP_ANIM, FRAMES, Vector3::new(STEP, 0.0, 0.0)),
             ],
             [],
@@ -1801,6 +1810,12 @@ mod playback_projection {
         .expect("sidestep fixture should assemble");
         let table = catalog.table(0x0900_0002).expect("table");
         let guid = holtburger_common::Guid(0xf000_0003);
+        let moving = MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((MotionCommand(RUN), 1.0)),
+            sidestep: Some((MotionCommand(SIDE), 1.0)),
+            turn: None,
+        };
         let order = MotionOrder {
             style: Some(MotionCommand(STYLE)),
             forward: None,
@@ -1809,6 +1824,24 @@ mod playback_projection {
         };
         let mut registry = MotionRuntimeRegistry::new();
         let mut travelled = 0.0;
+
+        registry.drive(table, guid, moving, 0.0);
+        let body = registry.get(guid).expect("playback");
+        assert_eq!(body.state().substate, MotionCommand(RUN));
+        assert_eq!(
+            body.state().modifiers(),
+            &[ActiveMotion {
+                command: MotionCommand(SIDE),
+                speed_mod: 1.0,
+            }]
+        );
+
+        registry.drive(table, guid, order, 0.0);
+        let body = registry.get(guid).expect("playback");
+        assert_eq!(body.state().substate, MotionCommand(SIDE));
+        assert!(body.state().modifiers().is_empty());
+        assert_eq!(body.sequence().velocity(), Vector3::zero());
+        assert_eq!(animation_ids(body.sequence()).last(), Some(&SIDESTEP_ANIM));
 
         // Measure long enough that the clip's one-frame entry anchor is insignificant. That anchor
         // is sequence semantics, whereas a selector restart would lose nearly all displacement.

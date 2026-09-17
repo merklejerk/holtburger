@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use holtburger_common::Guid;
 use holtburger_content::{
     SelectionEnvelopeProfile, compute_selection_envelope_radius, resolve_selection_envelope_profile,
@@ -87,20 +87,14 @@ impl ClientSelectionEnvelopeSource for ContentClientSelectionEnvelopeSource {
         facts: &ClientSelectionEnvelopeFacts,
     ) -> Result<ClientSelectionEnvelopeProfile> {
         let setup = self.setup(facts.setup_did)?;
-        resolve_selection_envelope_profile(
+        Ok(resolve_selection_envelope_profile(
             &setup,
             facts
                 .part_changes
                 .iter()
                 .map(|change| (change.part_index, change.gfx_obj_did)),
             facts.motion_table_did,
-        )
-        .with_context(|| {
-            format!(
-                "could not resolve entity 0x{:08X} profile",
-                facts.target.guid
-            )
-        })
+        ))
     }
 
     fn prepare_envelope(

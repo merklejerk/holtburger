@@ -1,5 +1,5 @@
 import type { ItemCapacity } from "./item-capacity";
-import { formatItemQuantity } from "./item-quantity";
+import { formatQuantity } from "./quantity-format";
 import { itemStructureDisplay, type ItemStructure } from "./item-structure";
 
 /** Item facts needed by both inventory and bound-action cells. */
@@ -43,10 +43,10 @@ export function itemCellPresentation(
 	const count = facts.count !== null && facts.count > 1 ? facts.count : null;
 	let label = facts.label;
 	let meter: ItemCellMeter | null = null;
-	if (count !== null) label += ` (quantity: ${formatItemQuantity(count)})`;
+	if (count !== null) label += ` (quantity: ${formatQuantity(count)})`;
 	const capacity = facts.capacity;
 	if (capacity !== null) {
-		label += ` [${formatItemQuantity(capacity.used)} / ${formatItemQuantity(capacity.max)}]`;
+		label += ` [${formatQuantity(capacity.used)} / ${formatQuantity(capacity.max)}]`;
 		if (capacity.used > 0) {
 			// Occupancy at or above a zero limit is full, without dividing by zero.
 			const fraction =

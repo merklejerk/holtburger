@@ -319,7 +319,7 @@ resource failure recovery, queued selections, DOM identity, interaction, contras
 Its Steel and opaque stylesheets are diagnostic fixtures, not shipped selections.
 
 ```sh
-npm run harness:browser -- --ui-showcase --screenshot /tmp/ui-showcase.png
+npm run dev:ui
 npm run harness:browser -- --ui-theme --gpu --viewport-width 1280 --viewport-height 807 --building-radius 1 --camera-height 28 --camera-pitch -15 --camera-yaw 35 --settle-ms 2000 --screenshot /tmp/css-themes.png
 npm run harness:browser -- --client-hud --brief --screenshot /tmp/css-client.png
 ```

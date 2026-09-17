@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
-	import { formatItemQuantity } from "../app/item-quantity";
+	import { formatQuantity } from "../app/quantity-format";
 	import { itemStructureDisplay } from "../app/item-structure";
 
 	import {
@@ -15,19 +15,30 @@
 		readonly selectedGuid: number | null;
 		/** Bounded display read kept separate from frame-hot target projection. */
 		readonly readSelectedDisplay: () => ClientSelectedEntityDisplay;
+		/** Bounded inventory-owned eligibility read sampled with the selected display. */
+		readonly readCanSplit: () => boolean;
 		/** Forward the button edge to the session-owned interaction controller. */
 		readonly onInteract: () => void;
+		/** Open the inventory-owned split flow for the selected stack. */
+		readonly onSplit: (source: HTMLButtonElement) => void;
 	}
 
-	const { selectedGuid, readSelectedDisplay, onInteract }: Props = $props();
+	const {
+		selectedGuid,
+		readSelectedDisplay,
+		readCanSplit,
+		onInteract,
+		onSplit,
+	}: Props = $props();
 	let display = $state<ClientSelectedEntityDisplay>(
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	);
+	let canSplit = $state(false);
 	const structureDisplay = $derived(itemStructureDisplay(display.structure));
 	const displayName = $derived(
 		(display.name ?? "Selected Entity") +
 			(display.stackCount !== null && display.stackCount > 1
-				? ` (${formatItemQuantity(display.stackCount)})`
+				? ` (${formatQuantity(display.stackCount)})`
 				: "") +
 			(structureDisplay === null ? "" : ` ${structureDisplay.label}`),
 	);
@@ -43,6 +54,7 @@
 		untrack(() => {
 			display =
 				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
+			canSplit = guid !== null && readCanSplit();
 		});
 	});
 
@@ -52,6 +64,7 @@
 				selectedGuid === null
 					? EMPTY_CLIENT_SELECTED_DISPLAY
 					: readSelectedDisplay();
+			canSplit = selectedGuid !== null && readCanSplit();
 		};
 		const interval = window.setInterval(
 			sample,
@@ -63,15 +76,25 @@
 
 <section class="selected-entity" aria-label={`Selected entity: ${displayName}`}>
 	<div class="selected-entity__heading ui-hud-group">
-		<button
-			class="ui-hud-button"
-			type="button"
-			disabled={!display.canInteract}
-			onclick={onInteract}
-			aria-label="Interact"
-		>
-			<ClientHudIcon name="interact" />
-		</button>
+		<div class="selected-entity__actions">
+			<button
+				class="ui-hud-button"
+				type="button"
+				disabled={!display.canInteract}
+				onclick={onInteract}
+				aria-label="Interact"
+			>
+				<ClientHudIcon name="interact" />
+			</button>
+			{#if canSplit}<button
+					class="ui-hud-button"
+					type="button"
+					onclick={(event) => onSplit(event.currentTarget)}
+					aria-label="Split stack"
+				>
+					<ClientHudIcon name="split" />
+				</button>{/if}
+		</div>
 		<strong title={displayName} style:color={display.nameColor}
 			><span>{displayName}</span></strong
 		>
@@ -116,9 +139,13 @@
 		}
 		.selected-entity__heading {
 			display: grid;
-			grid-template-columns: 24px minmax(0, 1fr) 24px;
+			grid-template-columns: auto minmax(0, 1fr) 24px;
 			gap: 4px;
 			align-items: center;
+		}
+		.selected-entity__actions {
+			display: flex;
+			gap: 4px;
 		}
 		.selected-entity__heading strong {
 			font-weight: 600;

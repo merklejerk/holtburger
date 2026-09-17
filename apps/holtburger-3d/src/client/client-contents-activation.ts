@@ -8,28 +8,41 @@ export function bindContentsActivation(
 	selectedGuid: () => number | null,
 	onSelect: (guid: number) => void,
 	activate: (guid: number) => void,
+	/** Panel-owned modified clicks can consume the sequence before ordinary activation. */
+	consumeClick?: (
+		event: MouseEvent,
+		guid: number,
+		cell: HTMLElement,
+	) => boolean,
 ): () => void {
 	const abort = new AbortController();
-	let consumedTargetSequence = false;
-	const itemGuid = (event: MouseEvent): number | null => {
+	let consumedClickSequence = false;
+	const itemCell = (event: MouseEvent): HTMLElement | null => {
 		const cell =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>(selector)
 				: null;
-		return cell === null ? null : Number(cell.dataset.itemGuid);
+		return cell !== null && panel.contains(cell) ? cell : null;
 	};
 	panel.addEventListener(
 		"click",
 		(event) => {
-			const guid = itemGuid(event);
-			if (guid === null) return;
-			if (event.detail <= 1) consumedTargetSequence = false;
+			const cell = itemCell(event);
+			if (cell === null) return;
+			const guid = Number(cell.dataset.itemGuid);
+			if (event.detail <= 1) consumedClickSequence = false;
+			if (consumeClick?.(event, guid, cell) === true) {
+				consumedClickSequence = true;
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				return;
+			}
 			const state = interactions.snapshot();
 			if (event.detail > 1 || state.kind === "acquiring") {
 				event.preventDefault();
 				event.stopImmediatePropagation();
 				if (event.detail <= 1 && state.kind === "acquiring") {
-					consumedTargetSequence = true;
+					consumedClickSequence = true;
 					interactions.target(guid, state.generation);
 				}
 			}
@@ -39,11 +52,12 @@ export function bindContentsActivation(
 	panel.addEventListener(
 		"dblclick",
 		(event) => {
-			const guid = itemGuid(event);
-			if (guid === null) return;
+			const cell = itemCell(event);
+			if (cell === null) return;
+			const guid = Number(cell.dataset.itemGuid);
 			event.preventDefault();
 			event.stopImmediatePropagation();
-			if (!consumedTargetSequence) {
+			if (!consumedClickSequence) {
 				if (selectedGuid() !== guid) onSelect(guid);
 				activate(guid);
 			}

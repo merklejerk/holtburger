@@ -7,6 +7,7 @@
 	import {
 		ClientInventorySplit,
 		type InventorySplitRequest,
+		type InventorySplitStart,
 	} from "./client-inventory-split";
 
 	import ClientContentsView from "./ClientContentsView.svelte";
@@ -30,9 +31,19 @@
 		readonly interactions: ClientItemInteractions;
 		readonly selectedGuid: number | null;
 		readonly onSelectItem: (guid: number) => void;
+		/** Optional request from another HUD surface, consumed after the panel owner mounts. */
+		readonly requestedSplit: InventorySplitStart | null;
+		/** Retire the exact handoff after this mounted panel accepts it. */
+		readonly onRequestedSplitConsumed: (request: InventorySplitStart) => void;
 	}
-	const { inventory, interactions, selectedGuid, onSelectItem }: Props =
-		$props();
+	const {
+		inventory,
+		interactions,
+		selectedGuid,
+		onSelectItem,
+		requestedSplit,
+		onRequestedSplitConsumed,
+	}: Props = $props();
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
@@ -66,7 +77,19 @@
 	let sampleNow: (() => void) | null = null;
 	/** Cold dialog state only; execution remains owned by core. */
 	let splitRequest = $state<InventorySplitRequest | null>(null);
-	let splitOwner: ClientInventorySplit | null = null;
+	let splitOwner = $state<ClientInventorySplit | null>(null);
+
+	$effect(() => {
+		const owner = splitOwner;
+		const request = requestedSplit;
+		if (owner === null || request === null) return;
+		owner.begin(request.item, request.source);
+		onRequestedSplitConsumed(request);
+	});
+
+	$effect(() => {
+		splitOwner?.cancelForSelection(selectedGuid);
+	});
 
 	onMount(() =>
 		bindContentsActivation(
@@ -76,6 +99,8 @@
 			() => selectedGuid,
 			onSelectItem,
 			(guid) => interactions.use(guid, false),
+			(event, guid, cell) =>
+				event.shiftKey && splitOwner?.begin(guid, cell) === true,
 		),
 	);
 	onMount(() => {

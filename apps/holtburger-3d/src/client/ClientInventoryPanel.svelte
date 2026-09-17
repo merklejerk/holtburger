@@ -47,6 +47,8 @@
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
+	/** Identity is resolved against each sampled view so removed or changed items cannot leave stale hints. */
+	let hoveredInventoryGuid = $state<number | null>(null);
 	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
 	/** Footer artwork follows the same bounded display sampling as the inventory cells. */
 	const pyrealDisplay = $derived(displays.get(inventory.pyrealIconKey));
@@ -56,6 +58,30 @@
 	);
 	const packSlots = $derived(view?.packSlots ?? []);
 	const pending = $derived(view?.pending ?? true);
+	const hoveredEquipLocations = $derived.by<number | null | undefined>(() => {
+		if (hoveredInventoryGuid === null) return undefined;
+		for (const section of sections) {
+			const hovered = [
+				...section.items,
+				...section.packs,
+				...section.unslotted,
+			].find((item) => item.guid === hoveredInventoryGuid);
+			if (hovered === undefined) continue;
+			return hovered.description.kind === "known"
+				? hovered.description.equipLocations
+				: undefined;
+		}
+		return undefined;
+	});
+	$effect(() => {
+		// Removing a hovered cell does not reliably dispatch pointerleave.
+		if (
+			hoveredInventoryGuid !== null &&
+			view !== null &&
+			hoveredEquipLocations === undefined
+		)
+			hoveredInventoryGuid = null;
+	});
 	const sortMode = $derived(view?.sortMode ?? "native");
 	const rootDescription = $derived(sections[0]?.container.description);
 	const pyreals = $derived(
@@ -161,6 +187,7 @@
 				{iconFor}
 				{selectedGuid}
 				{onSelectItem}
+				{hoveredEquipLocations}
 				onHoverSlot={(mask) => {
 					hoveredEquipmentSlot = mask;
 				}}
@@ -174,6 +201,9 @@
 			{selectedGuid}
 			{capacities}
 			{iconFor}
+			onHoverItem={(guid) => {
+				hoveredInventoryGuid = guid;
+			}}
 			onSelectItem={selectItem}
 			rootLabel="Main Pack"
 			dimItem={(item) =>

@@ -16,6 +16,8 @@
 		readonly rootLabel: string | null;
 		/** Optional equipment-hover presentation, owned by the inventory panel. */
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
+		/** Optional item hover identity for inventory-owned equipment affordances. */
+		readonly onHoverItem?: (guid: number | null) => void;
 		/** Explicit pack pickup appears only for external contents. */
 		readonly onTakePack?: (guid: number) => void;
 	}
@@ -28,6 +30,7 @@
 		onSelectItem,
 		rootLabel,
 		dimItem,
+		onHoverItem,
 		onTakePack,
 	}: Props = $props();
 	function itemName(item: ClientEntityFacts): string {
@@ -56,6 +59,7 @@
 				dimmed={dimItem?.(item) ?? false}
 				disabled={pending || item.description.kind === "pending"}
 				onselect={() => onSelectItem(item.guid)}
+				onHoverChange={(hovered) => onHoverItem?.(hovered ? item.guid : null)}
 			></ItemGridCell>
 		{/each}
 	</div>

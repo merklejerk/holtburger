@@ -6,14 +6,22 @@
 		readonly children: Snippet;
 		/** Axis belongs to the consuming panel; inventory stays vertical. */
 		readonly orientation?: "vertical" | "horizontal";
+		/** Child indexes whose offscreen location should call attention to a scroll control. */
+		readonly attentionIndexes?: ReadonlySet<number>;
 	}
-	const { children, orientation = "vertical" }: Props = $props();
+	const {
+		children,
+		orientation = "vertical",
+		attentionIndexes = new Set<number>(),
+	}: Props = $props();
 	let viewport = $state<HTMLDivElement | null>(null);
 	let cells = $state<HTMLDivElement | null>(null);
 	let canScrollBack = $state(false);
 	let canScrollForward = $state(false);
+	let attentionBack = $state(false);
+	let attentionForward = $state(false);
 
-	function updateEdges(): void {
+	function updateEdges(indexes = attentionIndexes): void {
 		if (viewport === null) return;
 		const offset =
 			orientation === "horizontal" ? viewport.scrollLeft : viewport.scrollTop;
@@ -27,13 +35,35 @@
 				: viewport.scrollHeight;
 		canScrollBack = offset > 0;
 		canScrollForward = offset + size < extent - 1;
+		const bounds = viewport.getBoundingClientRect();
+		let nextAttentionBack = false;
+		let nextAttentionForward = false;
+		for (const [index, cell] of Array.from(cells?.children ?? []).entries()) {
+			if (!indexes.has(index)) continue;
+			const rect = cell.getBoundingClientRect();
+			const start = orientation === "horizontal" ? rect.left : rect.top;
+			const end = orientation === "horizontal" ? rect.right : rect.bottom;
+			const viewportStart =
+				orientation === "horizontal" ? bounds.left : bounds.top;
+			const viewportEnd =
+				orientation === "horizontal" ? bounds.right : bounds.bottom;
+			nextAttentionBack ||= start < viewportStart - 1;
+			nextAttentionForward ||= end > viewportEnd + 1;
+		}
+		attentionBack = nextAttentionBack;
+		attentionForward = nextAttentionForward;
 	}
+
+	$effect(() => {
+		// Effects run after child DOM updates, so geometry and the matching indexes agree.
+		updateEdges(attentionIndexes);
+	});
 
 	onMount(() => {
 		if (viewport === null || cells === null)
 			throw new Error("Item strip did not mount its scroll elements.");
 		// Both resizing the viewport and changing the number of cells can change overflow.
-		const observer = new ResizeObserver(updateEdges);
+		const observer = new ResizeObserver(() => updateEdges());
 		observer.observe(viewport);
 		observer.observe(cells);
 		updateEdges();
@@ -70,7 +100,7 @@
 	<div
 		class="item-grid-strip-viewport"
 		bind:this={viewport}
-		onscroll={updateEdges}
+		onscroll={() => updateEdges()}
 	>
 		<div class="item-grid-strip-cells" bind:this={cells}>
 			{@render children()}
@@ -83,6 +113,7 @@
 			aria-label={orientation === "horizontal"
 				? "Scroll items left"
 				: "Scroll items up"}
+			data-attention={attentionBack}
 			onclick={() => scrollCell("up")}
 			><span class="strip-arrow-glyph strip-arrow-glyph-up" aria-hidden="true"
 			></span></button
@@ -95,6 +126,7 @@
 			aria-label={orientation === "horizontal"
 				? "Scroll items right"
 				: "Scroll items down"}
+			data-attention={attentionForward}
 			onclick={() => scrollCell("down")}
 			><span class="strip-arrow-glyph strip-arrow-glyph-down" aria-hidden="true"
 			></span></button
@@ -141,6 +173,9 @@
 			padding: 0;
 			line-height: 1;
 		}
+		.strip-arrow-glyph {
+			display: inline-block;
+		}
 		.strip-arrow-glyph-up::before {
 			content: var(--ui-item-strip-up-glyph);
 		}
@@ -152,6 +187,27 @@
 		}
 		.strip-arrow-down {
 			bottom: var(--ui-item-strip-block-inset);
+		}
+		.strip-arrow[data-attention="true"] {
+			color: var(--ui-item-strip-attention-color, var(--ui-color-active));
+		}
+		.strip-arrow[data-attention="true"] .strip-arrow-glyph {
+			animation: item-strip-attention-throb 400ms ease-in-out infinite alternate;
+		}
+		@keyframes item-strip-attention-throb {
+			from {
+				transform: rotate(var(--strip-arrow-glyph-rotation, 0deg)) scale(0.9);
+				text-shadow:
+					0 0 2px currentColor,
+					0 0 5px currentColor;
+			}
+			to {
+				transform: rotate(var(--strip-arrow-glyph-rotation, 0deg)) scale(1.2);
+				text-shadow:
+					0 0 4px currentColor,
+					0 0 10px currentColor,
+					0 0 16px currentColor;
+			}
 		}
 		.horizontal {
 			width: 100%;
@@ -185,8 +241,16 @@
 			left: auto;
 		}
 		.horizontal .strip-arrow-glyph {
-			display: inline-block;
-			transform: rotate(-90deg);
+			--strip-arrow-glyph-rotation: -90deg;
+			transform: rotate(var(--strip-arrow-glyph-rotation));
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.strip-arrow[data-attention="true"] .strip-arrow-glyph {
+				animation: none;
+				text-shadow:
+					0 0 4px currentColor,
+					0 0 10px currentColor;
+			}
 		}
 	}
 </style>

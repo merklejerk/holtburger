@@ -98,6 +98,32 @@
 		);
 	}
 
+	function updateBufferHover(event: PointerEvent): void {
+		if (bufferElement === null) return;
+		if (event.pointerType === "touch") {
+			setBufferHovered(false);
+			return;
+		}
+		const bounds = bufferElement.getBoundingClientRect();
+		setBufferHovered(
+			event.clientX >= bounds.left &&
+				event.clientX <= bounds.right &&
+				event.clientY >= bounds.top &&
+				event.clientY <= bounds.bottom,
+		);
+	}
+
+	function setBufferHovered(hovered: boolean): void {
+		if (bufferElement === null) return;
+		const next = String(hovered);
+		if (bufferElement.dataset.pointerHovered !== next)
+			bufferElement.dataset.pointerHovered = next;
+	}
+
+	function clearBufferHover(): void {
+		setBufferHovered(false);
+	}
+
 	function linePrefix(line: ClientChatLine): string {
 		const time = line.receivedAt.toLocaleTimeString([], {
 			hour: "2-digit",
@@ -112,19 +138,23 @@
 	}
 </script>
 
+<svelte:window
+	onpointermove={updateBufferHover}
+	onpointerleave={clearBufferHover}
+	onblur={clearBufferHover}
+/>
+
 <section class="chat-panel">
 	<div class="chat-history" class:interactive={historyInteractive}>
 		<div
 			bind:this={bufferElement}
 			class="chat-buffer ui-hud-surface"
+			data-pointer-hovered="false"
 			tabindex="-1"
 			role="log"
 			aria-live="polite"
 			aria-label="Chat messages"
 			use:keyboard.scope={{ keydown: scrollHistory }}
-			onpointerdown={(event) => {
-				if (historyInteractive) keyboard.activate(event.currentTarget);
-			}}
 		>
 			{#each visibleMessages as line (line.id)}
 				{@const tone = clientChatTone(line)}
@@ -213,6 +243,17 @@
 </section>
 
 <style>
+	@property --chat-buffer-focus {
+		syntax: "<percentage>";
+		inherits: false;
+		initial-value: 0%;
+	}
+	@property --chat-buffer-middle-opacity {
+		syntax: "<percentage>";
+		inherits: false;
+		initial-value: 48%;
+	}
+
 	@layer components {
 		.chat-panel {
 			display: grid;
@@ -244,7 +285,6 @@
 			min-height: 0;
 		}
 		.chat-history.interactive .chat-buffer {
-			pointer-events: auto;
 			user-select: text;
 		}
 		.chat-history-toggle {
@@ -260,19 +300,38 @@
 			min-height: 0;
 			overflow: hidden auto;
 			padding: 8px;
-			background: linear-gradient(
+			background-image: linear-gradient(
 				to top,
 				var(--_ui-hud-background-color),
-				color-mix(in srgb, var(--_ui-hud-background-color) 48%, transparent) 55%,
-				transparent
+				color-mix(
+						in srgb,
+						var(--_ui-hud-background-color) var(--chat-buffer-middle-opacity),
+						transparent
+					)
+					55%,
+				color-mix(
+					in srgb,
+					var(--_ui-hud-background-color) var(--chat-buffer-focus),
+					transparent
+				)
 			);
-			mask-image: linear-gradient(to bottom, transparent, #000 34%, #000);
+			mask-image: linear-gradient(
+				to bottom,
+				color-mix(in srgb, #000 var(--chat-buffer-focus), transparent),
+				#000 34%,
+				#000 100%
+			);
 			scrollbar-width: thin;
 			scrollbar-color: transparent transparent;
+			transition:
+				--chat-buffer-focus 160ms ease-out,
+				--chat-buffer-middle-opacity 160ms ease-out,
+				scrollbar-color 160ms ease-out;
 		}
 		.chat-buffer:focus {
 			/* Keyboard ownership enables copying without adding a border to the HUD. */
 			outline: none;
+			pointer-events: auto;
 		}
 		.chat-buffer::before {
 			/* Keep faded leading space inside the scroll area. Percentage padding would
@@ -286,21 +345,28 @@
 		}
 		.chat-buffer::-webkit-scrollbar-track,
 		.chat-buffer::-webkit-scrollbar-thumb {
-			background: transparent;
+			background-color: transparent;
+			transition: background-color 160ms ease-out;
 		}
+		/* Pointer hover is measured without making the click-through buffer a hit target. */
+		:global(.chat-buffer[data-pointer-hovered="true"]),
 		.chat-panel:focus-within .chat-buffer,
 		.chat-history.interactive .chat-buffer {
-			background: var(--_ui-hud-background-color);
-			mask-image: none;
+			--chat-buffer-focus: 100%;
+			--chat-buffer-middle-opacity: 100%;
 			scrollbar-color: var(--ui-color-border) transparent;
 		}
+		:global(.chat-buffer[data-pointer-hovered="true"]::-webkit-scrollbar-thumb),
 		.chat-panel:focus-within .chat-buffer::-webkit-scrollbar-thumb,
 		.chat-history.interactive .chat-buffer::-webkit-scrollbar-thumb {
-			background: var(--ui-color-border);
+			background-color: var(--ui-color-border);
 		}
+		:global(
+			.chat-buffer[data-pointer-hovered="true"]::-webkit-scrollbar-thumb:hover
+		),
 		.chat-panel:focus-within .chat-buffer::-webkit-scrollbar-thumb:hover,
 		.chat-history.interactive .chat-buffer::-webkit-scrollbar-thumb:hover {
-			background: var(--ui-color-accent);
+			background-color: var(--ui-color-accent);
 		}
 		p {
 			margin: 0 0 5px;
@@ -374,6 +440,12 @@
 			height: 25px;
 			min-height: 0;
 			padding: 5px;
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.chat-buffer,
+			.chat-buffer::-webkit-scrollbar-thumb {
+				transition: none;
+			}
 		}
 	}
 </style>

@@ -91,10 +91,16 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		},
 	});
 	const arbiter = new ClientInputArbiter({
-		ordinary: { applyAction() {}, restoreHeldAction() {}, reset() {} },
+		ordinary: {
+			applyAction: () => false,
+			restoreHeldAction() {},
+			reset() {},
+			setPersistentForward() {},
+		},
 		onEnter() {},
 		onActivate() {},
 		onCancel() {},
+		onAutoRunChanged() {},
 	});
 	let nowMs = 0;
 	const input = new ClientSelectionInput({

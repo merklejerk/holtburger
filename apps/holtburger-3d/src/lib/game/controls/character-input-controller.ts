@@ -66,6 +66,7 @@ export class CharacterInputController {
 	readonly #longitudinal: CharacterAction[] = [];
 	readonly #lateral: CharacterAction[] = [];
 	readonly #turn: CharacterAction[] = [];
+	#persistentForward = false;
 	#activeCharge: ActiveCharge | null = null;
 	#sequence = 0;
 
@@ -84,9 +85,13 @@ export class CharacterInputController {
 		this.#onEdge = options.onEdge;
 	}
 
-	/** Applies one action edge; action-repeat cannot rewrite newest-first precedence. */
-	applyAction(action: CharacterAction, pressed: boolean): void {
-		this.#applyAction(action, pressed, pressed ? "acquire" : "synchronize");
+	/** Applies one action edge and reports whether it retired persistent forward. */
+	applyAction(action: CharacterAction, pressed: boolean): boolean {
+		return this.#applyAction(
+			action,
+			pressed,
+			pressed ? "acquire" : "synchronize",
+		);
 	}
 
 	/** Restores a held drive action without manufacturing a new movement acquisition. */
@@ -94,31 +99,45 @@ export class CharacterInputController {
 		this.#applyAction(action, true, "synchronize");
 	}
 
+	/** Installs a forward fallback without conflating it with a physically held action. */
+	setPersistentForward(enabled: boolean, intent: CharacterDriveIntent): void {
+		if (this.#persistentForward === enabled) return;
+		this.#persistentForward = enabled;
+		this.#onDrive(this.drive(), intent);
+	}
+
 	#applyAction(
 		action: CharacterAction,
 		pressed: boolean,
 		intent: CharacterDriveIntent,
-	): void {
+	): boolean {
 		if (pressed) {
-			if (this.#held.has(action)) return;
+			if (this.#held.has(action)) return false;
 			this.#held.add(action);
+			const cancelledPersistentForward =
+				this.#persistentForward &&
+				(action === "forward" || action === "backward");
+			// Retail clears auto-run before admitting either longitudinal command
+			// (`CommandInterpreter::HandleNewForwardMovement`, acclient.c:682181-682186).
+			if (cancelledPersistentForward) this.#persistentForward = false;
 			if (action === "jump") {
 				this.#beginJump();
-				return;
+				return cancelledPersistentForward;
 			}
 			this.#axisFor(action)?.unshift(action);
 			this.#onDrive(this.drive(), intent);
-			return;
+			return cancelledPersistentForward;
 		}
 
-		if (!this.#held.delete(action)) return;
+		if (!this.#held.delete(action)) return false;
 		if (action === "jump") {
 			this.#releaseJump();
-			return;
+			return false;
 		}
 		const axis = this.#axisFor(action);
 		if (axis !== null) axis.splice(axis.indexOf(action), 1);
 		this.#onDrive(this.drive(), intent);
+		return false;
 	}
 
 	/** Latest semantic snapshot, composed independently across all three axes. */
@@ -136,7 +155,9 @@ export class CharacterInputController {
 					? "forward"
 					: this.#longitudinal[0] === "backward"
 						? "backward"
-						: null,
+						: this.#persistentForward
+							? "forward"
+							: null,
 			turn:
 				this.#turn[0] === "turnLeft"
 					? "left"
@@ -222,6 +243,7 @@ export class CharacterInputController {
 		this.#longitudinal.length = 0;
 		this.#lateral.length = 0;
 		this.#turn.length = 0;
+		this.#persistentForward = false;
 		this.#activeCharge = null;
 	}
 }

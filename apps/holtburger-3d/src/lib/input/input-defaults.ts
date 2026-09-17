@@ -71,6 +71,8 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Give the selected inventory item to the previous selected recipient. */
 		give: [{ key: "g", ctrl: false, alt: false, meta: false }],
+		/** Toggle persistent forward movement while gameplay owns the keyboard. */
+		toggleAutoRun: [{ key: "q", ctrl: false, alt: false, meta: false }],
 		/** Enter the aimed jump interaction. */
 		preciseJump: [{ key: "j", shift: true }],
 		/** Cancel the active context, then clear selection when gameplay owns Escape. */

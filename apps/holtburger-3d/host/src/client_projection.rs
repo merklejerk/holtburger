@@ -628,6 +628,8 @@ pub enum ClientHostEvent {
     LifecycleChanged(ClientLifecycleWire),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
+    /// Accepted non-autonomous server movement for the local character.
+    ServerControlledMotion,
     PreciseJumpEvaluation(ClientPreciseJumpEvaluationWire),
     PreciseJumpTransactionFeedback(ClientPreciseJumpTransactionFeedbackWire),
     EntitySelectionQueryResult(ClientEntitySelectionQueryResultWire),
@@ -877,6 +879,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::CharacterMotionFeedback(feedback) => {
             Some(ClientHostEvent::CharacterMotionFeedback(feedback.into()))
         }
+        ClientViewEvent::SelfServerControlledMotion { .. } => {
+            Some(ClientHostEvent::ServerControlledMotion)
+        }
         ClientViewEvent::PreciseJumpEvaluation(evaluation) => {
             Some(ClientHostEvent::PreciseJumpEvaluation(evaluation.into()))
         }
@@ -1105,6 +1110,23 @@ mod tests {
     use holtburger_core::client::types::ChatSpeaker;
     use holtburger_protocol::messages::ChatMessageType;
     use holtburger_protocol::messages::combat::AttackConditions;
+
+    #[test]
+    fn server_controlled_motion_projects_as_a_payloadless_notification() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(ClientHostEvent::ServerControlledMotion)
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("Expected event");
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-server-controlled-motion", "payload": null
+            })
+        );
+    }
 
     #[test]
     fn local_use_reports_progress_without_predicting_server_rejection() {

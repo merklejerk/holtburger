@@ -78,6 +78,7 @@ type ClientShortcut =
 	| "interact"
 	| "give"
 	| "toggleCombat"
+	| "toggleAutoRun"
 	| "preciseJump"
 	| "cancel"
 	| "enterWorld"

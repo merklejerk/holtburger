@@ -66,6 +66,43 @@ describe("CharacterInputController", () => {
 		});
 	});
 
+	it("cancels persistent forward on physical longitudinal input", () => {
+		const { drives, input, intents } = fixture();
+		input.setPersistentForward(true, "acquire");
+		expect(input.drive().longitudinal).toBe("forward");
+
+		expect(input.applyAction("backward", true)).toBe(true);
+		expect(input.drive().longitudinal).toBe("backward");
+		input.applyAction("backward", false);
+		expect(input.drive().longitudinal).toBeNull();
+
+		input.setPersistentForward(true, "acquire");
+		expect(input.applyAction("forward", true)).toBe(true);
+		input.applyAction("forward", false);
+		expect(input.drive().longitudinal).toBeNull();
+		expect(intents).toEqual([
+			"acquire",
+			"acquire",
+			"synchronize",
+			"acquire",
+			"acquire",
+			"synchronize",
+		]);
+		expect(drives.at(-1)?.longitudinal).toBeNull();
+	});
+
+	it("includes persistent forward in jump snapshots and clears it on reset", () => {
+		const { edges, input } = fixture();
+		input.setPersistentForward(true, "acquire");
+		input.applyAction("jump", true);
+		expect(edges[0]).toMatchObject({
+			drive: { longitudinal: "forward" },
+			kind: "begin-jump",
+		});
+		input.reset();
+		expect(input.drive().longitudinal).toBeNull();
+	});
+
 	it.each([
 		["forward", "backward"],
 		["strafeLeft", "strafeRight"],

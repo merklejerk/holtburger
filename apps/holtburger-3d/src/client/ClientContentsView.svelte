@@ -28,6 +28,8 @@
 		readonly onSelectItem: (guid: number) => boolean;
 		/** Optional equipment-hover presentation, owned by the inventory panel. */
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
+		/** Optional item hover identity for inventory-owned equipment affordances. */
+		readonly onHoverItem?: (guid: number | null) => void;
 		/** External shells provide explicit whole-pack pickup alongside drag/drop. */
 		readonly onTakePack?: (guid: number) => void;
 		/** Panel-specific summary and the shared compact sort control. */
@@ -44,6 +46,7 @@
 		iconFor,
 		onSelectItem,
 		dimItem,
+		onHoverItem,
 		onTakePack,
 		footer,
 	}: Props = $props();
@@ -111,6 +114,7 @@
 			{onSelectItem}
 			{rootLabel}
 			{dimItem}
+			{onHoverItem}
 			{onTakePack}
 		/>
 	</div>

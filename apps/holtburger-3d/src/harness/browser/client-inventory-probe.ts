@@ -1511,6 +1511,92 @@ export async function probeClientInventory(options: {
 			"Hover retained outdated compatibility after inventory update",
 		);
 	row.dispatchEvent(new PointerEvent("pointerleave"));
+	// Hovering an equippable inventory item calls attention to its offscreen slot.
+	const lastEquipmentSlot = EQUIPMENT_SLOTS.at(-1);
+	if (lastEquipmentSlot === undefined)
+		throw new Error("Equipment slot fixture is empty");
+	const remoteCompatible = owned(95, 1, 0);
+	if (remoteCompatible.description.kind !== "known")
+		throw new Error("Known equipment-attention fixture required");
+	records = [
+		root,
+		{
+			...remoteCompatible,
+			description: {
+				...remoteCompatible.description,
+				equipLocations: lastEquipmentSlot.mask,
+			},
+		},
+		owned(94, 1, 1),
+	];
+	baseline();
+	await sample();
+	equipmentViewport.scrollTop = 0;
+	equipmentViewport.dispatchEvent(new Event("scroll"));
+	cell(remoteCompatible.guid).dispatchEvent(new PointerEvent("pointerenter"));
+	await tick();
+	const hoverDimmedRows = equipment.querySelectorAll(
+		'.equipment-row[data-hover-dimmed="true"]',
+	);
+	if (
+		hoverDimmedRows.length !== EQUIPMENT_SLOTS.length - 1 ||
+		equipment.querySelector(
+			`[data-equipment-slot="${lastEquipmentSlot.mask}"][data-hover-dimmed]`,
+		) !== null
+	)
+		throw new Error(
+			"Inventory item hover did not dim only incompatible equipment slots",
+		);
+	const attentionDown = equipment.querySelector<HTMLButtonElement>(
+		'[aria-label="Scroll items down"][data-attention="true"]',
+	);
+	if (attentionDown === null) {
+		const slotRow = equipment.querySelector<HTMLElement>(
+			`[data-equipment-slot="${lastEquipmentSlot.mask}"]`,
+		);
+		const arrows = [...equipment.querySelectorAll(".strip-arrow")].map(
+			(arrow) => arrow.outerHTML,
+		);
+		throw new Error(
+			`Offscreen compatible equipment slot did not highlight its scroll arrow: ${JSON.stringify(
+				{
+					slot: slotRow?.getBoundingClientRect().toJSON(),
+					viewport: equipmentViewport.getBoundingClientRect().toJSON(),
+					arrows,
+				},
+			)}`,
+		);
+	}
+	if (
+		equipment.querySelector(
+			'[aria-label="Scroll items up"][data-attention="true"]',
+		) !== null
+	)
+		throw new Error("Equipment hover highlighted the wrong scroll direction");
+	equipmentViewport.scrollTop = equipmentViewport.scrollHeight;
+	equipmentViewport.dispatchEvent(new Event("scroll"));
+	await tick();
+	if (equipment.querySelector('[data-attention="true"]') !== null)
+		throw new Error(
+			"Visible compatible equipment slot retained scroll attention",
+		);
+	cell(remoteCompatible.guid).dispatchEvent(new PointerEvent("pointerleave"));
+	await tick();
+	if (equipment.querySelector(".equipment-row[data-hover-dimmed]") !== null)
+		throw new Error("Equipment slot hover compatibility did not clear");
+	cell(94).dispatchEvent(new PointerEvent("pointerenter"));
+	await tick();
+	if (
+		equipment.querySelectorAll('.equipment-row[data-hover-dimmed="true"]')
+			.length !== EQUIPMENT_SLOTS.length ||
+		equipment.querySelector('[data-attention="true"]') !== null
+	)
+		throw new Error(
+			"Known non-equippable item did not dim every equipment slot without scroll attention",
+		);
+	cell(94).dispatchEvent(new PointerEvent("pointerleave"));
+	equipmentViewport.scrollTop = 0;
+	equipmentViewport.dispatchEvent(new Event("scroll"));
 	// Leave stable contents and multi-row equipment for the CDP-driven drag probe.
 	const splitStack = owned(94, 1, 1);
 	if (splitStack.description.kind !== "known")

@@ -18,6 +18,8 @@
 		readonly onSelectItem: (guid: number) => void;
 		/** Cold pointer interaction; the panel owns dimming of incompatible contents. */
 		readonly onHoverSlot: (mask: number | null) => void;
+		/** Allowed locations for the hovered item; null means known non-equippable. */
+		readonly hoveredEquipLocations: number | null | undefined;
 	}
 	const {
 		equipment,
@@ -27,12 +29,24 @@
 		selectedGuid,
 		onSelectItem,
 		onHoverSlot,
+		hoveredEquipLocations,
 	}: Props = $props();
 	const updating = $derived(pending || equipment.pending);
+	const attentionIndexes = $derived(
+		new Set(
+			equipment.rows.flatMap(({ slot }, index) =>
+				hoveredEquipLocations !== undefined &&
+				hoveredEquipLocations !== null &&
+				(hoveredEquipLocations & slot.mask) !== 0
+					? [index]
+					: [],
+			),
+		),
+	);
 </script>
 
 <div class="equipment-strip" aria-busy={updating}>
-	<ItemGridStrip>
+	<ItemGridStrip {attentionIndexes}>
 		{#each equipment.rows as { slot, item } (slot.mask)}
 			{@const description = item?.description}
 			{@const name =
@@ -40,6 +54,11 @@
 			<div
 				class="equipment-row"
 				data-equipment-slot={slot.mask}
+				data-hover-dimmed={hoveredEquipLocations !== undefined &&
+				(hoveredEquipLocations === null ||
+					(hoveredEquipLocations & slot.mask) === 0)
+					? "true"
+					: undefined}
 				role="group"
 				aria-label={slot.label}
 				onpointerenter={() => onHoverSlot(slot.mask)}
@@ -78,7 +97,8 @@
 					var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
 			);
 		}
-		.equipment-row:global([data-inventory-dimmed="true"]) {
+		.equipment-row:global([data-inventory-dimmed="true"]),
+		.equipment-row[data-hover-dimmed="true"] {
 			opacity: var(--ui-item-dimmed-opacity, 0.3);
 		}
 		.equipment-row {

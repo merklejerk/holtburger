@@ -28,6 +28,8 @@
 		readonly disabled: boolean;
 		/** Consumer-owned action for an occupied cell. */
 		readonly onselect: () => void;
+		/** Optional cold pointer-hover notification for panel-local affordances. */
+		readonly onHoverChange?: (hovered: boolean) => void;
 	}
 	const {
 		label,
@@ -36,6 +38,7 @@
 		dimmed = false,
 		disabled,
 		onselect,
+		onHoverChange,
 		display,
 		equipped,
 		showEquipped = true,
@@ -65,6 +68,8 @@
 	aria-pressed={selected}
 	disabled={disabled || itemGuid === null}
 	onclick={onselect}
+	onpointerenter={() => onHoverChange?.(true)}
+	onpointerleave={() => onHoverChange?.(false)}
 >
 	{#if itemGuid !== null}
 		<ItemCellVisual

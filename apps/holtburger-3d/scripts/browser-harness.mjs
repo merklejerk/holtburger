@@ -4054,6 +4054,11 @@ async function runClientHudHarness({ viteUrl }) {
 			[],
 		);
 		const runtime = await capture();
+		runtime.vitals = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeCharacterVitals",
+			[],
+		);
 		await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",

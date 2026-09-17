@@ -659,6 +659,8 @@ pub enum ClientViewEvent {
     EntityIdentified {
         entity: Box<Entity>,
     },
+    /// Cold appraisal result; intentionally absent from reconstructible client snapshots.
+    ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
     EntityPropertiesUpdated {
         guid: Guid,
         updates: Vec<holtburger_common::properties::PropertyUpdate>,

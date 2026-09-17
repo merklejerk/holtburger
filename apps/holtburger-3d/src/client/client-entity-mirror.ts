@@ -2,6 +2,16 @@ import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
+/** Server-authored icon-composition inputs shared by entity facts and inspection snapshots. */
+export const clientIconAppearanceSchema = z
+	.object({
+		base: guid.positive().nullable(),
+		overlay: guid.positive().nullable(),
+		underlay: guid.positive().nullable(),
+		uiEffects: guid,
+	})
+	.strict()
+	.readonly();
 /** Confirmed world access; loading descriptions never imply opening or closing. */
 const worldContainerSchema = z.discriminatedUnion("kind", [
 	z
@@ -54,15 +64,7 @@ const clientEntityFactsSchema = z
 						.strict()
 						.readonly(),
 					/** Server icon inputs, independent of scene residency or asset readiness. */
-					icon: z
-						.object({
-							base: guid.positive().nullable(),
-							overlay: guid.positive().nullable(),
-							underlay: guid.positive().nullable(),
-							uiEffects: guid,
-						})
-						.strict()
-						.readonly(),
+					icon: clientIconAppearanceSchema,
 					/** Public classification for inventory type sorting. */
 					itemType: guid,
 					/** World-resolved category shared with map markers, used by selected-name styling. */

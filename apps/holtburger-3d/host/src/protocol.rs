@@ -103,6 +103,7 @@ pub enum HostEvent {
     ),
     ClientSpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     ClientSpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
+    ClientObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
     ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
@@ -384,6 +385,9 @@ impl ClientEventSink for StdioEventSink {
         event: crate::client_projection::ClientHostEvent,
     ) -> anyhow::Result<()> {
         let event = match event {
+            crate::client_projection::ClientHostEvent::ObjectInspectionResult(result) => {
+                HostEvent::ClientObjectInspectionResult(result)
+            }
             crate::client_projection::ClientHostEvent::EntityCollisionDisabled(disabled) => {
                 HostEvent::ClientEntityCollisionDisabled(disabled)
             }

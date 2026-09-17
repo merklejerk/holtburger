@@ -305,6 +305,8 @@ pub struct ViewState {
     pub context_scroll_offset: usize,
     /// What information should be displayed in the context panel.
     pub context_view: ContextView,
+    /// Latest cold appraisal result retained only for the active context presentation.
+    pub object_inspection: Option<holtburger_world::inspection::ObjectInspectionResult>,
     /// Current vendor state (inventory and multipliers) - note: pseudo-client state.
     pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// State of current interaction like vendor transactions.
@@ -349,6 +351,7 @@ impl Default for ViewState {
             previous_focused_pane: FocusedPane::Dashboard,
             context_scroll_offset: 0,
             context_view: ContextView::Default,
+            object_inspection: None,
             vendor: None,
             active_interaction: None,
             salvaging: None,

@@ -101,6 +101,10 @@
 		type ClientToast,
 	} from "./client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
+	import {
+		ClientObjectInspection,
+		type ClientObjectInspectionState,
+	} from "./client-object-inspection";
 
 	let entityCollisionDisabled = $state(false);
 	let lifecycle = $state<ClientLifecycleUiState>(
@@ -208,6 +212,8 @@
 	let itemInteractions = $state<ClientItemInteractions | null>(null);
 	let selectedEntityTracking: ClientSelectedEntityTracking | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
+	let objectInspectionOwner: ClientObjectInspection | null = null;
+	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
 	/** Session-local diagnostic policy; each use captures the current value. */
 	let unrestrictedUse = $state(false);
 	let hoveredEntityGuid = $state<number | null>(null);
@@ -470,6 +476,19 @@
 		await session.sendChat(message);
 	}
 
+	/** Keyboard and button activation capture the same selection before starting the request. */
+	function examineSelectedEntity(): void {
+		const guid = entitySelection?.selectedGuid() ?? null;
+		if (guid === null) return;
+		void objectInspectionOwner?.examine(guid);
+	}
+
+	/** HUD item identities are already resolved; select and inspect that exact target. */
+	function examineItem(guid: number): void {
+		entitySelection?.selectContentsItem(guid, "select");
+		void objectInspectionOwner?.examine(guid);
+	}
+
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
 		if (
@@ -501,6 +520,11 @@
 		if (APP_INPUT.shortcut("give", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) itemInteractions?.giveSelected();
+			return;
+		}
+		if (APP_INPUT.shortcut("examine", event) && !event.isComposing) {
+			event.preventDefault();
+			if (!event.repeat) examineSelectedEntity();
 			return;
 		}
 		if (selectionInput?.keydown(event, performance.now())) return;
@@ -855,6 +879,13 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		const inspectionOwner = new ClientObjectInspection(owner, (message) =>
+			toastCenter.publish({ message, tone: "warning" }),
+		);
+		objectInspectionOwner = inspectionOwner;
+		const unsubscribeInspection = inspectionOwner.subscribe(
+			(value) => (objectInspection = value),
+		);
 		const icons = browserUiIconRepository((requests) =>
 			prepareUiIcons(transport, requests),
 		);
@@ -968,6 +999,11 @@
 			unsubscribeDialogs();
 			dialogs = null;
 			unsubscribeToast();
+			unsubscribeInspection();
+			inspectionOwner.destroy();
+			if (objectInspectionOwner === inspectionOwner)
+				objectInspectionOwner = null;
+			objectInspection = { kind: "idle" };
 			toastCenter.destroy();
 			unsubscribePrecise();
 			unsubscribeSelection();
@@ -1032,9 +1068,13 @@
 		{inventory}
 		{worldContainer}
 		{itemInteractions}
+		{objectInspection}
 		onSelectContentsItem={(guid, mode) =>
 			entitySelection?.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}
+		onExamineEntity={examineSelectedEntity}
+		onExamineItem={examineItem}
+		onCloseInspection={() => objectInspectionOwner?.close()}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
@@ -1086,6 +1126,20 @@
 					},
 				});
 			} else pointerSelection?.acquireViewportPoint(clientX, clientY);
+		}}
+		onViewportExamine={(clientX, clientY) => {
+			if (entitySelection === null || pointerSelection === null) return;
+			const selection = entitySelection;
+			const intent = selection.beginAcquisition("external");
+			pointerSelection.acquireViewportSelection(clientX, clientY, {
+				isCurrent: () => selection.isCurrentAcquisition(intent),
+				commit: (result) => {
+					if (result.kind === "unavailable") return;
+					const guid = result.kind === "entity" ? result.guid : null;
+					selection.commitAcquisition(intent, guid);
+					if (guid !== null) void objectInspectionOwner?.examine(guid);
+				},
+			});
 		}}
 		onViewportHover={(clientX, clientY) =>
 			pointerSelection?.acquireViewportHover(clientX, clientY)}

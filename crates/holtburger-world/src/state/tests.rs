@@ -44,7 +44,9 @@ use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementStateFlags,
 };
-use holtburger_protocol::messages::object::events::UpdateHealthEventData;
+use holtburger_protocol::messages::object::events::{
+    IdentifyObjectResponseEventData, IdentifyResponseFlags, UpdateHealthEventData,
+};
 use holtburger_protocol::messages::object::messages::description::{
     ObjDescEventData, PhysicsChildData, PhysicsDescParent,
 };
@@ -5729,4 +5731,161 @@ fn world_container_range_uses_scaled_canonical_bodies_and_tolerates_pending_geom
         .unwrap();
     assert_eq!(world.within_use_radius(actor, target), None);
     assert_eq!(world.world_container().root(), Some(target));
+}
+
+fn identify_response_message(data: IdentifyObjectResponseEventData) -> GameMessage {
+    GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid(0x50000001),
+        sequence: 1,
+        event: GameEvent::IdentifyObjectResponse(Box::new(data)),
+    }))
+}
+
+#[test]
+fn successful_identify_merges_before_publishing_ready_inspection() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001001);
+    world.entities.insert(Entity::new(
+        guid,
+        "Appraised Item".to_string(),
+        WorldPosition::default(),
+    ));
+    let mut response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        flags: IdentifyResponseFlags::INT_STATS_TABLE,
+        success: true,
+        ..Default::default()
+    };
+    response.properties.ints.insert(PropertyInt::Value, 321);
+
+    let events = world.handle_message(&identify_response_message(response));
+    let identified_index = events
+        .iter()
+        .position(|event| matches!(event, WorldEvent::EntityIdentified(_)))
+        .expect("entity mutation publication");
+    let inspection_index = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+                    outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
+                    ..
+                })
+            )
+        })
+        .expect("ready inspection publication");
+
+    assert!(identified_index < inspection_index);
+    assert_eq!(
+        world
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.get_int_prop(PropertyInt::Value)),
+        Some(321)
+    );
+}
+
+#[test]
+fn rejected_identify_does_not_merge_partial_properties() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001002);
+    let mut entity = Entity::new(guid, "Rejected Item".to_string(), WorldPosition::default());
+    entity.set_int_prop(PropertyInt::Value, 1);
+    world.entities.insert(entity);
+    let mut response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        flags: IdentifyResponseFlags::INT_STATS_TABLE,
+        success: false,
+        ..Default::default()
+    };
+    response.properties.ints.insert(PropertyInt::Value, 999);
+
+    let events = world.handle_message(&identify_response_message(response));
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            outcome: crate::inspection::ObjectInspectionOutcome::Rejected,
+            ..
+        })
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::EntityIdentified(_)))
+    );
+    assert_eq!(
+        world
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.get_int_prop(PropertyInt::Value)),
+        Some(1)
+    );
+}
+
+#[test]
+fn unresolved_identify_publishes_missing() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001003);
+    let response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        success: true,
+        ..Default::default()
+    };
+
+    let events = world.handle_message(&identify_response_message(response));
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            guid: result_guid,
+            outcome: crate::inspection::ObjectInspectionOutcome::Missing,
+        }) if *result_guid == guid
+    )));
+}
+
+#[test]
+fn successful_vendor_identify_uses_the_shared_ready_shape() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001004);
+    let mut item = crate::vendor::CoreVendorItem {
+        guid,
+        wcid: 123,
+        ..Default::default()
+    };
+    item.properties.strings.insert(
+        holtburger_common::properties::PropertyString::Name,
+        "Vendor Item".to_string(),
+    );
+    world.vendor = Some(crate::vendor::VendorState {
+        vendor_guid: Guid(0x70001000),
+        items: vec![item],
+        buy_multiplier: 1.0,
+        sell_multiplier: 1.0,
+        merchandise_item_types: 0,
+        alternate_currency_wcid: 0,
+        alternate_currency_amount: 0,
+        alternate_currency_name: String::new(),
+    });
+    let response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        success: true,
+        ..Default::default()
+    };
+
+    let events = world.handle_message(&identify_response_message(response));
+
+    assert!(
+        events.iter().any(
+            |event| matches!(event, WorldEvent::VendorItemIdentified(item) if item.guid == guid)
+        )
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            guid: result_guid,
+            outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
+        }) if *result_guid == guid
+    )));
 }

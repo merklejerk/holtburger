@@ -87,6 +87,17 @@ pub(super) fn apply_tick(state: &mut GameState, elapsed: f64, result: &mut Updat
 
 pub(super) fn apply_context_view_change(state: &mut GameState, view: ContextView) -> UpdateResult {
     let mut result = UpdateResult::new();
+    let inspection_matches_view = match view {
+        ContextView::Assess(InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid)) => state
+            .view
+            .object_inspection
+            .as_ref()
+            .is_some_and(|inspection| inspection.guid == guid),
+        _ => false,
+    };
+    if !inspection_matches_view {
+        state.view.object_inspection = None;
+    }
     state.view.context_view = view;
     state.view.context_scroll_offset = 0;
     if view == ContextView::Logopolis {

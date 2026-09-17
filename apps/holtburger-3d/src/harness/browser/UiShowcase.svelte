@@ -41,7 +41,13 @@
 	/** Production HUD surfaces whose component inputs do not require a GPU owner. */
 	type HudSurface = Exclude<
 		keyof ClientHudLayout,
-		"minimap" | "inventory" | "worldContainer" | "debug" | "spells" | "spellBar"
+		| "minimap"
+		| "inventory"
+		| "worldContainer"
+		| "inspection"
+		| "debug"
+		| "spells"
+		| "spellBar"
 	>;
 	const layout = $derived.by(() => {
 		const width = (stageWidth - 16 * (columns + 1)) / columns;
@@ -355,6 +361,8 @@
 					})}
 					readCanSplit={() => false}
 					onInteract={() => {}}
+					onExamine={() => {}}
+					examinePending={false}
 					onSplit={() => {}}
 				/>{/snippet}
 			{#snippet chat()}<ClientChat {messages} onSend={send} />{/snippet}

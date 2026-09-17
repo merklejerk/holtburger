@@ -1,0 +1,333 @@
+<script lang="ts">
+	import { onMount } from "svelte";
+	import type { SpellReference } from "../app/spell-references";
+	import type { UiIconRepository } from "../app/ui-icon-repository";
+	import ClientInspectionArtwork from "./ClientInspectionArtwork.svelte";
+	import type { ClientSpellServices } from "./client-spells";
+	import type {
+		ItemInspection,
+		ObjectInspection,
+	} from "./client-object-inspection-contract";
+	import {
+		formatInspectionDamageTypes,
+		formatInspectionDuration,
+		formatInspectionEffect,
+		formatInspectionImbuedEffects,
+		formatInspectionNumber,
+		formatInspectionPercent,
+		formatItemStatuses,
+		formatWieldRequirement,
+		humanizeInspectionName,
+		inspectionBonusLabel,
+		inspectionEnchantmentClass,
+	} from "./client-object-inspection-format";
+
+	interface Props {
+		readonly inspection: ObjectInspection;
+		readonly item: ItemInspection;
+		readonly spells: ClientSpellServices | null;
+		readonly icons: UiIconRepository | null;
+	}
+
+	const { inspection, item, spells, icons }: Props = $props();
+	const statuses = $derived(formatItemStatuses(item.status));
+	const imbues = $derived(formatInspectionImbuedEffects(item.imbuedEffects));
+	let spellReferences = $state<readonly SpellReference[] | null>(null);
+	let spellFailure = $state<string | null>(null);
+
+	onMount(() => {
+		if (item.spells.length === 0) return;
+		if (spells === null) {
+			spellFailure = "Spell-reference service is unavailable.";
+			return;
+		}
+		let active = true;
+		void spells
+			.load(item.spells.map(({ id }) => id))
+			.then((references) => {
+				if (active) spellReferences = references;
+			})
+			.catch((error: unknown) => {
+				if (active)
+					spellFailure = error instanceof Error ? error.message : String(error);
+			});
+		return () => {
+			active = false;
+		};
+	});
+
+	function spellLabel(index: number): string {
+		const spell = item.spells[index];
+		const reference = spellReferences?.[index];
+		if (spell === undefined) return "Unknown spell";
+		if (reference?.kind === "known") return reference.name;
+		if (reference?.kind === "failed")
+			return `Spell ${spell.id} (lookup failed: ${reference.detail})`;
+		if (reference?.kind === "missing")
+			return `Spell ${spell.id} (definition missing)`;
+		return `Spell ${spell.id}`;
+	}
+
+	function formatDamageRange(range: {
+		readonly min: number;
+		readonly max: number;
+	}): string {
+		return range.min === range.max
+			? formatInspectionNumber(range.max)
+			: `${formatInspectionNumber(range.min)} – ${formatInspectionNumber(range.max)}`;
+	}
+</script>
+
+<article class="inspection-body inspection-item">
+	<header class="inspection-hero">
+		<ClientInspectionArtwork
+			artwork={item.artwork}
+			{icons}
+			name={inspection.name}
+		/>
+		<div>
+			<h2>{inspection.name}</h2>
+			{#if inspection.level !== null}<p class="inspection-kicker">
+					Level {formatInspectionNumber(inspection.level)}
+				</p>{/if}
+			{#if inspection.description !== null}<p class="inspection-description">
+					{inspection.description}
+				</p>{/if}
+		</div>
+	</header>
+
+	{#if item.value !== null || item.burden !== null || item.material !== null || item.tinkering !== null || item.spellcraft !== null}
+		<section>
+			<h3>Item</h3>
+			<dl class="inspection-facts">
+				{#if item.value !== null}<div>
+						<dt>Value</dt>
+						<dd>{formatInspectionNumber(item.value)}</dd>
+					</div>{/if}
+				{#if item.burden !== null}<div>
+						<dt>Burden</dt>
+						<dd>{formatInspectionNumber(item.burden)} bu</dd>
+					</div>{/if}
+				{#if item.material !== null}<div>
+						<dt>Material</dt>
+						<dd>
+							{humanizeInspectionName(item.material.materialType)} ({formatInspectionNumber(
+								item.material.workmanship,
+							)})
+						</dd>
+					</div>{/if}
+				{#if item.tinkering !== null}<div>
+						<dt>Tinkered</dt>
+						<dd>{formatInspectionNumber(item.tinkering.count)} times</dd>
+					</div>{/if}
+				{#if item.spellcraft !== null}<div>
+						<dt>Spellcraft</dt>
+						<dd>{formatInspectionNumber(item.spellcraft)}</dd>
+					</div>{/if}
+			</dl>
+		</section>
+	{/if}
+
+	{#if item.mana !== null || item.stack !== null || item.uses !== null || item.capacity.items !== null || item.capacity.containers !== null || statuses.length > 0}
+		<section>
+			<h3>State</h3>
+			<dl class="inspection-facts">
+				{#if item.mana !== null}<div class="inspection-wide">
+						<dt>{item.mana.kind === "mana" ? "Mana" : "Charge"}</dt>
+						<dd>
+							{formatInspectionNumber(item.mana.current)}{item.mana.max === null
+								? ""
+								: ` / ${formatInspectionNumber(item.mana.max)}`}{item.mana
+								.secondsLeft === null
+								? ""
+								: ` (${formatInspectionDuration(item.mana.secondsLeft)} left)`}
+						</dd>
+					</div>{/if}
+				{#if item.stack !== null}<div>
+						<dt>Count</dt>
+						<dd>
+							{item.stack.current === null
+								? "?"
+								: formatInspectionNumber(item.stack.current)} / {formatInspectionNumber(
+								item.stack.max,
+							)}
+						</dd>
+					</div>{/if}
+				{#if item.uses !== null}<div>
+						<dt>Uses</dt>
+						<dd>
+							{item.uses.current === null
+								? "?"
+								: formatInspectionNumber(item.uses.current)} / {formatInspectionNumber(
+								item.uses.max,
+							)}
+						</dd>
+					</div>{/if}
+				{#if item.capacity.items !== null}<div>
+						<dt>Item capacity</dt>
+						<dd>{formatInspectionNumber(item.capacity.items)}</dd>
+					</div>{/if}
+				{#if item.capacity.containers !== null}<div>
+						<dt>Container capacity</dt>
+						<dd>{formatInspectionNumber(item.capacity.containers)}</dd>
+					</div>{/if}
+				{#if statuses.length > 0}<div class="inspection-wide">
+						<dt>Status</dt>
+						<dd>{statuses.join(", ")}</dd>
+					</div>{/if}
+			</dl>
+		</section>
+	{/if}
+
+	{#if item.weapon !== null}
+		<section>
+			<h3>Combat</h3>
+			<dl class="inspection-facts">
+				{#if item.weapon !== null}
+					<div class="inspection-wide">
+						<dt>Damage</dt>
+						<dd>
+							<span class={inspectionEnchantmentClass(item.weapon.damage)}
+								>{formatDamageRange(item.weapon.damage.effective)}</span
+							>
+							{formatInspectionDamageTypes(item.weapon.damageType)}
+							{#if item.weapon.damage.unbuffed !== null}<span
+									class="inspection-unbuffed"
+								>
+									(base {formatDamageRange(item.weapon.damage.unbuffed)})
+								</span>{/if}
+						</dd>
+					</div>
+					{#if item.weapon.speed !== null}<div>
+							<dt>Speed</dt>
+							<dd>
+								<span class={inspectionEnchantmentClass(item.weapon.speed)}
+									>{formatInspectionNumber(item.weapon.speed.effective)}</span
+								>{#if item.weapon.speed.unbuffed !== null}<span
+										class="inspection-unbuffed"
+									>
+										(base {formatInspectionNumber(item.weapon.speed.unbuffed)})
+									</span>{/if}
+							</dd>
+						</div>{/if}
+					{#if item.weapon.weaponSkill !== null}<div>
+							<dt>Weapon skill</dt>
+							<dd>{humanizeInspectionName(item.weapon.weaponSkill)}</dd>
+						</div>{/if}
+					{#if item.weapon.weaponType !== null && item.weapon.weaponType !== "Undef"}<div
+						>
+							<dt>Type</dt>
+							<dd>{humanizeInspectionName(item.weapon.weaponType)}</dd>
+						</div>{/if}
+				{/if}
+			</dl>
+		</section>
+	{/if}
+
+	{#if item.armor !== null || item.protections !== null}
+		<section>
+			<h3>Protections</h3>
+			<dl class="inspection-facts inspection-protections">
+				{#if item.armor !== null}<div class="inspection-wide">
+						<dt>Armor</dt>
+						<dd>
+							<span class={inspectionEnchantmentClass(item.armor)}
+								>{formatInspectionNumber(item.armor.effective)}</span
+							>
+							{#if item.armor.unbuffed !== null}<span
+									class="inspection-unbuffed"
+								>
+									(base {formatInspectionNumber(item.armor.unbuffed)})
+								</span>{/if}
+						</dd>
+					</div>{/if}
+				{#each Object.entries(item.protections ?? {}) as [kind, value]}
+					<div>
+						<dt>{humanizeInspectionName(kind)}</dt>
+						<dd>
+							<span class={inspectionEnchantmentClass(value)}
+								>{value.effective.toFixed(2)}</span
+							>{#if value.unbuffed !== null}<span class="inspection-unbuffed">
+									(base {value.unbuffed.toFixed(2)})
+								</span>{/if}
+						</dd>
+					</div>
+				{/each}
+			</dl>
+		</section>
+	{/if}
+
+	{#if item.wieldRequirements.length > 0}
+		<section>
+			<h3>Wield requirements</h3>
+			<ul>
+				{#each item.wieldRequirements as requirement}<li>
+						{formatWieldRequirement(requirement)}
+					</li>{/each}
+			</ul>
+		</section>
+	{/if}
+	{#if item.bonuses.length > 0}
+		<section>
+			<h3>Bonuses</h3>
+			<dl class="inspection-facts">
+				{#each item.bonuses as bonus}<div>
+						<dt>{inspectionBonusLabel(bonus.kind)}</dt>
+						<dd>
+							<span class={inspectionEnchantmentClass(bonus.value)}
+								>{bonus.value.effective >= 0
+									? "+"
+									: ""}{formatInspectionPercent(bonus.value.effective)}</span
+							>{#if bonus.value.unbuffed !== null}<span
+									class="inspection-unbuffed"
+								>
+									(base {bonus.value.unbuffed >= 0
+										? "+"
+										: ""}{formatInspectionPercent(bonus.value.unbuffed)})
+								</span>{/if}
+						</dd>
+					</div>{/each}
+			</dl>
+		</section>
+	{/if}
+	{#if imbues.length > 0 || item.effects.length > 0}
+		<section>
+			<h3>Effects</h3>
+			<ul>
+				{#each imbues as effect}<li>
+						{effect}
+					</li>{/each}{#each item.effects as effect}<li>
+						{formatInspectionEffect(effect)}
+					</li>{/each}
+			</ul>
+		</section>
+	{/if}
+	{#if item.useText !== null}<section>
+			<h3>Use</h3>
+			<p>{item.useText}</p>
+		</section>{/if}
+	{#if item.spells.length > 0}
+		<section aria-busy={spellReferences === null && spellFailure === null}>
+			<h3>Spells</h3>
+			{#if spellFailure !== null}<p class="inspection-diagnostic">
+					Spell names unavailable: {spellFailure}
+				</p>{/if}
+			<ul>
+				{#each item.spells as spell, index}<li>
+						{spellLabel(index)}{spell.activeEnchantment ? " (active)" : ""}
+					</li>{/each}
+			</ul>
+		</section>
+	{/if}
+	{#if item.inscription !== null}
+		<section>
+			<h3>Inscription</h3>
+			<blockquote>{item.inscription.text}</blockquote>
+			{#if item.inscription.scribe !== null && item.inscription.scribe.length > 0}<p
+					class="inspection-scribe"
+				>
+					— {item.inscription.scribe}
+				</p>{/if}
+		</section>
+	{/if}
+</article>

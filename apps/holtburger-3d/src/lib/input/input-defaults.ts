@@ -64,6 +64,8 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r" }],
+		/** Request authoritative examination facts for the selected entity. */
+		examine: [{ key: "e", shift: false, ctrl: false, alt: false, meta: false }],
 		/** Toggle peace/combat with either character on the backquote key. */
 		toggleCombat: [
 			{ key: "`", ctrl: false, alt: false, meta: false },
@@ -214,6 +216,8 @@ export const INPUT_DEFAULTS = {
 	pointer: {
 		/** Client click selection and drag orbit share one gesture. */
 		clientInteract: [0],
+		/** Select and examine a viewport entity. */
+		clientExamine: [2],
 		/** Activate the currently aimed precise jump. */
 		preciseJumpActivate: [0],
 		/** Drag to orbit the possessed Explorer character. */

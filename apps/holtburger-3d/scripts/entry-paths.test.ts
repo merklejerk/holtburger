@@ -33,6 +33,52 @@ describe("development launcher arguments", () => {
 		});
 	});
 
+	it("forwards the config bypass as a valueless main-process flag", () => {
+		expect(
+			partitionClientLaunchArguments([
+				"--account=ash",
+				"--ignore-config",
+				"--debug",
+			]),
+		).toEqual({
+			launchArguments: ["--account=ash", "--ignore-config"],
+			rendererArguments: ["--debug"],
+		});
+		expect(() =>
+			partitionClientLaunchArguments(["--account=ash", "--ignore-config=true"]),
+		).toThrow(/does not accept a value/);
+	});
+
+	it("keeps abbreviated client options in Electron main", () => {
+		expect(
+			partitionClientLaunchArguments([
+				"-s=world.example:9001",
+				"-h",
+				"localhost",
+				"-P",
+				"9010",
+				"-a=ash",
+				"-p",
+				"secret",
+				"-i",
+				"--debug",
+			]),
+		).toEqual({
+			launchArguments: [
+				"-s=world.example:9001",
+				"-h",
+				"localhost",
+				"-P",
+				"9010",
+				"-a=ash",
+				"-p",
+				"secret",
+				"-i",
+			],
+			rendererArguments: ["--debug"],
+		});
+	});
+
 	it("accepts separated client values without putting credentials in the renderer URL", () => {
 		expect(
 			stripClientLaunchArguments([

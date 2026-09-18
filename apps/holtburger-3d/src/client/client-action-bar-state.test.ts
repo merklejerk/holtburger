@@ -2,12 +2,15 @@ import { expect, it } from "vitest";
 import {
 	ACTION_SLOT_INDICES,
 	MAX_ACTION_BARS,
+} from "./client-action-bar-contract";
+import {
 	actionDigitIndex,
 	bindActionCell,
 	cloneActionBar,
 	cycleActionBar,
 	deleteActionBar,
 	initialActionBar,
+	nextActionBarId,
 	swapActionCells,
 } from "./client-action-bar-state";
 import {
@@ -20,6 +23,15 @@ it("cycles with wrapping and closes deleted sequence gaps", () => {
 	expect(cycleActionBar(bars, 2).map((bar) => bar.id)).toEqual([1, 3, 2]);
 	expect(cycleActionBar(bars, 3).map((bar) => bar.id)).toEqual([3, 1, 2]);
 	expect(deleteActionBar(bars, 2).map((bar) => bar.id)).toEqual([1, 3]);
+});
+it("derives the lowest unused action bar identity", () => {
+	expect(nextActionBarId([])).toBe(1);
+	expect(
+		nextActionBarId([
+			{ ...initialActionBar(), id: 1 },
+			{ ...initialActionBar(), id: 3 },
+		]),
+	).toBe(2);
 });
 it("preserves limits and independently editable clone bindings", () => {
 	let bars = bindActionCell(
@@ -66,7 +78,9 @@ it("swaps sparse contents atomically across bars", () => {
 });
 it("maps digit labels and rejects non-digit commands", () => {
 	for (const slot of ACTION_SLOT_INDICES)
-		expect(actionDigitIndex(String((slot + 1) % MAX_ACTION_BARS))).toBe(slot);
+		expect(
+			actionDigitIndex(String((slot + 1) % ACTION_SLOT_INDICES.length)),
+		).toBe(slot);
 	expect(actionDigitIndex("10")).toBeNull();
 	expect(actionDigitIndex("Enter")).toBeNull();
 });

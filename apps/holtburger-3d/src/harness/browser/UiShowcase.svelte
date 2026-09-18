@@ -24,7 +24,11 @@
 		type ClientHudPlacement,
 		type ClientHudLayout,
 	} from "../../client/client-hud-layout";
-	import type { ClientChatLine } from "../../client/client-chat-policy";
+	import {
+		CLIENT_CHAT_FILTER_TAGS,
+		type ClientChatFilterTag,
+		type ClientChatLine,
+	} from "../../client/client-chat-policy";
 	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
 
 	provideAppInputPolicy();
@@ -167,6 +171,9 @@
 			kind: "error",
 			message: "You are too far away.",
 		},
+	]);
+	let chatFilters = $state<readonly ClientChatFilterTag[]>([
+		...CLIENT_CHAT_FILTER_TAGS,
 	]);
 	async function send(message: string): Promise<void> {
 		messages = [
@@ -357,7 +364,12 @@
 					onInteract={() => {}}
 					onSplit={() => {}}
 				/>{/snippet}
-			{#snippet chat()}<ClientChat {messages} onSend={send} />{/snippet}
+			{#snippet chat()}<ClientChat
+					{messages}
+					onSend={send}
+					enabledTags={chatFilters}
+					onEnabledTagsChange={(value) => (chatFilters = value)}
+				/>{/snippet}
 			{#snippet fps()}<ClientFpsCounter
 					readFrameRates={() => ({ capped: 60, uncapped: 120 })}
 				/>{/snippet}

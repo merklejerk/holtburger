@@ -12,8 +12,8 @@
 		ACTION_SLOT_INDICES,
 		MAX_ACTION_BARS,
 		type ActionSlotIndex,
-		type ClientActionBar,
-	} from "./client-action-bar-state";
+	} from "./client-action-bar-contract";
+	import type { ClientActionBar } from "./client-action-bar-state";
 	import {
 		type ActionBarGeometry,
 		actionBarGrid,
@@ -143,7 +143,7 @@
 			// A tiny viewport scrolls the fixed-size grid rather than losing or shrinking cells.
 			surface
 				.querySelector<HTMLElement>(
-					`[data-action-cell="${(focused + 1) % MAX_ACTION_BARS}"]`,
+					`[data-action-cell="${(focused + 1) % ACTION_SLOT_INDICES.length}"]`,
 				)
 				?.scrollIntoView({ block: "nearest", inline: "nearest" });
 			return;
@@ -252,7 +252,7 @@
 					>
 						<ActionCell
 							bar={bar.id}
-							digit={String((slot + 1) % MAX_ACTION_BARS)}
+							digit={String((slot + 1) % ACTION_SLOT_INDICES.length)}
 							{content}
 							label={content === null
 								? "Empty"

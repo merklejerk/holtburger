@@ -12,8 +12,9 @@
 	import type { ItemDragSession } from "./client-item-drag";
 	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientItemDrag } from "./client-item-drag";
+	import type { ActionSlotIndex } from "./client-action-bar-contract";
 	import {
-		initialActionBar,
+		nextActionBarId,
 		requireActionBar,
 		bindActionCell,
 		swapActionCells,
@@ -21,7 +22,6 @@
 		cloneActionBar,
 		deleteActionBar,
 		type ClientActionBar,
-		type ActionSlotIndex,
 	} from "./client-action-bar-state";
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import {
@@ -34,6 +34,9 @@
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	interface Props {
+		/** Character-owned complete action-bar configuration. */
+		readonly bars: readonly ClientActionBar[];
+		readonly onBarsChange: (bars: readonly ClientActionBar[]) => void;
 		/** Expose the mounted item gesture owner to common HUD cancellation. */
 		onDragOwner: (owner: ClientItemDrag | null) => void;
 		/** Resolve world inventory destinations without changing selection. */
@@ -56,6 +59,8 @@
 		viewport: ClientHudViewport;
 	}
 	let {
+		bars,
+		onBarsChange,
 		root,
 		onDragOwner,
 		inventory,
@@ -68,8 +73,6 @@
 		onPickInventoryTarget,
 		onInventoryNotice,
 	}: Props = $props();
-	let bars = $state<readonly ClientActionBar[]>([initialActionBar()]);
-	let nextId = 2;
 	// Readers belong to mounted surfaces; cloning pulls geometry once at the user action.
 	const geometry = new Map<number, () => ActionBarGeometry>();
 	function readGeometry(id: number): ActionBarGeometry {
@@ -80,20 +83,18 @@
 	}
 	/** Bounded UI sample; the inventory owner retains authoritative item facts. */
 	let items = $state<ReadonlyMap<number, ActionItemDisplay>>(new Map());
-	/** Fresh identities retire mounted focus, menus, geometry readers, and drag-source elements together. */
-	function resetBars() {
-		bars = [{ ...initialActionBar(), id: nextId++ }];
-	}
 	function change(bar: ClientActionBar) {
-		bars = bars.map((current) => (current.id === bar.id ? bar : current));
+		onBarsChange(
+			bars.map((current) => (current.id === bar.id ? bar : current)),
+		);
 	}
 	function menu(id: number, operation: "clone" | "cycle" | "delete") {
 		switch (operation) {
 			case "cycle":
-				bars = cycleActionBar(bars, id);
+				onBarsChange(cycleActionBar(bars, id));
 				break;
 			case "delete":
-				bars = deleteActionBar(bars, id);
+				onBarsChange(deleteActionBar(bars, id));
 				break;
 			case "clone": {
 				const source = requireActionBar(bars, id);
@@ -118,10 +119,12 @@
 					viewport,
 					sourceGeometry.preferred,
 				);
-				bars = cloneActionBar(bars, id, {
-					id: nextId++,
-					anchor: { horizontal, vertical },
-				});
+				onBarsChange(
+					cloneActionBar(bars, id, {
+						id: nextActionBarId(bars),
+						anchor: { horizontal, vertical },
+					}),
+				);
 				break;
 			}
 		}
@@ -154,7 +157,8 @@
 			)
 		)
 			return;
-		bars = reconcileActionBars(bars, session.entities.read());
+		const reconciled = reconcileActionBars(bars, session.entities.read());
+		if (reconciled !== bars) onBarsChange(reconciled);
 	}
 
 	onMount(() => {
@@ -171,13 +175,14 @@
 			{
 				read: (cell) => requireActionBar(bars, cell.bar).slots[cell.slot],
 				bind: (cell, content) => {
-					bars = bindActionCell(bars, cell, content);
+					onBarsChange(bindActionCell(bars, cell, content));
 				},
 				transfer: (source, target) => {
-					bars =
+					onBarsChange(
 						target === null
 							? bindActionCell(bars, source, null)
-							: swapActionCells(bars, source, target);
+							: swapActionCells(bars, source, target),
+					);
 				},
 			},
 			() => interactions.cancel(),
@@ -191,19 +196,11 @@
 		let retained = new Set<string>();
 		let disposed = false;
 		let sampling = false;
-		let playerGuid: number | null = null;
-		// Replacement snapshots retire old-character bindings before supply reconciliation.
-		const acceptPlayer = (guid: number | null) => {
-			if (guid === null || guid === playerGuid) return;
-			if (playerGuid !== null) resetBars();
-			playerGuid = guid;
-		};
 		const sample = async () => {
 			if (disposed || sampling) return;
 			sampling = true;
 			try {
 				const view = inventory.readItems();
-				acceptPlayer(view.playerGuid);
 				const keys = new Set<string>();
 				const next = new Map<number, ActionItemDisplay>();
 				for (const bar of bars)
@@ -264,20 +261,12 @@
 			void sample();
 		}, CLIENT_TUNING.inventory.displayIntervalMs);
 		const unsubscribe = session.subscribe((event) => {
-			if (event.type === "current-state")
-				acceptPlayer(event.state.localPlayerGuid);
 			if (
 				event.type === "entities" ||
 				event.type === "current-state" ||
 				(event.type === "lifecycle" && event.lifecycle.kind === "in-world")
 			)
 				reconcile();
-			if (
-				event.type === "lifecycle" &&
-				(event.lifecycle.kind === "entering-world" ||
-					event.lifecycle.kind === "character-selection")
-			)
-				resetBars();
 		});
 		return () => {
 			disposed = true;

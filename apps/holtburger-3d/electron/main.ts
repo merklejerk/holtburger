@@ -1,11 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildEntryPath, requireEntry } from "../scripts/entry-paths.mjs";
 import {
+	electronApplicationArguments,
 	isClientLaunchArgument,
 	parseClientLaunchArguments,
 	type ClientLaunchConfiguration,
@@ -22,15 +23,35 @@ import type {
 	HostCommandName,
 	HostMode,
 } from "../src/lib/host/host-transport.js";
+import type { ClientWindowSettings } from "../src/client/client-settings-contract.js";
+import {
+	ClientSettingsStore,
+	type ClientSettingsReadMode,
+} from "./client-settings-store.js";
+import { clientCharacterProfileKey } from "./client-profile-key.js";
+import { clientUserDataPath } from "./client-user-data.js";
+import { clientWindowBoundsReachable } from "./client-window-settings.js";
 
 const WINDOW_BACKGROUND_COLOR = "#0b0a08";
 const INITIAL_WINDOW_CONTENT_SIZE = Object.freeze({ width: 1440, height: 900 });
+const WINDOW_SETTINGS_WRITE_DELAY_MS = 250;
+
+if (!app.isPackaged) {
+	const developmentUserData = clientUserDataPath(
+		app.getPath("appData"),
+		app.getName(),
+		false,
+	);
+	mkdirSync(developmentUserData, { recursive: true });
+	app.setPath("userData", developmentUserData);
+}
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let hostClient: SidecarHostClient | undefined;
 let quitting = false;
 let exitCode = 0;
 let fatalReported = false;
+let flushClientSettings: (() => Promise<void>) | undefined;
 const hostReady = createHostReadyGate<SidecarHostClient>();
 
 // The client dev entry uses a separate default port so two worktrees cannot silently share a
@@ -47,12 +68,12 @@ function entryArguments(): {
 	title: string;
 	mode: HostMode;
 	clientStartup?: ClientLaunchConfiguration;
+	ignorePersistedConfig: boolean;
 } {
-	const processArguments = process.argv.slice(2);
-	const entryArguments =
-		processArguments[0] === "." || processArguments[0] === app.getAppPath()
-			? processArguments.slice(1)
-			: processArguments;
+	const entryArguments = electronApplicationArguments(
+		process.argv,
+		process.defaultApp === true,
+	);
 	const [entryName, ...rawArgs] = entryArguments;
 	const release = rawArgs.includes("--release");
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
@@ -60,10 +81,12 @@ function entryArguments(): {
 	const entry = requireEntry(selectedEntryName);
 	const mode: HostMode = selectedEntryName === "client" ? "client" : "explorer";
 	let clientStartup: ClientLaunchConfiguration | undefined;
+	let ignorePersistedConfig = false;
 	let rendererArguments: readonly string[] = entryArgs;
 	if (mode === "client") {
 		const parsed = parseClientLaunchArguments(entryArgs);
 		clientStartup = parsed.startup;
+		ignorePersistedConfig = parsed.ignorePersistedConfig;
 		rendererArguments = parsed.rendererArguments;
 	} else {
 		const clientArgument = entryArgs.find(isClientLaunchArgument);
@@ -78,6 +101,7 @@ function entryArguments(): {
 		title: entry.title + (release ? " (release host)" : ""),
 		mode,
 		clientStartup,
+		ignorePersistedConfig,
 	};
 }
 
@@ -222,11 +246,83 @@ function installIpcBridge(
 	});
 }
 
-function createWindow(entry: {
-	path: string;
-	title: string;
-	mode: HostMode;
-}): BrowserWindow {
+function requireApplicationFrame(
+	event: Electron.IpcMainInvokeEvent,
+	window: BrowserWindow,
+): void {
+	const applicationContents = window.webContents;
+	if (
+		applicationContents.isDestroyed() ||
+		event.sender !== applicationContents ||
+		event.senderFrame !== applicationContents.mainFrame
+	)
+		throw new Error(
+			"settings requests are accepted only from the application frame",
+		);
+}
+
+function requireCharacterGuid(value: unknown): number {
+	if (
+		typeof value !== "number" ||
+		!Number.isInteger(value) ||
+		value < 0 ||
+		value > 0xffff_ffff
+	)
+		throw new Error("character GUID must be an unsigned 32-bit integer");
+	return value;
+}
+
+function installSettingsIpcBridge(
+	window: BrowserWindow,
+	store: ClientSettingsStore,
+	startup: ClientLaunchConfiguration,
+	ignorePersistedConfig: boolean,
+): void {
+	const readMode: ClientSettingsReadMode = ignorePersistedConfig
+		? "fresh"
+		: "persisted";
+	ipcMain.handle("settings:load-user", (event) => {
+		requireApplicationFrame(event, window);
+		return store.readUser(readMode);
+	});
+	ipcMain.handle("settings:save-user", async (event, settings: unknown) => {
+		requireApplicationFrame(event, window);
+		await store.saveUser(settings);
+	});
+	ipcMain.handle("settings:load-character", (event, guid: unknown) => {
+		requireApplicationFrame(event, window);
+		return store.readCharacter(
+			clientCharacterProfileKey(startup, requireCharacterGuid(guid)),
+			readMode,
+		);
+	});
+	ipcMain.handle("settings:save-character", async (event, request: unknown) => {
+		requireApplicationFrame(event, window);
+		if (typeof request !== "object" || request === null)
+			throw new Error("character settings request is malformed");
+		if (!("characterGuid" in request) || !("settings" in request))
+			throw new Error("character settings request is incomplete");
+		const guid = requireCharacterGuid(request.characterGuid);
+		const lastKnownName =
+			"lastKnownName" in request ? request.lastKnownName : null;
+		if (lastKnownName !== null && typeof lastKnownName !== "string")
+			throw new Error("last-known character name must be a string or null");
+		await store.saveCharacter(
+			clientCharacterProfileKey(startup, guid),
+			request.settings,
+			lastKnownName,
+		);
+	});
+}
+
+function createWindow(
+	entry: {
+		path: string;
+		title: string;
+		mode: HostMode;
+	},
+	restoredWindow: ClientWindowSettings | null,
+): BrowserWindow {
 	const developmentOrigin = electronDevOrigin(entry.mode);
 	const window = new BrowserWindow({
 		title: entry.title,
@@ -240,6 +336,7 @@ function createWindow(entry: {
 		backgroundColor: WINDOW_BACKGROUND_COLOR,
 		webPreferences: {
 			preload: join(currentDirectory, "preload.cjs"),
+			additionalArguments: [`--holtburger-mode=${entry.mode}`],
 			nodeIntegration: false,
 			contextIsolation: true,
 			sandbox: true,
@@ -252,6 +349,17 @@ function createWindow(entry: {
 		INITIAL_WINDOW_CONTENT_SIZE.width,
 		INITIAL_WINDOW_CONTENT_SIZE.height,
 	);
+	if (restoredWindow !== null) {
+		if (
+			clientWindowBoundsReachable(
+				restoredWindow.normalBounds,
+				screen.getAllDisplays().map((display) => display.workArea),
+			)
+		)
+			window.setBounds(restoredWindow.normalBounds);
+		else window.center();
+		if (restoredWindow.maximized) window.maximize();
+	}
 	window.once("ready-to-show", () => window.show());
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 	window.webContents.on("render-process-gone", (_event, details) => {
@@ -305,6 +413,49 @@ function createWindow(entry: {
 	return window;
 }
 
+function installWindowSettings(
+	window: BrowserWindow,
+	store: ClientSettingsStore,
+): () => Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let failureReported = false;
+	const write = async (): Promise<void> => {
+		timer = undefined;
+		if (window.isDestroyed()) return;
+		try {
+			await store.updateWindow({
+				normalBounds: window.getNormalBounds(),
+				maximized: window.isMaximized(),
+			});
+			failureReported = false;
+		} catch (error) {
+			console.error("client window settings save failed", error);
+			if (!failureReported) {
+				failureReported = true;
+				dialog.showErrorBox(
+					"Holtburger settings could not be saved",
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+		}
+	};
+	const schedule = (): void => {
+		if (timer !== undefined) clearTimeout(timer);
+		timer = setTimeout(() => void write(), WINDOW_SETTINGS_WRITE_DELAY_MS);
+	};
+	window.on("move", schedule);
+	window.on("resize", schedule);
+	window.on("maximize", schedule);
+	window.on("unmaximize", schedule);
+	// Capture the constructor-negotiated normal bounds before renderer bootstrap can create v1.
+	void write();
+	return async () => {
+		if (timer !== undefined) clearTimeout(timer);
+		await write();
+		await store.flush();
+	};
+}
+
 function reportFatalError(title: string, error: unknown): void {
 	if (fatalReported) return;
 	fatalReported = true;
@@ -339,7 +490,49 @@ app.whenReady().then(async () => {
 		return;
 	}
 	Menu.setApplicationMenu(null);
-	const window = createWindow(entry);
+	let settingsStore: ClientSettingsStore | undefined;
+	if (entry.mode === "client") {
+		const primary = screen.getPrimaryDisplay().workArea;
+		settingsStore = new ClientSettingsStore(
+			join(app.getPath("userData"), "client-settings.json"),
+			{
+				normalBounds: {
+					x: Math.round(
+						primary.x + (primary.width - INITIAL_WINDOW_CONTENT_SIZE.width) / 2,
+					),
+					y: Math.round(
+						primary.y +
+							(primary.height - INITIAL_WINDOW_CONTENT_SIZE.height) / 2,
+					),
+					...INITIAL_WINDOW_CONTENT_SIZE,
+				},
+				maximized: false,
+			},
+		);
+		try {
+			await settingsStore.load();
+		} catch (error) {
+			reportFatalError("Holtburger client settings are invalid", error);
+			return;
+		}
+	}
+	// Native window restoration is independent of the renderer-owned config bypass.
+	const loadedUser = settingsStore?.readUser("persisted");
+	const window = createWindow(
+		entry,
+		loadedUser?.kind === "loaded"
+			? (settingsStore?.readWindow() ?? null)
+			: null,
+	);
+	if (settingsStore !== undefined && entry.clientStartup !== undefined) {
+		installSettingsIpcBridge(
+			window,
+			settingsStore,
+			entry.clientStartup,
+			entry.ignorePersistedConfig,
+		);
+		flushClientSettings = installWindowSettings(window, settingsStore);
+	}
 	installIpcBridge(window, entry.mode, entry.clientStartup);
 	try {
 		await startHost(window, entry.mode);
@@ -356,11 +549,16 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-	if (quitting || !hostClient) return;
+	if (quitting || (!hostClient && flushClientSettings === undefined)) return;
 	quitting = true;
 	event.preventDefault();
-	hostClient
-		.shutdown()
-		.catch((error) => console.error("host shutdown failed", error))
+	Promise.all([
+		hostClient?.shutdown() ?? Promise.resolve(),
+		flushClientSettings?.() ?? Promise.resolve(),
+	])
+		.catch((error) => {
+			exitCode = 1;
+			console.error("application shutdown failed", error);
+		})
 		.finally(() => app.exit(exitCode));
 });

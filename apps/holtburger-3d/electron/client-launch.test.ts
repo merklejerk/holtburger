@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { parseClientLaunchArguments } from "./client-launch";
+import {
+	electronApplicationArguments,
+	parseClientLaunchArguments,
+} from "./client-launch";
+
+describe("Electron application arguments", () => {
+	it("removes the development app path but retains the first packaged argument", () => {
+		expect(
+			electronApplicationArguments(
+				["/electron", "/app", "client", "--account=ash"],
+				true,
+			),
+		).toEqual(["client", "--account=ash"]);
+		expect(
+			electronApplicationArguments(
+				["/holtburger-3d", "client", "--account=ash"],
+				false,
+			),
+		).toEqual(["client", "--account=ash"]);
+	});
+});
 
 describe("parseClientLaunchArguments", () => {
 	it("resolves a server endpoint and keeps only non-credential args for the entry", () => {
@@ -19,6 +39,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "secret",
 			},
+			ignorePersistedConfig: false,
 			rendererArguments: ["--query=landblock=0x7fffff"],
 		});
 	});
@@ -40,6 +61,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "",
 			},
+			ignorePersistedConfig: false,
 			rendererArguments: [],
 		});
 	});
@@ -68,6 +90,49 @@ describe("parseClientLaunchArguments", () => {
 	it("rejects duplicate launch flags before startup", () => {
 		expect(() =>
 			parseClientLaunchArguments(["--account=ash", "--account=other"]),
+		).toThrow(/specified more than once/);
+	});
+
+	it("accepts the bare config bypass and rejects values", () => {
+		expect(
+			parseClientLaunchArguments(["--account=ash", "--ignore-config"]),
+		).toMatchObject({ ignorePersistedConfig: true });
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--ignore-config=true"]),
+		).toThrow(/does not accept a value/);
+	});
+
+	it("maps every one-character client option to its canonical field", () => {
+		expect(
+			parseClientLaunchArguments([
+				"-h",
+				"localhost",
+				"-P=9010",
+				"-a",
+				"ash",
+				"-p=secret",
+				"-i",
+			]),
+		).toEqual({
+			startup: {
+				host: "localhost",
+				port: 9010,
+				account: "ash",
+				password: "secret",
+			},
+			ignorePersistedConfig: true,
+			rendererArguments: [],
+		});
+		expect(
+			parseClientLaunchArguments(["-s", "world.example:9001", "-a", "ash"]),
+		).toMatchObject({
+			startup: { host: "world.example", port: 9001 },
+		});
+	});
+
+	it("detects duplicates across long and abbreviated spellings", () => {
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "-a", "other"]),
 		).toThrow(/specified more than once/);
 	});
 });

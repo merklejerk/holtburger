@@ -1,12 +1,10 @@
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import type { ClientHudPlacement } from "./client-hud-layout";
-
-/** Fixed address space shared by bar and cell digit shortcuts. */
-export const ACTION_SLOT_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
-/** Zero-based slot identity, preserved across gaps and shape changes. */
-export type ActionSlotIndex = (typeof ACTION_SLOT_INDICES)[number];
-/** Product limit, independent of adjustable visual tuning. */
-export const MAX_ACTION_BARS = ACTION_SLOT_INDICES.length;
+import {
+	ACTION_SLOT_INDICES,
+	MAX_ACTION_BARS,
+	type ActionSlotIndex,
+} from "./client-action-bar-contract";
 /** World-produced equivalence retained after a consumable instance disappears. */
 export type ConsumableIdentity = NonNullable<
 	Extract<ClientEntityFacts["description"], { kind: "known" }>["consumable"]
@@ -62,6 +60,13 @@ export function initialActionBar(): ClientActionBar {
 		},
 		slots: [null, null, null, null, null, null, null, null, null, null],
 	};
+}
+
+/** Allocate the lowest unused positive identity from the bounded live collection. */
+export function nextActionBarId(bars: readonly ClientActionBar[]): number {
+	for (let candidate = 1; candidate <= MAX_ACTION_BARS + 1; candidate += 1)
+		if (!bars.some((bar) => bar.id === candidate)) return candidate;
+	throw new Error("No action bar identity is available");
 }
 
 /** Fail loudly for stale internal identities rather than changing an unrelated bar. */
@@ -149,7 +154,7 @@ export function swapActionCells(
 export function actionDigitIndex(label: string): ActionSlotIndex | null {
 	return (
 		ACTION_SLOT_INDICES.find(
-			(index) => String((index + 1) % MAX_ACTION_BARS) === label,
+			(index) => String((index + 1) % ACTION_SLOT_INDICES.length) === label,
 		) ?? null
 	);
 }

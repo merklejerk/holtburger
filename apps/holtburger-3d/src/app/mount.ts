@@ -6,11 +6,10 @@ import "./ui-base.css";
 /** The application owns one document-wide theme selection. */
 export const uiThemes = createUiThemeLoader(document);
 
-export async function mountEntry(
-	App: Component,
+async function prepareMountTarget(
 	themeUrl: string = defaultUiThemeUrl,
 	overrideUrl: string | null = null,
-): Promise<void> {
+): Promise<HTMLElement> {
 	const target = document.getElementById("app");
 
 	if (target === null) {
@@ -20,5 +19,28 @@ export async function mountEntry(
 	// Publish appearance before any component mounts; this never owns runtime lifetime.
 	await uiThemes.replace(themeUrl, overrideUrl);
 	target.classList.add("ui-theme");
-	mount(App, { target });
+	return target;
+}
+
+export async function mountEntry(
+	App: Component,
+	themeUrl: string = defaultUiThemeUrl,
+	overrideUrl: string | null = null,
+): Promise<void> {
+	mount(App, { target: await prepareMountTarget(themeUrl, overrideUrl) });
+}
+
+/** Mount a production entry whose bootstrap produces required component props. */
+export async function mountEntryWithProps<
+	Props extends Record<string, unknown>,
+>(
+	App: Component<Props>,
+	props: Props,
+	themeUrl: string = defaultUiThemeUrl,
+	overrideUrl: string | null = null,
+): Promise<void> {
+	mount(App, {
+		target: await prepareMountTarget(themeUrl, overrideUrl),
+		props,
+	});
 }

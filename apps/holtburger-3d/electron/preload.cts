@@ -48,3 +48,28 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 		return Promise.resolve();
 	},
 });
+
+if (process.argv.includes("--holtburger-mode=client")) {
+	contextBridge.exposeInMainWorld("holtburgerSettings", {
+		loadUser(): Promise<unknown> {
+			return ipcRenderer.invoke("settings:load-user");
+		},
+		saveUser(settings: unknown): Promise<void> {
+			return ipcRenderer.invoke("settings:save-user", settings);
+		},
+		loadCharacter(characterGuid: number): Promise<unknown> {
+			return ipcRenderer.invoke("settings:load-character", characterGuid);
+		},
+		saveCharacter(
+			characterGuid: number,
+			settings: unknown,
+			lastKnownName: string | null,
+		): Promise<void> {
+			return ipcRenderer.invoke("settings:save-character", {
+				characterGuid,
+				settings,
+				lastKnownName,
+			});
+		},
+	});
+}

@@ -3,9 +3,9 @@ import type {
 	ClientEntityFacts,
 } from "./client-entity-mirror";
 import { bindingAction, sameConsumableIdentity } from "./client-action-item";
+import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
 import {
 	bindActionCell,
-	ACTION_SLOT_INDICES,
 	type ClientActionBar,
 } from "./client-action-bar-state";
 

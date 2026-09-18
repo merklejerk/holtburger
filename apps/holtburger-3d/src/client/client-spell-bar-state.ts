@@ -11,15 +11,20 @@ export interface SpellCellAddress {
 	/** Zero-based position within that bar. */
 	readonly slot: InputDigitIndex;
 }
-/** Session-local configuration, independent of visibility and loaded artwork. */
-export interface ClientSpellBarState {
-	/** Tab presented by the HUD and addressed by digit activation. */
-	readonly selected: InputDigitIndex;
+/** Character-scoped bindings, independent of visibility, selection, and loaded artwork. */
+export interface ClientSpellBarBindings {
 	/** Stable addresses containing only spell IDs, never prepared display data. */
 	readonly tabs: Ten<Ten<number | null>>;
 }
-/** Create ten independent empty tabs with the first selected. */
-export function initialSpellBar(): ClientSpellBarState {
+
+/** Session-local presentation composed with durable character bindings. */
+export interface ClientSpellBarState extends ClientSpellBarBindings {
+	/** Ephemeral tab presented by the HUD and addressed by digit activation. */
+	readonly selected: InputDigitIndex;
+}
+
+/** Create ten independent empty character-scoped binding tabs. */
+export function initialSpellBarBindings(): ClientSpellBarBindings {
 	const empty = (): Ten<number | null> => [
 		null,
 		null,
@@ -33,7 +38,6 @@ export function initialSpellBar(): ClientSpellBarState {
 		null,
 	];
 	return {
-		selected: 0,
 		tabs: [
 			empty(),
 			empty(),
@@ -47,6 +51,11 @@ export function initialSpellBar(): ClientSpellBarState {
 			empty(),
 		],
 	};
+}
+
+/** Compose empty bindings with the first ephemeral tab selected. */
+export function initialSpellBar(): ClientSpellBarState {
+	return { selected: 0, ...initialSpellBarBindings() };
 }
 /** Replace one position without weakening the fixed-length contract. */
 function replace<T>(values: Ten<T>, index: InputDigitIndex, value: T): Ten<T> {

@@ -201,9 +201,24 @@ npm run dev:client -- --vite-port 1432
 ```
 
 For client mode, `--port` remains the ACE server port; use `--vite-port` for the renderer server.
-The `--server`, `--host`, `--port`, `--account`, and `--password` launch options accept either
-`--name=value` or `--name value` spelling. Connection credentials stay in Electron main and are
-never copied into the renderer URL.
+Client launch options accept long and one-character spellings:
+
+| Long option       | Short option | Value               |
+| ----------------- | ------------ | ------------------- |
+| `--server`        | `-s`         | Host or `host:port` |
+| `--host`          | `-h`         | Host                |
+| `--port`          | `-P`         | ACE server port     |
+| `--account`       | `-a`         | Account name        |
+| `--password`      | `-p`         | Password            |
+| `--ignore-config` | `-i`         | No value            |
+
+Valued long and short options accept either `--name=value`/`-x=value` or separated values.
+Connection credentials stay in Electron main and are never copied into the renderer URL.
+
+Pass `--ignore-config` or `-i` to treat persisted user and character settings as absent for that
+run. Native window placement still restores normally. Persistence remains enabled, so the newly
+defaulted user settings and any character settings edited during the session overwrite their
+corresponding saved values.
 
 The sidecar has one explicit composition root and mode-owned capabilities. Shared content lives in
 `host/src/shared_host_content.rs`; Explorer authority and client authority live in

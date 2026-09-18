@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildEntryPath, requireEntry } from "../scripts/entry-paths.mjs";
+import { applicationMenuTemplate } from "./application-menu.js";
 import {
 	electronApplicationArguments,
 	isClientLaunchArgument,
@@ -489,7 +490,10 @@ app.whenReady().then(async () => {
 		reportFatalError("Holtburger 3D launch arguments are invalid", error);
 		return;
 	}
-	Menu.setApplicationMenu(null);
+	const menuTemplate = applicationMenuTemplate(process.platform);
+	Menu.setApplicationMenu(
+		menuTemplate === null ? null : Menu.buildFromTemplate(menuTemplate),
+	);
 	let settingsStore: ClientSettingsStore | undefined;
 	if (entry.mode === "client") {
 		const primary = screen.getPrimaryDisplay().workArea;

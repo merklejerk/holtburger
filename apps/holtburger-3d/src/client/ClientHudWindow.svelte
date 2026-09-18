@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, type Snippet } from "svelte";
+	import { onDestroy, onMount, type Snippet } from "svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import ClientHudIcon, {
 		type ClientHudIconName,
@@ -22,6 +22,8 @@
 		/** Same glyph used by the panel's launcher in the system shortcut dock. */
 		readonly icon: ClientHudIconName;
 		readonly viewport: ClientHudViewport;
+		readonly zIndex?: number;
+		readonly onFocus?: () => void;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
@@ -34,6 +36,8 @@
 		title,
 		icon,
 		viewport,
+		zIndex,
+		onFocus,
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
@@ -43,6 +47,9 @@
 	);
 	let cancelPointerGesture: (() => void) | null = null;
 	onDestroy(() => cancelPointerGesture?.());
+	onMount(() => {
+		onFocus?.();
+	});
 	const resizeHandles: readonly {
 		readonly name: string;
 		readonly edges: ClientPanelResizeEdges;
@@ -135,7 +142,10 @@
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}
 	style:height={`${resolved.height}px`}
+	style:z-index={zIndex}
 	aria-label={title}
+	onpointerdowncapture={onFocus}
+	onfocusin={onFocus}
 >
 	<header
 		class="hud-window-titlebar ui-frame"
@@ -169,7 +179,7 @@
 	@layer components {
 		.hud-window {
 			position: absolute;
-			z-index: 4;
+			z-index: 100;
 			display: grid;
 			grid-template-rows: auto minmax(0, 1fr);
 			overflow: visible;

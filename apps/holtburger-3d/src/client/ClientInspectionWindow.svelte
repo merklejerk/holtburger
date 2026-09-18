@@ -30,6 +30,8 @@
 		readonly placement: ClientHudPlacement;
 		readonly viewport: ClientHudViewport;
 		readonly previewHeight: number;
+		readonly zIndex?: number;
+		readonly onFocus?: () => void;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		readonly onPreviewHeightChange: (height: number) => void;
@@ -44,6 +46,8 @@
 		placement,
 		viewport,
 		previewHeight,
+		zIndex,
+		onFocus,
 		onClose,
 		onPlacementChange,
 		onPreviewHeightChange,
@@ -96,6 +100,8 @@
 	title={inspection.name}
 	{placement}
 	{viewport}
+	{zIndex}
+	{onFocus}
 	{onClose}
 	{onPlacementChange}
 	minWidth={CLIENT_UI_DEFAULTS.inspection.minSize.width}

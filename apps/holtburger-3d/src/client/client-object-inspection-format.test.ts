@@ -9,6 +9,7 @@ import {
 	formatPlayerKillerStatus,
 	formatWieldRequirement,
 	humanizeInspectionName,
+	truncateInspectionDescription,
 } from "./client-object-inspection-format";
 
 describe("object inspection formatting", () => {
@@ -41,6 +42,15 @@ describe("object inspection formatting", () => {
 		expect(formatInspectionDuration(3_599)).toBe("59m 59s");
 		expect(formatInspectionDuration(2_220)).toBe("37m");
 		expect(formatInspectionDuration(30)).toBe("30s");
+	});
+
+	it("prefers word boundaries while bounding uninterrupted descriptions", () => {
+		expect(truncateInspectionDescription("Short text", 10)).toBeNull();
+		expect(truncateInspectionDescription("alpha beta gamma", 10)).toBe(
+			"alpha beta",
+		);
+		expect(truncateInspectionDescription("alpha beta gamma", 8)).toBe("alpha");
+		expect(truncateInspectionDescription("uninterrupted", 6)).toBe("uninte");
 	});
 
 	it("preserves retail's character PK labels", () => {

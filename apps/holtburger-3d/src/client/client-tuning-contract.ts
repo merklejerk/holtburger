@@ -56,6 +56,8 @@ export interface ClientTuning {
 	readonly objectInspection: {
 		/** Delay between completed refreshes while an inspection window remains open. */
 		readonly refreshIntervalMs: number;
+		/** Maximum item-description characters shown before explicit expansion. */
+		readonly collapsedDescriptionCharacters: number;
 	};
 	/** Isolated creature-inspection model presentation and local controls. */
 	readonly objectPreview: {

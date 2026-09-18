@@ -361,6 +361,7 @@
 		.inspection-scroll :global(.inspection-artwork) {
 			display: grid;
 			justify-items: center;
+			align-self: start;
 			gap: 4px;
 			width: 84px;
 			text-align: center;

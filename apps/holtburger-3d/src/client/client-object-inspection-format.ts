@@ -133,6 +133,18 @@ export function formatInspectionDuration(seconds: number): string {
 	return sign + parts.join(" ");
 }
 
+/** Prefer a word-boundary collapse, splitting only an uninterrupted token. */
+export function truncateInspectionDescription(
+	description: string,
+	maximumCharacters: number,
+): string | null {
+	if (description.length <= maximumCharacters) return null;
+	const prefix = description.slice(0, maximumCharacters);
+	if (/\s/u.test(description[maximumCharacters] ?? "")) return prefix.trimEnd();
+	const partialWord = prefix.search(/\s+\S*$/u);
+	return partialWord > 0 ? prefix.slice(0, partialWord).trimEnd() : prefix;
+}
+
 /** Wield clauses are already semantic; this layer owns only user-facing phrasing. */
 export function formatWieldRequirement(requirement: WieldRequirement): string {
 	const { type, data } = requirement;

@@ -1113,6 +1113,13 @@
 	}
 
 	type InspectionResponseKind = "item" | "creature" | "rejected" | "missing";
+	const itemDescriptionPrefix = "Archived appraisal context. ";
+	const longItemDescription = `${itemDescriptionPrefix.repeat(
+		Math.floor(
+			CLIENT_TUNING.objectInspection.collapsedDescriptionCharacters /
+				itemDescriptionPrefix.length,
+		) + 1,
+	)}This final archival sentence must remain hidden until the reader explicitly expands the description.`;
 	interface ObjectInspectionProbeSnapshot {
 		readonly commandCount: number;
 		readonly commands: readonly unknown[];
@@ -1272,8 +1279,7 @@
 				inspection: {
 					guid,
 					name: "Ancient Atlan Sword of the Long Appraisal",
-					description:
-						"An extensively documented blade used to prove that long descriptions remain readable without changing the selected target or forcing the inspection window beyond the viewport.",
+					description: longItemDescription,
 					level: 80,
 					details: {
 						kind: "item",

@@ -183,6 +183,16 @@ export async function probeObjectInspection(
 		assert.match(item.window.text, /9,802 \/ 10,000/);
 		assert.match(item.window.text, /Harm Other I \(active\)/);
 		assert.match(item.window.text, /definition missing/);
+		assert.match(item.window.text, /\[See more\]/);
+		assert.doesNotMatch(item.window.text, /final archival sentence/);
+		await click(".inspection-description-toggle");
+		item = await snapshot();
+		assert.match(item.window.text, /final archival sentence/);
+		assert.match(item.window.text, /\[Hide\]/);
+		await click(".inspection-description-toggle");
+		item = await snapshot();
+		assert.doesNotMatch(item.window.text, /final archival sentence/);
+		assert.match(item.window.text, /\[See more\]/);
 		assert.ok(item.window.scrollHeight > item.window.clientHeight);
 		await settle(400);
 		item = await snapshot();

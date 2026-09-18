@@ -46,6 +46,7 @@ export const CLIENT_TUNING = {
 	portalTransition: CLIENT_PORTAL_TRANSITION,
 	objectInspection: {
 		refreshIntervalMs: 1_000,
+		collapsedDescriptionCharacters: 140,
 	},
 	objectPreview: {
 		height: {

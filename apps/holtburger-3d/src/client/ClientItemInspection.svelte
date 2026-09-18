@@ -4,6 +4,7 @@
 	import type { HexRgbaColor } from "../lib/frontend-color";
 	import ClientInspectionArtwork from "./ClientInspectionArtwork.svelte";
 	import type { ClientSpellServices } from "./client-spells";
+	import { CLIENT_TUNING } from "./client-tuning";
 	import type {
 		ItemInspection,
 		ObjectInspection,
@@ -20,6 +21,7 @@
 		humanizeInspectionName,
 		inspectionBonusLabel,
 		inspectionEnchantmentClass,
+		truncateInspectionDescription,
 	} from "./client-object-inspection-format";
 
 	interface Props {
@@ -33,6 +35,15 @@
 	const { inspection, nameColor, item, spells, icons }: Props = $props();
 	const statuses = $derived(formatItemStatuses(item.status));
 	const imbues = $derived(formatInspectionImbuedEffects(item.imbuedEffects));
+	const collapsedDescription = $derived(
+		inspection.description === null
+			? null
+			: truncateInspectionDescription(
+					inspection.description,
+					CLIENT_TUNING.objectInspection.collapsedDescriptionCharacters,
+				),
+	);
+	let descriptionExpanded = $state(false);
 	let spellReferences = $state<readonly SpellReference[] | null>(null);
 	let spellFailure = $state<string | null>(null);
 
@@ -94,7 +105,21 @@
 					Level {formatInspectionNumber(inspection.level)}
 				</p>{/if}
 			{#if inspection.description !== null}<p class="inspection-description">
-					{inspection.description}
+					{#if collapsedDescription !== null && !descriptionExpanded}
+						{collapsedDescription}…
+					{:else}
+						{inspection.description}
+					{/if}
+					{#if collapsedDescription !== null}
+						{" "}<button
+							type="button"
+							class="inspection-description-toggle"
+							aria-expanded={descriptionExpanded}
+							onclick={() => (descriptionExpanded = !descriptionExpanded)}
+						>
+							{descriptionExpanded ? "[Hide]" : "[See more]"}
+						</button>
+					{/if}
 				</p>{/if}
 		</div>
 	</header>
@@ -364,3 +389,18 @@
 		</section>
 	{/if}
 </article>
+
+<style>
+	@layer components {
+		.inspection-description-toggle {
+			appearance: none;
+			padding: 0;
+			border: 0;
+			background: transparent;
+			color: var(--ui-color-accent);
+			font: inherit;
+			text-decoration: underline;
+			cursor: pointer;
+		}
+	}
+</style>

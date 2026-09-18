@@ -3,6 +3,7 @@ import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	areStaticObjectDrawsCompatible,
 	createObjectSubmissionPhases,
+	dynamicObjectPhase,
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
 	objectBlendPolicy,
@@ -16,6 +17,37 @@ import {
 } from "./webgl2-object-program";
 
 const TRANSPARENT_TUNING = SHARED_FRONTEND_TUNING.rendering.transparentObjects;
+
+describe("dynamicObjectPhase", () => {
+	it.each([
+		["opaque", "transparent", "opaque"],
+		["alpha-test", "opaque", "opaque"],
+		["transparent", "transparent", "transparent"],
+		["additive", "additive", "additive"],
+	] as const)(
+		"routes %s through opacity and retail visibility",
+		(ordering, partial, full) => {
+			expect(dynamicObjectPhase(ordering, 0, "normally-visible", false)).toBe(
+				"skip",
+			);
+			expect(dynamicObjectPhase(ordering, 0.5, "normally-visible", false)).toBe(
+				partial,
+			);
+			expect(dynamicObjectPhase(ordering, 1, "normally-visible", false)).toBe(
+				full,
+			);
+			expect(dynamicObjectPhase(ordering, 1, "degrade-hidden", false)).toBe(
+				"skip",
+			);
+			expect(dynamicObjectPhase(ordering, 0.5, "degrade-hidden", true)).toBe(
+				partial,
+			);
+			expect(dynamicObjectPhase(ordering, 0, "degrade-hidden", true)).toBe(
+				"skip",
+			);
+		},
+	);
+});
 
 describe("orderTransparentObjectRanges", () => {
 	it("orders nearby ranges exactly back-to-front by camera depth", () => {

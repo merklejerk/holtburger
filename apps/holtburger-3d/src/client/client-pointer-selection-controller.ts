@@ -120,6 +120,15 @@ export class ClientPointerSelectionController {
 		);
 	}
 
+	/** Resolve ordinary selection geometry for a caller-owned correlated action. */
+	acquireViewportSelection(
+		clientX: number,
+		clientY: number,
+		destination: ClientViewportTargetDestination,
+	): void {
+		this.#acquirePoint(clientX, clientY, destination, false);
+	}
+
 	/** Resolve an interaction target without mutating ordinary selection. */
 	acquireTarget(
 		clientX: number,

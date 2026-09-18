@@ -3,6 +3,7 @@ import {
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
 import { describe, expect, it } from "vitest";
+import inspectionFixture from "./fixtures/object-inspection-wire.json";
 
 import { landblockVector3 } from "../lib/assets/ac-frame";
 import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
@@ -66,6 +67,30 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("dispatches examination and emits the validated cold result", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.invocations.length = 0;
+		const results: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "object-inspection-result") results.push(event.result);
+		});
+
+		await session.examineEntity(inspectionFixture.item.guid);
+		expect(transport.invocations).toEqual([
+			{
+				command: "examine_client_entity",
+				args: { guid: inspectionFixture.item.guid },
+			},
+		]);
+		transport.emit("client-object-inspection-result", inspectionFixture.item);
+		expect(results).toEqual([inspectionFixture.item]);
+		await expect(session.examineEntity(-1)).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(1);
+		session.stop();
+	});
+
 	it("commits container access with pending contents and replaces it coherently after loss", async () => {
 		const transport = new FakeClientTransport();
 		const player = 1;

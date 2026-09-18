@@ -1,3 +1,4 @@
+use crate::inspection::InspectionSupplement;
 use holtburger_common::properties::WorldObjectProperties;
 use holtburger_protocol::messages::object::events::{
     IdentifyObjectResponseEventData, IdentifyResponseFlags,
@@ -13,6 +14,7 @@ pub(crate) struct IdentifyTarget<'a> {
     pub weapon_profile: &'a mut Option<WeaponProfile>,
     pub hook_profile: &'a mut Option<HookProfile>,
     pub armor_levels: &'a mut Option<ArmorLevels>,
+    pub inspection_supplement: &'a mut Option<InspectionSupplement>,
     pub spell_book: &'a mut Vec<u32>,
     pub armor_highlight: &'a mut Option<u16>,
     pub armor_color: &'a mut Option<u16>,
@@ -33,6 +35,7 @@ pub(crate) fn apply_identify_response(
         weapon_profile,
         hook_profile,
         armor_levels,
+        inspection_supplement,
         spell_book,
         armor_highlight,
         armor_color,
@@ -45,6 +48,11 @@ pub(crate) fn apply_identify_response(
     if !data.success {
         return false;
     }
+
+    *inspection_supplement = Some(InspectionSupplement::from_response(
+        &data.properties,
+        data.armor_levels.as_ref(),
+    ));
 
     let flags = data.flags;
 

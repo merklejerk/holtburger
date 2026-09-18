@@ -33,6 +33,7 @@ import { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system"
 import {
 	InlineObjectVisualTemplatePreparer,
 	ObjectVisualTemplateRepository,
+	ObjectVisualTemplateAssetRepository,
 	objectVisualTemplateKey,
 	type ObjectVisualTemplateAtlas,
 	type ObjectVisualTemplateAtlasClaim,
@@ -1578,7 +1579,7 @@ function createSystem(
 	const templates = new ObjectVisualTemplateRepository(
 		geometry,
 		new ReadyTemplateAtlas(),
-		preparer,
+		new ObjectVisualTemplateAssetRepository(preparer),
 		() => () => {},
 	);
 	const system = new DynamicEntitySystem<string>(

@@ -108,6 +108,10 @@ impl SharedHostContent {
             .repository
             .read_asset::<XpTable>("XP table")
             .context("failed to load XP table for client bootstrap")?;
+        let character_titles = self
+            .repository
+            .read_character_title_catalog()
+            .context("failed to load character-title catalog for client bootstrap")?;
         let motion_catalog = self.motion_catalog.as_ref().clone();
         let soul_emote_catalog = self
             .repository
@@ -117,6 +121,7 @@ impl SharedHostContent {
             skill_table,
             spell_table,
             xp_table,
+            character_titles,
             motion_catalog,
             soul_emote_catalog,
         );

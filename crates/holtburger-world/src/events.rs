@@ -78,6 +78,8 @@ pub enum WorldEvent {
         pos: WorldPosition,
     },
     EntityIdentified(Box<Entity>),
+    /// Cold appraisal result populated once after any successful world merge.
+    ObjectInspectionResult(crate::inspection::ObjectInspectionResult),
     /// Complete visual appearance changed without replacing the entity incarnation.
     EntityAppearanceUpdated {
         guid: Guid,

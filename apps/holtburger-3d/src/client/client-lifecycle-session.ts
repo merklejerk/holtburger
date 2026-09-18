@@ -25,6 +25,15 @@ import {
 	type ClientInventoryPreviewResult,
 } from "./client-inventory-contract";
 import {
+	decodeObjectInspectionResult,
+	objectInspectionTargetSchema,
+	type ObjectInspectionResult,
+} from "./client-object-inspection-contract";
+import {
+	decodeObjectPreviewResult,
+	type ObjectPreviewResult,
+} from "./client-object-preview-contract";
+import {
 	ClientEntityMirror,
 	clientEntityDeltaSchema,
 } from "./client-entity-mirror";
@@ -110,6 +119,7 @@ import type { ClientSpellCastAim } from "./client-spell-casting";
 
 type ClientCommandName = Extract<
 	HostCommandName,
+	| "examine_client_entity"
 	| "request_client_current_state"
 	| "select_client_character"
 	| "replace_client_drive"
@@ -140,6 +150,8 @@ type ClientCommandName = Extract<
 >;
 type ClientEventName = Extract<
 	HostEventName,
+	| "client-object-inspection-result"
+	| "client-object-preview-result"
 	| "client-current-state"
 	| "client-inventory-preview"
 	| "client-item-use-target-result"
@@ -212,6 +224,14 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| {
+			readonly type: "object-inspection-result";
+			readonly result: ObjectInspectionResult;
+	  }
+	| {
+			readonly type: "object-preview-result";
+			readonly result: ObjectPreviewResult;
+	  }
 	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
@@ -467,6 +487,14 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Request authoritative facts for one captured entity identity. */
+	async examineEntity(guid: number): Promise<void> {
+		await this.#transport.invoke(
+			"examine_client_entity",
+			objectInspectionTargetSchema.parse({ guid }),
+		);
+	}
+
 	/** Evaluate a considered target without executing use. */
 	async queryItemUseTarget(query: ClientItemUseTargetQuery): Promise<void> {
 		await this.#transport.invoke("query_client_item_use_target", {
@@ -593,6 +621,26 @@ export class ClientLifecycleSession {
 	async #listenToSiblingEvents(): Promise<(() => void)[]> {
 		const unlisteners: (() => void)[] = [];
 		try {
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-object-inspection-result",
+					(payload) =>
+						this.#emit({
+							type: "object-inspection-result",
+							result: decodeObjectInspectionResult(payload),
+						}),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-object-preview-result",
+					(payload) =>
+						this.#emit({
+							type: "object-preview-result",
+							result: decodeObjectPreviewResult(payload),
+						}),
+				),
+			);
 			unlisteners.push(
 				await this.#transport.listen(
 					"client-entity-collision-disabled",

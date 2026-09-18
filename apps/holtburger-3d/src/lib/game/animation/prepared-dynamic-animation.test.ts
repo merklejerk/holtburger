@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DecodedAnimationHook } from "../../assets/decode-animation-record";
-import { AABB3, Mat4, Vec3 } from "../math/types";
 import { createRotationMat4 } from "../math/matrices";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import { rotationVectorQuaternion } from "./animation-playback";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
 import {

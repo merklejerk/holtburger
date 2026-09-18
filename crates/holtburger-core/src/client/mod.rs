@@ -25,6 +25,7 @@ mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
 pub mod entity_facts;
+mod entity_visual_facts;
 pub mod equipment_plan;
 mod equipment_runtime;
 pub mod inventory_plan;
@@ -34,6 +35,7 @@ pub mod item_use;
 mod messages;
 mod movement;
 pub mod movement_types;
+pub mod object_preview;
 pub mod precise_jump;
 pub mod precise_jump_prediction;
 mod precise_jump_runtime;
@@ -952,6 +954,25 @@ impl ClientRuntime {
                 self.observe_dynamic_scale_entity(entity.guid);
                 self.observe_selection_envelope_entity(entity.guid);
             }
+            WorldEvent::ObjectInspectionResult(result) => {
+                let preview = matches!(
+                    &result.outcome,
+                    holtburger_world::inspection::ObjectInspectionOutcome::Ready { inspection }
+                        if matches!(
+                            inspection.details,
+                            holtburger_world::inspection::ObjectInspectionDetails::Creature(_)
+                        )
+                )
+                .then(|| object_preview::capture_object_preview(&self.world, result.guid));
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ObjectInspectionResult(result.clone()));
+                if let Some(preview) = preview {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ObjectPreviewResult(preview));
+                }
+            }
             WorldEvent::EntityAppearanceUpdated { guid } => {
                 self.emit_dynamic_entity_upsert(*guid);
                 self.observe_selection_envelope_entity(*guid);
@@ -1231,6 +1252,29 @@ mod tests {
     const JUMP_FIXTURE_ACTION_ANIMATION: u32 = 0x0300_1007;
     const STOP_FIXTURE_ANIMATION: u32 = 0x0300_1008;
     const JUMP_FIXTURE_ACTION_COMMAND: u32 = 0x1000_004A;
+
+    #[test]
+    fn object_inspection_result_is_forwarded_without_reconstruction() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let result = holtburger_world::inspection::ObjectInspectionResult {
+            guid: Guid(0x5000_0042),
+            outcome: holtburger_world::inspection::ObjectInspectionOutcome::Missing,
+        };
+
+        client.handle_world_event(&WorldEvent::ObjectInspectionResult(result.clone()));
+
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::ObjectInspectionResult(forwarded)
+                if forwarded.guid == result.guid
+                    && matches!(
+                        forwarded.outcome,
+                        holtburger_world::inspection::ObjectInspectionOutcome::Missing
+                    )
+        ));
+        assert!(events.try_recv().is_err());
+    }
 
     /// A real motion-table fixture for jump presentation tests.
     ///

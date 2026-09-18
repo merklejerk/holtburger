@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ItemDragSession } from "./client-item-drag";
 	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
+	import ClientInspectionWindow from "./ClientInspectionWindow.svelte";
 	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientSpellDrag } from "./client-spell-drag";
 	import type { ClientItemDrag } from "./client-item-drag";
@@ -51,6 +52,7 @@
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
+	import type { ClientObjectInspectionState } from "./client-object-inspection";
 	import type { ClientCombatMode, ClientVital } from "./client-host-contract";
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -62,6 +64,7 @@
 	} from "./client-hud-layout";
 	import type { ClientChatFilterTag } from "./client-chat-policy";
 	import type { ClientPresentationDiagnostics } from "./client-presentation-session";
+	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import {
 		advanceClientViewportPointerGesture,
 		beginClientViewportPointerGesture,
@@ -83,6 +86,9 @@
 		readonly onChatFiltersChange: (
 			value: readonly ClientChatFilterTag[],
 		) => void;
+		/** User-scoped divider height inside creature inspections. */
+		readonly inspectionPreviewHeight: number;
+		readonly onInspectionPreviewHeightChange: (height: number) => void;
 		/** App-owned layout mode also gates gameplay shortcuts. */
 		readonly hudMode: "runtime" | "layout";
 		readonly onHudModeChange: (mode: "runtime" | "layout") => void;
@@ -134,6 +140,13 @@
 		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
 		/** Use the currently selected entity through the session-owned interaction controller. */
 		readonly onInteractEntity: () => void;
+		/** Latest captured examination request, independent of current selection. */
+		readonly objectInspection: ClientObjectInspectionState;
+		readonly objectPreviewService: ClientObjectPreviewService;
+		readonly onExamineEntity: () => void;
+		/** Select and examine an entity represented by an item-backed HUD cell. */
+		readonly onExamineItem: (guid: number) => void;
+		readonly onCloseInspection: () => void;
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -156,6 +169,7 @@
 		readonly onPreciseJumpActivate: () => void;
 		readonly onPreciseJumpEnter: () => void;
 		readonly onViewportSelect: (clientX: number, clientY: number) => void;
+		readonly onViewportExamine: (clientX: number, clientY: number) => void;
 		readonly onViewportHover: (clientX: number, clientY: number) => void;
 		readonly onMaintainEntitySelection: () => void;
 		readonly onSelectEntity: (guid: number | null) => void;
@@ -173,6 +187,8 @@
 		onMinimapViewDiametersChange,
 		chatFilters,
 		onChatFiltersChange,
+		inspectionPreviewHeight,
+		onInspectionPreviewHeightChange,
 		hudMode,
 		onHudModeChange,
 		spellBar,
@@ -203,6 +219,11 @@
 		onPickInventoryTarget,
 		onInventoryNotice,
 		onInteractEntity,
+		objectInspection,
+		objectPreviewService,
+		onExamineEntity,
+		onExamineItem,
+		onCloseInspection,
 		readTargetIndicatorFrame,
 		selectedEntityGuid,
 		hoveredEntityGuid,
@@ -223,6 +244,7 @@
 		onPreciseJumpActivate,
 		onPreciseJumpEnter,
 		onViewportSelect,
+		onViewportExamine,
 		onViewportHover,
 		onMaintainEntitySelection,
 		onSelectEntity,
@@ -433,6 +455,11 @@
 
 	function handlePointerDown(event: PointerEvent): void {
 		if (!inputGate.allowed) return;
+		if (APP_INPUT.pointer("clientExamine", event)) {
+			event.preventDefault();
+			onViewportExamine(event.clientX, event.clientY);
+			return;
+		}
 		if (preciseJumpActive && APP_INPUT.pointer("preciseJumpActivate", event)) {
 			event.preventDefault();
 			onPreciseJumpActivate();
@@ -525,6 +552,26 @@
 		event.preventDefault();
 		cameraController.zoom(event.deltaY * 0.01);
 	}
+
+	/** Explorer-wide context-click policy for entity-bearing HUD cells and the viewport. */
+	function handleContextMenu(event: MouseEvent): void {
+		const target = event.target instanceof Element ? event.target : null;
+		if (target?.closest(".client-canvas")) {
+			event.preventDefault();
+			return;
+		}
+		const cell = target?.closest<HTMLElement>(
+			".item-grid-cell[data-item-guid]:not(:disabled), [data-action-cell][data-action-item]",
+		);
+		if (cell === undefined || cell === null || !worldElement?.contains(cell))
+			return;
+		const encodedGuid = cell.dataset.itemGuid ?? cell.dataset.actionItem;
+		const guid = Number(encodedGuid);
+		if (!Number.isSafeInteger(guid) || guid < 0)
+			throw new Error(`Invalid item cell GUID ${encodedGuid ?? "missing"}`);
+		event.preventDefault();
+		onExamineItem(guid);
+	}
 </script>
 
 <main
@@ -534,6 +581,7 @@
 	data-combine-eligibility={combineEligibility}
 	onpointerover={considerPointer}
 	onpointerleave={() => (combineSurface = null)}
+	oncontextmenu={handleContextMenu}
 	onpointerdowncapture={(event) => {
 		if (
 			event.target instanceof Element &&
@@ -740,6 +788,9 @@
 						: display;
 				}}
 				onInteract={onInteractEntity}
+				onExamine={onExamineEntity}
+				examinePending={objectInspection.kind === "pending" &&
+					objectInspection.guid === selectedEntityGuid}
 				onSplit={splitSelectedEntity}
 			/>
 		</ClientHudPanel>
@@ -776,6 +827,25 @@
 				{viewport}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("worldContainer", placement)}
+			/>
+		{/key}
+	{/if}
+	{#if objectInspection.kind === "ready"}
+		{#key objectInspection.guid}
+			<ClientInspectionWindow
+				inspection={objectInspection.inspection}
+				nameColor={objectInspection.nameColor}
+				preview={objectInspection.preview}
+				{objectPreviewService}
+				{spells}
+				icons={spells?.icons ?? inventory?.icons ?? null}
+				placement={hudLayout.inspection}
+				{viewport}
+				previewHeight={inspectionPreviewHeight}
+				onClose={onCloseInspection}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("inspection", placement)}
+				onPreviewHeightChange={onInspectionPreviewHeightChange}
 			/>
 		{/key}
 	{/if}

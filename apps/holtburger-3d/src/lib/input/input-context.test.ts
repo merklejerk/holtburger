@@ -76,6 +76,38 @@ describe("InputContext", () => {
 		).toBe(false);
 	});
 
+	it("resolves an alternate configured examine binding with exact modifiers", () => {
+		const input = new AppInput({
+			...INPUT_DEFAULTS,
+			client: {
+				...INPUT_DEFAULTS.client,
+				examine: [
+					{
+						code: "KeyQ",
+						shift: true,
+						ctrl: false,
+						alt: false,
+						meta: false,
+					},
+				],
+			},
+		});
+		expect(
+			input.shortcut("examine", {
+				key: "Q",
+				code: "KeyQ",
+				shiftKey: true,
+			}),
+		).toBe(true);
+		expect(
+			input.shortcut("examine", {
+				key: "Q",
+				code: "KeyQ",
+				shiftKey: false,
+			}),
+		).toBe(false);
+	});
+
 	it("resolves configured modifiers held before pointer focus", () => {
 		const context = new InputContext(
 			{ precision: [{ key: "Control" }] },
@@ -176,5 +208,6 @@ describe("InputContext", () => {
 		expect(action).toHaveBeenCalledWith("forward", true);
 		expect(input.pointer("clientInteract", { button: 2 })).toBe(true);
 		expect(input.pointer("clientInteract", { button: 0 })).toBe(false);
+		expect(input.pointer("clientExamine", { button: 2 })).toBe(true);
 	});
 });

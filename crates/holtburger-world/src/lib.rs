@@ -7,7 +7,6 @@
 //! - [`handlers`] owns feature-based protocol orchestration that translates decoded messages into
 //!   narrow state mutations plus [`WorldEvent`] emission.
 
-pub mod assessment;
 pub mod attachment;
 pub mod book;
 pub mod bootstrap;
@@ -25,7 +24,7 @@ pub mod events;
 pub mod handlers;
 pub mod hydration;
 mod identify;
-pub mod inspect;
+pub mod inspection;
 pub mod interaction;
 pub mod item_use;
 pub mod magic;

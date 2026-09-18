@@ -1,5 +1,6 @@
 pub mod active_region;
 pub mod character_gen;
+pub mod character_titles;
 pub mod collision_pose;
 pub mod decode_cache;
 pub mod generated_scenery;
@@ -24,6 +25,7 @@ pub mod ui_assets;
 
 pub use active_region::ActiveRegionData;
 pub use character_gen::CharacterGenCatalog;
+pub use character_titles::{CharacterTitleCatalog, CharacterTitleCatalogError};
 pub use decode_cache::ContentDecodeCache;
 pub use generated_scenery::{
     GeneratedSceneryAsset, GeneratedSceneryAssetAssembler, GeneratedSceneryIdentity,

@@ -19,14 +19,25 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                     .runtime
                     .inventory_notifications
                     .begin_quiet_period(Instant::now());
+            } else {
+                clear_object_inspection(state);
             }
         }
         ClientViewEvent::BootAccount(..) => {}
-        ClientViewEvent::PingResponse
-        | ClientViewEvent::NetPulse { .. }
-        | ClientViewEvent::Disconnected => {}
+        ClientViewEvent::PingResponse | ClientViewEvent::NetPulse { .. } => {}
+        ClientViewEvent::Disconnected => {
+            clear_object_inspection(state);
+        }
         _ => {}
     }
 
     result
+}
+
+fn clear_object_inspection(state: &mut GameState) {
+    state.view.object_inspection = None;
+    if matches!(state.view.context_view, ContextView::Assess(_)) {
+        state.view.context_view = ContextView::Default;
+        super::object_interaction::refresh_context_buffer(state);
+    }
 }

@@ -102,6 +102,14 @@
 		type RendererFrameDiagnosticsSnapshot,
 		type RendererFrameProfile,
 	} from "../../lib/game/renderer/renderer";
+	import type { ObjectPreviewSource } from "../../lib/game/runtime/object-preview-source";
+	import {
+		ObjectPreviewController,
+		type ObjectPreviewResources,
+		type ObjectPreviewHandle,
+	} from "../../lib/game/preview/object-preview-controller";
+	import type { ObjectPreviewRendererDiagnostics } from "../../lib/game/renderer/webgl2-preview-renderer";
+	import { PresentationAssetService } from "../../lib/game/runtime/presentation-asset-service";
 	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
 	import {
 		createEntityShadowSettings,
@@ -536,6 +544,17 @@
 			wcid: string,
 			distance: number,
 		) => Promise<DynamicEntityView>;
+		/** Open, close, and reopen one catalog visual through the production preview renderer. */
+		readonly probeObjectPreviewLifecycle: (
+			guid: number,
+		) => Promise<BrowserHarnessObjectPreviewEvidence>;
+		/** Hold or clear one production preview for paired renderer timing windows. */
+		readonly setObjectPreviewBenchmarkVisible: (
+			guid: number,
+			visible: boolean,
+		) => Promise<void>;
+		/** Cold preview counters sampled only around explicit benchmark windows. */
+		readonly objectPreviewDiagnostics: () => ObjectPreviewRendererDiagnostics | null;
 		/** Spawn one simulated body for deterministic host-solver scenarios. */
 		readonly spawnSimulatedExplorerEntity: (
 			wcid: string,
@@ -801,6 +820,57 @@
 		readonly second: BrowserHarnessSpawnedSelectionSample;
 	}
 
+	interface BrowserHarnessObjectPreviewSample {
+		readonly backgroundAlpha: number;
+		readonly changedPixelCount: number;
+		readonly checksum: number;
+		/** Additive light carried by premultiplied RGB without falsely covering the DOM. */
+		readonly emissiveTransparentPixelCount: number;
+		readonly extent: RenderExtent;
+		/** Wall time from viewport publication to the first downloaded frame. */
+		readonly firstFrameLatencyMs: number;
+		readonly frameCount: number;
+		readonly glErrors: readonly number[];
+		/** Present only when this sample also performed production asset installation. */
+		readonly installDurationMs: number | null;
+		readonly partiallyTransparentPixelCount: number;
+		readonly rendererDiagnostics: ObjectPreviewRendererDiagnostics;
+		/** Wall time through stable close-fit publication. */
+		readonly settledFrameLatencyMs: number;
+		/** Pixels contributing either coverage or additive premultiplied colour. */
+		readonly visiblePixelCount: number;
+		readonly visibleBounds: {
+			readonly height: number;
+			readonly maxX: number;
+			readonly maxY: number;
+			readonly minX: number;
+			readonly minY: number;
+			readonly width: number;
+		} | null;
+	}
+	type BrowserHarnessObjectPreviewFrameSummary = Omit<
+		BrowserHarnessObjectPreviewSample,
+		| "firstFrameLatencyMs"
+		| "installDurationMs"
+		| "rendererDiagnostics"
+		| "settledFrameLatencyMs"
+	>;
+
+	interface BrowserHarnessObjectPreviewEvidence {
+		readonly contextLoss: {
+			readonly previewContextLost: boolean;
+			readonly supported: boolean;
+			readonly worldContextLost: boolean;
+		};
+		readonly first: BrowserHarnessObjectPreviewSample;
+		readonly resizedRotated: BrowserHarnessObjectPreviewSample;
+		readonly reopened: BrowserHarnessObjectPreviewSample;
+		readonly suspension: {
+			readonly pausedFrameCount: number;
+			readonly resumedFrameCount: number;
+		};
+	}
+
 	interface PortalTransitionLifecycleResourceEvidence {
 		readonly animationFramePosition: number | null;
 		readonly axialRollFramePosition: number | null;
@@ -989,6 +1059,7 @@
 	}
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
+	let previewCanvasElement: HTMLCanvasElement | null = $state(null);
 	let mapCanvasElement: HTMLCanvasElement | null = $state(null);
 	let mapCanvasSize = $state(0);
 	let mapRenderer: MapRenderer | null = null;
@@ -1021,6 +1092,9 @@
 	let viewportHeight = $state(INITIAL_VIEWPORT_HEIGHT);
 	let spawnedEntities: readonly DynamicEntityView[] = [];
 	let runtime: GamePresentationRuntime | undefined;
+	let presentationAssets: PresentationAssetService | undefined;
+	let objectPreviewResources: ObjectPreviewResources | undefined;
+	let activePreviewHandle: ObjectPreviewHandle | null = null;
 	let renderer: WebGL2Renderer | undefined;
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
 	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
@@ -1658,6 +1732,356 @@
 		if (!entity)
 			throw new Error("Explorer spawn snapshot omitted its new world entity.");
 		return entity;
+	}
+
+	/** Derive the captured setup-pose source used by preview diagnostics. */
+	function objectPreviewSource(guid: number): ObjectPreviewSource {
+		const entity = spawnedEntities.find(
+			(candidate) => candidate.identity.guid === guid,
+		);
+		if (!entity)
+			throw new Error(`Object preview probe could not find entity ${guid}.`);
+		return {
+			guid,
+			setupDid: entity.presentation.content.setupDid,
+			appearance: entity.presentation.appearance,
+			scale: entity.presentation.objectScale,
+			translucency: entity.physics.translucency,
+			pose: { kind: "setup-pose" },
+		};
+	}
+
+	/** Hold or clear the current production preview without adding measurement-side work. */
+	async function setObjectPreviewBenchmarkVisible(
+		guid: number,
+		visible: boolean,
+	): Promise<void> {
+		if (!objectPreviewResources || !previewCanvasElement)
+			throw new Error("Object preview benchmark requires an active runtime.");
+		const resources = objectPreviewResources;
+		const retiring = activePreviewHandle?.dispose() ?? Promise.resolve();
+		activePreviewHandle = null;
+		if (!visible) {
+			await retiring;
+			return;
+		}
+		const handle = new ObjectPreviewController(
+			{
+				activationBarrier: retiring,
+				canvas: previewCanvasElement,
+				source: objectPreviewSource(guid),
+			},
+			{ resolveResources: async () => resources },
+		);
+		activePreviewHandle = handle;
+		handle.setViewport({
+			extent: { height: 192, width: 256 },
+			minimumFrameIntervalSeconds: 1 / 60,
+			yawRadians: 0.65,
+		});
+		try {
+			await handle.ready;
+		} catch (cause) {
+			await handle.dispose();
+			if (activePreviewHandle === handle) activePreviewHandle = null;
+			throw cause;
+		}
+	}
+
+	function objectPreviewDiagnostics(): ObjectPreviewRendererDiagnostics | null {
+		return activePreviewHandle?.diagnostics() ?? null;
+	}
+
+	/** Read the callback-mutated preview owner without relying on Svelte's lexical narrowing. */
+	function requireActivePreviewHandle(message: string): ObjectPreviewHandle {
+		if (activePreviewHandle === null) throw new Error(message);
+		return activePreviewHandle;
+	}
+
+	/** Exercise direct-canvas resize, rotation, close and reopen through the production mount. */
+	async function probeObjectPreviewLifecycle(
+		guid: number,
+	): Promise<BrowserHarnessObjectPreviewEvidence> {
+		if (!objectPreviewResources || !previewCanvasElement)
+			throw new Error("Object preview probe requires an active runtime.");
+		const resources = objectPreviewResources;
+		const previewCanvas = previewCanvasElement;
+		const source = objectPreviewSource(guid);
+		let handle: ObjectPreviewHandle | null = null;
+		const capture = async (
+			yawRadians: number,
+			extent: RenderExtent,
+			install: boolean,
+		): Promise<BrowserHarnessObjectPreviewSample> => {
+			const startedAt = performance.now();
+			let installedAt: number | null = null;
+			if (install) {
+				const retiring = handle?.dispose() ?? Promise.resolve();
+				handle = new ObjectPreviewController(
+					{
+						activationBarrier: retiring,
+						canvas: previewCanvas,
+						source,
+					},
+					{ resolveResources: async () => resources },
+				);
+				activePreviewHandle = handle;
+			}
+			if (!handle) throw new Error("Object preview probe has no active mount.");
+			handle.setViewport({
+				extent,
+				minimumFrameIntervalSeconds: 1 / 60,
+				yawRadians,
+			});
+			await withTimeout(handle.ready, 5_000, "Object preview frame timed out.");
+			await withTimeout(
+				waitForPreviewExtent(previewCanvas, extent),
+				1_000,
+				"Object preview resize timed out.",
+			);
+			const firstFrameAt = performance.now();
+			if (install) installedAt = firstFrameAt;
+			const gl = previewCanvas.getContext("webgl2");
+			if (!gl) throw new Error("Object preview probe requires WebGL2.");
+			const observedGlErrors: number[] = [];
+			let candidate = summarizeObjectPreviewCanvas(gl, extent, 1);
+			observedGlErrors.push(...candidate.glErrors);
+			let sample: BrowserHarnessObjectPreviewFrameSummary | null =
+				candidate.visiblePixelCount === 0 ? null : candidate;
+			for (let frame = 2; sample === null && frame <= 8; frame += 1) {
+				await nextAnimationFrame();
+				candidate = summarizeObjectPreviewCanvas(gl, extent, frame);
+				observedGlErrors.push(...candidate.glErrors);
+				if (candidate.visiblePixelCount > 0) {
+					sample = candidate;
+					break;
+				}
+			}
+			if (sample === null)
+				throw new Error(
+					`Object preview default framebuffer remained empty across admitted draws; GL errors: ${observedGlErrors.join(", ") || "none"}; diagnostics: ${JSON.stringify(handle.diagnostics())}.`,
+				);
+			const rendererDiagnostics = handle.diagnostics();
+			if (rendererDiagnostics === null)
+				throw new Error("Object preview diagnostics retired before capture.");
+			return {
+				...sample,
+				firstFrameLatencyMs: firstFrameAt - startedAt,
+				installDurationMs:
+					installedAt === null ? null : installedAt - startedAt,
+				rendererDiagnostics,
+				settledFrameLatencyMs: performance.now() - startedAt,
+			};
+		};
+		try {
+			const first = await capture(0.65, { height: 192, width: 256 }, true);
+			const resizedRotated = await capture(
+				-0.65,
+				{ height: 160, width: 320 },
+				false,
+			);
+			const suspendedHandle = requireActivePreviewHandle(
+				"Object preview suspension lost its mount handle.",
+			);
+			const beforePause = suspendedHandle.diagnostics()?.frameCount;
+			if (beforePause === undefined)
+				throw new Error(
+					"Object preview suspension has no renderer diagnostics.",
+				);
+			suspendedHandle.setViewport(null);
+			for (let frame = 0; frame < 4; frame += 1) await nextAnimationFrame();
+			const pausedFrameCount = suspendedHandle.diagnostics()?.frameCount;
+			if (pausedFrameCount !== beforePause)
+				throw new Error(
+					`Hidden object preview advanced from frame ${beforePause} to ${String(pausedFrameCount)}.`,
+				);
+			suspendedHandle.setViewport({
+				extent: { height: 160, width: 320 },
+				minimumFrameIntervalSeconds: 1 / 60,
+				yawRadians: -0.65,
+			});
+			await withTimeout(
+				waitForPreviewFrameAfter(suspendedHandle, pausedFrameCount),
+				1_000,
+				"Object preview did not resume after suspension.",
+			);
+			const resumedFrameCount = suspendedHandle.diagnostics()?.frameCount;
+			if (resumedFrameCount === undefined)
+				throw new Error("Resumed object preview lost renderer diagnostics.");
+			const suspension = { pausedFrameCount, resumedFrameCount };
+			await activePreviewHandle?.dispose();
+			handle = null;
+			activePreviewHandle = null;
+			await nextAnimationFrame();
+			await nextAnimationFrame();
+			const reopened = await capture(-0.35, { height: 192, width: 256 }, true);
+			const reopenedHandle = requireActivePreviewHandle(
+				"Object preview reopen lost its mount handle.",
+			);
+			const previewGl = previewCanvas.getContext("webgl2");
+			const worldGl = canvasElement?.getContext("webgl2") ?? null;
+			if (!previewGl || !worldGl)
+				throw new Error(
+					"Object preview context-loss probe requires both contexts.",
+				);
+			const loseContext = previewGl.getExtension("WEBGL_lose_context");
+			const contextLoss = {
+				previewContextLost: false,
+				supported: loseContext !== null,
+				worldContextLost: worldGl.isContextLost(),
+			};
+			if (loseContext !== null) {
+				loseContext.loseContext();
+				await withTimeout(
+					waitForPreviewRetirement(reopenedHandle),
+					1_000,
+					"Lost object preview context did not retire.",
+				);
+				contextLoss.previewContextLost = previewGl.isContextLost();
+				contextLoss.worldContextLost = worldGl.isContextLost();
+			}
+			await reopenedHandle.dispose();
+			handle = null;
+			activePreviewHandle = null;
+			return { contextLoss, first, reopened, resizedRotated, suspension };
+		} finally {
+			await activePreviewHandle?.dispose();
+			activePreviewHandle = null;
+		}
+	}
+
+	/** Wait for the cadence-bounded renderer to consume a post-ready viewport update. */
+	async function waitForPreviewExtent(
+		canvas: HTMLCanvasElement,
+		extent: RenderExtent,
+	): Promise<void> {
+		while (canvas.width !== extent.width || canvas.height !== extent.height)
+			await nextAnimationFrame();
+	}
+
+	async function waitForPreviewRetirement(
+		handle: ObjectPreviewHandle,
+	): Promise<void> {
+		while (handle.diagnostics() !== null) await nextAnimationFrame();
+	}
+
+	async function waitForPreviewFrameAfter(
+		handle: ObjectPreviewHandle,
+		frameCount: number,
+	): Promise<void> {
+		while ((handle.diagnostics()?.frameCount ?? frameCount) <= frameCount)
+			await nextAnimationFrame();
+	}
+
+	function summarizeObjectPreviewCanvas(
+		gl: WebGL2RenderingContext,
+		extent: RenderExtent,
+		frameCount: number,
+	): BrowserHarnessObjectPreviewFrameSummary {
+		const pixels = new Uint8Array(extent.width * extent.height * 4);
+		gl.readPixels(
+			0,
+			0,
+			extent.width,
+			extent.height,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			pixels,
+		);
+		let changedPixelCount = 0;
+		let emissiveTransparentPixelCount = 0;
+		let partiallyTransparentPixelCount = 0;
+		let visiblePixelCount = 0;
+		let checksum = 2166136261;
+		let minX = extent.width;
+		let minY = extent.height;
+		let maxX = -1;
+		let maxY = -1;
+		for (let offset = 0; offset < pixels.length; offset += 4) {
+			const alpha = pixels[offset + 3]!;
+			const carriesColor =
+				pixels[offset] !== 0 ||
+				pixels[offset + 1] !== 0 ||
+				pixels[offset + 2] !== 0;
+			if (alpha !== 0) changedPixelCount += 1;
+			if (alpha > 0 && alpha < 255) partiallyTransparentPixelCount += 1;
+			if (alpha === 0 && carriesColor) emissiveTransparentPixelCount += 1;
+			if (alpha !== 0 || carriesColor) {
+				visiblePixelCount += 1;
+				const pixel = offset / 4;
+				const x = pixel % extent.width;
+				const y = Math.floor(pixel / extent.width);
+				minX = Math.min(minX, x);
+				minY = Math.min(minY, y);
+				maxX = Math.max(maxX, x);
+				maxY = Math.max(maxY, y);
+			}
+			for (let channel = 0; channel < 4; channel += 1) {
+				checksum ^= pixels[offset + channel]!;
+				checksum = Math.imul(checksum, 16777619) >>> 0;
+			}
+		}
+		return {
+			backgroundAlpha: pixels[3]!,
+			changedPixelCount,
+			checksum,
+			emissiveTransparentPixelCount,
+			extent,
+			frameCount,
+			glErrors: drainGlErrors(gl),
+			partiallyTransparentPixelCount,
+			visiblePixelCount,
+			visibleBounds:
+				maxX < 0
+					? null
+					: {
+							height: maxY - minY + 1,
+							maxX,
+							maxY,
+							minX,
+							minY,
+							width: maxX - minX + 1,
+						},
+		};
+	}
+
+	async function withTimeout<T>(
+		promise: Promise<T>,
+		durationMs: number,
+		message: string,
+	): Promise<T> {
+		let timeout = 0;
+		try {
+			return await Promise.race([
+				promise,
+				new Promise<T>((_, reject) => {
+					timeout = window.setTimeout(
+						() => reject(new Error(message)),
+						durationMs,
+					);
+				}),
+			]);
+		} finally {
+			window.clearTimeout(timeout);
+		}
+	}
+
+	function drainGlErrors(gl: WebGL2RenderingContext): readonly number[] {
+		const errors: number[] = [];
+		for (let index = 0; index < 32; index += 1) {
+			const error = gl.getError();
+			if (error === gl.NO_ERROR) return errors;
+			errors.push(error);
+		}
+		throw new Error(
+			"Object preview probe exceeded the bounded GL error drain.",
+		);
+	}
+
+	function nextAnimationFrame(): Promise<void> {
+		return new Promise((resolve) =>
+			window.requestAnimationFrame(() => resolve()),
+		);
 	}
 
 	function entityScenarioAnchor(): {
@@ -3509,6 +3933,31 @@
 							: await StandardCommitPipeline.build({
 									sourceBatch: landblockSource,
 								});
+				const texturePixelSource = new SyntheticCutoutTextureSource(
+					contentSource,
+				);
+				const setupVisualSource = new SyntheticNameplateSetupVisualSource(
+					contentSource,
+				);
+				presentationAssets = await PresentationAssetService.build({
+					animationSource: contentSource,
+					particleEmitterSource: contentSource,
+					physicsScriptSource: contentSource,
+					setupVisualSource,
+					texturePixelSource,
+				});
+				const particleMeshContentSource = contentSource;
+				objectPreviewResources = {
+					assets: presentationAssets,
+					preserveDrawingBuffer: true,
+					// The harness content source is composition-owned. Preview caches borrow its
+					// particle endpoint and therefore must not destroy the whole source on close.
+					particleMeshSource: () => ({
+						destroy: () => {},
+						loadParticleMeshes: (ids) =>
+							particleMeshContentSource.loadParticleMeshes(ids),
+					}),
+				};
 				runtime = await GamePresentationRuntime.build(
 					{
 						buildRenderer: async (world) => {
@@ -3518,9 +3967,7 @@
 						resources: device.resources,
 					},
 					pipeline,
-					new SyntheticCutoutTextureSource(contentSource),
-					contentSource,
-					contentSource,
+					presentationAssets,
 					contentSource,
 					// The harness renders headlessly; authored audio has no observable output here,
 					// so by default a refusing device keeps the runtime honest without a context.
@@ -3531,8 +3978,6 @@
 						: { playOneShot: () => null, prepare: async () => {} },
 					contentSource,
 					contentSource,
-					contentSource,
-					new SyntheticNameplateSetupVisualSource(contentSource),
 					EXPLORER_TUNING.frameSettings,
 					PARTICLE_SEED === null
 						? undefined
@@ -3961,6 +4406,9 @@
 					installSyntheticNameplateWorkload,
 					probeSyntheticNameplateLifecycle,
 					probeSpawnedEntitySelection,
+					probeObjectPreviewLifecycle,
+					objectPreviewDiagnostics,
+					setObjectPreviewBenchmarkVisible,
 					despawnExplorerEntityFleet,
 					spawnSimulatedExplorerEntity,
 					possessExplorerEntity,
@@ -4149,7 +4597,11 @@
 			landblockProfileSource?.destroy();
 			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
 			staticDetailOwner?.teardown();
+			void activePreviewHandle?.dispose().finally(() => {
+				activePreviewHandle = null;
+			});
 			void runtime?.destroy().finally(async () => {
+				await presentationAssets?.destroy();
 				await pipeline?.destroy();
 				await device?.destroy();
 			});
@@ -4162,6 +4614,12 @@
 	aria-label="Browser harness render viewport"
 	style:height={`${viewportHeight}px`}
 	style:width={`${viewportWidth}px`}
+></canvas>
+
+<canvas
+	bind:this={previewCanvasElement}
+	class="preview"
+	aria-label="Browser harness object preview"
 ></canvas>
 
 <canvas
@@ -4188,6 +4646,15 @@
 			position: absolute;
 			top: 0;
 			left: 0;
+		}
+
+		canvas.preview {
+			position: absolute;
+			top: 0;
+			right: 0;
+			width: 320px;
+			height: 192px;
+			pointer-events: none;
 		}
 	}
 </style>

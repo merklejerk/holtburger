@@ -447,7 +447,7 @@ function installWindowSettings(
 	window.on("resize", schedule);
 	window.on("maximize", schedule);
 	window.on("unmaximize", schedule);
-	// Capture the constructor-negotiated normal bounds before renderer bootstrap can create v1.
+	// Capture constructor-negotiated normal bounds before renderer bootstrap creates a document.
 	void write();
 	return async () => {
 		if (timer !== undefined) clearTimeout(timer);

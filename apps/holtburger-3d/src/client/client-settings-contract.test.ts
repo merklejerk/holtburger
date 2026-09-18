@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	clientLocalSettingsDocumentV1Schema,
+	clientLocalSettingsDocumentV2Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -14,7 +15,7 @@ const viewport = { width: 1440, height: 900 };
 
 function document() {
 	return {
-		schemaVersion: 1 as const,
+		schemaVersion: 2 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -31,11 +32,33 @@ function document() {
 	};
 }
 
+function versionOneDocument() {
+	const current = document();
+	const versionOneClient = { ...current.user.client };
+	const versionOneHudLayout = { ...versionOneClient.hudLayout };
+	Reflect.deleteProperty(versionOneClient, "inspection");
+	Reflect.deleteProperty(versionOneHudLayout, "inspection");
+	return {
+		...current,
+		schemaVersion: 1 as const,
+		user: {
+			...current.user,
+			client: { ...versionOneClient, hudLayout: versionOneHudLayout },
+		},
+	};
+}
+
 describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV2Schema.parse(value)).toEqual(value);
+	});
+
+	it("migrates v1 with stable inspection layout defaults", () => {
+		const value = versionOneDocument();
 		expect(clientLocalSettingsDocumentV1Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
 	});
 
 	it("rejects unknown fields and unsupported versions", () => {
@@ -46,8 +69,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 2 }),
-		).toThrow("Unsupported client settings schema version 2");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 3 }),
+		).toThrow("Unsupported client settings schema version 3");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {

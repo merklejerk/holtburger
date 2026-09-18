@@ -115,6 +115,7 @@ fn main() -> Result<()> {
         content.read_asset("skills")?,
         content.read_asset("spells")?,
         content.read_asset("xp")?,
+        content.read_character_title_catalog()?,
         content.read_motion_sequence_catalog()?,
         SoulEmoteCatalog::default(),
     );

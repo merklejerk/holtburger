@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_ACTION_BARS } from "./client-action-bar-contract.js";
+import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
@@ -27,7 +28,7 @@ const hudPlacementSchema = z
 	.strict()
 	.readonly();
 
-const clientHudLayoutSchema = z
+const clientHudLayoutV1Schema = z
 	.object({
 		character: hudPlacementSchema,
 		spellBar: hudPlacementSchema,
@@ -46,6 +47,12 @@ const clientHudLayoutSchema = z
 	.strict()
 	.readonly();
 
+const clientHudLayoutSchema = clientHudLayoutV1Schema
+	.unwrap()
+	.extend({ inspection: hudPlacementSchema })
+	.strict()
+	.readonly();
+
 const chatFilterTagSchema = z.enum(["chat", "combat"]);
 const chatFiltersSchema = z
 	.array(chatFilterTagSchema)
@@ -56,10 +63,9 @@ const chatFiltersSchema = z
 	)
 	.readonly();
 
-/** User-scoped client presentation preferences shared by every local character. */
-export const clientUserSettingsSchema = z
+const clientUserSettingsV1Schema = z
 	.object({
-		hudLayout: clientHudLayoutSchema,
+		hudLayout: clientHudLayoutV1Schema,
 		spellBarShape: z.enum(["single", "double"]),
 		minimapViewDiameters: z
 			.object({
@@ -70,6 +76,23 @@ export const clientUserSettingsSchema = z
 			.readonly(),
 		chatFilters: chatFiltersSchema,
 		weatherEnabled: z.boolean(),
+	})
+	.strict()
+	.readonly();
+
+/** User-scoped client presentation preferences shared by every local character. */
+export const clientUserSettingsSchema = clientUserSettingsV1Schema
+	.unwrap()
+	.extend({
+		hudLayout: clientHudLayoutSchema,
+		inspection: z
+			.object({
+				previewHeight: finiteNumber
+					.min(CLIENT_INSPECTION_PREVIEW_HEIGHT.minimum)
+					.max(CLIENT_INSPECTION_PREVIEW_HEIGHT.maximum),
+			})
+			.strict()
+			.readonly(),
 	})
 	.strict()
 	.readonly();
@@ -206,6 +229,25 @@ export const clientLocalSettingsDocumentV1Schema = z
 		user: z
 			.object({
 				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV1Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV1 = z.infer<
+	typeof clientLocalSettingsDocumentV1Schema
+>;
+
+/** Current durable document after all migrations have been applied. */
+export const clientLocalSettingsDocumentV2Schema = z
+	.object({
+		schemaVersion: z.literal(2),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
 				client: clientUserSettingsSchema,
 			})
 			.strict()
@@ -214,9 +256,42 @@ export const clientLocalSettingsDocumentV1Schema = z
 	})
 	.strict()
 	.readonly();
-export type ClientLocalSettingsDocumentV1 = z.infer<
-	typeof clientLocalSettingsDocumentV1Schema
+export type ClientLocalSettingsDocument = z.infer<
+	typeof clientLocalSettingsDocumentV2Schema
 >;
+
+/**
+ * Historical v2 defaults are fixed migration data, not live UI defaults. Future default changes
+ * must not change the result of migrating the same v1 document.
+ */
+const V2_INSPECTION_PLACEMENT = {
+	horizontal: { alignment: "end", offset: 32 },
+	vertical: { alignment: "center", offset: 0 },
+	preferredWidth: 410,
+	preferredHeight: 500,
+} as const;
+
+function migrateClientLocalSettingsDocumentV1(
+	document: ClientLocalSettingsDocumentV1,
+): ClientLocalSettingsDocument {
+	return clientLocalSettingsDocumentV2Schema.parse({
+		...document,
+		schemaVersion: 2,
+		user: {
+			...document.user,
+			client: {
+				...document.user.client,
+				hudLayout: {
+					...document.user.client.hudLayout,
+					inspection: V2_INSPECTION_PLACEMENT,
+				},
+				inspection: {
+					previewHeight: CLIENT_INSPECTION_PREVIEW_HEIGHT.initial,
+				},
+			},
+		},
+	});
+}
 
 /** Validate a user snapshot at an IPC or composition boundary. */
 export function parseClientUserSettings(value: unknown): ClientUserSettings {
@@ -233,16 +308,23 @@ export function parseClientCharacterSettings(
 /** Dispatch durable versions explicitly so older clients never overwrite newer state. */
 export function parseClientLocalSettingsDocument(
 	value: unknown,
-): ClientLocalSettingsDocumentV1 {
+): ClientLocalSettingsDocument {
 	if (
 		typeof value !== "object" ||
 		value === null ||
 		!("schemaVersion" in value)
 	)
 		throw new Error("Client settings document has no schemaVersion");
-	if (value.schemaVersion !== 1)
-		throw new Error(
-			`Unsupported client settings schema version ${String(value.schemaVersion)}`,
-		);
-	return clientLocalSettingsDocumentV1Schema.parse(value);
+	switch (value.schemaVersion) {
+		case 1:
+			return migrateClientLocalSettingsDocumentV1(
+				clientLocalSettingsDocumentV1Schema.parse(value),
+			);
+		case 2:
+			return clientLocalSettingsDocumentV2Schema.parse(value);
+		default:
+			throw new Error(
+				`Unsupported client settings schema version ${String(value.schemaVersion)}`,
+			);
+	}
 }

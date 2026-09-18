@@ -2,7 +2,7 @@ import { open, mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
 	ClientCharacterSettings,
-	ClientLocalSettingsDocumentV1,
+	ClientLocalSettingsDocument,
 	ClientUserSettings,
 	ClientWindowSettings,
 } from "../src/client/client-settings-contract.js";
@@ -30,7 +30,7 @@ export type ClientSettingsReadMode = "persisted" | "fresh";
 interface MutableSettingsState {
 	window: ClientWindowSettings;
 	user: ClientUserSettings | null;
-	characters: ClientLocalSettingsDocumentV1["characters"];
+	characters: ClientLocalSettingsDocument["characters"];
 }
 
 /** Electron-main filesystem owner for the complete client settings document. */
@@ -161,17 +161,17 @@ export class ClientSettingsStore {
 		return write;
 	}
 
-	#document(): ClientLocalSettingsDocumentV1 {
+	#document(): ClientLocalSettingsDocument {
 		if (this.#state.user === null)
 			throw new Error("Cannot create settings document before user bootstrap");
 		return {
-			schemaVersion: 1,
+			schemaVersion: 2,
 			user: { window: this.#state.window, client: this.#state.user },
 			characters: this.#state.characters,
 		};
 	}
 
-	async #replace(document: ClientLocalSettingsDocumentV1): Promise<void> {
+	async #replace(document: ClientLocalSettingsDocument): Promise<void> {
 		await mkdir(dirname(this.#path), { recursive: true });
 		const temporaryPath = `${this.#path}.tmp-${process.pid}-${this.#temporarySequence++}`;
 		let temporaryCreated = false;

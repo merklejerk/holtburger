@@ -10,7 +10,7 @@ use holtburger_common::properties::{
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContextExt;
-use holtburger_world::inspect::InspectableObject;
+use holtburger_world::inspection::InspectionSource;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use ratatui::text::Line;
@@ -43,7 +43,7 @@ pub fn get_debug_info(
             else {
                 return lines;
             };
-            let object = InspectableObject::from_vendor_item(v);
+            let object = InspectionSource::from_vendor_item(v);
             lines.push(Line::from(format!("ITEM: {}", v.name())));
             push_object_debug_info(data, &mut lines, &object, spell_lookup);
         }
@@ -615,7 +615,7 @@ pub fn get_debug_info(
 fn push_object_debug_info(
     data: &GameData,
     lines: &mut Vec<Line<'static>>,
-    object: &InspectableObject<'_>,
+    object: &InspectionSource<'_>,
     spell_lookup: Option<&SpellCatalog>,
 ) {
     let player_storage = (Some(object.guid) == data.player_guid)

@@ -275,7 +275,7 @@ fn process_entry(
     id: u32,
     state: &ProcessingState<'_>,
 ) -> Option<ProcessedEntry> {
-    let file_type = DatFileType::from_id(id);
+    let file_type = DatFileType::from_namespaced_id(namespace, id);
     let should_keep = state
         .manifest
         .is_none_or(|manifest| manifest.should_keep_entry(namespace, id, file_type));
@@ -379,11 +379,12 @@ pub fn run(options: Dat2HbaOptions) -> Result<()> {
 mod tests {
     use super::*;
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_dat::EOR_LANGUAGE_NAMESPACE;
     use holtburger_dat::file_type::animation::AnimationFlags;
     use holtburger_dat::file_type::setup_model::{
         AnimationFrame, AnimationHook, AnimationHookPayload, AttackConeHookPayload,
     };
-    use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+    use holtburger_dat::file_type::{EnumMapper, SkillTable, SpellTable, StringTable, XpTable};
     use holtburger_dat::graphics::Frame;
     use std::io::Cursor;
 
@@ -396,6 +397,16 @@ mod tests {
         assert!(manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x01000001, DatFileType::Model));
         assert!(manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x0A000001, DatFileType::Audio));
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            EnumMapper::FILE_ID,
+            DatFileType::EnumMapper
+        ));
+        assert!(manifest.should_keep_entry(
+            EOR_LANGUAGE_NAMESPACE,
+            StringTable::FILE_ID,
+            DatFileType::StringTable
+        ));
     }
 
     #[test]
@@ -436,6 +447,16 @@ mod tests {
         ));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x01000001, DatFileType::Model));
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            EnumMapper::FILE_ID,
+            DatFileType::EnumMapper
+        ));
+        assert!(manifest.should_keep_entry(
+            EOR_LANGUAGE_NAMESPACE,
+            StringTable::FILE_ID,
+            DatFileType::StringTable
+        ));
     }
 
     /// A pruned animation must keep every fact a host simulation reads and drop the rest, and it

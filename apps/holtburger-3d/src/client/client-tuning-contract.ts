@@ -52,6 +52,33 @@ export interface ClientTuning {
 	readonly diagnostics: FrontendUiDiagnosticsTuning;
 	/** Client portal lifecycle timing and visual policy. */
 	readonly portalTransition: ClientPortalTransitionTuning;
+	/** Server-backed object-inspection presentation policy. */
+	readonly objectInspection: {
+		/** Delay between completed refreshes while an inspection window remains open. */
+		readonly refreshIntervalMs: number;
+	};
+	/** Isolated creature-inspection model presentation and local controls. */
+	readonly objectPreview: {
+		/** User-resizable preview-pane height in CSS pixels. */
+		readonly height: {
+			/** Height assigned when an inspection window is created. */
+			readonly initial: number;
+			/** Smallest height reachable by pointer or keyboard resizing. */
+			readonly minimum: number;
+			/** Largest height reachable by pointer or keyboard resizing. */
+			readonly maximum: number;
+			/** Height change for one keyboard resize command. */
+			readonly keyboardStep: number;
+		};
+		readonly maximumFramesPerSecond: number;
+		readonly maximumBufferWidth: number;
+		readonly maximumBufferHeight: number;
+		/** Minimum supersampling used when device pixel density would otherwise be lower. */
+		readonly minimumResolutionScale: number;
+		readonly initialYawRadians: number;
+		readonly yawRadiansPerPixel: number;
+		readonly keyboardYawStepRadians: number;
+	};
 	/** Client third-person camera behavior. */
 	readonly camera: ClientCameraTuning;
 	/** Precise-jump evaluation cadence, reach, and marker presentation. */

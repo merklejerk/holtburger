@@ -26,6 +26,8 @@
 		readonly onSelectItem: (guid: number) => void;
 		readonly placement: ClientHudPlacement;
 		readonly viewport: ClientHudViewport;
+		readonly zIndex?: number;
+		readonly onFocus?: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
 	const {
@@ -35,6 +37,8 @@
 		onSelectItem,
 		placement,
 		viewport,
+		zIndex,
+		onFocus,
 		onPlacementChange,
 	}: Props = $props();
 	/** Only the bounded display sampler writes these markup inputs. */
@@ -119,6 +123,8 @@
 				: "Container"}
 			{placement}
 			{viewport}
+			{zIndex}
+			{onFocus}
 			{onPlacementChange}
 			minWidth={minimum.width}
 			minHeight={minimum.height}

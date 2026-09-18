@@ -2,6 +2,11 @@
 	import type { ItemDragSession } from "./client-item-drag";
 	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
 	import ClientInspectionWindow from "./ClientInspectionWindow.svelte";
+	import {
+		bringWindowToFront,
+		windowZIndex,
+		type ClientFloatingWindowId,
+	} from "./client-window-stack";
 	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientSpellDrag } from "./client-spell-drag";
 	import type { ClientItemDrag } from "./client-item-drag";
@@ -344,6 +349,10 @@
 		height: window.innerHeight,
 	};
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	let windowOrder = $state<readonly ClientFloatingWindowId[]>([]);
+	function focusWindow(id: ClientFloatingWindowId): void {
+		windowOrder = bringWindowToFront(windowOrder, id);
+	}
 	/** One selected-HUD request retained only until the inventory panel accepts it. */
 	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
 	let worldElement = $state<HTMLElement | null>(null);
@@ -825,6 +834,8 @@
 				onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
 				placement={hudLayout.worldContainer}
 				{viewport}
+				zIndex={windowZIndex(windowOrder, "worldContainer")}
+				onFocus={() => focusWindow("worldContainer")}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("worldContainer", placement)}
 			/>
@@ -842,6 +853,8 @@
 				placement={hudLayout.inspection}
 				{viewport}
 				previewHeight={inspectionPreviewHeight}
+				zIndex={windowZIndex(windowOrder, "inspection")}
+				onFocus={() => focusWindow("inspection")}
 				onClose={onCloseInspection}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("inspection", placement)}
@@ -864,6 +877,8 @@
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
 				{viewport}
+				zIndex={windowZIndex(windowOrder, panel)}
+				onFocus={() => focusWindow(panel)}
 				onClose={() => (activePanel = null)}
 				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
 			>
@@ -953,7 +968,7 @@
 			position: fixed;
 			top: 8px;
 			right: 8px;
-			z-index: 5;
+			z-index: 500;
 			width: 28px;
 			height: 28px;
 			min-height: 0;

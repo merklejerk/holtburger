@@ -2,6 +2,7 @@ import type {
 	ObjectInspection,
 	ObjectInspectionResult,
 } from "./client-object-inspection-contract";
+import type { HexRgbaColor } from "../lib/frontend-color";
 import type {
 	ObjectPreviewResult,
 	ObjectPreviewSource,
@@ -11,6 +12,14 @@ import type {
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
 import { CLIENT_TUNING } from "./client-tuning";
+import { selectedEntityNameColor } from "./client-selected-entity-color";
+
+type InspectionSession = Pick<
+	ClientLifecycleSession,
+	"examineEntity" | "subscribe" | "state"
+> & {
+	readonly entities: Pick<ClientLifecycleSession["entities"], "read">;
+};
 
 /** Latest-target presentation retained independently of mutable selection and entity mirrors. */
 export type ClientObjectInspectionState =
@@ -20,6 +29,8 @@ export type ClientObjectInspectionState =
 			readonly kind: "ready";
 			readonly guid: number;
 			readonly inspection: ObjectInspection;
+			/** Name color captured through the same policy as the selected-entity HUD. */
+			readonly nameColor: HexRgbaColor | null;
 			/** Null for item appraisal; creature previews retain their own cold readiness. */
 			readonly preview: ClientObjectPreviewState | null;
 	  };
@@ -40,13 +51,11 @@ export type ClientObjectPreviewState =
  *
  * The protocol echoes only a GUID, so a currently requested GUID is the complete correlation key.
  * At most one request is in flight; ready targets are refreshed on a cold, tunable cadence.
- * Selection and entity residency intentionally do not participate in this state machine.
+ * Selection changes and entity residency do not control this state machine; the entity mirror is
+ * sampled only to capture presentation facts for the exact requested target.
  */
 export class ClientObjectInspection {
-	readonly #session: Pick<
-		ClientLifecycleSession,
-		"examineEntity" | "subscribe" | "state"
-	>;
+	readonly #session: InspectionSession;
 	readonly #reportFailure: (message: string) => void;
 	readonly #listeners = new Set<(state: ClientObjectInspectionState) => void>();
 	readonly #unsubscribe: () => void;
@@ -57,13 +66,11 @@ export class ClientObjectInspection {
 	#refreshFailureReported = false;
 	#previewFingerprint: string | null = null;
 	#previewRevision = 0;
+	#nameColor: HexRgbaColor | null = null;
 	#destroyed = false;
 
 	constructor(
-		session: Pick<
-			ClientLifecycleSession,
-			"examineEntity" | "subscribe" | "state"
-		>,
+		session: InspectionSession,
 		reportFailure: (message: string) => void,
 	) {
 		this.#session = session;
@@ -94,11 +101,13 @@ export class ClientObjectInspection {
 		}
 		this.#resetRefresh();
 		this.#resetPreviewIdentity();
+		this.#nameColor = this.#resolveNameColor(guid);
 		this.#replace({ kind: "pending", guid });
 		try {
 			await this.#session.examineEntity(guid);
 		} catch (error) {
 			if (this.#state.kind !== "pending" || this.#state.guid !== guid) return;
+			this.#nameColor = null;
 			this.#replace({ kind: "idle" });
 			this.#reportFailure(failureText(error));
 		}
@@ -108,6 +117,7 @@ export class ClientObjectInspection {
 	close(): void {
 		this.#resetRefresh();
 		this.#resetPreviewIdentity();
+		this.#nameColor = null;
 		this.#replace({ kind: "idle" });
 	}
 
@@ -115,6 +125,7 @@ export class ClientObjectInspection {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#unsubscribe();
+		this.#nameColor = null;
 		this.#replace({ kind: "idle" });
 		this.#listeners.clear();
 	}
@@ -169,10 +180,12 @@ export class ClientObjectInspection {
 				}
 				if (result.outcome.inspection.details.kind === "item")
 					this.#resetPreviewIdentity();
+				this.#nameColor = this.#resolveNameColor(guid) ?? this.#nameColor;
 				this.#replace({
 					kind: "ready",
 					guid,
 					inspection: result.outcome.inspection,
+					nameColor: this.#nameColor,
 					preview:
 						result.outcome.inspection.details.kind === "creature"
 							? this.#state.kind === "ready" && this.#state.preview !== null
@@ -290,6 +303,18 @@ export class ClientObjectInspection {
 	#resetPreviewIdentity(): void {
 		this.#previewFingerprint = null;
 		this.#previewRevision = 0;
+	}
+
+	#resolveNameColor(guid: number): HexRgbaColor | null {
+		const read = this.#session.entities.read();
+		if (read.kind === "pending") return null;
+		const entity = read.level.entities.get(guid);
+		if (entity === undefined || entity.description.kind === "pending")
+			return null;
+		return selectedEntityNameColor(
+			entity.description,
+			guid === read.level.playerGuid,
+		);
 	}
 
 	#replace(state: ClientObjectInspectionState): void {

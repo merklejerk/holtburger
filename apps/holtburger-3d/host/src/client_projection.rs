@@ -1123,7 +1123,8 @@ mod tests {
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
     use holtburger_world::inspection::{
-        InspectionContext, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
+        ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionContext,
+        InspectionSupplement, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
     };
 
     #[test]
@@ -1133,11 +1134,15 @@ mod tests {
         ))
         .unwrap();
         let item_guid = Guid(0x6000_0001);
-        let item = Entity::new(
+        let mut item = Entity::new(
             item_guid,
             "Test Item".into(),
             holtburger_common::position::WorldPosition::default(),
         );
+        item.inspection_supplement = Some(InspectionSupplement {
+            equipment_unenchantable: Some(true),
+            ..InspectionSupplement::default()
+        });
         let creature_guid = Guid(0x6000_0002);
         let mut creature = Entity::new(
             creature_guid,
@@ -1168,6 +1173,42 @@ mod tests {
             health_max: 100,
             attributes: None,
             buffs: None,
+        });
+        let enchantable = |level| ArmorCoverageValue {
+            level,
+            enchantable: true,
+        };
+        character.inspection_supplement = Some(InspectionSupplement {
+            equipment_unenchantable: None,
+            armor_coverage: Some(ArmorCoverage {
+                head: enchantable(312),
+                chest: enchantable(507),
+                abdomen: enchantable(484),
+                upper_arm: enchantable(181),
+                lower_arm: enchantable(181),
+                hand: enchantable(277),
+                upper_leg: enchantable(484),
+                lower_leg: ArmorCoverageValue {
+                    level: 484,
+                    enchantable: false,
+                },
+                foot: enchantable(490),
+            }),
+            ratings: Some(CreatureRatings {
+                damage_rating: Some(5),
+                damage_resistance_rating: Some(0),
+                critical_rating: Some(-2),
+                critical_damage_rating: Some(0),
+                ..CreatureRatings::default()
+            }),
+            max_health_bonus: Some(25),
+            character_details: Some(CharacterDetails {
+                allegiance_name: Some("Test Allegiance".into()),
+                fellowship: Some("Test Fellowship".into()),
+                deaths: Some(0),
+                titles_earned: Some(7),
+                ..CharacterDetails::default()
+            }),
         });
         let mapper = EnumMapper {
             id: EnumMapper::FILE_ID,

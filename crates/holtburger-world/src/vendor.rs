@@ -1,5 +1,6 @@
 use crate::hydration::{WorldObjectPropertiesHydrationExt, decode_vendor_item_supply};
 use crate::identify::{self, IdentifyTarget};
+use crate::inspection::InspectionSupplement;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     HasProperties, HasPropertiesMut, PropertyUpdate, WorldObjectProperties,
@@ -21,6 +22,9 @@ pub struct CoreVendorItem {
     pub weapon_profile: Option<WeaponProfile>,
     pub hook_profile: Option<HookProfile>,
     pub armor_levels: Option<ArmorLevels>,
+    /// Facts retained from the latest successful appraisal as one replaceable snapshot.
+    #[serde(default)]
+    pub inspection_supplement: Option<InspectionSupplement>,
     pub spell_book: Vec<u32>,
     pub armor_highlight: Option<u16>,
     pub armor_color: Option<u16>,
@@ -59,6 +63,7 @@ impl CoreVendorItem {
             weapon_profile: None,
             hook_profile: None,
             armor_levels: None,
+            inspection_supplement: None,
             spell_book: Vec::new(),
             armor_highlight: None,
             armor_color: None,
@@ -82,6 +87,7 @@ impl CoreVendorItem {
                 weapon_profile: &mut self.weapon_profile,
                 hook_profile: &mut self.hook_profile,
                 armor_levels: &mut self.armor_levels,
+                inspection_supplement: &mut self.inspection_supplement,
                 spell_book: &mut self.spell_book,
                 armor_highlight: &mut self.armor_highlight,
                 armor_color: &mut self.armor_color,

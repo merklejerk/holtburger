@@ -798,6 +798,7 @@
 		{#key objectInspection.guid}
 			<ClientInspectionWindow
 				inspection={objectInspection.inspection}
+				nameColor={objectInspection.nameColor}
 				preview={objectInspection.preview}
 				{objectPreviewService}
 				{spells}

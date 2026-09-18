@@ -208,6 +208,7 @@ export async function probeObjectInspection(
 		assert.ok(equipmentPresentation.beneficial > 0);
 		assert.ok(equipmentPresentation.harmful > 0);
 		assert.ok(equipmentPresentation.unbuffed > 0);
+		assert.match(item.window.text, /Unenchantable/);
 		await screenshot("inspection-item");
 
 		const commandsBeforeClose = item.commandCount;
@@ -243,12 +244,58 @@ export async function probeObjectInspection(
 		assert.equal(pending.window, null);
 		await respond("creature", 8);
 		let creature = await waitFor(
-			(value) => value.window?.title === "Olthoi Eviscerator",
+			(value) => value.window?.title === "Holtmage",
 			"Creature inspection did not open",
 		);
 		assert.match(creature.window.text, /Creature vitals|Health/);
 		assert.match(creature.window.text, /attributes/i);
+		assert.match(creature.window.text, /Protection/i);
+		assert.match(creature.window.text, /\*484/);
+		assert.match(creature.window.text, /Combat ratings/i);
+		assert.match(creature.window.text, /Damage resistance\s*0/);
+		assert.match(creature.window.text, /Maximum health\s*25/);
+		assert.match(creature.window.text, /Test Allegiance/);
+		assert.match(creature.window.text, /Deaths\s*Never/);
 		assert.doesNotMatch(creature.window.text, /Wield requirements/);
+		const previewIdentity = await read(`(() => {
+			const pane = document.querySelector('.inspection-preview-pane').getBoundingClientRect();
+			const metadata = document.querySelector('.inspection-preview-metadata');
+			const level = document.querySelector('.inspection-preview-level');
+			const title = document.querySelector('.inspection-preview-title');
+			const name = document.querySelector('.inspection-preview-identity h2');
+			const selectedName = document.querySelector('.selected-entity__heading strong');
+			const metadataRect = metadata.getBoundingClientRect();
+			const heritageRect = metadata.querySelector('p').getBoundingClientRect();
+			const status = metadata.querySelector('[data-player-killer-status]');
+			const statusRect = status.getBoundingClientRect();
+			return {
+				metadata: metadata.textContent.trim(),
+				level: level.textContent.trim(),
+				title: title.textContent.trim(),
+				titleStyle: getComputedStyle(title).fontStyle,
+				nameColor: getComputedStyle(name).color,
+				selectedNameColor: getComputedStyle(selectedName).color,
+				status: status.dataset.playerKillerStatus,
+				tooltip: status.getAttribute('title'),
+				bottomGap: pane.bottom - metadataRect.bottom,
+				rowAlignment: Math.abs(statusRect.bottom - metadataRect.bottom),
+				leftGap: heritageRect.left - metadataRect.left,
+				rightGap: metadataRect.right - statusRect.right,
+			};
+		})()`);
+		assert.equal(previewIdentity.level, "Level 126");
+		assert.equal(previewIdentity.title, "Adventurer");
+		assert.equal(previewIdentity.titleStyle, "italic");
+		assert.equal(previewIdentity.nameColor, previewIdentity.selectedNameColor);
+		assert.equal(previewIdentity.metadata, "Male Undead");
+		assert.equal(previewIdentity.status, "non-player-killer");
+		assert.equal(previewIdentity.tooltip, "Non-Player Killer");
+		assert.ok(
+			previewIdentity.bottomGap >= 0 && previewIdentity.bottomGap <= 20,
+		);
+		assert.ok(previewIdentity.rowAlignment <= 1);
+		assert.ok(previewIdentity.leftGap <= 1);
+		assert.ok(previewIdentity.rightGap <= 1);
 		const creatureEnhancements = await read(`({
 			beneficial: document.querySelectorAll('.inspection-creature .inspection-enchantment-beneficial').length,
 			harmful: document.querySelectorAll('.inspection-creature .inspection-enchantment-harmful').length,
@@ -273,7 +320,7 @@ export async function probeObjectInspection(
 		assert.equal(pending.window, null);
 		await respond("creature", 8);
 		creature = await waitFor(
-			(value) => value.window?.title === "Olthoi Eviscerator",
+			(value) => value.window?.title === "Holtmage",
 			"Latest inspection response did not win",
 		);
 		assert.equal(creature.commandCount, latestCount);
@@ -391,6 +438,12 @@ export async function probeObjectInspection(
 		);
 		assert.ok(
 			narrow.window.rectangle.top + narrow.window.rectangle.height <= 320,
+		);
+		assert.equal(
+			await read(`getComputedStyle(
+				document.querySelector('.inspection-facts')
+			).gridTemplateColumns.split(' ').length`),
+			1,
 		);
 		await screenshot("inspection-small-viewport");
 		await client.send("Emulation.setDeviceMetricsOverride", {

@@ -37,10 +37,14 @@ const itemStatusSchema = z
 		isLocked: z.boolean().nullable(),
 		sellable: z.boolean().nullable(),
 		ivoryable: z.boolean().nullable(),
+		unenchantable: z.boolean().nullable(),
 	})
 	.strict();
 const countSchema = z.object({ current: u32.nullable(), max: u32 }).strict();
 const vitalRangeSchema = z.object({ current: u32, max: u32 }).strict();
+const armorCoverageValueSchema = z
+	.object({ level: u32, enchantable: z.boolean() })
+	.strict();
 const protectionsSchema = z
 	.object({
 		slashing: enchantedValueSchema(finiteNumber),
@@ -306,6 +310,57 @@ const creatureInspectionSchema = z
 			})
 			.strict()
 			.nullable(),
+		armorCoverage: z
+			.object({
+				head: armorCoverageValueSchema,
+				chest: armorCoverageValueSchema,
+				abdomen: armorCoverageValueSchema,
+				upperArm: armorCoverageValueSchema,
+				lowerArm: armorCoverageValueSchema,
+				hand: armorCoverageValueSchema,
+				upperLeg: armorCoverageValueSchema,
+				lowerLeg: armorCoverageValueSchema,
+				foot: armorCoverageValueSchema,
+			})
+			.strict()
+			.nullable(),
+		ratings: z
+			.object({
+				damageRating: i32.nullable(),
+				damageResistanceRating: i32.nullable(),
+				criticalRating: i32.nullable(),
+				criticalDamageRating: i32.nullable(),
+				criticalResistanceRating: i32.nullable(),
+				criticalDamageResistanceRating: i32.nullable(),
+				playerKillerDamageRating: i32.nullable(),
+				playerKillerDamageResistanceRating: i32.nullable(),
+				overpowerChancePercent: i32.nullable(),
+				overpowerResistancePercent: i32.nullable(),
+				healingBoostRating: i32.nullable(),
+				netherResistanceRating: i32.nullable(),
+				damageOverTimeResistanceRating: i32.nullable(),
+				lifeMagicResistanceRating: i32.nullable(),
+			})
+			.strict()
+			.nullable(),
+		maxHealthBonus: i32.nullable(),
+		characterDetails: z
+			.object({
+				allegianceName: z.string().nullable(),
+				patron: z.string().nullable(),
+				monarch: z.string().nullable(),
+				allegianceFollowers: i32.nullable(),
+				fellowship: z.string().nullable(),
+				arrivedInDereth: z.string().nullable(),
+				ageSeconds: i32.nullable(),
+				deaths: i32.nullable(),
+				titlesEarned: i32.nullable(),
+				chessRank: i32.nullable(),
+				fishingSkill: i32.nullable(),
+				enlightenment: i32.nullable(),
+			})
+			.strict()
+			.nullable(),
 	})
 	.strict();
 
@@ -369,6 +424,11 @@ export type CreatureInspection = Extract<
 	ObjectInspection["details"],
 	{ kind: "creature" }
 >["details"];
+/** Character-only identity variant used by player-specific inspection presentation. */
+export type CharacterIdentity = Extract<
+	CreatureInspection["identity"],
+	{ kind: "character" }
+>;
 
 export function decodeObjectInspectionResult(
 	value: unknown,

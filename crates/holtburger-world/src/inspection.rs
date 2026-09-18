@@ -12,7 +12,7 @@ use holtburger_common::properties::{
 use holtburger_common::stats::{CreatureType, SkillType};
 use holtburger_content::CharacterTitleCatalog;
 use holtburger_protocol::messages::object::types::{
-    ArmorProfile, CreatureBuffs, CreatureProfile, WeaponProfile,
+    ArmorLevels, ArmorProfile, CreatureBuffs, CreatureProfile, WeaponProfile,
 };
 use strum_macros::{Display, FromRepr};
 
@@ -25,6 +25,8 @@ pub struct InspectionSource<'a> {
     pub wcid: Option<u32>,
     /// Complete retained property tables.
     pub properties: &'a WorldObjectProperties,
+    /// Facts retained from exactly one successful appraisal response.
+    pub supplement: Option<&'a InspectionSupplement>,
     /// Live public-description flags used for semantics that retail does not read from appraisal properties.
     pub public_flags: ObjectDescriptionFlag,
     /// Appraised armor protection profile.
@@ -67,6 +69,7 @@ impl<'a> InspectionSource<'a> {
             guid: entity.guid,
             wcid: entity.wcid,
             properties: &entity.properties,
+            supplement: entity.inspection_supplement.as_ref(),
             public_flags: entity.flags,
             armor_profile: entity.armor_profile.as_ref(),
             creature_profile: entity.creature_profile.as_ref(),
@@ -86,6 +89,7 @@ impl<'a> InspectionSource<'a> {
             guid: item.guid,
             wcid: Some(item.wcid),
             properties: &item.properties,
+            supplement: item.inspection_supplement.as_ref(),
             public_flags: ObjectDescriptionFlag::empty(),
             armor_profile: item.armor_profile.as_ref(),
             creature_profile: item.creature_profile.as_ref(),
@@ -233,6 +237,260 @@ pub struct CreatureInspection {
     pub health: EnchantedValue<VitalRange>,
     /// Attributes, stamina, and mana disclosed as one optional profile block.
     pub attributes_and_vitals: Option<CreatureAttributesAndVitals>,
+    /// Appraised armor totals for all nine body locations.
+    pub armor_coverage: Option<ArmorCoverage>,
+    /// Effective creature ratings disclosed by the server.
+    pub ratings: Option<CreatureRatings>,
+    /// Maximum-health bonus supplied by equipped gear.
+    pub max_health_bonus: Option<i32>,
+    /// Privacy-controlled affiliation and personal facts for character-style subjects.
+    pub character_details: Option<CharacterDetails>,
+}
+
+/// Facts whose absence must replace, rather than inherit from, an older appraisal.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectionSupplement {
+    /// Equipment enchantability derived from the current response's ResistMagic property.
+    pub equipment_unenchantable: Option<bool>,
+    /// Raw armor-location values decoded into game meaning.
+    pub armor_coverage: Option<ArmorCoverage>,
+    /// Effective ratings copied only from the current response.
+    pub ratings: Option<CreatureRatings>,
+    /// Maximum-health bonus copied only from the current response.
+    pub max_health_bonus: Option<i32>,
+    /// Character facts copied only from the current response.
+    pub character_details: Option<CharacterDetails>,
+}
+
+/// Armor level and collective enchantability for one body location.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArmorCoverageValue {
+    /// Effective armor level with the wire sentinel removed.
+    pub level: u32,
+    /// Whether the server omitted the all-covering-layers-unenchantable marker.
+    pub enchantable: bool,
+}
+
+/// Complete nine-location armor appraisal block.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArmorCoverage {
+    /// Head armor level.
+    pub head: ArmorCoverageValue,
+    /// Chest armor level.
+    pub chest: ArmorCoverageValue,
+    /// Abdomen/groin armor level.
+    pub abdomen: ArmorCoverageValue,
+    /// Upper-arm/bicep armor level.
+    pub upper_arm: ArmorCoverageValue,
+    /// Lower-arm/wrist armor level.
+    pub lower_arm: ArmorCoverageValue,
+    /// Hand armor level.
+    pub hand: ArmorCoverageValue,
+    /// Upper-leg/thigh armor level.
+    pub upper_leg: ArmorCoverageValue,
+    /// Lower-leg/shin armor level.
+    pub lower_leg: ArmorCoverageValue,
+    /// Foot armor level.
+    pub foot: ArmorCoverageValue,
+}
+
+/// Effective combat ratings sent by the server in one appraisal response.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatureRatings {
+    /// Effective outgoing damage rating.
+    pub damage_rating: Option<i32>,
+    /// Effective incoming damage resistance rating.
+    pub damage_resistance_rating: Option<i32>,
+    /// Effective critical-hit frequency rating.
+    pub critical_rating: Option<i32>,
+    /// Effective critical-hit damage rating.
+    pub critical_damage_rating: Option<i32>,
+    /// Effective critical-hit frequency resistance rating.
+    pub critical_resistance_rating: Option<i32>,
+    /// Effective critical-hit damage resistance rating.
+    pub critical_damage_resistance_rating: Option<i32>,
+    /// Effective PK-only outgoing damage rating.
+    pub player_killer_damage_rating: Option<i32>,
+    /// Effective PK-only incoming damage resistance rating.
+    pub player_killer_damage_resistance_rating: Option<i32>,
+    /// Endgame-creature overpower chance in integer percentage points.
+    pub overpower_chance_percent: Option<i32>,
+    /// Overpower resistance in integer percentage points.
+    pub overpower_resistance_percent: Option<i32>,
+    /// Effective healing boost rating.
+    pub healing_boost_rating: Option<i32>,
+    /// Effective nether resistance rating.
+    pub nether_resistance_rating: Option<i32>,
+    /// Effective damage-over-time resistance rating.
+    pub damage_over_time_resistance_rating: Option<i32>,
+    /// Effective life-magic drain and harm resistance rating.
+    pub life_magic_resistance_rating: Option<i32>,
+}
+
+/// Server-disclosed character affiliation and privacy-controlled personal facts.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterDetails {
+    /// Allegiance name, when the character belongs to one.
+    pub allegiance_name: Option<String>,
+    /// Server-authored patron title and name.
+    pub patron: Option<String>,
+    /// Server-authored monarch title and name.
+    pub monarch: Option<String>,
+    /// Total allegiance followers, disclosed for monarchs.
+    pub allegiance_followers: Option<i32>,
+    /// Current fellowship name.
+    pub fellowship: Option<String>,
+    /// Server-authored character creation date.
+    pub arrived_in_dereth: Option<String>,
+    /// Total character age in seconds.
+    pub age_seconds: Option<i32>,
+    /// Number of character deaths.
+    pub deaths: Option<i32>,
+    /// Number of character titles earned.
+    pub titles_earned: Option<i32>,
+    /// Chess rank.
+    pub chess_rank: Option<i32>,
+    /// Fishing skill exposed by the legacy FakeFishingSkill property.
+    pub fishing_skill: Option<i32>,
+    /// Number of enlightenment cycles completed.
+    pub enlightenment: Option<i32>,
+}
+
+const UNENCHANTABLE_THRESHOLD: u32 = 9_999;
+
+impl InspectionSupplement {
+    /// Build the replaceable semantic facts from one complete successful response.
+    pub(crate) fn from_response(
+        properties: &WorldObjectProperties,
+        armor_levels: Option<&ArmorLevels>,
+    ) -> Self {
+        let ratings = CreatureRatings {
+            damage_rating: properties.get_int_prop(PropertyInt::DamageRating),
+            damage_resistance_rating: properties.get_int_prop(PropertyInt::DamageResistRating),
+            critical_rating: properties.get_int_prop(PropertyInt::CritRating),
+            critical_damage_rating: properties.get_int_prop(PropertyInt::CritDamageRating),
+            critical_resistance_rating: properties.get_int_prop(PropertyInt::CritResistRating),
+            critical_damage_resistance_rating: properties
+                .get_int_prop(PropertyInt::CritDamageResistRating),
+            player_killer_damage_rating: properties.get_int_prop(PropertyInt::PkDamageRating),
+            player_killer_damage_resistance_rating: properties
+                .get_int_prop(PropertyInt::PkDamageResistRating),
+            overpower_chance_percent: properties.get_int_prop(PropertyInt::Overpower),
+            overpower_resistance_percent: properties.get_int_prop(PropertyInt::OverpowerResist),
+            healing_boost_rating: properties.get_int_prop(PropertyInt::HealingBoostRating),
+            nether_resistance_rating: properties.get_int_prop(PropertyInt::NetherResistRating),
+            damage_over_time_resistance_rating: properties
+                .get_int_prop(PropertyInt::DotResistRating),
+            life_magic_resistance_rating: properties.get_int_prop(PropertyInt::LifeResistRating),
+        };
+        let character_details = CharacterDetails {
+            allegiance_name: properties
+                .get_string_prop(PropertyString::AllegianceName)
+                .map(str::to_owned),
+            patron: properties
+                .get_string_prop(PropertyString::PatronsTitle)
+                .map(str::to_owned),
+            monarch: properties
+                .get_string_prop(PropertyString::MonarchsTitle)
+                .map(str::to_owned),
+            allegiance_followers: properties.get_int_prop(PropertyInt::AllegianceFollowers),
+            fellowship: properties
+                .get_string_prop(PropertyString::Fellowship)
+                .map(str::to_owned),
+            arrived_in_dereth: properties
+                .get_string_prop(PropertyString::DateOfBirth)
+                .map(str::to_owned),
+            age_seconds: properties.get_int_prop(PropertyInt::Age),
+            deaths: properties.get_int_prop(PropertyInt::NumDeaths),
+            titles_earned: properties.get_int_prop(PropertyInt::NumCharacterTitles),
+            chess_rank: properties.get_int_prop(PropertyInt::ChessRank),
+            fishing_skill: properties.get_int_prop(PropertyInt::FakeFishingSkill),
+            enlightenment: properties.get_int_prop(PropertyInt::Enlightenment),
+        };
+
+        Self {
+            equipment_unenchantable: properties
+                .get_int_prop(PropertyInt::ResistMagic)
+                .map(|value| value >= UNENCHANTABLE_THRESHOLD as i32),
+            armor_coverage: armor_levels.map(ArmorCoverage::from_wire),
+            ratings: (!ratings.is_empty()).then_some(ratings),
+            max_health_bonus: properties.get_int_prop(PropertyInt::GearMaxHealth),
+            character_details: (!character_details.is_empty()).then_some(character_details),
+        }
+    }
+}
+
+impl ArmorCoverage {
+    fn from_wire(levels: &ArmorLevels) -> Self {
+        Self {
+            head: ArmorCoverageValue::from_wire(levels.head),
+            chest: ArmorCoverageValue::from_wire(levels.chest),
+            abdomen: ArmorCoverageValue::from_wire(levels.abdomen),
+            upper_arm: ArmorCoverageValue::from_wire(levels.upper_arm),
+            lower_arm: ArmorCoverageValue::from_wire(levels.lower_arm),
+            hand: ArmorCoverageValue::from_wire(levels.hand),
+            upper_leg: ArmorCoverageValue::from_wire(levels.upper_leg),
+            lower_leg: ArmorCoverageValue::from_wire(levels.lower_leg),
+            foot: ArmorCoverageValue::from_wire(levels.foot),
+        }
+    }
+}
+
+impl ArmorCoverageValue {
+    fn from_wire(value: u32) -> Self {
+        if value >= UNENCHANTABLE_THRESHOLD {
+            Self {
+                level: value - UNENCHANTABLE_THRESHOLD,
+                enchantable: false,
+            }
+        } else {
+            Self {
+                level: value,
+                enchantable: true,
+            }
+        }
+    }
+}
+
+impl CreatureRatings {
+    fn is_empty(&self) -> bool {
+        self.damage_rating.is_none()
+            && self.damage_resistance_rating.is_none()
+            && self.critical_rating.is_none()
+            && self.critical_damage_rating.is_none()
+            && self.critical_resistance_rating.is_none()
+            && self.critical_damage_resistance_rating.is_none()
+            && self.player_killer_damage_rating.is_none()
+            && self.player_killer_damage_resistance_rating.is_none()
+            && self.overpower_chance_percent.is_none()
+            && self.overpower_resistance_percent.is_none()
+            && self.healing_boost_rating.is_none()
+            && self.nether_resistance_rating.is_none()
+            && self.damage_over_time_resistance_rating.is_none()
+            && self.life_magic_resistance_rating.is_none()
+    }
+}
+
+impl CharacterDetails {
+    fn is_empty(&self) -> bool {
+        self.allegiance_name.is_none()
+            && self.patron.is_none()
+            && self.monarch.is_none()
+            && self.allegiance_followers.is_none()
+            && self.fellowship.is_none()
+            && self.arrived_in_dereth.is_none()
+            && self.age_seconds.is_none()
+            && self.deaths.is_none()
+            && self.titles_earned.is_none()
+            && self.chess_rank.is_none()
+            && self.fishing_skill.is_none()
+            && self.enlightenment.is_none()
+    }
 }
 
 /// Mutually exclusive identity presentations selected by retail's creature examination rules.
@@ -308,6 +566,8 @@ pub struct ItemStatus {
     pub sellable: Option<bool>,
     /// Whether ivory can be applied.
     pub ivoryable: Option<bool>,
+    /// Whether magic cannot enchant the item, derived from appraised ResistMagic.
+    pub unenchantable: Option<bool>,
 }
 
 /// A typed item modifier and its source-unit value.
@@ -819,6 +1079,9 @@ impl ItemInspection {
                 is_locked: object.get_bool_prop_opt(PropertyBool::Locked),
                 sellable: object.get_bool_prop_opt(PropertyBool::IsSellable),
                 ivoryable: object.get_bool_prop_opt(PropertyBool::Ivoryable),
+                unenchantable: object
+                    .supplement
+                    .and_then(|supplement| supplement.equipment_unenchantable),
             },
             stack: CountInfo::stack_from_object(object),
             uses: CountInfo::uses_from_object(object),
@@ -1394,8 +1657,16 @@ impl CreatureInspection {
             .creature_profile
             .expect("creature inspection classification requires a creature profile");
         let buffs = profile.buffs.as_ref();
+        let identity = creature_identity(object, context.character_titles);
+        let supplement = object.supplement;
+        let character_details = if matches!(identity, CreatureIdentity::Character { .. }) {
+            supplement.and_then(|value| value.character_details.clone())
+        } else {
+            None
+        };
         Self {
-            identity: creature_identity(object, context.character_titles),
+            character_details,
+            identity,
             health: creature_enchanted_value(
                 VitalRange {
                     current: profile.health,
@@ -1432,6 +1703,9 @@ impl CreatureInspection {
                     ),
                 }
             }),
+            armor_coverage: supplement.and_then(|value| value.armor_coverage.clone()),
+            ratings: supplement.and_then(|value| value.ratings.clone()),
+            max_health_bonus: supplement.and_then(|value| value.max_health_bonus),
         }
     }
 }
@@ -1629,9 +1903,12 @@ mod tests {
         WorldObjectPropertyAccessorsMut,
     };
     use holtburger_dat::file_type::{EnumMapper, StringTable, StringTableData};
+    use holtburger_protocol::messages::object::events::{
+        IdentifyObjectResponseEventData, IdentifyResponseFlags,
+    };
     use holtburger_protocol::messages::object::types::{
-        ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
-        WeaponProfile,
+        ArmorLevels, ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile,
+        CreatureProfileFlags, WeaponProfile,
     };
 
     fn inspect_entity(entity: &Entity) -> Result<ObjectInspection, ObjectInspectionError> {
@@ -2134,5 +2411,231 @@ mod tests {
             inspect_entity(&entity).unwrap(),
             inspect_vendor_item(&vendor).unwrap()
         );
+    }
+
+    #[test]
+    fn appraisal_supplement_decodes_armor_and_preserves_signed_zero_and_absence() {
+        let mut properties = WorldObjectProperties::default();
+        properties.set_int_prop(PropertyInt::DamageRating, -3);
+        properties.set_int_prop(PropertyInt::DamageResistRating, 0);
+        properties.set_int_prop(PropertyInt::NumDeaths, 0);
+        let supplement = InspectionSupplement::from_response(
+            &properties,
+            Some(&ArmorLevels {
+                head: 9_999,
+                chest: 10_311,
+                abdomen: 484,
+                upper_arm: 181,
+                lower_arm: 182,
+                hand: 277,
+                upper_leg: 484,
+                lower_leg: 485,
+                foot: 490,
+            }),
+        );
+
+        let armor = supplement.armor_coverage.expect("armor coverage");
+        assert_eq!(
+            armor,
+            ArmorCoverage {
+                head: ArmorCoverageValue {
+                    level: 0,
+                    enchantable: false,
+                },
+                chest: ArmorCoverageValue {
+                    level: 312,
+                    enchantable: false,
+                },
+                abdomen: ArmorCoverageValue {
+                    level: 484,
+                    enchantable: true,
+                },
+                upper_arm: ArmorCoverageValue {
+                    level: 181,
+                    enchantable: true,
+                },
+                lower_arm: ArmorCoverageValue {
+                    level: 182,
+                    enchantable: true,
+                },
+                hand: ArmorCoverageValue {
+                    level: 277,
+                    enchantable: true,
+                },
+                upper_leg: ArmorCoverageValue {
+                    level: 484,
+                    enchantable: true,
+                },
+                lower_leg: ArmorCoverageValue {
+                    level: 485,
+                    enchantable: true,
+                },
+                foot: ArmorCoverageValue {
+                    level: 490,
+                    enchantable: true,
+                },
+            }
+        );
+        let ratings = supplement.ratings.expect("ratings");
+        assert_eq!(ratings.damage_rating, Some(-3));
+        assert_eq!(ratings.damage_resistance_rating, Some(0));
+        assert_eq!(ratings.critical_damage_rating, None);
+        assert_eq!(
+            supplement
+                .character_details
+                .expect("character details")
+                .deaths,
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn equipment_unenchantable_preserves_absence_and_threshold_boundary() {
+        let mut properties = WorldObjectProperties::default();
+        assert_eq!(
+            InspectionSupplement::from_response(&properties, None).equipment_unenchantable,
+            None
+        );
+        for (value, expected) in [(9_998, false), (9_999, true), (10_000, true)] {
+            properties.set_int_prop(PropertyInt::ResistMagic, value);
+            assert_eq!(
+                InspectionSupplement::from_response(&properties, None).equipment_unenchantable,
+                Some(expected)
+            );
+        }
+
+        let mut bonus_only = WorldObjectProperties::default();
+        bonus_only.set_int_prop(PropertyInt::GearMaxHealth, 25);
+        let supplement = InspectionSupplement::from_response(&bonus_only, None);
+        assert_eq!(supplement.max_health_bonus, Some(25));
+        assert!(supplement.ratings.is_none());
+    }
+
+    #[test]
+    fn successful_refresh_replaces_supplement_while_rejection_preserves_it() {
+        let guid = Guid(0x6000_000B);
+        let mut entity = Entity::new(guid, "Refresh Test".to_owned(), WorldPosition::default());
+        let mut first = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            flags: IdentifyResponseFlags::INT_STATS_TABLE,
+            success: true,
+            ..Default::default()
+        };
+        first
+            .properties
+            .set_int_prop(PropertyInt::ResistMagic, 9_999);
+        first.properties.set_int_prop(PropertyInt::DamageRating, 5);
+        first.properties.set_string_prop(
+            PropertyString::DateOfBirth,
+            "1 Frostfell, 1 P.Y.".to_owned(),
+        );
+        first.armor_levels = Some(ArmorLevels {
+            head: 100,
+            chest: 200,
+            abdomen: 300,
+            upper_arm: 400,
+            lower_arm: 500,
+            hand: 600,
+            upper_leg: 700,
+            lower_leg: 800,
+            foot: 900,
+        });
+        assert!(entity.apply_identify_response(&first));
+        let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details else {
+            panic!("ordinary object should use item inspection");
+        };
+        assert_eq!(item.status.unenchantable, Some(true));
+
+        let rejected = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            success: false,
+            ..Default::default()
+        };
+        assert!(!entity.apply_identify_response(&rejected));
+        assert_eq!(
+            entity
+                .inspection_supplement
+                .as_ref()
+                .and_then(|value| value.ratings.as_ref())
+                .and_then(|value| value.damage_rating),
+            Some(5)
+        );
+        assert_eq!(
+            entity
+                .inspection_supplement
+                .as_ref()
+                .and_then(|value| value.armor_coverage.as_ref())
+                .map(|value| value.foot.level),
+            Some(900)
+        );
+
+        let mut changed = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            success: true,
+            armor_levels: Some(ArmorLevels {
+                head: 101,
+                chest: 201,
+                abdomen: 301,
+                upper_arm: 401,
+                lower_arm: 501,
+                hand: 601,
+                upper_leg: 701,
+                lower_leg: 801,
+                foot: 901,
+            }),
+            ..Default::default()
+        };
+        changed
+            .properties
+            .set_int_prop(PropertyInt::DamageRating, -2);
+        changed
+            .properties
+            .set_string_prop(PropertyString::Fellowship, "Changed Fellowship".to_owned());
+        assert!(entity.apply_identify_response(&changed));
+        let changed_supplement = entity
+            .inspection_supplement
+            .as_ref()
+            .expect("changed successful supplement");
+        assert_eq!(changed_supplement.equipment_unenchantable, None);
+        assert_eq!(
+            changed_supplement
+                .ratings
+                .as_ref()
+                .and_then(|value| value.damage_rating),
+            Some(-2)
+        );
+        assert_eq!(
+            changed_supplement
+                .armor_coverage
+                .as_ref()
+                .map(|value| value.foot.level),
+            Some(901)
+        );
+        assert_eq!(
+            changed_supplement
+                .character_details
+                .as_ref()
+                .and_then(|value| value.fellowship.as_deref()),
+            Some("Changed Fellowship")
+        );
+
+        let empty_success = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            success: true,
+            ..Default::default()
+        };
+        assert!(entity.apply_identify_response(&empty_success));
+        let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details else {
+            panic!("ordinary object should use item inspection");
+        };
+        assert_eq!(item.status.unenchantable, None);
+        assert_eq!(entity.get_int_prop(PropertyInt::DamageRating), Some(-2));
+        let supplement = entity
+            .inspection_supplement
+            .as_ref()
+            .expect("successful empty supplement");
+        assert!(supplement.armor_coverage.is_none());
+        assert!(supplement.ratings.is_none());
+        assert!(supplement.character_details.is_none());
     }
 }

@@ -14,7 +14,7 @@
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		formatInspectionNumber,
-		humanizeInspectionName,
+		formatPlayerKillerStatus,
 	} from "./client-object-inspection-format";
 	import type {
 		ClientHudPlacement,
@@ -105,6 +105,7 @@
 			/>
 		</div>
 	{:else}
+		{@const creatureIdentity = inspection.details.details.identity}
 		<div
 			class="inspection-creature-layout"
 			style:grid-template-rows={`${previewHeight}px minmax(0, 1fr)`}
@@ -112,18 +113,24 @@
 			<div class="inspection-preview-pane">
 				<header class="inspection-preview-identity">
 					<h2>{inspection.name}</h2>
-					{#if inspection.level !== null || inspection.details.details.creatureType !== null}
+					{#if inspection.level !== null || creatureIdentity.lineage !== null}
 						<p>
 							{inspection.level === null
 								? ""
 								: `Level ${formatInspectionNumber(inspection.level)}`}{inspection.level !==
-								null && inspection.details.details.creatureType !== null
+								null && creatureIdentity.lineage !== null
 								? " · "
-								: ""}{inspection.details.details.creatureType === null
+								: ""}{creatureIdentity.lineage === null
 								? ""
-								: humanizeInspectionName(
-										inspection.details.details.creatureType,
-									)}
+								: creatureIdentity.lineage}
+						</p>
+					{/if}
+					{#if creatureIdentity.kind === "character"}
+						{#if creatureIdentity.role !== null}<p>
+								{creatureIdentity.role}
+							</p>{/if}
+						<p>
+							{formatPlayerKillerStatus(creatureIdentity.playerKillerStatus)}
 						</p>
 					{/if}
 				</header>
@@ -351,7 +358,7 @@
 		}
 		.inspection-scroll :global(dd) {
 			text-align: right;
-			overflow-wrap: anywhere;
+			overflow-wrap: normal;
 		}
 		.inspection-scroll :global(.inspection-enchantment-beneficial) {
 			color: var(--ui-color-success);
@@ -369,6 +376,25 @@
 		}
 		.inspection-scroll :global(li + li) {
 			margin-top: 3px;
+		}
+		.inspection-scroll :global(.inspection-spells) {
+			padding-left: 0;
+			list-style: none;
+		}
+		.inspection-scroll :global(.inspection-spell > summary) {
+			padding: 3px 0;
+			cursor: pointer;
+		}
+		.inspection-scroll :global(.inspection-spell > summary::marker) {
+			color: var(--ui-color-accent);
+		}
+		.inspection-scroll :global(.inspection-spell-description) {
+			margin: 3px 0 7px 15px;
+			padding: 7px 9px;
+			border-left: 2px solid var(--ui-color-accent);
+			background: color-mix(in srgb, var(--ui-color-well) 75%, transparent);
+			overflow-wrap: anywhere;
+			white-space: pre-wrap;
 		}
 		.inspection-scroll :global(blockquote) {
 			padding-left: 10px;

@@ -268,7 +268,26 @@ const itemInspectionSchema = z
 
 const creatureInspectionSchema = z
 	.object({
-		creatureType: semanticEnumName.nullable(),
+		identity: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("creature"),
+					lineage: z.string().nullable(),
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("character"),
+					lineage: z.string().nullable(),
+					role: z.string().nullable(),
+					playerKillerStatus: z.enum([
+						"non-player-killer",
+						"player-killer-lite",
+						"player-killer",
+					]),
+				})
+				.strict(),
+		]),
 		health: enchantedValueSchema(vitalRangeSchema),
 		attributesAndVitals: z
 			.object({

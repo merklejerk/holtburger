@@ -4,6 +4,7 @@ import {
 	formatInspectionEffect,
 	formatInspectionImbuedEffects,
 	formatInspectionNumber,
+	formatPlayerKillerStatus,
 	formatWieldRequirement,
 	humanizeInspectionName,
 } from "./client-object-inspection-format";
@@ -30,6 +31,15 @@ describe("object inspection formatting", () => {
 	it("groups inspection numbers with US-style commas", () => {
 		expect(formatInspectionNumber(125000)).toBe("125,000");
 		expect(formatInspectionNumber(12345.6)).toBe("12,345.6");
+	});
+
+	it("preserves retail's character PK labels", () => {
+		expect(formatPlayerKillerStatus("non-player-killer")).toBe(
+			"Non-Player Killer",
+		);
+		expect(formatPlayerKillerStatus("player-killer-lite")).toBe(
+			"Player Killer Lite",
+		);
 	});
 
 	it("formats every tagged shape without re-deriving semantics", () => {

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from "svelte";
 	import type { SpellReference } from "../app/spell-references";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import ClientInspectionArtwork from "./ClientInspectionArtwork.svelte";
@@ -35,8 +34,10 @@
 	let spellReferences = $state<readonly SpellReference[] | null>(null);
 	let spellFailure = $state<string | null>(null);
 
-	onMount(() => {
+	$effect(() => {
 		if (item.spells.length === 0) return;
+		spellReferences = null;
+		spellFailure = null;
 		if (spells === null) {
 			spellFailure = "Spell-reference service is unavailable.";
 			return;
@@ -312,10 +313,40 @@
 			{#if spellFailure !== null}<p class="inspection-diagnostic">
 					Spell names unavailable: {spellFailure}
 				</p>{/if}
-			<ul>
-				{#each item.spells as spell, index}<li>
-						{spellLabel(index)}{spell.activeEnchantment ? " (active)" : ""}
-					</li>{/each}
+			<ul class="inspection-spells">
+				{#each item.spells as spell, index}
+					{@const reference = spellReferences?.[index]}
+					<li>
+						<details class="inspection-spell">
+							<summary>
+								{spellLabel(index)}{spell.activeEnchantment ? " (active)" : ""}
+							</summary>
+							<div class="inspection-spell-description">
+								{#if reference?.kind === "known"}
+									<p>
+										{reference.details.description.length > 0
+											? reference.details.description
+											: "No description available."}
+									</p>
+								{:else if reference?.kind === "missing"}
+									<p class="inspection-diagnostic">
+										Spell definition is unavailable.
+									</p>
+								{:else if reference?.kind === "failed"}
+									<p class="inspection-diagnostic">
+										Spell description unavailable: {reference.detail}
+									</p>
+								{:else if spellFailure !== null}
+									<p class="inspection-diagnostic">
+										Spell description unavailable.
+									</p>
+								{:else}
+									<p class="inspection-diagnostic">Loading description…</p>
+								{/if}
+							</div>
+						</details>
+					</li>
+				{/each}
 			</ul>
 		</section>
 	{/if}

@@ -37,8 +37,12 @@ fn vendor_assessment_waits_for_the_world_populated_inspection_result() {
         "Awaiting appraisal details"
     ));
 
-    let inspection = holtburger_world::inspection::ObjectInspection::from_vendor_item(&identified)
-        .expect("vendor fixture should populate an item inspection");
+    let titles = holtburger_content::CharacterTitleCatalog::default();
+    let inspection = holtburger_world::inspection::ObjectInspection::from_vendor_item(
+        &identified,
+        holtburger_world::inspection::InspectionContext::new(&titles),
+    )
+    .expect("vendor fixture should populate an item inspection");
     let result = state.handle_view_event(ClientViewEvent::ObjectInspectionResult(
         holtburger_world::inspection::ObjectInspectionResult {
             guid: item_guid,

@@ -63,9 +63,38 @@
 				"details": {
 					"kind": "creature",
 					"details": {
-						"creatureType": null,
+						"identity": { "kind": "creature", "lineage": null },
 						"health": {
 							"effective": { "current": 25, "max": 50 },
+							"unbuffed": null,
+							"enchantment": null
+						},
+						"attributesAndVitals": null
+					}
+				}
+			}
+		}
+	},
+	"character": {
+		"guid": 1610612739,
+		"outcome": {
+			"kind": "ready",
+			"inspection": {
+				"guid": 1610612739,
+				"name": "Drawohan the Gem Seller",
+				"description": null,
+				"level": 42,
+				"details": {
+					"kind": "creature",
+					"details": {
+						"identity": {
+							"kind": "character",
+							"lineage": "Lugian",
+							"role": "Gem Seller",
+							"playerKillerStatus": "non-player-killer"
+						},
+						"health": {
+							"effective": { "current": 100, "max": 100 },
 							"unbuffed": null,
 							"enchantment": null
 						},

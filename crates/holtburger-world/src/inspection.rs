@@ -6,10 +6,11 @@ use crate::vendor::CoreVendorItem;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     AttackType, AttunedStatus, DamageType, HasProperties, ImbuedEffectType, ItemType, MaterialType,
-    PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType, WorldObjectExt as _,
-    WorldObjectProperties, WorldObjectPropertyAccessors,
+    ObjectDescriptionFlag, PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType,
+    WorldObjectExt as _, WorldObjectProperties, WorldObjectPropertyAccessors,
 };
 use holtburger_common::stats::{CreatureType, SkillType};
+use holtburger_content::CharacterTitleCatalog;
 use holtburger_protocol::messages::object::types::{
     ArmorProfile, CreatureBuffs, CreatureProfile, WeaponProfile,
 };
@@ -24,6 +25,8 @@ pub struct InspectionSource<'a> {
     pub wcid: Option<u32>,
     /// Complete retained property tables.
     pub properties: &'a WorldObjectProperties,
+    /// Live public-description flags used for semantics that retail does not read from appraisal properties.
+    pub public_flags: ObjectDescriptionFlag,
     /// Appraised armor protection profile.
     pub armor_profile: Option<&'a ArmorProfile>,
     /// Appraised creature health and optional attribute profile.
@@ -46,12 +49,25 @@ pub struct InspectionSource<'a> {
     pub resist_color: Option<u16>,
 }
 
+/// Shared static reference data required to turn retained entity facts into an inspection.
+#[derive(Debug, Clone, Copy)]
+pub struct InspectionContext<'a> {
+    character_titles: &'a CharacterTitleCatalog,
+}
+
+impl<'a> InspectionContext<'a> {
+    pub fn new(character_titles: &'a CharacterTitleCatalog) -> Self {
+        Self { character_titles }
+    }
+}
+
 impl<'a> InspectionSource<'a> {
     pub fn from_entity(entity: &'a Entity) -> Self {
         Self {
             guid: entity.guid,
             wcid: entity.wcid,
             properties: &entity.properties,
+            public_flags: entity.flags,
             armor_profile: entity.armor_profile.as_ref(),
             creature_profile: entity.creature_profile.as_ref(),
             weapon_profile: entity.weapon_profile.as_ref(),
@@ -70,6 +86,7 @@ impl<'a> InspectionSource<'a> {
             guid: item.guid,
             wcid: Some(item.wcid),
             properties: &item.properties,
+            public_flags: ObjectDescriptionFlag::empty(),
             armor_profile: item.armor_profile.as_ref(),
             creature_profile: item.creature_profile.as_ref(),
             weapon_profile: item.weapon_profile.as_ref(),
@@ -135,7 +152,7 @@ pub enum ObjectInspectionDetails {
     /// Object and inventory-item presentation, selected when the appraisal omits a creature profile.
     Item(Box<ItemInspection>),
     /// Creature presentation, including players in the first slice.
-    Creature(CreatureInspection),
+    Creature(Box<CreatureInspection>),
 }
 
 /// Failure to populate a semantically valid inspection from retained world facts.
@@ -210,12 +227,57 @@ pub struct ItemInspectionArtwork {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatureInspection {
-    /// Appraised creature taxonomy.
-    pub creature_type: Option<CreatureType>,
+    /// Retail-compatible creature or character-style identity derived once for every frontend.
+    pub identity: CreatureIdentity,
     /// Effective current and maximum health with appraisal-supplied polarity.
     pub health: EnchantedValue<VitalRange>,
     /// Attributes, stamina, and mana disclosed as one optional profile block.
     pub attributes_and_vitals: Option<CreatureAttributesAndVitals>,
+}
+
+/// Mutually exclusive identity presentations selected by retail's creature examination rules.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum CreatureIdentity {
+    /// Ordinary creature presentation with its best available taxonomy label.
+    Creature {
+        /// Gender plus heritage, or creature type when heritage is absent.
+        lineage: Option<String>,
+    },
+    /// Character-style presentation selected by `Template` or `CharacterTitleId`.
+    Character {
+        /// Gender plus heritage, or creature type when heritage is absent.
+        lineage: Option<String>,
+        /// Localized character title, falling back to the server-authored template role.
+        role: Option<String>,
+        /// Public-flag classification displayed by the retail character inspector.
+        player_killer_status: PlayerKillerClassification,
+    },
+}
+
+impl CreatureIdentity {
+    /// Lineage text shared by compact creature headers in every frontend.
+    pub fn lineage(&self) -> Option<&str> {
+        match self {
+            Self::Creature { lineage } | Self::Character { lineage, .. } => lineage.as_deref(),
+        }
+    }
+}
+
+/// Three labels exposed by retail's character inspector, derived from public object flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Display)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlayerKillerClassification {
+    #[strum(serialize = "Non-Player Killer")]
+    NonPlayerKiller,
+    #[strum(serialize = "Player Killer Lite")]
+    PlayerKillerLite,
+    #[strum(serialize = "Player Killer")]
+    PlayerKiller,
 }
 
 /// Independently optional item and subcontainer capacity maxima.
@@ -678,16 +740,23 @@ mod damage_type_bits {
 
 impl ObjectInspection {
     /// Populate one immutable semantic snapshot from the successfully merged world object.
-    pub fn from_object(object: &InspectionSource<'_>) -> Result<Self, ObjectInspectionError> {
+    pub fn from_object(
+        object: &InspectionSource<'_>,
+        context: InspectionContext<'_>,
+    ) -> Result<Self, ObjectInspectionError> {
         let details = if object.guid.is_player() {
             if object.creature_profile.is_none() {
                 return Err(ObjectInspectionError::MissingPlayerCreatureProfile {
                     guid: object.guid,
                 });
             }
-            ObjectInspectionDetails::Creature(CreatureInspection::from_object(object))
+            ObjectInspectionDetails::Creature(Box::new(CreatureInspection::from_object(
+                object, context,
+            )))
         } else if object.creature_profile.is_some() {
-            ObjectInspectionDetails::Creature(CreatureInspection::from_object(object))
+            ObjectInspectionDetails::Creature(Box::new(CreatureInspection::from_object(
+                object, context,
+            )))
         } else {
             ObjectInspectionDetails::Item(Box::new(ItemInspection::from_object(object)))
         };
@@ -706,12 +775,18 @@ impl ObjectInspection {
         })
     }
 
-    pub fn from_entity(entity: &Entity) -> Result<Self, ObjectInspectionError> {
-        Self::from_object(&InspectionSource::from_entity(entity))
+    pub fn from_entity(
+        entity: &Entity,
+        context: InspectionContext<'_>,
+    ) -> Result<Self, ObjectInspectionError> {
+        Self::from_object(&InspectionSource::from_entity(entity), context)
     }
 
-    pub fn from_vendor_item(item: &CoreVendorItem) -> Result<Self, ObjectInspectionError> {
-        Self::from_object(&InspectionSource::from_vendor_item(item))
+    pub fn from_vendor_item(
+        item: &CoreVendorItem,
+        context: InspectionContext<'_>,
+    ) -> Result<Self, ObjectInspectionError> {
+        Self::from_object(&InspectionSource::from_vendor_item(item), context)
     }
 }
 
@@ -1214,16 +1289,113 @@ fn get_nonzero_modifier(object: &InspectionSource<'_>, prop: PropertyFloat) -> O
     object.get_float_prop(prop).filter(|&v| v != 0.0)
 }
 
+fn creature_identity(
+    object: &InspectionSource<'_>,
+    character_titles: &CharacterTitleCatalog,
+) -> CreatureIdentity {
+    let lineage = creature_lineage(object);
+    let title_id = object.get_int_prop(PropertyInt::CharacterTitleId);
+    let role = title_id
+        .and_then(|value| u32::try_from(value).ok())
+        .and_then(|value| character_titles.title(value))
+        .map(str::to_owned)
+        .or_else(|| {
+            object
+                .get_string_prop(PropertyString::Template)
+                .map(str::to_owned)
+        });
+
+    // gmExaminationUI::SetAppraiseInfo selects the character inspector when either property is
+    // present (acclient.c:218648-218662). Role text independently follows retail title resolution
+    // and then the authored template fallback (acclient.c:223277-223318,474675-474715).
+    if role.is_some() || title_id.is_some() {
+        CreatureIdentity::Character {
+            lineage,
+            role,
+            player_killer_status: player_killer_classification(object.public_flags),
+        }
+    } else {
+        CreatureIdentity::Creature { lineage }
+    }
+}
+
+fn creature_lineage(object: &InspectionSource<'_>) -> Option<String> {
+    let gender = object
+        .get_int_prop(PropertyInt::Gender)
+        .and_then(gender_display_name);
+    let ancestry = match object.get_int_prop(PropertyInt::HeritageGroup) {
+        Some(heritage) if heritage != HeritageGroup::Invalid as i32 => {
+            HeritageGroup::from_repr(heritage as usize).map(heritage_display_name)
+        }
+        _ => object
+            .get_int_prop(PropertyInt::CreatureType)
+            .and_then(|value| CreatureType::from_repr(value as u32))
+            .map(|value| split_semantic_name(&value.to_string())),
+    };
+
+    match (gender, ancestry) {
+        (Some(gender), Some(ancestry)) => Some(format!("{gender} {ancestry}")),
+        (Some(gender), None) => Some(gender.to_owned()),
+        (None, Some(ancestry)) => Some(ancestry),
+        (None, None) => None,
+    }
+}
+
+fn gender_display_name(value: i32) -> Option<&'static str> {
+    match value {
+        1 => Some("Male"),
+        2 => Some("Female"),
+        _ => None,
+    }
+}
+
+fn heritage_display_name(value: HeritageGroup) -> String {
+    match value {
+        HeritageGroup::Gharundim => "Gharu'ndim".to_owned(),
+        HeritageGroup::Shadowbound => "Umbraen".to_owned(),
+        HeritageGroup::OlthoiAcid => "Olthoi".to_owned(),
+        _ => split_semantic_name(&value.to_string()),
+    }
+}
+
+fn split_semantic_name(value: &str) -> String {
+    let mut display = String::with_capacity(value.len());
+    let mut previous_was_lowercase_or_digit = false;
+    for character in value.chars() {
+        if character == '_' || character == '-' {
+            display.push(' ');
+            previous_was_lowercase_or_digit = false;
+            continue;
+        }
+        if character.is_uppercase() && previous_was_lowercase_or_digit {
+            display.push(' ');
+        }
+        previous_was_lowercase_or_digit = character.is_lowercase() || character.is_ascii_digit();
+        display.push(character);
+    }
+    display
+}
+
+fn player_killer_classification(flags: ObjectDescriptionFlag) -> PlayerKillerClassification {
+    // CharExamineUI reads the live object's IsPK/IsPKLite bits rather than the raw appraisal
+    // property (acclient.c:223320-223341), with PK taking precedence if both are present.
+    if flags.contains(ObjectDescriptionFlag::PLAYER_KILLER) {
+        PlayerKillerClassification::PlayerKiller
+    } else if flags.contains(ObjectDescriptionFlag::PK_LITE_STATUS) {
+        PlayerKillerClassification::PlayerKillerLite
+    } else {
+        PlayerKillerClassification::NonPlayerKiller
+    }
+}
+
 impl CreatureInspection {
-    fn from_object(object: &InspectionSource<'_>) -> Self {
+    fn from_object(object: &InspectionSource<'_>, context: InspectionContext<'_>) -> Self {
         let profile = object
             .creature_profile
             .expect("creature inspection classification requires a creature profile");
         let buffs = profile.buffs.as_ref();
         Self {
-            creature_type: object
-                .get_int_prop(PropertyInt::CreatureType)
-                .and_then(|t| CreatureType::from_repr(t as u32)),
+            identity: creature_identity(object, context.character_titles),
             health: creature_enchanted_value(
                 VitalRange {
                     current: profile.health,
@@ -1450,14 +1622,58 @@ mod tests {
     use super::*;
     use crate::entity::Entity;
     use holtburger_common::Guid;
+    use holtburger_common::legacy_hash::legacy_string_hash;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PropertyBool, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
+        ObjectDescriptionFlag, PropertyBool, PropertyFloat, PropertyInt, PropertyString,
+        WorldObjectPropertyAccessorsMut,
     };
+    use holtburger_dat::file_type::{EnumMapper, StringTable, StringTableData};
     use holtburger_protocol::messages::object::types::{
         ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
         WeaponProfile,
     };
+
+    fn inspect_entity(entity: &Entity) -> Result<ObjectInspection, ObjectInspectionError> {
+        let titles = CharacterTitleCatalog::default();
+        ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
+
+    fn inspect_vendor_item(
+        item: &CoreVendorItem,
+    ) -> Result<ObjectInspection, ObjectInspectionError> {
+        let titles = CharacterTitleCatalog::default();
+        ObjectInspection::from_vendor_item(item, InspectionContext::new(&titles))
+    }
+
+    fn inspect_entity_with_title(
+        entity: &Entity,
+        title_id: u32,
+        token: &str,
+        display: &str,
+    ) -> Result<ObjectInspection, ObjectInspectionError> {
+        let mapper = EnumMapper {
+            id: EnumMapper::FILE_ID,
+            base_enum_map: 0,
+            numbering: 0,
+            entries: [(title_id, token.to_owned())].into_iter().collect(),
+        };
+        let strings = StringTable {
+            id: StringTable::FILE_ID,
+            language: 1,
+            unknown: 0,
+            entries: vec![StringTableData {
+                id: legacy_string_hash(token.as_bytes()),
+                variable_names: Vec::new(),
+                variables: Vec::new(),
+                strings: vec![display.to_owned()],
+                comments: Vec::new(),
+                unknown: 0,
+            }],
+        };
+        let titles = CharacterTitleCatalog::from_assets(&mapper, &strings).unwrap();
+        ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
 
     #[test]
     fn from_entity_captures_open_status_property() {
@@ -1469,7 +1685,7 @@ mod tests {
         entity.set_bool_prop(PropertyBool::Open, true);
         entity.set_bool_prop(PropertyBool::Locked, false);
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Item(item) = inspection.details else {
             panic!("door should use item inspection");
         };
@@ -1479,7 +1695,7 @@ mod tests {
     }
 
     #[test]
-    fn from_entity_captures_creature_type_property() {
+    fn ordinary_creature_identity_uses_creature_type_lineage() {
         let mut entity = Entity::new(
             Guid(0x60000003),
             "Test Creature".to_string(),
@@ -1494,13 +1710,97 @@ mod tests {
             buffs: None,
         });
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Creature(creature) = inspection.details else {
             panic!("profile-backed object should use creature inspection");
         };
 
-        assert_eq!(creature.creature_type, Some(CreatureType::Olthoi));
+        assert_eq!(
+            creature.identity,
+            CreatureIdentity::Creature {
+                lineage: Some("Olthoi".to_owned()),
+            }
+        );
         assert_eq!(creature.attributes_and_vitals, None);
+    }
+
+    #[test]
+    fn template_selects_character_identity_with_retail_fallbacks() {
+        let mut entity = Entity::new(
+            Guid(0x6000000B),
+            "Drawohan the Gem Seller".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_string_prop(PropertyString::Template, "Gem Seller".to_owned());
+        entity.set_int_prop(PropertyInt::CharacterTitleId, 999);
+        entity.set_int_prop(PropertyInt::CreatureType, CreatureType::Lugian as i32);
+        entity.flags = ObjectDescriptionFlag::VENDOR;
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+
+        let inspection = inspect_entity(&entity).unwrap();
+        let ObjectInspectionDetails::Creature(creature) = inspection.details else {
+            panic!("profile-backed object should use creature inspection");
+        };
+
+        assert_eq!(
+            creature.identity,
+            CreatureIdentity::Character {
+                lineage: Some("Lugian".to_owned()),
+                role: Some("Gem Seller".to_owned()),
+                player_killer_status: PlayerKillerClassification::NonPlayerKiller,
+            }
+        );
+    }
+
+    #[test]
+    fn character_identity_prefers_localized_title_and_shared_character_facts() {
+        let mut entity = Entity::new(
+            Guid(0x6000000C),
+            "Character".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_int_prop(PropertyInt::CharacterTitleId, 42);
+        entity.set_string_prop(PropertyString::Template, "Template Fallback".to_owned());
+        entity.set_int_prop(PropertyInt::Gender, 2);
+        entity.set_int_prop(PropertyInt::HeritageGroup, HeritageGroup::Gharundim as i32);
+        entity.flags = ObjectDescriptionFlag::PLAYER_KILLER | ObjectDescriptionFlag::PK_LITE_STATUS;
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+
+        let inspection =
+            inspect_entity_with_title(&entity, 42, "DefenderOfDereth", "Defender of Dereth")
+                .unwrap();
+        let ObjectInspectionDetails::Creature(creature) = inspection.details else {
+            panic!("profile-backed object should use creature inspection");
+        };
+
+        assert_eq!(
+            creature.identity,
+            CreatureIdentity::Character {
+                lineage: Some("Female Gharu'ndim".to_owned()),
+                role: Some("Defender of Dereth".to_owned()),
+                player_killer_status: PlayerKillerClassification::PlayerKiller,
+            }
+        );
+    }
+
+    #[test]
+    fn pk_lite_public_flag_selects_the_lite_character_label() {
+        assert_eq!(
+            player_killer_classification(ObjectDescriptionFlag::PK_LITE_STATUS),
+            PlayerKillerClassification::PlayerKillerLite
+        );
     }
 
     #[test]
@@ -1532,7 +1832,7 @@ mod tests {
             }),
         });
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Creature(creature) = inspection.details else {
             panic!("profile-backed object should use creature inspection");
         };
@@ -1570,7 +1870,7 @@ mod tests {
         );
         entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
 
         assert!(matches!(
             inspection.details,
@@ -1587,7 +1887,7 @@ mod tests {
         );
 
         assert_eq!(
-            ObjectInspection::from_entity(&entity),
+            inspect_entity(&entity),
             Err(ObjectInspectionError::MissingPlayerCreatureProfile { guid: entity.guid })
         );
     }
@@ -1601,7 +1901,7 @@ mod tests {
         );
         entity.spell_book = vec![42, 0x8000_002B];
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Item(item) = inspection.details else {
             panic!("item should use item inspection");
         };
@@ -1661,7 +1961,7 @@ mod tests {
         entity.armor_highlight = Some(0x2);
         entity.armor_color = Some(0x2);
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Item(item) = inspection.details else {
             panic!("weapon should use item inspection");
         };
@@ -1726,7 +2026,7 @@ mod tests {
         entity.armor_highlight = Some(0x2);
         entity.armor_color = Some(0);
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Item(item) = inspection.details else {
             panic!("weapon should use item inspection");
         };
@@ -1768,7 +2068,7 @@ mod tests {
         );
         entity.set_int_prop(PropertyInt::WieldDifficulty2, CreatureType::Olthoi as i32);
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Item(item) = inspection.details else {
             panic!("ordinary object should use item inspection");
         };
@@ -1799,7 +2099,7 @@ mod tests {
             ImbuedEffectType::AlwaysCritical.bits() as i32,
         );
 
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity).unwrap();
         let ObjectInspectionDetails::Item(item) = inspection.details else {
             panic!("ordinary object should use item inspection");
         };
@@ -1831,8 +2131,8 @@ mod tests {
         vendor.spell_book = entity.spell_book.clone();
 
         assert_eq!(
-            ObjectInspection::from_entity(&entity).unwrap(),
-            ObjectInspection::from_vendor_item(&vendor).unwrap()
+            inspect_entity(&entity).unwrap(),
+            inspect_vendor_item(&vendor).unwrap()
         );
     }
 }

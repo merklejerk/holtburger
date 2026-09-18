@@ -1,5 +1,5 @@
 use crate::spell::SpellCatalog;
-use holtburger_content::{MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_content::{CharacterTitleCatalog, MotionSequenceCatalog, SoulEmoteCatalog};
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
@@ -10,6 +10,8 @@ pub struct WorldBootstrap {
     pub skill_table: Arc<SkillTable>,
     pub spell_table: Arc<SpellTable>,
     pub xp_table: Arc<XpTable>,
+    /// Localized static character titles used by shared inspection semantics.
+    pub character_titles: Arc<CharacterTitleCatalog>,
     pub motion_sequences: Arc<MotionSequenceCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
 }
@@ -19,6 +21,7 @@ impl WorldBootstrap {
         skill_table: SkillTable,
         spell_table: SpellTable,
         xp_table: XpTable,
+        character_titles: CharacterTitleCatalog,
         motion_sequences: MotionSequenceCatalog,
         soul_emote_catalog: SoulEmoteCatalog,
     ) -> Self {
@@ -27,6 +30,7 @@ impl WorldBootstrap {
             skill_table: Arc::new(skill_table),
             spell_table: Arc::new(spell_table),
             xp_table: Arc::new(xp_table),
+            character_titles: Arc::new(character_titles),
             motion_sequences: Arc::new(motion_sequences),
             soul_emote_catalog: Arc::new(soul_emote_catalog),
         }
@@ -46,6 +50,7 @@ impl WorldBootstrap {
                 spell_sets: Default::default(),
             },
             XpTable::default(),
+            CharacterTitleCatalog::default(),
             MotionSequenceCatalog::default(),
             SoulEmoteCatalog::default(),
         )

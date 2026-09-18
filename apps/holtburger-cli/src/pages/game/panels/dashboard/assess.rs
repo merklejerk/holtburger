@@ -1,8 +1,8 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::AttunedStatus;
 use holtburger_world::inspection::{
-    BondedStatus, BonusKind, CreatureInspection, Effect, ItemInspection, ItemManaKind,
-    ObjectInspection, ObjectInspectionDetails, WieldRequirement,
+    BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, ItemInspection,
+    ItemManaKind, ObjectInspection, ObjectInspectionDetails, WieldRequirement,
 };
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
@@ -85,9 +85,21 @@ pub fn get_assess_info(
                 .level
                 .map_or_else(|| "?".to_string(), |value| value.to_string());
             let level = creature
-                .creature_type
-                .map_or(level.clone(), |kind| format!("{level} ({kind})"));
+                .identity
+                .lineage()
+                .map_or(level.clone(), |lineage| format!("{level} ({lineage})"));
             push_labeled(&mut lines, "Level", level, Color::White);
+            if let CreatureIdentity::Character {
+                role,
+                player_killer_status,
+                ..
+            } = &creature.identity
+            {
+                if let Some(role) = role {
+                    push_labeled(&mut lines, "Role", role, Color::White);
+                }
+                push_labeled(&mut lines, "PK Status", player_killer_status, Color::White);
+            }
             push_creature_info(&mut lines, creature);
         }
     }
@@ -405,10 +417,20 @@ mod tests {
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut,
+        ObjectDescriptionFlag, PropertyBool, PropertyInt, PropertyString,
+        WorldObjectPropertyAccessorsMut,
     };
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
+
+    fn inspect_entity(entity: &Entity) -> ObjectInspection {
+        let titles = holtburger_content::CharacterTitleCatalog::default();
+        ObjectInspection::from_entity(
+            entity,
+            holtburger_world::inspection::InspectionContext::new(&titles),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn assess_output_shows_open_and_locked_status() {
@@ -419,7 +441,7 @@ mod tests {
         );
         entity.set_bool_prop(PropertyBool::Open, true);
         entity.set_bool_prop(PropertyBool::Locked, false);
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity);
 
         let text = get_assess_info(&inspection, None)
             .into_iter()
@@ -449,7 +471,7 @@ mod tests {
             attributes: None,
             buffs: None,
         });
-        let inspection = ObjectInspection::from_entity(&entity).unwrap();
+        let inspection = inspect_entity(&entity);
 
         let text = get_assess_info(&inspection, None)
             .into_iter()
@@ -461,5 +483,38 @@ mod tests {
         assert!(text.contains("Health:  50/50"));
         assert!(!text.contains("Stamina:"));
         assert!(!text.contains("Mana:"));
+    }
+
+    #[test]
+    fn assess_output_uses_shared_character_identity() {
+        let mut entity = Entity::new(
+            Guid(0x60000004),
+            "Drawohan the Gem Seller".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_string_prop(PropertyString::Template, "Gem Seller".to_owned());
+        entity.set_int_prop(
+            PropertyInt::CreatureType,
+            holtburger_common::stats::CreatureType::Lugian as i32,
+        );
+        entity.flags = ObjectDescriptionFlag::VENDOR;
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let inspection = inspect_entity(&entity);
+
+        let text = get_assess_info(&inspection, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Level:  ? (Lugian)"));
+        assert!(text.contains("Role:  Gem Seller"));
+        assert!(text.contains("PK Status:  Non-Player Killer"));
     }
 }

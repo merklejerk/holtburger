@@ -1,12 +1,17 @@
 # 3D object examination implementation plan
 
+Preview architecture follow-up: [Isolated creature preview renderer implementation plan](holtburger-3d-isolated-preview-renderer-plan.md)
+owns the selected dedicated-WebGL2-context cutover, visual hooks/particles, main-canvas performance
+gates, and remaining preview verification. It supersedes the shared-context and pose-only preview
+decisions below; the existing implementation evidence is retained as the starting point.
+
 Status: Phases 1-7 and 9 are complete and verified. The selected Phase 8 equipment- and
 creature-enchantment slice is complete while the remaining fast-follow candidates stay deferred.
-Phases 10-15 remain planned work.
+Phases 10-14 are implemented. Phase 15 verification, profiling, and handoff remain active.
 
-Scope extension (2026-09-17): interactive creature model previews are planned in Phases 10–15
-below. They are not implemented or verified. The preview must support live idle animation,
-rotation, zoom, and resizing; a static portrait is not an intermediate product milestone.
+Scope extension (2026-09-17): interactive creature model previews are implemented through the
+first production slice described in Phases 10–15 below. The preview supports live idle animation,
+yaw rotation, and panel-driven resizing; a static portrait is not an intermediate product milestone.
 
 ## Goal and boundaries
 
@@ -126,8 +131,10 @@ untouched.
    mana attributes must not become authoritative zero merely because the current TUI did so.
 6. **Explicit outcomes.** A failed skill/appraisal result differs from a missing target and from a
    host/transport failure. One failure mode maps to one user-facing message.
-7. **Cold event semantics.** Examination is user-triggered and low-frequency. Its request/result does not belong in
-   renderer cadence, Svelte frame-hot state, entity snapshots, or a polling loop.
+7. **Cold event semantics.** Opening examination is user-triggered. While its window remains active,
+   h3d may request a fresh authoritative snapshot at a bounded, tunable low-frequency cadence. That
+   lifecycle does not belong in renderer cadence, Svelte frame-hot state, entity snapshots, or a
+   general world polling loop.
    The model preview has an independent frontend animation/camera lifetime; its frames never
    republish appraisal facts or flow through Svelte reactive state.
 8. **Latest request wins locally.** h3d retains one requested GUID. A response for another GUID is
@@ -145,14 +152,15 @@ untouched.
 
 ## Data distribution and accepted concessions
 
-- Examination requests are manual and infrequent; optimize for clarity and correctness, not
-  throughput, caching, or batching.
+- Examination requests are infrequent and window-scoped; optimize for clarity and correctness, not
+  throughput, caching, or batching. h3d refreshes the active target at a tunable one-second default.
 - One window and one latest request cover the required interaction. An `A -> B -> A` request sequence
   cannot distinguish the first A response from the second because the protocol echoes only the
   target GUID. Both responses describe A, so the first slice accepts either as the latest A result.
-- A repeated Examine activation for the same currently pending GUID is locally suppressed. No
-  automatic retry is provided; after a reported rejection the user may request again, subject to
-  ACE's server-owned throttle.
+- A repeated Examine activation for the same currently pending GUID is locally suppressed. Ready
+  windows permit at most one refresh in flight. Transport failures retain the current snapshot and
+  retry on the next cadence with one reported warning per outage; appraisal rejection or target
+  disappearance closes the window.
 - Starting a new request closes the previous open snapshot and waits for new details. This avoids
   presenting old content under an active new request.
 - No waiting popup is opened. The selected-entity button exposes pending state/disabled activation,
@@ -161,8 +169,9 @@ untouched.
   if the census proves materially different consumed facts that deserve distinct UX.
 - First-slice completeness means every fact in the locked shared contract is displayed or has an
   explicit diagnostic. It does not mean every retail examination fact is already modeled.
-- An open snapshot does not live-update after property deltas. Re-examination requests a fresh
-  snapshot. This prevents an event subscription from becoming a second world mirror.
+- An open snapshot is replaced only by a complete server-backed re-examination result; property
+  deltas do not patch it locally. Preview renderer state is retained unless renderer-relevant source
+  facts change. This prevents the inspector from becoming a second world mirror.
 - Existing TUI vendor inspection remains supported. h3d vendor UI remains out of scope.
 
 ## North stars
@@ -610,20 +619,21 @@ world mirror, duplicated request owner, or unused compatibility adapter to remov
 ### Phase 10 — Prove interactive preview composition and idle semantics
 
 This extension can run before the remaining Phase 8 appraisal candidates. Phase 9 remains the
-original inspection cleanup; Phase 15 closes the preview work separately. All tasks below are
-pending. Scope estimates are planning estimates, not measured implementation results.
+original inspection cleanup; Phase 15 closes the preview work separately. Checked tasks are landed;
+unchecked tasks are remaining evidence or hardening work. Scope estimates are planning estimates,
+not measured implementation results.
 
-Goal: replace the creature diamond with a live, resizable model viewport that can be rotated and
-zoomed without changing the creature in the world or the inspection snapshot.
+Goal: replace the creature diamond with a live model viewport that can be rotated around yaw and
+resized with its panel without changing the creature in the world or the inspection snapshot.
 
 Proposed UX:
 
-- A substantial model area above the scrollable creature details, with a draggable divider to
-  resize the model area independently. Existing window border resize continues to work.
-- Left drag orbits horizontally and vertically, with bounded pitch; wheel zooms within fitted
-  limits. A visible Reset view control and keyboard equivalents provide non-pointer operation.
+- A substantial model area above the scrollable creature details, sized as a stable proportion of
+  the inspection panel. Existing window border resize controls both model and detail space.
+- Left drag rotates yaw only. Left/right keyboard equivalents provide non-pointer operation; there
+  is no user zoom, pitch, reset control, or independent model-area divider.
 - Start at a consistent three-quarter view, fitted to the complete idle sequence envelope.
-  Resize preserves orbit and relative zoom; it does not restart animation or reconstruct assets.
+  Resize recomputes an aspect-aware whole-model fit without restarting animation or assets.
 - Neutral lighting and a self-contained background. Idle continues while the preview is visible.
   Hidden document/unmounted or zero-sized preview does no draw work; resume does not replay hooks.
 - Text appraisal appears immediately on its successful response, even while preview assets load.
@@ -637,43 +647,45 @@ proposed scope boundaries, not claims that the renderer cannot support them.
 
 Ground truth and existing owners:
 
-| Concern | Source and implication |
-| --- | --- |
-| Live appearance | `crates/holtburger-core/src/client/dynamic_entity_view.rs`: client projection carries setup, effective motion table, appearance, scale, and entity placement frame |
-| Explorer placement | `crates/holtburger-core/src/dynamic_entity_view.rs::DynamicEntityViewSource::from_projection` explicitly selects Resting for Explorer world objects; this does **not** establish that every live client creature uses Resting |
-| Default idle selection | `crates/holtburger-world/src/motion/selection.rs::set_default_state` selects default style/substate through the content table; trace its cited ACE `MotionTable.GetObjectSequence` and retail `acclient.c:324230-324400` before changing selection semantics |
-| Motion representation | `crates/holtburger-content/src/motion_sequence.rs`: inspect complete cycle sequences, frame windows, rates and missing-cycle behavior; an idle must not be assumed to consist of one clip |
-| Visual preparation | `src/lib/assets/setup-visual-host-source.ts`, `setup-visual-source.ts`, and `src/lib/game/systems/object-visual-template-repository.ts` already handle exact setup substitutions and template leases |
-| Live cache friction | `src/lib/game/runtime/game-presentation-runtime.ts::#retainSpawnedVisual` currently keys users by GUID; preview ownership must be an independent lease without a fabricated entity GUID |
-| Isolated drawing precedent | `game-presentation-runtime.ts::installPortalTransitionAssets` and `src/lib/game/renderer/webgl2-renderer.ts::#drawPortalTransitionTunnel` draw an authored setup outside world residency with shared resources |
-| Final presentation | `webgl2-renderer.ts::#presentFlatScene` owns the final framebuffer write and world color grade; any shared-context preview must respect its scheduling/state contract |
-| Window behavior | `src/client/ClientHudWindow.svelte` always supplies border resize handles; `Omit<ClientUiPanel, "resizable">` is intentional for these windows and needs no repair |
-| App-local controls | `src/app/pointer-gesture.ts`, `src/client/ClientWorldView.svelte`, and input arbitration own pointer cancellation and world/HUD routing |
+| Concern                    | Source and implication                                                                                                                                                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Live appearance            | `crates/holtburger-core/src/client/dynamic_entity_view.rs`: client projection carries setup, effective motion table, appearance, scale, and entity placement frame                                                                                           |
+| Explorer placement         | `crates/holtburger-core/src/dynamic_entity_view.rs::DynamicEntityViewSource::from_projection` explicitly selects Resting for Explorer world objects; this does **not** establish that every live client creature uses Resting                                |
+| Default idle selection     | `crates/holtburger-world/src/motion/selection.rs::set_default_state` selects default style/substate through the content table; trace its cited ACE `MotionTable.GetObjectSequence` and retail `acclient.c:324230-324400` before changing selection semantics |
+| Motion representation      | `crates/holtburger-content/src/motion_sequence.rs`: inspect complete cycle sequences, frame windows, rates and missing-cycle behavior; an idle must not be assumed to consist of one clip                                                                    |
+| Visual preparation         | `src/lib/assets/setup-visual-host-source.ts`, `setup-visual-source.ts`, and `src/lib/game/systems/object-visual-template-repository.ts` already handle exact setup substitutions and template leases                                                         |
+| Live cache friction        | `src/lib/game/runtime/game-presentation-runtime.ts::#retainSpawnedVisual` currently keys users by GUID; preview ownership must be an independent lease without a fabricated entity GUID                                                                      |
+| Isolated drawing precedent | `game-presentation-runtime.ts::installPortalTransitionAssets` and `src/lib/game/renderer/webgl2-renderer.ts::#drawPortalTransitionTunnel` draw an authored setup outside world residency with shared resources                                               |
+| Final presentation         | `webgl2-renderer.ts::#presentFlatScene` owns the final framebuffer write and world color grade; any shared-context preview must respect its scheduling/state contract                                                                                        |
+| Window behavior            | `src/client/ClientHudWindow.svelte` always supplies border resize handles; `Omit<ClientUiPanel, "resizable">` is intentional for these windows and needs no repair                                                                                           |
+| App-local controls         | `src/app/pointer-gesture.ts`, `src/client/ClientWorldView.svelte`, and input arbitration own pointer cancellation and world/HUD routing                                                                                                                      |
 
 App-relative paths in this extension are relative to `apps/holtburger-3d/`.
 
-- [ ] Trace actual client appearance and effective-motion-table availability for creature/player
+- [x] Trace actual client appearance and effective-motion-table availability for creature/player
       appraisal. Record capture timing, missing-target behavior, and whether available metadata
       survives despawn independently of a rendered scene node.
-- [ ] Trace the default idle cycle through existing world/content selectors. Census representative
+- [x] Trace the default idle cycle through existing world/content selectors. Census representative
       humanoid, quadruped, flying, multi-part, and absent-motion cases; record multi-clip cycles,
       partial-part animation, signed rates, and setup fallback needs.
 - [ ] Build a synthetic browser composition experiment with moving colored model geometry inside
       the actual inspection window and other overlapping HUD windows. Test both overlap orders,
       translucent panel backgrounds, scrolling, clipping, resizing, and dragging.
-- [ ] Compare the following concrete routes and record the chosen implementation and evidence:
+- [x] Compare the following concrete routes and record the chosen implementation and evidence:
 
-| Route | Benefit | Required proof / cost |
-| --- | --- | --- |
-| Main-context texture composited into the world canvas behind a DOM opening | Shares existing GPU resources directly | A transparent opening also reveals intervening/lower HUD elements; prove correct stacking and ancestor backgrounds without adding a general window compositor |
-| Shared rendering followed by a browser-supported canvas image transfer into a DOM canvas | DOM naturally owns clipping and overlap | Prove transfer ordering, alpha, no world-frame contamination, and measured copy cost; do not assume a zero-copy path or preservation of a transferred source buffer |
-| Dedicated preview canvas/context using shared preparation/drawing code | Native DOM stacking and isolated viewport | Separate GPU allocations are unavoidable; bound them to one preview and measure startup/resident cost; do not create another complete world runtime |
+| Route                                                                                    | Benefit                                   | Required proof / cost                                                                                                                                               |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Main-context texture composited into the world canvas behind a DOM opening               | Shares existing GPU resources directly    | A transparent opening also reveals intervening/lower HUD elements; prove correct stacking and ancestor backgrounds without adding a general window compositor       |
+| Shared rendering followed by a browser-supported canvas image transfer into a DOM canvas | DOM naturally owns clipping and overlap   | Prove transfer ordering, alpha, no world-frame contamination, and measured copy cost; do not assume a zero-copy path or preservation of a transferred source buffer |
+| Dedicated preview canvas/context using shared preparation/drawing code                   | Native DOM stacking and isolated viewport | Separate GPU allocations are unavoidable; bound them to one preview and measure startup/resident cost; do not create another complete world runtime                 |
 
-Preference is shared GPU residency, conditional on correct DOM composition. Continuous CPU pixel
-readback is not the proposed production path. If shared-context composition requires broad HUD
-stacking changes, use the bounded dedicated-context route and document its resource cost. Code-path
-sharing and GPU-allocation sharing are separate properties. Do not retain multiple production
-backends just because they were compared here.
+The selected production route is shared-context offscreen rendering followed by asynchronous
+WebGL2 pixel-buffer readback into a DOM-owned 2D canvas. A three-slot PBO/fence ring is polled
+without waiting; when all slots are busy the preview drops a frame instead of stalling the world.
+The preview is capped at 30 FPS and 512x384 physical pixels. This preserves native DOM overlap,
+clipping, and scrolling while sharing decoded setup data, templates, geometry, materials, and
+animation assets with the world renderer. It deliberately accepts a bounded GPU-to-CPU-to-canvas
+copy; hardware profiling remains required. A dedicated context is not retained as a second backend.
 
 Acceptance: one working composition experiment survives both overlap orders and resize; the idle
 contract accounts for full sequences; chosen route and resource cost are recorded. No production
@@ -691,20 +703,20 @@ Primary touch points: `crates/holtburger-content/src/motion_sequence.rs`, existi
 `host/src/client_runtime.rs`, `host/src/client_projection.rs`, `host/src/protocol.rs`,
 `src/client/client-object-inspection.ts`, its transport/schema companions, and focused tests.
 
-- [ ] Introduce only the missing reusable idle query over the existing table/sequence types.
+- [x] Introduce only the missing reusable idle query over the existing table/sequence types.
       Frontend policy requests default-style idle; Rust selects its authored sequence. Do not
       duplicate motion-table lookup in TypeScript or change the live body's state to obtain it.
-- [ ] Return a discriminated pose description: authored idle sequence, explicitly unavailable
+- [x] Return a discriminated pose description: authored idle sequence, explicitly unavailable
       idle with an authored setup pose, or unavailable visual. Preserve all sequence entries,
       traversal bounds, direction/rate, and loop semantics needed by the sampler.
-- [ ] Snapshot setup, ordered substitutions, scale, and the resolved preview pose for the requested
+- [x] Snapshot setup, ordered substitutions, scale, and the resolved preview pose for the requested
       identity. Choose and document one capture edge after the Phase 10 event-order trace, preferably
       at accepted appraisal; a separate cold preparation request must consume captured facts so
       later despawn cannot retarget it. Never silently mix request-time and response-time facts.
-- [ ] Keep preview preparation asynchronous and separate from appraisal success. Guard completion
+- [x] Keep preview preparation asynchronous and separate from appraisal success. Guard completion
       with the local inspection lifetime; close/new request/session replacement retires that lifetime.
       Preserve the existing server GUID-only correlation concession.
-- [ ] Limit host transport to validated source facts and resolved animation references; do not
+- [x] Limit host transport to validated source facts and resolved animation references; do not
       serialize a world entity, GPU resources, or decoded meshes into the appraisal result.
 - [ ] Test multi-clip/default-style selection, absence, snapshot replacement, despawn after capture,
       and Rust/TypeScript contract parity with checked-in synthetic data.
@@ -719,16 +731,16 @@ Primary touch points: `src/lib/game/runtime/game-presentation-runtime.ts`,
 `src/lib/game/animation/animation-asset-repository.ts`, existing animation samplers, and a small
 new model-preview owner colocated with the runtime. Exact filenames follow the Phase 10 route.
 
-- [ ] Generalize the existing visual lease only as far as needed for live entities and the preview.
+- [x] Generalize the existing visual lease only as far as needed for live entities and the preview.
       Retain geometry, textures, and animations through explicit owners with rollback on failure.
-- [ ] Prepare only the selected idle sequence's dependencies, using the existing decoders and
+- [x] Prepare only the selected idle sequence's dependencies, using the existing decoders and
       pose samplers. Loading the creature's complete combat motion closure is unnecessary here.
-- [ ] Advance a local preview cursor over the full idle sequence without dispatching animation
+- [x] Advance a local preview cursor over the full idle sequence without dispatching animation
       hooks, sound, root locomotion, scripts, or gameplay commands. Merge partial-part poses with
       authored setup transforms using the same rules as the existing model path.
-- [ ] Derive a stable envelope from the actual preview pose sequence and scale, including rotation
-      fit. Keep camera fit stable during playback and preserve user zoom through resizing.
-- [ ] Keep appearance immutable for the inspection lifetime. Camera, animation cursor, and size
+- [x] Derive a stable envelope from the actual preview pose sequence and scale, including rotation
+      fit. Keep camera fit stable during playback and refit the whole envelope after resizing.
+- [x] Keep appearance immutable for the inspection lifetime. Camera, animation cursor, and size
       changes do not reacquire the model or rebuild shared templates.
 - [ ] Test resource sharing for identical world/preview appearances where the chosen route permits
       it, plus failure rollback, replacement while loading, repeated close, and runtime shutdown.
@@ -738,9 +750,9 @@ actions; every acquired resource has a reachable release path and cannot outlive
 
 ### Steering checkpoint — Validate the viewport contract before UI integration
 
-- [ ] Recheck Phases 13–15 against the chosen composition route and landed source/lease types.
-- [ ] Confirm that orbit/resize inputs stay imperative and no new per-frame Svelte event bus exists.
-- [ ] Review line growth and duplicated draw logic. Extract the actual common setup-drawing work
+- [x] Recheck Phases 13–15 against the chosen composition route and landed source/lease types.
+- [x] Confirm that orbit/resize inputs stay imperative and no new per-frame Svelte event bus exists.
+- [x] Review line growth and duplicated draw logic. Extract the actual common setup-drawing work
       with the portal path where useful; retain portal-specific camera, sound, and transition policy.
 - [ ] Record concessions or content failures; resolve routine details without waiting for visual
       acceptance. A necessary broad window-manager redesign requires explicit scope review.
@@ -751,16 +763,16 @@ Primary touch points: `src/lib/game/renderer/renderer.ts`, `webgl2-renderer.ts`,
 `webgl2-flat-scene-presentation.ts` when sharing the main canvas, render-target helpers, device
 composition if a dedicated canvas is selected, and a focused synthetic GPU fixture.
 
-- [ ] Add an isolated-model draw input with a prepared visual, sampled pose, camera, lighting, and
+- [x] Add an isolated-model draw input with a prepared visual, sampled pose, camera, lighting, and
       target extent. Keep inspection/window identity outside shader and material contracts.
-- [ ] Reuse material handling, alpha tests, transparent ordering, part transforms, and filtering.
+- [x] Reuse material handling, alpha tests, transparent ordering, part transforms, and filtering.
       Generalize useful portal drawing code without copying its virtual world anchor assumptions.
-- [ ] Own a bounded color/depth target that reallocates only when physical extent changes. Use
+- [x] Own a bounded color/depth target that reallocates only when physical extent changes. Use
       frontend render-scale policy and explicit CSS-to-buffer conversion, not implicit device DPI.
-- [ ] Implement the proven composition route, including full clipping/overlap behavior. When using
+- [x] Implement the selected composition route, including full clipping/overlap behavior. When using
       the main final compositor, keep preview lighting independent of world fog, grade, portal
       warps and selected-entity outlines; preserve one final framebuffer write.
-- [ ] Restore renderer state after preview drawing and handle atlas changes, close, and context
+- [x] Restore renderer state after preview drawing and handle atlas changes, close, and context
       loss through the existing device lifecycle. Context loss requires restart today; do not claim
       seamless restoration or add a new restoration subsystem.
 - [ ] Verify moving geometry, transparent materials, resize, overlap, world-frame preservation,
@@ -769,34 +781,36 @@ composition if a dedicated canvas is selected, and a focused synthetic GPU fixtu
 Acceptance: preview frames animate and render at the current size without corrupting world frames,
 appearing through other windows, or leaving GPU resources after close.
 
-### Phase 14 — Integrate orbit, zoom, and flexible inspection layout
+### Phase 14 — Integrate yaw rotation and responsive inspection layout
 
 Primary touch points: `src/client/ClientCreatureInspection.svelte`, `ClientInspectionWindow.svelte`,
 `ClientWorldView.svelte`, `client-object-inspection.ts`, `client-presentation-session.ts`,
 `client-tuning.ts`, and a focused preview component/controller.
 
-- [ ] Replace the decorative diamond with the preview component and explicit loading/unavailable/
-      failure states. Keep the fallback marker only for unavailable/failed presentation.
-- [ ] Split creature layout into model viewport/divider and scrollable facts, respecting existing
-      minimum window/viewport bounds. Preserve the current item layout and border resize primitive.
-- [ ] Implement pointer capture, orbit, wheel zoom, keyboard controls and Reset view. Scope input
-      to the preview; rotation cannot trigger world selection, character movement, window drag,
-      action-cell activation, or page scrolling. Cancel gestures on close, blur, and pointer cancel.
-- [ ] Route camera and cursor state through an imperative controller. Svelte holds only cold display
+- [x] Replace the decorative diamond with the preview component and explicit loading/unavailable/
+      failure states. Keep the fallback marker only for unavailable/failed presentation. Compose
+      creature name, level, and type over the preview's top-left corner as one responsive hero.
+- [x] Split creature layout into a panel-proportional model viewport and scrollable facts, respecting
+      existing minimum window/viewport bounds. Preserve the item layout and border resize primitive.
+- [x] Implement pointer capture and yaw-only pointer/keyboard controls. Scope input to the preview;
+      rotation cannot trigger world selection, character movement, window drag, action-cell
+      activation, or page scrolling. Cancel gestures on close, blur, and pointer cancel.
+- [x] Route camera and cursor state through an imperative controller. Svelte holds only cold display
       states and layout. Put adjustable camera/lighting/size values in the existing tuning owner.
-- [ ] Observe size and position through the composition seam established in Phase 10: ResizeObserver
+- [x] Observe size and position through the composition seam established in Phase 10: ResizeObserver
       alone cannot detect window movement or scrolling. Publish a coherent extent/clip rectangle
       before drawing when the chosen route requires screen-space synchronization.
-- [ ] Connect pause/resume and teardown to document/viewport/session lifetime. Re-examining resets
+- [x] Connect pause/resume and teardown to document/viewport/session lifetime. Re-examining resets
       the view; resizing or moving the current window retains its view and animation phase.
 
-Acceptance: users can resize the model area and window, rotate, zoom, reset, and read long details;
-all gestures remain local and asynchronous replacement cannot resurrect a closed preview.
+Acceptance: users can resize the window, rotate yaw, and read long details; the whole model remains
+fitted as the panel changes, all gestures remain local, and asynchronous replacement cannot
+resurrect a closed preview.
 
 ### Phase 15 — Automated evidence, cleanup, and handoff
 
 - [ ] Add asset-free browser coverage for delayed loading, missing assets, close/replacement races,
-      orbit/zoom/reset, divider/window resize, minimum viewport, input ownership, both overlap
+      yaw rotation, responsive window resize, minimum viewport, input ownership, both overlap
       orders, document visibility, and lifecycle teardown. Use the actual production components.
 - [ ] Exercise representative local creature appearances as diagnostic evidence, including flying,
       broad/tall, multi-part and player bodies. Record exact content and commands; do not retain
@@ -814,9 +828,50 @@ all gestures remain local and asynchronous replacement cannot resurrect a closed
       interactive acceptance independently; do not stop implementation awaiting that gate or claim
       automated geometry checks establish aesthetic approval.
 
+Implementation evidence (2026-09-17):
+
+- The shared content census covered 436 motion tables, 18,451 cycles, and 62,210 motion-data
+  records. It found multi-clip cycles (up to 11 clips), negative and zero frame rates, and setups
+  without usable idle cycles; the landed contract preserves those cases rather than flattening
+  them to one positive-rate clip.
+- Core captures immutable setup, appearance, scale, and resolved idle facts while the examined
+  entity is retained. Appraisal publication remains independent; the browser correlates the later
+  preview event to the current inspection identity.
+- The runtime shares setup decoding, visual templates, geometry/material residency, and animation
+  assets with the world while assigning the preview its own lease. The renderer shares one WebGL2
+  context and the extracted isolated-setup draw path with portal presentation.
+- The selected 30 FPS path uses a bounded offscreen target and three asynchronous PBO/fence slots.
+  It never waits for a fence and drops preview captures under backpressure. Completed pixels are
+  row-flipped once into a clamped buffer and published to the DOM canvas.
+- The live browser regression for Elaniwood golem WCID 11528 opens, closes, and reopens the same
+  preview through the production runtime. Both captures contain rendered geometry (4,159 and 4,183
+  non-background pixels at 256x192) and report no WebGL errors. After transparent composition and
+  aspect-aware fitting landed, the same gate reports 4,448 and 5,079 non-background pixels with a
+  zero-alpha background on both captures. This gate caught and now guards the deleted-VAO failure:
+  compiled preview draws are owned by the installed preview generation rather than the durable
+  template draw unit whose leased geometry can be released on close.
+- Preview yaw now moves a Y-up look-at camera around a centered, upright authored model. Render -Z
+  is the authored AC +Y front at zero yaw; focused camera tests prove the camera-right vector
+  remains horizontal and every envelope corner fits wide, tall, and square viewports. The camera
+  starts from a tight sampled idle envelope, then calibrates against the nontransparent silhouette
+  gathered during asynchronous row transfer. WCID 11528 settles at 174/192 pixels (90.6%) high at
+  both probed yaw angles without touching an edge or producing a WebGL error.
+- Preview materials use the same compiled object draw and sampler catalog as the world; the live
+  probe selects the active `anisotropic-2x` frame policy. The DOM canvas now renders at device pixel
+  density with at least 1.5x supersampling (bounded to 768x576) before browser downsampling, which
+  addresses single-sample/CSS-resolution jaggies without inventing a preview filtering path.
+- Automated gates passed: affected Rust suites (including 495 core tests), 311 TypeScript test
+  files / 2,505 tests, strict Svelte and TypeScript checks with zero warnings, ESLint, dead-code
+  analysis, Clippy with warnings denied, production build, formatting, and the existing client HUD
+  browser harness. The latter validates surrounding HUD/input regressions but has no live creature
+  asset source, so it is not preview rendering evidence.
+- Remaining gates are the synthetic component/composition fixture, broader representative-content
+  exercise, hardware transfer profiling, explicit resource-race coverage, and user-owned visual
+  and interactive acceptance. These are intentionally left unchecked above.
+
 Preview definition of done: an accepted creature inspection has an independently retained live idle
-model with resize/orbit/zoom/reset, correct DOM composition, stable appearance after despawn, bounded
-resource lifetime, explicit missing-data behavior, and passing automated evidence. A setup-pose
+model with responsive whole-model fit and yaw rotation, correct DOM composition, stable appearance
+after despawn, bounded resource lifetime, explicit missing-data behavior, and passing automated evidence. A setup-pose
 fallback is permitted only when an idle is unavailable and must not be described as animated idle.
 
 Estimated incremental scope: approximately 12–20 production files plus focused tests/harness,
@@ -827,15 +882,15 @@ justify inspection of growth, not a target to fill. No new third-party 3D engine
 
 Principal risks and mitigation:
 
-| Risk | Planned response |
-| --- | --- |
-| Main-canvas preview reveals lower HUD windows | Prove both overlap orders first; select one correct composition route before production integration |
-| Idle contains several clips or differs from setup placement | Reuse shared table semantics and preserve the complete sequence; census before locking the contract |
-| Rotating/animating body clips against viewport | Fit the preview's full pose envelope with bounded zoom/pitch and aspect-aware projection |
-| Identical models lose resources when one owner closes | Explicit independent leases and world/preview coexistence tests |
-| Preview scripts affect the world or play audio | Pose-only sampling with no hook dispatch; no world entity installation |
-| Model load or context failure takes down readable appraisal | Independent preview outcome/lifetime with explicit diagnostic; follow existing whole-device failure policy |
-| Scope grows into a general UI compositor or asset browser | One active creature preview; dedicated-context concession if needed; future consumers do not add fields today |
+| Risk                                                        | Planned response                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Main-canvas preview reveals lower HUD windows               | Prove both overlap orders first; select one correct composition route before production integration           |
+| Idle contains several clips or differs from setup placement | Reuse shared table semantics and preserve the complete sequence; census before locking the contract           |
+| Rotating/animating body clips against viewport              | Fit every preview-envelope corner against the current aspect ratio with a fixed camera elevation              |
+| Identical models lose resources when one owner closes       | Explicit independent leases and world/preview coexistence tests                                               |
+| Preview scripts affect the world or play audio              | Pose-only sampling with no hook dispatch; no world entity installation                                        |
+| Model load or context failure takes down readable appraisal | Independent preview outcome/lifetime with explicit diagnostic; follow existing whole-device failure policy    |
+| Scope grows into a general UI compositor or asset browser   | One active creature preview; dedicated-context concession if needed; future consumers do not add fields today |
 
 ## Verification matrix
 
@@ -845,7 +900,7 @@ final verification must include:
 - `cargo fmt --all --check`
 - `cargo test -p holtburger-world -p holtburger-core -p holtburger-cli -p holtburger-3d-host`
 - `cargo clippy -p holtburger-world -p holtburger-core -p holtburger-cli -p holtburger-3d-host
-  --all-targets -- -D warnings`
+--all-targets -- -D warnings`
 - From `apps/holtburger-3d`: `npm run format:check`, `npm run check`, `npm run test:ts`,
   `npm run lint`, and `npm run build`
 - From `apps/holtburger-3d`: `npm run harness:browser -- --client-hud --brief`
@@ -857,20 +912,20 @@ or live-server checks supplement but never replace synthetic contract/browser co
 
 ## Risks and mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| The current flat model becomes a permanent cross-frontend contract | Census first; introduce discriminated variants; migrate and delete the flat model in one cutover |
-| Item/creature classification fails for NPC-shaped objects | Prove classification from ACE flags/properties and include `NpcLooksLikeObject` fixtures |
-| Failed appraisal is confused with missing target | Preserve known-target state at world handling and publish distinct outcomes |
-| TUI and h3d drift after launch | Construct one shared snapshot once; both frontends format that value |
-| Core or browser retains stale appraisal state across recovery | Keep inspection out of reconstructible snapshots; reset the app-local owner on lifecycle/resync edges |
-| A late response opens the wrong target | Latest requested GUID filtering; capture target at activation; explicit A/B/A concession |
-| Optional server data becomes misleading zeros | Use optional composite fields and tests for omitted creature/profile blocks |
-| Spell enchantment IDs are looked up incorrectly | Model the high-bit marker semantically before frontend name resolution |
-| Popup work expands into window-manager redesign | Reuse `ClientHudWindow`; accept DOM-order stacking unless empirical evidence blocks use |
-| “All info” grows into unbounded retail parity | Lock first-slice fields in Phase 1; rank fast-follow gaps; document evidence-backed deferrals |
-| Appraisal side effects are overlooked | Preserve ACE as server authority; do not suppress requests based on local range/skill guesses |
-| Asset-dependent tests ossify | Use assets for census/diagnosis only; retain synthetic checked-in fixtures for regression |
+| Risk                                                               | Mitigation                                                                                            |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| The current flat model becomes a permanent cross-frontend contract | Census first; introduce discriminated variants; migrate and delete the flat model in one cutover      |
+| Item/creature classification fails for NPC-shaped objects          | Prove classification from ACE flags/properties and include `NpcLooksLikeObject` fixtures              |
+| Failed appraisal is confused with missing target                   | Preserve known-target state at world handling and publish distinct outcomes                           |
+| TUI and h3d drift after launch                                     | Construct one shared snapshot once; both frontends format that value                                  |
+| Core or browser retains stale appraisal state across recovery      | Keep inspection out of reconstructible snapshots; reset the app-local owner on lifecycle/resync edges |
+| A late response opens the wrong target                             | Latest requested GUID filtering; capture target at activation; explicit A/B/A concession              |
+| Optional server data becomes misleading zeros                      | Use optional composite fields and tests for omitted creature/profile blocks                           |
+| Spell enchantment IDs are looked up incorrectly                    | Model the high-bit marker semantically before frontend name resolution                                |
+| Popup work expands into window-manager redesign                    | Reuse `ClientHudWindow`; accept DOM-order stacking unless empirical evidence blocks use               |
+| “All info” grows into unbounded retail parity                      | Lock first-slice fields in Phase 1; rank fast-follow gaps; document evidence-backed deferrals         |
+| Appraisal side effects are overlooked                              | Preserve ACE as server authority; do not suppress requests based on local range/skill guesses         |
+| Asset-dependent tests ossify                                       | Use assets for census/diagnosis only; retain synthetic checked-in fixtures for regression             |
 
 ## Definition of done
 
@@ -958,15 +1013,15 @@ levels. The latter facts are real but have no first-slice TUI consumer, so playe
 
 #### Wire and world preservation inventory
 
-| Decoded response fact | Preserved after a successful merge? | Current inspection visibility |
-| --- | --- | --- |
-| GUID, flags, success | GUID identifies the target; flags drive selective merge; success gates merge | GUID is on `InspectableObject`; flags/success are intentionally outcome/merge concerns |
-| Int, int64, bool, float, string, and DID tables | Yes, in `WorldObjectProperties` on both `Entity` and `CoreVendorItem` | Yes for named properties used by `Assessment`; not exposed raw |
-| Spell book | Yes, raw ordered `u32` values retained | Exposed, but current TUI incorrectly looks up bit-31 active-enchantment values as spell IDs |
-| Armor, creature, and weapon profiles | Yes | Exposed by `InspectableObject` and partly consumed |
-| Hook profile | Yes | Dropped by `InspectableObject` and deferred to fast follow |
-| Armor, weapon, and resistance highlight/color masks | Yes | Dropped by `InspectableObject`; remain preserved on the world record until fast follow |
-| Armor levels | Yes | Dropped by `InspectableObject`; player/non-attackable creature fast follow |
+| Decoded response fact                               | Preserved after a successful merge?                                          | Current inspection visibility                                                               |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| GUID, flags, success                                | GUID identifies the target; flags drive selective merge; success gates merge | GUID is on `InspectableObject`; flags/success are intentionally outcome/merge concerns      |
+| Int, int64, bool, float, string, and DID tables     | Yes, in `WorldObjectProperties` on both `Entity` and `CoreVendorItem`        | Yes for named properties used by `Assessment`; not exposed raw                              |
+| Spell book                                          | Yes, raw ordered `u32` values retained                                       | Exposed, but current TUI incorrectly looks up bit-31 active-enchantment values as spell IDs |
+| Armor, creature, and weapon profiles                | Yes                                                                          | Exposed by `InspectableObject` and partly consumed                                          |
+| Hook profile                                        | Yes                                                                          | Dropped by `InspectableObject` and deferred to fast follow                                  |
+| Armor, weapon, and resistance highlight/color masks | Yes                                                                          | Dropped by `InspectableObject`; remain preserved on the world record until fast follow      |
+| Armor levels                                        | Yes                                                                          | Dropped by `InspectableObject`; player/non-attackable creature fast follow                  |
 
 The protocol decoder covers every flag emitted by ACE's `BuildFlags`. Its general property storage
 drops unknown enum IDs, but all fields selected below have named property enums. No first-slice or
@@ -977,22 +1032,22 @@ add that named enum/fixture when its semantic consumer is introduced; do not add
 
 Every current field is read by `assess.rs`; none is dead. The problem is shape and truthfulness:
 
-| Current area | Source and current consumer | Finding / locked correction |
-| --- | --- | --- |
-| Identity | entity name; `LongDesc` then `ShortDesc`; header/body | Keep common and optional; an absent description remains absent |
-| Value, burden, level | `Value`, `EncumbranceVal`, `Level`; basic lines | `value: u32` fabricates zero on absence; make all three optional |
-| Capacity | pre-existing maximum capacities plus TUI-local player storage counts | Never default missing player usage to zero. First slice carries optional maxima only; current usage is not an appraisal fact and is deferred until a world storage owner can provide it |
-| Material/tinkering/spellcraft | `MaterialType` + effective workmanship, `NumTimesTinkered`, `ItemSpellcraft` | Item-only optional composites; material is absent unless both facts decode |
-| Item mana | `ItemCurMana`, optional max, derived remaining time from `ManaRate` | Keep current/max/rate-derived duration separately optional. Zero/negative rate or missing rate means unknown lifetime, not zero |
-| Status and counts | bonded, attuned, retained, open, locked, sellable, ivoryable, stack, structure | Item-only. Booleans without presence-aware accessors currently turn absence into false; use `Option<bool>` wherever absence changes meaning |
-| Armor/weapon/protections | armor property, profiles, damage helper | Item-only. Caster weapon speed must be `None`, not fabricated `0`; protection profile remains an optional eight-value composite |
-| Wield requirements | four requirement triplets plus `ItemDifficulty` | Item-only and keep typed requirement variants. Incomplete/unknown triplets are absent and diagnostic-worthy, never coerced to skill zero |
-| Bonuses | assessment floats and weapon-profile offense fallback | Item-only. Replace stringly `name`/`is_multiplier` with an enum and typed value basis |
-| Imbues/effects | five imbue words plus damage/critical/slayer/attack properties | Item-only. Follow ACE's property-presence behavior for `IgnoreArmor`/`AbsorbMagicDamage`; classify armor cleaving from `IgnoreArmor` and resistance cleaving from `ResistanceModifierType`, never the weapon damage type. Remove duplicate labels where an imbue and derived effect describe the same fact |
-| Creature | `CreatureProfile` and `CreatureType`; vitals/attribute lines | Health is required when the profile exists. Attributes, stamina, and mana are one optional composite; delete fabricated zero pairs |
-| Use/inscription | `Use`; inscription + optional scribe | Item-only, optional, preserve long text losslessly |
-| Spells | raw appraisal spell book; name lookup in TUI | Model `{ id, active_enchantment }`; clear bit 31 before lookup while preserving the marker |
-| Classification | currently inferred from optional creature profile in presentation and `ItemType` in places | Centralize once in world. A successful `ItemType::Creature` response without a creature profile is item/object presentation (`NpcLooksLikeObject`), while player GUIDs remain creature presentation |
+| Current area                  | Source and current consumer                                                                | Finding / locked correction                                                                                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity                      | entity name; `LongDesc` then `ShortDesc`; header/body                                      | Keep common and optional; an absent description remains absent                                                                                                                                                                                                                                             |
+| Value, burden, level          | `Value`, `EncumbranceVal`, `Level`; basic lines                                            | `value: u32` fabricates zero on absence; make all three optional                                                                                                                                                                                                                                           |
+| Capacity                      | pre-existing maximum capacities plus TUI-local player storage counts                       | Never default missing player usage to zero. First slice carries optional maxima only; current usage is not an appraisal fact and is deferred until a world storage owner can provide it                                                                                                                    |
+| Material/tinkering/spellcraft | `MaterialType` + effective workmanship, `NumTimesTinkered`, `ItemSpellcraft`               | Item-only optional composites; material is absent unless both facts decode                                                                                                                                                                                                                                 |
+| Item mana                     | `ItemCurMana`, optional max, derived remaining time from `ManaRate`                        | Keep current/max/rate-derived duration separately optional. Zero/negative rate or missing rate means unknown lifetime, not zero                                                                                                                                                                            |
+| Status and counts             | bonded, attuned, retained, open, locked, sellable, ivoryable, stack, structure             | Item-only. Booleans without presence-aware accessors currently turn absence into false; use `Option<bool>` wherever absence changes meaning                                                                                                                                                                |
+| Armor/weapon/protections      | armor property, profiles, damage helper                                                    | Item-only. Caster weapon speed must be `None`, not fabricated `0`; protection profile remains an optional eight-value composite                                                                                                                                                                            |
+| Wield requirements            | four requirement triplets plus `ItemDifficulty`                                            | Item-only and keep typed requirement variants. Incomplete/unknown triplets are absent and diagnostic-worthy, never coerced to skill zero                                                                                                                                                                   |
+| Bonuses                       | assessment floats and weapon-profile offense fallback                                      | Item-only. Replace stringly `name`/`is_multiplier` with an enum and typed value basis                                                                                                                                                                                                                      |
+| Imbues/effects                | five imbue words plus damage/critical/slayer/attack properties                             | Item-only. Follow ACE's property-presence behavior for `IgnoreArmor`/`AbsorbMagicDamage`; classify armor cleaving from `IgnoreArmor` and resistance cleaving from `ResistanceModifierType`, never the weapon damage type. Remove duplicate labels where an imbue and derived effect describe the same fact |
+| Creature                      | `CreatureProfile` and `CreatureType`; vitals/attribute lines                               | Health is required when the profile exists. Attributes, stamina, and mana are one optional composite; delete fabricated zero pairs                                                                                                                                                                         |
+| Use/inscription               | `Use`; inscription + optional scribe                                                       | Item-only, optional, preserve long text losslessly                                                                                                                                                                                                                                                         |
+| Spells                        | raw appraisal spell book; name lookup in TUI                                               | Model `{ id, active_enchantment }`; clear bit 31 before lookup while preserving the marker                                                                                                                                                                                                                 |
+| Classification                | currently inferred from optional creature profile in presentation and `ItemType` in places | Centralize once in world. A successful `ItemType::Creature` response without a creature profile is item/object presentation (`NpcLooksLikeObject`), while player GUIDs remain creature presentation                                                                                                        |
 
 #### Locked first-slice contract
 
@@ -1000,34 +1055,34 @@ The exact Rust names may be adjusted for idiom during Phase 2, but not the facts
 “Absent” always means the UI omits the row or explicitly shows unknown where context requires it;
 frontends must never synthesize zero, false, or an empty string.
 
-| Shape / field group | Producer | Named consumers | Absence semantics | Slice |
-| --- | --- | --- | --- | --- |
-| `common.guid`, `name` | merged target identity/name | TUI header, h3d title/correlation | required; construction fails loudly without name | First |
-| `common.description` | appraised `LongDesc`, then `ShortDesc` | TUI/h3d description | no description section | First |
-| `common.level` | appraised `Level` | TUI/h3d basic facts | unknown level | First |
-| `item.artwork` | existing merged icon/appearance facts | h3d item hero, TUI may omit visually | text inspection remains usable and records artwork diagnostic | First |
-| `item.value`, `burden` | appraised `Value`, `EncumbranceVal` | TUI/h3d basics | unknown, distinct from zero | First |
-| `item.capacity` | item/container capacity maxima already on target | TUI/h3d capacity | each maximum independently optional; usage absent | First |
-| `item.material` | `MaterialType` + effective `ItemWorkmanship` | TUI/h3d crafting facts | whole composite absent unless both exist | First |
-| `item.tinkering_count`, `spellcraft` | `NumTimesTinkered`, `ItemSpellcraft` | TUI/h3d crafting/magic facts | absent; explicit zero tinkers may be omitted | First |
-| `item.mana` | `ItemCurMana`, `ItemMaxMana`, `ManaRate` | TUI/h3d mana/charge row | current required for composite; max and remaining duration optional | First |
-| `item.status` | bonded, attuned, retained, open, locked, sellable, ivoryable properties | TUI/h3d status chips | each presence-sensitive fact independently optional | First |
-| `item.stack`, `uses` | stack/max-stack; structure/max-structure | TUI/h3d count rows | composite absent without meaningful maximum; current is optional rather than zero-filled | First |
-| `item.armor`, `weapon`, `protections` | appraised armor property and armor/weapon profiles plus direct assessment properties | TUI/h3d equipment sections | each composite optional; weapon speed optional for caster/profile omission | First |
-| `item.wield_requirements` | four appraised requirement triplets and arcane difficulty | TUI/h3d requirement list | empty list; malformed named requirement is a diagnostic | First |
-| `item.bonuses` | appraised offense/defense/mana/critical/elemental values | TUI/h3d bonuses | typed empty list; baseline values omitted | First |
-| `item.special_properties` | imbue words and direct special-property inputs | TUI/h3d effects | typed empty list; no inference from property presence alone | First |
-| `item.use_text`, `inscription` | `Use`, `Inscription`, `ScribeName` | TUI/h3d text sections | section absent | First |
-| `item.spells` | appraisal spell book | TUI/h3d spell lists and shared catalog lookup | empty list; unknown catalog ID remains visible | First |
-| `creature.creature_type` | appraised `CreatureType` | TUI/h3d identity line | unknown type | First |
-| `creature.health` | successful `CreatureProfile` | TUI/h3d vital display | profile is required for this variant; invalid construction otherwise | First |
-| `creature.attributes_and_vitals` | optional profile attribute block | TUI/h3d attributes, stamina, mana | entire composite absent; never zero-filled | First |
-| hook semantics/profile | ACE recursive hook appraisal + `HookProfile` | future TUI/h3d hook section | optional | Fast follow |
-| enchantment masks and creature buffs | profile/mask bitfields | future semantic highlighting in both frontends | optional, no color claim | Fast follow |
-| armor levels | `ArmorLevels` | player/non-attackable creature presentation | optional | Fast follow |
-| item ratings/set/activation/usage limits/progression/lock/rare/craftsman/heal-kit/mana-stone facts | named assessment properties consumed by retail item call tree | future TUI/h3d specialized sections | property-specific optional composites | Fast follow |
-| creature combat ratings | ACE `AddRatings`, retail creature/character UIs | future TUI/h3d ratings section | zero/absent ratings omitted | Fast follow |
-| player identity/social facts | ACE player-filtered properties; retail `CharExamineUI` | future distinct player UX in both frontends | property-specific optional facts | Fast follow; add `Player` variant then |
+| Shape / field group                                                                                | Producer                                                                             | Named consumers                                | Absence semantics                                                                        | Slice                                  |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------- |
+| `common.guid`, `name`                                                                              | merged target identity/name                                                          | TUI header, h3d title/correlation              | required; construction fails loudly without name                                         | First                                  |
+| `common.description`                                                                               | appraised `LongDesc`, then `ShortDesc`                                               | TUI/h3d description                            | no description section                                                                   | First                                  |
+| `common.level`                                                                                     | appraised `Level`                                                                    | TUI/h3d basic facts                            | unknown level                                                                            | First                                  |
+| `item.artwork`                                                                                     | existing merged icon/appearance facts                                                | h3d item hero, TUI may omit visually           | text inspection remains usable and records artwork diagnostic                            | First                                  |
+| `item.value`, `burden`                                                                             | appraised `Value`, `EncumbranceVal`                                                  | TUI/h3d basics                                 | unknown, distinct from zero                                                              | First                                  |
+| `item.capacity`                                                                                    | item/container capacity maxima already on target                                     | TUI/h3d capacity                               | each maximum independently optional; usage absent                                        | First                                  |
+| `item.material`                                                                                    | `MaterialType` + effective `ItemWorkmanship`                                         | TUI/h3d crafting facts                         | whole composite absent unless both exist                                                 | First                                  |
+| `item.tinkering_count`, `spellcraft`                                                               | `NumTimesTinkered`, `ItemSpellcraft`                                                 | TUI/h3d crafting/magic facts                   | absent; explicit zero tinkers may be omitted                                             | First                                  |
+| `item.mana`                                                                                        | `ItemCurMana`, `ItemMaxMana`, `ManaRate`                                             | TUI/h3d mana/charge row                        | current required for composite; max and remaining duration optional                      | First                                  |
+| `item.status`                                                                                      | bonded, attuned, retained, open, locked, sellable, ivoryable properties              | TUI/h3d status chips                           | each presence-sensitive fact independently optional                                      | First                                  |
+| `item.stack`, `uses`                                                                               | stack/max-stack; structure/max-structure                                             | TUI/h3d count rows                             | composite absent without meaningful maximum; current is optional rather than zero-filled | First                                  |
+| `item.armor`, `weapon`, `protections`                                                              | appraised armor property and armor/weapon profiles plus direct assessment properties | TUI/h3d equipment sections                     | each composite optional; weapon speed optional for caster/profile omission               | First                                  |
+| `item.wield_requirements`                                                                          | four appraised requirement triplets and arcane difficulty                            | TUI/h3d requirement list                       | empty list; malformed named requirement is a diagnostic                                  | First                                  |
+| `item.bonuses`                                                                                     | appraised offense/defense/mana/critical/elemental values                             | TUI/h3d bonuses                                | typed empty list; baseline values omitted                                                | First                                  |
+| `item.special_properties`                                                                          | imbue words and direct special-property inputs                                       | TUI/h3d effects                                | typed empty list; no inference from property presence alone                              | First                                  |
+| `item.use_text`, `inscription`                                                                     | `Use`, `Inscription`, `ScribeName`                                                   | TUI/h3d text sections                          | section absent                                                                           | First                                  |
+| `item.spells`                                                                                      | appraisal spell book                                                                 | TUI/h3d spell lists and shared catalog lookup  | empty list; unknown catalog ID remains visible                                           | First                                  |
+| `creature.creature_type`                                                                           | appraised `CreatureType`                                                             | TUI/h3d identity line                          | unknown type                                                                             | First                                  |
+| `creature.health`                                                                                  | successful `CreatureProfile`                                                         | TUI/h3d vital display                          | profile is required for this variant; invalid construction otherwise                     | First                                  |
+| `creature.attributes_and_vitals`                                                                   | optional profile attribute block                                                     | TUI/h3d attributes, stamina, mana              | entire composite absent; never zero-filled                                               | First                                  |
+| hook semantics/profile                                                                             | ACE recursive hook appraisal + `HookProfile`                                         | future TUI/h3d hook section                    | optional                                                                                 | Fast follow                            |
+| enchantment masks and creature buffs                                                               | profile/mask bitfields                                                               | future semantic highlighting in both frontends | optional, no color claim                                                                 | Fast follow                            |
+| armor levels                                                                                       | `ArmorLevels`                                                                        | player/non-attackable creature presentation    | optional                                                                                 | Fast follow                            |
+| item ratings/set/activation/usage limits/progression/lock/rare/craftsman/heal-kit/mana-stone facts | named assessment properties consumed by retail item call tree                        | future TUI/h3d specialized sections            | property-specific optional composites                                                    | Fast follow                            |
+| creature combat ratings                                                                            | ACE `AddRatings`, retail creature/character UIs                                      | future TUI/h3d ratings section                 | zero/absent ratings omitted                                                              | Fast follow                            |
+| player identity/social facts                                                                       | ACE player-filtered properties; retail `CharExamineUI`                               | future distinct player UX in both frontends    | property-specific optional facts                                                         | Fast follow; add `Player` variant then |
 
 The first-slice enum remains `Item(ItemInspection) | Creature(CreatureInspection)`. Player GUIDs use
 the creature variant in Phase 2, but the classifier is explicit and tested so the fast-follow
@@ -1056,22 +1111,22 @@ JOIN weenie_properties_bool b ON b.object_Id=w.class_Id
 WHERE b.type=83 AND b.value=1 GROUP BY w.type ORDER BY w.type;'
 ```
 
-| Representative class | Census predicate | Count |
-| --- | --- | ---: |
-| Melee weapons | `ItemType & 1` | 2,949 |
-| Armor | `ItemType & 2` | 1,846 |
-| Consumable food | `ItemType & 32` | 422 |
-| Missile weapons | `ItemType & 256` | 1,278 |
-| Containers | `ItemType & 512` | 760 |
-| Casters | `ItemType & 32768` | 424 |
-| Portals | `ItemType & 65536` | 3,308 |
-| Mana stones | `ItemType & 524288` | 15 |
-| Creatures | `WeenieType = 10` | 7,831 |
-| Doors | `WeenieType = 19` | 542 |
-| Chests | `WeenieType = 20` | 659 |
-| Hooks | `WeenieType = 56` | 5 |
-| Storage | `WeenieType = 57` | 1 |
-| House portals | `WeenieType = 58` | 1 |
+| Representative class                    | Census predicate           | Count |
+| --------------------------------------- | -------------------------- | ----: |
+| Melee weapons                           | `ItemType & 1`             | 2,949 |
+| Armor                                   | `ItemType & 2`             | 1,846 |
+| Consumable food                         | `ItemType & 32`            |   422 |
+| Missile weapons                         | `ItemType & 256`           | 1,278 |
+| Containers                              | `ItemType & 512`           |   760 |
+| Casters                                 | `ItemType & 32768`         |   424 |
+| Portals                                 | `ItemType & 65536`         | 3,308 |
+| Mana stones                             | `ItemType & 524288`        |    15 |
+| Creatures                               | `WeenieType = 10`          | 7,831 |
+| Doors                                   | `WeenieType = 19`          |   542 |
+| Chests                                  | `WeenieType = 20`          |   659 |
+| Hooks                                   | `WeenieType = 56`          |     5 |
+| Storage                                 | `WeenieType = 57`          |     1 |
+| House portals                           | `WeenieType = 58`          |     1 |
 | `NpcLooksLikeObject` creature templates | `WeenieType = 10`, bool 83 | 1,448 |
 
 The same boolean appears on one generic and one vendor template, so classification must not assume

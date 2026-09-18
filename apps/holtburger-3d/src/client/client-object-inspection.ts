@@ -3,9 +3,14 @@ import type {
 	ObjectInspectionResult,
 } from "./client-object-inspection-contract";
 import type {
+	ObjectPreviewResult,
+	ObjectPreviewSource,
+} from "./client-object-preview-contract";
+import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
+import { CLIENT_TUNING } from "./client-tuning";
 
 /** Latest-target presentation retained independently of mutable selection and entity mirrors. */
 export type ClientObjectInspectionState =
@@ -15,12 +20,26 @@ export type ClientObjectInspectionState =
 			readonly kind: "ready";
 			readonly guid: number;
 			readonly inspection: ObjectInspection;
+			/** Null for item appraisal; creature previews retain their own cold readiness. */
+			readonly preview: ClientObjectPreviewState | null;
 	  };
 
+/** Cold asset-readiness state for a ready creature examination. */
+export type ClientObjectPreviewState =
+	| { readonly kind: "pending" }
+	| {
+			readonly kind: "ready";
+			readonly source: ObjectPreviewSource;
+			/** Changes only when renderer-relevant source facts change. */
+			readonly revision: number;
+	  }
+	| { readonly kind: "unavailable" };
+
 /**
- * Owns the one-request/one-window inspection lifetime for a client session.
+ * Owns the one-target/one-window inspection lifetime for a client session.
  *
  * The protocol echoes only a GUID, so a currently requested GUID is the complete correlation key.
+ * At most one request is in flight; ready targets are refreshed on a cold, tunable cadence.
  * Selection and entity residency intentionally do not participate in this state machine.
  */
 export class ClientObjectInspection {
@@ -33,6 +52,11 @@ export class ClientObjectInspection {
 	readonly #unsubscribe: () => void;
 	#state: ClientObjectInspectionState = { kind: "idle" };
 	#playerGuid: number | null;
+	#refreshTimer: ReturnType<typeof setTimeout> | null = null;
+	#refreshGuid: number | null = null;
+	#refreshFailureReported = false;
+	#previewFingerprint: string | null = null;
+	#previewRevision = 0;
 	#destroyed = false;
 
 	constructor(
@@ -59,10 +83,17 @@ export class ClientObjectInspection {
 		return () => this.#listeners.delete(listener);
 	}
 
-	/** Close any open result, suppress duplicate pending requests, and capture this exact GUID. */
+	/** Acquire this exact target, or immediately refresh it when its window is already ready. */
 	async examine(guid: number): Promise<void> {
 		if (this.#destroyed) throw new Error("Object inspection is unavailable.");
 		if (this.#state.kind === "pending" && this.#state.guid === guid) return;
+		if (this.#state.kind === "ready" && this.#state.guid === guid) {
+			this.#cancelRefreshTimer();
+			await this.#refresh();
+			return;
+		}
+		this.#resetRefresh();
+		this.#resetPreviewIdentity();
 		this.#replace({ kind: "pending", guid });
 		try {
 			await this.#session.examineEntity(guid);
@@ -75,6 +106,8 @@ export class ClientObjectInspection {
 
 	/** Close presentation only; no server command and no selection mutation occurs. */
 	close(): void {
+		this.#resetRefresh();
+		this.#resetPreviewIdentity();
 		this.#replace({ kind: "idle" });
 	}
 
@@ -90,6 +123,9 @@ export class ClientObjectInspection {
 		switch (event.type) {
 			case "object-inspection-result":
 				this.#accept(event.result);
+				return;
+			case "object-preview-result":
+				this.#acceptPreview(event.result);
 				return;
 			case "resyncing":
 				this.close();
@@ -116,32 +152,144 @@ export class ClientObjectInspection {
 	}
 
 	#accept(result: ObjectInspectionResult): void {
-		if (this.#state.kind !== "pending" || result.guid !== this.#state.guid)
+		if (this.#state.kind === "idle" || result.guid !== this.#state.guid) return;
+		if (this.#state.kind === "ready" && this.#refreshGuid !== result.guid)
 			return;
 		const guid = this.#state.guid;
+		this.#refreshGuid = null;
+		this.#refreshFailureReported = false;
 		switch (result.outcome.kind) {
 			case "ready":
 				if (result.outcome.inspection.guid !== guid) {
-					this.#replace({ kind: "idle" });
+					this.close();
 					this.#reportFailure(
 						"The examination response had mismatched identities.",
 					);
 					return;
 				}
+				if (result.outcome.inspection.details.kind === "item")
+					this.#resetPreviewIdentity();
 				this.#replace({
 					kind: "ready",
 					guid,
 					inspection: result.outcome.inspection,
+					preview:
+						result.outcome.inspection.details.kind === "creature"
+							? this.#state.kind === "ready" && this.#state.preview !== null
+								? this.#state.preview
+								: { kind: "pending" }
+							: null,
 				});
+				this.#scheduleRefresh();
 				return;
 			case "rejected":
-				this.#replace({ kind: "idle" });
+				this.close();
 				this.#reportFailure("You could not examine that object.");
 				return;
 			case "missing":
-				this.#replace({ kind: "idle" });
+				this.close();
 				this.#reportFailure("That object is no longer available.");
 		}
+	}
+
+	#acceptPreview(result: ObjectPreviewResult): void {
+		if (
+			this.#state.kind !== "ready" ||
+			this.#state.preview === null ||
+			result.guid !== this.#state.guid
+		)
+			return;
+		switch (result.outcome.kind) {
+			case "ready":
+				if (result.outcome.source.guid !== this.#state.guid) {
+					this.#resetPreviewIdentity();
+					this.#replace({ ...this.#state, preview: { kind: "unavailable" } });
+					this.#reportFailure(
+						"The creature preview had mismatched identities.",
+					);
+					return;
+				}
+				{
+					const fingerprint = objectPreviewFingerprint(result.outcome.source);
+					if (
+						this.#state.preview.kind === "ready" &&
+						fingerprint === this.#previewFingerprint
+					)
+						return;
+					this.#previewFingerprint = fingerprint;
+					this.#previewRevision += 1;
+				}
+				this.#replace({
+					...this.#state,
+					preview: {
+						kind: "ready",
+						source: result.outcome.source,
+						revision: this.#previewRevision,
+					},
+				});
+				return;
+			case "unavailable":
+				this.#resetPreviewIdentity();
+				this.#replace({ ...this.#state, preview: { kind: "unavailable" } });
+		}
+	}
+
+	async #refresh(): Promise<void> {
+		if (
+			this.#destroyed ||
+			this.#state.kind !== "ready" ||
+			this.#refreshGuid !== null
+		)
+			return;
+		const guid = this.#state.guid;
+		this.#refreshGuid = guid;
+		try {
+			await this.#session.examineEntity(guid);
+		} catch (error) {
+			if (
+				this.#state.kind !== "ready" ||
+				this.#state.guid !== guid ||
+				this.#refreshGuid !== guid
+			)
+				return;
+			this.#refreshGuid = null;
+			if (!this.#refreshFailureReported) {
+				this.#refreshFailureReported = true;
+				this.#reportFailure(failureText(error));
+			}
+			this.#scheduleRefresh();
+		}
+	}
+
+	#scheduleRefresh(): void {
+		this.#cancelRefreshTimer();
+		if (
+			this.#destroyed ||
+			this.#state.kind !== "ready" ||
+			this.#refreshGuid !== null
+		)
+			return;
+		this.#refreshTimer = setTimeout(() => {
+			this.#refreshTimer = null;
+			void this.#refresh();
+		}, CLIENT_TUNING.objectInspection.refreshIntervalMs);
+	}
+
+	#cancelRefreshTimer(): void {
+		if (this.#refreshTimer === null) return;
+		clearTimeout(this.#refreshTimer);
+		this.#refreshTimer = null;
+	}
+
+	#resetRefresh(): void {
+		this.#cancelRefreshTimer();
+		this.#refreshGuid = null;
+		this.#refreshFailureReported = false;
+	}
+
+	#resetPreviewIdentity(): void {
+		this.#previewFingerprint = null;
+		this.#previewRevision = 0;
 	}
 
 	#replace(state: ClientObjectInspectionState): void {
@@ -149,6 +297,43 @@ export class ClientObjectInspection {
 		this.#state = state;
 		for (const listener of this.#listeners) listener(state);
 	}
+}
+
+/** Canonical renderer identity for the strictly decoded, ordered preview contract. */
+function objectPreviewFingerprint(source: ObjectPreviewSource): string {
+	return JSON.stringify([
+		source.guid,
+		source.setupDid,
+		source.appearance.paletteDid,
+		source.appearance.subPalettes.map((entry) => [
+			entry.paletteDid,
+			entry.offset,
+			entry.colorCount,
+		]),
+		source.appearance.textureChanges.map((entry) => [
+			entry.partIndex,
+			entry.oldTextureDid,
+			entry.newTextureDid,
+		]),
+		source.appearance.partChanges.map((entry) => [
+			entry.partIndex,
+			entry.gfxObjDid,
+		]),
+		source.scale,
+		source.translucency,
+		source.pose.kind === "setup-pose"
+			? [source.pose.kind]
+			: [
+					source.pose.kind,
+					source.pose.firstCyclicClip,
+					source.pose.clips.map((clip) => [
+						clip.animationId,
+						clip.lowFrame,
+						clip.highFrame,
+						clip.framerate,
+					]),
+				],
+	]);
 }
 
 function failureText(error: unknown): string {

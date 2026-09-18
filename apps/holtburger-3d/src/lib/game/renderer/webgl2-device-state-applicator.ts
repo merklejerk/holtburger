@@ -8,6 +8,9 @@ import type {
 const UNKNOWN_STATE = Symbol("unknown-device-state");
 type UnknownState = typeof UNKNOWN_STATE;
 
+/** Context-wide alpha accumulation policy; world targets retain their existing shared factors. */
+export type WebGL2BlendAlphaPolicy = "match-rgb" | "coverage";
+
 /** Components in the mat4 uniforms this applicator compares. */
 const MAT4_COMPONENTS = 16;
 
@@ -22,6 +25,7 @@ const UNIFORM_SCRATCH_COMPONENTS = 4;
  */
 export class WebGL2DeviceStateApplicator {
 	readonly #gl: WebGL2RenderingContext;
+	readonly #blendAlphaPolicy: WebGL2BlendAlphaPolicy;
 	#activeTextureUnit: number | UnknownState = UNKNOWN_STATE;
 	#blendEnabled: boolean | UnknownState = UNKNOWN_STATE;
 	#blendPolicy: ObjectBlendPolicy | UnknownState = UNKNOWN_STATE;
@@ -47,8 +51,12 @@ export class WebGL2DeviceStateApplicator {
 	/** Reused so per-draw comparison of scalar and vector uniforms allocates nothing. */
 	readonly #uniformScratch = new Float64Array(UNIFORM_SCRATCH_COMPONENTS);
 
-	constructor(gl: WebGL2RenderingContext) {
+	constructor(
+		gl: WebGL2RenderingContext,
+		blendAlphaPolicy: WebGL2BlendAlphaPolicy = "match-rgb",
+	) {
 		this.#gl = gl;
+		this.#blendAlphaPolicy = blendAlphaPolicy;
 	}
 
 	/**
@@ -125,10 +133,16 @@ export class WebGL2DeviceStateApplicator {
 		) {
 			return;
 		}
-		this.#gl.blendFunc(
-			blendFactor(this.#gl, policy.source),
-			blendFactor(this.#gl, policy.destination),
-		);
+		const source = blendFactor(this.#gl, policy.source);
+		const destination = blendFactor(this.#gl, policy.destination);
+		if (this.#blendAlphaPolicy === "coverage")
+			this.#gl.blendFuncSeparate(
+				source,
+				destination,
+				this.#gl.ONE,
+				this.#gl.ONE_MINUS_SRC_ALPHA,
+			);
+		else this.#gl.blendFunc(source, destination);
 		this.#blendPolicy = policy;
 	}
 

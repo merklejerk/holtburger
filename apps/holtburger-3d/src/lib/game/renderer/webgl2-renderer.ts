@@ -78,10 +78,7 @@ import {
 	type RenderContribution,
 } from "./render-world";
 import { retainsProjectedObjectFootprint } from "./object-footprint";
-import type {
-	GeometryResourceKey,
-	Texture2DResourceKey,
-} from "./resource-manager";
+import type { GeometryResourceKey } from "./resource-manager";
 import {
 	OBJECT_INSTANCE_RECORD_BYTES,
 	type ObjectInstanceData,
@@ -90,6 +87,7 @@ import type {
 	VisibleDynamicPresentation,
 	ActiveDynamicPart,
 } from "../systems/components";
+import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
 import { WebGL2WorldMarkerPass } from "./webgl2-world-marker-pass";
 import { WebGL2WorldTrajectoryPass } from "./webgl2-world-trajectory-pass";
 import {
@@ -228,23 +226,20 @@ import {
 } from "./webgl2-lighting";
 import {
 	formAdjacentObjectInstanceRuns,
+	dynamicObjectPhase,
 	formGroupedObjectInstanceRuns,
 	areStaticObjectDrawsCompatible,
 	type ObjectBlendPolicy,
 	createObjectSubmissionPhases,
-	objectBlendPolicy,
 	type ObjectFrameSubmission,
 	type ObjectSubmissionPhases,
-	type PreparedObjectAtlasBinding,
 	type PreparedObjectTextureBinding,
-	type PreparedStaticObjectDrawCompatibility,
 	type TransparentObjectRange,
 } from "./object-rendering-policy";
 import {
 	BakedDrawMergeCensusCollector,
 	type BakedDrawMergeCensus,
 } from "./baked-draw-merge-census";
-import { resolveStaticMaterialDetail } from "./static-detail-binding";
 import { createObjectMaterialTable } from "./object-material-table";
 import { compileStaticMaterialSpans } from "./static-material-spans";
 import {
@@ -295,7 +290,11 @@ import {
 	type WebGL2SkyProgram,
 } from "./webgl2-sky-program";
 import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
-import { prepareObjectSurface } from "./object-material-preparation";
+import {
+	WebGL2ObjectDrawCompiler,
+	type WebGL2ObjectDrawInput,
+	type WebGL2PreparedObjectDrawCompatibility,
+} from "./webgl2-object-draw-compiler";
 import {
 	WebGL2DynamicAppearances,
 	type PreparedDynamicAppearance,
@@ -527,11 +526,7 @@ interface ObjectFrameInput {
 	} | null;
 }
 
-type PreparedObjectDrawCompatibility = PreparedStaticObjectDrawCompatibility<
-	WebGL2GeometryBinding,
-	WebGLTexture,
-	WebGLSampler
->;
+type PreparedObjectDrawCompatibility = WebGL2PreparedObjectDrawCompatibility;
 
 /**
  * One object contribution paired with every renderer-resolved fact consumed at submission.
@@ -593,17 +588,6 @@ function createObjectSubmission(
 		transparentSort: object.transparentSort,
 	};
 }
-
-/** The facts one draw's compiled constants are derived from; deliberately no per-frame state. */
-type CompiledObjectDrawInput = Pick<
-	ObjectFrameInput,
-	| "cullFaceOverride"
-	| "geometry"
-	| "indexCount"
-	| "indexStart"
-	| "material"
-	| "ordering"
->;
 
 /** Anchor-relative landblock offset, resolved once per visible landblock per frame. */
 type LandblockRenderOffset = readonly [number, number, number];
@@ -978,6 +962,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #transparentCenterScratch = new Vec3(0, 0, 0);
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
+	/** Context-local object compiler shared by world and isolated renderer implementations. */
+	readonly #objectDrawCompiler: WebGL2ObjectDrawCompiler;
 	/** Appearance resources follow template leases, not current visibility. */
 	readonly #dynamicAppearances: WebGL2DynamicAppearances;
 	/** Shared current-frame pose addresses, uploaded before executing any prepared camera. */
@@ -1265,13 +1251,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl = gl;
 		this.#resources = resources;
 		this.#world = world;
-		this.#dynamicAppearances = new WebGL2DynamicAppearances(
-			gl,
-			(material, ordering) =>
-				prepareObjectSurface(material, ordering, (key, samplingClass) =>
-					this.#prepareObjectAtlasBinding(key, samplingClass),
-				),
-		);
 		this.#assertDeviceReady = assertDeviceReady;
 		this.#portalWarpDriveTuning = portalWarpDriveTuning;
 		this.#worldMarkerPass = new WebGL2WorldMarkerPass(gl);
@@ -1279,6 +1258,20 @@ export class WebGL2Renderer implements Renderer {
 		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
 			gl,
 			textureFilteringSupport,
+		);
+		this.#objectDrawCompiler = new WebGL2ObjectDrawCompiler({
+			resources,
+			resolveAtlasTexture: (key) => world.resolveAtlasTexture(key),
+			resolveStaticDetail: (role) =>
+				world.resolveActiveRegionStaticDetail(role),
+			resolveTexture2D: (key) => world.resolveTexture2D(key),
+			samplers: this.#textureSamplers,
+			textureFiltering: () => this.#frameTextureFiltering,
+		});
+		this.#dynamicAppearances = new WebGL2DynamicAppearances(
+			gl,
+			(material, ordering) =>
+				this.#objectDrawCompiler.prepareSurface(material, ordering),
 		);
 		this.#nameplatePass = new WebGL2NameplatePass(
 			gl,
@@ -2349,6 +2342,10 @@ export class WebGL2Renderer implements Renderer {
 	#prepareViewGeometry(
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		input: FrameViewInput,
+		extent: RenderExtent = {
+			width: this.#frameWidth,
+			height: this.#frameHeight,
+		},
 	): PreparedViewGeometry {
 		const camera = input.camera;
 		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
@@ -2356,7 +2353,7 @@ export class WebGL2Renderer implements Renderer {
 			camera.placement.position,
 			anchorLandblockId,
 		);
-		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
+		const aspectRatio = extent.width / Math.max(1, extent.height);
 		const projection = createPerspectiveMat4(
 			camera.fov,
 			aspectRatio,
@@ -2677,19 +2674,12 @@ export class WebGL2Renderer implements Renderer {
 							const part = presentation.visual.parts[range.source.partSelector];
 							if (part === undefined)
 								throw new Error("Ordered range references a missing part.");
-							const opacity = part.frameInstance.color.a;
-							if (
-								opacity === 0 ||
-								!retainsRetailGeometry(
-									range.source.retailVisibility,
-									frameSettings.showRetailHiddenGeometry,
-								)
-							)
-								continue;
-							const ordering =
-								range.source.ordering === "opaque" && opacity !== 1
-									? "transparent"
-									: range.source.ordering;
+							const ordering = dynamicObjectPhase(
+								range.source.ordering,
+								part.frameInstance.color.a,
+								range.source.retailVisibility,
+								frameSettings.showRetailHiddenGeometry,
+							);
 							if (ordering !== "transparent") continue;
 
 							appendBlended(range, range.source.indexCount, ordering);
@@ -3210,76 +3200,9 @@ export class WebGL2Renderer implements Renderer {
 	 * assembled per frame by the caller instead.
 	 */
 	#compileObjectDraw(
-		object: CompiledObjectDrawInput,
+		object: WebGL2ObjectDrawInput,
 	): CompiledObjectDraw<PreparedObjectDrawCompatibility> {
-		const geometry = this.#resources.getGeometry(object.geometry);
-		validateDrawRange(geometry, object.indexStart, object.indexCount);
-		const { material } = object;
-		const surface = prepareObjectSurface(
-			material,
-			object.ordering,
-			(key, samplingClass) =>
-				this.#prepareObjectAtlasBinding(key, samplingClass),
-		);
-		const detail = resolveStaticMaterialDetail(material, (role) =>
-			this.#world.resolveActiveRegionStaticDetail(role),
-		);
-		const compatibility: PreparedObjectDrawCompatibility = {
-			...surface,
-			cullFace: object.cullFaceOverride ?? material.polygon.cullFace,
-			detail:
-				detail === null
-					? null
-					: {
-							...this.#prepareObjectTextureBinding(
-								this.#world.resolveTexture2D(detail.key),
-								"filterable",
-							),
-							rect: [0, 0, 1, 1],
-							tiling: detail.tiling,
-						},
-			geometry,
-			indexCount: object.indexCount,
-			indexStart: object.indexStart,
-		};
-		return {
-			batchKey: `${object.ordering}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`,
-			blendPolicy: objectBlendPolicy(material.source.rawSurfaceFlags),
-			compatibility,
-		};
-	}
-
-	#prepareObjectAtlasBinding(
-		key: NonNullable<ObjectMaterialBinding["textures"]["base"]>,
-		samplingClass: TextureSamplingClass,
-	): PreparedObjectAtlasBinding<WebGLTexture, WebGLSampler> {
-		const atlas = this.#world.resolveAtlasTexture(key);
-		const bounds = atlas.placement.bounds;
-		return {
-			...this.#prepareObjectTextureBinding(atlas.resource, samplingClass),
-			rect: [
-				bounds.min.x,
-				bounds.min.y,
-				bounds.max.x - bounds.min.x,
-				bounds.max.y - bounds.min.y,
-			],
-		};
-	}
-
-	#prepareObjectTextureBinding(
-		resource: Texture2DResourceKey,
-		samplingClass: TextureSamplingClass,
-	): PreparedObjectTextureBinding<WebGLTexture, WebGLSampler> {
-		const binding = this.#resources.getTexture2D(resource);
-		return {
-			sampler: this.#textureSamplers.getSampler({
-				mipLevels: binding.mipLevels,
-				policy: this.#frameTextureFiltering,
-				samplingClass,
-				wrap: TextureWrapMode.Clamp,
-			}),
-			texture: binding.texture,
-		};
+		return this.#objectDrawCompiler.compile(object);
 	}
 
 	#resetFrameSelectionMetrics(
@@ -3865,6 +3788,76 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
+	#prepareIsolatedSetupObjects(
+		template: ObjectVisualTemplate,
+		partPoses: readonly Mat4[],
+		root: Mat4,
+		scale: Vec3,
+		view: PreparedViewGeometry,
+		source: "portal-transition",
+		renderScopeKey: string,
+		showRetailHiddenGeometry: boolean,
+	): PreparedObjectFrameInput[] {
+		const objects: PreparedObjectFrameInput[] = [];
+		for (const part of template.parts) {
+			const pose = partPoses[part.partIndex];
+			if (!pose)
+				throw new Error(
+					`Isolated setup pose has no transform for part ${part.partIndex}.`,
+				);
+			const localToLandblock = multiplyMat4(
+				root,
+				composeObjectPartTransform(pose, scale, part.defaultScale),
+			);
+			const bounds = part.localBounds;
+			const center = new Vec3(
+				bounds ? (bounds.min.x + bounds.max.x) / 2 : 0,
+				bounds ? (bounds.min.y + bounds.max.y) / 2 : 0,
+				bounds ? (bounds.min.z + bounds.max.z) / 2 : 0,
+			);
+			const transparentCenter = landblockVec3(
+				transformPoint3(localToLandblock, center),
+			);
+			for (const drawUnit of part.drawUnits) {
+				if (
+					!retainsRetailGeometry(
+						drawUnit.retailVisibility,
+						showRetailHiddenGeometry,
+					)
+				)
+					continue;
+				const geometry = this.#world.resolveGeometry(drawUnit.geometry);
+				const object: ObjectFrameInput = {
+					cullFaceOverride: null,
+					drawKind: "single",
+					geometry,
+					indexCount: drawUnit.indexCount,
+					indexStart: drawUnit.indexStart,
+					instances: null,
+					landblockId: view.anchorLandblockId,
+					localToLandblock,
+					material: drawUnit.material,
+					ordering: drawUnit.ordering,
+					receivesOutdoorPssm: false,
+					retailVisibility: drawUnit.retailVisibility,
+					renderScopeKey,
+					source,
+					transparentSort: {
+						center: transparentCenter,
+						stableId: `${source}/${part.partIndex}/${drawUnit.batchKey}`,
+					},
+				};
+				const compiled = this.#compiledDraws.resolveDraw(
+					drawUnit,
+					drawUnit.ordering,
+					() => this.#compileObjectDraw(object),
+				);
+				objects.push(createObjectSubmission(object, compiled));
+			}
+		}
+		return objects;
+	}
+
 	/**
 	 * Render the authored portal setup into a transition-only target before final presentation.
 	 *
@@ -3919,68 +3912,16 @@ export class WebGL2Renderer implements Renderer {
 					new Quat(Math.cos(roll / 2), 0, 0, Math.sin(roll / 2)),
 				),
 			);
-			const objects: PreparedObjectFrameInput[] = [];
-			for (const part of visual.template.parts) {
-				const pose = partPoses[part.partIndex];
-				if (!pose) {
-					throw new Error(
-						`Portal animation has no pose for setup part ${part.partIndex}.`,
-					);
-				}
-				const localToLandblock = multiplyMat4(
-					portalCameraWorld,
-					composeObjectPartTransform(
-						pose,
-						new Vec3(1, 1, 1),
-						part.defaultScale,
-					),
-				);
-				const bounds = part.localBounds;
-				const center = new Vec3(
-					bounds ? (bounds.min.x + bounds.max.x) / 2 : 0,
-					bounds ? (bounds.min.y + bounds.max.y) / 2 : 0,
-					bounds ? (bounds.min.z + bounds.max.z) / 2 : 0,
-				);
-				const transparentCenter = landblockVec3(
-					transformPoint3(localToLandblock, center),
-				);
-				for (const drawUnit of part.drawUnits) {
-					if (
-						!retainsRetailGeometry(
-							drawUnit.retailVisibility,
-							showRetailHiddenGeometry,
-						)
-					)
-						continue;
-					const geometry = this.#world.resolveGeometry(drawUnit.geometry);
-					const object: ObjectFrameInput = {
-						cullFaceOverride: null,
-						drawKind: "single",
-						geometry,
-						indexCount: drawUnit.indexCount,
-						indexStart: drawUnit.indexStart,
-						instances: null,
-						landblockId: view.anchorLandblockId,
-						localToLandblock,
-						material: drawUnit.material,
-						ordering: drawUnit.ordering,
-						receivesOutdoorPssm: false,
-						retailVisibility: drawUnit.retailVisibility,
-						renderScopeKey: PORTAL_TRANSITION_SCOPE,
-						source: "portal-transition",
-						transparentSort: {
-							center: transparentCenter,
-							stableId: `portal-transition/${part.partIndex}/${drawUnit.batchKey}`,
-						},
-					};
-					const compiled = this.#compiledDraws.resolveDraw(
-						drawUnit,
-						drawUnit.ordering,
-						() => this.#compileObjectDraw(object),
-					);
-					objects.push(createObjectSubmission(object, compiled));
-				}
-			}
+			const objects = this.#prepareIsolatedSetupObjects(
+				visual.template,
+				partPoses,
+				portalCameraWorld,
+				new Vec3(1, 1, 1),
+				view,
+				"portal-transition",
+				PORTAL_TRANSITION_SCOPE,
+				showRetailHiddenGeometry,
+			);
 			const portalViewInput: PreparedView = {
 				...view,
 				dynamicOpaque: [],
@@ -5859,24 +5800,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#canvas.width = width;
 		this.#canvas.height = height;
 		this.#gl.viewport(0, 0, width, height);
-	}
-}
-
-function validateDrawRange(
-	binding: WebGL2GeometryBinding,
-	indexStart: number,
-	indexCount: number,
-): void {
-	if (
-		!Number.isInteger(indexStart) ||
-		!Number.isInteger(indexCount) ||
-		indexStart < 0 ||
-		indexCount < 0 ||
-		indexStart + indexCount > binding.indexCount
-	) {
-		throw new Error(
-			`Invalid geometry draw range ${indexStart}+${indexCount}/${binding.indexCount}.`,
-		);
 	}
 }
 

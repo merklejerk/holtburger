@@ -15,10 +15,8 @@ import {
 	type ResolvedFrameRotation,
 	type SceneVector3,
 } from "../../assets/ac-frame";
-import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import type { SetupVisualSource } from "../../assets/setup-visual-source";
+import type { SetupVisualAppearance } from "../../assets/setup-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
-import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import { animationHookCommand } from "../../assets/decode-animation-record";
 import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
@@ -66,6 +64,10 @@ import {
 } from "../scene";
 import type { TerrainGenerator } from "../terrain/terrain-generator";
 import { WorkerTerrainGenerator } from "../terrain/terrain-worker-client";
+import {
+	PresentationAssetService,
+	setupVisualKey,
+} from "./presentation-asset-service";
 import { MapGeometryStore } from "../map/map-geometry-store";
 import type { InstalledTerrain } from "../terrain/terrain-system";
 import { TerrainSystem } from "../terrain/terrain-system";
@@ -78,7 +80,6 @@ import {
 import type { EntitySelectionGeometry } from "../selection/entity-selection-intersection";
 import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import {
-	InlineObjectVisualTemplatePreparer,
 	ObjectVisualTemplateRepository,
 	type ObjectVisualTemplateRepositoryDiagnostics,
 } from "../systems/object-visual-template-repository";
@@ -87,7 +88,6 @@ import {
 	AnimationSystem,
 	type AnimationLayerUpdate,
 } from "../systems/animation-system";
-import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { PhysicsScriptTableSource } from "../../assets/physics-script-table-source";
 import { selectPhysicsScript } from "../../assets/decode-physics-script-table-record";
 import {
@@ -133,7 +133,6 @@ import {
 	type InstalledAmbientTerrain,
 } from "../systems/ambient-scan";
 import type { UniformRoll } from "../systems/particle-system";
-import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
 import {
 	AudioSystem,
@@ -157,7 +156,10 @@ import { SKY_OBJECT_ONLY_PART_INDEX } from "../environment/sky-behavior-targets"
 import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
-import { AnimationAssetRepository } from "../animation/animation-asset-repository";
+import {
+	AnimationAssetRepository,
+	prepareAnimation,
+} from "../animation/animation-asset-repository";
 import {
 	TextureManager,
 	type TextureAtlasPageDiagnostics,
@@ -172,10 +174,7 @@ import { AtlasPageBuildWorkerPool } from "../textures/atlas/page-build-worker";
 import type { Texture2DResourceKey } from "../renderer/resource-manager";
 import { TexturePurpose, type AssetTextureKey } from "../textures/types";
 import { mergeAssetTextureFacts } from "../textures/texture-facts";
-import {
-	WorkerTexturePreparer,
-	type TexturePreparer,
-} from "../textures/texture-preparer";
+import type { TexturePreparer } from "../textures/texture-preparer";
 import { StaticObjectGeometryWorker } from "../commit/static-object-geometry-worker-client";
 import { prepareStaticObjectGeometry } from "../commit/static-object-geometry-worker";
 import { assembleStaticObjectArtifact } from "../commit/static-object-artifact";
@@ -242,7 +241,6 @@ import {
 	playingClip,
 	type PlayingClip,
 } from "../animation/animation-playback";
-import { prepareAnimation } from "../animation/animation-asset-repository";
 import type {
 	DynamicPresentationSource,
 	PlacedDynamicPresentationSource,
@@ -340,17 +338,13 @@ const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics 
 
 /** Runtime-owned collaborators that tests may replace with focused fakes. */
 export interface GamePresentationRuntimeDependencies {
-	readonly animationSource: AnimationAssetSource;
-	readonly physicsScriptSource: PhysicsScriptSource;
 	readonly physicsScriptTableSource: PhysicsScriptTableSource;
 	readonly audioDevice: AudioDevice;
-	readonly particleEmitterSource: ParticleEmitterSource;
 	readonly soundTableSource: SoundTableSource;
 	readonly particleMeshSource: ParticleMeshSource;
-	/** Optional live-entity visual capability; null for runtimes that never consume a focused feed. */
-	readonly setupVisualSource: SetupVisualSource | null;
+	/** Borrowed CPU preparation; composition destroys it after all presentations retire. */
+	readonly presentationAssets: PresentationAssetService;
 	readonly terrainGenerator: TerrainGenerator;
-	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
 		ResolvedStaticObjectLayerSource,
 		StaticObjectLayerArtifact | null,
@@ -504,9 +498,9 @@ interface DesiredDynamicEntityRecord {
 	realization: Promise<void> | null;
 }
 
-interface CachedDynamicVisual {
-	readonly completion: Promise<DecodedStaticPresentation>;
-	readonly users: Set<number>;
+interface RetainedSetupVisual {
+	readonly completion: Promise<PreparedAssetHandle<DecodedStaticPresentation>>;
+	readonly visualKey: string;
 }
 
 /** One activated authored-dynamic resident or valid static visual fallback. */
@@ -731,7 +725,10 @@ export class GamePresentationRuntime {
 	>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
 	readonly #dynamics: DynamicEntitySystem<DynamicOwnerId, ResourceOwnerId>;
-	readonly #setupVisualSource: SetupVisualSource | null;
+	/** Shared immutable animation residency used by world dynamics and the isolated preview. */
+	readonly #animationAssets: AnimationAssetRepository;
+	/** Narrow CPU preparation lifetime, borrowed from composition or owned by standalone builds. */
+	readonly #presentationAssets: PresentationAssetService;
 	/** Latest desired current views are liveness tokens and late-readiness endpoints, not authority. */
 	readonly #spawnedDesiredEntities = new Map<
 		number,
@@ -749,7 +746,7 @@ export class GamePresentationRuntime {
 		DynamicEntityPresentationRecord
 	>();
 	readonly #spawnedVisualKeys = new Map<number, string>();
-	readonly #spawnedVisuals = new Map<string, CachedDynamicVisual>();
+	readonly #retainedSetupVisuals = new Map<string, RetainedSetupVisual>();
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
 	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
@@ -1176,12 +1173,12 @@ export class GamePresentationRuntime {
 		);
 		this.#tickProfiler = dependencies.tickProfiler;
 		this.#frameSettings = dependencies.frameSettings;
-		this.#setupVisualSource = dependencies.setupVisualSource;
+		this.#presentationAssets = dependencies.presentationAssets;
 		this.#terrainGenerator = dependencies.terrainGenerator;
-		this.#texturePreparer = dependencies.texturePreparer;
+		this.#texturePreparer = this.#presentationAssets.texturePreparer;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
 		this.#residentAtlas = new ResidentTextureAtlas<ResourceOwnerId>(
-			dependencies.texturePreparer,
+			this.#texturePreparer,
 			typeof Worker === "undefined"
 				? null
 				: {
@@ -1219,7 +1216,7 @@ export class GamePresentationRuntime {
 		);
 		this.#textures = new TextureManager<ResourceOwnerId>(
 			renderResources,
-			dependencies.texturePreparer,
+			this.#texturePreparer,
 			this.#residentAtlas,
 		);
 		this.#staticObjects = new StaticObjectSystem<OwnerId, ResourceOwnerId>(
@@ -1357,15 +1354,11 @@ export class GamePresentationRuntime {
 				await this.#renderer?.particles?.install(batch, this.#texturePreparer);
 			},
 		);
-		this.#physicsScripts = new PhysicsScriptRepository(
-			dependencies.physicsScriptSource,
-		);
+		this.#physicsScripts = this.#presentationAssets.physicsScripts;
 		this.#physicsScriptTables = new PhysicsScriptTableRepository(
 			dependencies.physicsScriptTableSource,
 		);
-		this.#particleEmitters = new ParticleEmitterRepository(
-			dependencies.particleEmitterSource,
-		);
+		this.#particleEmitters = this.#presentationAssets.particleEmitters;
 		this.#particles = new ParticleSystem({
 			distanceSpacingMultiplier:
 				SHARED_FRONTEND_TUNING.particleDistanceSpacingMultiplier,
@@ -1391,7 +1384,7 @@ export class GamePresentationRuntime {
 		>(
 			this.#geometry,
 			this.#residentAtlas,
-			new InlineObjectVisualTemplatePreparer(),
+			this.#presentationAssets.objectTemplates,
 			(template) => {
 				const renderer = this.#renderer;
 				if (renderer === null)
@@ -1404,11 +1397,12 @@ export class GamePresentationRuntime {
 				);
 			},
 		);
+		this.#animationAssets = this.#presentationAssets.animations;
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
 			this.#dynamicPlacements,
 			this.#objectVisualTemplates,
-			new AnimationAssetRepository(dependencies.animationSource),
+			this.#animationAssets,
 			this.#physicsScripts,
 			this.#particleEmitters,
 			this.#effects,
@@ -1602,40 +1596,30 @@ export class GamePresentationRuntime {
 	static async build(
 		device: GamePresentationRuntimeRenderDevice,
 		commitPipeline: CommitPipeline,
-		texturePixelSource: TexturePixelSource,
-		animationSource: AnimationAssetSource,
-		physicsScriptSource: PhysicsScriptSource,
+		presentationAssets: PresentationAssetService,
 		physicsScriptTableSource: PhysicsScriptTableSource,
 		audioDevice: AudioDevice,
-		particleEmitterSource: ParticleEmitterSource,
 		soundTableSource: SoundTableSource,
 		particleMeshSource: ParticleMeshSource,
-		setupVisualSource: SetupVisualSource | null,
 		frameSettings: FrameSettings,
 		roll?: UniformRoll,
 		tickProfiler?: RuntimeTickProfiler,
 		workerFactories?: GamePresentationRuntimeWorkerFactories,
 	): Promise<GamePresentationRuntime> {
-		const [terrainGenerator, texturePreparer] = await Promise.all([
-			workerFactories === undefined
-				? WorkerTerrainGenerator.build()
-				: new WorkerTerrainGenerator({
-						createWorker: workerFactories.createTerrainWorker,
-					}),
-			WorkerTexturePreparer.build(texturePixelSource),
-		]);
+		const terrainGenerator = await (workerFactories === undefined
+			? WorkerTerrainGenerator.build()
+			: new WorkerTerrainGenerator({
+					createWorker: workerFactories.createTerrainWorker,
+				}));
 		const runtime = new GamePresentationRuntime(
 			device.resources,
 			commitPipeline,
 			{
-				animationSource,
 				audioDevice,
-				particleEmitterSource,
-				physicsScriptSource,
 				physicsScriptTableSource,
 				particleMeshSource,
-				setupVisualSource,
 				frameSettings,
+				presentationAssets,
 				roll,
 				soundTableSource,
 				tickProfiler,
@@ -1646,10 +1630,24 @@ export class GamePresentationRuntime {
 								StaticObjectGeometryWorker.build(),
 							),
 				terrainGenerator,
-				texturePreparer,
 			},
 		);
-		runtime.#renderer = await device.buildRenderer(runtime.#renderWorld);
+		try {
+			runtime.#renderer = await device.buildRenderer(runtime.#renderWorld);
+		} catch (cause) {
+			// Construction has not published the runtime to composition yet; retire its
+			// workers/residency here while leaving borrowed CPU assets with their owner.
+			try {
+				await runtime.destroy();
+			} catch (releaseCause) {
+				throw new AggregateError(
+					[cause, releaseCause],
+					"Runtime renderer construction and rollback failed.",
+					{ cause: releaseCause },
+				);
+			}
+			throw cause;
+		}
 		return runtime;
 	}
 
@@ -1679,7 +1677,10 @@ export class GamePresentationRuntime {
 			throw new Error(
 				"Cannot replace the dynamic entity snapshot after runtime shutdown.",
 			);
-		if (this.#setupVisualSource === null && entities.length > 0) {
+		if (
+			!this.#presentationAssets.setupVisuals.available &&
+			entities.length > 0
+		) {
 			throw new Error("This runtime has no setup visual source capability.");
 		}
 		const requested = new Map<number, DynamicEntityView>();
@@ -1721,7 +1722,7 @@ export class GamePresentationRuntime {
 	): Promise<DynamicEntityRealizationDisposition> {
 		if (this.#destroyed)
 			throw new Error("Cannot upsert a dynamic entity after runtime shutdown.");
-		if (this.#setupVisualSource === null)
+		if (!this.#presentationAssets.setupVisuals.available)
 			throw new Error("This runtime has no setup visual source capability.");
 		const record = this.#acceptDesiredDynamicEntity(entity);
 		await this.#realizeAcceptedDynamicEntity(record);
@@ -2199,11 +2200,7 @@ export class GamePresentationRuntime {
 			return;
 		}
 		const guid = entity.identity.guid;
-		const visual = this.#retainSpawnedVisual(
-			guid,
-			record.visualKey,
-			entity,
-		).catch((cause) => {
+		const visual = this.#retainSpawnedVisual(guid, entity).catch((cause) => {
 			throw dynamicEntityPresentationFailure(entity, cause);
 		});
 		const continuation = this.#realizeDynamicEntity(record, visual)
@@ -2849,42 +2846,74 @@ export class GamePresentationRuntime {
 
 	#retainSpawnedVisual(
 		guid: number,
-		visualKey: string,
 		entity: DynamicEntityView,
 	): Promise<DecodedStaticPresentation> {
+		const visualKey = setupVisualKey(
+			entity.presentation.content.setupDid,
+			entity.presentation.appearance,
+		);
 		const previousKey = this.#spawnedVisualKeys.get(guid);
 		if (previousKey !== undefined && previousKey !== visualKey) {
 			this.#releaseSpawnedVisual(guid, previousKey);
 		}
 		this.#spawnedVisualKeys.set(guid, visualKey);
-		let cached = this.#spawnedVisuals.get(visualKey);
-		if (cached === undefined) {
-			const source = this.#setupVisualSource;
-			if (source === null)
+		return this.#retainSetupVisual(
+			`dynamic-entity:${guid}`,
+			visualKey,
+			entity.presentation.content.setupDid,
+			entity.presentation.appearance,
+		);
+	}
+
+	#retainSetupVisual(
+		user: string,
+		visualKey: string,
+		setupDid: number,
+		appearance: SetupVisualAppearance,
+	): Promise<DecodedStaticPresentation> {
+		const retained = this.#retainedSetupVisuals.get(user);
+		if (retained !== undefined) {
+			if (retained.visualKey !== visualKey)
 				throw new Error(
-					"This runtime has no SetupModel visual source capability.",
+					`Setup visual user ${user} already retains ${retained.visualKey}.`,
 				);
-			const completion = source.load(
-				entity.presentation.content.setupDid,
-				entity.presentation.appearance,
-			);
-			cached = { completion, users: new Set() };
-			this.#spawnedVisuals.set(visualKey, cached);
-			void completion.catch(() => {
-				if (this.#spawnedVisuals.get(visualKey) === cached)
-					this.#spawnedVisuals.delete(visualKey);
-			});
+			return retained.completion.then((handle) => handle.asset);
 		}
-		cached.users.add(guid);
-		return cached.completion;
+		const completion = this.#presentationAssets.setupVisuals.acquire(
+			setupDid,
+			appearance,
+		);
+		const next = { completion, visualKey };
+		this.#retainedSetupVisuals.set(user, next);
+		return completion
+			.then((handle) => handle.asset)
+			.catch((cause: unknown) => {
+				if (this.#retainedSetupVisuals.get(user) === next)
+					this.#retainedSetupVisuals.delete(user);
+				throw cause;
+			});
 	}
 
 	#releaseSpawnedVisual(guid: number, visualKey: string): void {
-		const cached = this.#spawnedVisuals.get(visualKey);
-		cached?.users.delete(guid);
-		if (cached?.users.size === 0) this.#spawnedVisuals.delete(visualKey);
+		this.#releaseSetupVisual(`dynamic-entity:${guid}`, visualKey);
 		if (this.#spawnedVisualKeys.get(guid) === visualKey)
 			this.#spawnedVisualKeys.delete(guid);
+	}
+
+	#releaseSetupVisual(user: string, visualKey: string): void {
+		const retained = this.#retainedSetupVisuals.get(user);
+		if (retained === undefined) return;
+		if (retained.visualKey !== visualKey)
+			throw new Error(
+				`Setup visual user ${user} retains ${retained.visualKey}, not ${visualKey}.`,
+			);
+		this.#retainedSetupVisuals.delete(user);
+		void retained.completion.then(
+			(handle) => handle.release(),
+			// Acquisition failure already releases its provisional repository reference and
+			// remains observable by the caller awaiting the same completion.
+			() => undefined,
+		);
 	}
 
 	/** Retire an unrealizable scene node without confusing deferred authority with deletion. */
@@ -4041,12 +4070,10 @@ export class GamePresentationRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
-		this.#setupVisualSource?.destroy?.();
 		const spawned = [...this.#spawnedDesiredEntities.keys()];
 		for (const guid of spawned) this.#retireDynamicPresentationTree(guid);
 		for (const guid of spawned)
 			this.#forgetDesiredDynamicEntity(guid, "release-visual");
-		this.#spawnedVisuals.clear();
 		this.#spawnedVisualKeys.clear();
 		this.#pendingDynamicEntityCues.clear();
 		this.#destroyed = true;
@@ -4074,7 +4101,6 @@ export class GamePresentationRuntime {
 		this.#skyScripts.destroy();
 		// Dynamic residents own emitter and sound-table handles; release them before their repositories.
 		await this.#dynamics.destroy();
-		this.#particleEmitters.destroy();
 		for (const handle of this.#ambientSoundTableHandles.values()) {
 			handle.release();
 		}
@@ -4084,14 +4110,16 @@ export class GamePresentationRuntime {
 		this.#physicsScriptTables.destroy();
 		this.#particleMeshes.destroy();
 		this.#targetSoundTables.clear();
-		this.#physicsScripts.destroy();
 		this.#envCells.destroy();
 		this.#oceanBackdrop.destroy();
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
 		this.#residentAtlas.destroy();
 		await this.#textures.destroy();
-		await this.#texturePreparer.destroy();
+		if (this.#retainedSetupVisuals.size !== 0)
+			throw new Error(
+				`Runtime shutdown retained ${this.#retainedSetupVisuals.size} setup visual users.`,
+			);
 		this.#activeRegionStaticDetails.clear();
 		this.#activeRegionStaticDetailOwner = null;
 		this.#geometry.destroy();

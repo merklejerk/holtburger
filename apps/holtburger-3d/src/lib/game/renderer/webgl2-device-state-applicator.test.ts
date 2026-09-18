@@ -31,6 +31,27 @@ describe("WebGL2DeviceStateApplicator", () => {
 		]);
 	});
 
+	it("accumulates source-over canvas coverage independently from material RGB factors", () => {
+		const fixture = createFixture();
+		const state = new WebGL2DeviceStateApplicator(fixture.gl, "coverage");
+
+		state.applyBlend({
+			destination: "one-minus-src-alpha",
+			source: "src-alpha",
+		});
+
+		expect(fixture.calls).toEqual(["enable:5", "blendFuncSeparate:7:8:6:8"]);
+	});
+
+	it("accumulates encoded additive emission coverage", () => {
+		const fixture = createFixture();
+		const state = new WebGL2DeviceStateApplicator(fixture.gl, "coverage");
+
+		state.applyBlend({ destination: "one", source: "src-alpha" });
+
+		expect(fixture.calls).toEqual(["enable:5", "blendFuncSeparate:7:6:6:8"]);
+	});
+
 	it("applies texture-only and sampler-only changes without redundant active-unit calls", () => {
 		const fixture = createFixture();
 		const state = new WebGL2DeviceStateApplicator(fixture.gl);
@@ -227,6 +248,15 @@ function createFixture() {
 			calls.push(`bindVertexArray:${named(vertexArray)}`),
 		blendFunc: (source: number, destination: number) =>
 			calls.push(`blendFunc:${source}:${destination}`),
+		blendFuncSeparate: (
+			sourceRgb: number,
+			destinationRgb: number,
+			sourceAlpha: number,
+			destinationAlpha: number,
+		) =>
+			calls.push(
+				`blendFuncSeparate:${sourceRgb}:${destinationRgb}:${sourceAlpha}:${destinationAlpha}`,
+			),
 		cullFace: (face: number) => calls.push(`cullFace:${face}`),
 		disable: (capability: number) => calls.push(`disable:${capability}`),
 		enable: (capability: number) => calls.push(`enable:${capability}`),

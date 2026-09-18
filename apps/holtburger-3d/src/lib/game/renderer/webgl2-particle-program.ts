@@ -12,6 +12,7 @@ import {
 	PORTAL_DEFERRED_VISIBILITY_GLSL,
 	type WebGL2PortalDeferredVisibilityUniforms,
 } from "./portal-deferred-visibility-glsl";
+import { TRANSPARENT_CANVAS_EMISSION_GLSL } from "./transparent-canvas-emission";
 
 /** Sampler units bound once for the particle program's lifetime. */
 export const PARTICLE_TEXTURE_UNITS = {
@@ -332,8 +333,11 @@ uniform vec4 uMaterialColor;
 uniform int uPalettedClipMap;
 uniform float uAlphaTest;
 uniform float uOpacityScale;
+uniform int uCanvasEmissionMode;
 
 out vec4 outColor;
+
+${TRANSPARENT_CANVAS_EMISSION_GLSL}
 
 /**
  * Decode one palette index from the base texture at an exact texel coordinate.
@@ -402,7 +406,7 @@ void main() {
 	// Translucency is retail's sense: 1 is fully transparent, so alpha is its complement.
 	color.a *= (1.0 - clamp(vTranslucency, 0.0, 1.0)) * uOpacityScale;
 	if (color.a < uAlphaTest) discard;
-	outColor = color;
+	outColor = encodeTransparentCanvasEmission(color, uCanvasEmissionMode);
 }
 `;
 }
@@ -413,6 +417,7 @@ export interface WebGL2ParticleProgram {
 	readonly portalVisibilityUniforms: WebGL2PortalDeferredVisibilityUniforms | null;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
+		readonly canvasEmissionMode: WebGLUniformLocation;
 		readonly anchorOrigin: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
 		readonly cameraPosition: WebGLUniformLocation;
@@ -464,6 +469,11 @@ export function createWebGL2ParticleProgram(
 	}
 	const uniforms: WebGL2ParticleProgram["uniforms"] = {
 		alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+		canvasEmissionMode: requireWebGL2Uniform(
+			gl,
+			program,
+			"uCanvasEmissionMode",
+		),
 		anchorOrigin: requireWebGL2Uniform(gl, program, "uAnchorOrigin"),
 		base: requireWebGL2Uniform(gl, program, "uBase"),
 		cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),

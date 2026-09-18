@@ -13,6 +13,10 @@ import { TextureWrapMode } from "../textures/types";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
 import type { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
+import {
+	TRANSPARENT_CANVAS_EMISSION_BLEND,
+	transparentCanvasEmissionMode,
+} from "./transparent-canvas-emission";
 
 /** Neutral colour for a textured mesh, which never reads the solid-colour uniform. */
 const OPAQUE_WHITE = [1, 1, 1, 1] as const;
@@ -54,6 +58,8 @@ export interface ParticleDrawContext {
 	/** Renderer-owned device-state mirror shared with object submission. */
 	readonly state: WebGL2DeviceStateApplicator;
 	readonly textureFiltering: TextureFilteringPolicy;
+	/** Encode additive light as valid coverage-bearing output for DOM canvas composition. */
+	readonly transparentCanvasComposition?: boolean;
 	/** Global opacity scale applied to all particles in this context, in [0, 1]. Defaults to 1. */
 	readonly opacityScale?: number;
 }
@@ -289,7 +295,13 @@ export class WebGL2ParticlePass {
 			// Retail's own flag-to-blend mapping, shared with the object and sky paths: additive
 			// surfaces keep their destination so a particle's black backing adds nothing.
 			const blend = objectBlendPolicy(geometry.rawSurfaceFlags);
-			state.applyBlend(blend);
+			const emissionMode = context.transparentCanvasComposition
+				? transparentCanvasEmissionMode(blend)
+				: 0;
+			state.applyUniform1i(program.uniforms.canvasEmissionMode, emissionMode);
+			state.applyBlend(
+				emissionMode === 0 ? blend : TRANSPARENT_CANVAS_EMISSION_BLEND,
+			);
 			state.applyVertexArray(geometry.vertexArray);
 			// One uniform selects this range's records, where binding seven attribute pointers to the
 			// same range would cost about twenty GL calls.

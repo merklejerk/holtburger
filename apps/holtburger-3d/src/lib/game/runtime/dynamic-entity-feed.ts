@@ -5,6 +5,7 @@ import {
 } from "../motion/host-placed-path";
 import { DYNAMIC_ENTITY_PRESENTATION_CLASSES } from "../dynamic-entity-presentation-class";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../map/map-blip-category";
+import { entityAppearanceSchema } from "./entity-appearance-contract";
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -43,30 +44,6 @@ const worldPositionSchema = z.object({
 const spatialMembershipSchema = z.object({
 	reachesOutdoors: z.boolean(),
 	reachedEnvCellIds: z.array(cellIdSchema),
-});
-
-const appearanceSchema = z.object({
-	paletteDid: guid.nullable(),
-	subPalettes: z.array(
-		z.object({
-			paletteDid: guid,
-			offset: nonNegativeInteger,
-			colorCount: nonNegativeInteger,
-		}),
-	),
-	textureChanges: z.array(
-		z.object({
-			partIndex: nonNegativeInteger.max(0xff),
-			oldTextureDid: guid,
-			newTextureDid: guid,
-		}),
-	),
-	partChanges: z.array(
-		z.object({
-			partIndex: nonNegativeInteger.max(0xff),
-			gfxObjDid: guid,
-		}),
-	),
 });
 
 const parentLocationSchema = z.enum([
@@ -208,7 +185,7 @@ const dynamicEntityViewSchema = z.object({
 			soundTableDid: guid.nullable(),
 			physicsEffectTableDid: guid.nullable(),
 		}),
-		appearance: appearanceSchema,
+		appearance: entityAppearanceSchema,
 		objectScale: finiteNumber.positive(),
 		/** Lossless requested setup placement key, independent of world position. */
 		placementFrame: guid,

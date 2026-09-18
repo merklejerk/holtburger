@@ -84,6 +84,20 @@ describe("CompiledObjectDrawStore", () => {
 		expect(store.getDiagnostics().compiledEntryCount).toBe(2);
 	});
 
+	it("recompiles device facts for a replacement generation owner", () => {
+		const { store, compile, compileCount } = createStore();
+		const firstPreview = { generation: 1 };
+		const replacementPreview = { generation: 2 };
+		const variant = "part:0/material:0/opaque";
+
+		const first = store.resolveDraw(firstPreview, variant, compile);
+		store.resolveDraw(firstPreview, variant, compile);
+		const replacement = store.resolveDraw(replacementPreview, variant, compile);
+
+		expect(replacement).not.toBe(first);
+		expect(compileCount()).toBe(2);
+	});
+
 	it.each(FLUSH_REASONS)("recompiles after a %s flush", (reason) => {
 		const { store, compile, compileCount } = createStore();
 		const drawUnit = { id: "lantern" };

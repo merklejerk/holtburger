@@ -1,5 +1,6 @@
 //! Client-composition adapter into the shared focused dynamic-entity projection.
 
+use super::entity_visual_facts::{EntityVisualFactsError, entity_visual_facts};
 use super::simulation::ClientBodyMotion;
 use anyhow::Context;
 
@@ -66,18 +67,14 @@ pub fn project_client_dynamic_entity(
         .filter(|name| !name.is_empty())
         .ok_or(ClientDynamicEntityViewError::MissingName { guid: guid.0 })?
         .to_owned();
-    let setup_did = entity
-        .csetup_id()
-        .map(|did| did.0)
-        .ok_or(ClientDynamicEntityViewError::MissingSetup { guid: guid.0 })?;
-    let object_scale = entity.scale.effective();
-    let translucency = entity
-        .get_float_prop(PropertyFloat::Translucency)
-        .unwrap_or(0.0);
-    if !translucency.is_finite() || !(0.0..=1.0).contains(&translucency) {
-        return Err(ClientDynamicEntityViewError::InvalidTranslucency { guid: guid.0 });
-    }
-    let translucency = translucency as f32;
+    let visual = entity_visual_facts(entity).map_err(|cause| match cause {
+        EntityVisualFactsError::MissingSetup => {
+            ClientDynamicEntityViewError::MissingSetup { guid: guid.0 }
+        }
+        EntityVisualFactsError::InvalidTranslucency => {
+            ClientDynamicEntityViewError::InvalidTranslucency { guid: guid.0 }
+        }
+    })?;
     let placement = if let ResolvedScenePlacement::Attached { attachment, .. } = scene_placement {
         EntityPlacement::Attached(attachment)
     } else {
@@ -112,15 +109,15 @@ pub fn project_client_dynamic_entity(
         identity: DynamicEntityIdentityView { guid, wcid },
         display: dynamic_entity_display_view(name, entity.get_int_prop(PropertyInt::Level), guid),
         content: DynamicEntityContent {
-            setup_did,
+            setup_did: visual.setup_did,
             motion_table_did: world.effective_motion_table_id_for_guid(guid),
             sound_table_did: entity.stable_id().map(|did| did.0),
             physics_effect_table_did: entity.petable_id().map(|did| did.0),
         },
-        appearance: entity.appearance.clone(),
-        object_scale,
+        appearance: visual.appearance.clone(),
+        object_scale: visual.scale,
         placement_frame: entity.placement_frame,
-        translucency,
+        translucency: visual.translucency,
         physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
             format_args!("client entity 0x{:08X}", guid.0),
@@ -358,6 +355,74 @@ mod tests {
         entity.wcid = Some(42);
         entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         entity
+    }
+
+    #[test]
+    fn live_and_captured_visual_facts_agree_without_sharing_snapshot_lifetime() {
+        use crate::client::object_preview::{ObjectPreviewOutcome, capture_object_preview};
+        use holtburger_world::{EntityPartChange, EntitySubPalette, EntityTextureChange};
+
+        let guid = Guid(0x7000_0001);
+        let mut entity = projectable_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
+        let appearance = EntityAppearance {
+            palette_did: Some(0x0400_0001),
+            sub_palettes: vec![EntitySubPalette {
+                palette_did: 0x0400_0002,
+                offset: 8,
+                color_count: 16,
+            }],
+            texture_changes: vec![EntityTextureChange {
+                part_index: 0,
+                old_texture_did: 0x0500_0001,
+                new_texture_did: 0x0500_0002,
+            }],
+            part_changes: vec![EntityPartChange {
+                part_index: 0,
+                gfx_obj_did: 0x0100_0002,
+            }],
+        };
+        entity.appearance = appearance.clone();
+        entity.set_float_prop(PropertyFloat::Translucency, 0.5);
+        let mut world = WorldState::synthetic();
+        world.add_entity(entity);
+        world
+            .apply_entity_script_scale(guid, 3.0, 0.0, 1.0)
+            .unwrap();
+
+        let live = project_client_dynamic_entity(&world, guid)
+            .unwrap()
+            .unwrap();
+        let ObjectPreviewOutcome::Ready { source } = capture_object_preview(&world, guid).outcome
+        else {
+            panic!("fixture should have a preview");
+        };
+        assert_eq!(source.setup_did, live.presentation.content.setup_did);
+        assert_eq!(source.appearance, live.presentation.appearance);
+        assert_eq!(source.scale, live.presentation.object_scale);
+        assert_eq!(source.translucency, live.physics.translucency);
+        assert_eq!(source.scale, 3.0);
+        assert_eq!(source.translucency, 0.5);
+
+        let retained = world.entities.get_mut(guid).unwrap();
+        retained.appearance = EntityAppearance::default();
+        retained.set_float_prop(PropertyFloat::Translucency, 0.25);
+        let updated = project_client_dynamic_entity(&world, guid)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.physics.translucency, 0.25);
+        world.remove_entity(guid);
+        assert_eq!(source.appearance, appearance);
+        assert_eq!(source.translucency, 0.5);
+        assert_eq!(
+            capture_object_preview(&world, guid).outcome,
+            ObjectPreviewOutcome::Unavailable
+        );
     }
 
     fn projected_view(guid: Guid) -> Box<crate::DynamicEntityView> {
@@ -850,6 +915,10 @@ mod tests {
             project_client_dynamic_entity(&world, Guid(4)),
             Err(ClientDynamicEntityViewError::MissingSetup { guid: 4 })
         );
+        assert_eq!(
+            super::super::object_preview::capture_object_preview(&world, Guid(4)).outcome,
+            super::super::object_preview::ObjectPreviewOutcome::Unavailable
+        );
 
         for (guid, translucency) in [
             (8, f64::NAN),
@@ -865,6 +934,10 @@ mod tests {
             assert_eq!(
                 project_client_dynamic_entity(&world, Guid(guid)),
                 Err(ClientDynamicEntityViewError::InvalidTranslucency { guid })
+            );
+            assert_eq!(
+                super::super::object_preview::capture_object_preview(&world, Guid(guid)).outcome,
+                super::super::object_preview::ObjectPreviewOutcome::Unavailable
             );
         }
 

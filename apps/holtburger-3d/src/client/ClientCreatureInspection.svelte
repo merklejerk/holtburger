@@ -5,7 +5,6 @@
 	} from "./client-object-inspection-contract";
 	import {
 		formatInspectionNumber,
-		humanizeInspectionName,
 		inspectionEnchantmentClass,
 	} from "./client-object-inspection-format";
 
@@ -18,24 +17,6 @@
 </script>
 
 <article class="inspection-body inspection-creature">
-	<header class="inspection-creature-hero">
-		<div class="inspection-creature-mark" aria-hidden="true">◆</div>
-		<div>
-			<h2>{inspection.name}</h2>
-			{#if inspection.level !== null || creature.creatureType !== null}
-				<p class="inspection-kicker">
-					{inspection.level === null
-						? ""
-						: `Level ${formatInspectionNumber(inspection.level)}`}{inspection.level !==
-						null && creature.creatureType !== null
-						? " · "
-						: ""}{creature.creatureType === null
-						? ""
-						: humanizeInspectionName(creature.creatureType)}
-				</p>
-			{/if}
-		</div>
-	</header>
 	{#if inspection.description !== null}<p
 			class="inspection-description inspection-creature-description"
 		>

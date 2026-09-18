@@ -30,6 +30,10 @@ import {
 	type ObjectInspectionResult,
 } from "./client-object-inspection-contract";
 import {
+	decodeObjectPreviewResult,
+	type ObjectPreviewResult,
+} from "./client-object-preview-contract";
+import {
 	ClientEntityMirror,
 	clientEntityDeltaSchema,
 } from "./client-entity-mirror";
@@ -146,6 +150,7 @@ type ClientCommandName = Extract<
 type ClientEventName = Extract<
 	HostEventName,
 	| "client-object-inspection-result"
+	| "client-object-preview-result"
 	| "client-current-state"
 	| "client-inventory-preview"
 	| "client-item-use-target-result"
@@ -220,6 +225,10 @@ export type ClientLifecycleSessionEvent =
 	| {
 			readonly type: "object-inspection-result";
 			readonly result: ObjectInspectionResult;
+	  }
+	| {
+			readonly type: "object-preview-result";
+			readonly result: ObjectPreviewResult;
 	  }
 	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
@@ -616,6 +625,16 @@ export class ClientLifecycleSession {
 						this.#emit({
 							type: "object-inspection-result",
 							result: decodeObjectInspectionResult(payload),
+						}),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-object-preview-result",
+					(payload) =>
+						this.#emit({
+							type: "object-preview-result",
+							result: decodeObjectPreviewResult(payload),
 						}),
 				),
 			);

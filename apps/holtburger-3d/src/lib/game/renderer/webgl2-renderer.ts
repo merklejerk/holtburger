@@ -2694,8 +2694,15 @@ export class WebGL2Renderer implements Renderer {
 					const reachesOutdoors = facts.spatialMembership.scopes.some(
 						(scope) => scope.kind === "outdoor",
 					);
-					const caster =
+					const depth =
 						reachesIndoor || (simpleOutdoorShadows && reachesOutdoors)
+							? this.#dynamicDepths.prepare(
+									nodeId,
+									frameSettings.showRetailHiddenGeometry,
+								)
+							: null;
+					const caster =
+						depth !== null
 							? resolveEntityShadowCaster(
 									{
 										entityClass: contribution.entityClass,

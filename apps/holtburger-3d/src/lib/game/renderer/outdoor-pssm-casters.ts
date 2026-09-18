@@ -255,12 +255,6 @@ export function planOutdoorShadowCastersForView(
 		metrics.mappedRootCount += mappedCount;
 		metrics.analyticRootCount += selectedCount - mappedCount;
 	}
-	for (const [index, candidate] of candidates.entries()) {
-		if (index >= selectedCount) break;
-		if (index < mappedCount) continue;
-		analyticCasters.push(candidate);
-		selectedDynamicNodeIds.add(candidate.nodeId);
-	}
 	for (let mappedIndex = 0; mappedIndex < mappedCount; mappedIndex += 1) {
 		const candidate = candidates[mappedIndex];
 		if (candidate === undefined)
@@ -284,6 +278,21 @@ export function planOutdoorShadowCastersForView(
 			}
 		}
 		selectedDynamicNodeIds.add(nodeId);
+	}
+	for (
+		let analyticIndex = mappedCount;
+		analyticIndex < selectedCount;
+		analyticIndex += 1
+	) {
+		const candidate = candidates[analyticIndex];
+		if (candidate === undefined) break;
+		const depth = world.getDynamicDepth(
+			candidate.nodeId,
+			showRetailHiddenGeometry,
+		);
+		if (depth === null || !depth.renderScopes.some(isOutdoorScope)) continue;
+		analyticCasters.push(candidate);
+		selectedDynamicNodeIds.add(candidate.nodeId);
 	}
 }
 

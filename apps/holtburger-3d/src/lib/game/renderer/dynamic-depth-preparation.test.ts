@@ -9,7 +9,14 @@ import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
 
 const NODE_ID = "scene-node:selection-test" as SceneNodeId;
 
-function fixture() {
+function fixture(
+	orderingPerPart: readonly DynamicAppearance["ranges"][number]["ordering"][] = [
+		"opaque",
+		"opaque",
+		"opaque",
+		"opaque",
+	],
+) {
 	const appearance: DynamicAppearance = {
 		materials: [
 			{
@@ -34,7 +41,7 @@ function fixture() {
 			materialSelector: 0,
 			indexStart: partSelector * 3,
 			indexCount: 3,
-			ordering: "opaque",
+			ordering: orderingPerPart[partSelector] ?? "opaque",
 			polygon: {
 				cullFace: partSelector === 3 ? "front" : "back",
 				stippled: false,
@@ -153,5 +160,30 @@ describe("DynamicDepthPreparations", () => {
 		expect(first.ranges).toEqual(saved);
 		pass.beginFrame();
 		expect(first.ranges).toHaveLength(0);
+	});
+	it("excludes non-opaque ranges (alpha-test, transparent, additive) from depth preparation", () => {
+		const { pass } = fixture([
+			"opaque",
+			"alpha-test",
+			"transparent",
+			"additive",
+		]);
+		const selected = pass.prepare(NODE_ID, false);
+		if (selected === null) throw new Error("Fixture requires rigid selection.");
+		expect(selected.ranges).toEqual([
+			{ indexStart: 0, indexCount: 3, cullFace: "back" },
+		]);
+		expect(selected.selectedPartCount).toBe(1);
+		expect(selected.selectedTriangleCount).toBe(1);
+	});
+	it("returns null when an appearance has no opaque ranges", () => {
+		const { pass } = fixture([
+			"alpha-test",
+			"alpha-test",
+			"transparent",
+			"additive",
+		]);
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		expect(pass.prepare(NODE_ID, true)).toBeNull();
 	});
 });

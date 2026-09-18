@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	formatInspectionDamageTypes,
+	formatInspectionDuration,
 	formatInspectionEffect,
 	formatInspectionImbuedEffects,
 	formatInspectionNumber,
@@ -32,6 +33,14 @@ describe("object inspection formatting", () => {
 	it("groups inspection numbers with US-style commas", () => {
 		expect(formatInspectionNumber(125000)).toBe("125,000");
 		expect(formatInspectionNumber(12345.6)).toBe("12,345.6");
+	});
+
+	it("omits mana-duration seconds at one hour and above", () => {
+		expect(formatInspectionDuration(27_450)).toBe("7h 37m");
+		expect(formatInspectionDuration(3_630)).toBe("1h");
+		expect(formatInspectionDuration(3_599)).toBe("59m 59s");
+		expect(formatInspectionDuration(2_220)).toBe("37m");
+		expect(formatInspectionDuration(30)).toBe("30s");
 	});
 
 	it("preserves retail's character PK labels", () => {

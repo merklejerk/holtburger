@@ -4028,7 +4028,10 @@ export class WebGL2Renderer implements Renderer {
 		if (target === null) return;
 		const depth =
 			target.shape.kind === "rigid"
-				? this.#dynamicDepths.prepare(target.nodeId, showRetailHiddenGeometry)
+				? this.#dynamicDepths.prepareSelection(
+						target.nodeId,
+						showRetailHiddenGeometry,
+					)
 				: null;
 		const pass = (this.#entitySelectionPass ??= new WebGL2EntitySelectionPass(
 			this.#gl,

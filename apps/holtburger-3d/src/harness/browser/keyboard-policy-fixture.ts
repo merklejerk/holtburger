@@ -24,6 +24,10 @@ export function installKeyboardPolicyFixture(
 	button.onclick = () => {
 		clicks += 1;
 	};
+	const selectableText = document.createElement("p");
+	selectableText.id = "keyboard-selectable-text";
+	selectableText.textContent = "Ordinary selectable HUD text";
+	selectableText.style.userSelect = "text";
 	const editor = document.createElement("input");
 	editor.id = "keyboard-editor";
 	const checkbox = document.createElement("input");
@@ -66,7 +70,16 @@ export function installKeyboardPolicyFixture(
 	dialog.append(modalEditor);
 	// A modal inside a registered scope must not forward keys to its containing scope.
 	bar.append(dialog);
-	root.append(canvas, button, editor, checkbox, range, select, bar);
+	root.append(
+		canvas,
+		button,
+		selectableText,
+		editor,
+		checkbox,
+		range,
+		select,
+		bar,
+	);
 	document.body.append(root);
 	let modal: ReturnType<typeof keyboard.modal> | null = null;
 	const closeModal = () => {
@@ -111,6 +124,16 @@ export function installKeyboardPolicyFixture(
 			modal = keyboard.modal(dialog);
 		},
 		closeModal,
+		selectOrdinaryText: () => {
+			const range = document.createRange();
+			range.selectNodeContents(selectableText);
+			const selection = document.getSelection();
+			if (selection === null)
+				throw new Error("Document selection is unavailable.");
+			selection.removeAllRanges();
+			selection.addRange(range);
+			return selection.toString();
+		},
 		removeEditor: () => editor.remove(),
 		unregisterScope: () => scope.destroy(),
 		blurWindow: () => window.dispatchEvent(new Event("blur")),

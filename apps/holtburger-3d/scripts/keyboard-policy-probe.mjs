@@ -134,6 +134,48 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			"Editors suppress scope activation commands",
 		);
 
+		await click("#keyboard-viewport");
+		await key("keyDown", "c", "KeyC", 67, { modifiers: 2 });
+		assert.equal(
+			(await capture()).movement.right,
+			1,
+			"Modified gameplay keys retain their configured wildcard semantics without a selection",
+		);
+		await key("keyUp", "c", "KeyC", 67);
+		const ordinarySelectedText = await invoke("selectOrdinaryText");
+		assert.equal(
+			ordinarySelectedText,
+			"Ordinary selectable HUD text",
+			"The fixture owns a non-collapsed document selection",
+		);
+		await press("c", "KeyC", 67, { modifiers: 2 });
+		assert.equal(
+			(await capture()).movement.right,
+			0,
+			"Copying ordinary selected UI text must not strafe the character",
+		);
+		const metaCopyAllowed = await evaluate(`(() => {
+			const down = new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', metaKey: true,
+				bubbles: true, cancelable: true });
+			const allowed = window.dispatchEvent(down);
+			window.dispatchEvent(new KeyboardEvent('keyup', { key: 'c', code: 'KeyC', metaKey: true,
+				bubbles: true, cancelable: true }));
+			return allowed;
+		})()`);
+		assert.equal(
+			metaCopyAllowed,
+			true,
+			"Command+C remains available to native copy when document text is selected",
+		);
+		await click("#keyboard-editor");
+		await evaluate(`document.querySelector('#keyboard-editor').value = ''`);
+		await press("v", "KeyV", 86, { modifiers: 2 });
+		assert.equal(
+			(await capture()).editorValue,
+			ordinarySelectedText,
+			"Native copy transfers selected text from an ordinary unscoped UI surface",
+		);
+
 		await invoke("openModal");
 		assert.equal((await capture()).pointerAllowed, false);
 		await press("x", "KeyX", 88);
@@ -356,6 +398,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			tabSuppressed: true,
 			heldKeyCancellation: true,
 			chatActivation: true,
+			ordinaryTextCopy: true,
 			chatHistoryCopy: true,
 		};
 	} finally {

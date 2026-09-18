@@ -62,6 +62,24 @@ function isEditor(element: HTMLElement): boolean {
 	);
 }
 
+/** Preserve the browser's copy command when non-editor UI currently owns a document selection. */
+function isNativeCopyOfDocumentSelection(
+	event: KeyboardEvent,
+	document: Document,
+): boolean {
+	if (
+		event.key.toLowerCase() !== "c" ||
+		event.shiftKey ||
+		event.altKey ||
+		(!event.ctrlKey && !event.metaKey)
+	)
+		return false;
+	const selection = document.getSelection();
+	return (
+		selection !== null && selection.rangeCount > 0 && !selection.isCollapsed
+	);
+}
+
 /** App-local ownership and DOM routing; pointer availability remains with the viewport gate. */
 export class KeyboardInputPolicy {
 	/** Mounted UI endpoints; registration alone grants no keyboard ownership. */
@@ -69,7 +87,10 @@ export class KeyboardInputPolicy {
 	/** Native modal order, with the innermost interaction last. */
 	readonly #modals: ModalOwnership[] = [];
 	/** Physical presses retain their game release destination across pass-through scopes. */
-	readonly #presses = new Map<string, "active" | "game" | "cancelled">();
+	readonly #presses = new Map<
+		string,
+		"active" | "game" | "native" | "cancelled"
+	>();
 	/** Focused editor or intentional UI surface; null selects the game. */
 	#owner: HTMLElement | null = null;
 	/** A pointer gesture must see Escape before a focused scope consumes it. */
@@ -273,6 +294,17 @@ export class KeyboardInputPolicy {
 			event.stopImmediatePropagation();
 			return;
 		}
+		// A native press retains its release destination even if selection changes while held.
+		if (this.#presses.get(key) === "native") return;
+		// Selection does not focus an ordinary element. Keep its native copy command ahead of game
+		// bindings without turning every selectable panel into a persistent keyboard scope.
+		if (
+			this.#document !== null &&
+			isNativeCopyOfDocumentSelection(event, this.#document)
+		) {
+			this.#presses.set(key, "native");
+			return;
+		}
 		if (event.key === "Escape" && this.#escapeCancellation?.()) {
 			this.returnToGame();
 			event.preventDefault();
@@ -327,7 +359,8 @@ export class KeyboardInputPolicy {
 		const key = event.code || event.key;
 		const press = this.#presses.get(key);
 		this.#presses.delete(key);
-		if (press === undefined || press === "cancelled") return;
+		if (press === undefined || press === "cancelled" || press === "native")
+			return;
 		if (press === "game") this.#game?.keyup(event);
 		else if (this.#owner !== null) this.#scopeFor(this.#owner)?.keyup?.(event);
 		if (event.defaultPrevented) event.stopImmediatePropagation();

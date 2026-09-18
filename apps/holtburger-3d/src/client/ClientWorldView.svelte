@@ -63,6 +63,7 @@
 		type ClientHudViewport,
 	} from "./client-hud-layout";
 	import type { ClientPresentationDiagnostics } from "./client-presentation-session";
+	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import {
 		advanceClientViewportPointerGesture,
 		beginClientViewportPointerGesture,
@@ -121,6 +122,7 @@
 		readonly onInteractEntity: () => void;
 		/** Latest captured examination request, independent of current selection. */
 		readonly objectInspection: ClientObjectInspectionState;
+		readonly objectPreviewService: ClientObjectPreviewService;
 		readonly onExamineEntity: () => void;
 		/** Select and examine an entity represented by an item-backed HUD cell. */
 		readonly onExamineItem: (guid: number) => void;
@@ -186,6 +188,7 @@
 		onInventoryNotice,
 		onInteractEntity,
 		objectInspection,
+		objectPreviewService,
 		onExamineEntity,
 		onExamineItem,
 		onCloseInspection,
@@ -792,9 +795,11 @@
 		{/key}
 	{/if}
 	{#if objectInspection.kind === "ready"}
-		{#key objectInspection.inspection}
+		{#key objectInspection.guid}
 			<ClientInspectionWindow
 				inspection={objectInspection.inspection}
+				preview={objectInspection.preview}
+				{objectPreviewService}
 				{spells}
 				icons={spells?.icons ?? inventory?.icons ?? null}
 				placement={hudLayout.inspection}

@@ -200,6 +200,15 @@ impl MotionSequenceTable {
         self.style_defaults.get(&style).copied()
     }
 
+    /// The authored cycle selected when an object enters this table without a prior motion state.
+    ///
+    /// Keeping this lookup beside the table prevents presentation-only consumers from duplicating
+    /// the default-style/default-substate key rules owned by motion selection.
+    pub fn default_cycle(&self) -> Option<&MotionSequence> {
+        let default_substate = self.style_default(self.default_style)?;
+        self.cycle(self.default_style, default_substate)
+    }
+
     /// Every animation this table can reach, through cycles, modifiers, and links alike.
     ///
     /// Links matter disproportionately: 1,174 animations across the archive are reachable no other

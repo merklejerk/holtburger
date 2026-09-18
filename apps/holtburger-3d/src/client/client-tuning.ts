@@ -43,6 +43,24 @@ export const CLIENT_TUNING = {
 	audio: SHARED_FRONTEND_TUNING.audio,
 	diagnostics: CLIENT_DIAGNOSTICS,
 	portalTransition: CLIENT_PORTAL_TRANSITION,
+	objectInspection: {
+		refreshIntervalMs: 1_000,
+	},
+	objectPreview: {
+		height: {
+			initial: 220,
+			minimum: 120,
+			maximum: 480,
+			keyboardStep: 12,
+		},
+		maximumFramesPerSecond: 60,
+		maximumBufferWidth: 768,
+		maximumBufferHeight: 576,
+		minimumResolutionScale: 1.5,
+		initialYawRadians: 0.65,
+		yawRadiansPerPixel: 0.008,
+		keyboardYawStepRadians: 0.15,
+	},
 	camera: {
 		/** Projection used by the host-authored third-person camera. */
 		far: 2_000,

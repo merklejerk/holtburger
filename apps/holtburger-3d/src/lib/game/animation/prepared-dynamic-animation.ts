@@ -52,7 +52,7 @@ export function prepareDynamicAnimation(
 			localBounds: staticBounds,
 		};
 	}
-	const bounds = sweepPartBounds(
+	const bounds = sweepAnimationPartBounds(
 		animation,
 		template.parts,
 		sourceScale,
@@ -76,7 +76,8 @@ export function prepareDynamicAnimation(
 	};
 }
 
-function sweepPartBounds(
+/** Conservatively union one animation's rigid-part frames into an existing setup bound. */
+function sweepAnimationPartBounds(
 	animation: PreparedAnimation,
 	parts: readonly PartVisualTemplate[],
 	sourceScale: Vec3,

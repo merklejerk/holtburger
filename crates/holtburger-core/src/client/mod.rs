@@ -25,6 +25,7 @@ mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
 pub mod entity_facts;
+mod entity_visual_facts;
 pub mod equipment_plan;
 mod equipment_runtime;
 pub mod inventory_plan;
@@ -34,6 +35,7 @@ pub mod item_use;
 mod messages;
 mod movement;
 pub mod movement_types;
+pub mod object_preview;
 pub mod precise_jump;
 pub mod precise_jump_prediction;
 mod precise_jump_runtime;
@@ -953,9 +955,23 @@ impl ClientRuntime {
                 self.observe_selection_envelope_entity(entity.guid);
             }
             WorldEvent::ObjectInspectionResult(result) => {
+                let preview = matches!(
+                    &result.outcome,
+                    holtburger_world::inspection::ObjectInspectionOutcome::Ready { inspection }
+                        if matches!(
+                            inspection.details,
+                            holtburger_world::inspection::ObjectInspectionDetails::Creature(_)
+                        )
+                )
+                .then(|| object_preview::capture_object_preview(&self.world, result.guid));
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ObjectInspectionResult(result.clone()));
+                if let Some(preview) = preview {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ObjectPreviewResult(preview));
+                }
             }
             WorldEvent::EntityAppearanceUpdated { guid } => {
                 self.emit_dynamic_entity_upsert(*guid);

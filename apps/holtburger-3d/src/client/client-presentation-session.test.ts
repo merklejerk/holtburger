@@ -46,6 +46,8 @@ import type {
 } from "../lib/game/runtime/game-presentation-runtime";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
+import previewFixture from "./fixtures/object-preview-wire.json";
+import { decodeObjectPreviewResult } from "./client-object-preview-contract";
 
 describe("resolveClientEnvironmentSelection", () => {
 	it("uses synchronized portal-year time and the archive calendar offset", () => {
@@ -1008,33 +1010,48 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("cancels presentation construction when the client exits during startup", async () => {
-		const transport = new FakeClientTransport(currentState(0x0100_0001));
-		const lifecycle = new ClientLifecycleSession(transport);
-		await lifecycle.start();
-		let observedSignal: AbortSignal | undefined;
-		const presentation = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: async ({ signal }) => {
-				observedSignal = signal;
-				return await new Promise<never>((_resolve, reject) => {
-					signal?.addEventListener("abort", () => {
-						const error = new Error("cancelled");
-						error.name = "AbortError";
-						reject(error);
+	it.each([false, true])(
+		"cancels presentation construction during startup (pending preview: %s)",
+		async (withPreview) => {
+			const transport = new FakeClientTransport(currentState(0x0100_0001));
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			let observedSignal: AbortSignal | undefined;
+			const presentation = new ClientPresentationSession({
+				canvas: fakeCanvas(),
+				hostTransport: {} as never,
+				session: lifecycle,
+				ownerFactory: async ({ signal }) => {
+					observedSignal = signal;
+					return await new Promise<never>((_resolve, reject) => {
+						signal?.addEventListener("abort", () => {
+							const error = new Error("cancelled");
+							error.name = "AbortError";
+							reject(error);
+						});
 					});
-				});
-			},
-		});
+				},
+			});
 
-		const started = presentation.start();
-		await presentation.destroy();
+			const started = presentation.start();
+			const captured = decodeObjectPreviewResult(previewFixture.ready);
+			if (captured.outcome.kind !== "ready")
+				throw new Error("Preview fixture must be ready.");
+			const preview = withPreview
+				? presentation.objectPreviews.open({
+						canvas: fakeCanvas(),
+						source: captured.outcome.source,
+					})
+				: null;
+			const previewFailure = preview?.ready.catch((cause: unknown) => cause);
+			await presentation.destroy();
 
-		await expect(started).resolves.toBeUndefined();
-		expect(observedSignal?.aborted).toBe(true);
-	});
+			await expect(started).resolves.toBeUndefined();
+			expect(observedSignal?.aborted).toBe(true);
+			if (previewFailure)
+				await expect(previewFailure).resolves.toBeInstanceOf(Error);
+		},
+	);
 
 	it("reports owner release failures after marking the session stopped", async () => {
 		const transport = new FakeClientTransport(currentState(0x0100_0001));

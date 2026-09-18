@@ -165,9 +165,12 @@ export class ParticleMeshResidency {
 			this.#resources.releaseResource(geometry);
 		for (const texture of this.#textures.values())
 			this.#resources.releaseResource(texture);
+		if (this.#placeholderTexture !== null)
+			this.#resources.releaseResource(this.#placeholderTexture);
 		this.#geometries.length = 0;
 		this.#textures.clear();
 		this.#meshes.clear();
+		this.#placeholderTexture = null;
 	}
 
 	#requirePlaceholderTexture(): Texture2DResourceKey {

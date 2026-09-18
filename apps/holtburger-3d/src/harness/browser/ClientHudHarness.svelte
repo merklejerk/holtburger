@@ -2738,6 +2738,14 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		objectPreviewService={{
+			open: () => ({
+				dispose: async () => undefined,
+				diagnostics: () => null,
+				ready: Promise.resolve(),
+				setViewport: () => undefined,
+			}),
+		}}
 		itemSession={interactionLifecycle}
 		{hudMode}
 		onHudModeChange={(mode) => (hudMode = mode)}

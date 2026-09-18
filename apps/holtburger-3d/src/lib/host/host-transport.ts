@@ -9,6 +9,7 @@ import type {
 import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 import type { ClientEntityDelta } from "../../client/client-entity-mirror";
 import type { ObjectInspectionResult } from "../../client/client-object-inspection-contract";
+import type { ObjectPreviewResult } from "../../client/client-object-preview-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
 import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
 import type { PossessionEventOutcome } from "../../explorer/explorer-entity-possession";
@@ -157,6 +158,7 @@ const EXPLORER_HOST_EVENT_NAMES = [
 /** Client lifecycle, focused presentation, and terminal events. */
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-object-inspection-result",
+	"client-object-preview-result",
 	"client-current-state",
 	"client-inventory-preview",
 	"client-item-use-result",
@@ -234,6 +236,7 @@ export function hostEventNamesForMode(
 /** Payload map kept at the shell boundary so listeners cannot silently accept arbitrary events. */
 export interface HostEventPayloadMap {
 	"client-object-inspection-result": ObjectInspectionResult;
+	"client-object-preview-result": ObjectPreviewResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;
 	"client-item-use-result": ClientItemUseResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;

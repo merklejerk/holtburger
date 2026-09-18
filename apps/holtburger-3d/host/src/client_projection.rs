@@ -612,6 +612,8 @@ pub struct ClientExitRequested {
 pub enum ClientHostEvent {
     /// One world-populated examination outcome; presentation lifetime remains frontend-owned.
     ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
+    /// Captured creature visual facts correlated with the preceding examination result.
+    ObjectPreviewResult(holtburger_core::client::object_preview::ObjectPreviewResult),
     /// Character input invalidation for spell inspectors.
     SpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     /// Correlated character-bound spell facts.
@@ -850,6 +852,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
         ClientViewEvent::ObjectInspectionResult(result) => {
             Some(ClientHostEvent::ObjectInspectionResult(result))
+        }
+        ClientViewEvent::ObjectPreviewResult(result) => {
+            Some(ClientHostEvent::ObjectPreviewResult(result))
         }
         ClientViewEvent::SpellInspectionContext(context) => {
             Some(ClientHostEvent::SpellInspectionContext(context))
@@ -1189,6 +1194,32 @@ mod tests {
             let event = serde_json::to_value(event).unwrap();
             assert_eq!(event["event"], "client-object-inspection-result");
             assert_eq!(event["payload"], fixture[name]);
+        }
+    }
+
+    #[test]
+    fn object_preview_variants_match_the_shared_browser_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-preview-wire.json"
+        ))
+        .unwrap();
+        for value in fixture.as_object().unwrap().values() {
+            let result: holtburger_core::client::object_preview::ObjectPreviewResult =
+                serde_json::from_value(value.clone()).unwrap();
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(ClientHostEvent::ObjectPreviewResult(result))
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("Expected event");
+            };
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::json!({
+                    "event": "client-object-preview-result",
+                    "payload": value,
+                })
+            );
         }
     }
 

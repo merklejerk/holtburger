@@ -1,0 +1,36 @@
+{
+	"ready": {
+		"guid": 1610612738,
+		"outcome": {
+			"kind": "ready",
+			"source": {
+				"guid": 1610612738,
+				"setupDid": 33554433,
+				"appearance": {
+					"paletteDid": null,
+					"subPalettes": [],
+					"textureChanges": [],
+					"partChanges": []
+				},
+				"scale": 1.25,
+				"translucency": 0.5,
+				"pose": {
+					"kind": "default-idle",
+					"clips": [
+						{
+							"animationId": 50331649,
+							"lowFrame": 2,
+							"highFrame": 8,
+							"framerate": -10.0
+						}
+					],
+					"firstCyclicClip": 0
+				}
+			}
+		}
+	},
+	"unavailable": {
+		"guid": 1610612738,
+		"outcome": { "kind": "unavailable" }
+	}
+}

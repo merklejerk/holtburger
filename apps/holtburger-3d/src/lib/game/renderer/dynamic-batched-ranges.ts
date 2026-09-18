@@ -1,7 +1,7 @@
 import type { SceneNodeId } from "../scene";
 import type { ActiveDynamicPart } from "../systems/components";
 import type { PreparedDynamicAppearance } from "./webgl2-dynamic-appearances";
-import { retainsRetailGeometry } from "./retail-geometry-visibility";
+import { dynamicObjectPhase } from "./object-rendering-policy";
 
 /** Physical range ordinal supplies batch state and start; the count may span adjacent ranges. */
 interface DynamicBatchedSpan {
@@ -61,18 +61,13 @@ export class DynamicBatchedRanges {
 				throw new Error(
 					`Dynamic color range references missing part ${range.source.partSelector}.`,
 				);
-			const opacity = part.frameInstance.color.a;
-			// Match existing routing: only opaque material becomes transparent under a partial fade.
 			if (
-				opacity === 0 ||
-				!(this.#phase === "additive"
-					? range.source.ordering === "additive"
-					: range.source.ordering === "alpha-test" ||
-						(range.source.ordering === "opaque" && opacity === 1)) ||
-				!retainsRetailGeometry(
+				dynamicObjectPhase(
+					range.source.ordering,
+					part.frameInstance.color.a,
 					range.source.retailVisibility,
 					showRetailHiddenGeometry,
-				)
+				) !== this.#phase
 			)
 				continue;
 			const last = ranges.at(-1);

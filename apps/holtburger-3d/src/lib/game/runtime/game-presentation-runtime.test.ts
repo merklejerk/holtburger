@@ -2,7 +2,9 @@ import { HUMANOID_TEST_PARENTS } from "../animation/humanoid-body-test-fixture";
 import { PARTICLE_RECORD_STRIDE_FLOATS } from "../behavior/particle-record-slots";
 import { acVector3, sceneVec3, sceneVector3 } from "../../assets/ac-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import { describe, expect, it, vi } from "vitest";
+import { onTestFinished, describe, expect, it, vi } from "vitest";
+import { PresentationAssetService } from "./presentation-asset-service";
+import { WorkerTexturePreparer } from "../textures/texture-preparer";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type {
@@ -187,6 +189,61 @@ function testRenderer(overrides: Partial<Renderer> = {}): Renderer {
 }
 
 describe("GamePresentationRuntime view and interest control", () => {
+	it.each([false, true])(
+		"keeps borrowed assets alive after runtime retirement (failed build: %s)",
+		async (failBuild) => {
+			const destroySource = vi.fn();
+			const texturePreparer = await WorkerTexturePreparer.build(
+				new EchoTexturePixelSource(),
+			);
+			const assets = new PresentationAssetService({
+				animationSource: ANIMATION_SOURCE,
+				physicsScriptSource: PHYSICS_SCRIPT_SOURCE,
+				particleEmitterSource: PARTICLE_EMITTER_SOURCE,
+				setupVisualSource: {
+					load: async () => {
+						throw new Error("unused setup source");
+					},
+					destroy: destroySource,
+				},
+				texturePreparer,
+			});
+			const worker = new TestTerrainWorkerPort();
+			const terminate = vi.spyOn(worker, "terminate");
+			try {
+				const pending = GamePresentationRuntime.build(
+					{
+						resources: TEST_RESOURCES,
+						buildRenderer: async () => {
+							if (failBuild) throw new Error("renderer construction failed");
+							return testRenderer();
+						},
+					},
+					{ prepareLandblockLayers: async () => [] },
+					assets,
+					PHYSICS_SCRIPT_TABLE_SOURCE,
+					{ playOneShot: () => null, prepare: async () => {} },
+					SOUND_TABLE_SOURCE,
+					PARTICLE_MESH_SOURCE,
+					SHARED_FRAME_SETTINGS,
+					undefined,
+					undefined,
+					{ createTerrainWorker: () => worker },
+				);
+				if (failBuild)
+					await expect(pending).rejects.toThrow("renderer construction failed");
+				else await (await pending).destroy();
+				expect(terminate).toHaveBeenCalledOnce();
+				expect(destroySource).not.toHaveBeenCalled();
+				await expect(assets.animations.acquireAll([])).resolves.toEqual(
+					new Map(),
+				);
+			} finally {
+				await assets.destroy();
+			}
+			expect(destroySource).toHaveBeenCalledOnce();
+		},
+	);
 	it("keeps frontend scene interest independent from the primary camera", async () => {
 		const requestedLayers: LandblockIdLayer[] = [];
 		const frames: Parameters<Renderer["drawFrame"]>[0][] = [];
@@ -3288,18 +3345,23 @@ async function buildGamePresentationRuntimeForTest(
 	setupVisualSource: SetupVisualSource | null,
 	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
 ): Promise<GamePresentationRuntime> {
+	const presentationAssets = new PresentationAssetService({
+		animationSource,
+		physicsScriptSource,
+		particleEmitterSource,
+		setupVisualSource,
+		texturePreparer: await WorkerTexturePreparer.build(texturePixelSource),
+	});
+	// Tests own composition assets; runtime destruction must only release its borrowed leases.
+	onTestFinished(() => presentationAssets.destroy());
 	return GamePresentationRuntime.build(
 		device,
 		commitPipeline,
-		texturePixelSource,
-		animationSource,
-		physicsScriptSource,
+		presentationAssets,
 		physicsScriptTableSource,
 		audioDevice,
-		particleEmitterSource,
 		soundTableSource,
 		particleMeshSource,
-		setupVisualSource,
 		SHARED_FRAME_SETTINGS,
 		undefined,
 		undefined,

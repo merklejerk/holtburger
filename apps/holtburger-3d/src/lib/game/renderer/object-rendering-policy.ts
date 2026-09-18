@@ -1,4 +1,24 @@
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
+import type { RetailGeometryVisibility } from "../resolution/presentation";
+import { retainsRetailGeometry } from "./retail-geometry-visibility";
+
+/** Dynamic color-pass eligibility; view selection and sort order belong to each renderer. */
+export function dynamicObjectPhase(
+	ordering: ObjectMaterialOrdering,
+	opacity: number,
+	visibility: RetailGeometryVisibility,
+	showRetailHiddenGeometry: boolean,
+): "skip" | "opaque" | "transparent" | "additive" {
+	if (
+		opacity === 0 ||
+		!retainsRetailGeometry(visibility, showRetailHiddenGeometry)
+	)
+		return "skip";
+	// Partial fades move opaque surfaces to ordered alpha; alpha-test keeps depth writing.
+	if (ordering === "opaque") return opacity === 1 ? "opaque" : "transparent";
+	return ordering === "alpha-test" ? "opaque" : ordering;
+}
 
 /** Squared radius inside which transparent geometry receives exact camera-depth ordering. */
 const TRANSPARENT_NEAR_DISTANCE_SQUARED =

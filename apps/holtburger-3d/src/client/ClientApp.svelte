@@ -56,6 +56,7 @@
 		type ClientPresentationDiagnostics,
 		type ClientPresentationStatus,
 	} from "./client-presentation-session";
+	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import {
@@ -162,6 +163,16 @@
 	);
 	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
 	let presentationSession: ClientPresentationSession | null = null;
+	const objectPreviewService: ClientObjectPreviewService = {
+		open: (request) => {
+			const presentation = presentationSession;
+			if (!presentation)
+				throw new Error(
+					"Creature preview is unavailable before presentation starts.",
+				);
+			return presentation.objectPreviews.open(request);
+		},
+	};
 	let frameRateSampler: FrameRateSampler | null = null;
 
 	/** CDP-facing bridge for explicit live-client performance probes. */
@@ -1069,6 +1080,7 @@
 		{worldContainer}
 		{itemInteractions}
 		{objectInspection}
+		{objectPreviewService}
 		onSelectContentsItem={(guid, mode) =>
 			entitySelection?.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}

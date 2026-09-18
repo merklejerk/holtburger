@@ -1,3 +1,5 @@
+import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
+
 /** Launch-only credentials and endpoint resolved by Electron main. */
 export interface ClientLaunchConfiguration {
 	host: string;
@@ -8,15 +10,23 @@ export interface ClientLaunchConfiguration {
 
 export interface ParsedClientLaunchArguments {
 	readonly startup: ClientLaunchConfiguration;
+	/** Treat persisted renderer-owned settings as absent without disabling later saves. */
+	readonly ignorePersistedConfig: boolean;
 	/** Arguments intentionally left for the renderer entry URL (for example --query). */
 	readonly rendererArguments: readonly string[];
 }
 
+/** Remove Electron's executable and, for default-app development, its application path. */
+export function electronApplicationArguments(
+	argv: readonly string[],
+	defaultApp: boolean,
+): readonly string[] {
+	return argv.slice(defaultApp ? 2 : 1);
+}
+
 /** Identifies flags reserved for the client launch contract before entry-query construction. */
 export function isClientLaunchArgument(argument: string): boolean {
-	if (!argument.startsWith("--")) return false;
-	const name = argument.slice(2).split("=", 1)[0];
-	return isClientArgumentName(name);
+	return parseClientLaunchArgument(argument) !== null;
 }
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -34,34 +44,36 @@ export function parseClientLaunchArguments(
 	let port = DEFAULT_PORT;
 	let account: string | undefined;
 	let password = "";
+	let ignorePersistedConfig = false;
 	const rendererArguments: string[] = [];
 	const seen = new Set<string>();
 
 	for (let index = 0; index < arguments_.length; index += 1) {
 		const argument = arguments_[index];
-		if (!argument.startsWith("--")) {
+		const parsed = parseClientLaunchArgument(argument);
+		if (parsed === null) {
 			rendererArguments.push(argument);
 			continue;
 		}
-		const withoutPrefix = argument.slice(2);
-		const separator = withoutPrefix.indexOf("=");
-		const name =
-			separator === -1 ? withoutPrefix : withoutPrefix.slice(0, separator);
-		if (!isClientArgumentName(name)) {
-			rendererArguments.push(argument);
-			continue;
-		}
+		const { name } = parsed;
 		if (seen.has(name))
 			throw new Error(
 				`client launch argument --${name} was specified more than once`,
 			);
 		seen.add(name);
+		if (name === "ignore-config") {
+			if (parsed.value !== undefined)
+				throw new Error(
+					"client launch argument --ignore-config/-i does not accept a value",
+				);
+			ignorePersistedConfig = true;
+			continue;
+		}
 
-		let value: string | undefined =
-			separator === -1 ? undefined : withoutPrefix.slice(separator + 1);
+		let value = parsed.value;
 		if (value === undefined) {
 			value = arguments_[index + 1];
-			if (value === undefined || value.startsWith("--"))
+			if (value === undefined || value.startsWith("-"))
 				throw new Error(`client launch argument --${name} requires a value`);
 			index += 1;
 		}
@@ -95,20 +107,9 @@ export function parseClientLaunchArguments(
 	}
 	return {
 		startup: { host, port, account, password },
+		ignorePersistedConfig,
 		rendererArguments,
 	};
-}
-
-function isClientArgumentName(
-	name: string,
-): name is "server" | "host" | "port" | "account" | "password" {
-	return (
-		name === "server" ||
-		name === "host" ||
-		name === "port" ||
-		name === "account" ||
-		name === "password"
-	);
 }
 
 function parseServer(

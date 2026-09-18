@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import {
-		initialSpellBar,
+		initialSpellBarBindings,
 		type ClientSpellBarState,
 	} from "./client-spell-bar-state";
 	import type { InputDigitIndex } from "../lib/input/input-contract";
@@ -79,6 +79,16 @@
 		ClientChatLine,
 	} from "./client-chat-policy";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
+	import type {
+		ClientCharacterSettings,
+		ClientUserSettings,
+	} from "./client-settings-contract";
+	import {
+		ClientCharacterSettingsOwner,
+		type ClientCharacterSettingsState,
+	} from "./client-character-settings-owner";
+	import type { ClientSettingsTransport } from "./client-settings-transport";
+	import { ClientSettingsPersistence } from "./client-settings-persistence";
 	import {
 		clientLifecycleEnablesWorldInput,
 		clientLifecycleUsesWorldPresentation,
@@ -103,23 +113,57 @@
 	} from "./client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 
+	interface Props {
+		readonly initialUserSettings: ClientUserSettings;
+		/** Bootstrap write failure captured before the app's toast owner exists. */
+		readonly initialSettingsSaveFailure: string | null;
+		readonly settingsTransport: ClientSettingsTransport;
+	}
+
+	const {
+		initialUserSettings,
+		initialSettingsSaveFailure,
+		settingsTransport,
+	}: Props = $props();
+	// Bootstrap completes before mount; later prop replacement cannot own live settings lifetime.
+	const startupUserSettings = untrack(() => initialUserSettings);
+	const startupSettingsSaveFailure = untrack(() => initialSettingsSaveFailure);
+	const startupSettingsTransport = untrack(() => settingsTransport);
+	let userSettings = $state.raw<ClientUserSettings>(startupUserSettings);
+
 	let entityCollisionDisabled = $state(false);
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
 	);
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
+	const emptySpellBarBindings = initialSpellBarBindings();
+	let selectedSpellTab = $state<InputDigitIndex>(0);
+	let characterSettings = $state.raw<ClientCharacterSettingsState>({
+		kind: "absent",
+	});
 	/** Cold configuration shared by keyboard dispatch and the mounted HUD. */
-	let spellBar = $state<ClientSpellBarState>(initialSpellBar());
+	const spellBar = $derived<ClientSpellBarState>({
+		selected: selectedSpellTab,
+		tabs:
+			characterSettings.kind === "ready"
+				? characterSettings.settings.spellBarBindings.tabs
+				: emptySpellBarBindings.tabs,
+	});
 	let hudMode = $state<"runtime" | "layout">("runtime");
-	let spellBarPlayer: number | null = null;
-	function acceptSpellBarPlayer(player: number | null): void {
-		if (player === null || player === spellBarPlayer) return;
-		if (spellBarPlayer !== null) spellBar = initialSpellBar();
-		spellBarPlayer = player;
-	}
 	function selectSpellTab(selected: InputDigitIndex): void {
-		spellBar = { ...spellBar, selected };
+		selectedSpellTab = selected;
+	}
+	function changeSpellBar(value: ClientSpellBarState): void {
+		selectedSpellTab = value.selected;
+		if (
+			characterSettings.kind === "ready" &&
+			value.tabs !== characterSettings.settings.spellBarBindings.tabs
+		)
+			changeCharacterSettings({
+				...characterSettings.settings,
+				spellBarBindings: { tabs: value.tabs },
+			});
 	}
 	function activateSpellCell(slot: InputDigitIndex): void {
 		if (!spellBarEnabled) return;
@@ -131,7 +175,8 @@
 	/** Event-driven stance consumed by combat controls and spell shortcuts. */
 	let combatMode = $state<ClientCombatMode>("unknown");
 	const spellBarEnabled = $derived(
-		lifecycle.kind === "in-world" &&
+		characterSettings.kind === "ready" &&
+			lifecycle.kind === "in-world" &&
 			combatMode === "magic" &&
 			hudMode === "runtime",
 	);
@@ -182,9 +227,69 @@
 			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
 		},
 	});
+	if (startupSettingsSaveFailure !== null)
+		toastCenter.publish({
+			message: `Settings could not be saved: ${startupSettingsSaveFailure}`,
+			tone: "warning",
+		});
+	const userSettingsPersistence = new ClientSettingsPersistence({
+		delayMs: 250,
+		save: (settings: ClientUserSettings) =>
+			startupSettingsTransport.saveUser(settings),
+		report: (error) =>
+			toastCenter.publish({
+				message: `Settings could not be saved: ${diagnostic(error)}`,
+				tone: "warning",
+			}),
+	});
+	const characterSettingsOwner = new ClientCharacterSettingsOwner({
+		transport: startupSettingsTransport,
+		publish: (state) => {
+			characterSettings = state;
+			if (state.kind !== "ready") selectedSpellTab = 0;
+		},
+		loadFailed: (error) =>
+			(commandFailure = `Character settings could not be loaded: ${diagnostic(error)}`),
+		saveFailed: (error) =>
+			toastCenter.publish({
+				message: `Character settings could not be saved: ${diagnostic(error)}`,
+				tone: "warning",
+			}),
+		saveDelayMs: 250,
+	});
+	function changeUserSettings(settings: ClientUserSettings): void {
+		userSettings = settings;
+		userSettingsPersistence.publish(settings);
+	}
+	function changeCharacterSettings(settings: ClientCharacterSettings): void {
+		characterSettingsOwner.change(settings);
+	}
+	function acceptCharacterName(characterGuid: number, name: string): void {
+		characterSettingsOwner.acceptName(characterGuid, name);
+	}
+	function retireCharacterSettings(): void {
+		characterSettingsOwner.retire();
+	}
+	function acceptCharacterGuid(characterGuid: number | null): void {
+		characterSettingsOwner.acceptGuid(characterGuid);
+	}
+	onMount(() => {
+		const flush = () => {
+			void Promise.all([
+				userSettingsPersistence.flush(),
+				characterSettingsOwner.flush(),
+			]).catch(() => undefined);
+		};
+		window.addEventListener("beforeunload", flush);
+		return () => {
+			window.removeEventListener("beforeunload", flush);
+			flush();
+		};
+	});
 	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
 	let frameSettings = $state.raw<FrameSettings>({
 		...CLIENT_TUNING.frameSettings,
+		weatherEnabled: startupUserSettings.weatherEnabled,
 	});
 	let inputController: CharacterInputController | null = null;
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
@@ -309,11 +414,19 @@
 				combatMode = event.mode;
 				return;
 			case "current-state":
-				acceptSpellBarPlayer(event.state.localPlayerGuid);
+				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
 				playerName = event.state.playerName;
+				if (
+					event.state.localPlayerGuid !== null &&
+					event.state.playerName !== null
+				)
+					acceptCharacterName(
+						event.state.localPlayerGuid,
+						event.state.playerName,
+					);
 				worldName = event.state.worldName;
 				vitals = event.state.vitals;
 				characterMotion = event.state.characterMotion;
@@ -328,6 +441,11 @@
 				return;
 			case "lifecycle":
 				if (event.lifecycle.kind !== "in-world") inputGate.cancel();
+				if (
+					event.lifecycle.kind === "entering-world" ||
+					event.lifecycle.kind === "character-selection"
+				)
+					retireCharacterSettings();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "authority",
 					lifecycle: event.lifecycle,
@@ -364,11 +482,12 @@
 				worldName = event.name;
 				return;
 			case "local-player-established":
-				acceptSpellBarPlayer(event.identity.playerGuid);
+				acceptCharacterGuid(event.identity.playerGuid);
 				return;
 			case "player-entered":
 				if (event.player.playerGuid === session?.state().playerGuid) {
 					playerName = event.player.name;
+					acceptCharacterName(event.player.playerGuid, event.player.name);
 				}
 				return;
 			case "vitals":
@@ -981,8 +1100,7 @@
 			spellState.destroy();
 			spellReferences.dispose();
 			spells = null;
-			spellBar = initialSpellBar();
-			spellBarPlayer = null;
+			retireCharacterSettings();
 			inventoryOwner.destroy();
 			containerOwner.destroy();
 			worldContainer = null;
@@ -1035,10 +1153,29 @@
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
 		itemSession={session}
+		hudLayout={userSettings.hudLayout}
+		onHudLayoutChange={(hudLayout) =>
+			changeUserSettings({ ...userSettings, hudLayout })}
+		spellBarShape={userSettings.spellBarShape}
+		onSpellBarShapeChange={(spellBarShape) =>
+			changeUserSettings({ ...userSettings, spellBarShape })}
+		minimapViewDiameters={userSettings.minimapViewDiameters}
+		onMinimapViewDiametersChange={(minimapViewDiameters) =>
+			changeUserSettings({ ...userSettings, minimapViewDiameters })}
+		chatFilters={userSettings.chatFilters}
+		onChatFiltersChange={(chatFilters) =>
+			changeUserSettings({ ...userSettings, chatFilters })}
 		{hudMode}
 		onHudModeChange={(mode) => (hudMode = mode)}
 		{spellBar}
-		onSpellBarChange={(value) => (spellBar = value)}
+		onSpellBarChange={changeSpellBar}
+		actionBars={characterSettings.kind === "ready"
+			? characterSettings.settings.actionBars
+			: null}
+		onActionBarsChange={(actionBars) => {
+			if (characterSettings.kind === "ready")
+				changeCharacterSettings({ ...characterSettings.settings, actionBars });
+		}}
 		{spellBarEnabled}
 		onSelectSpellTab={selectSpellTab}
 		onActivateSpellCell={activateSpellCell}

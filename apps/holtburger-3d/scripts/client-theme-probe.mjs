@@ -209,6 +209,12 @@ export async function probeClientTheme(
 			unlisten: async () => {},
 			invoke: async () => { throw new Error("Theme harness: no live connection"); }
 		};
+		window.holtburgerSettings = {
+			loadUser: async () => ({ kind: "missing" }),
+			saveUser: async () => {},
+			loadCharacter: async () => ({ kind: "missing" }),
+			saveCharacter: async () => {}
+		};
 	`,
 	});
 	const loaded = new Promise((resolve) =>

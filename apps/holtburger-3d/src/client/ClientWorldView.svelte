@@ -23,12 +23,12 @@
 	import Minimap from "../app/Minimap.svelte";
 	import type { FrameRates } from "../app/frame-rate-sampler";
 	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
-	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
+	import type { ClientActionBar } from "./client-action-bar-state";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
@@ -56,10 +56,11 @@
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
-		createClientHudLayout,
 		resolveClientHudSquarePlacement,
+		type ClientHudLayout,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
+	import type { ClientChatFilterTag } from "./client-chat-policy";
 	import type { ClientPresentationDiagnostics } from "./client-presentation-session";
 	import {
 		advanceClientViewportPointerGesture,
@@ -69,6 +70,19 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** User-scoped fixed HUD geometry, independent of open-panel state. */
+		readonly hudLayout: ClientHudLayout;
+		readonly onHudLayoutChange: (layout: ClientHudLayout) => void;
+		readonly spellBarShape: "single" | "double";
+		readonly onSpellBarShapeChange: (shape: "single" | "double") => void;
+		readonly minimapViewDiameters: MinimapState["viewDiameters"];
+		readonly onMinimapViewDiametersChange: (
+			value: MinimapState["viewDiameters"],
+		) => void;
+		readonly chatFilters: readonly ClientChatFilterTag[];
+		readonly onChatFiltersChange: (
+			value: readonly ClientChatFilterTag[],
+		) => void;
 		/** App-owned layout mode also gates gameplay shortcuts. */
 		readonly hudMode: "runtime" | "layout";
 		readonly onHudModeChange: (mode: "runtime" | "layout") => void;
@@ -79,6 +93,9 @@
 		readonly spellBarEnabled: boolean;
 		readonly onSelectSpellTab: (tab: InputDigitIndex) => void;
 		readonly onActivateSpellCell: (slot: InputDigitIndex) => void;
+		/** Null while no authoritative character profile is ready. */
+		readonly actionBars: readonly ClientActionBar[] | null;
+		readonly onActionBarsChange: (bars: readonly ClientActionBar[]) => void;
 		/** Server-confirmed stance for the dock, independent of open panels. */
 		readonly combatMode: ClientCombatMode;
 		/** Shared normal casting action used by the spell browser. */
@@ -148,6 +165,14 @@
 	}
 
 	let {
+		hudLayout,
+		onHudLayoutChange,
+		spellBarShape,
+		onSpellBarShapeChange,
+		minimapViewDiameters,
+		onMinimapViewDiametersChange,
+		chatFilters,
+		onChatFiltersChange,
 		hudMode,
 		onHudModeChange,
 		spellBar,
@@ -155,6 +180,8 @@
 		spellBarEnabled,
 		onSelectSpellTab,
 		onActivateSpellCell,
+		actionBars,
+		onActionBarsChange,
 		combatMode,
 		onCastSpell,
 		combatEnabled,
@@ -294,8 +321,6 @@
 		width: window.innerWidth,
 		height: window.innerHeight,
 	};
-	/** HUD shape is independent of selected spell tab and casting stance. */
-	let spellBarShape = $state<"single" | "double">("single");
 	let activePanel = $state<ClientSystemPanel | null>(null);
 	/** One selected-HUD request retained only until the inventory panel accepts it. */
 	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
@@ -303,16 +328,6 @@
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
 	const shortcuts = untrack(() => createClientShortcuts(debugEnabled));
-	let hudLayout = $state(
-		createClientHudLayout(
-			CLIENT_UI_DEFAULTS,
-			initialViewport,
-			shortcuts.length,
-		),
-	);
-	let mapViewDiameters = $state<MinimapState["viewDiameters"]>({
-		...MAP_DEFAULT_VIEW_DIAMETERS,
-	});
 	const resolvedMapPlacement = $derived(
 		resolveClientHudSquarePlacement(
 			hudLayout.minimap,
@@ -324,7 +339,7 @@
 		left: resolvedMapPlacement.left,
 		top: resolvedMapPlacement.top,
 		size: resolvedMapPlacement.width,
-		viewDiameters: mapViewDiameters,
+		viewDiameters: minimapViewDiameters,
 	});
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
 	let viewportGesture: ClientViewportPointerGesture | null = null;
@@ -396,7 +411,7 @@
 	});
 
 	function updateMinimap(next: MinimapState): void {
-		mapViewDiameters = next.viewDiameters;
+		onMinimapViewDiametersChange(next.viewDiameters);
 		const sizeChanged = next.size !== resolvedMapPlacement.width;
 		const preferredSize = sizeChanged
 			? next.size
@@ -406,7 +421,14 @@
 			viewport,
 			{ width: preferredSize, height: preferredSize },
 		);
-		hudLayout = { ...hudLayout, minimap: minimapPlacement };
+		changeHudPlacement("minimap", minimapPlacement);
+	}
+
+	function changeHudPlacement<Surface extends keyof ClientHudLayout>(
+		surface: Surface,
+		placement: ClientHudLayout[Surface],
+	): void {
+		onHudLayoutChange({ ...hudLayout, [surface]: placement });
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
@@ -562,9 +584,11 @@
 		onStateChange={updateMinimap}
 		{onSelectEntity}
 	/>
-	{#if inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
+	{#if actionBars !== null && inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
+				bars={actionBars}
+				onBarsChange={onActionBarsChange}
 				session={itemSession}
 				{worldContainer}
 				onDragOwner={(owner) => (itemDrag = owner)}
@@ -580,7 +604,7 @@
 		{/key}
 	{/if}
 
-	{#if spells !== null && (spellBarEnabled || hudMode === "layout")}
+	{#if actionBars !== null && spells !== null && (spellBarEnabled || hudMode === "layout")}
 		<ClientSpellBar
 			{spells}
 			{inventory}
@@ -592,8 +616,8 @@
 			editable={hudMode === "layout"}
 			{viewport}
 			onPlacementChange={(placement) =>
-				(hudLayout = { ...hudLayout, spellBar: placement })}
-			onShapeChange={(shape) => (spellBarShape = shape)}
+				changeHudPlacement("spellBar", placement)}
+			onShapeChange={onSpellBarShapeChange}
 			onSelectTab={onSelectSpellTab}
 			onActivateCell={onActivateSpellCell}
 		/>
@@ -608,7 +632,8 @@
 		resizable={CLIENT_UI_DEFAULTS.character.resizable}
 		contentHitTesting="surface"
 		{viewport}
-		onPlacementChange={(character) => (hudLayout = { ...hudLayout, character })}
+		onPlacementChange={(placement) =>
+			changeHudPlacement("character", placement)}
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
 	</ClientHudPanel>
@@ -622,8 +647,8 @@
 			resizable={CLIENT_UI_DEFAULTS.jumpPower.resizable}
 			contentHitTesting="surface"
 			{viewport}
-			onPlacementChange={(jumpPower) =>
-				(hudLayout = { ...hudLayout, jumpPower })}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("jumpPower", placement)}
 		>
 			<ClientJumpPowerBar
 				active={jumpChargeActive}
@@ -644,8 +669,7 @@
 			resizable={CLIENT_UI_DEFAULTS.toast.resizable}
 			contentHitTesting="descendants"
 			{viewport}
-			onPlacementChange={(toastPlacement) =>
-				(hudLayout = { ...hudLayout, toast: toastPlacement })}
+			onPlacementChange={(placement) => changeHudPlacement("toast", placement)}
 		>
 			<ClientToastOverlay
 				{toast}
@@ -669,9 +693,14 @@
 		resizable={CLIENT_UI_DEFAULTS.chat.resizable}
 		contentHitTesting="descendants"
 		{viewport}
-		onPlacementChange={(chat) => (hudLayout = { ...hudLayout, chat })}
+		onPlacementChange={(placement) => changeHudPlacement("chat", placement)}
 	>
-		<ClientChat messages={chatMessages} onSend={onSendChat} />
+		<ClientChat
+			messages={chatMessages}
+			onSend={onSendChat}
+			enabledTags={chatFilters}
+			onEnabledTagsChange={onChatFiltersChange}
+		/>
 	</ClientHudPanel>
 	<ClientHudPanel
 		label="Frame rate"
@@ -682,7 +711,8 @@
 		resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
 		contentHitTesting="descendants"
 		{viewport}
-		onPlacementChange={(frameRate) => (hudLayout = { ...hudLayout, frameRate })}
+		onPlacementChange={(placement) =>
+			changeHudPlacement("frameRate", placement)}
 	>
 		<ClientFpsCounter {readFrameRates} />
 	</ClientHudPanel>
@@ -696,8 +726,8 @@
 			resizable={CLIENT_UI_DEFAULTS.selectedEntity.resizable}
 			contentHitTesting="descendants"
 			{viewport}
-			onPlacementChange={(selectedEntity) =>
-				(hudLayout = { ...hudLayout, selectedEntity })}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("selectedEntity", placement)}
 		>
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
@@ -723,7 +753,8 @@
 		resizable={CLIENT_UI_DEFAULTS.shortcuts.resizable}
 		contentHitTesting="surface"
 		{viewport}
-		onPlacementChange={(shortcuts) => (hudLayout = { ...hudLayout, shortcuts })}
+		onPlacementChange={(placement) =>
+			changeHudPlacement("shortcuts", placement)}
 	>
 		<ClientShortcutDock
 			{combatMode}
@@ -744,7 +775,7 @@
 				placement={hudLayout.worldContainer}
 				{viewport}
 				onPlacementChange={(placement) =>
-					(hudLayout = { ...hudLayout, worldContainer: placement })}
+					changeHudPlacement("worldContainer", placement)}
 			/>
 		{/key}
 	{/if}
@@ -764,8 +795,7 @@
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
 				{viewport}
 				onClose={() => (activePanel = null)}
-				onPlacementChange={(placement) =>
-					(hudLayout = { ...hudLayout, [panel]: placement })}
+				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
 			>
 				{#if panel === "spells"}
 					{#if spells !== null}{#key spells}<ClientSpellsPanel

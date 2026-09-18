@@ -7,8 +7,8 @@ import type {
 import {
 	ACTION_SLOT_INDICES,
 	type ActionSlotIndex,
-	type ClientActionBar,
-} from "./client-action-bar-state";
+} from "./client-action-bar-contract";
+import type { ClientActionBar } from "./client-action-bar-state";
 
 /** One canonical grid shared by rendering and keyboard navigation. */
 export function actionBarGrid(

@@ -15,7 +15,17 @@ const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
 	"port",
 	"account",
 	"password",
+	"ignore-config",
 ]);
+const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
+	["s", "server"],
+	["h", "host"],
+	["P", "port"],
+	["a", "account"],
+	["p", "password"],
+	["i", "ignore-config"],
+]);
+const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set(["ignore-config"]);
 
 function isKnownEntry(value) {
 	return Object.hasOwn(ENTRY_PATHS, value);
@@ -71,23 +81,29 @@ export function collapseRendererArguments(args) {
 /**
  * Removes the client connection arguments before a renderer URL is assembled.
  *
- * These values belong to Electron main and must not become query parameters. Both `--name=value`
- * and `--name value` forms are accepted here so the wrapper cannot reject a valid client launch
+ * These values belong to Electron main and must not become query parameters. Long and abbreviated
+ * inline/separated forms are accepted here so the wrapper cannot reject a valid client launch
  * before `parseClientLaunchArguments` gets to validate it.
  */
 export function partitionClientLaunchArguments(args) {
 	const launchArguments = [];
 	const rendererArgs = [];
 	for (let index = 0; index < args.length; index += 1) {
-		const parsed = parseLongArgument(args[index]);
-		if (!CLIENT_LAUNCH_ARGUMENT_NAMES.has(parsed.name)) {
+		const parsed = parseClientLaunchArgument(args[index]);
+		if (parsed === null) {
 			rendererArgs.push(args[index]);
 			continue;
 		}
 		launchArguments.push(args[index]);
+		if (CLIENT_BOOLEAN_ARGUMENT_NAMES.has(parsed.name)) {
+			if (parsed.value !== undefined) {
+				throw new Error(`${args[index]} does not accept a value.`);
+			}
+			continue;
+		}
 		if (parsed.value === undefined) {
 			const value = args[index + 1];
-			if (value === undefined || value.startsWith("--")) {
+			if (value === undefined || value.startsWith("-")) {
 				throw new Error(`${args[index]} requires a value.`);
 			}
 			launchArguments.push(value);
@@ -95,6 +111,22 @@ export function partitionClientLaunchArguments(args) {
 		}
 	}
 	return { launchArguments, rendererArguments: rendererArgs };
+}
+
+/** Resolve a canonical client option name from either its long or one-character spelling. */
+export function parseClientLaunchArgument(argument) {
+	let parsed;
+	if (argument.startsWith("--")) {
+		parsed = parseLongArgument(argument);
+		if (!CLIENT_LAUNCH_ARGUMENT_NAMES.has(parsed.name)) return null;
+	} else {
+		const match = /^-([^-=])(?:=(.*))?$/.exec(argument);
+		if (match === null) return null;
+		const name = CLIENT_SHORT_ARGUMENT_NAMES.get(match[1]);
+		if (name === undefined) return null;
+		parsed = { name, value: match[2] };
+	}
+	return parsed;
 }
 
 export function stripClientLaunchArguments(args) {

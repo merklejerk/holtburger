@@ -85,8 +85,22 @@
 		type ClientToast,
 	} from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
+	import {
+		createDefaultClientCharacterSettings,
+		createDefaultClientUserSettings,
+	} from "../../client/client-settings-defaults";
 
 	let spellBar = $state(initialSpellBar());
+	let userSettings = $state.raw(
+		createDefaultClientUserSettings(
+			{ width: window.innerWidth, height: window.innerHeight },
+			9,
+		),
+	);
+	let characterSettings = $state.raw<ReturnType<
+		typeof createDefaultClientCharacterSettings
+	> | null>(createDefaultClientCharacterSettings());
+	let characterSettingsGuid: number | null = 1;
 	let hudMode = $state<"runtime" | "layout">("runtime");
 	let spellCombatMode = $state<"peace" | "magic">("peace");
 	const spellBarEnabled = $derived(
@@ -183,6 +197,9 @@
 			hudMode = "runtime";
 			spellCombatMode = "magic";
 			emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+			emitInteractionEvent("client-local-player-established", {
+				playerGuid: 1,
+			});
 			emitInteractionEvent("client-combat-mode-updated", { mode: "magic" });
 			emitInteractionEvent("client-player-spells-updated", {
 				spellIds: [1, 2, 3],
@@ -1035,6 +1052,34 @@
 
 	let spellInspectionRevision = 1;
 	function emitInteractionEvent(event: string, payload: unknown): void {
+		if (event === "client-current-state") {
+			const localPlayerGuid = z
+				.object({ localPlayerGuid: z.number().nullable() })
+				.parse(payload).localPlayerGuid;
+			if (localPlayerGuid !== characterSettingsGuid) {
+				characterSettingsGuid = localPlayerGuid;
+				characterSettings =
+					localPlayerGuid === null
+						? null
+						: createDefaultClientCharacterSettings();
+			}
+		}
+		if (event === "client-local-player-established") {
+			const playerGuid = z
+				.object({ playerGuid: z.number() })
+				.parse(payload).playerGuid;
+			if (playerGuid !== characterSettingsGuid || characterSettings === null) {
+				characterSettingsGuid = playerGuid;
+				characterSettings = createDefaultClientCharacterSettings();
+			}
+		}
+		if (event === "client-lifecycle-changed") {
+			const kind = z.object({ kind: z.string() }).parse(payload).kind;
+			if (kind === "entering-world" || kind === "character-selection") {
+				characterSettingsGuid = null;
+				characterSettings = null;
+			}
+		}
 		if (event === "client-spell-inspection-context")
 			spellInspectionRevision = z
 				.object({ revision: z.number() })
@@ -2417,6 +2462,23 @@
 {#if !previewCharacters}
 	<ClientWorldView
 		itemSession={interactionLifecycle}
+		hudLayout={userSettings.hudLayout}
+		onHudLayoutChange={(hudLayout) =>
+			(userSettings = { ...userSettings, hudLayout })}
+		spellBarShape={userSettings.spellBarShape}
+		onSpellBarShapeChange={(spellBarShape) =>
+			(userSettings = { ...userSettings, spellBarShape })}
+		minimapViewDiameters={userSettings.minimapViewDiameters}
+		onMinimapViewDiametersChange={(minimapViewDiameters) =>
+			(userSettings = { ...userSettings, minimapViewDiameters })}
+		chatFilters={userSettings.chatFilters}
+		onChatFiltersChange={(chatFilters) =>
+			(userSettings = { ...userSettings, chatFilters })}
+		actionBars={characterSettings?.actionBars ?? null}
+		onActionBarsChange={(actionBars) => {
+			if (characterSettings !== null)
+				characterSettings = { ...characterSettings, actionBars };
+		}}
 		{hudMode}
 		onHudModeChange={(mode) => (hudMode = mode)}
 		{spellBar}

@@ -8,6 +8,12 @@ export function buildEntryPath(
 	args: readonly string[],
 ): string;
 export function collapseRendererArguments(args: readonly string[]): string[];
+export type ClientLaunchArgumentName =
+	"server" | "host" | "port" | "account" | "password" | "ignore-config";
+export function parseClientLaunchArgument(argument: string): {
+	readonly name: ClientLaunchArgumentName;
+	readonly value: string | undefined;
+} | null;
 export function partitionClientLaunchArguments(args: readonly string[]): {
 	launchArguments: string[];
 	rendererArguments: string[];

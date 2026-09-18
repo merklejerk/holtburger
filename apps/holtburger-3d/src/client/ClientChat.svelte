@@ -16,9 +16,14 @@
 	interface Props {
 		readonly messages: readonly ClientChatLine[];
 		readonly onSend: (message: string) => Promise<void>;
+		readonly enabledTags: readonly ClientChatFilterTag[];
+		readonly onEnabledTagsChange: (
+			value: readonly ClientChatFilterTag[],
+		) => void;
 	}
 
-	const { messages, onSend }: Props = $props();
+	const { messages, onSend, enabledTags, onEnabledTagsChange }: Props =
+		$props();
 	const { keyboard } = useAppInputPolicy();
 
 	let inputElement = $state<HTMLInputElement | null>(null);
@@ -28,9 +33,6 @@
 	let bufferElement = $state<HTMLDivElement | null>(null);
 	/** Explicit history interaction enables selection and preserves the reader's scroll position. */
 	let historyInteractive = $state(false);
-	let enabledTags = $state<readonly ClientChatFilterTag[]>([
-		...CLIENT_CHAT_FILTER_TAGS,
-	]);
 	const visibleMessages = $derived(
 		messages.filter((line) => clientChatFiltersAllow(enabledTags, line)),
 	);
@@ -93,8 +95,10 @@
 
 	function toggleTag(tag: ClientChatFilterTag): void {
 		const disabling = enabledTags.includes(tag);
-		enabledTags = CLIENT_CHAT_FILTER_TAGS.filter((candidate) =>
-			candidate === tag ? !disabling : enabledTags.includes(candidate),
+		onEnabledTagsChange(
+			CLIENT_CHAT_FILTER_TAGS.filter((candidate) =>
+				candidate === tag ? !disabling : enabledTags.includes(candidate),
+			),
 		);
 	}
 

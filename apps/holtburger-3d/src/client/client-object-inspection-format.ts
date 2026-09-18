@@ -1,15 +1,10 @@
 import type {
-	CreatureInspection,
+	CharacterIdentity,
 	ItemInspection,
 } from "./client-object-inspection-contract";
 
 type WieldRequirement = ItemInspection["wieldRequirements"][number];
 type ItemEffect = ItemInspection["effects"][number];
-type CharacterIdentity = Extract<
-	CreatureInspection["identity"],
-	{ kind: "character" }
->;
-
 /** Shared retail appraisal color class; semantic polarity is computed by the world layer. */
 export function inspectionEnchantmentClass(value: {
 	readonly enchantment: "beneficial" | "harmful" | null;
@@ -193,6 +188,7 @@ export function formatItemStatuses(
 		values.push(status.isLocked ? "Locked" : "Unlocked");
 	if (status.sellable === false) values.push("Not sellable");
 	if (status.ivoryable === true) values.push("Ivoryable");
+	if (status.unenchantable === true) values.push("Unenchantable");
 	return values;
 }
 

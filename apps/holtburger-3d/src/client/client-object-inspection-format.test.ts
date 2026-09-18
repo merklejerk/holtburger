@@ -4,6 +4,7 @@ import {
 	formatInspectionEffect,
 	formatInspectionImbuedEffects,
 	formatInspectionNumber,
+	formatItemStatuses,
 	formatPlayerKillerStatus,
 	formatWieldRequirement,
 	humanizeInspectionName,
@@ -40,6 +41,21 @@ describe("object inspection formatting", () => {
 		expect(formatPlayerKillerStatus("player-killer-lite")).toBe(
 			"Player Killer Lite",
 		);
+	});
+
+	it("surfaces equipment appraisal resistance as Unenchantable", () => {
+		expect(
+			formatItemStatuses({
+				bonded: null,
+				attuned: null,
+				retained: null,
+				isOpen: null,
+				isLocked: null,
+				sellable: null,
+				ivoryable: null,
+				unenchantable: true,
+			}),
+		).toEqual(["Unenchantable"]);
 	});
 
 	it("formats every tagged shape without re-deriving semantics", () => {

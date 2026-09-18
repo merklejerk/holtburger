@@ -362,6 +362,9 @@ fn push_item_status(lines: &mut Vec<Line<'static>>, item: &ItemInspection) {
     if item.status.ivoryable == Some(true) {
         statuses.push("Ivoryable".to_string());
     }
+    if item.status.unenchantable == Some(true) {
+        statuses.push("Unenchantable".to_string());
+    }
     if !statuses.is_empty() {
         push_labeled(lines, "Status", statuses.join(", "), Color::Magenta);
     }
@@ -377,38 +380,190 @@ fn push_creature_info(lines: &mut Vec<Line<'static>>, creature: &CreatureInspect
         ),
         Color::Red,
     );
-    let Some(profile) = &creature.attributes_and_vitals else {
-        return;
-    };
-    push_labeled(
-        lines,
-        "Stamina",
-        format!(
-            "{}/{}",
-            profile.stamina.effective.current, profile.stamina.effective.max
-        ),
-        Color::Yellow,
-    );
-    push_labeled(
-        lines,
-        "Mana",
-        format!(
-            "{}/{}",
-            profile.mana.effective.current, profile.mana.effective.max
-        ),
-        Color::Blue,
-    );
-    push_section(lines, "Attributes");
-    for (label, value) in [
-        ("Strength", profile.attributes.strength),
-        ("Endurance", profile.attributes.endurance),
-        ("Coordination", profile.attributes.coordination),
-        ("Quickness", profile.attributes.quickness),
-        ("Focus", profile.attributes.focus),
-        ("Self", profile.attributes.self_attr),
-    ] {
-        lines.push(Line::from(format!("  {label}: {}", value.effective)));
+    if let Some(profile) = &creature.attributes_and_vitals {
+        push_labeled(
+            lines,
+            "Stamina",
+            format!(
+                "{}/{}",
+                profile.stamina.effective.current, profile.stamina.effective.max
+            ),
+            Color::Yellow,
+        );
+        push_labeled(
+            lines,
+            "Mana",
+            format!(
+                "{}/{}",
+                profile.mana.effective.current, profile.mana.effective.max
+            ),
+            Color::Blue,
+        );
+        push_section(lines, "Attributes");
+        for (label, value) in [
+            ("Strength", profile.attributes.strength),
+            ("Endurance", profile.attributes.endurance),
+            ("Coordination", profile.attributes.coordination),
+            ("Quickness", profile.attributes.quickness),
+            ("Focus", profile.attributes.focus),
+            ("Self", profile.attributes.self_attr),
+        ] {
+            lines.push(Line::from(format!("  {label}: {}", value.effective)));
+        }
     }
+
+    if let Some(armor) = &creature.armor_coverage {
+        push_section(lines, "Protection");
+        let mut has_unenchantable = false;
+        for (label, value) in [
+            ("Head", armor.head),
+            ("Chest", armor.chest),
+            ("Abdomen", armor.abdomen),
+            ("Upper Arm", armor.upper_arm),
+            ("Lower Arm", armor.lower_arm),
+            ("Hand", armor.hand),
+            ("Upper Leg", armor.upper_leg),
+            ("Lower Leg", armor.lower_leg),
+            ("Foot", armor.foot),
+        ] {
+            has_unenchantable |= !value.enchantable;
+            lines.push(Line::from(format!(
+                "  {label}: {}{}",
+                if value.enchantable { "" } else { "*" },
+                value.level
+            )));
+        }
+        if has_unenchantable {
+            lines.push(Line::from("  * Unenchantable"));
+        }
+    }
+
+    if let Some(ratings) = &creature.ratings {
+        let combat_ratings = [
+            ("Damage Rating", ratings.damage_rating),
+            ("Damage Resistance", ratings.damage_resistance_rating),
+            ("Critical Rating", ratings.critical_rating),
+            ("Critical Damage", ratings.critical_damage_rating),
+            ("Critical Resistance", ratings.critical_resistance_rating),
+            (
+                "Critical Damage Resistance",
+                ratings.critical_damage_resistance_rating,
+            ),
+            ("PK Damage Rating", ratings.player_killer_damage_rating),
+            (
+                "PK Damage Resistance",
+                ratings.player_killer_damage_resistance_rating,
+            ),
+            ("Healing Boost", ratings.healing_boost_rating),
+            ("Nether Resistance", ratings.nether_resistance_rating),
+            ("DoT Resistance", ratings.damage_over_time_resistance_rating),
+            (
+                "Life Magic Resistance",
+                ratings.life_magic_resistance_rating,
+            ),
+        ];
+        if combat_ratings.iter().any(|(_, value)| value.is_some())
+            || ratings.overpower_chance_percent.is_some()
+            || ratings.overpower_resistance_percent.is_some()
+        {
+            push_section(lines, "Combat Ratings");
+            for (label, value) in combat_ratings {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+            if let Some(value) = ratings.overpower_chance_percent {
+                push_labeled(lines, "Overpower Chance", format!("{value}%"), Color::White);
+            }
+            if let Some(value) = ratings.overpower_resistance_percent {
+                push_labeled(
+                    lines,
+                    "Overpower Resistance",
+                    format!("{value}%"),
+                    Color::White,
+                );
+            }
+        }
+    }
+    if let Some(value) = creature.max_health_bonus {
+        push_section(lines, "Bonuses");
+        push_labeled(lines, "Maximum Health", value, Color::White);
+    }
+
+    if let Some(details) = &creature.character_details {
+        let affiliations = [
+            ("Allegiance", details.allegiance_name.as_deref()),
+            ("Monarch", details.monarch.as_deref()),
+            ("Patron", details.patron.as_deref()),
+            ("Fellowship", details.fellowship.as_deref()),
+        ];
+        if affiliations.iter().any(|(_, value)| value.is_some())
+            || details.allegiance_followers.is_some()
+        {
+            push_section(lines, "Affiliation");
+            for (label, value) in affiliations {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+            if let Some(value) = details.allegiance_followers {
+                push_labeled(lines, "Followers", value, Color::White);
+            }
+        }
+
+        let has_personal_details = details.arrived_in_dereth.is_some()
+            || details.age_seconds.is_some()
+            || details.deaths.is_some()
+            || details.titles_earned.is_some()
+            || details.chess_rank.is_some()
+            || details.fishing_skill.is_some()
+            || details.enlightenment.is_some();
+        if has_personal_details {
+            push_section(lines, "Character Details");
+            if let Some(value) = &details.arrived_in_dereth {
+                push_labeled(lines, "Arrived in Dereth", value, Color::White);
+            }
+            if let Some(value) = details.age_seconds {
+                push_labeled(
+                    lines,
+                    "Time in Dereth",
+                    format_character_age(value),
+                    Color::White,
+                );
+            }
+            if let Some(value) = details.deaths {
+                push_labeled(
+                    lines,
+                    "Deaths",
+                    if value == 0 {
+                        "Never".to_owned()
+                    } else {
+                        value.to_string()
+                    },
+                    Color::White,
+                );
+            }
+            for (label, value) in [
+                ("Titles Earned", details.titles_earned),
+                ("Chess Rank", details.chess_rank),
+                ("Fishing Skill", details.fishing_skill),
+                ("Enlightenment", details.enlightenment),
+            ] {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+        }
+    }
+}
+
+fn format_character_age(seconds: i32) -> String {
+    let total = i64::from(seconds).unsigned_abs();
+    let days = total / 86_400;
+    let hours = total % 86_400 / 3_600;
+    let minutes = total % 3_600 / 60;
+    let sign = if seconds < 0 { "-" } else { "" };
+    format!("{sign}{days}d {hours}h {minutes}m")
 }
 
 #[cfg(test)]
@@ -422,6 +577,9 @@ mod tests {
     };
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
+    use holtburger_world::inspection::{
+        ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionSupplement,
+    };
 
     fn inspect_entity(entity: &Entity) -> ObjectInspection {
         let titles = holtburger_content::CharacterTitleCatalog::default();
@@ -483,6 +641,68 @@ mod tests {
         assert!(text.contains("Health:  50/50"));
         assert!(!text.contains("Stamina:"));
         assert!(!text.contains("Mana:"));
+    }
+
+    #[test]
+    fn assess_output_surfaces_supplemental_creature_appraisal_facts() {
+        let mut entity = Entity::new(
+            Guid(0x60000005),
+            "Test Character".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_string_prop(PropertyString::Template, "Adventurer".to_owned());
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let armor = ArmorCoverageValue {
+            level: 312,
+            enchantable: true,
+        };
+        entity.inspection_supplement = Some(InspectionSupplement {
+            equipment_unenchantable: None,
+            armor_coverage: Some(ArmorCoverage {
+                head: ArmorCoverageValue {
+                    level: 103,
+                    enchantable: false,
+                },
+                chest: armor,
+                abdomen: armor,
+                upper_arm: armor,
+                lower_arm: armor,
+                hand: armor,
+                upper_leg: armor,
+                lower_leg: armor,
+                foot: armor,
+            }),
+            ratings: Some(CreatureRatings {
+                damage_rating: Some(5),
+                damage_resistance_rating: Some(0),
+                ..CreatureRatings::default()
+            }),
+            max_health_bonus: None,
+            character_details: Some(CharacterDetails {
+                fellowship: Some("Test Fellowship".to_owned()),
+                deaths: Some(0),
+                ..CharacterDetails::default()
+            }),
+        });
+
+        let text = get_assess_info(&inspect_entity(&entity), None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Protection:"));
+        assert!(text.contains("Head: *103"));
+        assert!(text.contains("Damage Rating:  5"));
+        assert!(text.contains("Damage Resistance:  0"));
+        assert!(text.contains("Fellowship:  Test Fellowship"));
+        assert!(text.contains("Deaths:  Never"));
     }
 
     #[test]

@@ -1,21 +1,20 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
+	import type { HexRgbaColor } from "../lib/frontend-color";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import ClientCreatureInspection from "./ClientCreatureInspection.svelte";
 	import ClientCreaturePreview from "./ClientCreaturePreview.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientItemInspection from "./ClientItemInspection.svelte";
+	import ClientPlayerKillerStatusIcon from "./ClientPlayerKillerStatusIcon.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import type { ObjectInspection } from "./client-object-inspection-contract";
 	import type { ClientObjectPreviewState } from "./client-object-inspection";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import { CLIENT_TUNING } from "./client-tuning";
-	import {
-		formatInspectionNumber,
-		formatPlayerKillerStatus,
-	} from "./client-object-inspection-format";
+	import { formatInspectionNumber } from "./client-object-inspection-format";
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,
@@ -23,6 +22,7 @@
 
 	interface Props {
 		readonly inspection: ObjectInspection;
+		readonly nameColor: HexRgbaColor | null;
 		readonly preview: ClientObjectPreviewState | null;
 		readonly objectPreviewService: ClientObjectPreviewService;
 		readonly spells: ClientSpellServices | null;
@@ -34,6 +34,7 @@
 	}
 	const {
 		inspection,
+		nameColor,
 		preview,
 		objectPreviewService,
 		spells,
@@ -102,6 +103,7 @@
 				item={inspection.details.details}
 				{spells}
 				{icons}
+				{nameColor}
 			/>
 		</div>
 	{:else}
@@ -112,26 +114,30 @@
 		>
 			<div class="inspection-preview-pane">
 				<header class="inspection-preview-identity">
-					<h2>{inspection.name}</h2>
-					{#if inspection.level !== null || creatureIdentity.lineage !== null}
-						<p>
-							{inspection.level === null
-								? ""
-								: `Level ${formatInspectionNumber(inspection.level)}`}{inspection.level !==
-								null && creatureIdentity.lineage !== null
-								? " · "
-								: ""}{creatureIdentity.lineage === null
-								? ""
-								: creatureIdentity.lineage}
-						</p>
-					{/if}
-					{#if creatureIdentity.kind === "character"}
-						{#if creatureIdentity.role !== null}<p>
-								{creatureIdentity.role}
-							</p>{/if}
-						<p>
-							{formatPlayerKillerStatus(creatureIdentity.playerKillerStatus)}
-						</p>
+					<h2 class="inspection-name" style:color={nameColor}>
+						{inspection.name}
+					</h2>
+					{#if inspection.level !== null}<p class="inspection-preview-level">
+							Level {formatInspectionNumber(inspection.level)}
+						</p>{/if}
+					{#if creatureIdentity.kind === "character" && creatureIdentity.role !== null}<p
+							class="inspection-preview-title"
+						>
+							{creatureIdentity.role}
+						</p>{/if}
+					{#if creatureIdentity.lineage !== null || creatureIdentity.kind === "character"}
+						<div class="inspection-preview-metadata">
+							{#if creatureIdentity.lineage !== null}<p>
+									{creatureIdentity.lineage}
+								</p>{/if}
+							{#if creatureIdentity.kind === "character"}
+								<span class="inspection-preview-pk-status">
+									<ClientPlayerKillerStatusIcon
+										status={creatureIdentity.playerKillerStatus}
+									/>
+								</span>
+							{/if}
+						</div>
 					{/if}
 				</header>
 				{#if preview?.kind === "ready"}
@@ -178,6 +184,7 @@
 			height: 100%;
 			overflow: auto;
 			scrollbar-gutter: stable;
+			container-type: inline-size;
 		}
 		.inspection-creature-layout {
 			display: grid;
@@ -237,8 +244,11 @@
 			position: absolute;
 			top: 16px;
 			left: 16px;
+			right: 16px;
+			bottom: 14px;
 			z-index: 1;
-			max-width: calc(100% - 32px);
+			display: flex;
+			flex-direction: column;
 			pointer-events: none;
 			text-shadow:
 				0 1px 2px var(--ui-color-shadow),
@@ -250,13 +260,36 @@
 		}
 		.inspection-preview-identity h2 {
 			font-size: 1.18rem;
-			color: var(--ui-color-highlight);
+			color: var(--ui-color-text);
 			overflow-wrap: anywhere;
 		}
 		.inspection-preview-identity p {
-			margin-top: 2px;
 			color: var(--ui-color-muted);
 			font-size: 0.78rem;
+		}
+		.inspection-preview-identity .inspection-preview-level {
+			margin-top: 2px;
+		}
+		.inspection-preview-title {
+			font-style: italic;
+		}
+		.inspection-preview-metadata {
+			display: flex;
+			align-items: flex-end;
+			justify-content: space-between;
+			gap: 7px;
+			width: 100%;
+			min-width: 0;
+			margin-top: auto;
+		}
+		.inspection-preview-metadata p {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		.inspection-preview-pk-status {
+			display: inline-flex;
+			margin-left: auto;
 		}
 		.inspection-preview-fallback {
 			display: grid;
@@ -290,6 +323,9 @@
 		.inspection-scroll :global(h2) {
 			font-size: 1.18rem;
 			color: var(--ui-color-highlight);
+		}
+		.inspection-scroll :global(.inspection-name) {
+			color: var(--ui-color-text);
 		}
 		.inspection-scroll :global(h3) {
 			margin-bottom: 7px;
@@ -371,6 +407,14 @@
 			color: var(--ui-color-muted);
 			white-space: nowrap;
 		}
+		.inspection-scroll :global(.inspection-note) {
+			margin: 7px 0 0;
+			color: var(--ui-color-muted);
+			font-size: 0.9em;
+		}
+		.inspection-scroll :global(.inspection-number) {
+			white-space: nowrap;
+		}
 		.inspection-scroll :global(ul) {
 			padding-left: 20px;
 		}
@@ -438,7 +482,7 @@
 		.inspection-scroll :global(.inspection-mana progress) {
 			accent-color: var(--ui-color-mana);
 		}
-		@media (max-width: 360px) {
+		@container (max-width: 360px) {
 			.inspection-scroll :global(.inspection-facts),
 			.inspection-scroll :global(.inspection-attributes) {
 				grid-template-columns: 1fr;

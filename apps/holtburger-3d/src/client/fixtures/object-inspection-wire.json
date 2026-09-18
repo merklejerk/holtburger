@@ -32,7 +32,8 @@
 							"isOpen": null,
 							"isLocked": null,
 							"sellable": null,
-							"ivoryable": null
+							"ivoryable": null,
+							"unenchantable": true
 						},
 						"stack": null,
 						"uses": null,
@@ -69,7 +70,11 @@
 							"unbuffed": null,
 							"enchantment": null
 						},
-						"attributesAndVitals": null
+						"attributesAndVitals": null,
+						"armorCoverage": null,
+						"ratings": null,
+						"maxHealthBonus": null,
+						"characterDetails": null
 					}
 				}
 			}
@@ -98,7 +103,49 @@
 							"unbuffed": null,
 							"enchantment": null
 						},
-						"attributesAndVitals": null
+						"attributesAndVitals": null,
+						"armorCoverage": {
+							"head": { "level": 312, "enchantable": true },
+							"chest": { "level": 507, "enchantable": true },
+							"abdomen": { "level": 484, "enchantable": true },
+							"upperArm": { "level": 181, "enchantable": true },
+							"lowerArm": { "level": 181, "enchantable": true },
+							"hand": { "level": 277, "enchantable": true },
+							"upperLeg": { "level": 484, "enchantable": true },
+							"lowerLeg": { "level": 484, "enchantable": false },
+							"foot": { "level": 490, "enchantable": true }
+						},
+						"ratings": {
+							"damageRating": 5,
+							"damageResistanceRating": 0,
+							"criticalRating": -2,
+							"criticalDamageRating": 0,
+							"criticalResistanceRating": null,
+							"criticalDamageResistanceRating": null,
+							"playerKillerDamageRating": null,
+							"playerKillerDamageResistanceRating": null,
+							"overpowerChancePercent": null,
+							"overpowerResistancePercent": null,
+							"healingBoostRating": null,
+							"netherResistanceRating": null,
+							"damageOverTimeResistanceRating": null,
+							"lifeMagicResistanceRating": null
+						},
+						"maxHealthBonus": 25,
+						"characterDetails": {
+							"allegianceName": "Test Allegiance",
+							"patron": null,
+							"monarch": null,
+							"allegianceFollowers": null,
+							"fellowship": "Test Fellowship",
+							"arrivedInDereth": null,
+							"ageSeconds": null,
+							"deaths": 0,
+							"titlesEarned": 7,
+							"chessRank": null,
+							"fishingSkill": null,
+							"enlightenment": null
+						}
 					}
 				}
 			}

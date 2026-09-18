@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
+import type { ClientEntityRead } from "./client-entity-mirror";
+import { entityFacts } from "./client-entity-mirror.test-support";
 import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 import { decodeObjectPreviewResult } from "./client-object-preview-contract";
@@ -41,8 +44,13 @@ const itemInspectionFixture = itemFixture.outcome.inspection;
 
 class FakeInspectionSession {
 	readonly requests: number[] = [];
+	readonly entities: { readonly read: () => ClientEntityRead };
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	#nextRequest: Promise<void> = Promise.resolve();
+
+	constructor(entityRead: ClientEntityRead = { kind: "pending" }) {
+		this.entities = { read: () => entityRead };
+	}
 
 	state(): ClientLifecycleSessionState {
 		return {
@@ -131,6 +139,7 @@ describe("ClientObjectInspection", () => {
 			kind: "ready",
 			guid: itemFixture.guid,
 			inspection: itemInspectionFixture,
+			nameColor: null,
 			preview: null,
 		});
 		owner.close();
@@ -141,6 +150,41 @@ describe("ClientObjectInspection", () => {
 			"ready",
 			"idle",
 		]);
+	});
+
+	it("captures the exact target's shared selected-name color", async () => {
+		const baseTarget = entityFacts(itemFixture.guid);
+		if (baseTarget.description.kind !== "known")
+			throw new Error("Expected known entity test facts.");
+		const target = entityFacts(itemFixture.guid, {
+			description: {
+				...baseTarget.description,
+				mapCategory: "mob",
+			},
+		});
+		const session = new FakeInspectionSession({
+			kind: "current",
+			level: {
+				worldContainer: { kind: "closed" },
+				revision: 1,
+				entities: new Map([
+					[target.guid, target],
+					[99, entityFacts(99)],
+				]),
+				playerGuid: 99,
+			},
+		});
+		const owner = new ClientObjectInspection(session, () => undefined);
+
+		await owner.examine(itemFixture.guid);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+
+		expect(owner.read()).toMatchObject({
+			kind: "ready",
+			guid: itemFixture.guid,
+			nameColor:
+				SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
+		});
 	});
 
 	it("correlates creature preview facts only after the matching appraisal", async () => {

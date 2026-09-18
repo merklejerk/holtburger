@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SpellReference } from "../app/spell-references";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
+	import type { HexRgbaColor } from "../lib/frontend-color";
 	import ClientInspectionArtwork from "./ClientInspectionArtwork.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import type {
@@ -23,12 +24,13 @@
 
 	interface Props {
 		readonly inspection: ObjectInspection;
+		readonly nameColor: HexRgbaColor | null;
 		readonly item: ItemInspection;
 		readonly spells: ClientSpellServices | null;
 		readonly icons: UiIconRepository | null;
 	}
 
-	const { inspection, item, spells, icons }: Props = $props();
+	const { inspection, nameColor, item, spells, icons }: Props = $props();
 	const statuses = $derived(formatItemStatuses(item.status));
 	const imbues = $derived(formatInspectionImbuedEffects(item.imbuedEffects));
 	let spellReferences = $state<readonly SpellReference[] | null>(null);
@@ -87,7 +89,7 @@
 			name={inspection.name}
 		/>
 		<div>
-			<h2>{inspection.name}</h2>
+			<h2 class="inspection-name" style:color={nameColor}>{inspection.name}</h2>
 			{#if inspection.level !== null}<p class="inspection-kicker">
 					Level {formatInspectionNumber(inspection.level)}
 				</p>{/if}

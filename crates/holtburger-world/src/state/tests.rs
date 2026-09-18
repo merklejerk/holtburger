@@ -1316,6 +1316,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         skill_table,
         spell_table,
         xp_table,
+        holtburger_content::CharacterTitleCatalog::default(),
         MotionSequenceCatalog::default(),
         SoulEmoteCatalog::default(),
     )));

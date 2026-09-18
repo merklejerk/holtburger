@@ -1,7 +1,14 @@
-import type { ItemInspection } from "./client-object-inspection-contract";
+import type {
+	CreatureInspection,
+	ItemInspection,
+} from "./client-object-inspection-contract";
 
 type WieldRequirement = ItemInspection["wieldRequirements"][number];
 type ItemEffect = ItemInspection["effects"][number];
+type CharacterIdentity = Extract<
+	CreatureInspection["identity"],
+	{ kind: "character" }
+>;
 
 /** Shared retail appraisal color class; semantic polarity is computed by the world layer. */
 export function inspectionEnchantmentClass(value: {
@@ -77,6 +84,20 @@ export function humanizeInspectionName(value: string): string {
 		.replaceAll("-", " ")
 		.trim();
 	return spaced.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/** Exact user-facing label for retail's public-flag character classification. */
+export function formatPlayerKillerStatus(
+	status: CharacterIdentity["playerKillerStatus"],
+): string {
+	switch (status) {
+		case "non-player-killer":
+			return "Non-Player Killer";
+		case "player-killer-lite":
+			return "Player Killer Lite";
+		case "player-killer":
+			return "Player Killer";
+	}
 }
 
 /** Preserve all known and future damage bits instead of collapsing mixed damage. */

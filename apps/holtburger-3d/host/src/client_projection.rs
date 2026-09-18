@@ -1111,14 +1111,19 @@ mod tests {
     use super::*;
     use crate::host_event_sink::ClientEventSink;
     use crate::protocol::{ProtocolFrame, StdioEventSink};
-    use holtburger_common::properties::DamageType;
+    use holtburger_common::legacy_hash::legacy_string_hash;
+    use holtburger_common::properties::{
+        DamageType, ObjectDescriptionFlag, PropertyInt, PropertyString,
+        WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_core::client::types::ChatSpeaker;
+    use holtburger_dat::file_type::{EnumMapper, StringTable, StringTableData};
     use holtburger_protocol::messages::ChatMessageType;
     use holtburger_protocol::messages::combat::AttackConditions;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
     use holtburger_world::inspection::{
-        ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
+        InspectionContext, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
     };
 
     #[test]
@@ -1146,13 +1151,55 @@ mod tests {
             attributes: None,
             buffs: None,
         });
+        let character_guid = Guid(0x6000_0003);
+        let mut character = Entity::new(
+            character_guid,
+            "Drawohan the Gem Seller".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        character.set_string_prop(PropertyString::Template, "Template Fallback".into());
+        character.set_int_prop(PropertyInt::CharacterTitleId, 42);
+        character.set_int_prop(PropertyInt::CreatureType, 5);
+        character.set_int_prop(PropertyInt::Level, 42);
+        character.flags = ObjectDescriptionFlag::VENDOR;
+        character.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let mapper = EnumMapper {
+            id: EnumMapper::FILE_ID,
+            base_enum_map: 0,
+            numbering: 0,
+            entries: [(42, "GemSeller".to_owned())].into_iter().collect(),
+        };
+        let strings = StringTable {
+            id: StringTable::FILE_ID,
+            language: 1,
+            unknown: 0,
+            entries: vec![StringTableData {
+                id: legacy_string_hash(b"GemSeller"),
+                variable_names: Vec::new(),
+                variables: Vec::new(),
+                strings: vec!["Gem Seller".to_owned()],
+                comments: Vec::new(),
+                unknown: 0,
+            }],
+        };
+        let titles = holtburger_content::CharacterTitleCatalog::from_assets(&mapper, &strings)
+            .expect("synthetic character title should join");
+        let inspection_context = InspectionContext::new(&titles);
         let cases = [
             (
                 "item",
                 ObjectInspectionResult {
                     guid: item_guid,
                     outcome: ObjectInspectionOutcome::Ready {
-                        inspection: Box::new(ObjectInspection::from_entity(&item).unwrap()),
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&item, inspection_context).unwrap(),
+                        ),
                     },
                 },
             ),
@@ -1161,7 +1208,20 @@ mod tests {
                 ObjectInspectionResult {
                     guid: creature_guid,
                     outcome: ObjectInspectionOutcome::Ready {
-                        inspection: Box::new(ObjectInspection::from_entity(&creature).unwrap()),
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&creature, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "character",
+                ObjectInspectionResult {
+                    guid: character_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&character, inspection_context).unwrap(),
+                        ),
                     },
                 },
             ),

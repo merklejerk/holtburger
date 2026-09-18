@@ -69,7 +69,14 @@ interface DepthRangeStorage {
 /** Renderer-owned frame cache: depth eligibility and coalescing are computed once per root. */
 export class DynamicDepthPreparations {
 	/** Cached null also prevents repeated hidden/empty queries. */
-	readonly #prepared = new Map<SceneNodeId, PreparedDynamicDepth | null>();
+	readonly #preparedShadow = new Map<
+		SceneNodeId,
+		PreparedDynamicDepth | null
+	>();
+	readonly #preparedSelection = new Map<
+		SceneNodeId,
+		PreparedDynamicDepth | null
+	>();
 	/** Storage selected by current frame's nonempty root ordinal. */
 	readonly #storage: DepthRangeStorage[] = [];
 	/** Reused distinct-part scratch consumed synchronously by one preparation. */
@@ -97,27 +104,41 @@ export class DynamicDepthPreparations {
 
 	/** Release borrowed scene/resources and invalidate all spans before the next frame's queries. */
 	beginFrame(): void {
-		this.#prepared.clear();
+		this.#preparedShadow.clear();
+		this.#preparedSelection.clear();
 		for (const storage of this.#storage) storage.ranges.length = 0;
 		this.#usedStorage = 0;
 		this.#selectedParts.clear();
 	}
 
-	/** All consumers pass the same frame-global retail visibility setting. */
+	/** Prepare opaque spans only for material-free shadow depth and shadow caster tiers. */
 	prepare(
 		nodeId: SceneNodeId,
 		showRetailHiddenGeometry: boolean,
 	): PreparedDynamicDepth | null {
-		const existing = this.#prepared.get(nodeId);
+		const existing = this.#preparedShadow.get(nodeId);
 		if (existing !== undefined) return existing;
-		const prepared = this.#prepare(nodeId, showRetailHiddenGeometry);
-		this.#prepared.set(nodeId, prepared);
+		const prepared = this.#prepare(nodeId, showRetailHiddenGeometry, true);
+		this.#preparedShadow.set(nodeId, prepared);
+		return prepared;
+	}
+
+	/** Prepare all visible spans (including transparent and alpha-test) for the selection mask. */
+	prepareSelection(
+		nodeId: SceneNodeId,
+		showRetailHiddenGeometry: boolean,
+	): PreparedDynamicDepth | null {
+		const existing = this.#preparedSelection.get(nodeId);
+		if (existing !== undefined) return existing;
+		const prepared = this.#prepare(nodeId, showRetailHiddenGeometry, false);
+		this.#preparedSelection.set(nodeId, prepared);
 		return prepared;
 	}
 
 	#prepare(
 		nodeId: SceneNodeId,
 		showRetailHiddenGeometry: boolean,
+		opaqueOnly: boolean,
 	): PreparedDynamicDepth | null {
 		const visible = this.#getPresentation(nodeId);
 		if (visible === null) return null;
@@ -137,10 +158,11 @@ export class DynamicDepthPreparations {
 				throw new Error(
 					`Dynamic depth range references missing part ${range.source.partSelector}.`,
 				);
-			// Material-free passes omit non-opaque spans (alpha-test, transparent, and additive)
+			// Shadow passes omit non-opaque spans (alpha-test, transparent, and additive)
 			// because depth-only shaders cannot evaluate texture cutouts or alpha blend factors.
+			// Selection mask passes retain all visible spans so outlines include translucent parts.
 			if (
-				range.source.ordering !== "opaque" ||
+				(opaqueOnly && range.source.ordering !== "opaque") ||
 				part.frameInstance.color.a === 0 ||
 				!retainsRetailGeometry(
 					range.source.retailVisibility,

@@ -186,4 +186,31 @@ describe("DynamicDepthPreparations", () => {
 		expect(pass.prepare(NODE_ID, false)).toBeNull();
 		expect(pass.prepare(NODE_ID, true)).toBeNull();
 	});
+	it("retains non-opaque ranges for selection mask preparation", () => {
+		const { pass } = fixture([
+			"opaque",
+			"alpha-test",
+			"transparent",
+			"additive",
+		]);
+		const selected = pass.prepareSelection(NODE_ID, false);
+		if (selected === null) throw new Error("Fixture requires selection.");
+		expect(selected.ranges).toEqual([
+			{ indexStart: 0, indexCount: 6, cullFace: "back" },
+			{ indexStart: 9, indexCount: 3, cullFace: "front" },
+		]);
+		expect(selected.selectedPartCount).toBe(3);
+	});
+	it("maintains independent caches for shadow depth and selection mask on the same node", () => {
+		const { pass } = fixture([
+			"opaque",
+			"transparent",
+			"transparent",
+			"transparent",
+		]);
+		const shadow = pass.prepare(NODE_ID, false);
+		const selection = pass.prepareSelection(NODE_ID, false);
+		expect(shadow?.selectedPartCount).toBe(1);
+		expect(selection?.selectedPartCount).toBe(3);
+	});
 });

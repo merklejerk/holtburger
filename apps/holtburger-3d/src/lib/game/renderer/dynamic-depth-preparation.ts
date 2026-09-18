@@ -137,8 +137,10 @@ export class DynamicDepthPreparations {
 				throw new Error(
 					`Dynamic depth range references missing part ${range.source.partSelector}.`,
 				);
-			// Both material-free passes retain partial fades and ignore texture alpha.
+			// Material-free passes omit non-opaque spans (alpha-test, transparent, and additive)
+			// because depth-only shaders cannot evaluate texture cutouts or alpha blend factors.
 			if (
+				range.source.ordering !== "opaque" ||
 				part.frameInstance.color.a === 0 ||
 				!retainsRetailGeometry(
 					range.source.retailVisibility,

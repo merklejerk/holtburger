@@ -155,7 +155,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.draws).toEqual([]);
 	});
 
-	it("keeps M=0 casters analytic without depth preparation or mapped GPU work", () => {
+	it("keeps M=0 casters analytic with depth verification and without mapped GPU work", () => {
 		const fixture = createFixture(true);
 		const input = {
 			...createInput(new Vec3(0, 1, 0)),
@@ -165,7 +165,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(prepared?.storage.analyticCasters).toHaveLength(1);
 		expect(fixture.pass.render(prepared, null)).toBeNull();
 		expect(input.selectedDynamicNodeIds).toEqual(new Set([NODE]));
-		expect(fixture.state.depthPreparations).toBe(0);
+		expect(fixture.state.depthPreparations).toBe(1);
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.programCreations).toBe(0);
 		expect(fixture.state.attachedLayers).toEqual([]);

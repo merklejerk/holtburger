@@ -214,7 +214,11 @@ describe("outdoor PSSM caster selection", () => {
 			createOutdoorPssmCasterSelectionScratch(),
 			result,
 		);
-		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([node(32)]);
+		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([
+			node(32),
+			node(31),
+			node(33),
+		]);
 		expect(analytic.map(({ identity }) => identity)).toEqual(["b", "c"]);
 		expect(selected).toEqual(new Set([node(31), node(32), node(33)]));
 		expect(result).toMatchObject({
@@ -224,6 +228,67 @@ describe("outdoor PSSM caster selection", () => {
 			rejectedRootCount: 1,
 			selectedRootCount: 3,
 		});
+	});
+
+	it("excludes non-opaque and non-outdoor roots from the analytic tier", () => {
+		const roots = [
+			{ nodeId: node(40), identity: "opaque-mapped", x: 2 },
+			{ nodeId: node(41), identity: "non-opaque-analytic", x: 5 },
+			{ nodeId: node(42), identity: "indoor-analytic", x: 6 },
+			{ nodeId: node(43), identity: "opaque-analytic", x: 8 },
+		];
+		const presentations = new Map<SceneNodeId, PreparedDynamicDepth | null>([
+			[node(40), depth(node(40))],
+			[node(41), null],
+			[
+				node(42),
+				{
+					...depth(node(42)),
+					renderScopes: [
+						{ kind: "env-cell", envCellId: "0x00010100", landblockId: ANCHOR },
+					],
+				},
+			],
+			[node(43), depth(node(43))],
+		]);
+		const getDynamicDepth = vi.fn((id: SceneNodeId) => {
+			const found = presentations.get(id);
+			if (found === undefined) throw new Error("Unknown fixture root.");
+			return found;
+		});
+		const find = (id: SceneNodeId) => {
+			const root = roots.find(({ nodeId }) => nodeId === id);
+			if (root === undefined) throw new Error("Unknown root.");
+			return root;
+		};
+		const world: OutdoorPssmCasterWorld = {
+			getDynamicDepth,
+			getEntityShadowDynamicFacts: (id) => ({
+				...dynamicFacts(id),
+				identity: find(id).identity,
+			}),
+			getRenderContributionDescriptor: (id) => dynamicDescriptorAt(find(id).x),
+			queryScopesScene: () => ({ entries: roots.map(({ nodeId }) => nodeId) }),
+		};
+		const analytic: EntityShadowCasterShape[] = [];
+		const selected = new Set<SceneNodeId>();
+		planOutdoorShadowCastersForView(
+			world,
+			[FRUSTUM],
+			FRUSTUM,
+			ANCHOR,
+			{ maximumMappedRoots: 1, maximumSelectedRoots: 4 },
+			selected,
+			analytic,
+			false,
+			[createOutdoorPssmCasterBatch()],
+			createOutdoorPssmCasterSelectionScratch(),
+			metrics(),
+		);
+		expect(selected).toEqual(new Set([node(40), node(43)]));
+		expect(analytic.map(({ identity }) => identity)).toEqual([
+			"opaque-analytic",
+		]);
 	});
 });
 

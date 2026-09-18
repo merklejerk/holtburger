@@ -123,7 +123,11 @@ export function formatInspectionDuration(seconds: number): string {
 	const minutes = Math.floor((total % 3600) / 60);
 	const remainder = total % 60;
 	const parts: string[] = [];
-	if (hours > 0) parts.push(`${hours}h`);
+	if (hours > 0) {
+		parts.push(`${hours}h`);
+		if (minutes > 0) parts.push(`${minutes}m`);
+		return sign + parts.join(" ");
+	}
 	if (minutes > 0) parts.push(`${minutes}m`);
 	if (remainder > 0 || parts.length === 0) parts.push(`${remainder}s`);
 	return sign + parts.join(" ");

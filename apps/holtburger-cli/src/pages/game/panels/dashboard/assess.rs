@@ -1,4 +1,4 @@
-use crate::utils::{format_duration, wrap_text};
+use crate::utils::wrap_text;
 use holtburger_common::properties::AttunedStatus;
 use holtburger_world::inspection::{
     BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, ItemInspection,
@@ -147,7 +147,7 @@ fn push_item_info(
             |maximum| format!("{}/{}", mana.current, maximum),
         );
         if let Some(seconds) = mana.seconds_left {
-            value.push_str(&format!(" ({} left)", format_duration(seconds)));
+            value.push_str(&format!(" ({} left)", format_inspection_duration(seconds)));
         }
         push_labeled(lines, label, value, Color::Blue);
     }
@@ -329,6 +329,30 @@ fn push_item_info(
             lines.push(Line::from(format!("      -- {scribe}")));
         }
     }
+}
+
+fn format_inspection_duration(seconds: f64) -> String {
+    let rounded = seconds.round() as i64;
+    let sign = if rounded < 0 { "-" } else { "" };
+    let total = rounded.unsigned_abs();
+    let hours = total / 3_600;
+    let minutes = total % 3_600 / 60;
+    let remainder = total % 60;
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+        if minutes > 0 {
+            parts.push(format!("{minutes}m"));
+        }
+    } else {
+        if minutes > 0 {
+            parts.push(format!("{minutes}m"));
+        }
+        if remainder > 0 || parts.is_empty() {
+            parts.push(format!("{remainder}s"));
+        }
+    }
+    format!("{sign}{}", parts.join(" "))
 }
 
 fn push_item_status(lines: &mut Vec<Line<'static>>, item: &ItemInspection) {
@@ -609,6 +633,15 @@ mod tests {
 
         assert!(text.contains("Open"));
         assert!(text.contains("Unlocked"));
+    }
+
+    #[test]
+    fn inspection_duration_omits_seconds_at_one_hour_and_above() {
+        assert_eq!(format_inspection_duration(27_450.0), "7h 37m");
+        assert_eq!(format_inspection_duration(3_630.0), "1h");
+        assert_eq!(format_inspection_duration(3_599.0), "59m 59s");
+        assert_eq!(format_inspection_duration(2_220.0), "37m");
+        assert_eq!(format_inspection_duration(30.0), "30s");
     }
 
     #[test]

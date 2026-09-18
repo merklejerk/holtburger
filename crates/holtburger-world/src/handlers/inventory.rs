@@ -1,6 +1,9 @@
 use crate::WorldEvent;
 use crate::book::BookData;
 use crate::entity::Entity;
+use crate::inspection::{
+    InspectionContext, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
+};
 use crate::state::WorldState;
 use crate::state::liveness::EntityCreateDisposition;
 use holtburger_common::Guid;
@@ -173,24 +176,56 @@ pub(crate) fn handle_event(
         }
         GameEvent::IdentifyObjectResponse(data) => {
             let guid = data.object_guid;
+            let character_titles = std::sync::Arc::clone(&state.character_titles);
+            let inspection_context = InspectionContext::new(&character_titles);
             if let Some(entity) = state.entities.get_mut(guid) {
-                if entity.apply_identify_response(data) {
-                    events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
-                    true
-                } else {
-                    false
+                if !data.success {
+                    events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
+                        guid,
+                        outcome: ObjectInspectionOutcome::Rejected,
+                    }));
+                    return true;
                 }
+                let applied = entity.apply_identify_response(data);
+                debug_assert!(applied, "successful identify response must merge");
+                let inspection = ObjectInspection::from_entity(entity, inspection_context)
+                    .expect("successful player appraisal must contain a creature profile");
+                events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
+                events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
+                    guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(inspection),
+                    },
+                }));
+                true
             } else if let Some(vendor) = state.vendor.as_mut()
                 && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
             {
-                if item.apply_identify_response(data) {
-                    events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
-                    true
-                } else {
-                    false
+                if !data.success {
+                    events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
+                        guid,
+                        outcome: ObjectInspectionOutcome::Rejected,
+                    }));
+                    return true;
                 }
+                let applied = item.apply_identify_response(data);
+                debug_assert!(applied, "successful identify response must merge");
+                let inspection = ObjectInspection::from_vendor_item(item, inspection_context)
+                    .expect("vendor items cannot require a player creature profile");
+                events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
+                events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
+                    guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(inspection),
+                    },
+                }));
+                true
             } else {
-                false
+                events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
+                    guid,
+                    outcome: ObjectInspectionOutcome::Missing,
+                }));
+                true
             }
         }
         GameEvent::BookDataResponse(data) => {

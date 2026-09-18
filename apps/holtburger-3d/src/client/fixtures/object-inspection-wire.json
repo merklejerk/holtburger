@@ -1,0 +1,162 @@
+{
+	"item": {
+		"guid": 1610612737,
+		"outcome": {
+			"kind": "ready",
+			"inspection": {
+				"guid": 1610612737,
+				"name": "Test Item",
+				"description": null,
+				"level": null,
+				"details": {
+					"kind": "item",
+					"details": {
+						"artwork": {
+							"base": null,
+							"overlay": null,
+							"underlay": null,
+							"uiEffects": 0,
+							"itemType": 0
+						},
+						"value": null,
+						"burden": null,
+						"capacity": { "items": null, "containers": null },
+						"material": null,
+						"tinkering": null,
+						"spellcraft": null,
+						"mana": null,
+						"status": {
+							"bonded": null,
+							"attuned": null,
+							"retained": null,
+							"isOpen": null,
+							"isLocked": null,
+							"sellable": null,
+							"ivoryable": null,
+							"unenchantable": true
+						},
+						"stack": null,
+						"uses": null,
+						"armor": null,
+						"weapon": null,
+						"protections": null,
+						"bonuses": [],
+						"wieldRequirements": [],
+						"inscription": null,
+						"imbuedEffects": 0,
+						"effects": [],
+						"useText": null,
+						"spells": []
+					}
+				}
+			}
+		}
+	},
+	"creature": {
+		"guid": 1610612738,
+		"outcome": {
+			"kind": "ready",
+			"inspection": {
+				"guid": 1610612738,
+				"name": "Test Creature",
+				"description": null,
+				"level": null,
+				"details": {
+					"kind": "creature",
+					"details": {
+						"identity": { "kind": "creature", "lineage": null },
+						"health": {
+							"effective": { "current": 25, "max": 50 },
+							"unbuffed": null,
+							"enchantment": null
+						},
+						"attributesAndVitals": null,
+						"armorCoverage": null,
+						"ratings": null,
+						"maxHealthBonus": null,
+						"characterDetails": null
+					}
+				}
+			}
+		}
+	},
+	"character": {
+		"guid": 1610612739,
+		"outcome": {
+			"kind": "ready",
+			"inspection": {
+				"guid": 1610612739,
+				"name": "Drawohan the Gem Seller",
+				"description": null,
+				"level": 42,
+				"details": {
+					"kind": "creature",
+					"details": {
+						"identity": {
+							"kind": "character",
+							"lineage": "Lugian",
+							"role": "Gem Seller",
+							"playerKillerStatus": "non-player-killer"
+						},
+						"health": {
+							"effective": { "current": 100, "max": 100 },
+							"unbuffed": null,
+							"enchantment": null
+						},
+						"attributesAndVitals": null,
+						"armorCoverage": {
+							"head": { "level": 312, "enchantable": true },
+							"chest": { "level": 507, "enchantable": true },
+							"abdomen": { "level": 484, "enchantable": true },
+							"upperArm": { "level": 181, "enchantable": true },
+							"lowerArm": { "level": 181, "enchantable": true },
+							"hand": { "level": 277, "enchantable": true },
+							"upperLeg": { "level": 484, "enchantable": true },
+							"lowerLeg": { "level": 484, "enchantable": false },
+							"foot": { "level": 490, "enchantable": true }
+						},
+						"ratings": {
+							"damageRating": 5,
+							"damageResistanceRating": 0,
+							"criticalRating": -2,
+							"criticalDamageRating": 0,
+							"criticalResistanceRating": null,
+							"criticalDamageResistanceRating": null,
+							"playerKillerDamageRating": null,
+							"playerKillerDamageResistanceRating": null,
+							"overpowerChancePercent": null,
+							"overpowerResistancePercent": null,
+							"healingBoostRating": null,
+							"netherResistanceRating": null,
+							"damageOverTimeResistanceRating": null,
+							"lifeMagicResistanceRating": null
+						},
+						"maxHealthBonus": 25,
+						"characterDetails": {
+							"allegianceName": "Test Allegiance",
+							"patron": null,
+							"monarch": null,
+							"allegianceFollowers": null,
+							"fellowship": "Test Fellowship",
+							"arrivedInDereth": null,
+							"ageSeconds": null,
+							"deaths": 0,
+							"titlesEarned": 7,
+							"chessRank": null,
+							"fishingSkill": null,
+							"enlightenment": null
+						}
+					}
+				}
+			}
+		}
+	},
+	"rejected": {
+		"guid": 1610612737,
+		"outcome": { "kind": "rejected" }
+	},
+	"missing": {
+		"guid": 1610612737,
+		"outcome": { "kind": "missing" }
+	}
+}

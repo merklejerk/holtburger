@@ -129,6 +129,8 @@ import {
 	projectClientTargetIndicator,
 	type ClientTargetIndicatorFrame,
 } from "./client-target-indicator";
+import type { ObjectPreviewResources } from "../lib/game/preview/object-preview-controller";
+import { StandardClientObjectPreviewService } from "./client-object-preview-service";
 
 /** Presentation state exposed to the thin client shell. */
 export type ClientPresentationStatusKind =
@@ -329,6 +331,7 @@ export interface ClientPresentationOwner {
 	readonly activeRegion: ActiveRegionSource;
 	readonly profileSource: LandblockProfileSource;
 	readonly runtime: ClientPresentationRuntime;
+	readonly objectPreviewResources?: ObjectPreviewResources;
 	destroy(): Promise<void>;
 }
 
@@ -372,6 +375,7 @@ type PendingPresentationCue =
  */
 export class ClientPresentationSession {
 	readonly camera: ClientPresentationCameraController;
+	readonly objectPreviews: StandardClientObjectPreviewService;
 	readonly #session: ClientLifecycleSession;
 	readonly #pendingEntityCues: PendingPresentationCue[] = [];
 	readonly #canvas: HTMLCanvasElement;
@@ -429,6 +433,16 @@ export class ClientPresentationSession {
 			orbit: CLIENT_TUNING.camera.orbit,
 			recenter: CLIENT_TUNING.camera.recenter,
 			session: cameraSession,
+		});
+		this.objectPreviews = new StandardClientObjectPreviewService({
+			onError: (error) => this.#reportError(error),
+			resolveResources: async () => {
+				await this.start();
+				const resources = this.#owner?.objectPreviewResources;
+				if (!resources)
+					throw new Error("Isolated object previews are not available.");
+				return resources;
+			},
 		});
 	}
 
@@ -1033,6 +1047,9 @@ export class ClientPresentationSession {
 				labels.push("presentation-start");
 			}
 		});
+		await attempt("object-preview-service", () =>
+			this.objectPreviews.destroy(),
+		);
 		const owner = this.#owner;
 		this.#owner = null;
 		this.#pendingEntityCues.length = 0;

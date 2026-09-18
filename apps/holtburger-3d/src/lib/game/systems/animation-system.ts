@@ -9,6 +9,7 @@ import {
 	wholeAnimationClip,
 	type PlayingClip,
 } from "../animation/animation-playback";
+import { dispatchAnimationHooks } from "../animation/animation-hook-dispatch";
 import type {
 	BehaviorEventRouter,
 	BehaviorTarget,
@@ -672,26 +673,13 @@ export class AnimationSystem<TOwnerId extends string> {
 		departedFrames: readonly number[],
 		mode: "initial-state" | "live",
 	): void {
-		const playbackDirection =
-			record.clip.framesPerSecond < 0 ? "backward" : "forward";
-		for (const frameIndex of departedFrames) {
-			for (const hook of record.clip.animation.hooks) {
-				if (hook.frameIndex !== frameIndex) continue;
-				if (hook.direction !== "both" && hook.direction !== playbackDirection)
-					continue;
-				this.#router.dispatch(
-					hook,
-					record.target,
-					{
-						assetId: record.clip.animation.id,
-						authoredOrder: hook.authoredOrder,
-						authoredPosition: hook.frameIndex,
-						producer: "animation",
-					},
-					mode,
-				);
-			}
-		}
+		dispatchAnimationHooks(
+			this.#router,
+			record.target,
+			record.clip,
+			departedFrames,
+			mode,
+		);
 	}
 }
 

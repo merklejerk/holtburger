@@ -54,6 +54,14 @@
 	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
+	import {
+		ClientObjectInspection,
+		type ClientObjectInspectionState,
+	} from "../../client/client-object-inspection";
+	import {
+		decodeObjectInspectionResult,
+		type ObjectInspectionResult,
+	} from "../../client/client-object-inspection-contract";
 	import { CLIENT_TUNING } from "../../client/client-tuning";
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
@@ -701,6 +709,8 @@
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
+		/** Controlled delayed responses around the production examination owner and UI. */
+		readonly objectInspectionProbe: () => ObjectInspectionProbe;
 		/** Production spell shortcut dispatch and session requests under browser input. */
 		readonly spellBarProbe: typeof spellBarProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
@@ -935,6 +945,18 @@
 			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
+	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
+	let inspectionFailure = $state<string | null>(null);
+	const objectInspectionOwner = new ClientObjectInspection(
+		interactionLifecycle,
+		(message) => {
+			inspectionFailure = message;
+			toast = { id: 9001, message, tone: "warning" };
+		},
+	);
+	const unsubscribeObjectInspection = objectInspectionOwner.subscribe(
+		(state) => (objectInspection = state),
+	);
 	const selection = new ClientEntitySelection({
 		lifecycle: interactionLifecycle,
 		presentation: () => null,
@@ -1089,6 +1111,372 @@
 			throw new Error(`Missing interaction listener: ${event}`);
 		handler(payload);
 	}
+
+	type InspectionResponseKind = "item" | "creature" | "rejected" | "missing";
+	interface ObjectInspectionProbeSnapshot {
+		readonly commandCount: number;
+		readonly commands: readonly unknown[];
+		readonly failure: string | null;
+		readonly selectedGuid: number | null;
+		readonly state: ClientObjectInspectionState;
+		readonly window: null | {
+			readonly count: number;
+			readonly rectangle: ClientHudHarnessRectangle;
+			readonly scrollHeight: number;
+			readonly clientHeight: number;
+			readonly text: string;
+			readonly title: string | null;
+		};
+	}
+	interface ObjectInspectionProbe {
+		readonly binding: (typeof INPUT_DEFAULTS.client.examine)[number];
+		begin(): void;
+		end(): void;
+		select(guid: number | null): void;
+		respond(kind: InspectionResponseKind, guid: number): void;
+		resync(): void;
+		restore(): void;
+		setArtworkFailure(failed: boolean): void;
+		snapshot(): ObjectInspectionProbeSnapshot;
+	}
+
+	function inspectionResult(
+		kind: InspectionResponseKind,
+		guid: number,
+	): ObjectInspectionResult {
+		if (kind === "rejected" || kind === "missing")
+			return decodeObjectInspectionResult({
+				guid,
+				outcome: { kind },
+			});
+		if (kind === "creature")
+			return decodeObjectInspectionResult({
+				guid,
+				outcome: {
+					kind: "ready",
+					inspection: {
+						guid,
+						name: "Holtmage",
+						description:
+							"An adventurer fixture with disclosed character appraisal details.",
+						level: 126,
+						details: {
+							kind: "creature",
+							details: {
+								identity: {
+									kind: "character",
+									lineage: "Male Undead",
+									role: "Adventurer",
+									playerKillerStatus: "non-player-killer",
+								},
+								health: {
+									effective: { current: 1840, max: 2400 },
+									unbuffed: null,
+									enchantment: "harmful",
+								},
+								attributesAndVitals: {
+									attributes: {
+										strength: {
+											effective: 410,
+											unbuffed: null,
+											enchantment: "beneficial",
+										},
+										endurance: {
+											effective: 395,
+											unbuffed: null,
+											enchantment: "harmful",
+										},
+										coordination: {
+											effective: 360,
+											unbuffed: null,
+											enchantment: null,
+										},
+										quickness: {
+											effective: 345,
+											unbuffed: null,
+											enchantment: null,
+										},
+										focus: {
+											effective: 290,
+											unbuffed: null,
+											enchantment: null,
+										},
+										selfAttr: {
+											effective: 275,
+											unbuffed: null,
+											enchantment: null,
+										},
+									},
+									stamina: {
+										effective: { current: 825, max: 910 },
+										unbuffed: null,
+										enchantment: "beneficial",
+									},
+									mana: {
+										effective: { current: 190, max: 300 },
+										unbuffed: null,
+										enchantment: null,
+									},
+								},
+								armorCoverage: {
+									head: { level: 312, enchantable: true },
+									chest: { level: 507, enchantable: true },
+									abdomen: { level: 484, enchantable: true },
+									upperArm: { level: 181, enchantable: true },
+									lowerArm: { level: 181, enchantable: true },
+									hand: { level: 277, enchantable: true },
+									upperLeg: { level: 484, enchantable: true },
+									lowerLeg: { level: 484, enchantable: false },
+									foot: { level: 490, enchantable: true },
+								},
+								ratings: {
+									damageRating: 5,
+									damageResistanceRating: 0,
+									criticalRating: 3,
+									criticalDamageRating: 0,
+									criticalResistanceRating: 1,
+									criticalDamageResistanceRating: 0,
+									playerKillerDamageRating: null,
+									playerKillerDamageResistanceRating: null,
+									overpowerChancePercent: 2,
+									overpowerResistancePercent: 1,
+									healingBoostRating: null,
+									netherResistanceRating: 4,
+									damageOverTimeResistanceRating: 2,
+									lifeMagicResistanceRating: 1,
+								},
+								maxHealthBonus: 25,
+								characterDetails: {
+									allegianceName: "Test Allegiance",
+									patron: "Test Patron",
+									monarch: "Test Monarch",
+									allegianceFollowers: 12,
+									fellowship: "Test Fellowship",
+									arrivedInDereth: "1 Frostfell, 1 P.Y.",
+									ageSeconds: 90_061,
+									deaths: 0,
+									titlesEarned: 7,
+									chessRank: 3,
+									fishingSkill: 210,
+									enlightenment: 2,
+								},
+							},
+						},
+					},
+				},
+			});
+		return decodeObjectInspectionResult({
+			guid,
+			outcome: {
+				kind: "ready",
+				inspection: {
+					guid,
+					name: "Ancient Atlan Sword of the Long Appraisal",
+					description:
+						"An extensively documented blade used to prove that long descriptions remain readable without changing the selected target or forcing the inspection window beyond the viewport.",
+					level: 80,
+					details: {
+						kind: "item",
+						details: {
+							artwork: {
+								base: 777,
+								overlay: 778,
+								underlay: null,
+								uiEffects: 1,
+								itemType: 1,
+							},
+							value: 125000,
+							burden: 650,
+							capacity: { items: 24, containers: 2 },
+							material: { materialType: "BlackGarnet", workmanship: 9.6 },
+							tinkering: { count: 8 },
+							spellcraft: 340,
+							mana: {
+								kind: "mana",
+								current: 9802,
+								max: 10000,
+								secondsLeft: 3723,
+							},
+							status: {
+								bonded: "bonded",
+								attuned: "Attuned",
+								retained: true,
+								isOpen: null,
+								isLocked: null,
+								sellable: false,
+								ivoryable: true,
+								unenchantable: true,
+							},
+							stack: { current: 3, max: 10 },
+							uses: { current: 42, max: 50 },
+							armor: {
+								effective: 315,
+								unbuffed: null,
+								enchantment: "beneficial",
+							},
+							weapon: {
+								damage: {
+									effective: { min: 31.5, max: 63 },
+									unbuffed: { min: 27.5, max: 55 },
+									enchantment: "beneficial",
+								},
+								damageType: 0x11,
+								weaponSkill: "HeavyWeapons",
+								speed: {
+									effective: 32,
+									unbuffed: 40,
+									enchantment: "beneficial",
+								},
+								weaponType: "Sword",
+							},
+							protections: {
+								slashing: {
+									effective: 1.2,
+									unbuffed: 1,
+									enchantment: "beneficial",
+								},
+								piercing: { effective: 1.1, unbuffed: null, enchantment: null },
+								bludgeoning: {
+									effective: 0.9,
+									unbuffed: 1,
+									enchantment: "harmful",
+								},
+								fire: {
+									effective: 1.3,
+									unbuffed: 1,
+									enchantment: "beneficial",
+								},
+								cold: { effective: 1.25, unbuffed: null, enchantment: null },
+								acid: { effective: 1.05, unbuffed: null, enchantment: null },
+								lightning: {
+									effective: 1.15,
+									unbuffed: null,
+									enchantment: null,
+								},
+								nether: { effective: 0.8, unbuffed: null, enchantment: null },
+							},
+							bonuses: [
+								{
+									kind: "attack",
+									value: {
+										effective: 0.18,
+										unbuffed: 0.12,
+										enchantment: "beneficial",
+									},
+								},
+								{
+									kind: "magicDefense",
+									value: { effective: 0.12, unbuffed: null, enchantment: null },
+								},
+							],
+							wieldRequirements: [
+								{ type: "level", data: { level: 80 } },
+								{
+									type: "training",
+									data: { skill: "HeavyWeapons", level: "specialized" },
+								},
+							],
+							inscription: {
+								text: "May this blade remember every long road through Dereth, every fellowship at its side, and every hand that kept its edge bright.",
+								scribe: "Harness Artisan",
+							},
+							imbuedEffects: 0x4001,
+							effects: [
+								{ type: "armor-cleaving" },
+								{
+									type: "slayer",
+									data: { creatureType: "Olthoi", bonus: 0.2 },
+								},
+							],
+							useText: "Use this item to recall to a remembered sanctuary.",
+							spells: [
+								{ id: 2000, activeEnchantment: true },
+								{ id: 999999, activeEnchantment: false },
+							],
+						},
+					},
+				},
+			},
+		});
+	}
+
+	let releaseInspectionKeys: (() => void) | null = null;
+	let inspectionCommandOffset = 0;
+	function examineHarnessSelection(): void {
+		const guid = selection.selectedGuid();
+		if (guid !== null) void objectInspectionOwner.examine(guid);
+	}
+	function examineHarnessItem(guid: number): void {
+		selection.selectContentsItem(guid, "select");
+		void objectInspectionOwner.examine(guid);
+	}
+	const objectInspectionProbe: ObjectInspectionProbe = {
+		binding: INPUT_DEFAULTS.client.examine[0],
+		begin: () => {
+			releaseInspectionKeys?.();
+			objectInspectionOwner.close();
+			inspectionFailure = null;
+			inspectionCommandOffset = interactionCommands.length;
+			selection.select(null);
+			releaseInspectionKeys = keyboard.bindGame({
+				keydown: (event) => {
+					if (!APP_INPUT.shortcut("examine", event) || event.isComposing)
+						return;
+					event.preventDefault();
+					if (!event.repeat) examineHarnessSelection();
+				},
+				keyup: () => {},
+				cancel: () => {},
+			});
+			keyboard.returnToGame();
+		},
+		end: () => {
+			releaseInspectionKeys?.();
+			releaseInspectionKeys = null;
+			objectInspectionOwner.close();
+			selection.select(null);
+		},
+		select: (guid) => selection.select(guid),
+		respond: (kind, guid) =>
+			emitInteractionEvent(
+				"client-object-inspection-result",
+				inspectionResult(kind, guid),
+			),
+		resync: () => emitInteractionEvent("client-state-resyncing", null),
+		restore: emitInteractionBaseline,
+		setArtworkFailure: (failed) => {
+			if (failed) iconFailures.add(777);
+			else iconFailures.delete(777);
+		},
+		snapshot: () => {
+			const commands = interactionCommands
+				.slice(inspectionCommandOffset)
+				.filter(({ command }) => command === "examine_client_entity");
+			const bodies = Array.from(
+				document.querySelectorAll<HTMLElement>(".inspection-scroll"),
+			);
+			const body = bodies[0] ?? null;
+			const panel = body?.closest<HTMLElement>("section[aria-label]") ?? null;
+			return {
+				commandCount: commands.length,
+				commands,
+				failure: inspectionFailure,
+				selectedGuid: selection.selectedGuid(),
+				state: objectInspectionOwner.read(),
+				window:
+					body === null || panel === null
+						? null
+						: {
+								count: bodies.length,
+								rectangle: rectangle(panel),
+								scrollHeight: body.scrollHeight,
+								clientHeight: body.clientHeight,
+								text: body.innerText,
+								title: panel.getAttribute("aria-label"),
+							},
+			};
+		},
+	};
 
 	let dialogPresentation = $state<ClientDialogPresentation | null>(null);
 	let dialogOwner: ClientDialogs | null = null;
@@ -2383,6 +2771,7 @@
 					(ids) => references.load(ids),
 					() => spellReferenceRequests,
 				),
+			objectInspectionProbe: () => objectInspectionProbe,
 			inventoryDragCommands: () => interactionCommands,
 			selectInventoryItem: (guid) =>
 				selection.selectContentsItem(guid, "select"),
@@ -2426,6 +2815,9 @@
 			toggleMode,
 		};
 		return () => {
+			objectInspectionProbe.end();
+			unsubscribeObjectInspection();
+			objectInspectionOwner.destroy();
 			keyboardFixture?.dispose();
 			spellState.destroy();
 			references.dispose();
@@ -2461,6 +2853,20 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		inspectionPreviewHeight={userSettings.inspection.previewHeight}
+		onInspectionPreviewHeightChange={(previewHeight) =>
+			(userSettings = {
+				...userSettings,
+				inspection: { previewHeight },
+			})}
+		objectPreviewService={{
+			open: () => ({
+				dispose: async () => undefined,
+				diagnostics: () => null,
+				ready: Promise.resolve(),
+				setViewport: () => undefined,
+			}),
+		}}
 		itemSession={interactionLifecycle}
 		hudLayout={userSettings.hudLayout}
 		onHudLayoutChange={(hudLayout) =>
@@ -2520,6 +2926,11 @@
 			viewportSelectionPoints.push({ x, y });
 			selectEntity(7);
 		}}
+		onViewportExamine={(x, y) => {
+			viewportSelectionPoints.push({ x, y });
+			selectEntity(7);
+			void objectInspectionOwner.examine(7);
+		}}
 		onViewportHover={(x, y) => {
 			viewportHoverPoints.push({ x, y });
 			// The item-use fixture supplies explicit hit-test results through hoverWorld.
@@ -2544,6 +2955,10 @@
 		onSelectContentsItem={(guid, mode) =>
 			selection.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}
+		{objectInspection}
+		onExamineEntity={examineHarnessSelection}
+		onExamineItem={examineHarnessItem}
+		onCloseInspection={() => objectInspectionOwner.close()}
 		selectedEntityGuid={selectedGuid}
 		hoveredEntityGuid={hoveredGuid}
 		showRetailHiddenGeometry={false}

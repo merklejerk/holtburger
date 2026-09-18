@@ -21,6 +21,7 @@ import {
 	WEBGL2_ENTITY_GROUNDING_GLSL,
 	type WebGL2EntityGroundingUniforms,
 } from "./webgl2-entity-grounding";
+import { TRANSPARENT_CANVAS_EMISSION_GLSL } from "./transparent-canvas-emission";
 
 /**
  * Where a vertex shader reads its object transform, selected at shader compilation rather than
@@ -307,6 +308,7 @@ uniform float uLuminosity;
 uniform int uUseDetail;
 uniform vec4 uDetailRect;
 uniform float uDetailTiling;
+uniform int uCanvasEmissionMode;
 ${fogDeclarations}
 
 in vec2 vTextureCoordinate;
@@ -315,6 +317,8 @@ in vec4 vInstanceColor;
 in vec3 vLighting;
 ${distanceFog ? "in float vViewerDistance;" : ""}
 out vec4 fragmentColor;
+
+${TRANSPARENT_CANVAS_EMISSION_GLSL}
 
 vec2 sourceUv() {
 	vec2 coordinate = vTextureCoordinate + vTextureOffset;
@@ -454,7 +458,7 @@ void main() {
 	}
 	${groundingApplication}
 	${fogApplication}
-	fragmentColor = color;
+	fragmentColor = encodeTransparentCanvasEmission(color, uCanvasEmissionMode);
 }
 `;
 }
@@ -478,6 +482,7 @@ interface WebGL2ObjectProgramCommon {
 		readonly staticLightColorIntensity: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
+		readonly canvasEmissionMode: WebGLUniformLocation;
 		readonly clipTransform: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
 		readonly detailRect: WebGLUniformLocation;
@@ -763,6 +768,11 @@ export function createWebGL2ObjectProgram(
 			),
 			ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 			base: requireWebGL2Uniform(gl, program, "uBase"),
+			canvasEmissionMode: requireWebGL2Uniform(
+				gl,
+				program,
+				"uCanvasEmissionMode",
+			),
 			clipTransform: requireWebGL2Uniform(gl, program, "uClipTransform"),
 			detail: requireWebGL2Uniform(gl, program, "uDetail"),
 			detailRect: requireWebGL2Uniform(gl, program, "uDetailRect"),

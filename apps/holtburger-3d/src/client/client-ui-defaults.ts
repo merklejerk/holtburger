@@ -41,6 +41,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 370, height: 330 },
 		minSize: { width: 240, height: 190 },
 	},
+	inspection: {
+		anchor: "center-right",
+		offset: { x: 32, y: 0 },
+		size: { width: 410, height: 500 },
+		minSize: { width: 300, height: 240 },
+	},
 	inventory: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },

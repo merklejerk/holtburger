@@ -10,6 +10,7 @@ import type {
 } from "../resolution/presentation";
 import {
 	InlineObjectVisualTemplatePreparer,
+	ObjectVisualTemplateAssetRepository,
 	ObjectVisualTemplateRepository,
 	objectVisualTemplateKey,
 	type ObjectVisualTemplateAtlas,
@@ -26,7 +27,9 @@ describe("ObjectVisualTemplateRepository", () => {
 		const repository = new ObjectVisualTemplateRepository(
 			geometry,
 			atlas,
-			new InlineObjectVisualTemplatePreparer(),
+			new ObjectVisualTemplateAssetRepository(
+				new InlineObjectVisualTemplatePreparer(),
+			),
 			() => {
 				throw new Error("device appearance preparation failed");
 			},
@@ -49,7 +52,9 @@ describe("ObjectVisualTemplateRepository", () => {
 		const repository = new ObjectVisualTemplateRepository(
 			geometry,
 			atlas,
-			new InlineObjectVisualTemplatePreparer(),
+			new ObjectVisualTemplateAssetRepository(
+				new InlineObjectVisualTemplatePreparer(),
+			),
 			() => () => {
 				throw new Error("appearance release failed");
 			},
@@ -106,7 +111,7 @@ describe("ObjectVisualTemplateRepository", () => {
 		const repository = new ObjectVisualTemplateRepository(
 			geometry,
 			atlas,
-			preparer,
+			new ObjectVisualTemplateAssetRepository(preparer),
 			() => {
 				expect(atlas.activeOwnerCount).toBe(1);
 				appearanceRetains += 1;
@@ -157,6 +162,54 @@ describe("ObjectVisualTemplateRepository", () => {
 		expect(geometry.resources.size).toBe(0);
 		expect(atlas.activeOwnerCount).toBe(0);
 		expect(atlas.withdrawalCount).toBe(1);
+	});
+
+	it("shares immutable preparation while keeping device residency independent", async () => {
+		const preparer = new CountingPreparer();
+		const assets = new ObjectVisualTemplateAssetRepository(preparer);
+		const worldGeometry = new FixtureGeometry();
+		const previewGeometry = new FixtureGeometry();
+		const worldAtlas = new FixtureAtlas();
+		const previewAtlas = new FixtureAtlas();
+		const world = new ObjectVisualTemplateRepository(
+			worldGeometry,
+			worldAtlas,
+			assets,
+			() => () => {},
+		);
+		const preview = new ObjectVisualTemplateRepository(
+			previewGeometry,
+			previewAtlas,
+			assets,
+			() => () => {},
+		);
+		const visual = source("cross-context", "appearance:shared-cpu");
+
+		const worldStage = world.stageOwner([visual]);
+		const previewStage = preview.stageOwner([visual]);
+		await Promise.all([worldStage.completion, previewStage.completion]);
+		worldStage.commit("world");
+		previewStage.commit("preview");
+
+		expect(preparer.count).toBe(1);
+		expect(assets.getDiagnostics().referenceCount).toBe(2);
+		expect(worldGeometry.resources.size).toBe(1);
+		expect(previewGeometry.resources.size).toBe(1);
+		expect(worldAtlas.preparationCount).toBe(1);
+		expect(previewAtlas.preparationCount).toBe(1);
+
+		world.dropOwner("world");
+		await world.destroy();
+		expect(assets.getDiagnostics().referenceCount).toBe(1);
+		expect(previewGeometry.resources.size).toBe(1);
+
+		preview.dropOwner("preview");
+		await preview.destroy();
+		expect(assets.getDiagnostics()).toMatchObject({
+			assetCount: 0,
+			referenceCount: 0,
+		});
+		await assets.destroy();
 	});
 
 	it("retains a shared layout until the last distinct appearance owner leaves", async () => {
@@ -463,7 +516,7 @@ function createRepository(
 	return new ObjectVisualTemplateRepository(
 		geometry,
 		atlas,
-		preparer,
+		new ObjectVisualTemplateAssetRepository(preparer),
 		() => () => {},
 	);
 }

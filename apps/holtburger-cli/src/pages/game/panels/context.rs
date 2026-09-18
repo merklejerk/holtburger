@@ -11,7 +11,7 @@ use crate::types::{ContextView, InspectTarget};
 use crate::utils::wrap_text;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_world::book::BookData;
-use holtburger_world::inspect::InspectableObject;
+use holtburger_world::inspection::{InspectionSource, ObjectInspectionOutcome};
 
 // In a fully dismantled view state, Context State should be passed directly here.
 pub struct ContextPaneRenderArgs<'a> {
@@ -134,11 +134,28 @@ pub fn build_context_display_lines(
 pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
     match view.context_view {
         ContextView::Assess(target) => {
-            let spell_catalog = data.spell_catalog();
-            if let Some(object) = resolve_inspectable_target(data, view, target) {
-                return assess::get_assess_info(data, &object, spell_catalog.as_deref());
+            let target_guid = match target {
+                InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
+            };
+            let Some(result) = view
+                .object_inspection
+                .as_ref()
+                .filter(|result| result.guid == target_guid)
+            else {
+                return vec![Line::from("Awaiting appraisal details…")];
+            };
+            match &result.outcome {
+                ObjectInspectionOutcome::Ready { inspection } => {
+                    let spell_catalog = data.spell_catalog();
+                    assess::get_assess_info(inspection, spell_catalog.as_deref())
+                }
+                ObjectInspectionOutcome::Rejected => {
+                    vec![Line::from("You could not appraise this object.")]
+                }
+                ObjectInspectionOutcome::Missing => {
+                    vec![Line::from("The object is no longer available.")]
+                }
             }
-            vec![]
         }
         ContextView::Debug(target) => {
             let spell_catalog = data.spell_catalog();
@@ -254,14 +271,14 @@ fn resolve_inspectable_target<'a>(
     data: &'a GameData,
     view: &'a ViewState,
     target: InspectTarget,
-) -> Option<InspectableObject<'a>> {
+) -> Option<InspectionSource<'a>> {
     match target {
-        InspectTarget::Entity(guid) => data.entities.get(&guid).map(InspectableObject::from_entity),
+        InspectTarget::Entity(guid) => data.entities.get(&guid).map(InspectionSource::from_entity),
         InspectTarget::VendorItem(guid) => view
             .vendor
             .as_ref()
             .and_then(|vendor| vendor.items.iter().find(|item| item.guid == guid))
-            .map(InspectableObject::from_vendor_item),
+            .map(InspectionSource::from_vendor_item),
     }
 }
 

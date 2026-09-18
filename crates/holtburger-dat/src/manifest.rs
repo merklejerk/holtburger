@@ -1,5 +1,7 @@
-use crate::EOR_PORTAL_NAMESPACE;
-use crate::file_type::{CharGen, ChatPoseTable, DatFileType, SkillTable, SpellTable, XpTable};
+use crate::file_type::{
+    CharGen, ChatPoseTable, DatFileType, EnumMapper, SkillTable, SpellTable, StringTable, XpTable,
+};
+use crate::{EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
 /// Portal file types that carry the motion representation every profile ships completely.
 ///
@@ -49,6 +51,7 @@ impl StripperManifest {
         ] {
             manifest.keep_type(file_type);
         }
+        manifest.keep_character_title_content();
 
         manifest
     }
@@ -66,6 +69,7 @@ impl StripperManifest {
         ] {
             manifest.keep_namespaced_file(EOR_PORTAL_NAMESPACE, file_id);
         }
+        manifest.keep_character_title_content();
 
         manifest
     }
@@ -86,6 +90,12 @@ impl StripperManifest {
         for file_type in MOTION_CONTENT_TYPES {
             self.keep_namespaced_type(EOR_PORTAL_NAMESPACE, file_type);
         }
+    }
+
+    /// Keeps the cross-DAT records required to localize character-title identifiers.
+    fn keep_character_title_content(&mut self) {
+        self.keep_namespaced_file(EOR_PORTAL_NAMESPACE, EnumMapper::FILE_ID);
+        self.keep_namespaced_file(EOR_LANGUAGE_NAMESPACE, StringTable::FILE_ID);
     }
 
     pub fn keep_type(&mut self, file_type: DatFileType) {
@@ -191,6 +201,37 @@ mod tests {
         ));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_entry(EOR_PORTAL_NAMESPACE, 0x01000001, DatFileType::Model));
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            EnumMapper::FILE_ID,
+            DatFileType::EnumMapper
+        ));
+        assert!(manifest.should_keep_entry(
+            EOR_LANGUAGE_NAMESPACE,
+            StringTable::FILE_ID,
+            DatFileType::StringTable
+        ));
+    }
+
+    #[test]
+    fn logic_manifest_keeps_only_required_character_title_records_by_exact_key() {
+        let manifest = StripperManifest::logic_only();
+
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            EnumMapper::FILE_ID,
+            DatFileType::EnumMapper
+        ));
+        assert!(manifest.should_keep_entry(
+            EOR_LANGUAGE_NAMESPACE,
+            StringTable::FILE_ID,
+            DatFileType::StringTable
+        ));
+        assert!(!manifest.should_keep_entry(
+            EOR_LANGUAGE_NAMESPACE,
+            StringTable::FILE_ID + 1,
+            DatFileType::StringTable
+        ));
     }
 
     #[test]

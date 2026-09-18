@@ -96,6 +96,39 @@ visibility. Diagnostics windows retain their normal border resizing. Internal co
 and the layout-lock button remain CSS-owned. Layout edits are not persisted yet.
 Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
 
+## Object examination
+
+Select an entity and press `E`, use the magnifying-glass button in the selected-entity HUD, or
+right-click an entity in the world, an item cell, or an item-backed action cell to select and examine
+it. Every entry point captures the target GUID at activation. A later
+selection change does not retarget the pending request or an open inspection, and the window does
+not open until a successful appraisal response arrives. Starting a request for another target
+replaces the previous pending/open inspection; duplicate requests for the same pending target are
+suppressed. Rejected, missing, and transport-failed requests remain distinct warning messages.
+
+Successful results open one independently draggable and resizable inspection window. Its placement
+survives snapshot replacement for the current mounted world view. Closing the window changes only
+frontend presentation: it does not change selection or send a close command to the server. Portal,
+resynchronization, character replacement, and session teardown close it automatically.
+
+Item inspection uses the shared appraisal snapshot for artwork, descriptions, state, combat facts,
+requirements, effects, spell references, and inscriptions. It holds a display lease in the existing
+UI icon repository; artwork and spell-definition failures stay visible without hiding the remaining
+facts. Creature inspection uses a separate vitals-and-attributes layout rather than forcing creature
+data through the item property stream. Appraisal-supplied creature enhancement masks color effective
+attributes and vitals without inventing unavailable base values. The current first slice intentionally
+does not yet present hook profiles, body-region armor levels, enhanced resistances, or the broader
+retail appraisal fields listed in the implementation plan's fast-follow phase.
+
+Equipment values use the appraisal response's per-stat enchantment masks. Effective beneficial and
+harmful values are colorized like retail; when the response also exposes an authoritative base
+value, the inspector includes it parenthetically. It never reverse-calculates a missing base value.
+
+The asset-free `npm run harness:browser -- --client-hud --brief` suite covers the configured shortcut,
+button, viewport/item/action-cell right-click, delayed/latest-target responses, failure and lifecycle
+teardown, close/drag/resize, small-viewport fitting, and coexistence with world-container and system
+windows.
+
 ## Inventory interactions
 
 Drag contents cells onto another cell to merge compatible stacks or insert before
@@ -105,7 +138,7 @@ unequipping into sorted contents appends to the selected container. Drag onto an
 equipment row to equip, or from equipment to a contents cell/header to unequip. Core preflights displaced equipment storage and
 sequences the server requests. Failures use existing action feedback.
 
-Right-click a stack to choose a split amount with a number field or slider. The
+Shift-click a stack to choose a split amount with a number field or slider. The
 inventory-local dialog opens only after capacity preflight. Splits prefer the
 source pack, then main pack and remaining packs in native order; selecting the
 whole quantity is a no-op. Ctrl+Shift+I toggles Electron DevTools; game interactions

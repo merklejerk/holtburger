@@ -610,6 +610,10 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// One world-populated examination outcome; presentation lifetime remains frontend-owned.
+    ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
+    /// Captured creature visual facts correlated with the preceding examination result.
+    ObjectPreviewResult(holtburger_core::client::object_preview::ObjectPreviewResult),
     /// Character input invalidation for spell inspectors.
     SpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     /// Correlated character-bound spell facts.
@@ -848,6 +852,12 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::ObjectInspectionResult(result) => {
+            Some(ClientHostEvent::ObjectInspectionResult(result))
+        }
+        ClientViewEvent::ObjectPreviewResult(result) => {
+            Some(ClientHostEvent::ObjectPreviewResult(result))
+        }
         ClientViewEvent::SpellInspectionContext(context) => {
             Some(ClientHostEvent::SpellInspectionContext(context))
         }
@@ -1106,10 +1116,218 @@ mod tests {
     use super::*;
     use crate::host_event_sink::ClientEventSink;
     use crate::protocol::{ProtocolFrame, StdioEventSink};
-    use holtburger_common::properties::DamageType;
+    use holtburger_common::legacy_hash::legacy_string_hash;
+    use holtburger_common::properties::{
+        DamageType, ObjectDescriptionFlag, PropertyInt, PropertyString,
+        WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_core::client::types::ChatSpeaker;
+    use holtburger_dat::file_type::{EnumMapper, StringTable, StringTableData};
     use holtburger_protocol::messages::ChatMessageType;
     use holtburger_protocol::messages::combat::AttackConditions;
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
+    use holtburger_world::entity::Entity;
+    use holtburger_world::inspection::{
+        ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionContext,
+        InspectionSupplement, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
+    };
+
+    #[test]
+    fn object_inspection_variants_match_the_shared_browser_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-inspection-wire.json"
+        ))
+        .unwrap();
+        let item_guid = Guid(0x6000_0001);
+        let mut item = Entity::new(
+            item_guid,
+            "Test Item".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        item.inspection_supplement = Some(InspectionSupplement {
+            equipment_unenchantable: Some(true),
+            ..InspectionSupplement::default()
+        });
+        let creature_guid = Guid(0x6000_0002);
+        let mut creature = Entity::new(
+            creature_guid,
+            "Test Creature".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        creature.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 25,
+            health_max: 50,
+            attributes: None,
+            buffs: None,
+        });
+        let character_guid = Guid(0x6000_0003);
+        let mut character = Entity::new(
+            character_guid,
+            "Drawohan the Gem Seller".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        character.set_string_prop(PropertyString::Template, "Template Fallback".into());
+        character.set_int_prop(PropertyInt::CharacterTitleId, 42);
+        character.set_int_prop(PropertyInt::CreatureType, 5);
+        character.set_int_prop(PropertyInt::Level, 42);
+        character.flags = ObjectDescriptionFlag::VENDOR;
+        character.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let enchantable = |level| ArmorCoverageValue {
+            level,
+            enchantable: true,
+        };
+        character.inspection_supplement = Some(InspectionSupplement {
+            equipment_unenchantable: None,
+            armor_coverage: Some(ArmorCoverage {
+                head: enchantable(312),
+                chest: enchantable(507),
+                abdomen: enchantable(484),
+                upper_arm: enchantable(181),
+                lower_arm: enchantable(181),
+                hand: enchantable(277),
+                upper_leg: enchantable(484),
+                lower_leg: ArmorCoverageValue {
+                    level: 484,
+                    enchantable: false,
+                },
+                foot: enchantable(490),
+            }),
+            ratings: Some(CreatureRatings {
+                damage_rating: Some(5),
+                damage_resistance_rating: Some(0),
+                critical_rating: Some(-2),
+                critical_damage_rating: Some(0),
+                ..CreatureRatings::default()
+            }),
+            max_health_bonus: Some(25),
+            character_details: Some(CharacterDetails {
+                allegiance_name: Some("Test Allegiance".into()),
+                fellowship: Some("Test Fellowship".into()),
+                deaths: Some(0),
+                titles_earned: Some(7),
+                ..CharacterDetails::default()
+            }),
+        });
+        let mapper = EnumMapper {
+            id: EnumMapper::FILE_ID,
+            base_enum_map: 0,
+            numbering: 0,
+            entries: [(42, "GemSeller".to_owned())].into_iter().collect(),
+        };
+        let strings = StringTable {
+            id: StringTable::FILE_ID,
+            language: 1,
+            unknown: 0,
+            entries: vec![StringTableData {
+                id: legacy_string_hash(b"GemSeller"),
+                variable_names: Vec::new(),
+                variables: Vec::new(),
+                strings: vec!["Gem Seller".to_owned()],
+                comments: Vec::new(),
+                unknown: 0,
+            }],
+        };
+        let titles = holtburger_content::CharacterTitleCatalog::from_assets(&mapper, &strings)
+            .expect("synthetic character title should join");
+        let inspection_context = InspectionContext::new(&titles);
+        let cases = [
+            (
+                "item",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&item, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "creature",
+                ObjectInspectionResult {
+                    guid: creature_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&creature, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "character",
+                ObjectInspectionResult {
+                    guid: character_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&character, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "rejected",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Rejected,
+                },
+            ),
+            (
+                "missing",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Missing,
+                },
+            ),
+        ];
+
+        for (name, result) in cases {
+            let projected = project_client_event(ClientViewEvent::ObjectInspectionResult(result))
+                .expect("inspection event should cross the host projection");
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("expected event frame");
+            };
+            let event = serde_json::to_value(event).unwrap();
+            assert_eq!(event["event"], "client-object-inspection-result");
+            assert_eq!(event["payload"], fixture[name]);
+        }
+    }
+
+    #[test]
+    fn object_preview_variants_match_the_shared_browser_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-preview-wire.json"
+        ))
+        .unwrap();
+        for value in fixture.as_object().unwrap().values() {
+            let result: holtburger_core::client::object_preview::ObjectPreviewResult =
+                serde_json::from_value(value.clone()).unwrap();
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(ClientHostEvent::ObjectPreviewResult(result))
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("Expected event");
+            };
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::json!({
+                    "event": "client-object-preview-result",
+                    "payload": value,
+                })
+            );
+        }
+    }
 
     #[test]
     fn server_controlled_motion_projects_as_a_payloadless_notification() {

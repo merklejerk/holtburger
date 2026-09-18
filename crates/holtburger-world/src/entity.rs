@@ -5,6 +5,7 @@ use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_
 use crate::entity_scale::EntityScaleState;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
+use crate::inspection::InspectionSupplement;
 use crate::motion::{MotionCommand, MotionContact};
 use crate::spatial::ContactState;
 use holtburger_common::position::WorldPosition;
@@ -1194,6 +1195,8 @@ pub struct Entity {
     pub weapon_profile: Option<WeaponProfile>,
     pub hook_profile: Option<HookProfile>,
     pub armor_levels: Option<ArmorLevels>,
+    /// Facts retained from the latest successful appraisal as one replaceable snapshot.
+    pub inspection_supplement: Option<InspectionSupplement>,
     pub spell_book: Vec<u32>,
     pub book: Option<BookData>,
 
@@ -1604,6 +1607,7 @@ impl Entity {
                 weapon_profile: &mut self.weapon_profile,
                 hook_profile: &mut self.hook_profile,
                 armor_levels: &mut self.armor_levels,
+                inspection_supplement: &mut self.inspection_supplement,
                 spell_book: &mut self.spell_book,
                 armor_highlight: &mut self.armor_highlight,
                 armor_color: &mut self.armor_color,
@@ -1742,6 +1746,7 @@ impl Entity {
             weapon_profile: None,
             hook_profile: None,
             armor_levels: None,
+            inspection_supplement: None,
             spell_book: Vec::new(),
             book: None,
             armor_highlight: None,

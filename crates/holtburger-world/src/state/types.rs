@@ -4,7 +4,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_content::{MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_content::{CharacterTitleCatalog, MotionSequenceCatalog, SoulEmoteCatalog};
 use holtburger_dat::file_type::{SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use holtburger_protocol::messages::combat::CombatMode;
@@ -56,6 +56,8 @@ pub struct WorldState {
     pub xp_table: Arc<XpTable>,
     pub skill_table: Arc<SkillTable>,
     pub spell_catalog: Arc<SpellCatalog>,
+    /// Localized static character titles consumed by inspection construction.
+    pub character_titles: Arc<CharacterTitleCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
     pub motion_sequences: Arc<MotionSequenceCatalog>,
     /// Authored-motion playback for every entity this client simulates.
@@ -407,6 +409,7 @@ impl WorldState {
             xp_table: Arc::clone(&bootstrap.xp_table),
             skill_table: Arc::clone(&bootstrap.skill_table),
             spell_catalog: bootstrap.spell_catalog(),
+            character_titles: Arc::clone(&bootstrap.character_titles),
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
             motion_sequences: Arc::clone(&bootstrap.motion_sequences),
             motion_runtimes: MotionRuntimeRegistry::new(),

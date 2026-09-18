@@ -288,6 +288,18 @@ impl ContentRepository {
             .context("failed to load chat pose table for soul emote catalog")?;
         Ok(SoulEmoteCatalog::from_asset(&chat_pose_table))
     }
+
+    /// Loads and joins the portal and language records used by retail character-title display.
+    pub fn read_character_title_catalog(&self) -> Result<crate::CharacterTitleCatalog> {
+        let mapper = self
+            .read_asset::<holtburger_dat::file_type::EnumMapper>("character-title enum mapper")
+            .context("failed to load character-title enum mapper")?;
+        let strings = self
+            .read_asset::<holtburger_dat::file_type::StringTable>("character-title string table")
+            .context("failed to load character-title string table")?;
+        crate::CharacterTitleCatalog::from_assets(&mapper, &strings)
+            .context("failed to build character-title catalog")
+    }
 }
 
 fn missing_asset_error(key: ResourceKey<'_>, source_description: Option<&str>) -> anyhow::Error {

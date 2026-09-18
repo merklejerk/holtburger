@@ -71,6 +71,9 @@ impl ClientRuntimeBuilder {
         let xp_table = content
             .read_asset::<XpTable>("XP table")
             .context("failed to load XP table for client runtime")?;
+        let character_titles = content
+            .read_character_title_catalog()
+            .context("failed to load character-title catalog for client runtime")?;
         let motion_sequences = content
             .read_motion_sequence_catalog()
             .context("failed to build the motion contract for client runtime")?;
@@ -82,6 +85,7 @@ impl ClientRuntimeBuilder {
             skill_table,
             spell_table,
             xp_table,
+            character_titles,
             motion_sequences,
             soul_emote_catalog,
         )));
@@ -267,8 +271,13 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
 mod tests {
     use super::*;
     use holtburger_content::ContentRepository;
-    use holtburger_dat::file_type::{ChatPoseTable, MotionTable, SkillTable, SpellTable, XpTable};
-    use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter, ResourceSource};
+    use holtburger_dat::file_type::{
+        ChatPoseTable, EnumMapper, MotionTable, SkillTable, SpellTable, StringTable, XpTable,
+    };
+    use holtburger_dat::{
+        DatFileType, EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
+        ResourceSource,
+    };
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
@@ -379,6 +388,20 @@ mod tests {
                     data,
                 )
                 .expect("test HBA entry should be added");
+        }
+
+        for (namespace, id) in [
+            (EOR_PORTAL_NAMESPACE, EnumMapper::FILE_ID),
+            (EOR_LANGUAGE_NAMESPACE, StringTable::FILE_ID),
+        ] {
+            let data = source
+                .get_file_in_namespace(namespace, id)
+                .unwrap_or_else(|_| {
+                    panic!("repo assets.hba should contain {namespace}:0x{id:08X}")
+                });
+            writer
+                .add(namespace, id, DatFileType::from_id(id) as u32, data)
+                .expect("character-title content test HBA entry should be added");
         }
 
         for (file_id, data) in [

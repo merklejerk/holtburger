@@ -28,6 +28,9 @@ export function createDefaultClientUserSettings(
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
 		weatherEnabled: CLIENT_TUNING.frameSettings.weatherEnabled,
+		inspection: {
+			previewHeight: CLIENT_TUNING.objectPreview.height.initial,
+		},
 	};
 }
 

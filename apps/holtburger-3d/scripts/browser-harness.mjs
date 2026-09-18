@@ -3,6 +3,7 @@ import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
+import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
@@ -29,6 +30,8 @@ const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
 /** Settle policy changes before each timed shadow benchmark window. */
 const ENTITY_SHADOW_BENCHMARK_WARMUP_MS = 500;
+/** Let the direct preview renderer and world profile reach steady state. */
+const OBJECT_PREVIEW_BENCHMARK_WARMUP_MS = 1_000;
 /** Settle the cold nameplate setting before each paired timing window. */
 const NAMEPLATE_BENCHMARK_WARMUP_MS = 500;
 /** Test-owned enabled ceiling held constant across nameplate benchmark runs. */
@@ -96,6 +99,7 @@ try {
 	} else if (options.clientHud) {
 		report = {
 			clientHud: result.clientHud,
+			clientInspection: result.clientInspection,
 			clientTargeting: result.clientTargeting,
 			clientTheme: result.clientTheme,
 			clientInventory: result.clientInventory,
@@ -107,6 +111,17 @@ try {
 		report = particleSaoHarnessReport(result);
 	} else if (options.reportMode === "nameplate") {
 		report = nameplateHarnessReport(result);
+	} else if (options.reportMode === "object-preview") {
+		report = {
+			objectPreviewBenchmark: summarizeObjectPreviewBenchmark(
+				result.objectPreviewBenchmark,
+			),
+			objectPreview: result.objectPreview,
+			glRenderer: result.glRenderer,
+			consoleMessages: result.consoleMessages.filter(
+				({ level }) => level === "error" || level === "exception",
+			),
+		};
 	} else if (options.reportMode === "brief") {
 		report = briefHarnessReport(result);
 	} else {
@@ -136,6 +151,7 @@ try {
 			portalTraversalInvestigation: result.portalTraversalInvestigation,
 			materialTableProbe: result.materialTableProbe,
 			nameplateBenchmark: result.nameplateBenchmark,
+			objectPreviewBenchmark: result.objectPreviewBenchmark,
 			ambientOcclusionCoverageCensus:
 				result.state.ambientOcclusionCoverageCensus,
 			textureFiltering: options.textureFiltering,
@@ -159,6 +175,7 @@ try {
 			lifecycleState: result.lifecycleState,
 			entityLifecycle: result.entityLifecycle,
 			spawnedSelection: result.spawnedSelection,
+			objectPreview: result.objectPreview,
 			possessionScenario: result.possessionScenario,
 			followFlight: result.followFlight,
 			relocationSequence: result.relocationSequence,
@@ -225,7 +242,14 @@ try {
 	if (options.fixture === "entity-selection") {
 		assertEntitySelectionFixture(result.state.entitySelection);
 	}
-	if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
+	// The focused preview probe owns its catalog realization/rendering assertions. The generic
+	// lifecycle assertion samples an earlier post-spawn state and can reject a slower catalog
+	// realization even when the preview subsequently installs and renders the requested visual.
+	if (
+		options.spawnWcid !== null &&
+		options.entityShowcaseCount === 0 &&
+		!options.objectPreviewProbe
+	) {
 		assertSpawnedEntityLifecycle(result);
 	}
 	if (options.launchDirection !== null) {
@@ -280,6 +304,8 @@ function parseArgs(args) {
 		excludeAuthoredDynamics: false,
 		excludeSpawnedAttachments: false,
 		spawnedSelectionProbe: false,
+		objectPreviewProbe: false,
+		objectPreviewBenchmarkPairs: 0,
 		spawnWcid: null,
 		deathMotionFixture: null,
 		entityShowcaseCount: 0,
@@ -379,6 +405,9 @@ function parseArgs(args) {
 			case "--nameplate-report-only":
 				parsed.reportMode = "nameplate";
 				break;
+			case "--object-preview-report-only":
+				parsed.reportMode = "object-preview";
+				break;
 			case "--chrome-path":
 				parsed.chromePath = requireValue(args, ++index, arg);
 				break;
@@ -472,6 +501,15 @@ function parseArgs(args) {
 				break;
 			case "--spawned-selection-probe":
 				parsed.spawnedSelectionProbe = true;
+				break;
+			case "--object-preview-probe":
+				parsed.objectPreviewProbe = true;
+				break;
+			case "--object-preview-benchmark-pairs":
+				parsed.objectPreviewBenchmarkPairs = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
 				break;
 			case "--entity-showcase-count":
 				parsed.entityShowcaseCount = parsePositiveInteger(
@@ -1245,6 +1283,29 @@ function parseArgs(args) {
 	if (parsed.spawnedSelectionProbe && parsed.spawnWcid === null) {
 		throw new Error("--spawned-selection-probe requires --spawn-wcid.");
 	}
+	if (parsed.objectPreviewProbe && parsed.spawnWcid === null) {
+		throw new Error("--object-preview-probe requires --spawn-wcid.");
+	}
+	if (parsed.objectPreviewBenchmarkPairs > 0) {
+		if (parsed.spawnWcid === null) {
+			throw new Error(
+				"--object-preview-benchmark-pairs requires --spawn-wcid.",
+			);
+		}
+		if (!parsed.gpu) {
+			throw new Error("--object-preview-benchmark-pairs requires --gpu.");
+		}
+		if (!parsed.profileRenderer) {
+			throw new Error(
+				"--object-preview-benchmark-pairs requires --profile-renderer.",
+			);
+		}
+		if (parsed.measureMs <= 0) {
+			throw new Error(
+				"--object-preview-benchmark-pairs requires a positive --measure-ms.",
+			);
+		}
+	}
 	// The pair and population scenarios spawn simulated fleets of their own, so they satisfy the
 	// same requirement without --spawn-simulated.
 	const simulatedScenario =
@@ -1326,6 +1387,8 @@ Options:
                         Print only workload identity, particle/SAO metrics, timings, and errors.
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
+  --object-preview-report-only
+                        Print only renderer identity, errors, and object-preview evidence.
   --world-marker        Draw the depth-tested world marker and trajectory fixture.
   --map                 Draw the overhead map onto a harness canvas before the screenshot.
   --map-size <px>       Square pixel size of the map canvas (default 512).
@@ -1361,6 +1424,12 @@ Options:
   --spawned-selection-probe
                         Select every entity produced by --spawn-wcid through the production runtime.
                         With --spawn-simulated, first activate a short authored locomotion clip.
+  --object-preview-probe
+                        Open, close, and reopen --spawn-wcid through the production preview path;
+                        fail on GL errors or a uniform background-only frame.
+  --object-preview-benchmark-pairs <n>
+                        Measure alternating closed/open preview windows in one settled hardware
+                        session. Requires --spawn-wcid, --gpu, --profile-renderer, and --measure-ms.
   --entity-pair-wcid <id>
                         Launch this simulated WCID along AC +x into the pair target. Needs a
                         catalog maximum velocity, so pick a missile-class template.
@@ -1790,6 +1859,7 @@ function briefHarnessReport(result) {
 	const staticObjects = result.state.staticObjects;
 	const authoredDynamics = result.state.authoredDynamics;
 	return {
+		objectPreviewBenchmark: result.objectPreviewBenchmark,
 		measuredFrameThroughput: result.measuredFrameThroughput,
 		portalTraversalSurvey: result.portalTraversalSurvey,
 		portalTraversalInvestigation: result.portalTraversalInvestigation,
@@ -1817,6 +1887,7 @@ function briefHarnessReport(result) {
 		),
 		entityLifecycle: summarizeEntityLifecycle(result.entityLifecycle),
 		spawnedSelection: result.spawnedSelection,
+		objectPreview: result.objectPreview,
 		possessionScenario: summarizePossessionScenario(result.possessionScenario),
 		entityPair: result.entityPair,
 		entityPopulation: result.entityPopulation,
@@ -1892,6 +1963,53 @@ function briefHarnessReport(result) {
 		texture: staticObjects?.texture ?? null,
 		terrainWorker: result.state.terrainWorker,
 		timing: result.state.timing,
+	};
+}
+
+function summarizeObjectPreviewBenchmark(benchmark) {
+	if (benchmark === null) return null;
+	const summarize = (samples) => ({
+		frameWork: summarizeNumbers(
+			samples.map((sample) => sample.timing.averageFrameWorkMs),
+		),
+		rendererCpu: summarizeNumbers(
+			samples.map((sample) => sample.rendererCpu.meanTotalMs),
+		),
+		gpu: samples.every((sample) => sample.gpu.kind === "available")
+			? summarizeNumbers(samples.map((sample) => sample.gpu.meanTotalMs))
+			: { kind: "unavailable" },
+		worstFrameWork: summarizeNumbers(
+			samples.map((sample) => sample.timing.longestFrameWorkMs),
+		),
+		previewFramesPerSecond: summarizeNumbers(
+			samples
+				.map((sample) => sample.previewFramesPerSecond)
+				.filter((value) => value !== null),
+		),
+		previewParticleCount: summarizeNumbers(
+			samples
+				.map(
+					(sample) =>
+						sample.previewDiagnostics?.particle.drawnParticleCount ?? null,
+				)
+				.filter((value) => value !== null),
+		),
+	});
+	return {
+		measureMs: benchmark.measureMs,
+		pairCount: benchmark.pairCount,
+		warmupMs: benchmark.warmupMs,
+		closed: summarize(benchmark.samples.filter((sample) => !sample.visible)),
+		open: summarize(benchmark.samples.filter((sample) => sample.visible)),
+	};
+}
+
+function summarizeNumbers(values) {
+	if (values.length === 0) return null;
+	return {
+		maximum: Math.max(...values),
+		mean: values.reduce((total, value) => total + value, 0) / values.length,
+		minimum: Math.min(...values),
 	};
 }
 
@@ -4626,6 +4744,17 @@ async function runClientHudHarness({ viteUrl }) {
 			);
 		}
 
+		const clientInspection = await probeObjectInspection(
+			client,
+			evaluateExpression,
+			options.screenshotPath
+				? async (name, data) =>
+						writeFile(
+							`${options.screenshotPath}.${name}.png`,
+							Buffer.from(data, "base64"),
+						)
+				: null,
+		);
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,
@@ -4683,6 +4812,7 @@ async function runClientHudHarness({ viteUrl }) {
 		};
 		return {
 			clientTheme: theme,
+			clientInspection,
 			clientTargeting: targeting,
 			clientInventory: inventory,
 			keyboardPolicy,
@@ -5550,6 +5680,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		let completedEntityState = null;
 		let possessionScenario = null;
 		let spawnedSelection = null;
+		let objectPreview = null;
 		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 			spawnedEntity = await evaluate(
 				client,
@@ -5646,6 +5777,40 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					spawnedEntity,
 					options.spawnSimulated,
 				);
+			}
+			if (options.objectPreviewProbe) {
+				objectPreview = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeObjectPreviewLifecycle",
+					[spawnedEntity.identity.guid],
+				);
+				for (const [label, sample] of Object.entries(objectPreview)) {
+					if (label === "contextLoss" || label === "suspension") continue;
+					if (sample.backgroundAlpha !== 0)
+						throw new Error(
+							`Object preview ${label} background alpha was ${sample.backgroundAlpha}, expected 0.`,
+						);
+					if (sample.glErrors.length > 0)
+						throw new Error(
+							`Object preview ${label} reported GL errors ${sample.glErrors.join(", ")}.`,
+						);
+					if (sample.visiblePixelCount === 0)
+						throw new Error(
+							`Object preview ${label} rendered only its uniform background.`,
+						);
+					if (sample.emissiveTransparentPixelCount !== 0)
+						throw new Error(
+							`Object preview ${label} emitted ${sample.emissiveTransparentPixelCount} RGB pixels without alpha coverage.`,
+						);
+				}
+				if (
+					objectPreview.contextLoss.supported &&
+					(!objectPreview.contextLoss.previewContextLost ||
+						objectPreview.contextLoss.worldContextLost)
+				)
+					throw new Error(
+						`Object preview context-loss isolation failed: ${JSON.stringify(objectPreview.contextLoss)}.`,
+					);
 			}
 		}
 		let entityShowcase = null;
@@ -6259,6 +6424,15 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						options.measureMs,
 					)
 				: null;
+		const objectPreviewBenchmark =
+			options.objectPreviewBenchmarkPairs > 0
+				? await runObjectPreviewBenchmark(
+						client,
+						options.objectPreviewBenchmarkPairs,
+						options.measureMs,
+						spawnedEntity?.identity.guid ?? null,
+					)
+				: null;
 		if (options.traceTerrainGl) {
 			await evaluate(
 				client,
@@ -6475,6 +6649,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			entityShadowCycleInitialState,
 			entityShadowBenchmark,
 			nameplateBenchmark,
+			objectPreviewBenchmark,
 			audioFlyby,
 			cameraSweepScreenshots,
 			map: mapEvidence,
@@ -6496,6 +6671,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 							despawnedState: despawnedEntityState,
 						},
 			spawnedSelection,
+			objectPreview,
 			generatedDisabledState,
 			initialState,
 			nameplateWorkload,
@@ -6614,6 +6790,114 @@ async function runEntityShadowBenchmark(client, pairCount, measureMs) {
 		pairCount,
 		warmupMs: ENTITY_SHADOW_BENCHMARK_WARMUP_MS,
 		samples,
+	};
+}
+
+/** Measure paired closed/open preview windows while keeping scene/content identity fixed. */
+async function runObjectPreviewBenchmark(client, pairCount, measureMs, guid) {
+	if (guid === null)
+		throw new Error("Object preview benchmark has no spawned entity GUID.");
+	const samples = [];
+	try {
+		for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+			const visibilityOrder =
+				pairIndex % 2 === 0 ? [false, true] : [true, false];
+			for (
+				let orderIndex = 0;
+				orderIndex < visibilityOrder.length;
+				orderIndex += 1
+			) {
+				const visible = visibilityOrder[orderIndex];
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setObjectPreviewBenchmarkVisible",
+					[guid, visible],
+				);
+				await delay(OBJECT_PREVIEW_BENCHMARK_WARMUP_MS);
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
+					[],
+				);
+				const previewBefore = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.objectPreviewDiagnostics",
+					[],
+				);
+				await delay(measureMs);
+				const previewAfter = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.objectPreviewDiagnostics",
+					[],
+				);
+				const state = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+					[],
+				);
+				const cpuProfile = state.frameProfile?.cpu ?? null;
+				const gpuProfile = state.frameProfile?.gpu ?? null;
+				samples.push({
+					pairIndex,
+					orderIndex,
+					visible,
+					previewFramesPerSecond:
+						previewBefore === null || previewAfter === null
+							? null
+							: ((previewAfter.frameCount - previewBefore.frameCount) * 1000) /
+								measureMs,
+					previewDiagnostics: previewAfter,
+					timing: state.timing,
+					rendererCpu: {
+						meanTotalMs: cpuProfile?.mean.totalMs ?? null,
+						p95RecentTotalMs: cpuProfile?.p95RecentTotalMs ?? null,
+						sampleCount: cpuProfile?.sampleCount ?? 0,
+					},
+					gpu: {
+						kind: gpuProfile?.kind ?? "unavailable",
+						meanTotalMs: gpuProfile?.mean?.totalMs ?? null,
+						meanPresentationMs: gpuProfile?.mean?.presentationMs ?? null,
+						sampleCount: gpuProfile?.sampleCount ?? 0,
+					},
+					metrics: objectPreviewBenchmarkMetrics(state.metrics),
+				});
+			}
+		}
+	} finally {
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setObjectPreviewBenchmarkVisible",
+			[guid, false],
+		);
+		await delay(OBJECT_PREVIEW_BENCHMARK_WARMUP_MS);
+	}
+	return {
+		measureMs,
+		pairCount,
+		warmupMs: OBJECT_PREVIEW_BENCHMARK_WARMUP_MS,
+		samples,
+	};
+}
+
+/** Keep only per-frame draw/upload and preview-target facts needed by the paired comparison. */
+function objectPreviewBenchmarkMetrics(metrics) {
+	if (metrics === null) return null;
+	return {
+		flatSceneFramebufferCount: metrics.flatSceneFramebufferCount,
+		flatSceneTargetBytes: metrics.flatSceneTargetBytes,
+		objectDrawCalls: metrics.objectDrawCalls,
+		objectLightingBinds: metrics.objectLightingBinds,
+		objectProgramChanges: metrics.objectProgramChanges,
+		objectSuppressedUniformUploads: metrics.objectSuppressedUniformUploads,
+		objectTextureBinds: metrics.objectTextureBinds,
+		objectUniformUploads: metrics.objectUniformUploads,
+		submittedDynamicDrawCount: metrics.submittedDynamicDrawCount,
+		submittedParticleBatchCount: metrics.submittedParticleBatchCount,
+		submittedParticleInstanceCount: metrics.submittedParticleInstanceCount,
+		submittedTransparentObjectDrawCount:
+			metrics.submittedTransparentObjectDrawCount,
+		unresolvedParticleBatchCount: metrics.unresolvedParticleBatchCount,
+		uploadedParticleRecordRowCount: metrics.uploadedParticleRecordRowCount,
 	};
 }
 

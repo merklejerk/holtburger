@@ -116,10 +116,18 @@ cargo run -p holtburger-tools --bin dat2hba -- \
 	--profile pruned \
 	eor/portal=client_portal.dat \
 	eor/cell=client_cell_1.dat \
+	eor/language=client_local_English.dat \
 	dats/assets.hba
 ```
 
 That produces a single namespaced bundle suitable for the current runtime/bootstrap flow.
+
+The full profile carries the complete portal, cell, and selected language DATs. The pruned and
+micro profiles retain only the language records required by their runtime consumers; character-title
+inspection currently keeps portal EnumMapper `0x22000041` and language StringTable `0x2300000E`.
+Supplying every source DAT to the same pack operation preserves the AIO workflow and makes each
+profile's required records available for retention. A namespace with no retained records, such as
+`eor/cell` in the current micro profile, is omitted from that emitted archive.
 
 Use `--profile micro` for the release-oriented minimal bundle. The current micro profile contains the
 three required runtime portal tables, the raw `0x0E000002` character-generation table for HBA-only

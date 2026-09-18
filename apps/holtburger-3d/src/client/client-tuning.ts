@@ -7,6 +7,7 @@ import type {
 	ClientPortalTransitionTuning,
 	ClientTuning,
 } from "./client-tuning-contract";
+import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout";
 
 const CLIENT_DIAGNOSTICS = {
 	/** Smoothing window used by the client frame-rate readout. */
@@ -43,6 +44,22 @@ export const CLIENT_TUNING = {
 	audio: SHARED_FRONTEND_TUNING.audio,
 	diagnostics: CLIENT_DIAGNOSTICS,
 	portalTransition: CLIENT_PORTAL_TRANSITION,
+	objectInspection: {
+		refreshIntervalMs: 1_000,
+	},
+	objectPreview: {
+		height: {
+			...CLIENT_INSPECTION_PREVIEW_HEIGHT,
+			keyboardStep: 12,
+		},
+		maximumFramesPerSecond: 60,
+		maximumBufferWidth: 768,
+		maximumBufferHeight: 576,
+		minimumResolutionScale: 1.5,
+		initialYawRadians: 0.65,
+		yawRadiansPerPixel: 0.008,
+		keyboardYawStepRadians: 0.15,
+	},
 	camera: {
 		/** Projection used by the host-authored third-person camera. */
 		far: 2_000,

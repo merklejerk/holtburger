@@ -1,6 +1,9 @@
 import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 import { APP_INPUT } from "../../lib/input/app-input";
-import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
+import type {
+	EscapeContextHandle,
+	KeyboardInputPolicy,
+} from "../../lib/input/keyboard-input-policy";
 import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 
 /** Real DOM controls driven by CDP to test browser defaults alongside production Explorer input. */
@@ -104,8 +107,20 @@ export function installKeyboardPolicyFixture(
 	});
 	controller.setControlScheme({ kind: "physical-fly" });
 	let disposed = false;
+	/** Synthetic activity competes with production windows through the real keyboard boundary. */
+	let activity: EscapeContextHandle | null = null;
+	let activityCancellations = 0;
 	return {
+		beginEscapeActivity: () => {
+			if (activity !== null) activity.promote();
+			else
+				activity = keyboard.bindEscapeContext(() => {
+					activity = null;
+					activityCancellations += 1;
+				});
+		},
 		capture: () => ({
+			activityCancellations,
 			gameActive: keyboard.gameActive,
 			pointerAllowed: inputGate.allowed,
 			movement: controller.physicalFlyInput().movement,
@@ -140,6 +155,7 @@ export function installKeyboardPolicyFixture(
 		dispose: () => {
 			if (disposed) return;
 			disposed = true;
+			activity?.release();
 			closeModal();
 			scope.destroy();
 			keyboard.returnToGame();

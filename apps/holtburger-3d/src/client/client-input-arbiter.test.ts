@@ -51,6 +51,16 @@ function fixture() {
 }
 
 describe("ClientInputArbiter", () => {
+	it("cancels precise mode once and restores held movement", () => {
+		const { arbiter, edges, ordinary } = fixture();
+		arbiter.applyAction("forward", true);
+		arbiter.enterPrecise();
+		expect(arbiter.cancelPrecise()).toBe(true);
+		expect(arbiter.cancelPrecise()).toBe(false);
+		expect(arbiter.preciseActive).toBe(false);
+		expect(edges).toEqual(["enter", "cancel"]);
+		expect(ordinary.calls).toContain("forward:restore");
+	});
 	it("preserves opposing action precedence across precise mode", () => {
 		const ordinary = new CharacterInputController({
 			fullChargeDurationMs: 1000,

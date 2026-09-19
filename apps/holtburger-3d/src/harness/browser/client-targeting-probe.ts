@@ -20,7 +20,6 @@ import {
 	cellId,
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
-import { APP_INPUT } from "../../lib/input/app-input";
 import { landblockVector3 } from "../../lib/assets/ac-frame";
 import { Vec3 } from "../../lib/game/math/types";
 
@@ -110,14 +109,6 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	});
 	const unbind = keyboard.bindGame({
 		keydown: (event) => {
-			if (
-				APP_INPUT.shortcut("cancel", event) &&
-				arbiter.applyCancel(true, event.repeat)
-			) {
-				input.cancel();
-				event.preventDefault();
-				return;
-			}
 			input.keydown(event, nowMs);
 		},
 		keyup: (event) => input.keyup(event, nowMs),
@@ -263,6 +254,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		});
 		expectSelected(9, "empty cycle keeps newer intent");
 		arbiter.enterPrecise();
+		keyboard.bindEscapeContext(() => {
+			input.cancel();
+			arbiter.cancelPrecise();
+		});
 		press("Escape");
 		expectSelected(9, "precise-jump Escape priority");
 		editor.focus();

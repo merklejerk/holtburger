@@ -33,6 +33,22 @@ export interface KeyboardScope {
 	readonly cancel?: () => void;
 }
 
+/** Opt-in cancellation lifetime whose recency determines the next contextual Escape action. */
+export interface EscapeContextHandle {
+	/** Make this context the next contextual Escape action. */
+	readonly promote: () => void;
+	/** Permanently remove this context from Escape routing. */
+	readonly release: () => void;
+}
+
+/** One registered contextual cancellation, retained across an optimistic dismissal. */
+interface EscapeContextEntry {
+	/** Existing feature operation invoked after this entry leaves the stack. */
+	readonly cancel: () => void;
+	/** Floating surfaces receive their depth among other floating surfaces. */
+	readonly onOrder: ((depth: number) => void) | undefined;
+}
+
 /** A modal retains the prior interaction independently of DOM focus restoration. */
 interface ModalOwnership {
 	/** Native top-layer boundary owned by this registration. */
@@ -95,6 +111,8 @@ export class KeyboardInputPolicy {
 	#owner: HTMLElement | null = null;
 	/** A pointer gesture must see Escape before a focused scope consumes it. */
 	#escapeCancellation: (() => boolean) | null = null;
+	/** Opt-in app contexts ordered from least to most recently engaged. */
+	readonly #escapeContexts: EscapeContextEntry[] = [];
 	/** One mode-specific controller, independent of pointer handlers. */
 	#game: KeyboardConsumer | null = null;
 	/** The DOM boundary exists only during the mounted app lifetime. */
@@ -175,6 +193,36 @@ export class KeyboardInputPolicy {
 		this.#escapeCancellation = cancel;
 		return () => {
 			if (this.#escapeCancellation === cancel) this.#escapeCancellation = null;
+		};
+	}
+
+	/** Register cancellation; optional visual-depth publication keeps floating surfaces in the same order. */
+	bindEscapeContext(
+		cancel: () => void,
+		onOrder?: (depth: number) => void,
+	): EscapeContextHandle {
+		const entry: EscapeContextEntry = { cancel, onOrder };
+		let released = false;
+		const promote = () => {
+			if (released) return;
+			const index = this.#escapeContexts.indexOf(entry);
+			if (index !== -1 && index === this.#escapeContexts.length - 1) return;
+			if (index !== -1) this.#escapeContexts.splice(index, 1);
+			this.#escapeContexts.push(entry);
+			this.#publishEscapeOrder();
+		};
+		promote();
+		return {
+			promote,
+			release: () => {
+				if (released) return;
+				released = true;
+				const index = this.#escapeContexts.indexOf(entry);
+				if (index !== -1) {
+					this.#escapeContexts.splice(index, 1);
+					this.#publishEscapeOrder();
+				}
+			},
 		};
 	}
 
@@ -289,6 +337,12 @@ export class KeyboardInputPolicy {
 			this.#presses.set(key, "cancelled");
 			return;
 		}
+		// A held Escape must not reach a replacement gesture, editor, modal, or game context.
+		if (event.key === "Escape" && !fresh) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			return;
+		}
 		if (!this.#presses.has(key) || this.#presses.get(key) === "cancelled") {
 			event.preventDefault();
 			event.stopImmediatePropagation();
@@ -343,6 +397,20 @@ export class KeyboardInputPolicy {
 				event.preventDefault();
 			}
 		}
+		if (
+			!event.defaultPrevented &&
+			this.#owner === null &&
+			this.#modals.length === 0 &&
+			this.viewport.allowed &&
+			fresh &&
+			event.key === "Escape" &&
+			this.#cancelEscapeContext()
+		) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.#presses.set(key, "cancelled");
+			return;
+		}
 		if (!event.defaultPrevented && this.gameActive) {
 			this.#presses.set(key, "game");
 			this.#game?.keydown(event);
@@ -351,6 +419,23 @@ export class KeyboardInputPolicy {
 		if (event.key === "Tab") event.preventDefault();
 		if (event.defaultPrevented) event.stopImmediatePropagation();
 	};
+
+	/** Retire before invoking feature code so one press cannot cancel two contexts. */
+	#cancelEscapeContext(): boolean {
+		const entry = this.#escapeContexts.pop();
+		if (entry === undefined) return false;
+		this.#publishEscapeOrder();
+		entry.cancel();
+		return true;
+	}
+
+	/** Visual depth is a projection of cancellation order, never a separately maintained stack. */
+	#publishEscapeOrder(): void {
+		let depth = 0;
+		for (const entry of this.#escapeContexts) {
+			if (entry.onOrder !== undefined) entry.onOrder(depth++);
+		}
+	}
 
 	/** A release belonging to an outgoing owner never reaches the replacement owner. */
 	readonly keyup = (event: KeyboardEvent): void => {

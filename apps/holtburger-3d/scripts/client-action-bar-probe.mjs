@@ -519,7 +519,6 @@ export async function probeActionBars(
 	);
 	await shift(false);
 	assert.deepEqual(await alternateHints(), []);
-	await key("Escape", "Escape");
 	await drag(cell(1, 3), { x: 500, y: 300 });
 	return {
 		alternateHints: true,

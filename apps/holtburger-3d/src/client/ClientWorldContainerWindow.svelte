@@ -26,8 +26,6 @@
 		readonly onSelectItem: (guid: number) => void;
 		readonly placement: ClientHudPlacement;
 		readonly viewport: ClientHudViewport;
-		readonly zIndex?: number;
-		readonly onFocus?: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
 	const {
@@ -37,8 +35,6 @@
 		onSelectItem,
 		placement,
 		viewport,
-		zIndex,
-		onFocus,
 		onPlacementChange,
 	}: Props = $props();
 	/** Only the bounded display sampler writes these markup inputs. */
@@ -116,21 +112,20 @@
 		inert={opening !== null}
 	>
 		<span class="container-cell-measure" aria-hidden="true"></span>
-		<ClientHudWindow
-			icon="inventory"
-			title={current.root.description.kind === "known"
-				? current.root.description.name
-				: "Container"}
-			{placement}
-			{viewport}
-			{zIndex}
-			{onFocus}
-			{onPlacementChange}
-			minWidth={minimum.width}
-			minHeight={minimum.height}
-			onClose={() => model.close(current.root.guid)}
-		>
-			{#key current.root.guid}
+		<!-- A replacement container starts a new window and Escape lifetime. -->
+		{#key current.root.guid}
+			<ClientHudWindow
+				icon="inventory"
+				title={current.root.description.kind === "known"
+					? current.root.description.name
+					: "Container"}
+				{placement}
+				{viewport}
+				{onPlacementChange}
+				minWidth={minimum.width}
+				minHeight={minimum.height}
+				onClose={() => model.close(current.root.guid)}
+			>
 				<ClientWorldContainerPanel
 					{model}
 					view={current}
@@ -143,8 +138,8 @@
 						refresh?.();
 					}}
 				/>
-			{/key}
-		</ClientHudWindow>
+			</ClientHudWindow>
+		{/key}
 	</div>
 {/if}
 

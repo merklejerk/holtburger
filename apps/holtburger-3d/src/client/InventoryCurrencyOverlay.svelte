@@ -2,6 +2,8 @@
 	import { onMount, type Snippet } from "svelte";
 	import UiIcon from "../app/UiIcon.svelte";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import type { InventoryCurrencyRow } from "./client-inventory-state";
 
 	interface Props {
@@ -16,15 +18,19 @@
 		displays: ReadonlyMap<string, UiIconDisplay>;
 	}
 	const { children, label, rows, pending, displays }: Props = $props();
+	const { keyboard } = useAppInputPolicy();
 	const id = $props.id();
 	let trigger: HTMLButtonElement;
 	let popup: HTMLDivElement;
 	let closeTimer: ReturnType<typeof setTimeout> | undefined;
+	let escapeContext: EscapeContextHandle | null = null;
 	function cancelClose() {
 		clearTimeout(closeTimer);
 	}
 	function close() {
 		cancelClose();
+		escapeContext?.release();
+		escapeContext = null;
 		popup.hidePopover();
 	}
 	function position() {
@@ -35,6 +41,9 @@
 	function open() {
 		cancelClose();
 		popup.showPopover();
+		if (escapeContext === null)
+			escapeContext = keyboard.bindEscapeContext(close);
+		else escapeContext.promote();
 		position();
 	}
 	function scheduleClose() {
@@ -48,22 +57,19 @@
 		}, 150);
 	}
 	onMount(() => {
-		const escape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") close();
-		};
 		const reposition = () => {
 			if (popup.matches(":popover-open")) position();
 		};
 		const observer = new ResizeObserver(reposition);
 		observer.observe(popup);
 		observer.observe(trigger);
-		window.addEventListener("keydown", escape);
 		window.addEventListener("resize", reposition);
 		window.addEventListener("scroll", reposition, true);
 		return () => {
 			cancelClose();
+			escapeContext?.release();
+			escapeContext = null;
 			observer.disconnect();
-			window.removeEventListener("keydown", escape);
 			window.removeEventListener("resize", reposition);
 			window.removeEventListener("scroll", reposition, true);
 		};
@@ -90,6 +96,7 @@
 	popover="manual"
 	role="tooltip"
 	class="inventory-currency-overlay"
+	onpointerdown={() => escapeContext?.promote()}
 	onpointerenter={cancelClose}
 	onpointerleave={scheduleClose}
 >

@@ -28,6 +28,7 @@
 		type ClientDialogPresentation,
 	} from "./client-dialogs";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount, untrack } from "svelte";
 	import {
@@ -222,7 +223,13 @@
 			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
 	}
 	function beginCombat(): void {
-		if (selectedEntityGuid === null || characterSettings.kind !== "ready")
+		const currentSession = session;
+		if (
+			currentSession === null ||
+			lifecycle.kind !== "in-world" ||
+			selectedEntityGuid === null ||
+			characterSettings.kind !== "ready"
+		)
 			return;
 		// Selection is sampled only for this explicit begin; core retains the engaged target.
 		const profile: ClientAttackProfile | null =
@@ -231,12 +238,21 @@
 				: combatMode === "missile"
 					? { kind: "missile", ...combatControls.missile }
 					: null;
-		if (profile !== null)
-			void session
-				?.beginCombatEngagement(selectedEntityGuid, profile)
-				.catch(reportCommandFailure);
+		if (profile !== null) {
+			retireCombatEscapeContext();
+			const context = keyboard.bindEscapeContext(stopCombat);
+			combatEscapeContext = context;
+			void currentSession
+				.beginCombatEngagement(selectedEntityGuid, profile)
+				.catch((error: unknown) => {
+					// A failed older begin must not retire a newer engagement's cancellation.
+					if (combatEscapeContext === context) retireCombatEscapeContext();
+					reportCommandFailure(error);
+				});
+		}
 	}
 	function stopCombat(): void {
+		retireCombatEscapeContext();
 		void session?.stopCombatEngagement().catch(reportCommandFailure);
 	}
 	const spellBarEnabled = $derived(
@@ -371,6 +387,18 @@
 	});
 	let inputController: CharacterInputController | null = null;
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
+	/** Explicit attack intent owns cancellation; passive status updates can only retire it. */
+	let combatEscapeContext: EscapeContextHandle | null = null;
+	/** Precise-jump entry owns registration; completion, cancellation and teardown retire it. */
+	let preciseEscapeContext: EscapeContextHandle | null = null;
+	function retireCombatEscapeContext(): void {
+		combatEscapeContext?.release();
+		combatEscapeContext = null;
+	}
+	function acceptCombatStatus(status: ClientCombatStatus): void {
+		combatStatus = status;
+		if (status.desired === null) retireCombatEscapeContext();
+	}
 	let inputArbiter: ClientInputArbiter | null = null;
 	const characterInput = APP_INPUT.characterContext((action, pressed) => {
 		if (
@@ -497,14 +525,17 @@
 				combatMode = event.mode;
 				return;
 			case "combat":
-				combatStatus = event.status;
+				acceptCombatStatus(event.status);
 				return;
 			case "current-state":
 				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
-				combatStatus = event.state.combat;
+				acceptCombatStatus(event.state.combat);
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
-				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
+				if (event.state.lifecycle.kind !== "in-world") {
+					retireCombatEscapeContext();
+					inputGate.cancel();
+				}
 				playerName = event.state.playerName;
 				if (
 					event.state.localPlayerGuid !== null &&
@@ -527,7 +558,10 @@
 				});
 				return;
 			case "lifecycle":
-				if (event.lifecycle.kind !== "in-world") inputGate.cancel();
+				if (event.lifecycle.kind !== "in-world") {
+					retireCombatEscapeContext();
+					inputGate.cancel();
+				}
 				if (
 					event.lifecycle.kind === "entering-world" ||
 					event.lifecycle.kind === "character-selection"
@@ -727,14 +761,6 @@
 			if (!event.repeat) void toggleCombatMode();
 			return;
 		}
-		if (
-			APP_INPUT.shortcut("cancel", event) &&
-			inputArbiter?.applyCancel(true, event.repeat)
-		) {
-			selectionInput?.cancel();
-			event.preventDefault();
-			return;
-		}
 		if (APP_INPUT.shortcut("cancel", event) && itemInteractions?.cancel()) {
 			event.preventDefault();
 			return;
@@ -752,10 +778,7 @@
 		if (selectionInput?.keydown(event, performance.now())) return;
 		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
-			if (!event.repeat) {
-				itemInteractions?.cancel();
-				inputArbiter.enterPrecise();
-			}
+			if (!event.repeat) enterPreciseJump();
 			return;
 		}
 		if (
@@ -788,8 +811,10 @@
 	}
 
 	function enterPreciseJump(): void {
+		const arbiter = inputArbiter;
+		if (arbiter === null) return;
 		itemInteractions?.cancel();
-		inputArbiter?.enterPrecise();
+		if (!arbiter.enterPrecise()) preciseEscapeContext?.promote();
 	}
 
 	function diagnostic(error: unknown): string {
@@ -1046,13 +1071,23 @@
 			onEnter: () => {
 				selectionInput?.cancel();
 				preciseJumpSession?.enter();
+				preciseEscapeContext?.release();
+				preciseEscapeContext = keyboard.bindEscapeContext(() => {
+					preciseEscapeContext = null;
+					selectionInput?.cancel();
+					arbiter.cancelPrecise();
+				});
 				toastCenter.publish({
 					message: "Precise jump enabled",
 					tone: "status",
 				});
 			},
 			onActivate: () => preciseJumpSession?.activate(),
-			onCancel: () => preciseJumpSession?.cancel(),
+			onCancel: () => {
+				preciseEscapeContext?.release();
+				preciseEscapeContext = null;
+				preciseJumpSession?.cancel();
+			},
 			onAutoRunChanged: (enabled) =>
 				toastCenter.publish({
 					message: enabled ? "AutoRun ON" : "AutoRun OFF",
@@ -1064,6 +1099,8 @@
 		return () => {
 			cancelled = true;
 			activeJumpBeginSequence = null;
+			preciseEscapeContext?.release();
+			preciseEscapeContext = null;
 			keyboard.cancel();
 			controller.releaseOwnership();
 			if (inputArbiter === arbiter) inputArbiter = null;
@@ -1183,7 +1220,7 @@
 			reportFailure: (message) =>
 				toastCenter.publish({ message, tone: "warning" }),
 			beginAcquisition: () => {
-				inputArbiter?.applyCancel(true, false);
+				inputArbiter?.cancelPrecise();
 				keyboard.returnToGame();
 			},
 		});
@@ -1201,7 +1238,11 @@
 			if (preciseJumpActive !== snapshot.active)
 				preciseJumpActive = snapshot.active;
 			presentationSession?.setPreciseJumpMarker(snapshot.marker);
-			if (!snapshot.active) inputArbiter?.deactivate();
+			if (!snapshot.active) {
+				preciseEscapeContext?.release();
+				preciseEscapeContext = null;
+				inputArbiter?.deactivate();
+			}
 		});
 		void owner.start().catch((error: unknown) => {
 			startupError = diagnostic(error);
@@ -1210,6 +1251,7 @@
 		return () => {
 			disposed = true;
 			spellState.destroy();
+			retireCombatEscapeContext();
 			spellReferences.dispose();
 			spells = null;
 			retireCharacterSettings();

@@ -390,7 +390,58 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		assert.equal((await capture()).gameActive, true);
 		await click(historyToggle);
 		assert.equal((await historyState()).pressed, "false");
+
+		// A real HUD window and an independently active command share one recency order.
+		await click("#keyboard-viewport");
+		// Keep the fixture controls out of the production window's pointer hit area.
+		await evaluate(
+			`document.querySelector('#keyboard-viewport').parentElement.style.inset = '180px auto auto 20px'`,
+		);
+		const inventoryWindow = '.hud-window[aria-label="Inventory"]';
+		const inventoryOpen = () =>
+			evaluate(`document.querySelector('${inventoryWindow}') !== null`);
+		await click('.shortcut-dock button[aria-label="Inventory"]');
+		assert.equal(await inventoryOpen(), true);
+		await invoke("beginEscapeActivity");
+		await click(`${inventoryWindow} .hud-window-titlebar`, 0.1);
+		await invoke("openModal");
+		await key("keyDown", "Escape", "Escape", 27);
+		await key("keyDown", "Escape", "Escape", 27, { autoRepeat: true });
+		await key("keyUp", "Escape", "Escape", 27);
+		assert.equal(
+			await inventoryOpen(),
+			true,
+			"Modal Escape preserves the underlying window",
+		);
+		assert.equal((await capture()).activityCancellations, 0);
+		await key("keyDown", "Escape", "Escape", 27);
+		await key("keyDown", "Escape", "Escape", 27, { autoRepeat: true });
+		await key("keyUp", "Escape", "Escape", 27);
+		assert.equal(
+			await inventoryOpen(),
+			false,
+			"Refocusing the window promotes it above the activity",
+		);
+		assert.equal(
+			(await capture()).activityCancellations,
+			0,
+			"Holding Escape must not drain the next context",
+		);
+		await press("Escape", "Escape", 27);
+		assert.equal((await capture()).activityCancellations, 1);
+		await click('.shortcut-dock button[aria-label="Inventory"]');
+		await invoke("beginEscapeActivity");
+		await press("Escape", "Escape", 27);
+		assert.equal(
+			await inventoryOpen(),
+			true,
+			"Re-engaging the activity promotes it above the window",
+		);
+		assert.equal((await capture()).activityCancellations, 2);
+		await press("Escape", "Escape", 27);
+		assert.equal(await inventoryOpen(), false);
 		return {
+			contextualEscape: true,
 			nativeControls: true,
 			editorOwnership: true,
 			explicitScopes: true,

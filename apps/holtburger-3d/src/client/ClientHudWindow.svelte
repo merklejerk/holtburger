@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onDestroy, onMount, type Snippet } from "svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
+	import { CLIENT_UI_LAYERS } from "./client-ui-layers";
 	import ClientHudIcon, {
 		type ClientHudIconName,
 	} from "./ClientHudIcon.svelte";
@@ -22,8 +25,6 @@
 		/** Same glyph used by the panel's launcher in the system shortcut dock. */
 		readonly icon: ClientHudIconName;
 		readonly viewport: ClientHudViewport;
-		readonly zIndex?: number;
-		readonly onFocus?: () => void;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
@@ -36,20 +37,34 @@
 		title,
 		icon,
 		viewport,
-		zIndex,
-		onFocus,
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
+	const { keyboard } = useAppInputPolicy();
 	const minimum = $derived({ width: minWidth, height: minHeight });
 	const resolved = $derived(
 		resolveClientHudPlacement(placement, viewport, minimum),
 	);
 	let cancelPointerGesture: (() => void) | null = null;
+	let escapeContext: EscapeContextHandle | null = null;
+	/** Cold visual order is published by the same owner that routes Escape. */
+	let depth = $state(0);
 	onDestroy(() => cancelPointerGesture?.());
 	onMount(() => {
-		onFocus?.();
+		// Read the current prop when Escape fires; keyed window content can replace its close target.
+		escapeContext = keyboard.bindEscapeContext(
+			() => onClose(),
+			(value) => (depth = value),
+		);
+		return () => {
+			escapeContext?.release();
+			escapeContext = null;
+		};
 	});
+	function focusWindow(): void {
+		// Pointer intent promotes the window; automatic editor/modal focus restoration does not.
+		escapeContext?.promote();
+	}
 	const resizeHandles: readonly {
 		readonly name: string;
 		readonly edges: ClientPanelResizeEdges;
@@ -142,10 +157,9 @@
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}
 	style:height={`${resolved.height}px`}
-	style:z-index={zIndex}
+	style:z-index={CLIENT_UI_LAYERS.windowBase + depth}
 	aria-label={title}
-	onpointerdowncapture={onFocus}
-	onfocusin={onFocus}
+	onpointerdowncapture={focusWindow}
 >
 	<header
 		class="hud-window-titlebar ui-frame"

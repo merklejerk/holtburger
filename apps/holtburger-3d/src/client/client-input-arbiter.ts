@@ -89,12 +89,11 @@ export class ClientInputArbiter {
 		return true;
 	}
 
-	applyCancel(down: boolean, repeat = false): boolean {
+	/** End precise targeting and restore ordinary held movement without a jump release. */
+	cancelPrecise(): boolean {
 		if (!this.#precise) return false;
-		if (down && !repeat) {
-			this.#onCancel();
-			this.deactivate();
-		}
+		this.#onCancel();
+		this.deactivate();
 		return true;
 	}
 

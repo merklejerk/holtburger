@@ -47,6 +47,100 @@ describe("game keyboard routing", () => {
 		expect(game.keydown).toHaveBeenCalledOnce();
 	});
 
+	it("cancels promoted app contexts in recency order without draining on repeat", () => {
+		const { keyboard, game } = fixture();
+		const cancelled: string[] = [];
+		const inventory = keyboard.bindEscapeContext(() =>
+			cancelled.push("inventory"),
+		);
+		keyboard.bindEscapeContext(() => cancelled.push("attack"));
+		inventory.promote();
+
+		keyboard.keydown(keyEvent("Escape"));
+		keyboard.keydown(keyEvent("Escape", true));
+		expect(cancelled).toEqual(["inventory"]);
+		expect(game.keydown).not.toHaveBeenCalled();
+
+		keyboard.keyup(keyEvent("Escape"));
+		keyboard.keydown(keyEvent("Escape"));
+		expect(cancelled).toEqual(["inventory", "attack"]);
+		expect(game.keydown).not.toHaveBeenCalled();
+	});
+
+	it("removes released contexts and lets dismissed contexts be promoted again", () => {
+		const { keyboard } = fixture();
+		const cancelled: string[] = [];
+		const retained = keyboard.bindEscapeContext(() =>
+			cancelled.push("retained"),
+		);
+		const released = keyboard.bindEscapeContext(() =>
+			cancelled.push("released"),
+		);
+		released.release();
+
+		keyboard.keydown(keyEvent("Escape"));
+		retained.promote();
+		keyboard.keydown(keyEvent("Escape"));
+		expect(cancelled).toEqual(["retained", "retained"]);
+	});
+
+	it("publishes visual order from the same promotions and removals as Escape", () => {
+		const { keyboard } = fixture();
+		const inventoryOrder = vi.fn();
+		const inspectionOrder = vi.fn();
+		const closeInventory = vi.fn();
+		const stopAttack = vi.fn();
+		const inventory = keyboard.bindEscapeContext(
+			closeInventory,
+			inventoryOrder,
+		);
+		const attack = keyboard.bindEscapeContext(stopAttack);
+		const inspection = keyboard.bindEscapeContext(vi.fn(), inspectionOrder);
+		expect(inventoryOrder).toHaveBeenLastCalledWith(0);
+		expect(inspectionOrder).toHaveBeenLastCalledWith(1);
+		inventory.promote();
+		expect(inventoryOrder).toHaveBeenLastCalledWith(1);
+		expect(inspectionOrder).toHaveBeenLastCalledWith(0);
+		attack.promote();
+		expect(inventoryOrder).toHaveBeenLastCalledWith(1);
+		inspection.release();
+		expect(inventoryOrder).toHaveBeenLastCalledWith(0);
+		inventory.release();
+		inventory.promote();
+		keyboard.keydown(keyEvent("Escape"));
+		keyboard.keydown(keyEvent("Escape"));
+		// Permanently released windows cannot be resurrected by a stale callback.
+		expect(closeInventory).not.toHaveBeenCalled();
+		expect(stopAttack).toHaveBeenCalledOnce();
+	});
+
+	it("suppresses repeats before gesture cancellation even when ownership stays in game", () => {
+		const { keyboard, game } = fixture();
+		const gesture = vi.fn(() => true);
+		const window = vi.fn();
+		keyboard.bindEscapeCancellation(gesture);
+		keyboard.bindEscapeContext(window);
+		keyboard.keydown(keyEvent("Escape"));
+		keyboard.keydown(keyEvent("Escape", true));
+		expect(gesture).toHaveBeenCalledOnce();
+		expect(window).not.toHaveBeenCalled();
+		expect(game.keydown).not.toHaveBeenCalled();
+	});
+
+	it("keeps modal/scene blockers ahead of app contexts", () => {
+		const { keyboard, viewport } = fixture();
+		const cancel = vi.fn();
+		keyboard.bindEscapeContext(cancel);
+		const release = viewport.block();
+		keyboard.keydown(keyEvent("Escape"));
+		expect(cancel).not.toHaveBeenCalled();
+		release();
+		keyboard.keydown(keyEvent("Escape", true));
+		expect(cancel).not.toHaveBeenCalled();
+		keyboard.keydown(keyEvent("Escape"));
+		expect(cancel).toHaveBeenCalledOnce();
+	});
+
 	it("cancels without release actions and rejects repeats across scene availability", () => {
 		const { viewport, keyboard, game } = fixture();
 		keyboard.keydown(keyEvent("Space"));

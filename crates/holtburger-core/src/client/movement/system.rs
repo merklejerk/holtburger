@@ -467,24 +467,19 @@ impl MovementSystem {
     }
 
     fn ingest_client_directed_command(&mut self, command: ClientDirectedCommand) {
-        match command {
-            ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::AcquireFacing { .. } => {
-                self.movement_publication_required |= self.has_server_controlled_motion();
-                self.character_motion.release_input();
-                self.pending_jump_attempt = None;
-                self.pending_arrival_pose = None;
-                self.pending_snap_facing = None;
-                self.pending_transient_motion = None;
-                self.pending_manual_playback_stop = self.has_server_controlled_motion();
-            }
-            _ if !matches!(
-                self.active_movement,
-                Some(ActiveMovement::ClientDirected(_))
-            ) =>
-            {
-                return;
-            }
-            _ => {}
+        if command.acquires_control() {
+            self.movement_publication_required |= self.has_server_controlled_motion();
+            self.character_motion.release_input();
+            self.pending_jump_attempt = None;
+            self.pending_arrival_pose = None;
+            self.pending_snap_facing = None;
+            self.pending_transient_motion = None;
+            self.pending_manual_playback_stop = self.has_server_controlled_motion();
+        } else if !matches!(
+            self.active_movement,
+            Some(ActiveMovement::ClientDirected(_))
+        ) {
+            return;
         }
         match command {
             ClientDirectedCommand::Acquire(intent) | ClientDirectedCommand::Update(intent) => {
@@ -667,27 +662,26 @@ impl MovementSystem {
         for command in std::mem::take(&mut self.queued_control_commands) {
             match command {
                 QueuedControlCommand::Drive(command) => {
+                    let acquires_client_directed_control = match command {
+                        PlayerDriveIntent::ClientDirected(command) => command.acquires_control(),
+                        _ => false,
+                    };
                     if matches!(
                         command,
                         PlayerDriveIntent::ManualHeld(_)
                             | PlayerDriveIntent::ManualPulse { .. }
                             | PlayerDriveIntent::Stop
                             | PlayerDriveIntent::SnapFacing { .. }
-                    ) || matches!(
-                        command,
-                        PlayerDriveIntent::ClientDirected(
-                            ClientDirectedCommand::Acquire(_)
-                                | ClientDirectedCommand::AcquireFacing { .. }
-                        )
-                    ) {
+                    ) || acquires_client_directed_control
+                    {
                         world.admit_entity_sticky_target(world.player.guid, None);
                     }
                     explicit_stop_requested |= matches!(command, PlayerDriveIntent::Stop);
                     self.ingest_drive_intent(command, now);
-                    if matches!(
-                        self.active_movement,
-                        Some(ActiveMovement::ClientDirected(_))
-                    ) {
+                    // A new controller invalidates the previous presentation owner. Updates from
+                    // that same controller must retain its cursor or a continuously steered body
+                    // will reinstall the first locomotion frame on every simulation interval.
+                    if acquires_client_directed_control {
                         world.motion_runtimes.clear_locomotion(world.player.guid);
                     }
                 }

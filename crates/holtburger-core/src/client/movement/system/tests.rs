@@ -2325,6 +2325,69 @@ fn controller_retains_ownership_without_repeating_displacement() {
     );
 }
 
+#[test]
+fn client_directed_updates_do_not_clear_existing_locomotion() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3391);
+    world.player.guid = guid;
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(drive)),
+        now,
+    );
+    movement.process_control_commands(now, &mut world);
+    let order = movement
+        .client_directed_locomotion_order(&world)
+        .unwrap()
+        .unwrap();
+    let table = world
+        .motion_sequences
+        .table(FIXTURE_MOTION_TABLE_ID)
+        .unwrap();
+    // This kinematic fixture has no animation assets, so use the observable manual authority as
+    // the cursor sentinel. `clear_locomotion` itself is intentionally authority-agnostic.
+    world.motion_runtimes.drive_manual(
+        table,
+        guid,
+        order,
+        CharacterMotionPresentation::Grounded,
+        0.1,
+    );
+    assert!(world.has_manual_locomotion(guid));
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
+        now,
+    );
+    movement.process_control_commands(now, &mut world);
+    assert!(world.has_manual_locomotion(guid));
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::AcquireFacing { heading: 1.0 }),
+        now,
+    );
+    movement.process_control_commands(now, &mut world);
+    assert!(!world.has_manual_locomotion(guid));
+}
+
 /// Decode actual session output from the unencrypted, unfragmented packets this fixture emits.
 fn captured_actions(file: &tempfile::NamedTempFile) -> Vec<GameAction> {
     let bytes = std::fs::read(file.path()).unwrap();

@@ -197,6 +197,16 @@ pub enum ClientDirectedCommand {
     Release,
 }
 
+impl ClientDirectedCommand {
+    /// Whether this command installs a new client-directed movement owner.
+    pub const fn acquires_control(self) -> bool {
+        match self {
+            Self::Acquire(_) | Self::AcquireFacing { .. } => true,
+            Self::Update(_) | Self::Settle { .. } | Self::Release => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerDriveIntent {
     /// Explicitly acquires manual control with the supplied held drive.

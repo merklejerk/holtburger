@@ -1,24 +1,29 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
+	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import type {
 		ClientAttackProfile,
-		ClientCombatMode,
 		ClientCombatStatus,
 	} from "./client-host-contract";
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,
 	} from "./client-hud-layout";
-	const ATTACK_HEIGHTS = ["low", "medium", "high"] as const;
+	import {
+		COMBAT_BREAKPOINTS,
+		type ClientCombatTarget,
+	} from "./client-combat-bar-state";
+
+	const ARC_LENGTH = 100;
 
 	interface Props {
 		readonly placement: ClientHudPlacement;
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
-		readonly combatMode: ClientCombatMode;
 		readonly status: ClientCombatStatus;
-		readonly activeTargetName: string | null;
+		/** Known presentation for the engaged entity, resolved by the app. */
+		readonly activeTarget: ClientCombatTarget | null;
 		readonly profile: ClientAttackProfile;
 		readonly selectedTarget: number | null;
 		readonly enabled: boolean;
@@ -32,9 +37,8 @@
 		placement,
 		editable,
 		viewport,
-		combatMode,
 		status,
-		activeTargetName,
+		activeTarget,
 		profile,
 		selectedTarget,
 		enabled,
@@ -46,8 +50,8 @@
 
 	const naturalPlacement = $derived({
 		...placement,
-		preferredWidth: 420,
-		preferredHeight: 78,
+		preferredWidth: CLIENT_UI_DEFAULTS.combatBar.size.width,
+		preferredHeight: CLIENT_UI_DEFAULTS.combatBar.size.height,
 	});
 	let sampledAt = $state(performance.now());
 	let refillReceivedAt = $state(performance.now());
@@ -70,14 +74,19 @@
 	const value = $derived(
 		profile.kind === "melee" ? profile.power : profile.accuracy,
 	);
-	const active = $derived(status.desired !== null);
+	const gaugeLevel = $derived(fill * value);
+	const needleAngle = $derived(-180 + gaugeLevel * 180);
 	const activeTargetLabel = $derived(
 		status.desired === null
 			? null
-			: (activeTargetName ??
+			: (activeTarget?.name ??
 					`0x${status.desired.target.toString(16).toUpperCase().padStart(8, "0")}`),
 	);
-	const label = $derived(profile.kind === "melee" ? "Power" : "Accuracy");
+	const attackLabel = $derived(
+		selectedTarget === null
+			? "Select a target to attack"
+			: `Attack selected target with ${profile.kind === "melee" ? "melee" : "missile"}`,
+	);
 
 	function replaceValue(next: number): void {
 		onProfileChange(
@@ -89,62 +98,122 @@
 </script>
 
 <ClientHudPanel
-	label="Combat bar"
+	label="Combat gauge"
 	{editable}
 	placement={naturalPlacement}
 	{viewport}
-	minWidth={300}
-	minHeight={64}
+	minWidth={CLIENT_UI_DEFAULTS.combatBar.minSize.width}
+	minHeight={CLIENT_UI_DEFAULTS.combatBar.minSize.height}
 	resizable={false}
 	contentHitTesting="surface"
 	{onPlacementChange}
 >
-	<div class="combat-bar" data-combat-mode={combatMode}>
-		<div class="combat-fill" style:--combat-fill={`${fill * 100}%`}></div>
-		<div class="combat-controls">
-			<div class="height-controls" aria-label="Attack height">
-				{#each ATTACK_HEIGHTS as height}
+	<div class="combat-bar" data-combat-mode={profile.kind}>
+		<div class="gauge-column">
+			<div class="gauge">
+				<button
+					type="button"
+					class="attack-trigger"
+					disabled={!enabled || selectedTarget === null}
+					title={attackLabel}
+					aria-label={attackLabel}
+					onclick={onAttack}
+				>
+					<svg viewBox="0 0 220 125" aria-hidden="true">
+						<path
+							class="gauge-face"
+							d="M 25 110 A 85 85 0 0 1 195 110 L 25 110 Z"
+						/>
+						<path
+							class="gauge-track"
+							d="M 25 110 A 85 85 0 0 1 195 110"
+							pathLength={ARC_LENGTH}
+						/>
+						<path
+							class="gauge-fill"
+							d="M 25 110 A 85 85 0 0 1 195 110"
+							pathLength={ARC_LENGTH}
+							style:stroke-dasharray={`${gaugeLevel * ARC_LENGTH} ${ARC_LENGTH}`}
+						/>
+						<g class="needle" style:transform={`rotate(${needleAngle}deg)`}>
+							{#if profile.kind === "melee"}
+								<path
+									class="weapon"
+									d="M 104 106 L 153 106 L 169 110 L 153 114 L 104 114 Z"
+								/>
+								<path class="weapon" d="M 119 99 H 125 V 121 H 119 Z" />
+								<path class="weapon" d="M 101 106 H 112 V 114 H 101 Z" />
+							{:else}
+								<path class="weapon-stroke" d="M 104 110 H 165" />
+								<path
+									class="weapon"
+									d="M 171 110 L 155 101 L 159 110 L 155 119 Z"
+								/>
+								<path
+									class="weapon"
+									d="M 111 110 L 101 103 L 105 110 L 101 117 Z"
+								/>
+							{/if}
+						</g>
+						<circle class="needle-pin" cx="110" cy="110" r="6" />
+					</svg>
+				</button>
+				{#each COMBAT_BREAKPOINTS as breakpoint, index}
 					<button
 						type="button"
-						class:active={profile.height === height}
+						class="breakpoint breakpoint-{index + 1}"
+						class:selected={value === breakpoint}
 						disabled={!enabled}
-						onclick={() => onProfileChange({ ...profile, height })}
-						>{height[0]?.toUpperCase()}</button
+						aria-label={`Set ${profile.kind === "melee" ? "attack power" : "missile accuracy"} to ${breakpoint * 100}%`}
+						aria-pressed={value === breakpoint}
+						onclick={() => replaceValue(breakpoint)}>{index + 1}</button
 					>
 				{/each}
 			</div>
-			<label>
-				<span>{label}</span>
-				<input
-					type="range"
-					min="0"
-					max="1"
-					step="0.05"
-					{value}
-					disabled={!enabled}
-					oninput={(event) => replaceValue(Number(event.currentTarget.value))}
-				/>
-			</label>
-			<span class="combat-value">{Math.round(value * 100)}%</span>
-			{#if active}
-				<button type="button" class="combat-action stop" onclick={onStop}
-					>Stop</button
-				>
-			{:else}
+			{#if activeTargetLabel !== null}
 				<button
 					type="button"
-					class="combat-action"
-					disabled={!enabled || selectedTarget === null}
-					onclick={onAttack}>Attack</button
+					class="combat-target"
+					style:color={activeTarget?.color}
+					title={`Stop attacking ${activeTargetLabel}`}
+					disabled={!enabled}
+					onclick={onStop}>{activeTargetLabel}</button
 				>
+			{:else}
+				<div class="combat-target-placeholder">No target engaged</div>
 			{/if}
 		</div>
-		<div class="combat-state">{status.state.replaceAll("-", " ")}</div>
-		{#if activeTargetLabel !== null}
-			<div class="combat-target" title={activeTargetLabel}>
-				Target: {activeTargetLabel}
-			</div>
-		{/if}
+
+		<div class="attack-height" aria-label="Attack height">
+			<button
+				type="button"
+				class="height head"
+				class:selected={profile.height === "high"}
+				disabled={!enabled}
+				aria-label="High attack"
+				aria-pressed={profile.height === "high"}
+				onclick={() => onProfileChange({ ...profile, height: "high" })}
+			></button>
+			<button
+				type="button"
+				class="height torso"
+				class:selected={profile.height === "medium"}
+				disabled={!enabled}
+				aria-label="Medium attack"
+				aria-pressed={profile.height === "medium"}
+				onclick={() => onProfileChange({ ...profile, height: "medium" })}
+			></button>
+			<button
+				type="button"
+				class="height legs"
+				class:selected={profile.height === "low"}
+				disabled={!enabled}
+				aria-label="Low attack"
+				aria-pressed={profile.height === "low"}
+				onclick={() => onProfileChange({ ...profile, height: "low" })}
+			></button>
+		</div>
+		<span class="combat-state">{status.state.replaceAll("-", " ")}</span>
 	</div>
 </ClientHudPanel>
 
@@ -152,84 +221,203 @@
 	.combat-bar {
 		position: relative;
 		display: grid;
-		align-content: center;
+		grid-template-columns: minmax(230px, 1fr) 58px;
+		align-items: center;
+		gap: 4px;
+		box-sizing: border-box;
 		width: 100%;
 		height: 100%;
-		min-height: 64px;
+		min-height: 170px;
+		padding: 7px 12px 8px;
 		overflow: hidden;
-		border: 1px solid var(--ui-border-strong);
-		background: var(--ui-surface-strong);
-		color: var(--ui-text);
+		border: 1px solid var(--ui-color-border);
+		background: var(--ui-hud-background-color);
+		color: var(--ui-color-text);
 	}
-	.combat-fill {
-		position: absolute;
-		inset: 0 auto 0 0;
-		width: var(--combat-fill);
-		background: color-mix(in srgb, var(--ui-accent) 24%, transparent);
-		pointer-events: none;
+	.gauge-column {
+		display: grid;
+		align-self: stretch;
+		grid-template-rows: minmax(0, 1fr) 25px;
+		min-width: 0;
 	}
-	.combat-controls {
+	.gauge {
 		position: relative;
-		display: grid;
-		grid-template-columns: auto minmax(110px, 1fr) 3rem auto;
-		gap: 8px;
-		align-items: center;
-		padding: 9px 10px 18px;
+		width: min(100%, 250px);
+		height: 142px;
+		margin: 0 auto;
 	}
-	.height-controls {
-		display: flex;
-		gap: 2px;
-	}
-	button {
-		min-height: 28px;
-		border: 1px solid var(--ui-border);
-		background: var(--ui-control-surface);
+	.attack-trigger {
+		position: absolute;
+		inset: 18px 15px 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
 		color: inherit;
+		cursor: crosshair;
 	}
-	.height-controls button {
-		width: 28px;
+	.attack-trigger:disabled {
+		cursor: default;
 	}
-	button.active {
-		border-color: var(--ui-accent);
-		color: var(--ui-accent);
-	}
-	label {
-		display: grid;
-		gap: 2px;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	input {
+	.attack-trigger svg {
+		display: block;
 		width: 100%;
+		height: 100%;
+		overflow: visible;
 	}
-	.combat-value {
-		font-variant-numeric: tabular-nums;
-		text-align: right;
+	.gauge-face {
+		fill: color-mix(in srgb, var(--ui-color-control) 56%, transparent);
 	}
-	.combat-action {
-		min-width: 58px;
+	.gauge-track,
+	.gauge-fill {
+		fill: none;
+		stroke-linecap: butt;
+		stroke-width: 13;
 	}
-	.combat-action.stop {
-		color: var(--ui-danger, #ff8d82);
+	.gauge-track {
+		stroke: color-mix(in srgb, var(--ui-color-border) 62%, transparent);
+	}
+	.gauge-fill {
+		stroke: var(--ui-color-accent);
+	}
+	.needle {
+		transform-box: view-box;
+		transform-origin: 110px 110px;
+	}
+	.weapon,
+	.needle-pin {
+		fill: var(--ui-color-text);
+	}
+	.weapon-stroke {
+		fill: none;
+		stroke: var(--ui-color-text);
+		stroke-width: 7;
+	}
+	.breakpoint,
+	.height {
+		border: 1px solid var(--ui-color-border);
+		background: var(--ui-color-well);
+		color: var(--ui-color-text);
+		cursor: pointer;
+	}
+	.breakpoint {
+		position: absolute;
+		width: 34px;
+		height: 34px;
+		padding: 0;
+		border-radius: 50%;
+		font-size: 1.05rem;
+		font-weight: 800;
+	}
+	.breakpoint-1 {
+		left: 0;
+		bottom: 12px;
+	}
+	.breakpoint-2 {
+		left: 26px;
+		top: 28px;
+	}
+	.breakpoint-3 {
+		left: calc(50% - 17px);
+		top: 0;
+	}
+	.breakpoint-4 {
+		right: 26px;
+		top: 28px;
+	}
+	.breakpoint-5 {
+		right: 0;
+		bottom: 12px;
+	}
+	.breakpoint.selected,
+	.height.selected {
+		border-color: var(--ui-color-accent);
+		background: color-mix(
+			in srgb,
+			var(--ui-color-accent) 38%,
+			var(--ui-color-control)
+		);
+		box-shadow:
+			0 0 0 2px color-mix(in srgb, var(--ui-color-accent) 35%, transparent),
+			0 0 10px color-mix(in srgb, var(--ui-color-accent) 55%, transparent);
+		color: var(--ui-color-text);
+	}
+	.breakpoint:disabled,
+	.height:disabled {
+		cursor: default;
+		opacity: 0.55;
+	}
+	.combat-target,
+	.combat-target-placeholder {
+		align-self: center;
+		justify-self: center;
+		max-width: 100%;
+		overflow: hidden;
+		font-size: 0.8rem;
+		font-weight: 700;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.combat-target {
+		padding: 2px 8px;
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+	}
+	.combat-target:hover {
+		text-decoration: line-through;
+	}
+	.combat-target-placeholder {
+		color: var(--ui-color-muted);
+		font-weight: 400;
+	}
+	.attack-height {
+		display: grid;
+		grid-template-rows: 42px 58px 50px;
+		align-content: center;
+		justify-items: center;
+		gap: 3px;
+	}
+	.height {
+		padding: 0;
+	}
+	.height.head {
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+	}
+	.height.torso {
+		width: 56px;
+		height: 54px;
+		clip-path: polygon(
+			25% 0,
+			75% 0,
+			100% 32%,
+			76% 32%,
+			76% 100%,
+			24% 100%,
+			24% 32%,
+			0 32%
+		);
+	}
+	.height.legs {
+		width: 45px;
+		height: 48px;
+		clip-path: polygon(
+			10% 0,
+			90% 0,
+			82% 100%,
+			56% 100%,
+			50% 48%,
+			44% 100%,
+			18% 100%
+		);
 	}
 	.combat-state {
 		position: absolute;
-		left: 10px;
-		bottom: 3px;
-		font-size: 0.65rem;
+		right: 5px;
+		bottom: 2px;
+		font-size: 0.55rem;
 		text-transform: capitalize;
-		color: var(--ui-text-muted);
-	}
-	.combat-target {
-		position: absolute;
-		right: 10px;
-		bottom: 3px;
-		max-width: 55%;
-		overflow: hidden;
-		font-size: 0.65rem;
-		color: var(--ui-text-muted);
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		color: var(--ui-color-muted);
 	}
 </style>

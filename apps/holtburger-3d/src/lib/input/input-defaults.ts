@@ -155,6 +155,26 @@ export const INPUT_DEFAULTS = {
 			],
 		},
 	},
+	/** Direct attack-power/accuracy selection while a physical combat HUD is active. */
+	combatBar: {
+		breakpoints: {
+			0: [
+				{ code: "Digit1", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			1: [
+				{ code: "Digit2", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			2: [
+				{ code: "Digit3", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			3: [
+				{ code: "Digit4", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			4: [
+				{ code: "Digit5", shift: false, ctrl: false, alt: false, meta: false },
+			],
+		},
+	},
 	/** Action bar shortcuts. Numbered entries use zero-based positions (0 is bar/cell 1, 9 is 0).
 	 * Physical codes keep digits addressable while Shift changes their printed characters.
 	 * Cell/confirm bindings allow modifiers so the alternate-side modifier can be remapped freely.

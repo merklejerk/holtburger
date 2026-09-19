@@ -2,6 +2,7 @@ import { INPUT_DEFAULTS } from "./input-defaults";
 import { InputContext, matchesKey } from "./input-context";
 import type {
 	ActionBarDirection,
+	CombatBreakpointIndex,
 	InputDigitIndex,
 	CharacterAction,
 	FlyAction,
@@ -48,6 +49,16 @@ export class AppInput {
 			if (index !== undefined) return { kind, index };
 		}
 		return null;
+	}
+
+	/** Resolve the five physical-combat breakpoint keys after gameplay gains keyboard ownership. */
+	combatBreakpoint(event: InputKeyEvent): CombatBreakpointIndex | null {
+		const indices: readonly CombatBreakpointIndex[] = [0, 1, 2, 3, 4];
+		return (
+			indices.find((index) =>
+				matchesKey(event, this.configuration.combatBar.breakpoints[index]),
+			) ?? null
+		);
 	}
 
 	/** Resolve a numbered bar's focus chord using the shared installation configuration. */

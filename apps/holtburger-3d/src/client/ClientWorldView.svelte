@@ -8,6 +8,7 @@
 	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
 	import type { ClientSpellBarState } from "./client-spell-bar-state";
 	import type { InputDigitIndex } from "../lib/input/input-contract";
+	import type { ClientCombatTarget } from "./client-combat-bar-state";
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
@@ -112,7 +113,8 @@
 		/** Server-confirmed stance for the dock, independent of open panels. */
 		readonly combatMode: ClientCombatMode;
 		readonly combatStatus: ClientCombatStatus;
-		readonly combatTargetName: string | null;
+		/** Known name and color of the engaged entity. */
+		readonly combatTarget: ClientCombatTarget | null;
 		readonly combatControls: ClientCharacterSettings["combatControls"];
 		readonly onCombatProfileChange: (profile: ClientAttackProfile) => void;
 		readonly onBeginCombat: () => void;
@@ -213,7 +215,7 @@
 		onActionBarsChange,
 		combatMode,
 		combatStatus,
-		combatTargetName,
+		combatTarget,
 		combatControls,
 		onCombatProfileChange,
 		onBeginCombat,
@@ -694,9 +696,8 @@
 			placement={hudLayout.combatBar}
 			editable={hudMode === "layout"}
 			{viewport}
-			{combatMode}
 			status={combatStatus}
-			activeTargetName={combatTargetName}
+			activeTarget={combatTarget}
 			profile={combatMode === "melee"
 				? { kind: "melee", ...combatControls.melee }
 				: { kind: "missile", ...combatControls.missile }}

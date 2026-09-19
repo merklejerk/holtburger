@@ -4,8 +4,13 @@
 		initialSpellBarBindings,
 		type ClientSpellBarState,
 	} from "./client-spell-bar-state";
-	import type { InputDigitIndex } from "../lib/input/input-contract";
+	import type {
+		CombatBreakpointIndex,
+		InputDigitIndex,
+	} from "../lib/input/input-contract";
 	import { handleSpellBarKeydown } from "./client-spell-bar-input";
+	import { COMBAT_BREAKPOINTS } from "./client-combat-bar-state";
+	import { selectedEntityNameColor } from "./client-selected-entity-color";
 	import { SpellReferences } from "../app/spell-references";
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientItemInteractions } from "./client-item-interactions";
@@ -187,12 +192,19 @@
 		state: "idle",
 		refill: null,
 	});
-	const combatTargetName = $derived.by(() => {
+	const combatTarget = $derived.by(() => {
 		const target = combatStatus.desired?.target;
 		const read = session?.entities.read();
 		if (target === undefined || read?.kind !== "current") return null;
 		const description = read.level.entities.get(target)?.description;
-		return description?.kind === "known" ? description.name : null;
+		if (description?.kind !== "known") return null;
+		return {
+			name: description.name,
+			color: selectedEntityNameColor(
+				description,
+				target === session?.state().playerGuid,
+			),
+		};
 	});
 	const defaultCombatControls: ClientCharacterSettings["combatControls"] = {
 		melee: { height: "medium", power: 0.5 },
@@ -221,6 +233,21 @@
 		});
 		if (combatStatus.desired !== null)
 			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
+	}
+	function selectCombatBreakpoint(index: CombatBreakpointIndex): void {
+		const value = COMBAT_BREAKPOINTS[index];
+		if (combatMode === "melee")
+			changeCombatProfile({
+				kind: "melee",
+				...combatControls.melee,
+				power: value,
+			});
+		else if (combatMode === "missile")
+			changeCombatProfile({
+				kind: "missile",
+				...combatControls.missile,
+				accuracy: value,
+			});
 	}
 	function beginCombat(): void {
 		const currentSession = session;
@@ -738,6 +765,20 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (
+			(combatMode === "melee" || combatMode === "missile") &&
+			characterSettings.kind === "ready" &&
+			lifecycle.kind === "in-world" &&
+			hudMode === "runtime" &&
+			!event.isComposing
+		) {
+			const breakpoint = APP_INPUT.combatBreakpoint(event);
+			if (breakpoint !== null) {
+				event.preventDefault();
+				if (!event.repeat) selectCombatBreakpoint(breakpoint);
+				return;
+			}
+		}
 		if (
 			handleSpellBarKeydown(
 				event,
@@ -1346,7 +1387,7 @@
 		onActivateSpellCell={activateSpellCell}
 		{combatMode}
 		{combatStatus}
-		{combatTargetName}
+		{combatTarget}
 		{combatControls}
 		onCombatProfileChange={changeCombatProfile}
 		onBeginCombat={beginCombat}

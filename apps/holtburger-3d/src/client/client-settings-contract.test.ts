@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	clientLocalSettingsDocumentV1Schema,
 	clientLocalSettingsDocumentV2Schema,
+	clientLocalSettingsDocumentV3Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -15,7 +16,7 @@ const viewport = { width: 1440, height: 900 };
 
 function document() {
 	return {
-		schemaVersion: 2 as const,
+		schemaVersion: 3 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -33,7 +34,7 @@ function document() {
 }
 
 function versionOneDocument() {
-	const current = document();
+	const current = versionTwoDocument();
 	const versionOneClient = { ...current.user.client };
 	const versionOneHudLayout = { ...versionOneClient.hudLayout };
 	Reflect.deleteProperty(versionOneClient, "inspection");
@@ -48,16 +49,38 @@ function versionOneDocument() {
 	};
 }
 
+function versionTwoDocument() {
+	const current = document();
+	const client = { ...current.user.client };
+	const hudLayout = { ...client.hudLayout };
+	Reflect.deleteProperty(hudLayout, "combatBar");
+	const characters = structuredClone(current.characters);
+	for (const profile of Object.values(characters))
+		Reflect.deleteProperty(profile.settings, "combatControls");
+	return {
+		...current,
+		schemaVersion: 2 as const,
+		user: { ...current.user, client: { ...client, hudLayout } },
+		characters,
+	};
+}
+
 describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
-		expect(clientLocalSettingsDocumentV2Schema.parse(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV3Schema.parse(value)).toEqual(value);
 	});
 
 	it("migrates v1 with stable inspection layout defaults", () => {
 		const value = versionOneDocument();
 		expect(clientLocalSettingsDocumentV1Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
+	});
+
+	it("migrates v2 combat defaults without disturbing existing settings", () => {
+		const value = versionTwoDocument();
+		expect(clientLocalSettingsDocumentV2Schema.parse(value)).toEqual(value);
 		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
 	});
 
@@ -69,8 +92,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 3 }),
-		).toThrow("Unsupported client settings schema version 3");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 4 }),
+		).toThrow("Unsupported client settings schema version 4");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {

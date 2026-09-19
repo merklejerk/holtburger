@@ -1,5 +1,4 @@
 use holtburger_common::Guid;
-use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
@@ -17,7 +16,6 @@ use crate::navigation::{
     NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
 };
 use crate::pages::game::GameData;
-use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
@@ -174,39 +172,6 @@ impl GameState {
         result
     }
 
-    pub(crate) fn clear_combat_drive(&mut self) {
-        self.runtime.combat_drive = None;
-    }
-
-    pub(crate) fn handle_combat_drive(
-        &mut self,
-        input: CombatDriveInput,
-    ) -> Option<CombatDriveEffect> {
-        let effect = self
-            .runtime
-            .combat_drive
-            .get_or_insert_with(CombatDriveRuntime::default)
-            .handle(&input);
-
-        if let (CombatDriveInput::Tick { now, .. }, Some(CombatDriveEffect::Attack(_))) =
-            (input, effect)
-        {
-            self.data.combat_runtime.note_attack_attempt(now);
-        }
-
-        effect
-    }
-
-    pub(crate) fn combat_target_position_for_drive(
-        &self,
-        target_guid: Guid,
-    ) -> Option<WorldPosition> {
-        self.runtime.navigation.automation_target_position(
-            self.data.runtime_player_position(),
-            self.data.runtime_position_for_guid(target_guid),
-        )
-    }
-
     fn drain_notifications(
         &mut self,
         server_time: Option<(f64, Instant)>,
@@ -326,7 +291,6 @@ struct GamePageRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,
-    combat_drive: Option<CombatDriveRuntime>,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,
 }

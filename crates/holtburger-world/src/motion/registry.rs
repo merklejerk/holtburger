@@ -64,7 +64,7 @@ pub struct BodyMotionRuntime {
     unmodelled: UnmodelledMotionChannels,
     /// Latest steady destination retained while a transient action owns playback.
     steady_order: MotionOrder,
-    /// Accepted reach/release substate retained through its authored return transition.
+    /// Accepted substate gesture retained through its authored return transition.
     pending_gesture: Option<MotionCommand>,
     /// FIFO transient edges awaiting installation after the active action.
     action_queue: VecDeque<EntityMotionAction>,
@@ -197,7 +197,7 @@ pub enum MotionPresentation {
 pub enum OrdinaryMotionActivity {
     /// Standing or travelling playback that can be represented by independent locomotion.
     Locomotion,
-    /// Recognized windup/release/reach, including authored entry and return transitions.
+    /// Recognized spell, reach, and missile gesture, including entry and return transitions.
     Gesture,
     /// Other actions, explicit poses, or noncyclic transitions, including contact/death.
     Explicit,
@@ -275,7 +275,10 @@ impl BodyMotionRuntime {
             .filter(|gesture| {
                 matches!(
                     gesture,
-                    super::MotionGesture::Release | super::MotionGesture::Reach
+                    super::MotionGesture::Release
+                        | super::MotionGesture::Reach
+                        | super::MotionGesture::MissileAim
+                        | super::MotionGesture::MissileReload
                 )
             })
             .map(|_| runtime.state.substate);
@@ -302,7 +305,12 @@ impl BodyMotionRuntime {
         self.select_order(table, order, true);
         if matches!(
             self.state.substate.movement_override_gesture(),
-            Some(super::MotionGesture::Release | super::MotionGesture::Reach)
+            Some(
+                super::MotionGesture::Release
+                    | super::MotionGesture::Reach
+                    | super::MotionGesture::MissileAim
+                    | super::MotionGesture::MissileReload
+            )
         ) {
             self.pending_gesture = Some(self.state.substate);
         } else if self.sequence.is_cyclic()
@@ -580,7 +588,7 @@ impl BodyMotionRuntime {
                 })
     }
 
-    /// Whether an accepted reach/release still owns its entry, hold, or return playback.
+    /// Whether an accepted substate gesture still owns its entry, hold, or return playback.
     pub fn has_pending_gesture(&self) -> bool {
         self.pending_gesture.is_some()
     }
@@ -634,10 +642,11 @@ impl BodyMotionRuntime {
         if !grounded {
             // RETAIL DIVERGENCE: retail contact arbitration replaces unsupported forward
             // motion. Preserve already accepted gestures on their independent clock; restoring
-            // interruption would cancel casting on takeoff. Support still owns locomotion
-            // displacement, and other actions retain interruption priority. The visual layout
-            // census covers 22 humanoid CharGen entries; this
-            // does not admit new cast commands.
+            // interruption would cancel casting or missile playback on takeoff. Support still
+            // owns locomotion displacement, and other actions retain interruption priority.
+            // The visual layout census covers 22 humanoid CharGen entries;
+            // command admission remains the explicit gesture
+            // allowlist.
             if !(self.permits_gesture_locomotion(table) && self.ordinary_owns_body_semantics()) {
                 self.interrupt_transitions();
                 self.select_order(table, order, false);

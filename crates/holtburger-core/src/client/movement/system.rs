@@ -424,6 +424,14 @@ impl MovementSystem {
             PlayerDriveIntent::SynchronizeHeld(state) => {
                 self.character_motion.replace_drive(state);
             }
+            PlayerDriveIntent::ReleaseManual => {
+                self.manual_input = ManualInputLifetime::None;
+                self.character_motion.release_input();
+                if had_manual_drive {
+                    self.active_movement = None;
+                    self.pending_manual_playback_stop = true;
+                }
+            }
             PlayerDriveIntent::ManualHeld(state) => {
                 self.character_motion.replace_drive(state);
                 self.acquire_manual_control(None);

@@ -100,6 +100,10 @@ pub enum MotionGesture {
     Release,
     /// Pickup/drop reach substate; does not imply an inventory transaction.
     Reach,
+    /// Missile aiming substate, including level and vertical variants.
+    MissileAim,
+    /// Missile reload substate.
+    MissileReload,
 }
 
 impl MotionCommand {
@@ -108,9 +112,10 @@ impl MotionCommand {
     const MODIFIER: u32 = 0x2000_0000;
     const ACTION: u32 = 0x1000_0000;
 
-    /// Classifies the spell/reach allowlist for independent manual movement, not all gestures.
-    /// Shipped component gestures (ACE SpellFormula.cs) and inventory reach variants
-    /// (Player_Inventory.cs). Arbitrary UseUserAnimation overrides are not inferred.
+    /// Classifies the spell/reach/missile allowlist for independent manual movement.
+    /// Shipped component gestures (ACE SpellFormula.cs), inventory reach variants
+    /// (Player_Inventory.cs), and missile aim/reload substates (Player_Missile.cs). Arbitrary
+    /// UseUserAnimation overrides are not inferred.
     pub const fn movement_override_gesture(self) -> Option<MotionGesture> {
         match self.0 {
             0x1000_0070 | 0x1000_0072 | 0x1000_0074 | 0x1000_0076 | 0x1000_0078 | 0x1000_0132 => {
@@ -118,6 +123,8 @@ impl MotionCommand {
             }
             0x4000_002b..=0x4000_0031 | 0x4000_0033..=0x4000_0039 => Some(MotionGesture::Release),
             0x4000_0018 | 0x4000_0136..=0x4000_0139 => Some(MotionGesture::Reach),
+            0x4000_0016 => Some(MotionGesture::MissileReload),
+            0x4000_001e..=0x4000_002a => Some(MotionGesture::MissileAim),
             _ => None,
         }
     }

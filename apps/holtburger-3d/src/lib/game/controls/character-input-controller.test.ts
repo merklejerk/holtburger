@@ -42,7 +42,7 @@ describe("CharacterInputController", () => {
 			"acquire",
 			"acquire",
 			"synchronize",
-			"synchronize",
+			"release",
 			"synchronize",
 		]);
 		expect(drives[0]).toEqual(drives[4]);
@@ -83,10 +83,10 @@ describe("CharacterInputController", () => {
 		expect(intents).toEqual([
 			"acquire",
 			"acquire",
-			"synchronize",
+			"release",
 			"acquire",
 			"acquire",
-			"synchronize",
+			"release",
 		]);
 		expect(drives.at(-1)?.longitudinal).toBeNull();
 	});

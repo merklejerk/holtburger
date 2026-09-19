@@ -654,8 +654,6 @@ mod tests {
             target_guid: Guid(0x60000001),
         });
         state.data.combat_mode = CombatMode::Melee;
-        state.data.combat_runtime.issue_state =
-            crate::pages::game::combat::CombatIssueState::InFlight;
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -664,13 +662,9 @@ mod tests {
             result
                 .commands
                 .iter()
-                .any(|command| matches!(command, ClientCommand::CancelAttack))
+                .any(|command| matches!(command, ClientCommand::StopCombatEngagement))
         );
         assert_eq!(state.view.active_interaction, None);
-        assert_ne!(
-            state.data.combat_runtime.issue_state,
-            crate::pages::game::combat::CombatIssueState::InFlight
-        );
     }
 
     #[test]

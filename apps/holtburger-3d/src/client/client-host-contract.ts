@@ -21,6 +21,55 @@ const combatModeSchema = z.enum([
 ]);
 export type ClientCombatMode = z.infer<typeof combatModeSchema>;
 
+export const clientAttackProfileSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("melee"),
+			height: z.enum(["low", "medium", "high"]),
+			power: z.number().finite().min(0).max(1),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("missile"),
+			height: z.enum(["low", "medium", "high"]),
+			accuracy: z.number().finite().min(0).max(1),
+		})
+		.strict(),
+]);
+export type ClientAttackProfile = z.infer<typeof clientAttackProfileSchema>;
+
+const combatStatusSchema = z
+	.object({
+		desired: z
+			.object({
+				target: z.number().int().nonnegative().max(0xffff_ffff),
+				profile: clientAttackProfileSchema,
+			})
+			.strict()
+			.nullable(),
+		state: z.enum([
+			"idle",
+			"charging",
+			"waiting-for-readiness",
+			"active",
+			"retiring",
+		]),
+		refill: z
+			.object({
+				elapsedMs: z.number().int().nonnegative(),
+				durationMs: z.number().int().nonnegative(),
+			})
+			.strict()
+			.nullable(),
+	})
+	.strict();
+export type ClientCombatStatus = z.infer<typeof combatStatusSchema>;
+
+export function decodeClientCombatStatus(value: unknown): ClientCombatStatus {
+	return combatStatusSchema.parse(value);
+}
+
 export function decodeClientCombatMode(value: unknown): {
 	mode: ClientCombatMode;
 } {
@@ -260,6 +309,7 @@ const currentStateSchema = z
 		playerName: z.string().nullable(),
 		knownSpells: knownSpellIdsSchema.nullable(),
 		combatMode: combatModeSchema,
+		combat: combatStatusSchema,
 		vitals: z.array(vitalSchema),
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),
@@ -322,12 +372,15 @@ const clientDriveSnapshotSchema = z
 	})
 	.strict();
 
-const clientDriveRequestSchema = z
-	.object({
-		kind: z.enum(["acquire", "synchronize"]),
-		drive: clientDriveSnapshotSchema,
-	})
-	.strict();
+const clientDriveRequestSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.enum(["acquire", "synchronize"]),
+			drive: clientDriveSnapshotSchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("release") }).strict(),
+]);
 
 const clientCharacterMotionEventRequestSchema = z.discriminatedUnion("kind", [
 	z

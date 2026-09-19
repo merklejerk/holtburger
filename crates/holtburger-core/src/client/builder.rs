@@ -10,7 +10,8 @@ use tokio::sync::broadcast;
 
 use super::{
     ClientRuntime, ClientState, PublishedCharacterMotionCapabilities, TurbineChatState,
-    character_selection::CharacterSelectionState, movement::MovementSystem,
+    character_selection::CharacterSelectionState, combat_tuning::ClientCombatTuning,
+    movement::MovementSystem,
 };
 
 #[derive(Clone)]
@@ -28,6 +29,7 @@ pub struct ClientRuntimeBuilder {
     dynamic_scale_source: Option<Arc<dyn super::dynamic_scale::ClientDynamicScaleSource>>,
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
+    combat_tuning: ClientCombatTuning,
     /// Whether an external 3D presentation must acknowledge the first pure-destination frame.
     /// Non-rendering clients retain the immediate adapter default.
     requires_external_world_reveal: bool,
@@ -43,6 +45,7 @@ impl ClientRuntimeBuilder {
             collision_source: None,
             dynamic_scale_source: None,
             selection_envelope_source: None,
+            combat_tuning: ClientCombatTuning::default(),
             requires_external_world_reveal: false,
             message_dump_dir: None,
         }
@@ -117,6 +120,12 @@ impl ClientRuntimeBuilder {
         source: Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>,
     ) -> Self {
         self.selection_envelope_source = Some(source);
+        self
+    }
+
+    /// Replaces the shared targeted-combat policy for this client composition.
+    pub fn combat_tuning(mut self, tuning: ClientCombatTuning) -> Self {
+        self.combat_tuning = tuning;
         self
     }
 
@@ -205,6 +214,9 @@ impl ClientRuntimeBuilder {
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
             movement: MovementSystem::new(),
+            combat_engagement: Default::default(),
+            combat_tuning: self.combat_tuning,
+            combat_approach_drive_active: false,
             collision_coordinator: self
                 .collision_source
                 .map(super::collision::ClientCollisionCoordinator::new),
@@ -252,6 +264,9 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         message_dump_dir: None,
         message_counter: 0,
         movement: MovementSystem::new(),
+        combat_engagement: Default::default(),
+        combat_tuning: ClientCombatTuning::default(),
+        combat_approach_drive_active: false,
         collision_coordinator: None,
         dynamic_scale_coordinator: None,
         entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),

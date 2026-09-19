@@ -9,7 +9,13 @@ export function buildEntryPath(
 ): string;
 export function collapseRendererArguments(args: readonly string[]): string[];
 export type ClientLaunchArgumentName =
-	"server" | "host" | "port" | "account" | "password" | "ignore-config";
+	| "server"
+	| "host"
+	| "port"
+	| "account"
+	| "password"
+	| "melee-max-chase-distance"
+	| "ignore-config";
 export function parseClientLaunchArgument(argument: string): {
 	readonly name: ClientLaunchArgumentName;
 	readonly value: string | undefined;

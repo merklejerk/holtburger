@@ -262,12 +262,12 @@ impl BodyMotionRuntime {
         }
         // RETAIL DIVERGENCE: support replaces ordinary commands with Falling in retail.
         // Retaining accepted gestures permits remote airborne composition; reverting this
-        // erases casts at admission or next tick. Scope is the existing gesture allowlist and
-        // 22 humanoid CharGen layouts. Physical
-        // support still selects the lower-body pose.
+        // erases gestures at admission or next tick. Scope is the explicit spell/reach/missile
+        // allowlist and 22 humanoid CharGen layouts.
+        // Physical support still selects the lower-body pose.
         let style = commanded.style.unwrap_or(self.state.style);
         // Eligibility is based on executable content, not just a recognized command number.
-        // An unsupported cast must not discard the observer's current takeoff transition.
+        // An unsupported gesture must not discard the observer's current takeoff transition.
         let gesture_command = commanded.forward.is_some_and(|(command, _)| {
             command.movement_override_gesture().is_some()
                 && table.cycle(style.raw(), command.raw()).is_some()
@@ -280,8 +280,8 @@ impl BodyMotionRuntime {
         let preserve_gesture = self.gesture_actions_allow_locomotion()
             && (gesture_command || (gesture_return && (incoming_windups || ongoing_gesture)));
         if self.has_manual_locomotion() || preserve_gesture {
-            // A cast received during takeoff must not sit behind the old locomotion entry.
-            // Existing casting entries and queued windups retain their clocks and hooks.
+            // A gesture received during takeoff must not sit behind the old locomotion entry.
+            // Existing gesture entries and queued windups retain their clocks and hooks.
             if unsupported && preserve_gesture && !ongoing_gesture {
                 self.sequence.remove_transition_prefix();
             }

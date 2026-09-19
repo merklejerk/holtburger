@@ -2224,6 +2224,33 @@ fn passive_input_preserves_server_approach() {
 }
 
 #[test]
+fn manual_release_retires_only_the_manual_owner() {
+    let mut world = WorldState::synthetic();
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+        now,
+    );
+    movement.process_control_commands(now, &mut world);
+    assert!(movement.has_active_manual_drive());
+
+    movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now);
+    movement.process_control_commands(now, &mut world);
+    assert!(movement.active_movement.is_none());
+    assert!(movement.pending_manual_playback_stop);
+
+    movement.admit_server_controlled_motion(
+        Some(test_server_approach(WorldPosition::default())),
+        now,
+        &mut world,
+    );
+    movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now);
+    movement.process_control_commands(now, &mut world);
+    assert!(movement.has_server_controlled_motion());
+}
+
+#[test]
 fn displaced_controller_cannot_steer_settle_or_release_the_new_source() {
     let now = Instant::now();
     let drive = AutonomousDriveIntent {

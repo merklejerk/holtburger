@@ -14,6 +14,7 @@
 	import type { ClientSpellBarState } from "./client-spell-bar-state";
 	import type { InputDigitIndex } from "../lib/input/input-contract";
 	import ClientSpellBar from "./ClientSpellBar.svelte";
+	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
 	import type {
 		ClientItemInteractions,
@@ -58,7 +59,13 @@
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 	import type { ClientObjectInspectionState } from "./client-object-inspection";
-	import type { ClientCombatMode, ClientVital } from "./client-host-contract";
+	import type {
+		ClientAttackProfile,
+		ClientCombatMode,
+		ClientCombatStatus,
+		ClientVital,
+	} from "./client-host-contract";
+	import type { ClientCharacterSettings } from "./client-settings-contract";
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
@@ -109,6 +116,12 @@
 		readonly onActionBarsChange: (bars: readonly ClientActionBar[]) => void;
 		/** Server-confirmed stance for the dock, independent of open panels. */
 		readonly combatMode: ClientCombatMode;
+		readonly combatStatus: ClientCombatStatus;
+		readonly combatTargetName: string | null;
+		readonly combatControls: ClientCharacterSettings["combatControls"];
+		readonly onCombatProfileChange: (profile: ClientAttackProfile) => void;
+		readonly onBeginCombat: () => void;
+		readonly onStopCombat: () => void;
 		/** Shared normal casting action used by the spell browser. */
 		readonly onCastSpell: (spellId: number) => void;
 		/** Gameplay lifecycle admits stance commands. */
@@ -204,6 +217,12 @@
 		actionBars,
 		onActionBarsChange,
 		combatMode,
+		combatStatus,
+		combatTargetName,
+		combatControls,
+		onCombatProfileChange,
+		onBeginCombat,
+		onStopCombat,
 		onCastSpell,
 		combatEnabled,
 		onToggleCombat,
@@ -661,7 +680,7 @@
 		{/key}
 	{/if}
 
-	{#if actionBars !== null && spells !== null && (spellBarEnabled || hudMode === "layout")}
+	{#if actionBars !== null && spells !== null && (spellBarEnabled || (hudMode === "layout" && combatMode !== "melee" && combatMode !== "missile"))}
 		<ClientSpellBar
 			{spells}
 			{inventory}
@@ -677,6 +696,26 @@
 			onShapeChange={onSpellBarShapeChange}
 			onSelectTab={onSelectSpellTab}
 			onActivateCell={onActivateSpellCell}
+		/>
+	{/if}
+	{#if combatMode === "melee" || combatMode === "missile"}
+		<ClientCombatBar
+			placement={hudLayout.combatBar}
+			editable={hudMode === "layout"}
+			{viewport}
+			{combatMode}
+			status={combatStatus}
+			activeTargetName={combatTargetName}
+			profile={combatMode === "melee"
+				? { kind: "melee", ...combatControls.melee }
+				: { kind: "missile", ...combatControls.missile }}
+			selectedTarget={selectedEntityGuid}
+			enabled={combatEnabled && hudMode === "runtime"}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("combatBar", placement)}
+			onProfileChange={onCombatProfileChange}
+			onAttack={onBeginCombat}
+			onStop={onStopCombat}
 		/>
 	{/if}
 

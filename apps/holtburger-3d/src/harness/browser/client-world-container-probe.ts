@@ -143,6 +143,7 @@ export async function probeWorldContainer(options: {
 			playerName: "Wayfarer",
 			knownSpells: null,
 			combatMode: "peace",
+			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,

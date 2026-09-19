@@ -1,6 +1,5 @@
 use super::*;
 use crate::pages::game::combat as combat_model;
-use holtburger_core::ActionResultReason;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::SpellCastAim;
 
@@ -50,10 +49,24 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         }
         AppAction::CycleCombatProfileLevel => {
             state.data.combat_controls.cycle_profile_level();
+            if state.data.combat_status.desired.is_some()
+                && let Some(profile) = shared_attack_profile(state, state.data.combat_mode)
+            {
+                result
+                    .commands
+                    .push(ClientCommand::UpdateCombatProfile(profile));
+            }
             result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::CycleCombatAttackHeight => {
             state.data.combat_controls.cycle_attack_height();
+            if state.data.combat_status.desired.is_some()
+                && let Some(profile) = shared_attack_profile(state, state.data.combat_mode)
+            {
+                result
+                    .commands
+                    .push(ClientCommand::UpdateCombatProfile(profile));
+            }
             result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::SetCombatMode { on } => {
@@ -99,42 +112,17 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     let mut result = UpdateResult::new();
 
     match event {
-        ClientViewEvent::CombatFeedback(feedback) => {
-            result.merge(combat_model::handle_combat_feedback(state, feedback));
+        ClientViewEvent::CombatFeedback(_) => {
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::ActionResult {
-            reason: ActionResultReason::Weenie(_, _),
-            ..
-        } if combat_model::combat_feedback_context_active(state) => {
-            if let ClientViewEvent::ActionResult { reason, .. } = event {
-                state.data.combat_runtime.note_action_result(reason);
-            }
-        }
-        ClientViewEvent::TransientString { message }
-        | ClientViewEvent::PopupString { message }
-        | ClientViewEvent::ServerMessage { message, .. }
-            if combat_model::combat_feedback_context_active(state) =>
-        {
-            state.data.combat_runtime.note_server_message(message);
-        }
-        ClientViewEvent::SelfServerControlledMotion { data }
-            if state.data.combat_mode == CombatMode::Melee
-                && combat_model::combat_feedback_context_active(state) =>
-        {
-            state
-                .data
-                .combat_runtime
-                .note_self_server_controlled_motion(data);
+        ClientViewEvent::CombatStatusUpdated(status) => {
+            state.data.combat_status = *status;
+            result.request_redraw(RedrawPriority::Immediate);
         }
         _ => {}
     }
 
     result
-}
-
-pub(super) fn apply_tick(state: &mut GameState, now: Instant, result: &mut UpdateResult) {
-    combat_model::advance_combat_drive(state, now, result);
 }
 
 pub(super) fn try_enter_combat_mode(
@@ -192,32 +180,32 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
         return result;
     };
 
-    if state.data.combat_mode != desired_mode {
-        match try_enter_combat_mode(state, desired_mode) {
-            EnterCombatModeResult::Failed(res) => {
-                result.merge(res);
-                result.request_redraw(RedrawPriority::Immediate);
-                return result;
-            }
-            EnterCombatModeResult::Success(res) => {
-                result.merge(res);
-            }
-        }
-    }
-
-    state
-        .data
-        .combat_runtime
-        .begin_explicit_engagement(target_guid, desired_mode);
-    if desired_mode == CombatMode::Melee {
-        state.runtime.navigation.begin_combat_navigation();
-    }
-    state.data.combat_runtime.arm_attack_drive();
+    let profile = shared_attack_profile(state, desired_mode)
+        .expect("explicit melee or missile mode must produce an attack profile");
+    result.commands.push(ClientCommand::BeginCombatEngagement {
+        target: target_guid,
+        profile,
+    });
     result.request_redraw(RedrawPriority::Immediate);
 
-    if state.data.combat_mode == desired_mode {
-        combat_model::run_combat_drive(state, Instant::now(), desired_mode, true, &mut result);
-    }
-
     result
+}
+
+fn shared_attack_profile(
+    state: &GameState,
+    mode: CombatMode,
+) -> Option<holtburger_core::ClientAttackProfile> {
+    let height = state.data.combat_controls.attack_height;
+    let level = state.data.combat_controls.profile_level.wire_value();
+    match mode {
+        CombatMode::Melee => Some(holtburger_core::ClientAttackProfile::Melee {
+            height,
+            power: level,
+        }),
+        CombatMode::Missile => Some(holtburger_core::ClientAttackProfile::Missile {
+            height,
+            accuracy: level,
+        }),
+        CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => None,
+    }
 }

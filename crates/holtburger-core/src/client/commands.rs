@@ -241,6 +241,9 @@ impl ClientRuntime {
             | ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
             | ClientCommand::CastSpell { .. }
+            | ClientCommand::BeginCombatEngagement { .. }
+            | ClientCommand::UpdateCombatProfile(_)
+            | ClientCommand::StopCombatEngagement
             | ClientCommand::TargetedMeleeAttack { .. }
             | ClientCommand::TargetedMissileAttack { .. } => self.handle_combat_command(cmd).await,
 
@@ -895,6 +898,9 @@ impl ClientRuntime {
                     return Ok(());
                 }
                 log::info!(">>> Queueing self drive intent: {:?}", intent);
+                if intent.interrupts_combat() {
+                    self.interrupt_combat_for_player_movement(Instant::now());
+                }
                 self.movement.enqueue_drive_intent(intent, Instant::now());
                 Ok(())
             }

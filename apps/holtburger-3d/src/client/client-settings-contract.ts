@@ -47,9 +47,15 @@ const clientHudLayoutV1Schema = z
 	.strict()
 	.readonly();
 
-const clientHudLayoutSchema = clientHudLayoutV1Schema
+const clientHudLayoutV2Schema = clientHudLayoutV1Schema
 	.unwrap()
 	.extend({ inspection: hudPlacementSchema })
+	.strict()
+	.readonly();
+
+const clientHudLayoutSchema = clientHudLayoutV2Schema
+	.unwrap()
+	.extend({ combatBar: hudPlacementSchema })
 	.strict()
 	.readonly();
 
@@ -81,10 +87,10 @@ const clientUserSettingsV1Schema = z
 	.readonly();
 
 /** User-scoped client presentation preferences shared by every local character. */
-export const clientUserSettingsSchema = clientUserSettingsV1Schema
+const clientUserSettingsV2Schema = clientUserSettingsV1Schema
 	.unwrap()
 	.extend({
-		hudLayout: clientHudLayoutSchema,
+		hudLayout: clientHudLayoutV2Schema,
 		inspection: z
 			.object({
 				previewHeight: finiteNumber
@@ -94,6 +100,12 @@ export const clientUserSettingsSchema = clientUserSettingsV1Schema
 			.strict()
 			.readonly(),
 	})
+	.strict()
+	.readonly();
+
+export const clientUserSettingsSchema = clientUserSettingsV2Schema
+	.unwrap()
+	.extend({ hudLayout: clientHudLayoutSchema })
 	.strict()
 	.readonly();
 export type ClientUserSettings = z.infer<typeof clientUserSettingsSchema>;
@@ -178,7 +190,7 @@ const spellTabsSchema = z
 	.readonly();
 
 /** Character-scoped local shortcuts, never ACE/retail configuration authority. */
-export const clientCharacterSettingsSchema = z
+const clientCharacterSettingsV2Schema = z
 	.object({
 		actionBars: z
 			.array(actionBarSchema)
@@ -190,6 +202,34 @@ export const clientCharacterSettingsSchema = z
 			)
 			.readonly(),
 		spellBarBindings: z.object({ tabs: spellTabsSchema }).strict().readonly(),
+	})
+	.strict()
+	.readonly();
+
+const attackHeightSchema = z.enum(["low", "medium", "high"]);
+
+export const clientCharacterSettingsSchema = clientCharacterSettingsV2Schema
+	.unwrap()
+	.extend({
+		combatControls: z
+			.object({
+				melee: z
+					.object({
+						height: attackHeightSchema,
+						power: finiteNumber.min(0).max(1),
+					})
+					.strict()
+					.readonly(),
+				missile: z
+					.object({
+						height: attackHeightSchema,
+						accuracy: finiteNumber.min(0).max(1),
+					})
+					.strict()
+					.readonly(),
+			})
+			.strict()
+			.readonly(),
 	})
 	.strict()
 	.readonly();
@@ -214,10 +254,10 @@ export const clientWindowSettingsSchema = z
 	.readonly();
 export type ClientWindowSettings = z.infer<typeof clientWindowSettingsSchema>;
 
-const characterProfileSchema = z
+const characterProfileV2Schema = z
 	.object({
 		lastKnownName: z.string().min(1).max(128).nullable(),
-		settings: clientCharacterSettingsSchema,
+		settings: clientCharacterSettingsV2Schema,
 	})
 	.strict()
 	.readonly();
@@ -233,7 +273,9 @@ export const clientLocalSettingsDocumentV1Schema = z
 			})
 			.strict()
 			.readonly(),
-		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+		characters: z
+			.record(z.string().min(1), characterProfileV2Schema)
+			.readonly(),
 	})
 	.strict()
 	.readonly();
@@ -248,6 +290,34 @@ export const clientLocalSettingsDocumentV2Schema = z
 		user: z
 			.object({
 				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV2Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z
+			.record(z.string().min(1), characterProfileV2Schema)
+			.readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV2 = z.infer<
+	typeof clientLocalSettingsDocumentV2Schema
+>;
+
+const characterProfileSchema = z
+	.object({
+		lastKnownName: z.string().min(1).max(128).nullable(),
+		settings: clientCharacterSettingsSchema,
+	})
+	.strict()
+	.readonly();
+
+export const clientLocalSettingsDocumentV3Schema = z
+	.object({
+		schemaVersion: z.literal(3),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
 				client: clientUserSettingsSchema,
 			})
 			.strict()
@@ -257,7 +327,7 @@ export const clientLocalSettingsDocumentV2Schema = z
 	.strict()
 	.readonly();
 export type ClientLocalSettingsDocument = z.infer<
-	typeof clientLocalSettingsDocumentV2Schema
+	typeof clientLocalSettingsDocumentV3Schema
 >;
 
 /**
@@ -273,7 +343,7 @@ const V2_INSPECTION_PLACEMENT = {
 
 function migrateClientLocalSettingsDocumentV1(
 	document: ClientLocalSettingsDocumentV1,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV2 {
 	return clientLocalSettingsDocumentV2Schema.parse({
 		...document,
 		schemaVersion: 2,
@@ -290,6 +360,40 @@ function migrateClientLocalSettingsDocumentV1(
 				},
 			},
 		},
+	});
+}
+
+function migrateClientLocalSettingsDocumentV2(
+	document: ClientLocalSettingsDocumentV2,
+): ClientLocalSettingsDocument {
+	return clientLocalSettingsDocumentV3Schema.parse({
+		...document,
+		schemaVersion: 3,
+		user: {
+			...document.user,
+			client: {
+				...document.user.client,
+				hudLayout: {
+					...document.user.client.hudLayout,
+					combatBar: document.user.client.hudLayout.spellBar,
+				},
+			},
+		},
+		characters: Object.fromEntries(
+			Object.entries(document.characters).map(([guid, profile]) => [
+				guid,
+				{
+					...profile,
+					settings: {
+						...profile.settings,
+						combatControls: {
+							melee: { height: "medium", power: 0.5 },
+							missile: { height: "medium", accuracy: 0.5 },
+						},
+					},
+				},
+			]),
+		),
 	});
 }
 
@@ -317,11 +421,17 @@ export function parseClientLocalSettingsDocument(
 		throw new Error("Client settings document has no schemaVersion");
 	switch (value.schemaVersion) {
 		case 1:
-			return migrateClientLocalSettingsDocumentV1(
-				clientLocalSettingsDocumentV1Schema.parse(value),
+			return migrateClientLocalSettingsDocumentV2(
+				migrateClientLocalSettingsDocumentV1(
+					clientLocalSettingsDocumentV1Schema.parse(value),
+				),
 			);
 		case 2:
-			return clientLocalSettingsDocumentV2Schema.parse(value);
+			return migrateClientLocalSettingsDocumentV2(
+				clientLocalSettingsDocumentV2Schema.parse(value),
+			);
+		case 3:
+			return clientLocalSettingsDocumentV3Schema.parse(value);
 		default:
 			throw new Error(
 				`Unsupported client settings schema version ${String(value.schemaVersion)}`,

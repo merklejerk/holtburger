@@ -47,6 +47,8 @@ export interface ClientUiDefaults {
 	readonly character: ClientUiPanel;
 	/** Tabbed combat spell shortcuts; a custom button toggles the strip arrangement. */
 	readonly spellBar: Omit<ClientUiPanel, "resizable">;
+	/** Targeted melee/missile controls; defaults overlap the stance-exclusive spell bar. */
+	readonly combatBar: Omit<ClientUiPanel, "resizable">;
 	/** Chat history and command input. */
 	readonly chat: ClientUiPanel;
 	/** Known-spells floating window. */

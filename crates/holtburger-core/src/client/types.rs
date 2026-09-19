@@ -363,6 +363,8 @@ pub struct ClientApplicationSnapshot {
     pub known_spells: Option<Vec<u32>>,
     /// Server-confirmed stance, undefined before the local player is established.
     pub combat_mode: CombatMode,
+    /// Shared desired attack and server-repeat lifecycle.
+    pub combat: ClientCombatStatus,
     /// Complete shell-facing lifecycle level.
     pub lifecycle: ClientLifecycleState,
     /// Accepted local-player debug override; never changes server physics flags.
@@ -389,6 +391,97 @@ pub struct ClientApplicationSnapshot {
     pub entities: super::entity_facts::ClientEntitySnapshot,
     /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.
     pub runtime_bodies: Arc<[RuntimeSpatialBodyView]>,
+}
+
+/// Parameters ACE applies to one targeted attack sequence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClientAttackProfile {
+    Melee {
+        /// Requested vertical strike band.
+        height: AttackHeight,
+        /// Requested melee charge in the inclusive zero-to-one range.
+        power: f32,
+    },
+    Missile {
+        /// Requested vertical strike band.
+        height: AttackHeight,
+        /// Requested missile accuracy in the inclusive zero-to-one range.
+        accuracy: f32,
+    },
+}
+
+impl ClientAttackProfile {
+    /// Combat stance required by this attack family.
+    pub const fn combat_mode(self) -> CombatMode {
+        match self {
+            Self::Melee { .. } => CombatMode::Melee,
+            Self::Missile { .. } => CombatMode::Missile,
+        }
+    }
+
+    /// Normalizes UI input before it reaches protocol messages or timing decisions.
+    pub fn normalized(self) -> Self {
+        match self {
+            Self::Melee { height, power } => Self::Melee {
+                height,
+                power: power.clamp(0.0, 1.0),
+            },
+            Self::Missile { height, accuracy } => Self::Missile {
+                height,
+                accuracy: accuracy.clamp(0.0, 1.0),
+            },
+        }
+    }
+
+    /// Retail's initial request-producing fill scales with the selected control value.
+    pub fn initial_charge_fraction(self) -> f32 {
+        match self.normalized() {
+            Self::Melee { power, .. } => power,
+            Self::Missile { accuracy, .. } => accuracy,
+        }
+    }
+}
+
+/// One explicit, frontend-owned target preference retained across recoverable interruptions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientCombatEngagement {
+    pub target: Guid,
+    pub profile: ClientAttackProfile,
+}
+
+/// Coarse lifecycle exposed to presentation without leaking reducer bookkeeping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientCombatControlState {
+    Idle,
+    Charging,
+    WaitingForReadiness,
+    Active,
+    Retiring,
+}
+
+/// Event-aligned estimate for a server-owned repeat refill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientCombatRefillEstimate {
+    pub started_at: Instant,
+    pub duration: Duration,
+}
+
+/// Atomic projection of desired combat and the control state that owns wire requests.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientCombatStatus {
+    pub desired: Option<ClientCombatEngagement>,
+    pub state: ClientCombatControlState,
+    pub refill: Option<ClientCombatRefillEstimate>,
+}
+
+impl Default for ClientCombatStatus {
+    fn default() -> Self {
+        Self {
+            desired: None,
+            state: ClientCombatControlState::Idle,
+            refill: None,
+        }
+    }
 }
 
 /// Renderer-consumed timing facts derived from authoritative character motion state.
@@ -745,6 +838,8 @@ pub enum ClientViewEvent {
     CombatModeUpdated {
         mode: CombatMode,
     },
+    /// Replacement level for the shared targeted-attack owner.
+    CombatStatusUpdated(ClientCombatStatus),
     VendorStateUpdated {
         vendor: Option<VendorState>,
     },
@@ -1003,6 +1098,15 @@ pub enum ClientCommand {
         spell_id: u32,
         aim: SpellCastAim,
     },
+    /// Starts or explicitly retargets the shared server-repeat engagement.
+    BeginCombatEngagement {
+        target: Guid,
+        profile: ClientAttackProfile,
+    },
+    /// Coalesces controls for the desired engagement without changing its target.
+    UpdateCombatProfile(ClientAttackProfile),
+    /// Clears desired engagement and retires any server attack sequence.
+    StopCombatEngagement,
     TargetedMeleeAttack {
         target: Guid,
         attack_height: AttackHeight,

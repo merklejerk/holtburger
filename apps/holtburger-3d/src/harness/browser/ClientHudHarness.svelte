@@ -76,7 +76,12 @@
 		ClientChatErrorMessage,
 		ClientChatLine,
 	} from "../../client/client-chat-policy";
-	import type { ClientChatMessage } from "../../client/client-host-contract";
+	import type {
+		ClientAttackProfile,
+		ClientChatMessage,
+		ClientCombatMode,
+		ClientCombatStatus,
+	} from "../../client/client-host-contract";
 	import type { MinimapFrame } from "../../app/minimap-frame";
 	import type { MapEntity } from "../../lib/game/map/map-blips";
 	import { Mat4 } from "../../lib/game/math/types";
@@ -110,7 +115,12 @@
 	> | null>(createDefaultClientCharacterSettings());
 	let characterSettingsGuid: number | null = 1;
 	let hudMode = $state<"runtime" | "layout">("runtime");
-	let spellCombatMode = $state<"peace" | "magic">("peace");
+	let spellCombatMode = $state<ClientCombatMode>("peace");
+	let combatStatus = $state<ClientCombatStatus>({
+		desired: null,
+		state: "idle",
+		refill: null,
+	});
 	const spellBarEnabled = $derived(
 		spellCombatMode === "magic" && hudMode === "runtime",
 	);
@@ -226,7 +236,7 @@
 			});
 			keyboard.returnToGame();
 		},
-		mode: (mode: "peace" | "magic") => {
+		mode: (mode: ClientCombatMode) => {
 			spellCombatMode = mode;
 			emitInteractionEvent("client-combat-mode-updated", { mode });
 		},
@@ -286,6 +296,53 @@
 			emitInteractionEvent("client-combat-mode-updated", { mode: "peace" });
 		},
 	};
+	const combatBarProbe = {
+		begin: (mode: "melee" | "missile") => {
+			hudMode = "runtime";
+			spellCombatMode = mode;
+			selectedGuid = 7;
+			combatStatus = { desired: null, state: "idle", refill: null };
+		},
+		active: (mode: "melee" | "missile") => {
+			spellCombatMode = mode;
+			selectedGuid = 7;
+			combatStatus = {
+				desired: {
+					target: 7,
+					profile:
+						mode === "melee"
+							? { kind: "melee", height: "medium", power: 0.5 }
+							: { kind: "missile", height: "medium", accuracy: 0.5 },
+				},
+				state: "active",
+				refill: { elapsedMs: 350, durationMs: 1000 },
+			};
+		},
+		status: () => combatStatus,
+		end: () => {
+			spellCombatMode = "peace";
+			combatStatus = { desired: null, state: "idle", refill: null };
+		},
+	};
+	function updateCombatProfile(profile: ClientAttackProfile): void {
+		if (characterSettings === null) return;
+		characterSettings = {
+			...characterSettings,
+			combatControls:
+				profile.kind === "melee"
+					? {
+							...characterSettings.combatControls,
+							melee: { height: profile.height, power: profile.power },
+						}
+					: {
+							...characterSettings.combatControls,
+							missile: {
+								height: profile.height,
+								accuracy: profile.accuracy,
+							},
+						},
+		};
+	}
 
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 
@@ -713,6 +770,8 @@
 		readonly objectInspectionProbe: () => ObjectInspectionProbe;
 		/** Production spell shortcut dispatch and session requests under browser input. */
 		readonly spellBarProbe: typeof spellBarProbe;
+		/** Render and manipulate the production melee/missile HUD without a live server. */
+		readonly combatBarProbe: typeof combatBarProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
 		/** Replace selected inventory identity while a panel interaction is active. */
@@ -856,6 +915,7 @@
 			playerName: "Wayfarer",
 			knownSpells: null,
 			combatMode: "peace",
+			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,
@@ -2770,6 +2830,7 @@
 				return activeItemUseProbe;
 			},
 			spellBarProbe,
+			combatBarProbe,
 			probeSpells: () =>
 				probeClientSpells(
 					emitInteractionEvent,
@@ -2899,6 +2960,19 @@
 		onSelectSpellTab={selectSpellTab}
 		onActivateSpellCell={activateSpellCell}
 		combatMode={spellCombatMode}
+		{combatStatus}
+		combatTargetName={combatStatus.desired === null ? null : "Training Target"}
+		combatControls={characterSettings?.combatControls ?? {
+			melee: { height: "medium", power: 0.5 },
+			missile: { height: "medium", accuracy: 0.5 },
+		}}
+		onCombatProfileChange={updateCombatProfile}
+		onBeginCombat={() =>
+			combatBarProbe.active(
+				spellCombatMode === "missile" ? "missile" : "melee",
+			)}
+		onStopCombat={() =>
+			(combatStatus = { desired: null, state: "idle", refill: null })}
 		combatEnabled={true}
 		onToggleCombat={() => {}}
 		onCastSpell={(id) => void castSpell(id)}

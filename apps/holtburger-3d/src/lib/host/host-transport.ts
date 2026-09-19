@@ -18,6 +18,7 @@ import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path"
 import type {
 	ClientCurrentState,
 	ClientCombatMode,
+	ClientCombatStatus,
 	ClientDynamicScriptCue,
 	ClientDynamicSoundCue,
 	ClientExitRequested,
@@ -99,6 +100,9 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"send_client_chat",
 	"toggle_client_combat_mode",
 	"cast_client_spell",
+	"begin_client_combat_engagement",
+	"update_client_combat_profile",
+	"stop_client_combat_engagement",
 	"query_client_entity_health",
 	"preview_client_inventory",
 	"submit_client_inventory",
@@ -182,6 +186,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-player-vitals-updated",
 	"client-player-spells-updated",
 	"client-combat-mode-updated",
+	"client-combat-status-updated",
 	"client-entity-health-updated",
 	"client-chat-message",
 	"client-action-feedback",
@@ -265,6 +270,7 @@ export interface HostEventPayloadMap {
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
 	"client-combat-mode-updated": { mode: ClientCombatMode };
+	"client-combat-status-updated": ClientCombatStatus;
 	"client-player-vitals-updated": {
 		vitals: ClientVital[];
 	};

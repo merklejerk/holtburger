@@ -39,5 +39,9 @@ export function createDefaultClientCharacterSettings(): ClientCharacterSettings 
 	return {
 		actionBars: [initialActionBar()],
 		spellBarBindings: initialSpellBarBindings(),
+		combatControls: {
+			melee: { height: "medium", power: 0.5 },
+			missile: { height: "medium", accuracy: 0.5 },
+		},
 	};
 }

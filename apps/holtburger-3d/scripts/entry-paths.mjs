@@ -15,6 +15,7 @@ const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
 	"port",
 	"account",
 	"password",
+	"melee-max-chase-distance",
 	"ignore-config",
 ]);
 const CLIENT_SHORT_ARGUMENT_NAMES = new Map([

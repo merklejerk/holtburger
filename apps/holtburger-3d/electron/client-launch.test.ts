@@ -93,6 +93,23 @@ describe("parseClientLaunchArguments", () => {
 		).toThrow(/specified more than once/);
 	});
 
+	it("accepts a finite positive melee chase override", () => {
+		expect(
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--melee-max-chase-distance=24.5",
+			]),
+		).toMatchObject({ startup: { meleeMaxChaseDistance: 24.5 } });
+		for (const invalid of ["0", "-1", "nope", "Infinity"]) {
+			expect(() =>
+				parseClientLaunchArguments([
+					"--account=ash",
+					`--melee-max-chase-distance=${invalid}`,
+				]),
+			).toThrow(/finite positive/);
+		}
+	});
+
 	it("accepts the bare config bypass and rejects values", () => {
 		expect(
 			parseClientLaunchArguments(["--account=ash", "--ignore-config"]),

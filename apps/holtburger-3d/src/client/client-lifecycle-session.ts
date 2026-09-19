@@ -41,6 +41,10 @@ import {
 	decodeClientCurrentState,
 	decodeClientCombatMode,
 	type ClientCombatMode,
+	decodeClientCombatStatus,
+	type ClientCombatStatus,
+	clientAttackProfileSchema,
+	type ClientAttackProfile,
 	decodeClientSpells,
 	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
@@ -127,6 +131,9 @@ type ClientCommandName = Extract<
 	| "send_client_chat"
 	| "toggle_client_combat_mode"
 	| "cast_client_spell"
+	| "begin_client_combat_engagement"
+	| "update_client_combat_profile"
+	| "stop_client_combat_engagement"
 	| "query_client_entity_health"
 	| "preview_client_inventory"
 	| "submit_client_inventory"
@@ -175,6 +182,7 @@ type ClientEventName = Extract<
 	| "client-player-vitals-updated"
 	| "client-player-spells-updated"
 	| "client-combat-mode-updated"
+	| "client-combat-status-updated"
 	| "client-entity-health-updated"
 	| "client-chat-message"
 	| "client-transient-string"
@@ -215,6 +223,7 @@ export interface ClientLifecycleSessionState {
 	readonly knownSpells: readonly number[] | null;
 	/** Latest server stance, consumed by the combat shortcut. */
 	readonly combatMode: ClientCombatMode;
+	readonly combat: ClientCombatStatus;
 	readonly vitals: readonly ClientVital[];
 	readonly characterMotion: ClientCharacterMotionCapabilities | null;
 	/** Current server question, retained independently of presentation mounts. */
@@ -233,6 +242,7 @@ export type ClientLifecycleSessionEvent =
 			readonly result: ObjectPreviewResult;
 	  }
 	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
+	| { readonly type: "combat"; readonly status: ClientCombatStatus }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
 			readonly type: "spell-inspection-context";
@@ -538,6 +548,27 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("toggle_client_combat_mode");
 	}
 
+	async beginCombatEngagement(
+		target: number,
+		profile: ClientAttackProfile,
+	): Promise<void> {
+		if (this.#state.lifecycle?.kind !== "in-world") return;
+		await this.#transport.invoke("begin_client_combat_engagement", {
+			target,
+			profile: clientAttackProfileSchema.parse(profile),
+		});
+	}
+
+	async updateCombatProfile(profile: ClientAttackProfile): Promise<void> {
+		await this.#transport.invoke("update_client_combat_profile", {
+			profile: clientAttackProfileSchema.parse(profile),
+		});
+	}
+
+	async stopCombatEngagement(): Promise<void> {
+		await this.#transport.invoke("stop_client_combat_engagement");
+	}
+
 	/** Send one ordinary local-speech message. */
 	async sendChat(message: string): Promise<void> {
 		if (message.trim().length === 0) {
@@ -691,6 +722,16 @@ export class ClientLifecycleSession {
 						const { mode } = decodeClientCombatMode(payload);
 						this.#state = { ...this.#state, combatMode: mode };
 						this.#emit({ type: "combat-mode", mode });
+					},
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-combat-status-updated",
+					(payload) => {
+						const status = decodeClientCombatStatus(payload);
+						this.#state = { ...this.#state, combat: status };
+						this.#emit({ type: "combat", status });
 					},
 				),
 			);
@@ -933,6 +974,7 @@ export class ClientLifecycleSession {
 			playerName: state.playerName,
 			knownSpells: state.knownSpells,
 			combatMode: state.combatMode,
+			combat: state.combat,
 			vitals: state.vitals,
 			characterMotion: state.characterMotion,
 			activeConfirmation: state.activeConfirmation,
@@ -1110,6 +1152,7 @@ function emptyState(): ClientLifecycleSessionState {
 		playerName: null,
 		knownSpells: null,
 		combatMode: "unknown",
+		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

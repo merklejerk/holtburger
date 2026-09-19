@@ -126,6 +126,60 @@ pub struct ClientPreciseJumpCancelRequest {
     pub sequence: u64,
 }
 
+/// Strict renderer attack controls; protocol enums stop at the host boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientAttackProfileRequest {
+    Melee {
+        height: ClientAttackHeightRequest,
+        power: f32,
+    },
+    Missile {
+        height: ClientAttackHeightRequest,
+        accuracy: f32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientAttackHeightRequest {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<ClientAttackHeightRequest> for holtburger_protocol::messages::combat::AttackHeight {
+    fn from(value: ClientAttackHeightRequest) -> Self {
+        match value {
+            ClientAttackHeightRequest::Low => Self::Low,
+            ClientAttackHeightRequest::Medium => Self::Medium,
+            ClientAttackHeightRequest::High => Self::High,
+        }
+    }
+}
+
+impl ClientAttackProfileRequest {
+    fn into_core(self) -> Result<holtburger_core::ClientAttackProfile> {
+        let value = match self {
+            Self::Melee { height, power } => {
+                ensure!(power.is_finite(), "melee power must be finite");
+                holtburger_core::ClientAttackProfile::Melee {
+                    height: height.into(),
+                    power,
+                }
+            }
+            Self::Missile { height, accuracy } => {
+                ensure!(accuracy.is_finite(), "missile accuracy must be finite");
+                holtburger_core::ClientAttackProfile::Missile {
+                    height: height.into(),
+                    accuracy,
+                }
+            }
+        };
+        Ok(value.normalized())
+    }
+}
+
 /// Commands accepted only by the client authority.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -176,6 +230,14 @@ pub enum ClientHostCommand {
         spell_id: u32,
         aim: holtburger_core::client::types::SpellCastAim,
     },
+    BeginClientCombatEngagement {
+        target: holtburger_common::Guid,
+        profile: ClientAttackProfileRequest,
+    },
+    UpdateClientCombatProfile {
+        profile: ClientAttackProfileRequest,
+    },
+    StopClientCombatEngagement,
     RequestClientCurrentState,
     SelectClientCharacter {
         guid: holtburger_common::Guid,
@@ -253,6 +315,9 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "send_client_chat",
     "toggle_client_combat_mode",
     "cast_client_spell",
+    "begin_client_combat_engagement",
+    "update_client_combat_profile",
+    "stop_client_combat_engagement",
     "query_client_entity_health",
     "respond_to_client_confirmation",
     "start_client_camera",
@@ -327,7 +392,7 @@ impl ClientHostRuntime {
             }
         };
 
-        let builder = holtburger_core::ClientRuntimeBuilder::new(startup.account.clone())
+        let mut builder = holtburger_core::ClientRuntimeBuilder::new(startup.account.clone())
             .server(startup.host.clone(), startup.port)
             .world_bootstrap(bootstrap)
             .require_external_world_reveal()
@@ -347,6 +412,9 @@ impl ClientHostRuntime {
                     &self.content.service,
                 )),
             ));
+        if let Some(distance) = startup.melee_max_chase_distance {
+            builder = builder.combat_tuning(holtburger_core::ClientCombatTuning::new(distance)?);
+        }
         let mut client = match builder.connect().await {
             Ok(client) => client,
             Err(error) => {
@@ -573,6 +641,27 @@ pub async fn dispatch_client(
             .map_err(application_error),
         CastClientSpell { spell_id, aim } => runtime
             .send_command(ClientCommand::CastSpell { spell_id, aim })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        BeginClientCombatEngagement { target, profile } => {
+            let profile = profile.into_core().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::BeginCombatEngagement { target, profile })
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        UpdateClientCombatProfile { profile } => {
+            let profile = profile.into_core().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::UpdateCombatProfile(profile))
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        StopClientCombatEngagement => runtime
+            .send_command(ClientCommand::StopCombatEngagement)
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

@@ -6,6 +6,8 @@ export interface ClientLaunchConfiguration {
 	port: number;
 	account: string;
 	password: string;
+	/** Optional developer override for the shared melee pursuit leash, in meters. */
+	meleeMaxChaseDistance?: number;
 }
 
 export interface ParsedClientLaunchArguments {
@@ -44,6 +46,7 @@ export function parseClientLaunchArguments(
 	let port = DEFAULT_PORT;
 	let account: string | undefined;
 	let password = "";
+	let meleeMaxChaseDistance: number | undefined;
 	let ignorePersistedConfig = false;
 	const rendererArguments: string[] = [];
 	const seen = new Set<string>();
@@ -96,6 +99,12 @@ export function parseClientLaunchArguments(
 			case "password":
 				password = value;
 				break;
+			case "melee-max-chase-distance":
+				meleeMaxChaseDistance = parsePositiveFinite(
+					value,
+					"--melee-max-chase-distance",
+				);
+				break;
 		}
 	}
 
@@ -106,7 +115,13 @@ export function parseClientLaunchArguments(
 		port = resolved.port;
 	}
 	return {
-		startup: { host, port, account, password },
+		startup: {
+			host,
+			port,
+			account,
+			password,
+			...(meleeMaxChaseDistance === undefined ? {} : { meleeMaxChaseDistance }),
+		},
 		ignorePersistedConfig,
 		rendererArguments,
 	};
@@ -135,4 +150,11 @@ function parsePort(value: string, argumentName: string): number {
 			`client launch argument ${argumentName} has an invalid port`,
 		);
 	return port;
+}
+
+function parsePositiveFinite(value: string, argumentName: string): number {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0)
+		throw new Error(`${argumentName} must be a finite positive number`);
+	return parsed;
 }

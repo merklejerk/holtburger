@@ -36,18 +36,16 @@ export async function probeCombatBar(
 		"melee",
 	);
 	assert.equal(
-		await read("document.querySelector('.combat-action').textContent.trim()"),
-		"Attack",
+		await read(
+			"document.querySelector('.breakpoint.selected').textContent.trim()",
+		),
+		"3",
 	);
-	await read("document.querySelector('.combat-action').click()");
+	await read("document.querySelector('.attack-trigger').click()");
 	await settle();
 	assert.equal(
-		await read("document.querySelector('.combat-action').textContent.trim()"),
-		"Stop",
-	);
-	assert.equal(
 		await read("document.querySelector('.combat-target').textContent.trim()"),
-		"Target: Training Target",
+		"Training Target",
 	);
 	await capture("combat-melee");
 
@@ -57,17 +55,30 @@ export async function probeCombatBar(
 		await read("document.querySelector('.combat-bar').dataset.combatMode"),
 		"missile",
 	);
+	const fillLength = await read(
+		"parseFloat(document.querySelector('.gauge-fill').style.strokeDasharray)",
+	);
+	assert.ok(fillLength > 0, "Active refill must render visible arc progress");
+	await read("document.querySelector('.breakpoint-5').click()");
+	await settle();
 	assert.equal(
 		await read(
-			"document.querySelector('.combat-controls label span').textContent",
+			"document.querySelector('.breakpoint.selected').textContent.trim()",
 		),
-		"Accuracy",
+		"5",
 	);
-	const fillWidth = await read(
-		"document.querySelector('.combat-fill').getBoundingClientRect().width",
+	await read("document.querySelector('.height.head').click()");
+	await settle();
+	assert.equal(
+		await read(
+			"document.querySelector('.height.head').getAttribute('aria-pressed')",
+		),
+		"true",
 	);
-	assert.ok(fillWidth > 0, "Active refill must render visible progress");
 	await capture("combat-missile");
+	await read("document.querySelector('.combat-target').click()");
+	await settle();
+	assert.equal(await read(`${api}.status().desired`), null);
 
 	await read(`${api}.end()`);
 	await settle();
@@ -75,5 +86,5 @@ export async function probeCombatBar(
 		await read("document.querySelectorAll('.combat-bar').length"),
 		0,
 	);
-	return { meleeAttackStop: true, missileRefillWidth: fillWidth };
+	return { meleeAttackStop: true, missileRefillLength: fillLength };
 }

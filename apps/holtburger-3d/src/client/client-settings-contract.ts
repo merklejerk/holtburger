@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { MAX_ACTION_BARS } from "./client-action-bar-contract.js";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
+import {
+	COMBAT_GAUGE_SIZE,
+	nearestCombatBreakpoint,
+} from "./client-combat-bar-state.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
@@ -216,14 +220,20 @@ export const clientCharacterSettingsSchema = clientCharacterSettingsV2Schema
 				melee: z
 					.object({
 						height: attackHeightSchema,
-						power: finiteNumber.min(0).max(1),
+						power: finiteNumber
+							.min(0)
+							.max(1)
+							.transform(nearestCombatBreakpoint),
 					})
 					.strict()
 					.readonly(),
 				missile: z
 					.object({
 						height: attackHeightSchema,
-						accuracy: finiteNumber.min(0).max(1),
+						accuracy: finiteNumber
+							.min(0)
+							.max(1)
+							.transform(nearestCombatBreakpoint),
 					})
 					.strict()
 					.readonly(),
@@ -375,7 +385,11 @@ function migrateClientLocalSettingsDocumentV2(
 				...document.user.client,
 				hudLayout: {
 					...document.user.client.hudLayout,
-					combatBar: document.user.client.hudLayout.spellBar,
+					combatBar: {
+						...document.user.client.hudLayout.spellBar,
+						preferredWidth: COMBAT_GAUGE_SIZE.width,
+						preferredHeight: COMBAT_GAUGE_SIZE.height,
+					},
 				},
 			},
 		},

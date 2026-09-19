@@ -66,6 +66,21 @@ function versionTwoDocument() {
 }
 
 describe("client settings contract", () => {
+	it("snaps saved combat slider values before display and attack dispatch", () => {
+		const parsed = parseClientCharacterSettings({
+			...createDefaultClientCharacterSettings(),
+			combatControls: {
+				melee: { height: "high", power: 0.6 },
+				missile: { height: "low", accuracy: 0.625 },
+			},
+		});
+		expect(parsed.combatControls).toEqual({
+			melee: { height: "high", power: 0.5 },
+			missile: { height: "low", accuracy: 0.75 },
+		});
+		expect(parseClientCharacterSettings(parsed)).toEqual(parsed);
+	});
+
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);

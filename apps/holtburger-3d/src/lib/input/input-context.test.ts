@@ -4,6 +4,29 @@ import { AppInput } from "./app-input";
 import { INPUT_DEFAULTS } from "./input-defaults";
 
 describe("InputContext", () => {
+	it("maps unmodified number keys 1–5 to combat breakpoints", () => {
+		const input = new AppInput(INPUT_DEFAULTS);
+		for (const [index, digit] of ["1", "2", "3", "4", "5"].entries()) {
+			expect(
+				input.combatBreakpoint({
+					key: digit,
+					code: `Digit${digit}`,
+					shiftKey: false,
+					ctrlKey: false,
+					altKey: false,
+					metaKey: false,
+				}),
+			).toBe(index);
+		}
+		expect(
+			input.combatBreakpoint({
+				key: "!",
+				code: "Digit1",
+				shiftKey: true,
+			}),
+		).toBeNull();
+	});
+
 	it("binds auto-run to unmodified Q while permitting the walk modifier", () => {
 		const input = new AppInput(INPUT_DEFAULTS);
 		for (const shiftKey of [false, true]) {

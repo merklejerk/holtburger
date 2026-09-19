@@ -1,5 +1,6 @@
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
+import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state";
 import type { ClientUiDefaults } from "./client-ui-contract";
 
 /**
@@ -24,15 +25,8 @@ export const CLIENT_UI_DEFAULTS = {
 	combatBar: {
 		anchor: "center",
 		offset: { x: 0, y: CLIENT_ACTION_BAR_TUNING.initialCellSize + 96 },
-		size: {
-			width:
-				CLIENT_ACTION_BAR_TUNING.initialCellSize * SPELL_BAR_INDICES.length,
-			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
-		},
-		minSize: {
-			width: CLIENT_ACTION_BAR_TUNING.initialCellSize,
-			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
-		},
+		size: COMBAT_GAUGE_SIZE,
+		minSize: COMBAT_GAUGE_SIZE,
 	},
 	character: {
 		anchor: "top-left",

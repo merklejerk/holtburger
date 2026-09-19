@@ -114,6 +114,8 @@ export interface InputConfiguration {
 	/** Five attack-power/accuracy breakpoints interpreted while melee or missile combat is active. */
 	readonly combatBar: {
 		readonly breakpoints: CombatBreakpointInputBindings;
+		/** Top-to-bottom attack-height choices interpreted in the same combat scope. */
+		readonly heights: CombatHeightInputBindings;
 	};
 	/** Browser pointer buttons assigned to each viewport gesture. */
 	readonly pointer: Readonly<Record<ViewportPointerAction, readonly number[]>>;
@@ -123,12 +125,17 @@ export interface InputConfiguration {
 export type InputDigitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 /** Zero-based positions of the five combat breakpoints bound to keys 1–5. */
 export type CombatBreakpointIndex = 0 | 1 | 2 | 3 | 4;
+/** Zero-based top-to-bottom positions of the three physical attack heights. */
+export type CombatHeightIndex = 0 | 1 | 2;
 /** Each numbered position accepts any number of alternative bindings, including none. */
 type NumberedInputBindings = Readonly<
 	Record<InputDigitIndex, readonly KeyBinding[]>
 >;
 type CombatBreakpointInputBindings = Readonly<
 	Record<CombatBreakpointIndex, readonly KeyBinding[]>
+>;
+type CombatHeightInputBindings = Readonly<
+	Record<CombatHeightIndex, readonly KeyBinding[]>
 >;
 /** Spatial intent independent of the physical navigation keys. */
 export type ActionBarDirection = "up" | "down" | "left" | "right";

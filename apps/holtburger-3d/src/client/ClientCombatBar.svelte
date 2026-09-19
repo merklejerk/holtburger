@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { onDestroy, untrack } from "svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import type {
@@ -12,25 +12,118 @@
 	} from "./client-hud-layout";
 	import {
 		COMBAT_BREAKPOINTS,
-		type ClientCombatTarget,
+		COMBAT_GAUGE_SIZE,
+		COMBAT_HEIGHTS,
 	} from "./client-combat-bar-state";
 
 	const ARC_LENGTH = 100;
+	const POWER_STEP = 0.01;
+	/** Independent visual inputs; every other combat-gauge dimension is derived below. */
+	const GAUGE_TUNING = {
+		viewBoxWidth: 300,
+		viewBoxHeight: 130,
+		arcBaselineY: 112,
+		arcRadiusX: 96,
+		arcRadiusY: 76,
+		arcStrokeWidth: 13,
+		powerHitStrokeWidth: 24,
+		heightArcGap: 8,
+		heightRowGap: 4,
+		backdropBleedX: 15,
+		backdropBleedTop: 9,
+		backdropBleedBottom: 11,
+		breakpointLabelSize: 24,
+		breakpointOutwardDistance: 16,
+		breakpointEndpointClearance: 10,
+		breakpointOpticalLift: 4,
+	} as const;
+
+	interface GaugePoint {
+		readonly x: number;
+		readonly y: number;
+	}
+
+	const arcCenterX = GAUGE_TUNING.viewBoxWidth / 2;
+	const gaugeLeft = (COMBAT_GAUGE_SIZE.width - GAUGE_TUNING.viewBoxWidth) / 2;
+	const gaugeTop = (COMBAT_GAUGE_SIZE.height - GAUGE_TUNING.viewBoxHeight) / 2;
+	const arcBaseline = gaugeTop + GAUGE_TUNING.arcBaselineY;
+	const arcLeft = gaugeLeft + arcCenterX - GAUGE_TUNING.arcRadiusX;
+	const innerArcInset =
+		GAUGE_TUNING.arcStrokeWidth / 2 + GAUGE_TUNING.heightArcGap;
+	const unsnappedHeight = GAUGE_TUNING.arcRadiusY - innerArcInset;
+	// Whole-pixel rows keep both nominally equal gaps on the same raster boundary.
+	const heightRowHeight = Math.floor(
+		(unsnappedHeight -
+			GAUGE_TUNING.heightRowGap * (COMBAT_HEIGHTS.length - 1)) /
+			COMBAT_HEIGHTS.length,
+	);
+	const heightLayout = {
+		left: arcLeft + innerArcInset,
+		bottom: COMBAT_GAUGE_SIZE.height - arcBaseline,
+		width: 2 * (GAUGE_TUNING.arcRadiusX - innerArcInset),
+		height:
+			heightRowHeight * COMBAT_HEIGHTS.length +
+			GAUGE_TUNING.heightRowGap * (COMBAT_HEIGHTS.length - 1),
+	} as const;
+	const backdropLayout = {
+		left: arcLeft - GAUGE_TUNING.backdropBleedX,
+		bottom:
+			COMBAT_GAUGE_SIZE.height - arcBaseline - GAUGE_TUNING.backdropBleedBottom,
+		width: 2 * (GAUGE_TUNING.arcRadiusX + GAUGE_TUNING.backdropBleedX),
+		height:
+			GAUGE_TUNING.arcRadiusY +
+			GAUGE_TUNING.backdropBleedTop +
+			GAUGE_TUNING.backdropBleedBottom,
+	} as const;
+	const arcPath = `M ${arcCenterX - GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcBaselineY} A ${GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcRadiusY} 0 0 1 ${arcCenterX + GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcBaselineY}`;
+
+	function pointOnArc(value: number): GaugePoint {
+		return {
+			x: arcCenterX - GAUGE_TUNING.arcRadiusX * Math.cos(Math.PI * value),
+			y:
+				GAUGE_TUNING.arcBaselineY -
+				GAUGE_TUNING.arcRadiusY * Math.sin(Math.PI * value),
+		};
+	}
+
+	const breakpointMarkers = COMBAT_BREAKPOINTS.map((value, index) => {
+		const point = pointOnArc(value);
+		const radialX = point.x - arcCenterX;
+		const radialY = point.y - GAUGE_TUNING.arcBaselineY;
+		const radialLength = Math.hypot(radialX, radialY);
+		const endpointDirection =
+			index === 0 ? -1 : index === COMBAT_BREAKPOINTS.length - 1 ? 1 : 0;
+		// Endpoint clearance and a tiny vertical lift keep glyphs optically off the stroke.
+		const labelCenterX =
+			gaugeLeft +
+			point.x +
+			endpointDirection * GAUGE_TUNING.breakpointEndpointClearance;
+		const labelCenterY =
+			gaugeTop +
+			point.y -
+			GAUGE_TUNING.breakpointOpticalLift * Math.sin(Math.PI * value);
+		return {
+			left: Math.round(labelCenterX) - GAUGE_TUNING.breakpointLabelSize / 2,
+			top: Math.round(labelCenterY) - GAUGE_TUNING.breakpointLabelSize / 2,
+			outwardX: Math.round(
+				(radialX / radialLength) * GAUGE_TUNING.breakpointOutwardDistance,
+			),
+			outwardY: Math.round(
+				(radialY / radialLength) * GAUGE_TUNING.breakpointOutwardDistance,
+			),
+		};
+	});
 
 	interface Props {
 		readonly placement: ClientHudPlacement;
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
 		readonly status: ClientCombatStatus;
-		/** Known presentation for the engaged entity, resolved by the app. */
-		readonly activeTarget: ClientCombatTarget | null;
 		readonly profile: ClientAttackProfile;
-		readonly selectedTarget: number | null;
 		readonly enabled: boolean;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
-		readonly onProfileChange: (profile: ClientAttackProfile) => void;
-		readonly onAttack: () => void;
-		readonly onStop: () => void;
+		/** Commit an attack profile and engage the current selection when present. */
+		readonly onProfileSelect: (profile: ClientAttackProfile) => void;
 	}
 
 	let {
@@ -38,20 +131,60 @@
 		editable,
 		viewport,
 		status,
-		activeTarget,
 		profile,
-		selectedTarget,
 		enabled,
 		onPlacementChange,
-		onProfileChange,
-		onAttack,
-		onStop,
+		onProfileSelect,
 	}: Props = $props();
 
 	const naturalPlacement = $derived({
 		...placement,
 		preferredWidth: CLIENT_UI_DEFAULTS.combatBar.size.width,
 		preferredHeight: CLIENT_UI_DEFAULTS.combatBar.size.height,
+	});
+	const value = $derived(
+		profile.kind === "melee" ? profile.power : profile.accuracy,
+	);
+	let combatBar: HTMLDivElement | null = null;
+	let profileEmphasized = $state(false);
+	let observedProfile = $state<string | null>(null);
+	let emphasisTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function cssDurationMs(property: string): number {
+		if (combatBar === null) throw new Error("Combat gauge is not mounted");
+		const value = getComputedStyle(combatBar).getPropertyValue(property).trim();
+		const multiplier = value.endsWith("ms")
+			? 1
+			: value.endsWith("s")
+				? 1_000
+				: null;
+		if (multiplier === null)
+			throw new Error(`${property} must use an ms or s duration`);
+		const amount = Number.parseFloat(value);
+		if (!Number.isFinite(amount) || amount < 0)
+			throw new Error(`${property} must be a non-negative duration`);
+		return amount * multiplier;
+	}
+
+	$effect(() => {
+		const signature = `${profile.kind}:${profile.height}:${value}`;
+		if (observedProfile === null) {
+			observedProfile = signature;
+			return;
+		}
+		if (observedProfile === signature) return;
+		observedProfile = signature;
+		untrack(() => {
+			profileEmphasized = true;
+			if (emphasisTimer !== null) clearTimeout(emphasisTimer);
+			emphasisTimer = setTimeout(() => {
+				profileEmphasized = false;
+				emphasisTimer = null;
+			}, cssDurationMs("--ui-combat-emphasis-duration"));
+		});
+	});
+	onDestroy(() => {
+		if (emphasisTimer !== null) clearTimeout(emphasisTimer);
 	});
 	let sampledAt = $state(performance.now());
 	let refillReceivedAt = $state(performance.now());
@@ -63,7 +196,7 @@
 		const timer = setInterval(sample, 33);
 		return () => clearInterval(timer);
 	});
-	const fill = $derived.by(() => {
+	const charge = $derived.by(() => {
 		const refill = status.refill;
 		if (refill === null) return status.state === "active" ? 1 : 0;
 		if (refill.durationMs === 0) return 1;
@@ -71,29 +204,100 @@
 		const elapsed = refill.elapsedMs + (sampledAt - refillReceivedAt);
 		return Math.min(1, elapsed / refill.durationMs);
 	});
-	const value = $derived(
-		profile.kind === "melee" ? profile.power : profile.accuracy,
-	);
-	const gaugeLevel = $derived(fill * value);
-	const needleAngle = $derived(-180 + gaugeLevel * 180);
-	const activeTargetLabel = $derived(
-		status.desired === null
-			? null
-			: (activeTarget?.name ??
-					`0x${status.desired.target.toString(16).toUpperCase().padStart(8, "0")}`),
-	);
-	const attackLabel = $derived(
-		selectedTarget === null
-			? "Select a target to attack"
-			: `Attack selected target with ${profile.kind === "melee" ? "melee" : "missile"}`,
+	let dragValue = $state<number | null>(null);
+	let activePointer = $state<number | null>(null);
+	let powerControl: SVGGElement | null = null;
+	const displayedValue = $derived(dragValue ?? value);
+	const chargeLevel = $derived(charge * displayedValue);
+	const displayedPercent = $derived(Math.round(displayedValue * 100));
+	const handlePoint = $derived(pointOnArc(displayedValue));
+	// The triangle points along local +Y; use the actual ellipse-to-center vector.
+	const handleAngle = $derived(
+		(Math.atan2(
+			handlePoint.x - arcCenterX,
+			GAUGE_TUNING.arcBaselineY - handlePoint.y,
+		) *
+			180) /
+			Math.PI,
 	);
 
-	function replaceValue(next: number): void {
-		onProfileChange(
-			profile.kind === "melee"
-				? { ...profile, power: next }
-				: { ...profile, accuracy: next },
-		);
+	function clampPower(value: number): number {
+		return Math.min(1, Math.max(0, value));
+	}
+
+	function profileWithValue(next: number): ClientAttackProfile {
+		return profile.kind === "melee"
+			? { ...profile, power: next }
+			: { ...profile, accuracy: next };
+	}
+
+	function powerAtPointer(event: PointerEvent): number {
+		const bounds = powerControl?.ownerSVGElement?.getBoundingClientRect();
+		if (bounds === undefined || bounds.width === 0) return displayedValue;
+		const svgX =
+			((event.clientX - bounds.left) / bounds.width) *
+			GAUGE_TUNING.viewBoxWidth;
+		const cosine =
+			clampPower(
+				(arcCenterX - svgX + GAUGE_TUNING.arcRadiusX) /
+					(GAUGE_TUNING.arcRadiusX * 2),
+			) *
+				2 -
+			1;
+		return Math.acos(cosine) / Math.PI;
+	}
+
+	function beginPowerDrag(event: PointerEvent): void {
+		if (!enabled || event.button !== 0 || powerControl === null) return;
+		event.preventDefault();
+		activePointer = event.pointerId;
+		dragValue = powerAtPointer(event);
+		powerControl.setPointerCapture(event.pointerId);
+	}
+
+	function movePowerDrag(event: PointerEvent): void {
+		if (event.pointerId !== activePointer) return;
+		dragValue = powerAtPointer(event);
+	}
+
+	function finishPowerDrag(event: PointerEvent): void {
+		if (event.pointerId !== activePointer || powerControl === null) return;
+		const next = powerAtPointer(event);
+		powerControl.releasePointerCapture(event.pointerId);
+		activePointer = null;
+		dragValue = null;
+		onProfileSelect(profileWithValue(next));
+	}
+
+	function cancelPowerDrag(event: PointerEvent): void {
+		if (event.pointerId !== activePointer) return;
+		activePointer = null;
+		dragValue = null;
+	}
+
+	function changePowerFromKeyboard(event: KeyboardEvent): void {
+		if (!enabled) return;
+		let next: number;
+		switch (event.key) {
+			case "ArrowLeft":
+			case "ArrowDown":
+				next = value - POWER_STEP;
+				break;
+			case "ArrowRight":
+			case "ArrowUp":
+				next = value + POWER_STEP;
+				break;
+			case "Home":
+				next = 0;
+				break;
+			case "End":
+				next = 1;
+				break;
+			default:
+				return;
+		}
+		event.preventDefault();
+		onProfileSelect(profileWithValue(clampPower(next)));
 	}
 </script>
 
@@ -108,316 +312,251 @@
 	contentHitTesting="surface"
 	{onPlacementChange}
 >
-	<div class="combat-bar" data-combat-mode={profile.kind}>
-		<div class="gauge-column">
-			<div class="gauge">
-				<button
-					type="button"
-					class="attack-trigger"
-					disabled={!enabled || selectedTarget === null}
-					title={attackLabel}
-					aria-label={attackLabel}
-					onclick={onAttack}
+	<div
+		bind:this={combatBar}
+		class="combat-bar"
+		class:profile-emphasized={profileEmphasized}
+		data-combat-mode={profile.kind}
+	>
+		<div
+			class="gauge-background"
+			style:left={`${backdropLayout.left}px`}
+			style:bottom={`${backdropLayout.bottom}px`}
+			style:width={`${backdropLayout.width}px`}
+			style:height={`${backdropLayout.height}px`}
+			aria-hidden="true"
+		></div>
+		<svg
+			class="gauge"
+			viewBox={`0 0 ${GAUGE_TUNING.viewBoxWidth} ${GAUGE_TUNING.viewBoxHeight}`}
+			style:left={`${gaugeLeft}px`}
+			style:top={`${gaugeTop}px`}
+			style:width={`${GAUGE_TUNING.viewBoxWidth}px`}
+			style:height={`${GAUGE_TUNING.viewBoxHeight}px`}
+		>
+			<path
+				class="gauge-track"
+				d={arcPath}
+				pathLength={ARC_LENGTH}
+				stroke-width={GAUGE_TUNING.arcStrokeWidth}
+			/>
+			<path
+				class="gauge-fill"
+				d={arcPath}
+				pathLength={ARC_LENGTH}
+				stroke-width={GAUGE_TUNING.arcStrokeWidth}
+				style:stroke-dasharray={`${chargeLevel * ARC_LENGTH} ${ARC_LENGTH}`}
+			/>
+			<g
+				bind:this={powerControl}
+				class="power-control"
+				class:disabled={!enabled}
+				class:dragging={activePointer !== null}
+				role="slider"
+				tabindex={enabled ? 0 : -1}
+				aria-label={profile.kind === "melee"
+					? "Attack power"
+					: "Missile accuracy"}
+				aria-valuemin="0"
+				aria-valuemax="100"
+				aria-valuenow={displayedPercent}
+				aria-valuetext={`${displayedPercent}%`}
+				onpointerdown={beginPowerDrag}
+				onpointermove={movePowerDrag}
+				onpointerup={finishPowerDrag}
+				onpointercancel={cancelPowerDrag}
+				onkeydown={changePowerFromKeyboard}
+			>
+				<path
+					class="power-hit-area"
+					d={arcPath}
+					stroke-width={GAUGE_TUNING.powerHitStrokeWidth}
+				/>
+				<g
+					transform={`translate(${handlePoint.x} ${handlePoint.y}) rotate(${handleAngle})`}
 				>
-					<svg viewBox="0 0 220 125" aria-hidden="true">
-						<path
-							class="gauge-face"
-							d="M 25 110 A 85 85 0 0 1 195 110 L 25 110 Z"
-						/>
-						<path
-							class="gauge-track"
-							d="M 25 110 A 85 85 0 0 1 195 110"
-							pathLength={ARC_LENGTH}
-						/>
-						<path
-							class="gauge-fill"
-							d="M 25 110 A 85 85 0 0 1 195 110"
-							pathLength={ARC_LENGTH}
-							style:stroke-dasharray={`${gaugeLevel * ARC_LENGTH} ${ARC_LENGTH}`}
-						/>
-						<g class="needle" style:transform={`rotate(${needleAngle}deg)`}>
-							{#if profile.kind === "melee"}
-								<path
-									class="weapon"
-									d="M 104 106 L 153 106 L 169 110 L 153 114 L 104 114 Z"
-								/>
-								<path class="weapon" d="M 119 99 H 125 V 121 H 119 Z" />
-								<path class="weapon" d="M 101 106 H 112 V 114 H 101 Z" />
-							{:else}
-								<path class="weapon-stroke" d="M 104 110 H 165" />
-								<path
-									class="weapon"
-									d="M 171 110 L 155 101 L 159 110 L 155 119 Z"
-								/>
-								<path
-									class="weapon"
-									d="M 111 110 L 101 103 L 105 110 L 101 117 Z"
-								/>
-							{/if}
-						</g>
-						<circle class="needle-pin" cx="110" cy="110" r="6" />
-					</svg>
-				</button>
-				{#each COMBAT_BREAKPOINTS as breakpoint, index}
-					<button
-						type="button"
-						class="breakpoint breakpoint-{index + 1}"
-						class:selected={value === breakpoint}
-						disabled={!enabled}
-						aria-label={`Set ${profile.kind === "melee" ? "attack power" : "missile accuracy"} to ${breakpoint * 100}%`}
-						aria-pressed={value === breakpoint}
-						onclick={() => replaceValue(breakpoint)}>{index + 1}</button
-					>
-				{/each}
-			</div>
-			{#if activeTargetLabel !== null}
+					<path class="power-handle" d="M -10 -10 H 10 L 0 11 Z" />
+				</g>
+			</g>
+		</svg>
+
+		<div
+			class="attack-height"
+			style:left={`${heightLayout.left}px`}
+			style:bottom={`${heightLayout.bottom}px`}
+			style:width={`${heightLayout.width}px`}
+			style:height={`${heightLayout.height}px`}
+			style:gap={`${GAUGE_TUNING.heightRowGap}px`}
+			aria-label="Attack height"
+		>
+			{#each COMBAT_HEIGHTS as height, index}
 				<button
 					type="button"
-					class="combat-target"
-					style:color={activeTarget?.color}
-					title={`Stop attacking ${activeTargetLabel}`}
+					class="height {height}"
+					class:selected={profile.height === height}
+					data-shortcut={index + 1}
 					disabled={!enabled}
-					onclick={onStop}>{activeTargetLabel}</button
-				>
-			{:else}
-				<div class="combat-target-placeholder">No target engaged</div>
-			{/if}
+					aria-label={`${height[0].toUpperCase()}${height.slice(1)} attack (Shift+${index + 1})`}
+					aria-pressed={profile.height === height}
+					onclick={() => onProfileSelect({ ...profile, height })}
+				></button>
+			{/each}
 		</div>
 
-		<div class="attack-height" aria-label="Attack height">
-			<button
-				type="button"
-				class="height head"
-				class:selected={profile.height === "high"}
-				disabled={!enabled}
-				aria-label="High attack"
-				aria-pressed={profile.height === "high"}
-				onclick={() => onProfileChange({ ...profile, height: "high" })}
-			></button>
-			<button
-				type="button"
-				class="height torso"
-				class:selected={profile.height === "medium"}
-				disabled={!enabled}
-				aria-label="Medium attack"
-				aria-pressed={profile.height === "medium"}
-				onclick={() => onProfileChange({ ...profile, height: "medium" })}
-			></button>
-			<button
-				type="button"
-				class="height legs"
-				class:selected={profile.height === "low"}
-				disabled={!enabled}
-				aria-label="Low attack"
-				aria-pressed={profile.height === "low"}
-				onclick={() => onProfileChange({ ...profile, height: "low" })}
-			></button>
-		</div>
-		<span class="combat-state">{status.state.replaceAll("-", " ")}</span>
+		{#each breakpointMarkers as marker, index}
+			<span
+				class="breakpoint breakpoint-{index + 1}"
+				style:left={`${marker.left}px`}
+				style:top={`${marker.top}px`}
+				style:width={`${GAUGE_TUNING.breakpointLabelSize}px`}
+				style:height={`${GAUGE_TUNING.breakpointLabelSize}px`}
+				style:--breakpoint-outward-x={`${marker.outwardX}px`}
+				style:--breakpoint-outward-y={`${marker.outwardY}px`}
+				aria-hidden="true">{index + 1}</span
+			>
+		{/each}
 	</div>
 </ClientHudPanel>
 
 <style>
 	.combat-bar {
+		--combat-rest-opacity: var(--ui-combat-idle-opacity);
+
 		position: relative;
-		display: grid;
-		grid-template-columns: minmax(230px, 1fr) 58px;
-		align-items: center;
-		gap: 4px;
 		box-sizing: border-box;
 		width: 100%;
 		height: 100%;
-		min-height: 170px;
-		padding: 7px 12px 8px;
-		overflow: hidden;
-		border: 1px solid var(--ui-color-border);
-		background: var(--ui-hud-background-color);
-		color: var(--ui-color-text);
+		color: var(--ui-combat-foreground-color);
+		opacity: var(--combat-rest-opacity);
+		transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
 	}
-	.gauge-column {
-		display: grid;
-		align-self: stretch;
-		grid-template-rows: minmax(0, 1fr) 25px;
-		min-width: 0;
+	.combat-bar:hover,
+	.combat-bar:focus-within,
+	.combat-bar.profile-emphasized {
+		--combat-rest-opacity: 1;
+	}
+	.gauge-background {
+		position: absolute;
+		border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+		background: var(--ui-combat-backdrop-color);
+		filter: var(--ui-combat-backdrop-filter);
+		pointer-events: none;
 	}
 	.gauge {
-		position: relative;
-		width: min(100%, 250px);
-		height: 142px;
-		margin: 0 auto;
-	}
-	.attack-trigger {
 		position: absolute;
-		inset: 18px 15px 0;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: inherit;
-		cursor: crosshair;
-	}
-	.attack-trigger:disabled {
-		cursor: default;
-	}
-	.attack-trigger svg {
 		display: block;
-		width: 100%;
-		height: 100%;
 		overflow: visible;
 	}
-	.gauge-face {
-		fill: color-mix(in srgb, var(--ui-color-control) 56%, transparent);
-	}
 	.gauge-track,
-	.gauge-fill {
+	.gauge-fill,
+	.power-hit-area {
 		fill: none;
-		stroke-linecap: butt;
-		stroke-width: 13;
 	}
 	.gauge-track {
-		stroke: color-mix(in srgb, var(--ui-color-border) 62%, transparent);
+		stroke: var(--ui-combat-track-color);
 	}
 	.gauge-fill {
-		stroke: var(--ui-color-accent);
+		stroke: var(--ui-combat-charge-color);
 	}
-	.needle {
-		transform-box: view-box;
-		transform-origin: 110px 110px;
+	.power-control {
+		cursor: grab;
+		outline: none;
 	}
-	.weapon,
-	.needle-pin {
-		fill: var(--ui-color-text);
+	.power-control.dragging {
+		cursor: grabbing;
 	}
-	.weapon-stroke {
-		fill: none;
-		stroke: var(--ui-color-text);
-		stroke-width: 7;
+	.power-control.disabled {
+		cursor: default;
+		opacity: 0.55;
 	}
-	.breakpoint,
+	.power-control:focus-visible .power-handle {
+		filter: var(--ui-combat-handle-focus-filter);
+	}
+	.power-hit-area {
+		stroke: transparent;
+		pointer-events: stroke;
+	}
+	.power-handle {
+		fill: var(--ui-combat-foreground-color);
+		stroke: var(--ui-combat-outline-color);
+		stroke-width: 3;
+		filter: var(--ui-combat-handle-filter);
+		pointer-events: all;
+		transform-box: fill-box;
+		transform-origin: center;
+		transition: transform 120ms var(--ui-easing);
+	}
+	.power-handle:hover,
+	.power-control:focus-visible .power-handle,
+	.power-control.dragging .power-handle {
+		transform: scale(1.12);
+	}
+	.attack-height {
+		position: absolute;
+		display: grid;
+		grid-template-rows: repeat(3, minmax(0, 1fr));
+		overflow: hidden;
+		clip-path: ellipse(50% 100% at 50% 100%);
+	}
 	.height {
-		border: 1px solid var(--ui-color-border);
-		background: var(--ui-color-well);
-		color: var(--ui-color-text);
+		position: relative;
+		display: grid;
+		box-sizing: border-box;
+		width: 100%;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		background: var(--ui-combat-height-color);
+		color: var(--ui-combat-foreground-color);
 		cursor: pointer;
 	}
-	.breakpoint {
-		position: absolute;
-		width: 34px;
-		height: 34px;
-		padding: 0;
-		border-radius: 50%;
-		font-size: 1.05rem;
+	.height::after {
+		content: attr(data-shortcut);
+		font-size: var(--ui-font-size-micro);
 		font-weight: 800;
+		opacity: 0;
+		pointer-events: none;
+		text-shadow: var(--ui-combat-breakpoint-shadow);
+		transition: opacity 100ms ease-out;
 	}
-	.breakpoint-1 {
-		left: 0;
-		bottom: 12px;
+	.combat-bar:hover .height::after,
+	.combat-bar:focus-within .height::after {
+		opacity: 1;
 	}
-	.breakpoint-2 {
-		left: 26px;
-		top: 28px;
-	}
-	.breakpoint-3 {
-		left: calc(50% - 17px);
-		top: 0;
-	}
-	.breakpoint-4 {
-		right: 26px;
-		top: 28px;
-	}
-	.breakpoint-5 {
-		right: 0;
-		bottom: 12px;
-	}
-	.breakpoint.selected,
 	.height.selected {
-		border-color: var(--ui-color-accent);
-		background: color-mix(
-			in srgb,
-			var(--ui-color-accent) 38%,
-			var(--ui-color-control)
-		);
-		box-shadow:
-			0 0 0 2px color-mix(in srgb, var(--ui-color-accent) 35%, transparent),
-			0 0 10px color-mix(in srgb, var(--ui-color-accent) 55%, transparent);
-		color: var(--ui-color-text);
+		background: var(--ui-combat-height-selected-color);
 	}
-	.breakpoint:disabled,
+	.height:hover:not(:disabled),
+	.height:focus-visible {
+		background: var(--ui-combat-height-hover-color);
+		outline: none;
+	}
 	.height:disabled {
 		cursor: default;
 		opacity: 0.55;
 	}
-	.combat-target,
-	.combat-target-placeholder {
-		align-self: center;
-		justify-self: center;
-		max-width: 100%;
-		overflow: hidden;
-		font-size: 0.8rem;
-		font-weight: 700;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.combat-target {
-		padding: 2px 8px;
-		border: 0;
-		background: transparent;
-		cursor: pointer;
-	}
-	.combat-target:hover {
-		text-decoration: line-through;
-	}
-	.combat-target-placeholder {
-		color: var(--ui-color-muted);
-		font-weight: 400;
-	}
-	.attack-height {
-		display: grid;
-		grid-template-rows: 42px 58px 50px;
-		align-content: center;
-		justify-items: center;
-		gap: 3px;
-	}
-	.height {
-		padding: 0;
-	}
-	.height.head {
-		width: 36px;
-		height: 36px;
-		border-radius: 50%;
-	}
-	.height.torso {
-		width: 56px;
-		height: 54px;
-		clip-path: polygon(
-			25% 0,
-			75% 0,
-			100% 32%,
-			76% 32%,
-			76% 100%,
-			24% 100%,
-			24% 32%,
-			0 32%
-		);
-	}
-	.height.legs {
-		width: 45px;
-		height: 48px;
-		clip-path: polygon(
-			10% 0,
-			90% 0,
-			82% 100%,
-			56% 100%,
-			50% 48%,
-			44% 100%,
-			18% 100%
-		);
-	}
-	.combat-state {
+	.breakpoint {
 		position: absolute;
-		right: 5px;
-		bottom: 2px;
-		font-size: 0.55rem;
-		text-transform: capitalize;
-		color: var(--ui-color-muted);
+		z-index: 3;
+		display: grid;
+		place-items: center;
+		font-size: 0.9rem;
+		font-weight: 800;
+		opacity: 0;
+		pointer-events: none;
+		text-shadow: var(--ui-combat-breakpoint-shadow);
+		transform: scale(0.85);
+		transition:
+			opacity 100ms ease-out,
+			transform 100ms ease-out;
+	}
+	.combat-bar:hover .breakpoint,
+	.combat-bar:focus-within .breakpoint {
+		opacity: 1;
+		transform: translate(
+				var(--breakpoint-outward-x),
+				var(--breakpoint-outward-y)
+			)
+			scale(1);
 	}
 </style>

@@ -3,6 +3,7 @@ import { InputContext, matchesKey } from "./input-context";
 import type {
 	ActionBarDirection,
 	CombatBreakpointIndex,
+	CombatHeightIndex,
 	InputDigitIndex,
 	CharacterAction,
 	FlyAction,
@@ -57,6 +58,16 @@ export class AppInput {
 		return (
 			indices.find((index) =>
 				matchesKey(event, this.configuration.combatBar.breakpoints[index]),
+			) ?? null
+		);
+	}
+
+	/** Resolve the three top-to-bottom physical attack-height keys. */
+	combatHeight(event: InputKeyEvent): CombatHeightIndex | null {
+		const indices: readonly CombatHeightIndex[] = [0, 1, 2];
+		return (
+			indices.find((index) =>
+				matchesKey(event, this.configuration.combatBar.heights[index]),
 			) ?? null
 		);
 	}

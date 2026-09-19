@@ -6,11 +6,15 @@
 	} from "./client-spell-bar-state";
 	import type {
 		CombatBreakpointIndex,
+		CombatHeightIndex,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
+	import { handleCombatBarKeydown } from "./client-combat-bar-input";
 	import { handleSpellBarKeydown } from "./client-spell-bar-input";
-	import { COMBAT_BREAKPOINTS } from "./client-combat-bar-state";
-	import { selectedEntityNameColor } from "./client-selected-entity-color";
+	import {
+		COMBAT_BREAKPOINTS,
+		COMBAT_HEIGHTS,
+	} from "./client-combat-bar-state";
 	import { SpellReferences } from "../app/spell-references";
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientItemInteractions } from "./client-item-interactions";
@@ -192,20 +196,6 @@
 		state: "idle",
 		refill: null,
 	});
-	const combatTarget = $derived.by(() => {
-		const target = combatStatus.desired?.target;
-		const read = session?.entities.read();
-		if (target === undefined || read?.kind !== "current") return null;
-		const description = read.level.entities.get(target)?.description;
-		if (description?.kind !== "known") return null;
-		return {
-			name: description.name,
-			color: selectedEntityNameColor(
-				description,
-				target === session?.state().playerGuid,
-			),
-		};
-	});
 	const defaultCombatControls: ClientCharacterSettings["combatControls"] = {
 		melee: { height: "medium", power: 0.5 },
 		missile: { height: "medium", accuracy: 0.5 },
@@ -215,8 +205,8 @@
 			? characterSettings.settings.combatControls
 			: defaultCombatControls,
 	);
-	function changeCombatProfile(profile: ClientAttackProfile): void {
-		if (characterSettings.kind !== "ready") return;
+	function persistCombatProfile(profile: ClientAttackProfile): boolean {
+		if (characterSettings.kind !== "ready") return false;
 		const controls =
 			profile.kind === "melee"
 				? {
@@ -231,25 +221,45 @@
 			...characterSettings.settings,
 			combatControls: controls,
 		});
-		if (combatStatus.desired !== null)
+		return true;
+	}
+	function selectCombatProfile(profile: ClientAttackProfile): void {
+		if (!persistCombatProfile(profile)) return;
+		if (selectedEntityGuid !== null) beginCombatEngagement(profile);
+		else if (combatStatus.desired !== null)
 			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
 	}
 	function selectCombatBreakpoint(index: CombatBreakpointIndex): void {
 		const value = COMBAT_BREAKPOINTS[index];
 		if (combatMode === "melee")
-			changeCombatProfile({
+			selectCombatProfile({
 				kind: "melee",
 				...combatControls.melee,
 				power: value,
 			});
 		else if (combatMode === "missile")
-			changeCombatProfile({
+			selectCombatProfile({
 				kind: "missile",
 				...combatControls.missile,
 				accuracy: value,
 			});
 	}
-	function beginCombat(): void {
+	function selectCombatHeight(index: CombatHeightIndex): void {
+		const height = COMBAT_HEIGHTS[index];
+		if (combatMode === "melee")
+			selectCombatProfile({
+				kind: "melee",
+				...combatControls.melee,
+				height,
+			});
+		else if (combatMode === "missile")
+			selectCombatProfile({
+				kind: "missile",
+				...combatControls.missile,
+				height,
+			});
+	}
+	function beginCombatEngagement(profile: ClientAttackProfile): void {
 		const currentSession = session;
 		if (
 			currentSession === null ||
@@ -259,24 +269,16 @@
 		)
 			return;
 		// Selection is sampled only for this explicit begin; core retains the engaged target.
-		const profile: ClientAttackProfile | null =
-			combatMode === "melee"
-				? { kind: "melee", ...combatControls.melee }
-				: combatMode === "missile"
-					? { kind: "missile", ...combatControls.missile }
-					: null;
-		if (profile !== null) {
-			retireCombatEscapeContext();
-			const context = keyboard.bindEscapeContext(stopCombat);
-			combatEscapeContext = context;
-			void currentSession
-				.beginCombatEngagement(selectedEntityGuid, profile)
-				.catch((error: unknown) => {
-					// A failed older begin must not retire a newer engagement's cancellation.
-					if (combatEscapeContext === context) retireCombatEscapeContext();
-					reportCommandFailure(error);
-				});
-		}
+		retireCombatEscapeContext();
+		const context = keyboard.bindEscapeContext(stopCombat);
+		combatEscapeContext = context;
+		void currentSession
+			.beginCombatEngagement(selectedEntityGuid, profile)
+			.catch((error: unknown) => {
+				// A failed older begin must not retire a newer engagement's cancellation.
+				if (combatEscapeContext === context) retireCombatEscapeContext();
+				reportCommandFailure(error);
+			});
 	}
 	function stopCombat(): void {
 		retireCombatEscapeContext();
@@ -766,19 +768,17 @@
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
 		if (
-			(combatMode === "melee" || combatMode === "missile") &&
-			characterSettings.kind === "ready" &&
-			lifecycle.kind === "in-world" &&
-			hudMode === "runtime" &&
-			!event.isComposing
-		) {
-			const breakpoint = APP_INPUT.combatBreakpoint(event);
-			if (breakpoint !== null) {
-				event.preventDefault();
-				if (!event.repeat) selectCombatBreakpoint(breakpoint);
-				return;
-			}
-		}
+			handleCombatBarKeydown(
+				event,
+				(combatMode === "melee" || combatMode === "missile") &&
+					characterSettings.kind === "ready" &&
+					lifecycle.kind === "in-world" &&
+					hudMode === "runtime",
+				selectCombatBreakpoint,
+				selectCombatHeight,
+			)
+		)
+			return;
 		if (
 			handleSpellBarKeydown(
 				event,
@@ -1387,11 +1387,8 @@
 		onActivateSpellCell={activateSpellCell}
 		{combatMode}
 		{combatStatus}
-		{combatTarget}
 		{combatControls}
-		onCombatProfileChange={changeCombatProfile}
-		onBeginCombat={beginCombat}
-		onStopCombat={stopCombat}
+		onCombatProfileSelect={selectCombatProfile}
 		combatEnabled={lifecycle.kind === "in-world"}
 		onToggleCombat={() => void toggleCombatMode()}
 		onCastSpell={(spellId) => void castSpell(spellId)}

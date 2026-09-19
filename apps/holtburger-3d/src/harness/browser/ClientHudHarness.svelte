@@ -2,7 +2,6 @@
 	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
 	import type { InputDigitIndex } from "../../lib/input/input-contract";
-	import { hexRgba } from "../../lib/frontend-color";
 	import {
 		bindSpellCell,
 		initialSpellBar,
@@ -2962,20 +2961,14 @@
 		onActivateSpellCell={activateSpellCell}
 		combatMode={spellCombatMode}
 		{combatStatus}
-		combatTarget={combatStatus.desired === null
-			? null
-			: { name: "Training Target", color: hexRgba("#ff6868ff") }}
 		combatControls={characterSettings?.combatControls ?? {
 			melee: { height: "medium", power: 0.5 },
 			missile: { height: "medium", accuracy: 0.5 },
 		}}
-		onCombatProfileChange={updateCombatProfile}
-		onBeginCombat={() =>
-			combatBarProbe.active(
-				spellCombatMode === "missile" ? "missile" : "melee",
-			)}
-		onStopCombat={() =>
-			(combatStatus = { desired: null, state: "idle", refill: null })}
+		onCombatProfileSelect={(profile) => {
+			updateCombatProfile(profile);
+			combatBarProbe.active(profile.kind);
+		}}
 		combatEnabled={true}
 		onToggleCombat={() => {}}
 		onCastSpell={(id) => void castSpell(id)}

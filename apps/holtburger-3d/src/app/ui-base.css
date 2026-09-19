@@ -56,6 +56,46 @@
 		/* Shared easing for small interactive embellishments. */
 		--ui-easing: cubic-bezier(0.238, 0.55, 0.546, 1.361);
 		--ui-hud-background-color: #00000044;
+		/* Combat gauge paint; geometry and hit targets remain component-owned. */
+		--ui-combat-idle-opacity: 0.5;
+		--ui-combat-emphasis-duration: 0.25s;
+		--ui-combat-opacity-transition-duration: 180ms;
+		--ui-combat-foreground-color: var(--ui-color-text);
+		--ui-combat-outline-color: var(--ui-color-border);
+		--ui-combat-track-color: color-mix(
+			in srgb,
+			var(--ui-color-border) 72%,
+			transparent
+		);
+		--ui-combat-charge-color: var(--ui-color-health);
+		--ui-combat-height-color: color-mix(
+			in srgb,
+			var(--ui-color-control) 82%,
+			transparent
+		);
+		--ui-combat-height-selected-color: color-mix(
+			in srgb,
+			var(--ui-color-accent) 30%,
+			var(--ui-color-control)
+		);
+		--ui-combat-height-hover-color: color-mix(
+			in srgb,
+			var(--ui-color-accent) 45%,
+			var(--ui-color-control)
+		);
+		--ui-combat-backdrop-color: color-mix(
+			in srgb,
+			var(--ui-color-shadow) 62%,
+			transparent
+		);
+		--ui-combat-backdrop-filter: blur(18px);
+		--ui-combat-handle-filter: drop-shadow(
+			0 2px 2px color-mix(in srgb, var(--ui-color-shadow) 80%, transparent)
+		);
+		--ui-combat-handle-focus-filter: var(--ui-combat-handle-filter)
+			drop-shadow(0 0 5px var(--ui-color-accent));
+		--ui-combat-breakpoint-shadow:
+			0 0 5px var(--ui-color-shadow), 0 0 10px var(--ui-color-shadow);
 		/* Item grid density, artwork scaling, strip controls and inventory layout. */
 		/* Minimum contents-grid cell size and fixed pack-strip cell size. */
 		--ui-item-cell-min-size: 36px;

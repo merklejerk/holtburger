@@ -27,6 +27,25 @@ describe("InputContext", () => {
 		).toBeNull();
 	});
 
+	it("maps Shift+1–3 to top-to-bottom attack heights", () => {
+		const input = new AppInput(INPUT_DEFAULTS);
+		for (const [index, digit] of ["1", "2", "3"].entries()) {
+			expect(
+				input.combatHeight({
+					key: digit,
+					code: `Digit${digit}`,
+					shiftKey: true,
+					ctrlKey: false,
+					altKey: false,
+					metaKey: false,
+				}),
+			).toBe(index);
+		}
+		expect(
+			input.combatHeight({ key: "1", code: "Digit1", shiftKey: false }),
+		).toBeNull();
+	});
+
 	it("binds auto-run to unmodified Q while permitting the walk modifier", () => {
 		const input = new AppInput(INPUT_DEFAULTS);
 		for (const shiftKey of [false, true]) {

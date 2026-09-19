@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { MAX_ACTION_BARS } from "./client-action-bar-contract.js";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
-import {
-	COMBAT_GAUGE_SIZE,
-	nearestCombatBreakpoint,
-} from "./client-combat-bar-state.js";
+import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
@@ -220,20 +217,14 @@ export const clientCharacterSettingsSchema = clientCharacterSettingsV2Schema
 				melee: z
 					.object({
 						height: attackHeightSchema,
-						power: finiteNumber
-							.min(0)
-							.max(1)
-							.transform(nearestCombatBreakpoint),
+						power: finiteNumber.min(0).max(1),
 					})
 					.strict()
 					.readonly(),
 				missile: z
 					.object({
 						height: attackHeightSchema,
-						accuracy: finiteNumber
-							.min(0)
-							.max(1)
-							.transform(nearestCombatBreakpoint),
+						accuracy: finiteNumber.min(0).max(1),
 					})
 					.strict()
 					.readonly(),

@@ -66,7 +66,7 @@ function versionTwoDocument() {
 }
 
 describe("client settings contract", () => {
-	it("snaps saved combat slider values before display and attack dispatch", () => {
+	it("preserves precise combat slider values", () => {
 		const parsed = parseClientCharacterSettings({
 			...createDefaultClientCharacterSettings(),
 			combatControls: {
@@ -75,8 +75,8 @@ describe("client settings contract", () => {
 			},
 		});
 		expect(parsed.combatControls).toEqual({
-			melee: { height: "high", power: 0.5 },
-			missile: { height: "low", accuracy: 0.75 },
+			melee: { height: "high", power: 0.6 },
+			missile: { height: "low", accuracy: 0.625 },
 		});
 		expect(parseClientCharacterSettings(parsed)).toEqual(parsed);
 	});

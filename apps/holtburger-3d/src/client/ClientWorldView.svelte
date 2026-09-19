@@ -8,7 +8,6 @@
 	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
 	import type { ClientSpellBarState } from "./client-spell-bar-state";
 	import type { InputDigitIndex } from "../lib/input/input-contract";
-	import type { ClientCombatTarget } from "./client-combat-bar-state";
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
@@ -113,12 +112,8 @@
 		/** Server-confirmed stance for the dock, independent of open panels. */
 		readonly combatMode: ClientCombatMode;
 		readonly combatStatus: ClientCombatStatus;
-		/** Known name and color of the engaged entity. */
-		readonly combatTarget: ClientCombatTarget | null;
 		readonly combatControls: ClientCharacterSettings["combatControls"];
-		readonly onCombatProfileChange: (profile: ClientAttackProfile) => void;
-		readonly onBeginCombat: () => void;
-		readonly onStopCombat: () => void;
+		readonly onCombatProfileSelect: (profile: ClientAttackProfile) => void;
 		/** Shared normal casting action used by the spell browser. */
 		readonly onCastSpell: (spellId: number) => void;
 		/** Gameplay lifecycle admits stance commands. */
@@ -215,11 +210,8 @@
 		onActionBarsChange,
 		combatMode,
 		combatStatus,
-		combatTarget,
 		combatControls,
-		onCombatProfileChange,
-		onBeginCombat,
-		onStopCombat,
+		onCombatProfileSelect,
 		onCastSpell,
 		combatEnabled,
 		onToggleCombat,
@@ -697,17 +689,13 @@
 			editable={hudMode === "layout"}
 			{viewport}
 			status={combatStatus}
-			activeTarget={combatTarget}
 			profile={combatMode === "melee"
 				? { kind: "melee", ...combatControls.melee }
 				: { kind: "missile", ...combatControls.missile }}
-			selectedTarget={selectedEntityGuid}
 			enabled={combatEnabled && hudMode === "runtime"}
 			onPlacementChange={(placement) =>
 				changeHudPlacement("combatBar", placement)}
-			onProfileChange={onCombatProfileChange}
-			onAttack={onBeginCombat}
-			onStop={onStopCombat}
+			onProfileSelect={onCombatProfileSelect}
 		/>
 	{/if}
 

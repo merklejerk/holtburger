@@ -174,6 +174,17 @@ export const INPUT_DEFAULTS = {
 				{ code: "Digit5", shift: false, ctrl: false, alt: false, meta: false },
 			],
 		},
+		heights: {
+			0: [
+				{ code: "Digit1", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			1: [
+				{ code: "Digit2", shift: true, ctrl: false, alt: false, meta: false },
+			],
+			2: [
+				{ code: "Digit3", shift: true, ctrl: false, alt: false, meta: false },
+			],
+		},
 	},
 	/** Action bar shortcuts. Numbered entries use zero-based positions (0 is bar/cell 1, 9 is 0).
 	 * Physical codes keep digits addressable while Shift changes their printed characters.

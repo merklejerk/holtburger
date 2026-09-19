@@ -31,6 +31,9 @@ The local `assets.hba` CharGen/SetupModel census on 2026-09-16 found 26 heritage
 entries: 22 humanoid entries with 34 parts, and four Olthoi entries with 25 or 31 parts.
 Tumerok changes two parents within the upper-body group but preserves the group assignments.
 The layout recognizer accepts both observed humanoid topologies and rejects other layouts.
+Those 22 entries reference nine distinct humanoid motion tables. A 2026-09-19 content census found
+all 14 allowlisted missile commands plus Ready in BowCombat, CrossbowCombat, and AtlatlCombat for
+every one of those tables: 378 command/style/table combinations with no missing cycles.
 
 | Parts | Source/group | Authored relationship |
 | --- | --- | --- |
@@ -69,13 +72,14 @@ therefore do not independently enable footstep hooks. Releasing movement immedia
 the full gesture on the ground; airborne/sliding contact keeps the support pose in the lower
 body even without directional input. There is no additional crossfade or foot-placement solver.
 
-Recognized casting gestures keep their authored clocks through local and remote jump/fall transitions.
+Recognized spell, reach, and missile gestures keep their authored clocks through local and remote
+jump/fall transitions.
 The independent locomotion track selects the support pose, while the gesture retains action
 completion and body-hook ownership. Other actions keep existing contact interruption priority.
 Both the per-tick driver and committed contact edges preserve these gestures. Packet admission
 also retains eligible accepted casting commands and windup batches for remote characters, so
-casts arriving midair remain gestures instead of being reclassified as falling. A fresh airborne
-cast discards an obsolete takeoff transition before selecting its own entry. Existing gesture
+gestures arriving midair remain gestures instead of being reclassified as falling. A fresh airborne
+gesture discards an obsolete takeoff transition before selecting its own entry. Existing gesture
 entries and queues retain their clocks. Server-directed movement keeps its existing priority.
 Landing without movement restores the full gesture. This extends gesture/locomotion coexistence to
 unsupported travel; it does not authorize new spell casts. Gesture hooks and collision poses
@@ -89,7 +93,26 @@ While airborne, a locomotion stance change discards its grounded transition rout
 the destination Falling cycle directly. The player motion table `0x09000001` routes style changes
 through a Falling-to-Stand landing clip (`0x030004a6`) and magic stance clips (`0x03000598`);
 playing those links in flight hid the intended lower-body pose. Same-style takeoff retains its
-authored transition. Ordinary casting transitions continue independently.
+authored transition. Ordinary gesture transitions continue independently.
+
+### Mobile missile gestures
+
+The world gesture allowlist includes ACE's exact persisted missile substates: Reload
+`0x40000016`, AimLevel `0x4000001e`, and AimHigh/AimLow through `0x4000002a`. Adjacent or
+otherwise unknown substates retain exclusive ordinary-motion handling. Aim and reload keep their
+server-authored clocks, hooks, and Ready return while local manual movement or observed remote
+locomotion supplies the lower-body track. Projectile creation, range results, and ammunition
+placement remain separate server events and are not inferred from animation time.
+
+Core preserves an accepted missile sequence through manual locomotion and jumping, while a new
+unsent request waits for grounded runtime contact. Matching local non-autonomous `TurnToObject`
+packets are acknowledged without installing a movement owner, using the same authority mechanism
+as targeted casting turns. Other targets and directive families retain ordinary handling.
+
+Horizontal aim remains whole-body authored behavior. If the player steers away from the target,
+turn suppression can present an off-axis shot because the aim clips encode vertical pitch without
+target-relative torso yaw. The current policy deliberately reuses spell-equivalent composition;
+torso yaw, IK, and locomotion-facing decoupling require separate visual evidence and design.
 
 ### Local casting turns and movement ownership
 

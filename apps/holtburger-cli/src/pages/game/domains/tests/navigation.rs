@@ -140,8 +140,7 @@ fn navigation_snapshot_includes_projected_self_movement_kinematics() {
 }
 
 #[test]
-fn sticky_melee_pursuit_survives_transient_attack_drive_cancellation_when_engagement_remains_desired()
- {
+fn sticky_melee_pursuit_is_owned_by_core_instead_of_frontend_navigation() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -152,10 +151,13 @@ fn sticky_melee_pursuit_survives_transient_attack_drive_cancellation_when_engage
         rotation: Quaternion::from_heading(180.0f32.to_radians()),
         ..WorldPosition::default()
     });
-    state
-        .data
-        .combat_runtime
-        .begin_explicit_engagement(target_guid, CombatMode::Melee);
+    state.data.combat_status.desired = Some(holtburger_core::ClientCombatEngagement {
+        target: target_guid,
+        profile: holtburger_core::ClientAttackProfile::Melee {
+            height: AttackHeight::Medium,
+            power: 0.5,
+        },
+    });
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let target_position = WorldPosition {
@@ -170,12 +172,9 @@ fn sticky_melee_pursuit_survives_transient_attack_drive_cancellation_when_engage
 
     let result = state.handle_tick(0.016);
 
-    assert!(has_autonomous_navigation_command(&result));
+    assert!(!has_autonomous_navigation_command(&result));
     assert!(!has_active_approach(&state));
-    assert!(matches!(
-        state.runtime.navigation.navigation_mode(),
-        Some(NavigationMode::StickyMelee { target }) if target == target_guid
-    ));
+    assert_eq!(state.runtime.navigation.navigation_mode(), None);
 }
 
 #[test]
@@ -615,7 +614,7 @@ fn teleport_start_cancels_frontend_owned_approach_controller() {
 }
 
 #[test]
-fn teleport_start_clears_sticky_melee_targeting_and_attack() {
+fn teleport_start_clears_targeting_and_core_status_retires_attack() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -626,11 +625,13 @@ fn teleport_start_clears_sticky_melee_targeting_and_attack() {
         ..WorldPosition::default()
     });
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.issue_state = crate::pages::game::combat::CombatIssueState::InFlight;
-    state
-        .data
-        .combat_runtime
-        .begin_explicit_engagement(target_guid, CombatMode::Melee);
+    state.data.combat_status.desired = Some(holtburger_core::ClientCombatEngagement {
+        target: target_guid,
+        profile: holtburger_core::ClientAttackProfile::Melee {
+            height: AttackHeight::Medium,
+            power: 0.5,
+        },
+    });
 
     let target_position = WorldPosition {
         landblock_id: Guid(0x01000000),
@@ -644,8 +645,10 @@ fn teleport_start_clears_sticky_melee_targeting_and_attack() {
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let initial = state.handle_tick(0.016);
-    assert!(has_autonomous_navigation_command(&initial));
+    assert!(!has_autonomous_navigation_command(&initial));
 
+    // Core publishes combat retirement when it invalidates the world, before teleport UI work.
+    state.handle_view_event(ClientViewEvent::CombatStatusUpdated(Default::default()));
     let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
     assert!(has_stop_navigation_command(&result));
@@ -653,14 +656,10 @@ fn teleport_start_clears_sticky_melee_targeting_and_attack() {
         result
             .commands
             .iter()
-            .any(|command| { matches!(command, ClientCommand::CancelAttack) })
+            .any(|command| { matches!(command, ClientCommand::StopCombatEngagement) })
     );
     assert_eq!(state.view.active_interaction, None);
-    assert_ne!(
-        state.data.combat_runtime.issue_state,
-        crate::pages::game::combat::CombatIssueState::InFlight
-    );
-    assert_eq!(state.data.combat_runtime.sticky_melee_target(), None);
+    assert_eq!(state.data.combat_status.desired, None);
 
     let post_teleport_tick = state.handle_tick(0.016);
     assert!(!has_autonomous_navigation_command(&post_teleport_tick));

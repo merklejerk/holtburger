@@ -60,6 +60,9 @@ pub struct ClientLaunchConfiguration {
     pub account: String,
     /// Launch credential transferred once and excluded from debug output.
     pub password: String,
+    /// Optional developer override for the shared melee pursuit leash, in meters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub melee_max_chase_distance: Option<f32>,
 }
 
 impl fmt::Debug for ClientLaunchConfiguration {
@@ -70,6 +73,7 @@ impl fmt::Debug for ClientLaunchConfiguration {
             .field("port", &self.port)
             .field("account", &self.account)
             .field("password", &"<redacted>")
+            .field("melee_max_chase_distance", &self.melee_max_chase_distance)
             .finish()
     }
 }

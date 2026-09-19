@@ -95,6 +95,8 @@ pub enum ClientDriveRequest {
     Acquire { drive: ClientDriveSnapshot },
     /// Reconcile held controls without taking movement ownership.
     Synchronize { drive: ClientDriveSnapshot },
+    /// Release manual movement without disturbing a replacement owner.
+    Release,
 }
 
 impl ClientDriveRequest {
@@ -102,6 +104,7 @@ impl ClientDriveRequest {
         match self {
             Self::Acquire { drive } => PlayerDriveIntent::ManualHeld(drive.into_drive()),
             Self::Synchronize { drive } => PlayerDriveIntent::SynchronizeHeld(drive.into_drive()),
+            Self::Release => PlayerDriveIntent::ReleaseManual,
         }
     }
 }
@@ -287,6 +290,7 @@ mod tests {
         ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
             known_spells: None,
             combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+            combat: Default::default(),
             entities: holtburger_core::ClientEntitySnapshot::default(),
             entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,
@@ -572,6 +576,13 @@ mod tests {
     }
 
     #[test]
+    fn drive_request_maps_release_to_scoped_manual_retirement() {
+        let request: ClientDriveRequest =
+            serde_json::from_value(serde_json::json!({ "kind": "release" })).unwrap();
+        assert_eq!(request.into_intent(), PlayerDriveIntent::ReleaseManual);
+    }
+
+    #[test]
     fn character_motion_requests_preserve_ordered_edges_and_release_drive() {
         let begin: ClientCharacterMotionEventRequest = serde_json::from_value(serde_json::json!({
             "kind": "begin-jump",
@@ -683,6 +694,7 @@ mod tests {
         let snapshot = ClientApplicationSnapshot {
             known_spells: None,
             combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+            combat: Default::default(),
             entities: holtburger_core::ClientEntitySnapshot::default(),
             entity_collision_disabled: false,
             lifecycle: ClientLifecycleState::InWorld,

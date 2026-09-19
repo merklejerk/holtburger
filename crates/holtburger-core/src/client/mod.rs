@@ -18,8 +18,10 @@ pub mod character_kinematics;
 pub mod character_motion;
 mod character_selection;
 pub mod collision;
+mod combat_engagement;
 pub mod combat_feedback;
 mod combat_runtime;
+pub mod combat_tuning;
 mod commands;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
@@ -153,6 +155,12 @@ pub struct ClientRuntime {
     message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
     movement: MovementSystem,
+    /// Single owner of desired targeted combat and ACE repeat-sequence requests.
+    combat_engagement: combat_engagement::CombatEngagementRuntime,
+    /// Validated shared combat policy selected by the runtime composition.
+    combat_tuning: combat_tuning::ClientCombatTuning,
+    /// Whether combat currently owns the client-directed movement lease.
+    combat_approach_drive_active: bool,
     /// Stages static collision and local-player body products outside the simulation turn.
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
     /// Prepares direct scale timelines off-turn and joins them to exact entity instances.
@@ -290,6 +298,7 @@ impl ClientRuntime {
             } else {
                 self.world.player_combat_mode()
             },
+            combat: self.combat_engagement.status(),
             vitals: self.world.player.vitals.clone(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),
@@ -335,6 +344,7 @@ impl ClientRuntime {
     }
 
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
+        self.reset_combat_engagement();
         self.clear_busy_operation();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("Client is exiting; the last request may still complete");
@@ -355,6 +365,7 @@ impl ClientRuntime {
         cause: ClientWorldActivationState,
         player_guid: Guid,
     ) {
+        self.reset_combat_engagement();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("World lifecycle changed; the last request may still complete");
         let generation = self.bump_world_generation();
@@ -514,6 +525,7 @@ impl ClientRuntime {
         }
 
         self.send_login_complete().await?;
+        self.establish_attack_repeat_policy().await?;
         let initial_entry = activation.phase == ClientWorldActivationPhase::InitialEntry;
         self.activation = None;
         self.state = ClientState::InWorld;
@@ -574,10 +586,13 @@ impl ClientRuntime {
     }
 
     pub(super) fn emit_action_result(
-        &self,
+        &mut self,
         source: ActionResultSource,
         reason: ActionResultReason,
     ) {
+        if source == ActionResultSource::Wire {
+            self.observe_combat_action_result(&reason);
+        }
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::ActionResult { source, reason });
@@ -4235,7 +4250,7 @@ mod tests {
 
     #[test]
     fn inventory_server_save_failed_projection_preserves_item_guid() {
-        let client = builder::build_test_client(ClientState::InWorld);
+        let mut client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
         let item_guid = Guid(0x4000_0001);
 

@@ -2,7 +2,6 @@ use super::inventory;
 use super::object_interaction;
 use super::*;
 use crate::navigation::NavigationMode;
-use crate::pages::game::combat as combat_model;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -173,9 +172,7 @@ pub(super) fn apply_navigation_interrupt(
             state.data.combat_mode,
             CombatMode::Melee | CombatMode::Missile
         ) {
-            result.commands.push(ClientCommand::CancelAttack);
-            state.data.combat_runtime.cancel_attack();
-            state.clear_combat_drive();
+            result.commands.push(ClientCommand::StopCombatEngagement);
         }
         result.actions.push(AppAction::Notification {
             notification: AppNotification::ActiveInteractionChanged { interaction: None },
@@ -261,7 +258,6 @@ fn navigation_snapshot(state: &GameState, target_guid: Option<Guid>) -> Navigati
         player_position: state.data.runtime_player_position(),
         self_movement_kinematics: state.data.self_movement_kinematics.clone(),
         run_rate_scalar: state.data.player_run_rate(),
-        combat_request: combat_model::navigation_request(state),
         tracked_target: target_guid.zip(target_sample).map(|(guid, sample)| {
             ResolvedNavigationTarget {
                 guid,
@@ -281,11 +277,7 @@ fn navigation_tick(state: &GameState, now: Instant, elapsed: f64) -> NavigationT
 }
 
 fn navigation_tick_target_guid(state: &GameState) -> Option<Guid> {
-    state
-        .runtime
-        .navigation
-        .tracked_target_guid()
-        .or_else(|| combat_model::navigation_request(state).map(|request| request.target_guid))
+    state.runtime.navigation.tracked_target_guid()
 }
 
 fn apply_navigation_update(update: NavigationUpdate, result: &mut UpdateResult) {

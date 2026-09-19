@@ -33,6 +33,126 @@ pub enum ClientCombatMode {
     Magic,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientAttackHeightWire {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<holtburger_protocol::messages::combat::AttackHeight> for ClientAttackHeightWire {
+    fn from(value: holtburger_protocol::messages::combat::AttackHeight) -> Self {
+        use holtburger_protocol::messages::combat::AttackHeight;
+        match value {
+            AttackHeight::Low => Self::Low,
+            AttackHeight::Medium => Self::Medium,
+            AttackHeight::High => Self::High,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientAttackProfileWire {
+    Melee {
+        height: ClientAttackHeightWire,
+        power: f32,
+    },
+    Missile {
+        height: ClientAttackHeightWire,
+        accuracy: f32,
+    },
+}
+
+impl From<holtburger_core::ClientAttackProfile> for ClientAttackProfileWire {
+    fn from(value: holtburger_core::ClientAttackProfile) -> Self {
+        match value {
+            holtburger_core::ClientAttackProfile::Melee { height, power } => Self::Melee {
+                height: height.into(),
+                power,
+            },
+            holtburger_core::ClientAttackProfile::Missile { height, accuracy } => Self::Missile {
+                height: height.into(),
+                accuracy,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCombatControlStateWire {
+    Idle,
+    Charging,
+    WaitingForReadiness,
+    Active,
+    Retiring,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatEngagementWire {
+    pub target: Guid,
+    pub profile: ClientAttackProfileWire,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatRefillWire {
+    pub elapsed_ms: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatStatusWire {
+    pub desired: Option<ClientCombatEngagementWire>,
+    pub state: ClientCombatControlStateWire,
+    pub refill: Option<ClientCombatRefillWire>,
+}
+
+impl From<holtburger_core::ClientCombatStatus> for ClientCombatStatusWire {
+    fn from(value: holtburger_core::ClientCombatStatus) -> Self {
+        let state = match value.state {
+            holtburger_core::ClientCombatControlState::Idle => ClientCombatControlStateWire::Idle,
+            holtburger_core::ClientCombatControlState::Charging => {
+                ClientCombatControlStateWire::Charging
+            }
+            holtburger_core::ClientCombatControlState::WaitingForReadiness => {
+                ClientCombatControlStateWire::WaitingForReadiness
+            }
+            holtburger_core::ClientCombatControlState::Active => {
+                ClientCombatControlStateWire::Active
+            }
+            holtburger_core::ClientCombatControlState::Retiring => {
+                ClientCombatControlStateWire::Retiring
+            }
+        };
+        let now = std::time::Instant::now();
+        Self {
+            desired: value.desired.map(|desired| ClientCombatEngagementWire {
+                target: desired.target,
+                profile: desired.profile.into(),
+            }),
+            state,
+            refill: value.refill.map(|refill| ClientCombatRefillWire {
+                elapsed_ms: now
+                    .saturating_duration_since(refill.started_at)
+                    .min(refill.duration)
+                    .as_millis()
+                    .try_into()
+                    .expect("combat refill elapsed time must fit the wire contract"),
+                duration_ms: refill
+                    .duration
+                    .as_millis()
+                    .try_into()
+                    .expect("combat refill duration must fit the wire contract"),
+            }),
+        }
+    }
+}
+
 impl From<holtburger_protocol::messages::combat::CombatMode> for ClientCombatMode {
     fn from(mode: holtburger_protocol::messages::combat::CombatMode) -> Self {
         use holtburger_protocol::messages::combat::CombatMode;
@@ -268,6 +388,8 @@ pub struct ClientCurrentState {
     pub known_spells: Option<Vec<u32>>,
     /// Server-confirmed stance for the combat shortcut.
     pub combat_mode: ClientCombatMode,
+    /// Desired targeted combat and shared repeat lifecycle.
+    pub combat: ClientCombatStatusWire,
     /// Accepted local-player entity response override.
     pub entity_collision_disabled: bool,
     /// Complete renderer-facing lifecycle level.
@@ -654,6 +776,7 @@ pub enum ClientHostEvent {
     CombatModeUpdated {
         mode: ClientCombatMode,
     },
+    CombatStatusUpdated(ClientCombatStatusWire),
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
     },
@@ -833,6 +956,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
         Self {
             known_spells: snapshot.known_spells.clone(),
             combat_mode: snapshot.combat_mode.into(),
+            combat: snapshot.combat.into(),
             lifecycle: (&snapshot.lifecycle).into(),
             entity_collision_disabled: snapshot.entity_collision_disabled,
             local_player_guid: snapshot.local_player_guid,
@@ -921,6 +1045,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }),
         ClientViewEvent::CombatModeUpdated { mode } => {
             Some(ClientHostEvent::CombatModeUpdated { mode: mode.into() })
+        }
+        ClientViewEvent::CombatStatusUpdated(status) => {
+            Some(ClientHostEvent::CombatStatusUpdated(status.into()))
         }
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
             Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })

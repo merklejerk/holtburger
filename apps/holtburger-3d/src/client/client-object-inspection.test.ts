@@ -62,6 +62,7 @@ class FakeInspectionSession {
 			playerName: null,
 			knownSpells: null,
 			combatMode: "peace",
+			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,

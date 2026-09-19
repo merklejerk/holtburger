@@ -21,38 +21,10 @@ fn set_active_interaction(
     let previous_interaction = state.view.active_interaction;
     state.view.active_interaction = next_interaction;
 
-    sync_combat_navigation_request(previous_interaction, next_interaction, state);
     sync_target_health_query(previous_interaction, next_interaction, result);
 
     if should_cancel_attack(state, previous_interaction, next_interaction) {
-        result.commands.push(ClientCommand::CancelAttack);
-        state.data.combat_runtime.cancel_attack();
-        state.clear_combat_drive();
-    }
-}
-
-fn sync_combat_navigation_request(
-    previous_interaction: Option<Interaction>,
-    next_interaction: Option<Interaction>,
-    state: &mut GameState,
-) {
-    let desired_target = state.data.combat_runtime.desired_engagement_target();
-    if desired_target.is_none() {
-        return;
-    }
-
-    let previous_target = target_guid_for_interaction(previous_interaction);
-    let next_target = target_guid_for_interaction(next_interaction);
-
-    if desired_target == previous_target && desired_target != next_target {
-        state.data.combat_runtime.clear_engagement();
-    }
-}
-
-fn target_guid_for_interaction(interaction: Option<Interaction>) -> Option<Guid> {
-    match interaction {
-        Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-        _ => None,
+        result.commands.push(ClientCommand::StopCombatEngagement);
     }
 }
 

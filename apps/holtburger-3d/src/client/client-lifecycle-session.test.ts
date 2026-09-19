@@ -885,6 +885,11 @@ describe("ClientLifecycleSession", () => {
 			},
 		});
 		expect(transport.calls).toEqual(["invoke:replace_client_drive"]);
+		await session.replaceDrive({ kind: "release" });
+		expect(transport.calls).toEqual([
+			"invoke:replace_client_drive",
+			"invoke:replace_client_drive",
+		]);
 		await expect(
 			session.replaceDrive({
 				kind: "acquire",
@@ -896,7 +901,7 @@ describe("ClientLifecycleSession", () => {
 				},
 			} as never),
 		).rejects.toThrow();
-		expect(transport.calls).toHaveLength(1);
+		expect(transport.calls).toHaveLength(2);
 	});
 
 	it("validates and forwards ordered character-motion edges without reshaping them", async () => {
@@ -990,6 +995,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		playerName: "Drudge",
 		knownSpells: null,
 		combatMode: "peace",
+		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

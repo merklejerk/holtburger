@@ -1,12 +1,37 @@
 //! Shared combat request execution; world and existing operation owners retain state.
-use super::types::{ActionResultReason, ActionResultSource, ClientCommand, SpellCastAim};
+use super::combat_engagement::CombatControlEffect;
+use super::movement_types::{
+    AutonomousDriveIntent, ClientDirectedCommand, Gait, PlayerDriveIntent,
+};
+use super::types::{
+    ActionResultReason, ActionResultSource, ClientAttackProfile, ClientCommand, ClientViewEvent,
+    CombatFeedback, SpellCastAim,
+};
 use super::{ClientRuntime, ClientState};
 use anyhow::Result;
-use holtburger_common::Guid;
+use holtburger_common::{CharacterOption, Guid, Vector3};
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_protocol::messages::*;
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::entity::EntityMotionDirective;
 use holtburger_world::spell::SpellCastingRoute;
+use holtburger_world::{
+    ContactState, PhysicalCollisionFilter, SpatialBodyId, StaticSurfaceRayRequest,
+};
+use std::time::{Duration, Instant};
+
+// ACE Player_Melee.cs distinguishes direct striking range (0.6) from the broader distance at
+// which the server may begin its own sticky sequence (4.0). Client pursuit reaches direct range
+// before the initial request; an accepted sequence then hands movement ownership to ACE.
+const MELEE_ATTACK_DISTANCE: f32 = 0.6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CombatStaticPath {
+    Clear,
+    Blocked,
+    Unknown,
+}
 
 /// Resolved cast request shared by wire publication and pending-operation correlation.
 #[derive(Debug)]
@@ -32,12 +57,432 @@ impl PreparedSpellCast {
 }
 
 impl ClientRuntime {
+    fn combat_refill_duration(&self) -> Duration {
+        if self.world.player.last_server_motion_style == Some(MotionStance::DualWieldCombat) {
+            Duration::from_millis(800)
+        } else {
+            Duration::from_secs(1)
+        }
+    }
+
+    fn emit_combat_status_if_changed(&self, previous: super::types::ClientCombatStatus) {
+        let current = self.combat_engagement.status();
+        if current != previous {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::CombatStatusUpdated(current));
+        }
+    }
+
+    fn combat_request_ready(&self) -> bool {
+        let Some(desired) = self.combat_engagement.status().desired else {
+            return false;
+        };
+        let physical_ready = match desired.profile {
+            ClientAttackProfile::Melee { .. }
+                if self
+                    .combat_engagement
+                    .sent_engagement()
+                    .is_some_and(|sent| {
+                        sent.target == desired.target
+                            && matches!(sent.profile, ClientAttackProfile::Melee { .. })
+                    }) =>
+            {
+                true
+            }
+            ClientAttackProfile::Melee { .. } => {
+                self.world
+                    .physical_cylinder_distance(self.world.player.guid, desired.target)
+                    .is_some_and(|distance| distance <= MELEE_ATTACK_DISTANCE)
+                    && self.combat_static_path(desired.target) == CombatStaticPath::Clear
+            }
+            ClientAttackProfile::Missile { .. } => self.missile_request_grounded(),
+        };
+        self.world.player_combat_mode() == desired.profile.combat_mode()
+            && self
+                .world
+                .combat_target_status(desired.target)
+                .is_available()
+            && physical_ready
+            && self.active_busy_operation.is_none()
+            && self.equipment_operation.is_none()
+            && self.pack_exchange.is_none()
+    }
+
+    /// ACE rejects a new missile request while jumping; unknown support cannot authorize it.
+    fn missile_request_grounded(&self) -> bool {
+        self.world
+            .runtime_body_view(SpatialBodyId::LocalPlayer(self.world.player.guid))
+            .is_some_and(|body| body.contact == ContactState::Grounded)
+    }
+
+    fn combat_static_path(&self, target: Guid) -> CombatStaticPath {
+        let Some(collision) = self
+            .collision_coordinator
+            .as_ref()
+            .map(super::collision::ClientCollisionCoordinator::snapshot)
+        else {
+            return CombatStaticPath::Unknown;
+        };
+        let Some(player_pose) = self.world.runtime_pose_for_guid(self.world.player.guid) else {
+            return CombatStaticPath::Unknown;
+        };
+        let Some(target_pose) = self.world.runtime_pose_for_guid(target) else {
+            return CombatStaticPath::Unknown;
+        };
+        let anchor = Guid((player_pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+        let Ok(player) = player_pose.reanchor_to_landblock_owner(anchor) else {
+            return CombatStaticPath::Unknown;
+        };
+        let Ok(target) = target_pose.reanchor_to_landblock_owner(anchor) else {
+            return CombatStaticPath::Unknown;
+        };
+        let start = player.coords + Vector3::new(0.0, 0.0, 1.0);
+        let end = target.coords + Vector3::new(0.0, 0.0, 1.0);
+        let delta = end - start;
+        let distance = delta.length();
+        if distance <= f32::EPSILON {
+            return CombatStaticPath::Clear;
+        }
+        let request = StaticSurfaceRayRequest {
+            anchor,
+            start,
+            direction: delta / distance,
+            maximum_distance: distance,
+            previous_cell: player_pose.is_indoors().then_some(player_pose.landblock_id),
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        match collision.scene.cast_static_surface_ray(request) {
+            Ok(None) => CombatStaticPath::Clear,
+            Ok(Some(_)) => CombatStaticPath::Blocked,
+            Err(_) => CombatStaticPath::Unknown,
+        }
+    }
+
+    /// Chooses direct pursuit before the movement owner advances this tick.
+    ///
+    /// Pursuit intentionally steers at the current target pose without route planning. Static
+    /// collision remains authoritative, so a target rounding a corner can pin pursuit at it.
+    pub(super) fn prepare_combat_movement(&mut self, now: Instant, dt: Duration) {
+        let previous_status = self.combat_engagement.status();
+        let Some(desired) = self.combat_engagement.status().desired else {
+            self.release_combat_approach(now);
+            return;
+        };
+        if !self
+            .world
+            .combat_target_status(desired.target)
+            .is_available()
+        {
+            self.combat_engagement.stop();
+            self.emit_combat_status_if_changed(previous_status);
+            self.release_combat_approach(now);
+            return;
+        }
+        if self.world.player_combat_mode() != desired.profile.combat_mode()
+            && self.combat_engagement.has_sent_sequence()
+        {
+            self.combat_engagement.stop();
+            self.emit_combat_status_if_changed(previous_status);
+            self.release_combat_approach(now);
+            return;
+        }
+        // Missile has no pursuit policy and remains compatible with player-owned translation.
+        if !matches!(desired.profile, ClientAttackProfile::Melee { .. }) {
+            self.release_combat_approach(now);
+            return;
+        }
+        let distance = self
+            .world
+            .physical_cylinder_distance(self.world.player.guid, desired.target);
+        if distance
+            .is_some_and(|distance| distance >= self.combat_tuning.melee_max_chase_distance())
+        {
+            self.combat_engagement.stop();
+            self.emit_combat_status_if_changed(previous_status);
+            self.release_combat_approach(now);
+            return;
+        }
+        if self.movement.has_active_manual_drive() {
+            self.interrupt_combat_for_movement(now);
+            return;
+        }
+        // ACE owns target-relative movement after accepting an attack. Its swing motion carries
+        // StickToObject and remains authoritative until AttackDone(ActionCancelled) retires the
+        // sequence (Player_Melee.cs:215-230, 413-428). Reapplying the initial 0.6 m admission
+        // gate here would cancel and reacquire combat whenever sticky motion crossed that edge.
+        if self.combat_engagement.has_sent_sequence() {
+            self.release_combat_approach(now);
+            return;
+        }
+        let Some(distance) = distance else {
+            self.release_combat_approach(now);
+            return;
+        };
+        let path = self.combat_static_path(desired.target);
+        if distance <= MELEE_ATTACK_DISTANCE && path == CombatStaticPath::Clear {
+            self.release_combat_approach(now);
+            return;
+        }
+        if path == CombatStaticPath::Unknown {
+            self.release_combat_approach(now);
+            return;
+        }
+        let Some(player_pose) = self.world.runtime_pose_for_guid(self.world.player.guid) else {
+            self.release_combat_approach(now);
+            return;
+        };
+        let Some(target_pose) = self.world.runtime_pose_for_guid(desired.target) else {
+            self.release_combat_approach(now);
+            return;
+        };
+        let Ok(capabilities) = self.world.resolve_self_movement_capabilities() else {
+            self.release_combat_approach(now);
+            return;
+        };
+        let delta = target_pose.global_coords() - player_pose.global_coords();
+        let planar = Vector3::new(delta.x, delta.y, 0.0);
+        let planar_distance = planar.length();
+        if planar_distance <= f32::EPSILON {
+            self.release_combat_approach(now);
+            return;
+        }
+        let budget = capabilities.resolved_autonomous_run_speed(1.0) * dt.as_secs_f32();
+        if budget <= f32::EPSILON {
+            self.release_combat_approach(now);
+            return;
+        }
+        let desired_world_delta = delta * (budget / planar_distance).min(1.0);
+        let intent = AutonomousDriveIntent {
+            desired_world_delta,
+            desired_heading: Some(Vector3::zero().heading_to(&planar)),
+            target_hint: Some(target_pose),
+            gait: Gait::Run,
+            force_grounded: true,
+        };
+        let command = if self.combat_approach_drive_active {
+            ClientDirectedCommand::Update(intent)
+        } else {
+            self.combat_approach_drive_active = true;
+            ClientDirectedCommand::Acquire(intent)
+        };
+        self.movement
+            .enqueue_drive_intent(PlayerDriveIntent::ClientDirected(command), now);
+    }
+
+    fn release_combat_approach(&mut self, now: Instant) {
+        if !std::mem::take(&mut self.combat_approach_drive_active) {
+            return;
+        }
+        self.movement.enqueue_drive_intent(
+            PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Release),
+            now,
+        );
+    }
+
+    /// Ends desired combat when another movement owner takes control.
+    pub(super) fn interrupt_combat_for_movement(&mut self, now: Instant) {
+        let previous = self.combat_engagement.status();
+        if previous.desired.is_none() {
+            return;
+        }
+        self.combat_engagement.stop();
+        self.emit_combat_status_if_changed(previous);
+        self.release_combat_approach(now);
+    }
+
+    /// Applies the active attack family's player-movement interruption policy.
+    pub(super) fn interrupt_combat_for_player_movement(&mut self, now: Instant) {
+        let Some(desired) = self.combat_engagement.status().desired else {
+            return;
+        };
+        if matches!(desired.profile, ClientAttackProfile::Missile { .. }) {
+            // RETAIL DIVERGENCE: retail requires the missile Ready forward command and cancels
+            // auto-repeat after movement leaves it (acclient.c:390981-391000,391436-391464);
+            // jump also cancels it (acclient.c:390479-390512). ACE's accepted missile loop has no
+            // ordinary-movement guard (Player_Missile.cs:280-304), so preserving the sequence
+            // enables mobile missile combat. Restoring retail behavior would make manual movement
+            // and jump retire missile fire. Census: five core movement-interruption entry points;
+            // all 14 commands in all three missile stances across nine humanoid motion tables;
+            // 22 supported humanoid layouts; and four Olthoi entries retaining full-body fallback
+            // (docs/animation_composition.md).
+            self.release_combat_approach(now);
+            return;
+        }
+        self.interrupt_combat_for_movement(now);
+    }
+
+    /// Whether a received server directive supersedes combat-owned movement.
+    ///
+    /// ACE melee sticky remains combat-owned for its sent target. Matching missile-facing turns
+    /// are filtered before world admission; any directive that reaches this policy retires
+    /// missile combat rather than introducing chase movement.
+    pub(super) fn server_motion_interrupts_combat(&self, data: &MovementEventData) -> bool {
+        let Some(directive) = EntityMotionDirective::from_movement_event(data) else {
+            return false;
+        };
+        let Some(sent) = self.combat_engagement.sent_engagement() else {
+            return true;
+        };
+        match sent.profile {
+            ClientAttackProfile::Melee { .. } => directive.target_guid() != Some(sent.target),
+            ClientAttackProfile::Missile { .. } => true,
+        }
+    }
+
+    pub(super) async fn advance_combat_engagement(&mut self, now: Instant) -> Result<()> {
+        let previous = self.combat_engagement.status();
+        let ready = self.combat_request_ready();
+        let effect = self.combat_engagement.next_effect(now, ready);
+        match effect {
+            Some(CombatControlEffect::Attack(engagement)) => {
+                self.send_targeted_attack(engagement.target, engagement.profile)
+                    .await?;
+            }
+            Some(CombatControlEffect::Cancel) => {
+                log::info!(">>> Retiring shared combat engagement");
+                self.send_game_action(GameAction::CancelAttack(Box::new(
+                    CancelAttackActionData {},
+                )))
+                .await?;
+            }
+            None => {}
+        }
+        self.emit_combat_status_if_changed(previous);
+        Ok(())
+    }
+
+    async fn send_targeted_attack(
+        &mut self,
+        target: Guid,
+        profile: ClientAttackProfile,
+    ) -> Result<()> {
+        match profile {
+            ClientAttackProfile::Melee { height, power } => {
+                log::info!(
+                    ">>> Shared melee engagement on 0x{:08X} ({:?}, power {:.2})",
+                    target.0,
+                    height,
+                    power
+                );
+                self.send_game_action(GameAction::TargetedMeleeAttack(Box::new(
+                    TargetedMeleeAttackActionData {
+                        target_guid: target,
+                        attack_height: height,
+                        power_level: power,
+                    },
+                )))
+                .await
+            }
+            ClientAttackProfile::Missile { height, accuracy } => {
+                log::info!(
+                    ">>> Shared missile engagement on 0x{:08X} ({:?}, accuracy {:.2})",
+                    target.0,
+                    height,
+                    accuracy
+                );
+                self.send_game_action(GameAction::TargetedMissileAttack(Box::new(
+                    TargetedMissileAttackActionData {
+                        target_guid: target,
+                        attack_height: height,
+                        accuracy_level: accuracy,
+                    },
+                )))
+                .await
+            }
+        }
+    }
+
+    pub(super) fn observe_combat_feedback(&mut self, feedback: &CombatFeedback, now: Instant) {
+        let previous = self.combat_engagement.status();
+        match feedback {
+            CombatFeedback::AttackCommenced => self.combat_engagement.attack_commenced(),
+            CombatFeedback::AttackDone { error } => {
+                self.combat_engagement.attack_done(*error, now);
+            }
+            _ => {}
+        }
+        self.emit_combat_status_if_changed(previous);
+    }
+
+    pub(super) fn observe_combat_action_result(&mut self, reason: &ActionResultReason) {
+        if let ActionResultReason::Weenie(error, _) = reason {
+            self.combat_engagement.note_weenie_error(*error);
+        }
+    }
+
+    pub(super) fn reset_combat_engagement(&mut self) {
+        let previous = self.combat_engagement.status();
+        self.combat_engagement.reset();
+        self.combat_approach_drive_active = false;
+        self.emit_combat_status_if_changed(previous);
+    }
+
+    /// Establishes the server-side repeat policy used by the shared attack owner.
+    ///
+    /// ACE persists character options but does not acknowledge this action. Ordered session
+    /// delivery is the contract: activation sends this before exposing an attack-capable world,
+    /// then mirrors the requested value locally so teleport retries do not write it again.
+    pub(super) async fn establish_attack_repeat_policy(&mut self) -> Result<()> {
+        if self
+            .world
+            .player
+            .character_option_enabled(CharacterOption::AutoRepeatAttacks)
+        {
+            return Ok(());
+        }
+
+        self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
+            SetSingleCharacterOptionActionData {
+                option: CharacterOption::AutoRepeatAttacks,
+                value: true,
+            },
+        )))
+        .await?;
+        self.world
+            .player
+            .set_character_option_enabled(CharacterOption::AutoRepeatAttacks, true);
+        self.emit_player_options_updated();
+        Ok(())
+    }
+
     pub(super) async fn handle_combat_command(&mut self, command: ClientCommand) -> Result<()> {
         if !matches!(self.state, ClientState::InWorld) {
             return Ok(());
         }
         match command {
             ClientCommand::CastSpell { spell_id, aim } => self.cast_spell(spell_id, aim).await,
+            ClientCommand::BeginCombatEngagement { target, profile } => {
+                let profile = profile.normalized();
+                let previous = self.combat_engagement.status();
+                self.combat_engagement.begin(
+                    target,
+                    profile,
+                    Instant::now(),
+                    self.combat_refill_duration(),
+                );
+                self.emit_combat_status_if_changed(previous);
+                let desired_mode = profile.combat_mode();
+                if self.world.player_combat_mode() != desired_mode {
+                    self.send_game_action(GameAction::ChangeCombatMode(Box::new(
+                        ChangeCombatModeActionData { mode: desired_mode },
+                    )))
+                    .await?;
+                }
+                Ok(())
+            }
+            ClientCommand::UpdateCombatProfile(profile) => {
+                let previous = self.combat_engagement.status();
+                self.combat_engagement.update_profile(profile);
+                self.emit_combat_status_if_changed(previous);
+                Ok(())
+            }
+            ClientCommand::StopCombatEngagement => {
+                let previous = self.combat_engagement.status();
+                self.combat_engagement.stop();
+                self.emit_combat_status_if_changed(previous);
+                self.advance_combat_engagement(Instant::now()).await
+            }
             ClientCommand::TargetedMeleeAttack {
                 target,
                 attack_height,
@@ -195,7 +640,7 @@ impl ClientRuntime {
         result
     }
 
-    fn reject_combat_request(&self, message: &str) {
+    fn reject_combat_request(&mut self, message: &str) {
         self.emit_action_result(
             ActionResultSource::Client,
             ActionResultReason::General(message.into()),
@@ -208,12 +653,15 @@ mod tests {
     use super::*;
     use crate::client::builder::build_test_client;
     use crate::client::movement_types::{CharacterDrive, PlayerDriveIntent};
-    use crate::client::types::BusyOperationKind;
+    use crate::client::types::{BusyOperationKind, ClientCombatStatus};
     use crate::client::types::{BusyOperationResult, ClientExitCause, ClientViewEvent};
     use byteorder::{LittleEndian, ReadBytesExt};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_protocol::errors::WeenieError;
+    use holtburger_protocol::messages::movement::{
+        MoveToObject, MoveToParameters, MovementInvalid, Origin,
+    };
     use holtburger_protocol::messages::transport::{FragmentHeader, PacketHeader, packet_flags};
     use holtburger_protocol::traits::ProtocolUnpack;
     use holtburger_world::WorldState;
@@ -272,6 +720,191 @@ mod tests {
         spell.components = [1, 2, 3, 4, 0x31, 0, 0, 0];
         client.world = world_with_spell(Guid(1), 42, spell);
         client
+    }
+
+    fn server_motion(data: MovementTypeData, movement_type: MovementType) -> MovementEventData {
+        MovementEventData {
+            guid: Guid(1),
+            object_instance_sequence: 1,
+            movement_sequence: 1,
+            server_control_sequence: 1,
+            is_autonomous: false,
+            movement_type,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data,
+        }
+    }
+
+    #[tokio::test]
+    async fn manual_movement_interrupts_melee_but_preserves_missile_combat() {
+        let mut client = client(0);
+        let begin = || ClientCommand::BeginCombatEngagement {
+            target: Guid(2),
+            profile: ClientAttackProfile::Melee {
+                height: AttackHeight::Medium,
+                power: 0.5,
+            },
+        };
+        client.handle_command(begin()).await.unwrap();
+        client
+            .handle_command(ClientCommand::DriveSelf(
+                PlayerDriveIntent::SynchronizeHeld(CharacterDrive::default()),
+            ))
+            .await
+            .unwrap();
+        assert!(client.combat_engagement.status().desired.is_some());
+
+        client
+            .handle_command(ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(
+                CharacterDrive::builder().run().forward().build(),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            client.combat_engagement.status(),
+            ClientCombatStatus::default()
+        );
+
+        client
+            .handle_command(ClientCommand::BeginCombatEngagement {
+                target: Guid(2),
+                profile: ClientAttackProfile::Missile {
+                    height: AttackHeight::Medium,
+                    accuracy: 0.5,
+                },
+            })
+            .await
+            .unwrap();
+        client
+            .handle_command(ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(
+                CharacterDrive::builder().run().forward().build(),
+            )))
+            .await
+            .unwrap();
+        assert!(matches!(
+            client
+                .combat_engagement
+                .status()
+                .desired
+                .map(|engagement| engagement.profile),
+            Some(ClientAttackProfile::Missile { .. })
+        ));
+    }
+
+    #[test]
+    fn accepted_jump_policy_preserves_sent_missile_sequence() {
+        let mut client = client(0);
+        let now = Instant::now();
+        client.combat_engagement.begin(
+            Guid(2),
+            ClientAttackProfile::Missile {
+                height: AttackHeight::Medium,
+                accuracy: 0.5,
+            },
+            now,
+            Duration::ZERO,
+        );
+        assert!(matches!(
+            client.combat_engagement.next_effect(now, true),
+            Some(CombatControlEffect::Attack(_))
+        ));
+
+        client.interrupt_combat_for_player_movement(now);
+
+        assert!(client.combat_engagement.has_sent_sequence());
+        assert!(matches!(
+            client
+                .combat_engagement
+                .status()
+                .desired
+                .map(|engagement| engagement.profile),
+            Some(ClientAttackProfile::Missile { .. })
+        ));
+    }
+
+    #[test]
+    fn missile_request_waits_for_grounded_runtime_contact() {
+        let mut client = client(0);
+        client.world.seed_local_player_entity(
+            Guid(1),
+            "Archer",
+            WorldPosition {
+                landblock_id: Guid(0x1234_0000),
+                ..WorldPosition::default()
+            },
+        );
+        for (contact, expected) in [
+            (holtburger_world::ContactState::Airborne, false),
+            (holtburger_world::ContactState::Sliding, false),
+            (holtburger_world::ContactState::Grounded, true),
+        ] {
+            client.world.apply_spatial_body_event(
+                &holtburger_world::SpatialBodyEvent::ContactChanged {
+                    body_id: holtburger_world::SpatialBodyId::LocalPlayer(Guid(1)),
+                    contact,
+                },
+            );
+            assert_eq!(client.missile_request_grounded(), expected);
+        }
+    }
+
+    #[test]
+    fn server_directives_interrupt_except_for_the_sent_attack_target() {
+        let mut client = client(0);
+        let now = Instant::now();
+        client.combat_engagement.begin(
+            Guid(2),
+            ClientAttackProfile::Melee {
+                height: AttackHeight::Medium,
+                power: 0.5,
+            },
+            now,
+            Duration::ZERO,
+        );
+        assert!(matches!(
+            client.combat_engagement.next_effect(now, true),
+            Some(CombatControlEffect::Attack(_))
+        ));
+        let object_motion = |target| {
+            server_motion(
+                MovementTypeData::MoveToObject(MoveToObject {
+                    target,
+                    origin: Origin::default(),
+                    params: MoveToParameters::default(),
+                    run_rate: 1.0,
+                }),
+                MovementType::MoveToObject,
+            )
+        };
+
+        assert!(!client.server_motion_interrupts_combat(&object_motion(Guid(2))));
+        assert!(client.server_motion_interrupts_combat(&object_motion(Guid(3))));
+        assert!(client.server_motion_interrupts_combat(&server_motion(
+            MovementTypeData::MoveToPosition(MoveToPosition {
+                origin: Origin::default(),
+                params: MoveToParameters::default(),
+                run_rate: 1.0,
+            }),
+            MovementType::MoveToPosition,
+        )));
+        assert!(!client.server_motion_interrupts_combat(&server_motion(
+            MovementTypeData::Invalid(MovementInvalid::default()),
+            MovementType::Invalid,
+        )));
+
+        client.combat_engagement.reset();
+        client.combat_engagement.begin(
+            Guid(2),
+            ClientAttackProfile::Missile {
+                height: AttackHeight::Medium,
+                accuracy: 0.5,
+            },
+            now,
+            Duration::ZERO,
+        );
+        assert!(client.combat_engagement.next_effect(now, true).is_some());
+        assert!(client.server_motion_interrupts_combat(&object_motion(Guid(2))));
     }
 
     #[test]
@@ -611,5 +1244,34 @@ mod tests {
             actions.push(message.action);
         }
         actions
+    }
+
+    #[tokio::test]
+    async fn repeat_policy_is_ordered_after_login_and_written_once() {
+        let mut client = client(0);
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        client
+            .session
+            .set_capture(capture.path().to_str().unwrap())
+            .unwrap();
+
+        client.send_login_complete().await.unwrap();
+        client.establish_attack_repeat_policy().await.unwrap();
+        client.establish_attack_repeat_policy().await.unwrap();
+
+        let actions = captured_actions(&capture);
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(actions[0], GameAction::LoginComplete(_)));
+        let GameAction::SetSingleCharacterOption(data) = &actions[1] else {
+            panic!("expected repeat option after login complete");
+        };
+        assert_eq!(data.option, CharacterOption::AutoRepeatAttacks);
+        assert!(data.value);
+        assert!(
+            client
+                .world
+                .player
+                .character_option_enabled(CharacterOption::AutoRepeatAttacks)
+        );
     }
 }

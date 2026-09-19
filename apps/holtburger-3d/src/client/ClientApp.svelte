@@ -68,6 +68,8 @@
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
 		ClientCombatMode,
+		ClientAttackProfile,
+		ClientCombatStatus,
 		ClientCharacterMotionCapabilities,
 		ClientCharacterMotionEventRequest,
 		ClientCharacterMotionRejection,
@@ -179,6 +181,64 @@
 	let spells = $state<ClientSpellServices | null>(null);
 	/** Event-driven stance consumed by combat controls and spell shortcuts. */
 	let combatMode = $state<ClientCombatMode>("unknown");
+	let combatStatus = $state<ClientCombatStatus>({
+		desired: null,
+		state: "idle",
+		refill: null,
+	});
+	const combatTargetName = $derived.by(() => {
+		const target = combatStatus.desired?.target;
+		const read = session?.entities.read();
+		if (target === undefined || read?.kind !== "current") return null;
+		const description = read.level.entities.get(target)?.description;
+		return description?.kind === "known" ? description.name : null;
+	});
+	const defaultCombatControls: ClientCharacterSettings["combatControls"] = {
+		melee: { height: "medium", power: 0.5 },
+		missile: { height: "medium", accuracy: 0.5 },
+	};
+	const combatControls = $derived(
+		characterSettings.kind === "ready"
+			? characterSettings.settings.combatControls
+			: defaultCombatControls,
+	);
+	function changeCombatProfile(profile: ClientAttackProfile): void {
+		if (characterSettings.kind !== "ready") return;
+		const controls =
+			profile.kind === "melee"
+				? {
+						...combatControls,
+						melee: { height: profile.height, power: profile.power },
+					}
+				: {
+						...combatControls,
+						missile: { height: profile.height, accuracy: profile.accuracy },
+					};
+		changeCharacterSettings({
+			...characterSettings.settings,
+			combatControls: controls,
+		});
+		if (combatStatus.desired !== null)
+			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
+	}
+	function beginCombat(): void {
+		if (selectedEntityGuid === null || characterSettings.kind !== "ready")
+			return;
+		// Selection is sampled only for this explicit begin; core retains the engaged target.
+		const profile: ClientAttackProfile | null =
+			combatMode === "melee"
+				? { kind: "melee", ...combatControls.melee }
+				: combatMode === "missile"
+					? { kind: "missile", ...combatControls.missile }
+					: null;
+		if (profile !== null)
+			void session
+				?.beginCombatEngagement(selectedEntityGuid, profile)
+				.catch(reportCommandFailure);
+	}
+	function stopCombat(): void {
+		void session?.stopCombatEngagement().catch(reportCommandFailure);
+	}
 	const spellBarEnabled = $derived(
 		characterSettings.kind === "ready" &&
 			lifecycle.kind === "in-world" &&
@@ -191,6 +251,9 @@
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
 	let commandFailure = $state<string | null>(null);
+	function reportCommandFailure(error: unknown): void {
+		commandFailure = diagnostic(error);
+	}
 	let playerName = $state<string | null>(null);
 	let worldName = $state<string | null>(null);
 	let vitals = $state<readonly ClientVital[]>([]);
@@ -406,15 +469,18 @@
 				drive.turn !== null,
 			performance.now(),
 		);
-		const request: ClientDriveRequest = {
-			kind: intent,
-			drive: {
-				gait: drive.gait,
-				longitudinal: drive.longitudinal,
-				lateral: drive.lateral,
-				turning: drive.turn,
-			},
-		};
+		const request: ClientDriveRequest =
+			intent === "release"
+				? { kind: "release" }
+				: {
+						kind: intent,
+						drive: {
+							gait: drive.gait,
+							longitudinal: drive.longitudinal,
+							lateral: drive.lateral,
+							turning: drive.turn,
+						},
+					};
 		inputDispatch = inputDispatch
 			.then(() => currentSession.replaceDrive(request))
 			.catch((error: unknown) => {
@@ -430,9 +496,13 @@
 			case "combat-mode":
 				combatMode = event.mode;
 				return;
+			case "combat":
+				combatStatus = event.status;
+				return;
 			case "current-state":
 				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
+				combatStatus = event.state.combat;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
 				playerName = event.state.playerName;
@@ -1233,6 +1303,12 @@
 		onSelectSpellTab={selectSpellTab}
 		onActivateSpellCell={activateSpellCell}
 		{combatMode}
+		{combatStatus}
+		{combatTargetName}
+		{combatControls}
+		onCombatProfileChange={changeCombatProfile}
+		onBeginCombat={beginCombat}
+		onStopCombat={stopCombat}
 		combatEnabled={lifecycle.kind === "in-world"}
 		onToggleCombat={() => void toggleCombatMode()}
 		onCastSpell={(spellId) => void castSpell(spellId)}

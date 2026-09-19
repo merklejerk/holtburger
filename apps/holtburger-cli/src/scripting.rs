@@ -358,23 +358,26 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     fn combat_info(&self) -> ScriptCombatInfo {
         ScriptCombatInfo {
             combat_mode: self.data.combat_mode,
-            is_engaged: self.data.combat_runtime.desired_engagement().is_some(),
-            target: self.data.combat_runtime.desired_engagement_target(),
+            is_engaged: self.data.combat_status.desired.is_some(),
+            target: self
+                .data
+                .combat_status
+                .desired
+                .map(|engagement| engagement.target),
             power: self.data.combat_controls.profile_level.wire_value(),
             height: self.data.combat_controls.attack_height,
-            last_attack_time: self.server_time.and_then(|(server_time, now)| {
-                self.data.combat_runtime.last_attack_attempt_at().and_then(
-                    |last_attack_attempt_at| {
-                        now.checked_duration_since(last_attack_attempt_at)
-                            .map(|age| server_time - age.as_secs_f64())
-                    },
-                )
-            }),
+            // Shared repetition does not expose a cadence-derived fake request time.
+            last_attack_time: None,
         }
     }
 
     fn current_interaction(&self) -> Option<ScriptClientInteraction> {
-        if let Some(target) = self.data.combat_runtime.desired_engagement_target() {
+        if let Some(target) = self
+            .data
+            .combat_status
+            .desired
+            .map(|engagement| engagement.target)
+        {
             return Some(ScriptClientInteraction::Attack { guid: target });
         }
 
@@ -1234,7 +1237,7 @@ mod tests {
     use std::fs;
     use std::fs::File;
     use std::path::PathBuf;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     #[test]
     fn discoverable_script_basenames_reads_js_files_in_sorted_order() {
@@ -1581,12 +1584,15 @@ mod tests {
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.combat_mode = CombatMode::Melee;
         data.combat_controls.attack_height = AttackHeight::High;
-        data.combat_runtime
-            .begin_explicit_engagement(target_guid, CombatMode::Melee);
-
         let now = Instant::now();
-        data.combat_runtime
-            .note_attack_attempt(now - Duration::from_secs(2));
+        data.combat_status.desired = Some(holtburger_core::ClientCombatEngagement {
+            target: target_guid,
+            profile: holtburger_core::ClientAttackProfile::Melee {
+                height: AttackHeight::High,
+                power: 0.5,
+            },
+        });
+        data.combat_status.state = holtburger_core::ClientCombatControlState::Active;
 
         let script_view = TuiScriptClientView {
             data: &data,
@@ -1602,7 +1608,7 @@ mod tests {
         assert_eq!(combat_info.target, Some(target_guid));
         assert_eq!(combat_info.power, 0.5);
         assert_eq!(combat_info.height, AttackHeight::High);
-        assert!((combat_info.last_attack_time.expect("timestamp") - 898.0).abs() < 1e-6);
+        assert_eq!(combat_info.last_attack_time, None);
     }
 
     #[test]

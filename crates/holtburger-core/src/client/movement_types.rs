@@ -203,6 +203,8 @@ pub enum PlayerDriveIntent {
     ManualHeld(CharacterDrive),
     /// Updates held input without taking control from a server directive or another controller.
     SynchronizeHeld(CharacterDrive),
+    /// Releases manual control only while that source still owns movement.
+    ReleaseManual,
     ManualPulse {
         state: CharacterDrive,
         duration: Duration,
@@ -213,6 +215,20 @@ pub enum PlayerDriveIntent {
         heading: f32,
     },
     Stop,
+}
+
+impl PlayerDriveIntent {
+    /// Whether this intent takes manual movement authority from an active combat engagement.
+    pub fn interrupts_combat(self) -> bool {
+        match self {
+            Self::ManualHeld(state) | Self::ManualPulse { state, .. } => !state.is_stationary(),
+            Self::SnapFacing { .. } => true,
+            Self::SynchronizeHeld(_)
+            | Self::ReleaseManual
+            | Self::ClientDirected(_)
+            | Self::Stop => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -332,6 +348,24 @@ mod tests {
             PlayerDriveIntent::Stop,
             PlayerDriveIntent::ManualHeld(CharacterDrive::builder().walk().forward().build())
         );
+    }
+
+    #[test]
+    fn only_manual_acquisition_interrupts_combat() {
+        let moving = CharacterDrive::builder().run().forward().build();
+        assert!(PlayerDriveIntent::ManualHeld(moving).interrupts_combat());
+        assert!(
+            PlayerDriveIntent::ManualPulse {
+                state: moving,
+                duration: Duration::from_millis(120),
+            }
+            .interrupts_combat()
+        );
+        assert!(PlayerDriveIntent::SnapFacing { heading: 1.0 }.interrupts_combat());
+        assert!(!PlayerDriveIntent::ManualHeld(CharacterDrive::default()).interrupts_combat());
+        assert!(!PlayerDriveIntent::SynchronizeHeld(moving).interrupts_combat());
+        assert!(!PlayerDriveIntent::ReleaseManual.interrupts_combat());
+        assert!(!PlayerDriveIntent::Stop.interrupts_combat());
     }
 
     #[test]

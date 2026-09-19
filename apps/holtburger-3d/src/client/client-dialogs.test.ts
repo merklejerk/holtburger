@@ -45,6 +45,7 @@ async function fixture() {
 			playerName: null,
 			knownSpells: null,
 			combatMode: "peace",
+			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: requestId === null ? null : confirmation(requestId),

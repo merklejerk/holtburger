@@ -256,6 +256,7 @@ export function createClientHudLayout(
 	return {
 		character: place(defaults.character),
 		spellBar: place(defaults.spellBar),
+		combatBar: place(defaults.combatBar),
 		chat: place(defaults.chat),
 		inventory: place(defaults.inventory),
 		worldContainer: place(defaults.worldContainer),

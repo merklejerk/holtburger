@@ -1,4 +1,3 @@
-use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use holtburger_common::position::WorldPosition;
@@ -303,8 +302,8 @@ pub struct GameData {
     pub world_name: String,
     /// Current combat stances.
     pub combat_mode: CombatMode,
-    /// Runtime-only combat state derived from feedback events and stance updates.
-    pub combat_runtime: CombatRuntimeState,
+    /// Core-owned desired engagement and ACE repeat lifecycle.
+    pub combat_status: holtburger_core::ClientCombatStatus,
     /// Local CLI combat controls for melee power or missile accuracy and attack height.
     pub combat_controls: CombatControlState,
     /// Every entity currently in player's pack.
@@ -348,7 +347,7 @@ impl Default for GameData {
             entity_facts: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
-            combat_runtime: CombatRuntimeState::default(),
+            combat_status: Default::default(),
             combat_controls: CombatControlState::default(),
             inventory: HashSet::new(),
             equipment: HashMap::new(),

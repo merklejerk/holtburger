@@ -266,6 +266,7 @@ impl ClientRuntime {
                         self.poll_selection_envelopes();
                     }
                     if active_world {
+                        self.prepare_combat_movement(now, dt_duration);
                         let movement_events = self
                             .movement
                             .tick(now, &mut self.world, &mut self.session)
@@ -277,6 +278,12 @@ impl ClientRuntime {
                             self.handle_runtime_world_event(&event);
                         }
                         for feedback in self.movement.take_character_motion_feedback() {
+                            if matches!(
+                                feedback.outcome,
+                                ClientCharacterMotionOutcome::ChargeAccepted
+                            ) {
+                                self.interrupt_combat_for_player_movement(now);
+                            }
                             let _ = self
                                 .client_view_event_tx
                                 .send(ClientViewEvent::CharacterMotionFeedback(feedback));
@@ -373,6 +380,7 @@ impl ClientRuntime {
                             );
                         }
                         if let Some(jump) = simulation_tick.committed_jump {
+                            self.interrupt_combat_for_player_movement(now);
                             self.session
                                 .send_action(GameAction::Jump(Box::new(JumpActionData {
                                 extent: jump.resolved.extent().get(),
@@ -390,6 +398,7 @@ impl ClientRuntime {
                         self.movement
                             .publish_position_after_simulation(now, &self.world, &mut self.session)
                             .await?;
+                        self.advance_combat_engagement(now).await?;
                         if let Some(feedback) = simulation_tick.character_motion_feedback {
                             let _ = self
                                 .client_view_event_tx

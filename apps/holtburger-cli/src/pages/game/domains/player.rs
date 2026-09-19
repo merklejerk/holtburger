@@ -92,13 +92,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                 state.data.trade = None;
             }
             state.data.combat_mode = *mode;
-            state.data.combat_runtime.handle_mode_updated(*mode);
-            if matches!(
-                mode,
-                CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
-            ) {
-                state.clear_combat_drive();
-            }
             handled = true;
         }
         _ => {}

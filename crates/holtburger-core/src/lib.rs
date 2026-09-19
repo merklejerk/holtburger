@@ -37,6 +37,9 @@ pub use client::collision::{
     ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
 };
 pub use client::combat_feedback::combat_feedback_message;
+pub use client::combat_tuning::{
+    ClientCombatTuning, ClientCombatTuningError, DEFAULT_MELEE_MAX_CHASE_DISTANCE,
+};
 pub use client::dynamic_scale::{
     ClientDynamicScaleFacts, ClientDynamicScaleSource, ContentClientDynamicScaleSource,
     PreparedClientDynamicScale,
@@ -64,11 +67,13 @@ pub use client::selection_envelope::{
 };
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
-    BusyOperationResult, ClientApplicationSnapshot, ClientCharacterMotionCapabilities,
-    ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
-    ClientCharacterSummary, ClientCommand, ClientDynamicScriptCue, ClientDynamicSoundCue,
-    ClientExitCause, ClientLifecycleState, ClientPresentationDiscontinuityKind, ClientState,
-    ClientViewEvent, ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
+    BusyOperationResult, ClientApplicationSnapshot, ClientAttackProfile,
+    ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
+    ClientCharacterMotionRejection, ClientCharacterSummary, ClientCombatControlState,
+    ClientCombatEngagement, ClientCombatRefillEstimate, ClientCombatStatus, ClientCommand,
+    ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause, ClientLifecycleState,
+    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
+    PlayerCharacterOptions, RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,

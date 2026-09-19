@@ -52,6 +52,7 @@
 		| "debug"
 		| "spells"
 		| "spellBar"
+		| "combatBar"
 	>;
 	const layout = $derived.by(() => {
 		const width = (stageWidth - 16 * (columns + 1)) / columns;

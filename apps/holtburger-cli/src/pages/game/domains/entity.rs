@@ -6,6 +6,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
 
     match event {
         ClientViewEvent::ApplicationSnapshot(snapshot) => {
+            state.data.combat_status = snapshot.combat;
             state.data.entity_facts = snapshot
                 .entities
                 .entities

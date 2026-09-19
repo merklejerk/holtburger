@@ -1621,6 +1621,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		playerName: "Player",
 		knownSpells: null,
 		combatMode: "peace",
+		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

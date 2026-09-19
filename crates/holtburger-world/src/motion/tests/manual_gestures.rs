@@ -3,6 +3,8 @@ use holtburger_common::Guid;
 
 const RELEASE: u32 = 0x4000_002b;
 const REACH: u32 = 0x4000_0018;
+const MISSILE_RELOAD: u32 = 0x4000_0016;
+const MISSILE_AIM: u32 = 0x4000_001e;
 const ENTRY_ANIM: u32 = 0x0300_0010;
 const RETURN_ANIM: u32 = 0x0300_0011;
 const HOLD_ANIM: u32 = 0x0300_0012;
@@ -18,6 +20,8 @@ fn build_gesture_catalog(with_stop: bool) -> MotionSequenceCatalog {
         (WALK, WALK_ANIM, 4.0),
         (RELEASE, HOLD_ANIM, 4.0),
         (REACH, HOLD_ANIM, 4.0),
+        (MISSILE_RELOAD, HOLD_ANIM, 4.0),
+        (MISSILE_AIM, HOLD_ANIM, 4.0),
         (MotionCommand::FALLING.raw(), STAND_ANIM, 4.0),
     ]
     .into_iter()
@@ -34,6 +38,11 @@ fn build_gesture_catalog(with_stop: bool) -> MotionSequenceCatalog {
             HashMap::from([
                 (RELEASE, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (REACH, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
+                (
+                    MISSILE_RELOAD,
+                    motion(vec![clip(ENTRY_ANIM, 4.0)], None, None),
+                ),
+                (MISSILE_AIM, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (WINDUP, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
             ]),
         ),
@@ -43,6 +52,14 @@ fn build_gesture_catalog(with_stop: bool) -> MotionSequenceCatalog {
         ),
         (
             MotionTable::cycle_key(STYLE, REACH),
+            HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
+        ),
+        (
+            MotionTable::cycle_key(STYLE, MISSILE_RELOAD),
+            HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
+        ),
+        (
+            MotionTable::cycle_key(STYLE, MISSILE_AIM),
             HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
         ),
     ]);
@@ -86,7 +103,7 @@ fn order(command: u32) -> MotionOrder {
 fn movement_preserves_gesture_entry_hold_and_return_timing() {
     let catalog = gesture_catalog();
     let table = catalog.table(0x0900_0001).unwrap();
-    for command in [RELEASE, REACH] {
+    for command in [RELEASE, REACH, MISSILE_AIM, MISSILE_RELOAD] {
         let mut idle = BodyMotionRuntime::new(table);
         idle.accept_order(table, order(command));
         let mut moving = idle.clone();
@@ -238,7 +255,7 @@ fn queued_windups_continue_while_moving_and_release_remains_the_return_destinati
 fn gestures_continue_through_takeoff_airborne_input_release_and_landing() {
     let catalog = gesture_catalog();
     let table = catalog.table(0x0900_0001).unwrap();
-    for command in [RELEASE, REACH] {
+    for command in [RELEASE, REACH, MISSILE_AIM, MISSILE_RELOAD] {
         let mut idle = BodyMotionRuntime::new(table);
         idle.accept_order(table, order(command));
         let mut airborne = idle.clone();
@@ -861,6 +878,47 @@ fn remote_gestures_keep_their_clock_through_airborne_admission_and_return() {
                     assert_eq!(registry.get(guid).unwrap().remote_motion_sample(), sample);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn remote_missile_aim_and_reload_compose_with_observed_locomotion() {
+    let catalog = gesture_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = Guid(1);
+    for command in [MISSILE_AIM, MISSILE_RELOAD] {
+        let mut registry = MotionRuntimeRegistry::new();
+        registry.accept_remote(
+            table,
+            guid,
+            remote_gesture_input(command, ContactState::Grounded),
+            [],
+            None,
+        );
+        let ordinary = registry.motion_playback(guid).unwrap().ordinary;
+        for contact in [
+            ContactState::Grounded,
+            ContactState::Airborne,
+            ContactState::Sliding,
+        ] {
+            registry.drive_remote(table, guid, remote_gesture_input(command, contact), 0.25);
+            registry.present_locomotion(
+                table,
+                guid,
+                order(WALK).with_character_presentation(CharacterMotionPresentation::resolve(
+                    contact, false, false,
+                )),
+                0.25,
+            );
+            let playback = registry.motion_playback(guid).unwrap();
+            assert_eq!(playback.activity, OrdinaryMotionActivity::Gesture);
+            assert_eq!(playback.ordinary, ordinary);
+            assert!(playback.locomotion.is_some());
+            assert_eq!(
+                registry.state(guid).unwrap().substate,
+                MotionCommand(command)
+            );
         }
     }
 }

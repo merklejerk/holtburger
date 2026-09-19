@@ -7,8 +7,8 @@ export interface CharacterDrive {
 	readonly turn: "left" | "right" | null;
 }
 
-/** Whether a drive command acquires movement or only reconciles held input. */
-export type CharacterDriveIntent = "acquire" | "synchronize";
+/** Whether a drive command acquires, reconciles, or releases manual movement ownership. */
+export type CharacterDriveIntent = "acquire" | "release" | "synchronize";
 
 /** Non-coalescible lifecycle edge sent in frontend order. */
 export type CharacterInputEdge =
@@ -103,7 +103,7 @@ export class CharacterInputController {
 	setPersistentForward(enabled: boolean, intent: CharacterDriveIntent): void {
 		if (this.#persistentForward === enabled) return;
 		this.#persistentForward = enabled;
-		this.#onDrive(this.drive(), intent);
+		this.#publishDrive(intent);
 	}
 
 	#applyAction(
@@ -125,7 +125,7 @@ export class CharacterInputController {
 				return cancelledPersistentForward;
 			}
 			this.#axisFor(action)?.unshift(action);
-			this.#onDrive(this.drive(), intent);
+			this.#publishDrive(intent);
 			return cancelledPersistentForward;
 		}
 
@@ -136,8 +136,21 @@ export class CharacterInputController {
 		}
 		const axis = this.#axisFor(action);
 		if (axis !== null) axis.splice(axis.indexOf(action), 1);
-		this.#onDrive(this.drive(), intent);
+		this.#publishDrive(intent);
 		return false;
+	}
+
+	/** Publish an idle snapshot as an explicit, scoped release instead of a passive update. */
+	#publishDrive(intent: CharacterDriveIntent): void {
+		const drive = this.drive();
+		const moving =
+			drive.longitudinal !== null ||
+			drive.lateral !== null ||
+			drive.turn !== null;
+		this.#onDrive(
+			drive,
+			!moving && this.#activeCharge === null ? "release" : intent,
+		);
 	}
 
 	/** Latest semantic snapshot, composed independently across all three axes. */

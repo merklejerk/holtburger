@@ -137,6 +137,7 @@ pub enum HostEvent {
     ClientCombatModeUpdated {
         mode: crate::client_projection::ClientCombatMode,
     },
+    ClientCombatStatusUpdated(crate::client_projection::ClientCombatStatusWire),
     ClientPlayerSpellsUpdated {
         #[serde(rename = "spellIds")]
         spell_ids: Vec<u32>,
@@ -456,6 +457,9 @@ impl ClientEventSink for StdioEventSink {
             },
             crate::client_projection::ClientHostEvent::CombatModeUpdated { mode } => {
                 HostEvent::ClientCombatModeUpdated { mode }
+            }
+            crate::client_projection::ClientHostEvent::CombatStatusUpdated(status) => {
+                HostEvent::ClientCombatStatusUpdated(status)
             }
             crate::client_projection::ClientHostEvent::PlayerSpellsUpdated { spell_ids } => {
                 HostEvent::ClientPlayerSpellsUpdated { spell_ids }
@@ -839,6 +843,7 @@ mod tests {
                     port: 9000,
                     account: "test".to_string(),
                     password: "secret".to_string(),
+                    melee_max_chase_distance: None,
                 },
             })
             .required_mode(),

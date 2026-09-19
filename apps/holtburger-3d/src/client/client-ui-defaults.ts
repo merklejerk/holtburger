@@ -21,6 +21,19 @@ export const CLIENT_UI_DEFAULTS = {
 			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
 		},
 	},
+	combatBar: {
+		anchor: "center",
+		offset: { x: 0, y: CLIENT_ACTION_BAR_TUNING.initialCellSize + 96 },
+		size: {
+			width:
+				CLIENT_ACTION_BAR_TUNING.initialCellSize * SPELL_BAR_INDICES.length,
+			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
+		},
+		minSize: {
+			width: CLIENT_ACTION_BAR_TUNING.initialCellSize,
+			height: CLIENT_ACTION_BAR_TUNING.initialCellSize + 16,
+		},
+	},
 	character: {
 		anchor: "top-left",
 		offset: { x: 16, y: 16 },

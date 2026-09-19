@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
+import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
@@ -4724,6 +4725,11 @@ async function runClientHudHarness({ viteUrl }) {
 			[],
 		);
 		inventory.spellBar = await probeSpellBar(
+			client,
+			evaluateExpression,
+			options.screenshotPath,
+		);
+		inventory.combatBar = await probeCombatBar(
 			client,
 			evaluateExpression,
 			options.screenshotPath,

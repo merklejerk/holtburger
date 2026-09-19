@@ -63,7 +63,6 @@ pub(crate) fn reduce_tick(state: &mut GameState, elapsed: f64) -> UpdateResult {
 
     inventory::apply_tick(state, now);
     player::apply_tick(state, elapsed, &mut result);
-    combat::apply_tick(state, now, &mut result);
     navigation::apply_tick(state, now, elapsed, &mut result);
     ui::apply_tick(state, elapsed, &mut result);
     logopolis::apply_tick(state, elapsed, &mut result);

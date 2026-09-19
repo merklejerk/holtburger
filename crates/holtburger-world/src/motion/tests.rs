@@ -2821,7 +2821,26 @@ fn movement_override_gesture_classification_excludes_unknown_variants() {
         MotionCommand(0x4000_0139).movement_override_gesture(),
         Some(MotionGesture::Reach)
     );
-    for raw in [0x8000_0000, 0x1000_0071, 0x4000_0032, 0x4000_0135, ACTION] {
+    assert_eq!(
+        MotionCommand(0x4000_0016).movement_override_gesture(),
+        Some(MotionGesture::MissileReload)
+    );
+    for raw in 0x4000_001e..=0x4000_002a {
+        assert_eq!(
+            MotionCommand(raw).movement_override_gesture(),
+            Some(MotionGesture::MissileAim)
+        );
+    }
+    for raw in [
+        0x8000_0000,
+        0x1000_0071,
+        0x4000_0015,
+        0x4000_0017,
+        0x4000_001d,
+        0x4000_0032,
+        0x4000_0135,
+        ACTION,
+    ] {
         assert_eq!(MotionCommand(raw).movement_override_gesture(), None);
     }
 }

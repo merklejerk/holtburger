@@ -8,6 +8,7 @@ use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_world::entity::Entity;
 use holtburger_world::{AuthoritativePoseEffect, AuthoritativePoseResetCause, WorldEvent};
+use std::time::Instant;
 
 fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType) -> bool {
     matches!(
@@ -21,22 +22,31 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl ClientRuntime {
-    /// Correlates object turns with the resolved target of an outstanding local cast.
-    fn suppresses_cast_turn(&self, data: &MovementEventData) -> bool {
+    /// Correlates object turns with an operation that already owns target-facing presentation.
+    fn suppresses_local_target_turn(&self, data: &MovementEventData) -> bool {
         if data.guid != self.world.player.guid || data.is_autonomous {
             return false;
         }
-        let Some(pending) = &self.active_busy_operation else {
+        let MovementTypeData::TurnToObject(turn) = &data.data else {
             return false;
         };
-        let super::PendingOperation::SpellCast {
-            target: Some(target),
-        } = pending.operation
-        else {
-            return false;
-        };
-        pending.deadline > std::time::Instant::now()
-            && matches!(&data.data, MovementTypeData::TurnToObject(turn) if turn.target == target)
+        let casting_target = self.active_busy_operation.as_ref().and_then(|pending| {
+            if pending.deadline <= std::time::Instant::now() {
+                return None;
+            }
+            match pending.operation {
+                super::PendingOperation::SpellCast {
+                    target: Some(target),
+                } => Some(target),
+                _ => None,
+            }
+        });
+        let missile_target = self
+            .combat_engagement
+            .sent_engagement()
+            .filter(|engagement| matches!(engagement.profile, ClientAttackProfile::Missile { .. }))
+            .map(|engagement| engagement.target);
+        casting_target == Some(turn.target) || missile_target == Some(turn.target)
     }
 
     fn apply_local_position_authority(
@@ -125,6 +135,7 @@ impl ClientRuntime {
         if self.activation.is_some() {
             return self.try_complete_world_activation().await;
         }
+        self.establish_attack_repeat_policy().await?;
         self.state = ClientState::InWorld;
         self.send_status_event();
         self.emit_current_application_snapshot();
@@ -153,6 +164,9 @@ impl ClientRuntime {
             for event in &pending_events {
                 match event {
                     WorldEvent::SelfServerControlledMotion(data) => {
+                        if self.server_motion_interrupts_combat(data) {
+                            self.interrupt_combat_for_movement(std::time::Instant::now());
+                        }
                         self.movement
                             .record_server_control_sequence(data.server_control_sequence);
                         let world_events = {
@@ -297,12 +311,13 @@ impl ClientRuntime {
 
         // Pass to world state for tracking positioning and spawning
         let world_events = if let GameMessage::UpdateMotion(data) = &message
-            && self.suppresses_cast_turn(data)
+            && self.suppresses_local_target_turn(data)
         {
             // RETAIL DIVERGENCE: acclient.c:299939-299946 installs non-autonomous motion.
-            // Installing these turns interrupts held movement/jump during casting. Scope is
-            // local TurnToObject packets matching an outstanding cast target; no asset layout
-            // is involved. See docs/animation_composition.md for the packet-family census.
+            // Installing these turns interrupts held movement/jump during casting or mobile
+            // missile fire. Scope is local TurnToObject packets matching an outstanding cast or
+            // sent missile target; no asset layout is involved. See docs/animation_composition.md
+            // for the packet-family census.
             if self.world.acknowledge_local_object_turn(data) {
                 self.movement
                     .record_server_control_sequence(data.server_control_sequence);
@@ -474,11 +489,12 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::AttackDone(data) => {
+                    let feedback =
+                        crate::client::types::CombatFeedback::AttackDone { error: data.error };
+                    self.observe_combat_feedback(&feedback, Instant::now());
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(
-                            crate::client::types::CombatFeedback::AttackDone { error: data.error },
-                        ));
+                        .send(ClientViewEvent::CombatFeedback(feedback));
                     Ok(())
                 }
                 GameEvent::AttackerNotification(data) => {
@@ -533,11 +549,11 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::CombatCommenceAttack => {
+                    let feedback = crate::client::types::CombatFeedback::AttackCommenced;
+                    self.observe_combat_feedback(&feedback, Instant::now());
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(
-                            crate::client::types::CombatFeedback::AttackCommenced,
-                        ));
+                        .send(ClientViewEvent::CombatFeedback(feedback));
                     Ok(())
                 }
                 GameEvent::VictimNotification(data) => {
@@ -1214,7 +1230,7 @@ mod tests {
                 params: params.clone(),
             }),
         };
-        assert!(client.suppresses_cast_turn(&turn));
+        assert!(client.suppresses_local_target_turn(&turn));
         for unrelated in [
             MovementEventData {
                 guid: target,
@@ -1238,7 +1254,7 @@ mod tests {
                 ..turn.clone()
             },
         ] {
-            assert!(!client.suppresses_cast_turn(&unrelated));
+            assert!(!client.suppresses_local_target_turn(&unrelated));
         }
         client
             .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
@@ -1263,9 +1279,9 @@ mod tests {
         );
 
         client.active_busy_operation.as_mut().unwrap().deadline = std::time::Instant::now();
-        assert!(!client.suppresses_cast_turn(&turn));
+        assert!(!client.suppresses_local_target_turn(&turn));
         client.finish_busy_operation_from_use_done(WeenieError::None);
-        assert!(!client.suppresses_cast_turn(&turn));
+        assert!(!client.suppresses_local_target_turn(&turn));
         turn.server_control_sequence = 11;
         turn.movement_sequence = 21;
         client
@@ -1279,14 +1295,69 @@ mod tests {
             client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None })
         );
         assert!(
-            !client.suppresses_cast_turn(&turn),
+            !client.suppresses_local_target_turn(&turn),
             "untargeted casts cannot correlate turns"
         );
         client.clear_busy_operation();
         assert!(
             client.arm_busy_operation(crate::client::PendingOperation::Use { source: Guid::NULL })
         );
-        assert!(!client.suppresses_cast_turn(&turn));
+        assert!(!client.suppresses_local_target_turn(&turn));
+    }
+
+    #[tokio::test]
+    async fn sent_missile_turn_preserves_manual_movement_authority() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        let target = Guid(0x5000_0002);
+        client.world.seed_local_player_entity(
+            guid,
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x0100_0001),
+                ..Default::default()
+            },
+        );
+        let now = Instant::now();
+        client.combat_engagement.begin(
+            target,
+            ClientAttackProfile::Missile {
+                height: holtburger_protocol::messages::combat::AttackHeight::Medium,
+                accuracy: 0.5,
+            },
+            now,
+            std::time::Duration::ZERO,
+        );
+        assert!(client.combat_engagement.next_effect(now, true).is_some());
+        let turn = MovementEventData {
+            guid,
+            object_instance_sequence: client.world.player.instance_sequence,
+            movement_sequence: 20,
+            server_control_sequence: 10,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::BowCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target,
+                desired_heading: 180.0,
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 1.0,
+                    desired_heading: 180.0,
+                },
+            }),
+        };
+
+        assert!(client.suppresses_local_target_turn(&turn));
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(turn))))
+            .await
+            .unwrap();
+
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert!(!client.movement.has_server_controlled_motion());
+        assert!(client.combat_engagement.has_sent_sequence());
     }
 
     #[tokio::test]
@@ -1326,8 +1397,8 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert_eq!(client.state, ClientState::InWorld);
-        assert_eq!(client.session.game_action_sequence, 0);
-        assert_eq!(client.session.bytes_out, 0);
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
     }
 
     #[tokio::test]

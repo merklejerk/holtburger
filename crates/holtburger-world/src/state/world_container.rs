@@ -79,13 +79,22 @@ impl WorldState {
     /// unknown geometry neither grants access nor restores previously revoked access.
     pub fn within_use_radius(&self, actor: Guid, target: Guid) -> Option<bool> {
         let target_entity = self.get_visible_entity(target)?;
+        let distance = self.physical_cylinder_distance(actor, target)?;
+        // ACE WorldObject_Use.cs::IsWithinUseRadiusOf supplies 0.6 when not authored.
+        Some(f64::from(distance) <= target_entity.use_radius().unwrap_or(0.6))
+    }
+
+    /// ACE-compatible separation between two prepared physical cylinders.
+    ///
+    /// This is a shared geometry fact. Callers choose the interaction-specific reach threshold.
+    pub fn physical_cylinder_distance(&self, actor: Guid, target: Guid) -> Option<f32> {
         let actor_body = self.scene.body_for_guid(actor)?;
         let target_body = self.scene.body_for_guid(target)?;
         let actor_geometry = actor_body.physical.as_ref()?.dynamic.as_ref()?;
         let target_geometry = target_body.physical.as_ref()?.dynamic.as_ref()?;
         let actor_setup = &actor_geometry.collision.target_geometry;
         let target_setup = &target_geometry.collision.target_geometry;
-        let distance = use_cylinder_distance(
+        Some(use_cylinder_distance(
             actor_body.pose.distance_to(&target_body.pose),
             actor_body.pose.coords.z,
             actor_setup.setup_radius * actor_geometry.object_scale,
@@ -93,9 +102,7 @@ impl WorldState {
             target_body.pose.coords.z,
             target_setup.setup_radius * target_geometry.object_scale,
             target_setup.setup_height * target_geometry.object_scale,
-        );
-        // ACE WorldObject_Use.cs::IsWithinUseRadiusOf supplies 0.6 when not authored.
-        Some(f64::from(distance) <= target_entity.use_radius().unwrap_or(0.6))
+        ))
     }
 
     /// Retire access before storage links disappear so pending descendants are released too.

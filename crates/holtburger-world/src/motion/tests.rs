@@ -818,6 +818,57 @@ fn a_style_change_transitions_into_the_new_styles_default_substate() {
 }
 
 #[test]
+fn new_manual_track_inherits_stance_without_replaying_its_entry() {
+    let catalog = catalog_with_combat_default(COMBAT_STAND);
+    let table = catalog.table(0x0900_0001).expect("table");
+    let combat = MotionOrder {
+        style: Some(MotionCommand(COMBAT_STYLE)),
+        ..MotionOrder::default()
+    };
+    // Both settled stance and an unfinished entry retain their own authored clock.
+    for settled in [false, true] {
+        let mut runtime = if settled {
+            BodyMotionRuntime::establish(table, combat)
+        } else {
+            let mut runtime = BodyMotionRuntime::new(table);
+            runtime.accept_order(table, combat);
+            runtime
+        };
+        let ordinary = runtime.motion_playback().unwrap().ordinary;
+        runtime.drive_manual(table, combat, CharacterMotionPresentation::Grounded, 0.0);
+        let playback = runtime.motion_playback().unwrap();
+        assert_eq!(playback.ordinary, ordinary);
+        assert_eq!(playback.locomotion.unwrap().clip.animation_id(), STAND_ANIM);
+    }
+}
+
+#[test]
+fn new_manual_track_preserves_a_newly_requested_stance_transition() {
+    let catalog = catalog_with_combat_default(COMBAT_STAND);
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut runtime = BodyMotionRuntime::new(table);
+    runtime.drive_manual(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(COMBAT_STYLE)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        0.0,
+    );
+    assert_eq!(
+        runtime
+            .motion_playback()
+            .unwrap()
+            .locomotion
+            .unwrap()
+            .clip
+            .animation_id(),
+        LINK_ANIM
+    );
+}
+
+#[test]
 fn a_command_the_table_does_not_model_leaves_the_body_alone() {
     let catalog = catalog();
     let table = catalog.table(0x0900_0001).expect("table");

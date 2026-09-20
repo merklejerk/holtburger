@@ -101,10 +101,18 @@ enum LocomotionAuthority {
 }
 
 impl LocomotionPlayback {
-    fn new(table: &MotionSequenceTable, authority: LocomotionAuthority) -> Self {
+    fn new(
+        table: &MotionSequenceTable,
+        style: MotionCommand,
+        authority: LocomotionAuthority,
+    ) -> Self {
         let mut state = MotionState::default();
         let mut sequence = MotionSequenceRuntime::new();
         set_default_state(table, &mut state, &mut sequence);
+        // A new independent track inherits the body's stance, not its gesture or transition
+        // cursor. Establish that baseline before selecting any newly requested movement.
+        select_motion(table, &mut state, &mut sequence, style, 1.0);
+        sequence.remove_transition_prefix();
         Self {
             state,
             sequence,
@@ -487,7 +495,7 @@ impl BodyMotionRuntime {
     ) -> bool {
         self.bind_table(table);
         let locomotion = self.locomotion.get_or_insert_with(|| {
-            LocomotionPlayback::new(table, LocomotionAuthority::Presentation)
+            LocomotionPlayback::new(table, self.state.style, LocomotionAuthority::Presentation)
         });
         locomotion.authority = LocomotionAuthority::Presentation;
         locomotion.command_active =
@@ -633,6 +641,7 @@ impl BodyMotionRuntime {
         quantum: f32,
     ) -> &SequenceTick {
         self.bind_table(table);
+        let established_style = self.state.style;
         let grounded = matches!(
             presentation,
             super::CharacterMotionPresentation::Grounded
@@ -676,7 +685,11 @@ impl BodyMotionRuntime {
             self.retained_run_rate_multiplier = Some(speed);
         }
         let locomotion = self.locomotion.get_or_insert_with(|| {
-            LocomotionPlayback::new(table, LocomotionAuthority::Manual { displacing: false })
+            LocomotionPlayback::new(
+                table,
+                established_style,
+                LocomotionAuthority::Manual { displacing: false },
+            )
         });
         let previous_style = locomotion.state.style;
         let unmodelled = apply_order(

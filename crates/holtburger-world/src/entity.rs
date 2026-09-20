@@ -1341,7 +1341,7 @@ impl Entity {
         admission
     }
 
-    /// A locally declined directive advances authority without replacing accepted motion.
+    /// A local echo or declined directive advances authority without replacing accepted motion.
     pub(crate) fn acknowledge_local_movement(&mut self, data: &MovementEventData) {
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = data.object_instance_sequence;
         self.sequences[OBJECT_MOVEMENT_SEQUENCE_INDEX] = data.movement_sequence;

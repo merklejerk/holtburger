@@ -103,7 +103,16 @@ pub(crate) fn handle_message(
             if is_local && !state.player.apply_self_update_motion(data) {
                 return true;
             }
-            if is_local && !data.is_autonomous {
+            if is_local && data.is_autonomous {
+                // Retail acknowledges timestamps but does not unpack autonomous self movement
+                // (acclient.c:299929-299946). ACE's jump broadcast carries an empty interpreted
+                // state; installing its NonCombat default would overwrite local stance intent.
+                if let Some(entity) = state.entities.get_mut(guid) {
+                    entity.acknowledge_local_movement(data);
+                }
+                return true;
+            }
+            if is_local {
                 events.push(WorldEvent::SelfServerControlledMotion(Box::new(
                     (**data).clone(),
                 )));
@@ -133,13 +142,8 @@ pub(crate) fn handle_message(
             };
             report_unsupported_interpreted_commands(state, guid, snapshot);
             report_rejected_motion_actions(guid, rejected_actions);
-            let playback_changed = if is_local && data.is_autonomous {
-                // Local prediction already owns playback; an admitted echo only renews sticky.
-                state.admit_entity_sticky_target(guid, sticky_target);
-                false
-            } else {
-                state.accept_entity_motion(guid, snapshot, actions, sticky_target)
-            };
+            let playback_changed =
+                state.accept_entity_motion(guid, snapshot, actions, sticky_target);
 
             if motion_changed {
                 publish_entity_motion_update(state, guid, snapshot, events);

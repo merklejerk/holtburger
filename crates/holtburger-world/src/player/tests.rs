@@ -767,6 +767,40 @@ fn test_empty_update_motion_initializes_remote_entity_idle_and_emits_event() {
 }
 
 #[test]
+fn autonomous_jump_echo_preserves_local_combat_stance() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x5000_0001);
+    state.seed_local_player_entity(guid, "Player", WorldPosition::default());
+    let motion = EntityMotionSnapshot {
+        current_style: Some(MotionStance::TwoHandedSwordCombat),
+        ..Default::default()
+    };
+    state.player_entity_mut().unwrap().network_motion = EntityNetworkMotion::Initialized(motion);
+    // ACE HandleActionJump constructs MovementData with zero outer style and an empty
+    // MovementInvalid payload, then broadcasts it as autonomous movement.
+    let events = state.handle_message(&GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 1,
+        movement_sequence: 2,
+        server_control_sequence: 3,
+        is_autonomous: true,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 0,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    })));
+    assert_eq!(
+        state.player_entity().unwrap().network_motion.snapshot(),
+        Some(motion)
+    );
+    assert_eq!(state.player.server_control_sequence, 3);
+    assert!(!events.iter().any(|event| matches!(event,
+        WorldEvent::EntityMotionUpdated { guid: changed, .. }
+        | WorldEvent::EntityMotionPlaybackChanged { guid: changed } if *changed == guid
+    )));
+}
+
+#[test]
 fn test_update_motion_retains_interpreted_motion_speeds() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);

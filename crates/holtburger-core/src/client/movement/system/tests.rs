@@ -365,7 +365,7 @@ fn manual_playback_selects_ready_falling_and_grounded_from_shared_support_state(
         object_instance_sequence: 1,
         movement_sequence: 2,
         server_control_sequence: 3,
-        is_autonomous: true,
+        is_autonomous: false,
         movement_type: MovementType::Invalid,
         motion_flags: 0,
         current_style: 0,

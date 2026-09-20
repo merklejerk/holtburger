@@ -217,6 +217,7 @@ impl ClientRuntimeBuilder {
             combat_engagement: Default::default(),
             combat_tuning: self.combat_tuning,
             combat_approach_drive_active: false,
+            melee_approach_state: None,
             collision_coordinator: self
                 .collision_source
                 .map(super::collision::ClientCollisionCoordinator::new),
@@ -267,6 +268,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         combat_engagement: Default::default(),
         combat_tuning: ClientCombatTuning::default(),
         combat_approach_drive_active: false,
+        melee_approach_state: None,
         collision_coordinator: None,
         dynamic_scale_coordinator: None,
         entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),

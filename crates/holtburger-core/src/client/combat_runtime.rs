@@ -21,16 +21,71 @@ use holtburger_world::{
 };
 use std::time::{Duration, Instant};
 
-// ACE Player_Melee.cs distinguishes direct striking range (0.6) from the broader distance at
-// which the server may begin its own sticky sequence (4.0). Client pursuit reaches direct range
-// before the initial request; an accepted sequence then hands movement ownership to ACE.
-const MELEE_ATTACK_DISTANCE: f32 = 0.6;
+// ACE Player_Melee.cs permits a direct strike at 0.6 m and a melee-visible sticky sequence at
+// 4.0 m. Keep normal admission strict, then use a smaller sticky fallback after pursuit stalls so
+// client/server cylinder or position disagreement cannot put the request on ACE's exact boundary.
+const MELEE_DIRECT_DISTANCE: f32 = 0.6;
+const MELEE_STALLED_DISTANCE: f32 = 3.0;
+const MELEE_STALL_DURATION: Duration = Duration::from_secs(1);
+const MELEE_PROGRESS_DISTANCE: f32 = 0.1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CombatStaticPath {
     Clear,
     Blocked,
     Unknown,
+}
+
+/// Target-specific pursuit evidence and the resulting melee-request admission decision.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MeleeApproachState {
+    /// Target whose approach samples produced this evidence.
+    target: Guid,
+    /// Smallest separation observed at the last material progress edge.
+    closest_distance: f32,
+    /// Time at which separation last decreased enough to count as progress.
+    last_progress_at: Instant,
+    /// Physical admission computed before movement advances the sampled world state.
+    request_admitted: bool,
+}
+
+impl MeleeApproachState {
+    fn sample(
+        previous: Option<Self>,
+        target: Guid,
+        distance: f32,
+        path: CombatStaticPath,
+        now: Instant,
+    ) -> Self {
+        let mut state = match previous {
+            Some(state) if state.target == target => state,
+            _ => Self {
+                target,
+                closest_distance: distance,
+                last_progress_at: now,
+                request_admitted: false,
+            },
+        };
+        if state.closest_distance - distance >= MELEE_PROGRESS_DISTANCE {
+            state.closest_distance = distance;
+            state.last_progress_at = now;
+        }
+        state.request_admitted = melee_request_admitted(
+            distance,
+            path,
+            now.saturating_duration_since(state.last_progress_at) >= MELEE_STALL_DURATION,
+        );
+        state
+    }
+
+    fn request_admitted_for(self, target: Guid) -> bool {
+        self.target == target && self.request_admitted
+    }
+}
+
+fn melee_request_admitted(distance: f32, path: CombatStaticPath, stalled: bool) -> bool {
+    path == CombatStaticPath::Clear
+        && (distance <= MELEE_DIRECT_DISTANCE || stalled && distance <= MELEE_STALLED_DISTANCE)
 }
 
 /// Resolved cast request shared by wire publication and pending-operation correlation.
@@ -90,12 +145,9 @@ impl ClientRuntime {
             {
                 true
             }
-            ClientAttackProfile::Melee { .. } => {
-                self.world
-                    .physical_cylinder_distance(self.world.player.guid, desired.target)
-                    .is_some_and(|distance| distance <= MELEE_ATTACK_DISTANCE)
-                    && self.combat_static_path(desired.target) == CombatStaticPath::Clear
-            }
+            ClientAttackProfile::Melee { .. } => self
+                .melee_approach_state
+                .is_some_and(|state| state.request_admitted_for(desired.target)),
             ClientAttackProfile::Missile { .. } => self.missile_request_grounded(),
         };
         self.world.player_combat_mode() == desired.profile.combat_mode()
@@ -166,7 +218,7 @@ impl ClientRuntime {
     pub(super) fn prepare_combat_movement(&mut self, now: Instant, dt: Duration) {
         let previous_status = self.combat_engagement.status();
         let Some(desired) = self.combat_engagement.status().desired else {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         };
         if !self
@@ -176,7 +228,7 @@ impl ClientRuntime {
         {
             self.combat_engagement.stop();
             self.emit_combat_status_if_changed(previous_status);
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         if self.world.player_combat_mode() != desired.profile.combat_mode()
@@ -184,12 +236,12 @@ impl ClientRuntime {
         {
             self.combat_engagement.stop();
             self.emit_combat_status_if_changed(previous_status);
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         // Missile has no pursuit policy and remains compatible with player-owned translation.
         if !matches!(desired.profile, ClientAttackProfile::Melee { .. }) {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         let distance = self
@@ -200,7 +252,7 @@ impl ClientRuntime {
         {
             self.combat_engagement.stop();
             self.emit_combat_status_if_changed(previous_status);
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         if self.movement.has_active_manual_drive() {
@@ -209,47 +261,55 @@ impl ClientRuntime {
         }
         // ACE owns target-relative movement after accepting an attack. Its swing motion carries
         // StickToObject and remains authoritative until AttackDone(ActionCancelled) retires the
-        // sequence (Player_Melee.cs:215-230, 413-428). Reapplying the initial 0.6 m admission
+        // sequence (Player_Melee.cs:215-230, 413-428). Reapplying the initial admission
         // gate here would cancel and reacquire combat whenever sticky motion crossed that edge.
         if self.combat_engagement.has_sent_sequence() {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         let Some(distance) = distance else {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         };
         let path = self.combat_static_path(desired.target);
-        if distance <= MELEE_ATTACK_DISTANCE && path == CombatStaticPath::Clear {
-            self.release_combat_approach(now);
+        if path == CombatStaticPath::Unknown {
+            self.reset_combat_approach(now);
             return;
         }
-        if path == CombatStaticPath::Unknown {
+        let approach = MeleeApproachState::sample(
+            self.melee_approach_state,
+            desired.target,
+            distance,
+            path,
+            now,
+        );
+        self.melee_approach_state = Some(approach);
+        if approach.request_admitted_for(desired.target) {
             self.release_combat_approach(now);
             return;
         }
         let Some(player_pose) = self.world.runtime_pose_for_guid(self.world.player.guid) else {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         };
         let Some(target_pose) = self.world.runtime_pose_for_guid(desired.target) else {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         };
         let Ok(capabilities) = self.world.resolve_self_movement_capabilities() else {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         };
         let delta = target_pose.global_coords() - player_pose.global_coords();
         let planar = Vector3::new(delta.x, delta.y, 0.0);
         let planar_distance = planar.length();
         if planar_distance <= f32::EPSILON {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         let budget = capabilities.resolved_autonomous_run_speed(1.0) * dt.as_secs_f32();
         if budget <= f32::EPSILON {
-            self.release_combat_approach(now);
+            self.reset_combat_approach(now);
             return;
         }
         let desired_world_delta = delta * (budget / planar_distance).min(1.0);
@@ -280,6 +340,11 @@ impl ClientRuntime {
         );
     }
 
+    fn reset_combat_approach(&mut self, now: Instant) {
+        self.melee_approach_state = None;
+        self.release_combat_approach(now);
+    }
+
     /// Ends desired combat when another movement owner takes control.
     pub(super) fn interrupt_combat_for_movement(&mut self, now: Instant) {
         let previous = self.combat_engagement.status();
@@ -288,7 +353,7 @@ impl ClientRuntime {
         }
         self.combat_engagement.stop();
         self.emit_combat_status_if_changed(previous);
-        self.release_combat_approach(now);
+        self.reset_combat_approach(now);
     }
 
     /// Applies the active attack family's player-movement interruption policy.
@@ -338,6 +403,7 @@ impl ClientRuntime {
             Some(CombatControlEffect::Attack(engagement)) => {
                 self.send_targeted_attack(engagement.target, engagement.profile)
                     .await?;
+                self.melee_approach_state = None;
             }
             Some(CombatControlEffect::Cancel) => {
                 log::info!(">>> Retiring shared combat engagement");
@@ -415,6 +481,7 @@ impl ClientRuntime {
         let previous = self.combat_engagement.status();
         self.combat_engagement.reset();
         self.combat_approach_drive_active = false;
+        self.melee_approach_state = None;
         self.emit_combat_status_if_changed(previous);
     }
 
@@ -712,6 +779,87 @@ mod tests {
             ..Default::default()
         });
         world
+    }
+
+    #[test]
+    fn melee_request_uses_stall_fallback_inside_the_server_sticky_boundary() {
+        for (distance, path, stalled, expected) in [
+            (MELEE_DIRECT_DISTANCE, CombatStaticPath::Clear, false, true),
+            (
+                MELEE_DIRECT_DISTANCE + 0.01,
+                CombatStaticPath::Clear,
+                false,
+                false,
+            ),
+            (MELEE_STALLED_DISTANCE, CombatStaticPath::Clear, true, true),
+            (
+                MELEE_STALLED_DISTANCE + 0.01,
+                CombatStaticPath::Clear,
+                true,
+                false,
+            ),
+            (1.0, CombatStaticPath::Blocked, true, false),
+            (1.0, CombatStaticPath::Unknown, true, false),
+        ] {
+            assert_eq!(melee_request_admitted(distance, path, stalled), expected);
+        }
+    }
+
+    #[test]
+    fn melee_approach_admission_requires_target_specific_lack_of_progress() {
+        let start = Instant::now();
+        let target = Guid(2);
+        let sample = |previous, target, distance, elapsed| {
+            MeleeApproachState::sample(
+                previous,
+                target,
+                distance,
+                CombatStaticPath::Clear,
+                start + elapsed,
+            )
+        };
+        let initial_distance = 2.5;
+        let initial = sample(None, target, initial_distance, Duration::ZERO);
+        let almost_stalled = sample(
+            Some(initial),
+            target,
+            initial_distance,
+            MELEE_STALL_DURATION - Duration::from_millis(1),
+        );
+        assert!(!almost_stalled.request_admitted_for(target));
+        let stalled = sample(
+            Some(initial),
+            target,
+            initial_distance,
+            MELEE_STALL_DURATION,
+        );
+        assert!(stalled.request_admitted_for(target));
+
+        let progress_at = Duration::from_millis(900);
+        let progressed_distance = initial_distance - MELEE_PROGRESS_DISTANCE - 0.01;
+        let progressed = sample(Some(initial), target, progressed_distance, progress_at);
+        let after_progress = sample(
+            Some(progressed),
+            target,
+            progressed_distance,
+            progress_at + Duration::from_millis(100),
+        );
+        assert!(!after_progress.request_admitted_for(target));
+        let stalled_after_progress = sample(
+            Some(progressed),
+            target,
+            progressed_distance,
+            progress_at + MELEE_STALL_DURATION,
+        );
+        assert!(stalled_after_progress.request_admitted_for(target));
+
+        let replacement = sample(
+            Some(stalled),
+            Guid(3),
+            initial_distance,
+            progress_at + MELEE_STALL_DURATION,
+        );
+        assert!(!replacement.request_admitted_for(Guid(3)));
     }
 
     fn client(flags: u32) -> ClientRuntime {

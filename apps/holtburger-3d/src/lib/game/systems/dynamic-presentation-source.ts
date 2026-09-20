@@ -29,6 +29,8 @@ interface NameplateIndicator {
 export interface NameplateContent {
 	readonly name: string;
 	readonly level: number | null;
+	/** App-authored strikeout applies only to the name, not the level or icon row. */
+	readonly strikeThrough: boolean;
 	/** Ordered app-local indicators painted on a dedicated final row. */
 	readonly indicators: readonly NameplateIndicator[];
 }

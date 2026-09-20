@@ -182,6 +182,12 @@ export class ClientPointerSelectionController {
 			});
 	}
 
+	/** Invalidate pending replies when the pointer leaves the interactive world surface. */
+	clearViewportHover(): void {
+		this.#pendingHover = null;
+		this.#publishHover(null);
+	}
+
 	/** Sample one hover point unless the preceding hover query still supplies backpressure. */
 	acquireViewportHover(clientX: number, clientY: number): void {
 		if (this.#destroyed || this.#pendingHover !== null) return;

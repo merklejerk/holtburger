@@ -950,6 +950,7 @@ export class DynamicEntitySystem<
 		if (
 			entity.nameplateContent?.name === content.name &&
 			entity.nameplateContent.level === content.level &&
+			entity.nameplateContent.strikeThrough === content.strikeThrough &&
 			orderedIndicatorsEqual(
 				entity.nameplateContent.indicators,
 				content.indicators,

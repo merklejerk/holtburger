@@ -5,13 +5,13 @@ import type { NameplateSettings } from "./nameplate-policy";
 export interface DistanceRankedNameplate {
 	readonly distanceSquared: number;
 	readonly identity: string;
-	/** Selected plates remain even when the ordinary visible budget is exhausted. */
+	/** Selected and hovered plates remain even when the ordinary visible budget is exhausted. */
 	readonly required?: boolean;
 }
 
 interface AnchoredNameplate {
 	readonly anchor: Vec3;
-	/** Selected plates bypass distance and count policy while still requiring camera-forward depth. */
+	/** Required plates bypass distance and count policy while still requiring camera-forward depth. */
 	readonly required?: boolean;
 }
 
@@ -72,7 +72,7 @@ export function retainNearestNameplates<T extends DistanceRankedNameplate>(
 			requiredCount < 0 ? candidates.length : requiredCount,
 		),
 	);
-	// Admission priority must not become blend order: a selected distant plate is still behind.
+	// Admission priority must not become blend order: a required distant plate is still behind.
 	candidates.sort(
 		(left, right) =>
 			right.distanceSquared - left.distanceSquared ||

@@ -244,6 +244,7 @@ export class WebGL2NameplateTextureCache {
 			visual.category,
 			visual.content.name,
 			visual.content.level,
+			visual.content.strikeThrough,
 			visual.content.indicators.map(({ kind, iconId }) => [kind, iconId]),
 		]);
 		categoryKeys.set(visual.category, { generation: style.generation, key });
@@ -283,9 +284,19 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		if (!context)
 			throw new Error("Canvas2D is unavailable for nameplate rasterization.");
 		const { content } = visual;
-		const rows = [{ text: content.name, style: appearance.name }];
+		const rows = [
+			{
+				text: content.name,
+				style: appearance.name,
+				strikeThrough: content.strikeThrough,
+			},
+		];
 		if (content.level !== null)
-			rows.push({ text: `Level ${content.level}`, style: appearance.level });
+			rows.push({
+				text: `Level ${content.level}`,
+				style: appearance.level,
+				strikeThrough: false,
+			});
 		let textWidth = 0;
 		let textHeight = 0;
 		for (const row of rows) {
@@ -324,6 +335,17 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 			if (row.style.outlineWidthPixels > 0)
 				context.strokeText(row.text, cssWidth / 2, centerY);
 			context.fillText(row.text, cssWidth / 2, centerY);
+			if (row.strikeThrough) {
+				// Match the text width rather than the wider icon row. Canvas scaling handles density.
+				const width = context.measureText(row.text).width;
+				const thickness = row.style.fontSizePixels / 16;
+				context.fillRect(
+					(cssWidth - width) / 2,
+					centerY - thickness / 2,
+					width,
+					thickness,
+				);
+			}
 			top += row.style.fontSizePixels + appearance.lineGapPixels;
 		}
 		if (content.indicators.length > 0) {

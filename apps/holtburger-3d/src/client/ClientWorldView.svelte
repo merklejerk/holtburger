@@ -181,6 +181,8 @@
 		readonly onViewportSelect: (clientX: number, clientY: number) => void;
 		readonly onViewportExamine: (clientX: number, clientY: number) => void;
 		readonly onViewportHover: (clientX: number, clientY: number) => void;
+		/** Clear world hover and invalidate in-flight acquisition on surface exit. */
+		readonly onViewportHoverClear: () => void;
 		readonly onMaintainEntitySelection: () => void;
 		readonly onSelectEntity: (guid: number | null) => void;
 		readonly chatMessages: readonly ClientChatLine[];
@@ -259,6 +261,7 @@
 		onViewportSelect,
 		onViewportExamine,
 		onViewportHover,
+		onViewportHoverClear,
 		onMaintainEntitySelection,
 		onSelectEntity,
 		chatMessages,
@@ -425,8 +428,10 @@
 		if (canvasElement === null) return;
 		const handle = window.setInterval(() => {
 			onMaintainEntitySelection();
-			if (!inputGate.allowed || !pointerInsideCanvas || !hasPointerPosition)
+			if (!inputGate.allowed || !pointerInsideCanvas || !hasPointerPosition) {
+				onViewportHoverClear();
 				return;
+			}
 			onViewportHover(pointerX, pointerY);
 		}, CLIENT_TUNING.entitySelection.sampleIntervalMs);
 		return () => window.clearInterval(handle);
@@ -536,6 +541,7 @@
 
 	function handlePointerLeave(): void {
 		pointerInsideCanvas = false;
+		onViewportHoverClear();
 	}
 
 	function completeViewportGesture(event: PointerEvent): void {

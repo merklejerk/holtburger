@@ -2235,10 +2235,10 @@
 				kind: "icon" as const,
 				iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID,
 			};
-			runtime.setDynamicEntityNameplateIndicators(
-				target.identity.guid,
-				workload === "svg-icons" ? [icon, icon] : [icon],
-			);
+			runtime.setDynamicEntityNameplateDecoration(target.identity.guid, {
+				indicators: workload === "svg-icons" ? [icon, icon] : [icon],
+				strikeThrough: true,
+			});
 		}
 		spawnedEntities = entities;
 		return entities;
@@ -2268,6 +2268,26 @@
 					);
 				return diagnostics;
 			};
+		// Exercise hover admission with ordinary plates disabled, then restore the workload.
+		const maximumVisible = frameSettings.nameplates.maximumVisible;
+		try {
+			setNameplateMaximumVisible(0);
+			runtime.setHoveredEntityGuid(current.identity.guid);
+			await waitForTwoAnimationFrames();
+			if (readNameplates().submittedInstanceCount < 1)
+				throw new Error(
+					"Hovered nameplate did not bypass the disabled budget.",
+				);
+			runtime.setHoveredEntityGuid(null);
+			await waitForTwoAnimationFrames();
+			if (readNameplates().submittedInstanceCount !== 0)
+				throw new Error("Cleared hover retained a forced nameplate.");
+		} finally {
+			runtime.setHoveredEntityGuid(null);
+			setNameplateMaximumVisible(maximumVisible);
+		}
+		await waitForTwoAnimationFrames();
+		// Hover may populate the cache even when the original budget was zero.
 		const before = readNameplates();
 		const previousY = current.placement.pose.coords.y;
 		const movedY = previousY + 2;

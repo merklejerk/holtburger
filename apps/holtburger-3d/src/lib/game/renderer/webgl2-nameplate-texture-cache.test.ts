@@ -13,7 +13,7 @@ const APPEARANCE = SHARED_FRAME_SETTINGS.nameplates.appearance;
 const ICON_ID = nameplateIconId("fixture");
 const PLATE: NameplateVisual = {
 	category: "mob",
-	content: { indicators: [], level: 42, name: "Drudge" },
+	content: { strikeThrough: false, indicators: [], level: 42, name: "Drudge" },
 };
 
 function createFixture(options: { readonly width?: number } = {}) {
@@ -58,6 +58,65 @@ function createFixture(options: { readonly width?: number } = {}) {
 }
 
 describe("WebGL2NameplateTextureCache", () => {
+	it.each([false, true])(
+		"paints name-only strikeout when enabled: %s",
+		(strikeThrough) => {
+			const fillRect = vi.fn();
+			const context = {
+				font: "",
+				measureText: (text: string) => ({ width: text.length * 10 }),
+				scale: vi.fn(),
+				strokeText: vi.fn(),
+				fillText: vi.fn(),
+				fillRect,
+			};
+			vi.stubGlobal("document", {
+				createElement: () => ({ getContext: () => context }),
+			});
+			try {
+				new Canvas2DNameplateRasterizer({
+					read: () => {
+						throw new Error("No icons expected");
+					},
+				}).rasterize(
+					{ ...PLATE, content: { ...PLATE.content, strikeThrough } },
+					APPEARANCE,
+					2,
+				);
+				expect(context.fillText).toHaveBeenCalledTimes(2);
+				expect(fillRect).toHaveBeenCalledTimes(strikeThrough ? 1 : 0);
+				if (strikeThrough)
+					expect(fillRect).toHaveBeenCalledWith(
+						APPEARANCE.horizontalPaddingPixels +
+							((`Level ${PLATE.content.level}`.length -
+								PLATE.content.name.length) *
+								10) /
+								2,
+						APPEARANCE.verticalPaddingPixels +
+							APPEARANCE.name.fontSizePixels / 2 -
+							APPEARANCE.name.fontSizePixels / 32,
+						PLATE.content.name.length * 10,
+						APPEARANCE.name.fontSizePixels / 16,
+					);
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		},
+	);
+
+	it("distinguishes struck and plain text even with identical icons", () => {
+		const fixture = createFixture();
+		const struck = {
+			...PLATE,
+			content: { ...PLATE.content, strikeThrough: true },
+		};
+		fixture.cache.reconcile([PLATE, struck], APPEARANCE, 1);
+		expect(fixture.cache.acquire(struck)).not.toBe(
+			fixture.cache.acquire(PLATE),
+		);
+		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
+	});
+
 	it("rasterizes indicators on a dedicated row below name and optional level", () => {
 		const fillText = vi.fn();
 		const strokeText = vi.fn();
@@ -97,6 +156,7 @@ describe("WebGL2NameplateTextureCache", () => {
 				{
 					...PLATE,
 					content: {
+						strikeThrough: false,
 						indicators: [{ kind: "icon", iconId: ICON_ID }],
 						level: null,
 						name: "Corpse",
@@ -233,6 +293,7 @@ describe("WebGL2NameplateTextureCache", () => {
 			...PLATE,
 			content: {
 				...PLATE.content,
+				strikeThrough: false,
 				indicators: [
 					{ kind: "icon", iconId: ICON_ID },
 					{ kind: "icon", iconId: secondId },
@@ -243,6 +304,7 @@ describe("WebGL2NameplateTextureCache", () => {
 			...opened,
 			content: {
 				...opened.content,
+				strikeThrough: false,
 				indicators: [
 					{ iconId: ICON_ID, kind: "icon" },
 					{ iconId: secondId, kind: "icon" },
@@ -253,6 +315,7 @@ describe("WebGL2NameplateTextureCache", () => {
 			...opened,
 			content: {
 				...opened.content,
+				strikeThrough: false,
 				indicators: [...opened.content.indicators].reverse(),
 			},
 		};
@@ -272,6 +335,7 @@ describe("WebGL2NameplateTextureCache", () => {
 			...PLATE,
 			content: {
 				...PLATE.content,
+				strikeThrough: false,
 				indicators: [{ kind: "icon", iconId: ICON_ID }],
 			},
 		};
@@ -308,7 +372,12 @@ describe("WebGL2NameplateTextureCache", () => {
 		const fixture = createFixture();
 		const npc = {
 			category: "npc" as const,
-			content: { indicators: [], level: null, name: "Town Crier" },
+			content: {
+				strikeThrough: false,
+				indicators: [],
+				level: null,
+				name: "Town Crier",
+			},
 		};
 		fixture.cache.reconcile([PLATE, npc], APPEARANCE, 1);
 		fixture.cache.acquire(PLATE);

@@ -120,6 +120,8 @@
 		readonly viewport: ClientHudViewport;
 		readonly status: ClientCombatStatus;
 		readonly profile: ClientAttackProfile;
+		/** Accepted interactions, including selections that leave the profile unchanged. */
+		readonly selectionRevision: number;
 		readonly enabled: boolean;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Commit an attack profile and engage the current selection when present. */
@@ -132,6 +134,7 @@
 		viewport,
 		status,
 		profile,
+		selectionRevision,
 		enabled,
 		onPlacementChange,
 		onProfileSelect,
@@ -167,7 +170,7 @@
 	}
 
 	$effect(() => {
-		const signature = `${profile.kind}:${profile.height}:${value}`;
+		const signature = `${profile.kind}:${profile.height}:${value}:${selectionRevision}`;
 		if (observedProfile === null) {
 			observedProfile = signature;
 			return;
@@ -309,7 +312,7 @@
 	minWidth={CLIENT_UI_DEFAULTS.combatBar.minSize.width}
 	minHeight={CLIENT_UI_DEFAULTS.combatBar.minSize.height}
 	resizable={false}
-	contentHitTesting="surface"
+	contentHitTesting="descendants"
 	{onPlacementChange}
 >
 	<div
@@ -426,6 +429,7 @@
 		box-sizing: border-box;
 		width: 100%;
 		height: 100%;
+		pointer-events: none;
 		color: var(--ui-combat-foreground-color);
 		opacity: var(--combat-rest-opacity);
 		transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
@@ -459,11 +463,8 @@
 		stroke: var(--ui-combat-charge-color);
 	}
 	.power-control {
-		cursor: grab;
+		cursor: pointer;
 		outline: none;
-	}
-	.power-control.dragging {
-		cursor: grabbing;
 	}
 	.power-control.disabled {
 		cursor: default;
@@ -505,6 +506,7 @@
 		width: 100%;
 		place-items: center;
 		padding: 0;
+		pointer-events: auto;
 		border: 0;
 		background: var(--ui-combat-height-color);
 		color: var(--ui-combat-foreground-color);

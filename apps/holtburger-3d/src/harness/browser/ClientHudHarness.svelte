@@ -1,7 +1,16 @@
 <script lang="ts">
 	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
+	import { handleCombatBarKeydown } from "../../client/client-combat-bar-input";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
-	import type { InputDigitIndex } from "../../lib/input/input-contract";
+	import type {
+		CombatBreakpointIndex,
+		CombatHeightIndex,
+		InputDigitIndex,
+	} from "../../lib/input/input-contract";
+	import {
+		COMBAT_BREAKPOINTS,
+		COMBAT_HEIGHTS,
+	} from "../../client/client-combat-bar-state";
 	import {
 		bindSpellCell,
 		initialSpellBar,
@@ -296,12 +305,27 @@
 			emitInteractionEvent("client-combat-mode-updated", { mode: "peace" });
 		},
 	};
+	let releaseCombatKeys: (() => void) | null = null;
 	const combatBarProbe = {
 		begin: (mode: "melee" | "missile") => {
 			hudMode = "runtime";
 			spellCombatMode = mode;
 			selectedGuid = 7;
 			combatStatus = { desired: null, state: "idle", refill: null };
+			releaseCombatKeys?.();
+			releaseCombatKeys = keyboard.bindGame({
+				keydown: (event) => {
+					handleCombatBarKeydown(
+						event,
+						true,
+						selectCombatBreakpoint,
+						selectCombatHeight,
+					);
+				},
+				keyup: () => {},
+				cancel: () => {},
+			});
+			keyboard.returnToGame();
 		},
 		active: (mode: "melee" | "missile") => {
 			spellCombatMode = mode;
@@ -320,10 +344,13 @@
 		},
 		status: () => combatStatus,
 		end: () => {
+			releaseCombatKeys?.();
+			releaseCombatKeys = null;
 			spellCombatMode = "peace";
 			combatStatus = { desired: null, state: "idle", refill: null };
 		},
 	};
+	let combatProfileSelectionRevision = $state(0);
 	function updateCombatProfile(profile: ClientAttackProfile): void {
 		if (characterSettings === null) return;
 		characterSettings = {
@@ -342,6 +369,43 @@
 							},
 						},
 		};
+	}
+	function selectCombatProfile(profile: ClientAttackProfile): void {
+		updateCombatProfile(profile);
+		combatProfileSelectionRevision += 1;
+		combatBarProbe.active(profile.kind);
+	}
+	function selectCombatBreakpoint(index: CombatBreakpointIndex): void {
+		if (characterSettings === null) return;
+		const value = COMBAT_BREAKPOINTS[index];
+		if (spellCombatMode === "melee")
+			selectCombatProfile({
+				kind: "melee",
+				...characterSettings.combatControls.melee,
+				power: value,
+			});
+		else if (spellCombatMode === "missile")
+			selectCombatProfile({
+				kind: "missile",
+				...characterSettings.combatControls.missile,
+				accuracy: value,
+			});
+	}
+	function selectCombatHeight(index: CombatHeightIndex): void {
+		if (characterSettings === null) return;
+		const height = COMBAT_HEIGHTS[index];
+		if (spellCombatMode === "melee")
+			selectCombatProfile({
+				kind: "melee",
+				...characterSettings.combatControls.melee,
+				height,
+			});
+		else if (spellCombatMode === "missile")
+			selectCombatProfile({
+				kind: "missile",
+				...characterSettings.combatControls.missile,
+				height,
+			});
 	}
 
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
@@ -2972,14 +3036,12 @@
 		onActivateSpellCell={activateSpellCell}
 		combatMode={spellCombatMode}
 		{combatStatus}
+		{combatProfileSelectionRevision}
 		combatControls={characterSettings?.combatControls ?? {
 			melee: { height: "medium", power: 0.5 },
 			missile: { height: "medium", accuracy: 0.5 },
 		}}
-		onCombatProfileSelect={(profile) => {
-			updateCombatProfile(profile);
-			combatBarProbe.active(profile.kind);
-		}}
+		onCombatProfileSelect={selectCombatProfile}
 		combatEnabled={true}
 		onToggleCombat={() => {}}
 		onCastSpell={(id) => void castSpell(id)}

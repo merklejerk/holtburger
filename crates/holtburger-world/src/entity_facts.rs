@@ -205,6 +205,16 @@ pub enum EntityTargetingCategory {
     NonCreature,
 }
 
+/// Session-local interaction state for a corpse visible to client conveniences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CorpseState {
+    /// The corpse has not produced a successful contents response for this session.
+    Unopened,
+    /// This client has successfully opened the corpse during this session.
+    Opened,
+}
+
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -227,6 +237,8 @@ pub struct ClientEntityFacts {
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
     pub targeting: EntityTargetingCategory,
+    /// Corpse identity and this session's confirmed-open state; absent for other entities.
+    pub corpse: Option<CorpseState>,
     /// Section existence and loading state.
     pub storage: StorageCoverage,
 }
@@ -404,6 +416,12 @@ impl WorldState {
             can_receive_give: crate::interaction::give_recipient_candidate(self, guid),
             scene_placement,
             targeting,
+            corpse: entity.and_then(|entity| {
+                entity
+                    .flags
+                    .contains(holtburger_common::properties::ObjectDescriptionFlag::CORPSE)
+                    .then_some(CorpseState::Unopened)
+            }),
             storage,
         }))
     }

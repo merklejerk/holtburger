@@ -147,6 +147,8 @@ const clientEntityFactsSchema = z
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
 		targeting: z.enum(["ineligible", "creature", "non-creature"]),
+		/** Session-local confirmed-open state; null identifies every non-corpse entity. */
+		corpse: z.enum(["unopened", "opened"]).nullable(),
 		storage: z.discriminatedUnion("kind", [
 			z
 				.object({ kind: z.literal("not-established") })

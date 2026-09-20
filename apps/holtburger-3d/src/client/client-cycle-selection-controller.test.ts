@@ -111,6 +111,35 @@ describe("stable cycle acquisition", () => {
 		expect(f.selection.selectedGuid()).toBe(2);
 	});
 
+	it("filters unopened corpses without leaving the non-creature ring", () => {
+		const f = fixture();
+		const candidates: CycleCandidate[] = [
+			{ guid: 2, distanceSquared: 1 },
+			{ guid: 3, distanceSquared: 2, unopenedCorpse: true },
+			{ guid: 4, distanceSquared: 3 },
+			{ guid: 5, distanceSquared: 4, unopenedCorpse: true },
+		];
+		const cycle = new ClientCycleSelectionController({
+			selection: f.selection,
+			policy: POLICY,
+			sample: () => candidates,
+		});
+		cycle.cycle("non-creature", 1, 0);
+		expect(f.selection.selectedGuid()).toBe(2);
+		cycle.cycle("non-creature", 1, 1, "unopened-corpse");
+		expect(f.selection.selectedGuid()).toBe(3);
+		cycle.cycle("non-creature", 1, 2);
+		expect(f.selection.selectedGuid()).toBe(4);
+		cycle.cycle("non-creature", -1, 3, "unopened-corpse");
+		expect(f.selection.selectedGuid()).toBe(3);
+		candidates[1] = { guid: 3, distanceSquared: 2 };
+		cycle.cycle("non-creature", 1, 4, "unopened-corpse");
+		expect(f.selection.selectedGuid()).toBe(5);
+		cycle.destroy();
+		f.cycle.destroy();
+		f.selection.destroy();
+	});
+
 	it("breaks distance ties by GUID rather than source iteration order", () => {
 		const f = fixture();
 		const cycle = new ClientCycleSelectionController({

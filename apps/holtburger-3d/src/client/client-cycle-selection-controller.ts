@@ -9,6 +9,8 @@ import type { ClientEntitySelection } from "./client-entity-selection";
 
 /** World-produced eligible categories; disposition does not participate in cycling. */
 export type CycleCategory = "creature" | "non-creature";
+/** Optional view over a category; subsets never own traversal state. */
+export type CycleSubset = "all" | "unopened-corpse";
 /** App-local acquisition knobs, sampled only on input. */
 export interface CycleSelectionPolicy {
 	/** Player-to-origin acquisition radius in meters for both categories. */
@@ -24,6 +26,8 @@ export interface CycleCandidate {
 	readonly guid: number;
 	/** Squared player-to-origin distance; consumed only when sorting new membership. */
 	readonly distanceSquared: number;
+	/** Whether corpse convenience traversal may select this broad non-creature candidate. */
+	readonly unopenedCorpse?: boolean;
 }
 
 /** Cheap origin-based camera test; intentionally ignores portal scopes and occlusion. */
@@ -105,7 +109,13 @@ export function sampleCycleCandidates(
 			distanceSquared <= radiusSquared &&
 			(inView === null || inView(position))
 		)
-			candidates.push({ guid, distanceSquared });
+			candidates.push({
+				guid,
+				distanceSquared,
+				...(read.level.entities.get(guid)?.corpse === "unopened"
+					? { unopenedCorpse: true }
+					: {}),
+			});
 	}
 	return candidates;
 }
@@ -149,7 +159,12 @@ export class ClientCycleSelectionController {
 		});
 	}
 
-	cycle(category: CycleCategory, direction: 1 | -1, nowMs: number): void {
+	cycle(
+		category: CycleCategory,
+		direction: 1 | -1,
+		nowMs: number,
+		subset: CycleSubset = "all",
+	): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("cycle");
 		const candidates = this.#sample(category);
@@ -172,6 +187,11 @@ export class ClientCycleSelectionController {
 			.sort(nearestFirst)
 			.map((candidate) => candidate.guid);
 		const guids = [...survivors, ...newcomers];
+		const byGuid = new Map(
+			candidates.map((candidate) => [candidate.guid, candidate] as const),
+		);
+		const matchesSubset = (guid: number) =>
+			subset === "all" || byGuid.get(guid)?.unopenedCorpse === true;
 		let next: number | null = null;
 		if (guids.length > 0) {
 			const cursor =
@@ -179,8 +199,9 @@ export class ClientCycleSelectionController {
 					? previous.cursor
 					: this.#selection.selectedGuid();
 			const index = cursor === null ? -1 : guids.indexOf(cursor);
+			let startIndex: number | null = null;
 			if (index >= 0) {
-				next = this.#at(guids, index + direction);
+				startIndex = index + direction;
 			} else if (continuing && survivors.length > 0 && cursor !== null) {
 				// Preserve the removed cursor's logical gap in the old ring, in either direction.
 				const oldIndex = previous.guids.indexOf(cursor);
@@ -190,12 +211,21 @@ export class ClientCycleSelectionController {
 						oldIndex + direction * step,
 					);
 					if (eligible.has(successor)) {
-						next = successor;
+						startIndex = guids.indexOf(successor);
 						break;
 					}
 				}
 			} else {
-				next = this.#at(guids, direction === 1 ? 0 : -1);
+				startIndex = direction === 1 ? 0 : -1;
+			}
+			if (startIndex !== null) {
+				for (let step = 0; step < guids.length; step += 1) {
+					const candidate = this.#at(guids, startIndex + direction * step);
+					if (matchesSubset(candidate)) {
+						next = candidate;
+						break;
+					}
+				}
 			}
 		}
 		this.#cycle = { category, guids, cursor: next, lastPressMs: nowMs };
@@ -203,13 +233,14 @@ export class ClientCycleSelectionController {
 	}
 
 	/** Fresh nearest acquisition resets stable traversal and never advances past an existing target. */
-	selectNearest(category: CycleCategory): void {
+	selectNearest(category: CycleCategory, subset: CycleSubset = "all"): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
 		const candidates = this.#sample(category);
 		if (candidates === null) return;
 		let nearest: CycleCandidate | null = null;
 		for (const candidate of candidates) {
+			if (subset === "unopened-corpse" && !candidate.unopenedCorpse) continue;
 			if (nearest === null || nearestFirst(candidate, nearest) < 0)
 				nearest = candidate;
 		}

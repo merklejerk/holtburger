@@ -950,6 +950,7 @@
 					worldContainerContent: false,
 					canReceiveGive: false,
 					targeting: "non-creature",
+					corpse: null,
 					scenePlacement: "available",
 					storage:
 						guid === 1
@@ -1064,6 +1065,7 @@
 						location: { kind: "none" },
 						scenePlacement: "available",
 						targeting: "creature",
+						corpse: null,
 						description: {
 							...recipient.description,
 							name: "Give recipient",

@@ -421,7 +421,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 				...base,
 				source: {
 					...base.source,
-					nameplate: { level: 12, name: "Drudge" },
+					nameplate: { indicators: [], level: 12, name: "Drudge" },
 				},
 			},
 		]);
@@ -438,23 +438,38 @@ describe("DynamicEntitySystem authored ownership", () => {
 				identity: base.source.identity,
 				visual: {
 					entityClass: base.source.entityClass,
-					content: { level: 12, name: "Drudge" },
+					content: { indicators: [], level: 12, name: "Drudge" },
 				},
 			},
 		]);
 
-		system.updateNameplateContent(nodeId, { level: 13, name: "Drudge" });
+		system.updateNameplateContent(nodeId, {
+			indicators: [],
+			level: 13,
+			name: "Drudge",
+		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
 		expect(system.getNameplateFacts(nodeId)?.content).toEqual({
+			indicators: [],
 			level: 13,
 			name: "Drudge",
 		});
 		expect(system.getRenderable(nodeId)).not.toBeNull();
 
-		system.updateNameplateContent(nodeId, { level: 13, name: "Drudge" });
+		system.updateNameplateContent(nodeId, {
+			indicators: [],
+			level: 13,
+			name: "Drudge",
+		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
-		system.removeOwner("layer");
+		system.updateNameplateContent(nodeId, {
+			indicators: ["✓"],
+			level: 13,
+			name: "Drudge",
+		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 2);
+		system.removeOwner("layer");
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 3);
 	});
 
 	it("installs and removes a promoted owner population as one set", async () => {

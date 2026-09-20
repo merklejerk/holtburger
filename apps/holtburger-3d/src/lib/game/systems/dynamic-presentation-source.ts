@@ -9,6 +9,8 @@ import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentat
 export interface NameplateContent {
 	readonly name: string;
 	readonly level: number | null;
+	/** Ordered lightweight status glyphs painted on a dedicated final row. */
+	readonly indicators: readonly string[];
 }
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */

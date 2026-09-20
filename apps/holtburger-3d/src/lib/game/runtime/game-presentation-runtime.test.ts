@@ -4,6 +4,7 @@ import { acVector3, sceneVec3, sceneVector3 } from "../../assets/ac-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
+import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
 import { WorkerTexturePreparer } from "../textures/texture-preparer";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -2628,6 +2629,43 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				.templateCount,
 		).toBe(0);
 		await runtime.destroy();
+	});
+
+	it("combines retained indicators with current display facts through realization, rename, and removal", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({ load: () => delayed.promise });
+		const update = vi.spyOn(
+			DynamicEntitySystem.prototype,
+			"updateNameplateContent",
+		);
+		try {
+			const pending = runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+			runtime.setDynamicEntityNameplateIndicators(7, ["✓"]);
+			delayed.resolve(spawnedVisual());
+			await pending;
+			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
+				name: "Entity 7",
+				level: null,
+				indicators: ["✓"],
+			});
+			const renamed = spawnedEntity(7, 1);
+			renamed.display = { name: "Renamed corpse", level: 13 };
+			await runtime.upsertDynamicEntity(renamed);
+			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
+				...renamed.display,
+				indicators: ["✓"],
+			});
+			await runtime.replaceDynamicEntitySnapshot([]);
+			await runtime.upsertDynamicEntity(spawnedEntity(7, 2));
+			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
+				name: "Entity 7",
+				level: null,
+				indicators: [],
+			});
+		} finally {
+			update.mockRestore();
+			await runtime.destroy();
+		}
 	});
 
 	it("replaces one GUID generation and updates same-generation state without reloading", async () => {

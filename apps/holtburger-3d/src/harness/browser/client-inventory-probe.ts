@@ -43,6 +43,7 @@ function item(
 		scenePlacement: "available",
 		storage: { kind: "not-established" },
 		...overrides,
+		corpse: overrides.corpse ?? null,
 	};
 }
 

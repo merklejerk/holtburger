@@ -129,6 +129,8 @@ pub struct ClientRuntime {
     active_busy_operation: Option<PendingBusyOperation>,
     /// Close acknowledgements outstanding after local access has been revoked.
     closing_containers: std::collections::BTreeMap<Guid, Instant>,
+    /// Bounded successful-open history used only by corpse-selection conveniences.
+    opened_corpses: world_container::OpenedCorpseHistory,
     /// Single owner of equipment mutations and their authoritative confirmations.
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
     /// Dependent pack exchange waiting to send its second insertion.
@@ -308,8 +310,11 @@ impl ClientRuntime {
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),
             ),
-            entities: entity_facts::ClientEntitySnapshot::from_world(&self.world)
-                .expect("accepted world relationships must produce an entity baseline"),
+            entities: entity_facts::ClientEntitySnapshot::from_world_with_opened(
+                &self.world,
+                self.opened_corpses.ids(),
+            )
+            .expect("accepted world relationships must produce an entity baseline"),
             runtime_bodies: self.world.runtime_body_views().into(),
         }
     }

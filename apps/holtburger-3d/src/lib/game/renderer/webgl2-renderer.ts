@@ -694,6 +694,7 @@ interface PreparedNameplateCandidate {
 	readonly anchor: Vec3;
 	readonly distanceSquared: number;
 	readonly identity: string;
+	readonly required: boolean;
 	readonly renderScopeKeys: readonly string[];
 	readonly visual: NameplateVisual;
 }
@@ -2728,11 +2729,12 @@ export class WebGL2Renderer implements Renderer {
 						);
 					}
 				}
+				const selected = this.#frameSelectionTarget?.nodeId === nodeId;
 				if (
 					renderTarget !== null &&
 					renderTarget.renderScopeKeys.length > 0 &&
 					retainedDynamicContributionCount > 0 &&
-					frameSettings.nameplates.maximumVisible > 0
+					(frameSettings.nameplates.maximumVisible > 0 || selected)
 				) {
 					const facts = this.#world.getEntityNameplateFacts(nodeId);
 					if (facts !== null) {
@@ -2741,7 +2743,10 @@ export class WebGL2Renderer implements Renderer {
 							facts.identity,
 							this.#frameViewerEntityIdentity,
 						);
-						if (frameSettings.nameplates.categoryVisibility[category]) {
+						if (
+							selected ||
+							frameSettings.nameplates.categoryVisibility[category]
+						) {
 							const landblockOffset = createLandblockOffset(
 								getLandblockCoordinates(renderTarget.landblockId),
 								prepared.anchorCoordinates,
@@ -2757,6 +2762,7 @@ export class WebGL2Renderer implements Renderer {
 								anchor,
 								distanceSquared,
 								identity: facts.identity,
+								required: selected,
 								renderScopeKeys: renderTarget.renderScopeKeys,
 								visual: {
 									category,

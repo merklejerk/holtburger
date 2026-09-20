@@ -243,6 +243,7 @@ import {
 } from "../animation/animation-playback";
 import type {
 	DynamicPresentationSource,
+	NameplateContent,
 	PlacedDynamicPresentationSource,
 } from "../systems/dynamic-presentation-source";
 import {
@@ -744,6 +745,11 @@ export class GamePresentationRuntime {
 	readonly #spawnedPresentations = new Map<
 		number,
 		DynamicEntityPresentationRecord
+	>();
+	/** App-owned indicators survive realization; name and level always come from current authority. */
+	readonly #spawnedNameplateIndicators = new Map<
+		number,
+		NameplateContent["indicators"]
 	>();
 	readonly #spawnedVisualKeys = new Map<number, string>();
 	readonly #retainedSetupVisuals = new Map<string, RetainedSetupVisual>();
@@ -1752,6 +1758,7 @@ export class GamePresentationRuntime {
 		}
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (desired?.entity.generation !== generation) return;
+		this.#spawnedNameplateIndicators.delete(guid);
 		this.#retireDynamicPresentationTree(guid);
 		this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? []) {
@@ -1762,6 +1769,22 @@ export class GamePresentationRuntime {
 					parentGuid: guid,
 				});
 		}
+	}
+
+	/** Replace app-owned indicators; an empty row clears retained decoration. */
+	setDynamicEntityNameplateIndicators(
+		guid: number,
+		indicators: NameplateContent["indicators"],
+	): void {
+		if (indicators.length === 0) this.#spawnedNameplateIndicators.delete(guid);
+		else this.#spawnedNameplateIndicators.set(guid, indicators);
+		const installed = this.#spawnedPresentations.get(guid);
+		const desired = this.#spawnedDesiredEntities.get(guid);
+		if (installed !== undefined && desired !== undefined)
+			this.#dynamics.updateNameplateContent(installed.nodeId, {
+				...desired.entity.display,
+				indicators,
+			});
 	}
 
 	/** Queue one server-authored PlayScript cue for the exact dynamic entity generation. */
@@ -2835,7 +2858,11 @@ export class GamePresentationRuntime {
 				entity,
 				desired.scriptTableId,
 			);
-		this.#dynamics.updateNameplateContent(installed.nodeId, entity.display);
+		this.#dynamics.updateNameplateContent(installed.nodeId, {
+			...entity.display,
+			indicators:
+				this.#spawnedNameplateIndicators.get(entity.identity.guid) ?? [],
+		});
 		this.#applyDynamicEntityMotion(
 			installed,
 			entity.motion,
@@ -4075,6 +4102,7 @@ export class GamePresentationRuntime {
 		for (const guid of spawned)
 			this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		this.#spawnedVisualKeys.clear();
+		this.#spawnedNameplateIndicators.clear();
 		this.#pendingDynamicEntityCues.clear();
 		this.#destroyed = true;
 		this.#sceneInterestCoordinator.destroy();

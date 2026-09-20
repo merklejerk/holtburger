@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import type { NameplateVisual } from "./nameplate-policy";
 import {
+	Canvas2DNameplateRasterizer,
 	WebGL2NameplateTextureCache,
 	type NameplateRasterizer,
 } from "./webgl2-nameplate-texture-cache";
@@ -10,7 +11,7 @@ import {
 const APPEARANCE = SHARED_FRAME_SETTINGS.nameplates.appearance;
 const PLATE: NameplateVisual = {
 	category: "mob",
-	content: { level: 42, name: "Drudge" },
+	content: { indicators: [], level: 42, name: "Drudge" },
 };
 
 function createFixture(options: { readonly width?: number } = {}) {
@@ -55,6 +56,73 @@ function createFixture(options: { readonly width?: number } = {}) {
 }
 
 describe("WebGL2NameplateTextureCache", () => {
+	it("rasterizes indicators on a dedicated row below name and optional level", () => {
+		const fillText = vi.fn();
+		const strokeText = vi.fn();
+		const context = {
+			fillText,
+			font: "",
+			lineJoin: "miter",
+			lineWidth: 0,
+			measureText: (text: string) => ({ width: text.length * 10 }),
+			scale: vi.fn(),
+			strokeText,
+			textAlign: "start",
+			textBaseline: "alphabetic",
+		} as unknown as CanvasRenderingContext2D;
+		const canvas = {
+			getContext: () => context,
+			height: 0,
+			width: 0,
+		};
+		vi.stubGlobal("document", {
+			createElement: () => canvas,
+		});
+		try {
+			const raster = new Canvas2DNameplateRasterizer().rasterize(
+				{
+					...PLATE,
+					content: {
+						indicators: ["✓"],
+						level: null,
+						name: "Corpse",
+					},
+				},
+				APPEARANCE,
+				1,
+			);
+
+			expect(raster.height).toBe(
+				Math.ceil(
+					APPEARANCE.verticalPaddingPixels * 2 +
+						APPEARANCE.name.fontSizePixels +
+						APPEARANCE.lineGapPixels +
+						APPEARANCE.indicators.fontSizePixels,
+				),
+			);
+			expect(fillText.mock.calls.map(([text, , y]) => [text, y])).toEqual([
+				[
+					"Corpse",
+					APPEARANCE.verticalPaddingPixels + APPEARANCE.name.fontSizePixels / 2,
+				],
+				[
+					"✓",
+					APPEARANCE.verticalPaddingPixels +
+						APPEARANCE.name.fontSizePixels +
+						APPEARANCE.lineGapPixels +
+						APPEARANCE.indicators.fontSizePixels / 2,
+				],
+			]);
+			expect(strokeText).toHaveBeenCalledTimes(
+				[APPEARANCE.name, APPEARANCE.indicators].filter(
+					(style) => style.outlineWidthPixels > 0,
+				).length,
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it("requires reconciliation to establish the active raster style", () => {
 		const fixture = createFixture();
 		expect(() => fixture.cache.acquire(PLATE)).toThrow("no reconciled style");
@@ -141,6 +209,20 @@ describe("WebGL2NameplateTextureCache", () => {
 		});
 	});
 
+	it("keeps ordered indicator rows in the complete visual key", () => {
+		const fixture = createFixture();
+		const opened = {
+			...PLATE,
+			content: { ...PLATE.content, indicators: ["✓"] },
+		};
+		fixture.cache.reconcile([PLATE, opened], APPEARANCE, 1);
+
+		fixture.cache.acquire(PLATE);
+		fixture.cache.acquire(opened);
+
+		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
+	});
+
 	it("records and rejects an oversized raster before allocating a texture", () => {
 		const fixture = createFixture({ width: 4_097 });
 		fixture.cache.reconcile([PLATE], APPEARANCE, 1);
@@ -159,7 +241,7 @@ describe("WebGL2NameplateTextureCache", () => {
 		const fixture = createFixture();
 		const npc = {
 			category: "npc" as const,
-			content: { level: null, name: "Town Crier" },
+			content: { indicators: [], level: null, name: "Town Crier" },
 		};
 		fixture.cache.reconcile([PLATE, npc], APPEARANCE, 1);
 		fixture.cache.acquire(PLATE);

@@ -1,4 +1,7 @@
-import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
+import {
+	entityFacts,
+	playerEntitySnapshot,
+} from "./client-entity-mirror.test-support";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,6 +16,7 @@ import {
 import { AABB3, Mat4, Vec3 } from "../lib/game/math/types";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import type { ScenePlacement } from "../lib/game/scene";
+import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import type {
 	ClientCameraTick,
@@ -74,6 +78,47 @@ describe("resolveClientEnvironmentSelection", () => {
 });
 
 describe("ClientPresentationSession", () => {
+	it("decorates an opened corpse nameplate from semantic entity facts", async () => {
+		const playerGuid = 0x0101_0001;
+		const corpseGuid = 0x8000_0010;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			transport.emit("client-entity-facts-changed", {
+				worldContainer: null,
+				upserts: [entityFacts(corpseGuid, { corpse: "opened" })],
+				removed: [],
+			});
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: {
+					...view(corpseGuid),
+					display: { name: "Corpse of Drudge", level: null },
+				},
+			});
+
+			expect(runtime.nameplateIndicators.get(corpseGuid)).toEqual(["✓"]);
+			transport.emit("client-entity-facts-changed", {
+				worldContainer: null,
+				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],
+				removed: [],
+			});
+			expect(runtime.nameplateIndicators.has(corpseGuid)).toBe(false);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
 	it("expires construction-stage sounds while retaining fresh repeated cues", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
@@ -1259,6 +1304,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	selectedFrame: SelectedDynamicEntityFrame | null = null;
 	selectedPresentationState: SelectedDynamicEntityPresentationState | null =
 		null;
+	nameplateIndicators = new Map<number, NameplateContent["indicators"]>();
 	envCellScopeAvailable = true;
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
@@ -1291,6 +1337,14 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		settings: Parameters<ClientPresentationRuntime["setFrameSettings"]>[0],
 	): void {
 		this.frameSettings.push(settings);
+	}
+
+	setDynamicEntityNameplateIndicators(
+		guid: number,
+		indicators: NameplateContent["indicators"],
+	): void {
+		if (indicators.length === 0) this.nameplateIndicators.delete(guid);
+		else this.nameplateIndicators.set(guid, indicators);
 	}
 
 	async replaceDynamicEntitySnapshot(

@@ -17,6 +17,46 @@ use super::{
     types::{ActionResultReason, ActionResultSource, ClientViewEvent},
 };
 
+/// Small session-local FIFO with deduplicated membership for corpse convenience state.
+#[derive(Default)]
+pub(super) struct OpenedCorpseHistory {
+    order: std::collections::VecDeque<Guid>,
+    members: std::collections::BTreeSet<Guid>,
+}
+
+impl OpenedCorpseHistory {
+    const LIMIT: usize = 100;
+
+    fn remember(&mut self, guid: Guid) -> Option<Guid> {
+        if !self.members.insert(guid) {
+            return None;
+        }
+        self.order.push_back(guid);
+        if self.order.len() <= Self::LIMIT {
+            return None;
+        }
+        let expired = self
+            .order
+            .pop_front()
+            .expect("corpse history above its limit must contain an oldest GUID");
+        self.members.remove(&expired);
+        Some(expired)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.order.iter().copied()
+    }
+
+    pub(super) fn ids(&self) -> &std::collections::BTreeSet<Guid> {
+        &self.members
+    }
+
+    fn clear(&mut self) {
+        self.order.clear();
+        self.members.clear();
+    }
+}
+
 /// Limit pending-close admission, not a claim that the server completed its animation.
 const CONTAINER_CLOSE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -120,6 +160,10 @@ impl ClientRuntime {
         self.world.close_world_container();
         self.world.clear_inventory_transfers();
         self.closing_containers.clear();
+        for guid in self.opened_corpses.iter() {
+            self.entity_facts.invalidate(guid);
+        }
+        self.opened_corpses.clear();
         self.publish_entity_facts();
     }
 
@@ -177,6 +221,20 @@ impl ClientRuntime {
                     {
                         self.replace_container_surface(data.container).await?;
                         self.world.confirm_world_container(data.container);
+                        if self
+                            .world
+                            .get_visible_entity(data.container)
+                            .is_some_and(|entity| {
+                                entity.flags.contains(
+                                    holtburger_common::properties::ObjectDescriptionFlag::CORPSE,
+                                )
+                            })
+                        {
+                            if let Some(expired) = self.opened_corpses.remember(data.container) {
+                                self.entity_facts.invalidate(expired);
+                            }
+                            self.entity_facts.invalidate(data.container);
+                        }
                     }
                 }
                 GameEvent::CloseGroundContainer(data) => {
@@ -239,6 +297,23 @@ mod tests {
                 })
                 .collect(),
         }))
+    }
+
+    #[test]
+    fn opened_corpse_history_is_bounded_and_deduplicated() {
+        let mut history = OpenedCorpseHistory::default();
+        for value in 0..OpenedCorpseHistory::LIMIT {
+            assert_eq!(history.remember(Guid(value as u32)), None);
+        }
+        assert_eq!(
+            history.remember(Guid((OpenedCorpseHistory::LIMIT / 2) as u32)),
+            None
+        );
+        let newest = Guid(OpenedCorpseHistory::LIMIT as u32);
+        assert_eq!(history.remember(newest), Some(Guid(0)));
+        assert_eq!(history.order.len(), OpenedCorpseHistory::LIMIT);
+        assert!(!history.ids().contains(&Guid(0)));
+        assert!(history.ids().contains(&newest));
     }
 
     async fn receive(client: &mut ClientRuntime, event: GameEvent) {
@@ -442,6 +517,40 @@ mod tests {
         )
         .await;
         assert_eq!(client.world.world_container().root(), Some(ROOT));
+    }
+
+    #[tokio::test]
+    async fn successful_corpse_roster_records_session_open_history() {
+        let mut client = fixture();
+        client.world.entities.get_mut(ROOT).unwrap().flags |= ObjectDescriptionFlag::CORPSE;
+
+        use_root(&mut client, ROOT).await;
+        receive(&mut client, roster(ROOT, &[])).await;
+
+        assert!(client.opened_corpses.ids().contains(&ROOT));
+        assert_eq!(client.opened_corpses.iter().collect::<Vec<_>>(), [ROOT]);
+        assert_eq!(
+            client
+                .application_snapshot()
+                .entities
+                .entities
+                .iter()
+                .find(|facts| facts.guid == ROOT)
+                .and_then(|facts| facts.corpse),
+            Some(holtburger_world::entity_facts::CorpseState::Opened)
+        );
+        client.reset_container_access();
+        assert!(client.opened_corpses.ids().is_empty());
+        assert_eq!(
+            client
+                .application_snapshot()
+                .entities
+                .entities
+                .iter()
+                .find(|facts| facts.guid == ROOT)
+                .and_then(|facts| facts.corpse),
+            Some(holtburger_world::entity_facts::CorpseState::Unopened)
+        );
     }
 
     #[tokio::test]

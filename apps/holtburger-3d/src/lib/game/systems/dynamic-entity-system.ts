@@ -948,7 +948,11 @@ export class DynamicEntitySystem<
 		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
 		if (
 			entity.nameplateContent?.name === content.name &&
-			entity.nameplateContent.level === content.level
+			entity.nameplateContent.level === content.level &&
+			orderedStringsEqual(
+				entity.nameplateContent.indicators,
+				content.indicators,
+			)
 		)
 			return;
 		entity.nameplateContent = content;
@@ -1693,6 +1697,17 @@ export class DynamicEntitySystem<
 		this.#scene.destroyNode(entity.visualRootNodeId);
 		this.#placements.destroyRoot(entity.rootNodeId);
 	}
+}
+
+/** Compare small immutable compositor rows without making reference identity semantic. */
+function orderedStringsEqual(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
+	);
 }
 
 /** Rebuild geometry-dependent envelopes from retained animation assets, without starting playback. */

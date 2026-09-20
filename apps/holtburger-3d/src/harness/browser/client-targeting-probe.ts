@@ -147,7 +147,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			);
 	};
 	const replace = (
-		records: readonly { guid: number; distance: number; creature: boolean }[],
+		records: readonly {
+			guid: number;
+			distance: number;
+			creature: boolean;
+			corpse?: "unopened" | "opened";
+		}[],
 	) => {
 		const player = targetingEntity(1, 1);
 		const dynamic = records.map((record) => {
@@ -168,6 +173,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 						entityFacts(1, { targeting: "creature" }),
 						...records.map((record) =>
 							entityFacts(record.guid, {
+								corpse: record.corpse ?? null,
 								targeting: record.creature ? "creature" : "non-creature",
 							}),
 						),
@@ -183,12 +189,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	};
 	try {
 		keyboard.returnToGame();
-		const base = [
+		const base: Parameters<typeof replace>[0] = [
 			{ guid: 2, distance: 5, creature: true },
 			{ guid: 3, distance: 10, creature: true },
 			{ guid: 4, distance: 15, creature: true },
-			{ guid: 9, distance: -5, creature: false },
-			{ guid: 10, distance: -8, creature: false },
+			{ guid: 9, distance: -5, creature: false, corpse: "unopened" },
+			{ guid: 10, distance: -8, creature: false, corpse: "unopened" },
 		];
 		replace(base);
 		press("Tab");
@@ -216,6 +222,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(9, "rear non-creature");
 		press("Tab", true, true);
 		expectSelected(10, "reverse non-creature traversal");
+		press("v");
+		expectSelected(9, "corpse subset shares forward non-creature cursor");
+		press("V", false, true);
+		expectSelected(10, "corpse subset shares reverse non-creature cursor");
 		press("x");
 		expectSelected(1, "self binding");
 		pointer.acquireViewportPoint(0, 0);

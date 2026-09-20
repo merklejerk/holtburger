@@ -928,6 +928,8 @@ export class WebGL2Renderer implements Renderer {
 	#frameWorldIndicator: WorldIndicatorInput | null = null;
 	/** Current realized selected root, resolved by the runtime rather than retained by the renderer. */
 	#frameSelectionTarget: EntitySelectionTarget | null = null;
+	/** Hover admission is independent from the selected-geometry outline. */
+	#frameHoveredEntityNodeId: SceneNodeId | null = null;
 	/** Frame-global mask geometry prepared before any camera draws. */
 	#preparedSelection: {
 		readonly pass: WebGL2EntitySelectionPass;
@@ -1547,6 +1549,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameClockSeconds = input.timeSeconds;
 		this.#frameWorldIndicator = input.worldIndicator ?? null;
 		this.#frameSelectionTarget = input.selectionTarget;
+		this.#frameHoveredEntityNodeId = input.hoveredEntityNodeId;
 		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
 		// Snapshotted here because the flat schedule never receives frame settings, and both
 		// schedules reach presentation through the same shared helper.
@@ -2747,12 +2750,14 @@ export class WebGL2Renderer implements Renderer {
 						);
 					}
 				}
-				const selected = this.#frameSelectionTarget?.nodeId === nodeId;
+				const required =
+					this.#frameSelectionTarget?.nodeId === nodeId ||
+					this.#frameHoveredEntityNodeId === nodeId;
 				if (
 					renderTarget !== null &&
 					renderTarget.renderScopeKeys.length > 0 &&
 					retainedDynamicContributionCount > 0 &&
-					(frameSettings.nameplates.maximumVisible > 0 || selected)
+					(frameSettings.nameplates.maximumVisible > 0 || required)
 				) {
 					const facts = this.#world.getEntityNameplateFacts(nodeId);
 					if (facts !== null) {
@@ -2762,7 +2767,7 @@ export class WebGL2Renderer implements Renderer {
 							this.#frameViewerEntityIdentity,
 						);
 						if (
-							selected ||
+							required ||
 							frameSettings.nameplates.categoryVisibility[category]
 						) {
 							const landblockOffset = createLandblockOffset(
@@ -2780,7 +2785,7 @@ export class WebGL2Renderer implements Renderer {
 								anchor,
 								distanceSquared,
 								identity: facts.identity,
-								required: selected,
+								required,
 								renderScopeKeys: renderTarget.renderScopeKeys,
 								visual: {
 									category,

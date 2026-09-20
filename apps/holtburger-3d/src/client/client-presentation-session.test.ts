@@ -107,15 +107,18 @@ describe("ClientPresentationSession", () => {
 				},
 			});
 
-			expect(runtime.nameplateIndicators.get(corpseGuid)).toEqual([
-				{ kind: "icon", iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID },
-			]);
+			expect(runtime.nameplateDecoration.get(corpseGuid)).toEqual({
+				indicators: [
+					{ kind: "icon", iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID },
+				],
+				strikeThrough: true,
+			});
 			transport.emit("client-entity-facts-changed", {
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],
 				removed: [],
 			});
-			expect(runtime.nameplateIndicators.has(corpseGuid)).toBe(false);
+			expect(runtime.nameplateDecoration.has(corpseGuid)).toBe(false);
 		} finally {
 			await presentation.destroy();
 			lifecycle.stop();
@@ -465,6 +468,32 @@ describe("ClientPresentationSession", () => {
 		expect(Math.hypot(...(center?.direction ?? []))).toBeCloseTo(1);
 		expect(right?.direction).not.toEqual(center?.direction);
 		await presentation.destroy();
+	});
+
+	it("forwards retained hover on startup and subsequent changes without selection", async () => {
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(currentState(0x0101_0001)),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			presentation.setHoveredEntityGuid(7);
+			await presentation.start();
+			expect(runtime.hoveredEntityGuid).toBe(7);
+			presentation.setHoveredEntityGuid(8);
+			expect(runtime.hoveredEntityGuid).toBe(8);
+			presentation.setHoveredEntityGuid(null);
+			expect(runtime.hoveredEntityGuid).toBeNull();
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
 	});
 
 	it("tracks the selected bound using presentation-owned facts", async () => {
@@ -1307,7 +1336,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	selectedFrame: SelectedDynamicEntityFrame | null = null;
 	selectedPresentationState: SelectedDynamicEntityPresentationState | null =
 		null;
-	nameplateIndicators = new Map<number, NameplateContent["indicators"]>();
+	nameplateDecoration = new Map<
+		number,
+		Pick<NameplateContent, "indicators" | "strikeThrough">
+	>();
 	envCellScopeAvailable = true;
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
@@ -1342,12 +1374,13 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.frameSettings.push(settings);
 	}
 
-	setDynamicEntityNameplateIndicators(
+	setDynamicEntityNameplateDecoration(
 		guid: number,
-		indicators: NameplateContent["indicators"],
+		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
 	): void {
-		if (indicators.length === 0) this.nameplateIndicators.delete(guid);
-		else this.nameplateIndicators.set(guid, indicators);
+		if (decoration.indicators.length === 0 && !decoration.strikeThrough)
+			this.nameplateDecoration.delete(guid);
+		else this.nameplateDecoration.set(guid, decoration);
 	}
 
 	async replaceDynamicEntitySnapshot(
@@ -1476,6 +1509,11 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	}
 
 	setSelectedEntityGuid(): void {}
+	/** Last hover delivered through the presentation adapter. */
+	hoveredEntityGuid: number | null = null;
+	setHoveredEntityGuid(guid: number | null): void {
+		this.hoveredEntityGuid = guid;
+	}
 
 	selectedEntityPresentationState(): SelectedDynamicEntityPresentationState {
 		return (

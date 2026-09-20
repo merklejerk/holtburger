@@ -55,7 +55,7 @@ describe("nameplate budget selection", () => {
 		]);
 	});
 
-	it("retains a selected plate beyond the distance and count cutoffs", () => {
+	it("retains selected and hovered plates beyond the distance and count cutoffs", () => {
 		const settings = SHARED_FRAME_SETTINGS.nameplates;
 		const clipFromAnchor = Mat4.zero();
 		clipFromAnchor.m34 = 1;
@@ -66,11 +66,20 @@ describe("nameplate budget selection", () => {
 				identity: "selected",
 				required: true,
 			},
+			{
+				anchor: new Vec3(0, 0, maximumLegibleNameplateDepth(settings) * 3),
+				distanceSquared: 200,
+				identity: "hovered",
+				required: true,
+			},
 		];
 
 		retainLegibleNameplates(candidates, clipFromAnchor, settings);
 		retainNearestNameplates(candidates, 0);
 
-		expect(candidates.map(({ identity }) => identity)).toEqual(["selected"]);
+		expect(candidates.map(({ identity }) => identity)).toEqual([
+			"hovered",
+			"selected",
+		]);
 	});
 });

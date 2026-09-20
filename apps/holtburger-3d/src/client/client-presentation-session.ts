@@ -285,10 +285,12 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
 	setViewerEntity(guid: number | null): void;
 	setSelectedEntityGuid(guid: number | null): void;
+	/** Force the hovered entity's nameplate without selecting it. */
+	setHoveredEntityGuid(guid: number | null): void;
 	/** Apply or clear app-owned semantic decoration without rebuilding presentation. */
-	setDynamicEntityNameplateIndicators(
+	setDynamicEntityNameplateDecoration(
 		guid: number,
-		indicators: NameplateContent["indicators"],
+		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
 	): void;
 	selectedEntityPresentationState(
 		guid: number,
@@ -419,6 +421,8 @@ export class ClientPresentationSession {
 	/** Exact camera/extent pair used by the most recently presented frame. */
 	#lastPrimaryView: PrimaryCameraView | null = null;
 	#selectedEntityGuid: number | null = null;
+	/** Retained across presentation-owner replacement, like selected identity. */
+	#hoveredEntityGuid: number | null = null;
 	readonly #constructionAbortController = new AbortController();
 
 	constructor(dependencies: ClientPresentationSessionDependencies) {
@@ -502,6 +506,11 @@ export class ClientPresentationSession {
 	setSelectedEntityGuid(guid: number | null): void {
 		this.#selectedEntityGuid = guid;
 		this.#owner?.runtime.setSelectedEntityGuid(guid);
+	}
+
+	setHoveredEntityGuid(guid: number | null): void {
+		this.#hoveredEntityGuid = guid;
+		this.#owner?.runtime.setHoveredEntityGuid(guid);
 	}
 
 	/** Read one coherent residency and camera-distance fact for app-local selection policy. */
@@ -1095,6 +1104,7 @@ export class ClientPresentationSession {
 			}
 			this.#owner = owner;
 			owner.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
+			owner.runtime.setHoveredEntityGuid(this.#hoveredEntityGuid);
 			this.#reconcileEntityNameplates();
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				owner.profileSource,
@@ -1260,17 +1270,18 @@ export class ClientPresentationSession {
 			this.#reconcileEntityNameplate(dynamic.identity.guid);
 	}
 
-	/** Project semantic corpse history into app-local indicators without copying display facts. */
+	/** Project semantic corpse history into app-local decoration without copying display facts. */
 	#reconcileEntityNameplate(guid: number): void {
 		const runtime = this.#owner?.runtime;
 		const entities = this.#session.entities.read();
 		if (runtime === undefined || entities.kind !== "current") return;
-		runtime.setDynamicEntityNameplateIndicators(
-			guid,
-			entities.level.entities.get(guid)?.corpse === "opened"
+		const opened = entities.level.entities.get(guid)?.corpse === "opened";
+		runtime.setDynamicEntityNameplateDecoration(guid, {
+			indicators: opened
 				? [{ kind: "icon", iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID }]
 				: [],
-		);
+			strikeThrough: opened,
+		});
 	}
 
 	#deliverEntityCue(pending: PendingPresentationCue): void {

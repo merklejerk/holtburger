@@ -60,7 +60,7 @@ export function adaptDynamicEntityPresentation(
 		},
 		source: {
 			entityClass: entity.presentation.entityClass,
-			nameplate: { ...entity.display, indicators: [] },
+			nameplate: { ...entity.display, indicators: [], strikeThrough: false },
 			behavior: {
 				...withPhysicsScriptTableOverride(
 					visual.behavior,

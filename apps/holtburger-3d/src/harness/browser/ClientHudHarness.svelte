@@ -3014,6 +3014,7 @@
 			// The item-use fixture supplies explicit hit-test results through hoverWorld.
 			if (activeItemUseProbe === null) hoveredGuid = hoverHitEnabled ? 7 : null;
 		}}
+		onViewportHoverClear={() => (hoveredGuid = null)}
 		onMaintainEntitySelection={() => {
 			selectionMaintenanceCount += 1;
 		}}

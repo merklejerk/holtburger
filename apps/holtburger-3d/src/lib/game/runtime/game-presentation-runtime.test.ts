@@ -1951,19 +1951,29 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 3)]);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 		runtime.setSelectedEntityGuid(7);
+		runtime.setHoveredEntityGuid(7);
 		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
 
 		runtime.render(1);
 		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
+		expect(frames.at(-1)?.hoveredEntityNodeId).toBe(
+			frames.at(-1)?.selectionTarget?.nodeId,
+		);
 		await runtime.replaceDynamicEntitySnapshot([portal]);
 		runtime.setSelectedEntityGuid(8);
 		expect(runtime.selectedEntityPresentationState(8).kind).toBe("realized");
 		runtime.render(2);
 		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
+		expect(frames.at(-1)?.hoveredEntityNodeId).toBeNull();
+		runtime.setHoveredEntityGuid(8);
 
 		runtime.setSelectedEntityGuid(null);
 		runtime.render(3);
 		expect(frames.at(-1)?.selectionTarget).toBeNull();
+		expect(frames.at(-1)?.hoveredEntityNodeId).not.toBeNull();
+		runtime.setHoveredEntityGuid(null);
+		runtime.render(4);
+		expect(frames.at(-1)?.hoveredEntityNodeId).toBeNull();
 		await runtime.destroy();
 	});
 
@@ -2661,13 +2671,17 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				kind: "icon" as const,
 				iconId: nameplateIconId("opened"),
 			};
-			runtime.setDynamicEntityNameplateIndicators(7, [opened]);
+			runtime.setDynamicEntityNameplateDecoration(7, {
+				indicators: [opened],
+				strikeThrough: true,
+			});
 			delayed.resolve(spawnedVisual());
 			await pending;
 			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
 				name: "Entity 7",
 				level: null,
 				indicators: [opened],
+				strikeThrough: true,
 			});
 			const renamed = spawnedEntity(7, 1);
 			renamed.display = { name: "Renamed corpse", level: 13 };
@@ -2675,6 +2689,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
 				...renamed.display,
 				indicators: [opened],
+				strikeThrough: true,
 			});
 			await runtime.replaceDynamicEntitySnapshot([]);
 			await runtime.upsertDynamicEntity(spawnedEntity(7, 2));
@@ -2682,6 +2697,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				name: "Entity 7",
 				level: null,
 				indicators: [],
+				strikeThrough: false,
 			});
 		} finally {
 			update.mockRestore();

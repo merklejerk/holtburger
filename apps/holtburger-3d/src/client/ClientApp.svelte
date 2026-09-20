@@ -1028,6 +1028,10 @@
 		};
 		presentationSession = presentation;
 		presentation.setSelectedEntityGuid(untrack(() => selectedEntityGuid));
+		// Seed a replacement presentation once; hover changes must not own its lifecycle.
+		presentation.setHoveredEntityGuid(
+			untrack(() => pointerSelection?.hoveredGuid() ?? null),
+		);
 		frameRateSampler = currentFrameRateSampler;
 		(window as ClientPerformanceWindow).__holtburgerClientPerformance =
 			performanceProbe;
@@ -1272,9 +1276,10 @@
 			selectedEntityGuid = guid;
 			presentationSession?.setSelectedEntityGuid(guid);
 		});
-		const unsubscribeHover = pointer.subscribeHovered(
-			(guid) => (hoveredEntityGuid = guid),
-		);
+		const unsubscribeHover = pointer.subscribeHovered((guid) => {
+			hoveredEntityGuid = guid;
+			presentationSession?.setHoveredEntityGuid(guid);
+		});
 		const unsubscribePrecise = precise.subscribe((snapshot) => {
 			if (preciseJumpActive !== snapshot.active)
 				preciseJumpActive = snapshot.active;
@@ -1316,6 +1321,7 @@
 			toastCenter.destroy();
 			unsubscribePrecise();
 			unsubscribeSelection();
+			pointer.clearViewportHover();
 			unsubscribeHover();
 			interactions.destroy();
 			if (selectedEntityTracking === interactions)
@@ -1481,6 +1487,7 @@
 		}}
 		onViewportHover={(clientX, clientY) =>
 			pointerSelection?.acquireViewportHover(clientX, clientY)}
+		onViewportHoverClear={() => pointerSelection?.clearViewportHover()}
 		onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
 		onSelectEntity={(guid) => entitySelection?.select(guid)}
 		{chatMessages}

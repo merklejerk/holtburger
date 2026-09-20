@@ -191,6 +191,8 @@ export interface FrameInput {
 	readonly views: readonly FrameViewInput[];
 	/** Current realized selected presentation; null leaves the frame's x-ray pass idle. */
 	readonly selectionTarget: EntitySelectionTarget | null;
+	/** Current hovered root; forces its nameplate without changing selection or outlines. */
+	readonly hoveredEntityNodeId: SceneNodeId | null;
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
 }

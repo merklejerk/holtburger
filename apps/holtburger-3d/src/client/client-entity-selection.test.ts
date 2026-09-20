@@ -263,6 +263,17 @@ describe("ClientEntitySelection", () => {
 		lifecycle.emit(available(lifecycle.requests[1]!.sequence, []));
 		expect(pointer.hoveredGuid()).toBeNull();
 		expect(hoverChanges).toEqual([4, null]);
+		pointer.acquireViewportHover(3, 4);
+		await Promise.resolve();
+		lifecycle.emit(available(lifecycle.requests[2]!.sequence, [8]));
+		expect(pointer.hoveredGuid()).toBe(8);
+		pointer.acquireViewportHover(3, 4);
+		await Promise.resolve();
+		pointer.clearViewportHover();
+		lifecycle.emit(available(lifecycle.requests[3]!.sequence, [8]));
+		expect(pointer.hoveredGuid()).toBeNull();
+		expect(selection.selectedGuid()).toBeNull();
+		expect(hoverChanges).toEqual([4, null, 8, null]);
 		pointer.destroy();
 		selection.destroy();
 	});

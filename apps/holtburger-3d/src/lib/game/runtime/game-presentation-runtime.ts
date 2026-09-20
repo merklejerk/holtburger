@@ -746,10 +746,10 @@ export class GamePresentationRuntime {
 		number,
 		DynamicEntityPresentationRecord
 	>();
-	/** App-owned indicators survive realization; name and level always come from current authority. */
-	readonly #spawnedNameplateIndicators = new Map<
+	/** App-owned decoration survives realization; name and level always come from current authority. */
+	readonly #spawnedNameplateDecoration = new Map<
 		number,
-		NameplateContent["indicators"]
+		Pick<NameplateContent, "indicators" | "strikeThrough">
 	>();
 	readonly #spawnedVisualKeys = new Map<number, string>();
 	readonly #retainedSetupVisuals = new Map<string, RetainedSetupVisual>();
@@ -1158,6 +1158,8 @@ export class GamePresentationRuntime {
 	#viewerEntityGuid: number | null = null;
 	/** Frontend-selected identity; realization is resolved lazily so streaming does not clear it. */
 	#selectedEntityGuid: number | null = null;
+	/** Frontend hover identity, resolved against current realization at draw time. */
+	#hoveredEntityGuid: number | null = null;
 	/** One source-neutral replacement barrier layered over the ordinary interest coordinator. */
 	#sceneActivation: SceneActivationReceipt | null = null;
 	/** Exact layer failures retained until the owning interest revision is withdrawn. */
@@ -1758,7 +1760,7 @@ export class GamePresentationRuntime {
 		}
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (desired?.entity.generation !== generation) return;
-		this.#spawnedNameplateIndicators.delete(guid);
+		this.#spawnedNameplateDecoration.delete(guid);
 		this.#retireDynamicPresentationTree(guid);
 		this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? []) {
@@ -1771,19 +1773,20 @@ export class GamePresentationRuntime {
 		}
 	}
 
-	/** Replace app-owned indicators; an empty row clears retained decoration. */
-	setDynamicEntityNameplateIndicators(
+	/** Replace app-owned decoration without copying authoritative name or level facts. */
+	setDynamicEntityNameplateDecoration(
 		guid: number,
-		indicators: NameplateContent["indicators"],
+		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
 	): void {
-		if (indicators.length === 0) this.#spawnedNameplateIndicators.delete(guid);
-		else this.#spawnedNameplateIndicators.set(guid, indicators);
+		if (decoration.indicators.length === 0 && !decoration.strikeThrough)
+			this.#spawnedNameplateDecoration.delete(guid);
+		else this.#spawnedNameplateDecoration.set(guid, decoration);
 		const installed = this.#spawnedPresentations.get(guid);
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (installed !== undefined && desired !== undefined)
 			this.#dynamics.updateNameplateContent(installed.nodeId, {
 				...desired.entity.display,
-				indicators,
+				...decoration,
 			});
 	}
 
@@ -2860,8 +2863,10 @@ export class GamePresentationRuntime {
 			);
 		this.#dynamics.updateNameplateContent(installed.nodeId, {
 			...entity.display,
-			indicators:
-				this.#spawnedNameplateIndicators.get(entity.identity.guid) ?? [],
+			...(this.#spawnedNameplateDecoration.get(entity.identity.guid) ?? {
+				indicators: [],
+				strikeThrough: false,
+			}),
 		});
 		this.#applyDynamicEntityMotion(
 			installed,
@@ -3469,6 +3474,11 @@ export class GamePresentationRuntime {
 		this.#selectedEntityGuid = guid;
 	}
 
+	/** Hover affects nameplate admission only, never authoritative selection. */
+	setHoveredEntityGuid(guid: number | null): void {
+		this.#hoveredEntityGuid = guid;
+	}
+
 	/** Distinguish explicit scene-interest eviction from recoverable realization gaps. */
 	selectedEntityPresentationState(
 		guid: number,
@@ -4054,6 +4064,11 @@ export class GamePresentationRuntime {
 			portalTransition,
 			outdoorLights: this.#outdoorLights,
 			selectionTarget: this.#selectedEntityRenderTarget(),
+			hoveredEntityNodeId:
+				this.#hoveredEntityGuid === null
+					? null
+					: (this.#spawnedPresentations.get(this.#hoveredEntityGuid)?.nodeId ??
+						null),
 			timeSeconds,
 			viewerLightOrigin: resolveViewerLightOrigin(
 				this.#viewerEntityGuid === null
@@ -4102,7 +4117,7 @@ export class GamePresentationRuntime {
 		for (const guid of spawned)
 			this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		this.#spawnedVisualKeys.clear();
-		this.#spawnedNameplateIndicators.clear();
+		this.#spawnedNameplateDecoration.clear();
 		this.#pendingDynamicEntityCues.clear();
 		this.#destroyed = true;
 		this.#sceneInterestCoordinator.destroy();

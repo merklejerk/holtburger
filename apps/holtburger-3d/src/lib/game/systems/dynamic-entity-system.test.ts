@@ -424,7 +424,12 @@ describe("DynamicEntitySystem authored ownership", () => {
 				...base,
 				source: {
 					...base.source,
-					nameplate: { indicators: [], level: 12, name: "Drudge" },
+					nameplate: {
+						strikeThrough: false,
+						indicators: [],
+						level: 12,
+						name: "Drudge",
+					},
 				},
 			},
 		]);
@@ -441,18 +446,25 @@ describe("DynamicEntitySystem authored ownership", () => {
 				identity: base.source.identity,
 				visual: {
 					entityClass: base.source.entityClass,
-					content: { indicators: [], level: 12, name: "Drudge" },
+					content: {
+						strikeThrough: false,
+						indicators: [],
+						level: 12,
+						name: "Drudge",
+					},
 				},
 			},
 		]);
 
 		system.updateNameplateContent(nodeId, {
+			strikeThrough: false,
 			indicators: [],
 			level: 13,
 			name: "Drudge",
 		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
 		expect(system.getNameplateFacts(nodeId)?.content).toEqual({
+			strikeThrough: false,
 			indicators: [],
 			level: 13,
 			name: "Drudge",
@@ -460,19 +472,37 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getRenderable(nodeId)).not.toBeNull();
 
 		system.updateNameplateContent(nodeId, {
+			strikeThrough: false,
 			indicators: [],
 			level: 13,
 			name: "Drudge",
 		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
 		system.updateNameplateContent(nodeId, {
+			strikeThrough: false,
 			indicators: [{ kind: "icon", iconId: nameplateIconId("opened") }],
 			level: 13,
 			name: "Drudge",
 		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 2);
-		system.removeOwner("layer");
+		const decorated = {
+			strikeThrough: true,
+			indicators: [
+				{ kind: "icon" as const, iconId: nameplateIconId("opened") },
+			],
+			level: 13,
+			name: "Drudge",
+		};
+		system.updateNameplateContent(nodeId, decorated);
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 3);
+		expect(system.getNameplateFacts(nodeId)?.content.strikeThrough).toBe(true);
+		system.updateNameplateContent(nodeId, {
+			...decorated,
+			strikeThrough: false,
+		});
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
+		system.removeOwner("layer");
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 5);
 	});
 
 	it("installs and removes a promoted owner population as one set", async () => {

@@ -5,8 +5,12 @@ import type {
 	NameplateVisual,
 } from "./nameplate-policy";
 import type { NameplateContent } from "../systems/dynamic-presentation-source";
+import type {
+	NameplateIconRead,
+	NameplateIconRepository,
+} from "./nameplate-icon-repository";
 
-const NAMEPLATE_STYLE_REVISION = 3;
+const NAMEPLATE_STYLE_REVISION = 4;
 const MAX_NAMEPLATE_TEXTURE_BYTES = 16 * 1024 * 1024;
 
 export interface RasterizedNameplate {
@@ -41,7 +45,10 @@ export interface NameplateTextureCacheDiagnostics {
 	readonly releaseCount: number;
 }
 
-type CacheEntry = NameplateTextureBinding;
+interface CacheEntry {
+	readonly binding: NameplateTextureBinding;
+	readonly iconIds: NameplateContent["indicators"][number]["iconId"][];
+}
 
 interface ActiveNameplateStyle {
 	readonly appearance: NameplateAppearance;
@@ -73,10 +80,7 @@ export class WebGL2NameplateTextureCache {
 	#releaseCount = 0;
 	#destroyed = false;
 
-	constructor(
-		gl: WebGL2RenderingContext,
-		rasterizer: NameplateRasterizer = new Canvas2DNameplateRasterizer(),
-	) {
+	constructor(gl: WebGL2RenderingContext, rasterizer: NameplateRasterizer) {
 		this.#gl = gl;
 		this.#rasterizer = rasterizer;
 	}
@@ -107,7 +111,7 @@ export class WebGL2NameplateTextureCache {
 		const existing = this.#entries.get(key);
 		if (existing) {
 			this.#hitCount += 1;
-			return existing;
+			return existing.binding;
 		}
 		this.#missCount += 1;
 		const rasterized = this.#rasterizer.rasterize(
@@ -140,14 +144,30 @@ export class WebGL2NameplateTextureCache {
 			this.#gl.deleteTexture(texture);
 			throw cause;
 		}
-		const entry: CacheEntry = {
+		const binding: NameplateTextureBinding = {
 			height: rasterized.height,
 			texture,
 			width: rasterized.width,
 		};
+		const entry: CacheEntry = {
+			binding,
+			iconIds: visual.content.indicators.map(({ iconId }) => iconId),
+		};
 		this.#entries.set(key, entry);
 		this.#byteCount += rasterized.width * rasterized.height * 4;
-		return entry;
+		return binding;
+	}
+
+	/** Delete only complete rasters whose prepared icon pixels may have changed. */
+	invalidateIcons(
+		ids: Iterable<NameplateContent["indicators"][number]["iconId"]>,
+	): void {
+		this.#requireAlive();
+		const changed = new Set(ids);
+		if (changed.size === 0) return;
+		for (const [key, entry] of this.#entries)
+			if (entry.iconIds.some((id) => changed.has(id)))
+				this.#deleteEntry(key, entry);
 	}
 
 	diagnostics(): NameplateTextureCacheDiagnostics {
@@ -216,24 +236,24 @@ export class WebGL2NameplateTextureCache {
 		}
 		const cached = categoryKeys.get(visual.category);
 		if (cached?.generation === style.generation) return cached.key;
-		// Content objects are replaced, never mutated. Serialize their arbitrary text once per style
-		// generation while preserving value sharing across distinct equal content objects.
+		// Content objects are replaced, never mutated. Serialize their complete value once per style
+		// generation while preserving sharing across distinct equal content objects.
 		const key = JSON.stringify([
 			NAMEPLATE_STYLE_REVISION,
 			style.generation,
 			visual.category,
 			visual.content.name,
 			visual.content.level,
-			visual.content.indicators,
+			visual.content.indicators.map(({ kind, iconId }) => [kind, iconId]),
 		]);
 		categoryKeys.set(visual.category, { generation: style.generation, key });
 		return key;
 	}
 
 	#deleteEntry(key: string, entry: CacheEntry): void {
-		this.#gl.deleteTexture(entry.texture);
+		this.#gl.deleteTexture(entry.binding.texture);
 		this.#entries.delete(key);
-		this.#byteCount -= entry.width * entry.height * 4;
+		this.#byteCount -= entry.binding.width * entry.binding.height * 4;
 		this.#releaseCount += 1;
 	}
 
@@ -245,6 +265,12 @@ export class WebGL2NameplateTextureCache {
 
 /** Browser Canvas implementation kept behind a small testable rasterizer port. */
 export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
+	readonly #icons: Pick<NameplateIconRepository, "read">;
+
+	constructor(icons: Pick<NameplateIconRepository, "read">) {
+		this.#icons = icons;
+	}
+
 	rasterize(
 		visual: NameplateVisual,
 		appearance: NameplateAppearance,
@@ -260,11 +286,6 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		const rows = [{ text: content.name, style: appearance.name }];
 		if (content.level !== null)
 			rows.push({ text: `Level ${content.level}`, style: appearance.level });
-		if (content.indicators.length > 0)
-			rows.push({
-				text: content.indicators.join("  "),
-				style: appearance.indicators,
-			});
 		let textWidth = 0;
 		let textHeight = 0;
 		for (const row of rows) {
@@ -272,13 +293,20 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 			textWidth = Math.max(textWidth, context.measureText(row.text).width);
 			textHeight += row.style.fontSizePixels;
 		}
+		const iconRowWidth =
+			content.indicators.length * appearance.indicatorSizePixels +
+			Math.max(0, content.indicators.length - 1) *
+				appearance.indicatorGapPixels;
 		const cssWidth = Math.ceil(
-			textWidth + appearance.horizontalPaddingPixels * 2,
+			Math.max(textWidth, iconRowWidth) +
+				appearance.horizontalPaddingPixels * 2,
 		);
+		const rowCount = rows.length + (content.indicators.length > 0 ? 1 : 0);
 		const cssHeight = Math.ceil(
 			appearance.verticalPaddingPixels * 2 +
 				textHeight +
-				(rows.length - 1) * appearance.lineGapPixels,
+				(content.indicators.length > 0 ? appearance.indicatorSizePixels : 0) +
+				(rowCount - 1) * appearance.lineGapPixels,
 		);
 		canvas.width = Math.max(1, Math.ceil(cssWidth * density));
 		canvas.height = Math.max(1, Math.ceil(cssHeight * density));
@@ -298,7 +326,43 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 			context.fillText(row.text, cssWidth / 2, centerY);
 			top += row.style.fontSizePixels + appearance.lineGapPixels;
 		}
+		if (content.indicators.length > 0) {
+			let left = (cssWidth - iconRowWidth) / 2;
+			for (const { iconId } of content.indicators) {
+				this.#drawIcon(
+					context,
+					this.#icons.read(iconId),
+					left,
+					top,
+					appearance.indicatorSizePixels,
+				);
+				left += appearance.indicatorSizePixels + appearance.indicatorGapPixels;
+			}
+		}
 		return { height: canvas.height, pixels: canvas, width: canvas.width };
+	}
+
+	#drawIcon(
+		context: CanvasRenderingContext2D,
+		read: NameplateIconRead,
+		left: number,
+		top: number,
+		slotSize: number,
+	): void {
+		if (read.kind !== "ready") return;
+		const scale = Math.min(
+			slotSize / read.icon.width,
+			slotSize / read.icon.height,
+		);
+		const width = read.icon.width * scale;
+		const height = read.icon.height * scale;
+		context.drawImage(
+			read.icon.image,
+			left + (slotSize - width) / 2,
+			top + (slotSize - height) / 2,
+			width,
+			height,
+		);
 	}
 }
 

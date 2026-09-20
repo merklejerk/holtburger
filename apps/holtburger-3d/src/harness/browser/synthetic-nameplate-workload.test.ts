@@ -107,6 +107,24 @@ describe("synthetic nameplate workload", () => {
 		});
 	});
 
+	it("provides deterministic SVG fixtures for two- and three-row plates", () => {
+		const [twoRows] = createSyntheticNameplateWorkload(
+			"svg-icon",
+			LANDBLOCK,
+			CAMERA,
+			null,
+		);
+		const [threeRows] = createSyntheticNameplateWorkload(
+			"svg-icon-level",
+			LANDBLOCK,
+			CAMERA,
+			null,
+		);
+
+		expect(twoRows?.display).toEqual({ level: null, name: "Opened corpse" });
+		expect(threeRows?.display).toEqual({ level: 42, name: "Opened corpse" });
+	});
+
 	it("adds a disabled-category opaque wall without changing the target plate value", () => {
 		const open = createSyntheticNameplateWorkload(
 			"occlusion-open",

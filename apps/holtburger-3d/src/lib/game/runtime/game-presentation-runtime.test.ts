@@ -5,6 +5,7 @@ import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
+import { nameplateIconId } from "../systems/dynamic-presentation-source";
 import { WorkerTexturePreparer } from "../textures/texture-preparer";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -387,6 +388,14 @@ describe("GamePresentationRuntime view and interest control", () => {
 							releaseCount: 0,
 						},
 						eligibleCandidateCount: 0,
+						icons: {
+							failedCount: 0,
+							loadingCount: 0,
+							preparationCount: 0,
+							readyCount: 0,
+							releaseCount: 0,
+							revision: 0,
+						},
 						submittedDrawCount: 0,
 						submittedInstanceCount: 0,
 					},
@@ -540,6 +549,14 @@ describe("GamePresentationRuntime view and interest control", () => {
 					releaseCount: 0,
 				},
 				eligibleCandidateCount: 0,
+				icons: {
+					failedCount: 0,
+					loadingCount: 0,
+					preparationCount: 0,
+					readyCount: 0,
+					releaseCount: 0,
+					revision: 0,
+				},
 				submittedDrawCount: 0,
 				submittedInstanceCount: 0,
 			},
@@ -2640,20 +2657,24 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		);
 		try {
 			const pending = runtime.upsertDynamicEntity(spawnedEntity(7, 1));
-			runtime.setDynamicEntityNameplateIndicators(7, ["✓"]);
+			const opened = {
+				kind: "icon" as const,
+				iconId: nameplateIconId("opened"),
+			};
+			runtime.setDynamicEntityNameplateIndicators(7, [opened]);
 			delayed.resolve(spawnedVisual());
 			await pending;
 			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
 				name: "Entity 7",
 				level: null,
-				indicators: ["✓"],
+				indicators: [opened],
 			});
 			const renamed = spawnedEntity(7, 1);
 			renamed.display = { name: "Renamed corpse", level: 13 };
 			await runtime.upsertDynamicEntity(renamed);
 			expect(update).toHaveBeenLastCalledWith(expect.anything(), {
 				...renamed.display,
-				indicators: ["✓"],
+				indicators: [opened],
 			});
 			await runtime.replaceDynamicEntitySnapshot([]);
 			await runtime.upsertDynamicEntity(spawnedEntity(7, 2));

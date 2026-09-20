@@ -22,6 +22,9 @@ const SYNTHETIC_SHADOW_CROWD_PART_COUNT = 61;
 
 export type SyntheticNameplateWorkload =
 	| "repeated-100"
+	| "svg-icon"
+	| "svg-icon-level"
+	| "svg-icons"
 	| "unique-100"
 	| "ordered-500"
 	| "shadow-crowd-112x61"
@@ -136,7 +139,8 @@ export function createSyntheticNameplateWorkload(
 			? 500
 			: workload === "shadow-crowd-112x61"
 				? 112
-				: workload === "occlusion-open" ||
+				: workload.startsWith("svg-") ||
+					  workload === "occlusion-open" ||
 					  workload === "occlusion-wall" ||
 					  workload.startsWith("portal-")
 					? 1
@@ -162,17 +166,31 @@ export function createSyntheticNameplateWorkload(
 		const row = Math.floor(index / columnCount);
 		const lateral = workload.startsWith("portal-")
 			? 4.5
-			: workload === "occlusion-open" || workload === "occlusion-wall"
+			: workload.startsWith("svg-") ||
+				  workload === "occlusion-open" ||
+				  workload === "occlusion-wall"
 				? 0
 				: (column - (columnCount - 1) * 0.5) * 1.5;
 		// The 20-column budget workload starts deeper than the 10-column visual workloads so
 		// every near-row entity sits comfortably inside the camera frustum on every backend.
-		const forward = (workload === "ordered-500" ? 24 : 8) + row * 1.75;
+		const forward =
+			(workload === "ordered-500" ? 24 : workload.startsWith("svg-") ? 4 : 8) +
+			row * 1.75;
 		return entity({
 			entityClass: "mob",
 			guid: 0xff00_0000 + index,
-			level: workload === "unique-100" ? index + 1 : 42,
-			name: workload === "unique-100" ? `Nameplate ${index + 1}` : "Drudge",
+			level:
+				workload === "svg-icon" || workload === "svg-icons"
+					? null
+					: workload === "unique-100"
+						? index + 1
+						: 42,
+			name:
+				workload === "unique-100"
+					? `Nameplate ${index + 1}`
+					: workload.startsWith("svg-")
+						? "Opened corpse"
+						: "Drudge",
 			reachedEnvCellIds:
 				envCellId === null
 					? workload === "portal-plural"

@@ -152,20 +152,32 @@ fn test_character_option_helpers_read_and_update_both_masks() {
     assert!(player.character_option_enabled(CharacterOption::ShowYourHelmOrHeadGear));
     assert!(
         player
+            .character_options
             .options1
             .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
     );
-    assert!(player.options2.contains(CharacterOptions2::SHOW_HELM));
+    assert!(
+        player
+            .character_options
+            .options2
+            .contains(CharacterOptions2::SHOW_HELM)
+    );
 
     player.set_character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog, false);
 
     assert!(!player.character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog,));
     assert!(
         !player
+            .character_options
             .options1
             .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
     );
-    assert!(player.options2.contains(CharacterOptions2::SHOW_HELM));
+    assert!(
+        player
+            .character_options
+            .options2
+            .contains(CharacterOptions2::SHOW_HELM)
+    );
 }
 
 #[test]

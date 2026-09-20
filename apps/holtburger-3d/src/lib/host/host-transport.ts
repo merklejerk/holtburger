@@ -37,6 +37,7 @@ import type {
 	ClientEntityHealth,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
+	ClientAppearanceOptions,
 	ClientPreciseJumpEvaluation,
 	ClientPreciseJumpTransactionFeedback,
 	ClientEntitySelectionQueryResult,
@@ -99,6 +100,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"queue_client_character_motion_event",
 	"send_client_chat",
 	"toggle_client_combat_mode",
+	"set_client_appearance_option",
 	"cast_client_spell",
 	"begin_client_combat_engagement",
 	"update_client_combat_profile",
@@ -185,6 +187,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-player-entered",
 	"client-player-vitals-updated",
 	"client-player-spells-updated",
+	"client-appearance-options-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-entity-health-updated",
@@ -269,6 +272,7 @@ export interface HostEventPayloadMap {
 	"client-world-name-updated": { name: string };
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
+	"client-appearance-options-updated": ClientAppearanceOptions;
 	"client-combat-mode-updated": { mode: ClientCombatMode };
 	"client-combat-status-updated": ClientCombatStatus;
 	"client-player-vitals-updated": {

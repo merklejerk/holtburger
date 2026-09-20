@@ -972,6 +972,60 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
 	});
 
+	it("retains appearance updates and submits an appearance change", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+
+		transport.emit("client-appearance-options-updated", {
+			showHelmet: false,
+			showCloak: true,
+		});
+		expect(session.state().appearanceOptions).toEqual({
+			showHelmet: false,
+			showCloak: true,
+		});
+
+		await session.setAppearanceOption("helmet", true);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "set_client_appearance_option",
+			args: { option: "helmet", enabled: true },
+		});
+		session.stop();
+	});
+
+	it("restores appearance from snapshots, retains it during teleport, and retires it on character changes and resync", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const options = { showHelmet: false, showCloak: true };
+		const snapshot = {
+			...currentState(0x50000001),
+			appearanceOptions: options,
+		};
+		transport.setCurrentState(snapshot);
+		await session.start();
+		expect(session.state().appearanceOptions).toEqual(options);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().appearanceOptions).toEqual(options);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().appearanceOptions).toBeNull();
+		transport.emit("client-appearance-options-updated", options);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().appearanceOptions).toBeNull();
+		transport.emit("client-current-state", snapshot);
+		expect(session.state().appearanceOptions).toEqual(options);
+		session.stop();
+		expect(session.state().appearanceOptions).toBeNull();
+	});
+
 	it("sends visible local speech and rejects empty input before transport", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -994,6 +1048,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,
+		appearanceOptions: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

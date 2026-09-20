@@ -22,7 +22,8 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		read(`(() => {
 		const cell = document.querySelector(${JSON.stringify(selector)});
 		if (!cell) throw new Error('Missing drag fixture cell');
-		cell.scrollIntoView({ block: 'nearest' });
+		// Keep the target away from the strip's overlaid edge scroll controls.
+		cell.scrollIntoView({ block: 'center', inline: 'nearest' });
 		const box = cell.getBoundingClientRect();
         if (cell.matches('[data-game-viewport]')) {
             for (let y = box.top + 20; y < box.bottom; y += 30) {
@@ -32,7 +33,10 @@ export async function probeInventoryDrag(client, evaluateExpression) {
             }
             throw new Error('No uncovered viewport point');
         }
-        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        const point = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        if (!cell.contains(document.elementFromPoint(point.x, point.y)))
+            throw new Error('Drag fixture point is covered: ' + ${JSON.stringify(selector)});
+        return point;
 	})()`);
 	const source =
 		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="91"]';

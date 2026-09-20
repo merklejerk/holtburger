@@ -24,6 +24,10 @@
 	import ClientContentsSortButton from "./ClientContentsSortButton.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import { CLIENT_TUNING } from "./client-tuning";
+	import type {
+		ClientAppearanceOption,
+		ClientAppearanceOptions,
+	} from "./client-host-contract";
 
 	interface Props {
 		/** Stable session owner; the parent keys this component by that lifetime. */
@@ -36,6 +40,11 @@
 		readonly requestedSplit: InventorySplitStart | null;
 		/** Retire the exact handoff after this mounted panel accepts it. */
 		readonly onRequestedSplitConsumed: (request: InventorySplitStart) => void;
+		readonly appearanceOptions: ClientAppearanceOptions | null;
+		readonly onAppearanceOptionChange: (
+			option: ClientAppearanceOption,
+			enabled: boolean,
+		) => Promise<void>;
 	}
 	const {
 		inventory,
@@ -44,12 +53,14 @@
 		onSelectItem,
 		requestedSplit,
 		onRequestedSplitConsumed,
+		appearanceOptions,
+		onAppearanceOptionChange,
 	}: Props = $props();
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
-	/** Visual-only prototype state; helmet rendering is not wired yet. */
-	let helmetVisible = $state(true);
+	/** Submission state prevents repeated writes while one option request is in flight. */
+	let appearanceOptionPending = $state(false);
 	/** Identity is resolved against each sampled view so removed or changed items cannot leave stale hints. */
 	let hoveredInventoryGuid = $state<number | null>(null);
 	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
@@ -173,6 +184,20 @@
 		onSelectItem(guid);
 		return true;
 	}
+	async function toggleAppearanceOption(
+		option: ClientAppearanceOption,
+	): Promise<void> {
+		if (appearanceOptionPending || appearanceOptions === null) return;
+		const enabled = !(option === "helmet"
+			? appearanceOptions.showHelmet
+			: appearanceOptions.showCloak);
+		appearanceOptionPending = true;
+		try {
+			await onAppearanceOptionChange(option, enabled);
+		} finally {
+			appearanceOptionPending = false;
+		}
+	}
 </script>
 
 <div
@@ -204,15 +229,29 @@
 			>
 				<button
 					type="button"
-					class="inventory-tool helmet-tool ui-hud-button"
+					class="inventory-tool ui-hud-button"
 					aria-label="Toggle helmet visibility"
-					aria-pressed={helmetVisible}
-					title={`Helmet ${helmetVisible ? "visible" : "hidden"} (visual stub)`}
-					onclick={() => {
-						helmetVisible = !helmetVisible;
-					}}
+					aria-pressed={appearanceOptions?.showHelmet ?? false}
+					disabled={appearanceOptions === null || appearanceOptionPending}
+					title={appearanceOptions === null
+						? "Helmet visibility unavailable"
+						: `Helmet ${appearanceOptions.showHelmet ? "visible" : "hidden"}`}
+					onclick={() => void toggleAppearanceOption("helmet")}
 				>
 					<ClientHudIcon name="helmet" />
+				</button>
+				<button
+					type="button"
+					class="inventory-tool ui-hud-button"
+					aria-label="Toggle cloak visibility"
+					aria-pressed={appearanceOptions?.showCloak ?? false}
+					disabled={appearanceOptions === null || appearanceOptionPending}
+					title={appearanceOptions === null
+						? "Cloak visibility unavailable"
+						: `Cloak ${appearanceOptions.showCloak ? "visible" : "hidden"}`}
+					onclick={() => void toggleAppearanceOption("cloak")}
+				>
+					<ClientHudIcon name="cloak" />
 				</button>
 				<button
 					type="button"
@@ -384,9 +423,9 @@
 			overflow: hidden;
 		}
 		.inventory-equipment-toolbar {
-			display: flex;
-			align-items: center;
-			justify-content: space-evenly;
+			display: grid;
+			grid-template-columns: repeat(2, 24px);
+			justify-content: center;
 			gap: 8px;
 			padding: 4px var(--ui-inventory-padding);
 			border-top: var(--ui-inventory-divider);
@@ -400,7 +439,7 @@
 			width: 20px;
 			height: 20px;
 		}
-		.helmet-tool[aria-pressed="true"] :global(svg) {
+		.inventory-tool[aria-pressed="true"] :global(svg) {
 			filter: drop-shadow(0 0 2px var(--ui-color-active));
 		}
 	}

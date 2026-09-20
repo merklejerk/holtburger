@@ -46,6 +46,9 @@ import {
 	clientAttackProfileSchema,
 	type ClientAttackProfile,
 	decodeClientSpells,
+	decodeClientAppearanceOptions,
+	type ClientAppearanceOption,
+	type ClientAppearanceOptions,
 	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
 	decodeClientDynamicSoundCue,
@@ -130,6 +133,7 @@ type ClientCommandName = Extract<
 	| "queue_client_character_motion_event"
 	| "send_client_chat"
 	| "toggle_client_combat_mode"
+	| "set_client_appearance_option"
 	| "cast_client_spell"
 	| "begin_client_combat_engagement"
 	| "update_client_combat_profile"
@@ -181,6 +185,7 @@ type ClientEventName = Extract<
 	| "client-player-entered"
 	| "client-player-vitals-updated"
 	| "client-player-spells-updated"
+	| "client-appearance-options-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
 	| "client-entity-health-updated"
@@ -221,6 +226,8 @@ export interface ClientLifecycleSessionState {
 	readonly playerName: string | null;
 	/** Null until a complete description is available. */
 	readonly knownSpells: readonly number[] | null;
+	/** Server-backed appearance preferences, null until PlayerDescription is available. */
+	readonly appearanceOptions: ClientAppearanceOptions | null;
 	/** Latest server stance, consumed by the combat shortcut. */
 	readonly combatMode: ClientCombatMode;
 	readonly combat: ClientCombatStatus;
@@ -243,6 +250,10 @@ export type ClientLifecycleSessionEvent =
 	  }
 	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
 	| { readonly type: "combat"; readonly status: ClientCombatStatus }
+	| {
+			readonly type: "appearance-options";
+			readonly options: ClientAppearanceOptions;
+	  }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
 			readonly type: "spell-inspection-context";
@@ -398,7 +409,11 @@ export class ClientLifecycleSession {
 		this.#dynamicSession.stop();
 		this.entities.awaitSnapshot();
 		this.#entryRequestGuid = null;
-		this.#state = { ...this.#state, knownSpells: null };
+		this.#state = {
+			...this.#state,
+			knownSpells: null,
+			appearanceOptions: null,
+		};
 		this.#emit({ type: "resyncing" });
 	}
 
@@ -431,6 +446,17 @@ export class ClientLifecycleSession {
 			this.#entryRequestGuid = null;
 			throw error;
 		}
+	}
+
+	/** Change one appearance preference persisted by the active-character authority. */
+	async setAppearanceOption(
+		option: ClientAppearanceOption,
+		enabled: boolean,
+	): Promise<void> {
+		await this.#transport.invoke("set_client_appearance_option", {
+			option,
+			enabled,
+		});
 	}
 
 	/** Replace the held local drive; core owns cadence, sequence numbers, and movement limits. */
@@ -686,7 +712,11 @@ export class ClientLifecycleSession {
 				await this.#transport.listen("client-state-resyncing", (payload) => {
 					if (payload !== null)
 						throw new Error("Invalid client resync notification.");
-					this.#state = { ...this.#state, knownSpells: null };
+					this.#state = {
+						...this.#state,
+						knownSpells: null,
+						appearanceOptions: null,
+					};
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
 					this.#emit({ type: "resyncing" });
@@ -712,6 +742,16 @@ export class ClientLifecycleSession {
 						const spellIds = decodeClientSpells(payload);
 						this.#state = { ...this.#state, knownSpells: spellIds };
 						this.#emit({ type: "spells", spellIds });
+					},
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-appearance-options-updated",
+					(payload) => {
+						const options = decodeClientAppearanceOptions(payload);
+						this.#state = { ...this.#state, appearanceOptions: options };
+						this.#emit({ type: "appearance-options", options });
 					},
 				),
 			);
@@ -973,6 +1013,7 @@ export class ClientLifecycleSession {
 			worldName: state.worldName,
 			playerName: state.playerName,
 			knownSpells: state.knownSpells,
+			appearanceOptions: state.appearanceOptions,
 			combatMode: state.combatMode,
 			combat: state.combat,
 			vitals: state.vitals,
@@ -1000,20 +1041,22 @@ export class ClientLifecycleSession {
 		if (lifecycle.kind !== "entering-world") {
 			this.#entryRequestGuid = null;
 		}
+		const retiresCharacterDescription =
+			lifecycle.kind === "connecting" ||
+			lifecycle.kind === "authenticating" ||
+			lifecycle.kind === "character-selection" ||
+			lifecycle.kind === "entering-world" ||
+			lifecycle.kind === "exiting" ||
+			(lifecycle.kind === "portal-space" &&
+				lifecycle.cause === "initial-entry" &&
+				lifecycle.worldGeneration !== this.#state.worldGeneration);
 		this.#state = {
 			...this.#state,
 			lifecycle,
-			knownSpells:
-				lifecycle.kind === "connecting" ||
-				lifecycle.kind === "authenticating" ||
-				lifecycle.kind === "character-selection" ||
-				lifecycle.kind === "entering-world" ||
-				lifecycle.kind === "exiting" ||
-				(lifecycle.kind === "portal-space" &&
-					lifecycle.cause === "initial-entry" &&
-					lifecycle.worldGeneration !== this.#state.worldGeneration)
-					? null
-					: this.#state.knownSpells,
+			knownSpells: retiresCharacterDescription ? null : this.#state.knownSpells,
+			appearanceOptions: retiresCharacterDescription
+				? null
+				: this.#state.appearanceOptions,
 			activeConfirmation:
 				lifecycle.kind === "exiting" ? null : this.#state.activeConfirmation,
 			worldGeneration:
@@ -1151,6 +1194,7 @@ function emptyState(): ClientLifecycleSessionState {
 		worldName: null,
 		playerName: null,
 		knownSpells: null,
+		appearanceOptions: null,
 		combatMode: "unknown",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

@@ -491,6 +491,7 @@
 
 	/** Cold character-selection fixture exercises production controls without a live server. */
 	let previewCharacters = $state(false);
+	let appearanceOptions = $state({ showHelmet: true, showCloak: true });
 	/** Session-local diagnostic use policy exercised through the production panel. */
 	let unrestrictedUse = $state(false);
 	let entryPending = $state(false);
@@ -914,6 +915,7 @@
 			worldName: "Fixture",
 			playerName: "Wayfarer",
 			knownSpells: null,
+			appearanceOptions,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
@@ -2922,6 +2924,13 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		{appearanceOptions}
+		onAppearanceOptionChange={async (option, enabled) => {
+			appearanceOptions = {
+				...appearanceOptions,
+				[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
+			};
+		}}
 		inspectionPreviewHeight={userSettings.inspection.previewHeight}
 		onInspectionPreviewHeightChange={(previewHeight) =>
 			(userSettings = {

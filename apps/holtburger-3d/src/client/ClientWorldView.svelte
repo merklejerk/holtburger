@@ -58,6 +58,8 @@
 		ClientAttackProfile,
 		ClientCombatMode,
 		ClientCombatStatus,
+		ClientAppearanceOption,
+		ClientAppearanceOptions,
 		ClientVital,
 	} from "./client-host-contract";
 	import type { ClientCharacterSettings } from "./client-settings-contract";
@@ -171,6 +173,11 @@
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		readonly vitals: readonly ClientVital[];
+		readonly appearanceOptions: ClientAppearanceOptions | null;
+		readonly onAppearanceOptionChange: (
+			option: ClientAppearanceOption,
+			enabled: boolean,
+		) => Promise<void>;
 		readonly jumpChargeActive: boolean;
 		readonly readJumpExtent: () => number;
 		readonly toast: ClientToast | null;
@@ -251,6 +258,8 @@
 		playerName,
 		worldName,
 		vitals,
+		appearanceOptions,
+		onAppearanceOptionChange,
 		jumpChargeActive,
 		readJumpExtent,
 		toast,
@@ -916,6 +925,8 @@
 								selectedGuid={selectedEntityGuid}
 								onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
 								requestedSplit={requestedInventorySplit}
+								{appearanceOptions}
+								{onAppearanceOptionChange}
 								onRequestedSplitConsumed={(request) => {
 									if (requestedInventorySplit === request)
 										requestedInventorySplit = null;

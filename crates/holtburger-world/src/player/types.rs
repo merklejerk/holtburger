@@ -32,6 +32,34 @@ enum CharacterOptionMask {
     Options2(CharacterOptions2),
 }
 
+/// Complete server-backed preference state for the active character.
+///
+/// The two masks are a wire-format detail retained losslessly here; consumers should use the
+/// typed accessors so option-to-mask knowledge stays in the world layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerCharacterOptions {
+    /// Primary mask exactly as supplied by PlayerDescription.
+    pub options1: CharacterOptions1,
+    /// Secondary mask exactly as supplied by PlayerDescription.
+    pub options2: CharacterOptions2,
+}
+
+impl PlayerCharacterOptions {
+    pub fn is_enabled(self, option: CharacterOption) -> bool {
+        match character_option_mask(option) {
+            CharacterOptionMask::Options1(flag) => self.options1.contains(flag),
+            CharacterOptionMask::Options2(flag) => self.options2.contains(flag),
+        }
+    }
+
+    pub fn set_enabled(&mut self, option: CharacterOption, enabled: bool) {
+        match character_option_mask(option) {
+            CharacterOptionMask::Options1(flag) => self.options1.set(flag, enabled),
+            CharacterOptionMask::Options2(flag) => self.options2.set(flag, enabled),
+        }
+    }
+}
+
 fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
     match option {
         CharacterOption::AutoRepeatAttacks => {
@@ -251,10 +279,8 @@ pub struct PlayerState {
     pub enchantments: Vec<Enchantment>,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
     pub spells: BTreeMap<u32, f32>,
-    /// Primary character option mask retained from PlayerDescription.
-    pub options1: CharacterOptions1,
-    /// Secondary character option mask retained from PlayerDescription.
-    pub options2: CharacterOptions2,
+    /// Complete server-backed character preferences retained from PlayerDescription.
+    pub character_options: PlayerCharacterOptions,
     /// Content of the 8 spellbook hotbars (Organization). Each inner vec corresponds to a UI hotbar.
     pub hotbar_spells: Vec<Vec<u32>>,
     /// Desired material component counts retained from PlayerDescription.
@@ -297,8 +323,7 @@ impl PlayerState {
             local_position_overlays: HashMap::new(),
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
-            options1: CharacterOptions1::empty(),
-            options2: CharacterOptions2::empty(),
+            character_options: PlayerCharacterOptions::default(),
             hotbar_spells: vec![Vec::new(); 8],
             desired_comps: Vec::new(),
             spellbook_filters: 0,
@@ -347,20 +372,10 @@ impl PlayerState {
     }
 
     pub fn character_option_enabled(&self, option: CharacterOption) -> bool {
-        match character_option_mask(option) {
-            CharacterOptionMask::Options1(flag) => self.options1.contains(flag),
-            CharacterOptionMask::Options2(flag) => self.options2.contains(flag),
-        }
+        self.character_options.is_enabled(option)
     }
 
     pub fn set_character_option_enabled(&mut self, option: CharacterOption, enabled: bool) {
-        match character_option_mask(option) {
-            CharacterOptionMask::Options1(flag) => {
-                self.options1.set(flag, enabled);
-            }
-            CharacterOptionMask::Options2(flag) => {
-                self.options2.set(flag, enabled);
-            }
-        }
+        self.character_options.set_enabled(option, enabled);
     }
 }

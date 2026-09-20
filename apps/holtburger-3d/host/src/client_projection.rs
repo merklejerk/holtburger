@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use holtburger_common::{Guid, stats::VitalType};
+use holtburger_common::{CharacterOption, Guid, stats::VitalType};
 use holtburger_core::client::types::{ChatChannelKind, ChatSpeakerKind, CombatFeedback};
 use holtburger_core::errors::{
     format_action_result_message, format_entity_use_feedback, format_weenie_error,
@@ -386,6 +386,8 @@ pub enum ClientWorldActivationCauseWire {
 pub struct ClientCurrentState {
     /// Complete knowledge, absent until the initial character description.
     pub known_spells: Option<Vec<u32>>,
+    /// Narrow server-backed appearance preferences consumed by client HUD controls.
+    pub appearance_options: Option<ClientAppearanceOptions>,
     /// Server-confirmed stance for the combat shortcut.
     pub combat_mode: ClientCombatMode,
     /// Desired targeted combat and shared repeat lifecycle.
@@ -414,6 +416,25 @@ pub struct ClientCurrentState {
     pub dynamic: holtburger_core::DynamicEntitySnapshot,
     /// Complete retained entity/storage baseline for inventory and selection.
     pub entities: holtburger_core::ClientEntitySnapshot,
+}
+
+/// Server-backed appearance preferences exposed to the client HUD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientAppearanceOptions {
+    /// Whether server-authored appearance includes equipped headwear.
+    pub show_helmet: bool,
+    /// Whether server-authored appearance includes the equipped cloak.
+    pub show_cloak: bool,
+}
+
+impl From<holtburger_core::PlayerCharacterOptions> for ClientAppearanceOptions {
+    fn from(options: holtburger_core::PlayerCharacterOptions) -> Self {
+        Self {
+            show_helmet: options.is_enabled(CharacterOption::ShowYourHelmOrHeadGear),
+            show_cloak: options.is_enabled(CharacterOption::ShowYourCloak),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -780,6 +801,7 @@ pub enum ClientHostEvent {
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
     },
+    AppearanceOptionsUpdated(ClientAppearanceOptions),
     PlayerVitalsUpdated {
         vitals: Vec<ClientVitalWire>,
     },
@@ -955,6 +977,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             known_spells: snapshot.known_spells.clone(),
+            appearance_options: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
             combat: snapshot.combat.into(),
             lifecycle: (&snapshot.lifecycle).into(),
@@ -1051,6 +1074,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
             Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })
+        }
+        ClientViewEvent::PlayerOptionsUpdated { options } => {
+            Some(ClientHostEvent::AppearanceOptionsUpdated(options.into()))
         }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
             Some(ClientHostEvent::PlayerVitalsUpdated {
@@ -1258,6 +1284,22 @@ mod tests {
         ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionContext,
         InspectionSupplement, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
     };
+
+    #[test]
+    fn appearance_projection_exposes_only_helmet_and_cloak() {
+        let options = holtburger_core::PlayerCharacterOptions {
+            options1: holtburger_common::CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+            options2: holtburger_common::CharacterOptions2::SHOW_HELM,
+        };
+
+        assert_eq!(
+            ClientAppearanceOptions::from(options),
+            ClientAppearanceOptions {
+                show_helmet: true,
+                show_cloak: false,
+            }
+        );
+    }
 
     #[test]
     fn object_inspection_variants_match_the_shared_browser_fixture() {

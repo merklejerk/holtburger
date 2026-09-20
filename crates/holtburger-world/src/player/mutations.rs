@@ -312,8 +312,10 @@ impl PlayerState {
         self.enchantments = data.enchantments.clone();
 
         self.spells = data.spells.clone();
-        self.options1 = data.options1;
-        self.options2 = data.options2;
+        self.character_options = super::PlayerCharacterOptions {
+            options1: data.options1,
+            options2: data.options2,
+        };
         self.hotbar_spells = data.hotbar_spells.clone();
         self.desired_comps = data.desired_comps.clone();
         self.spellbook_filters = data.spellbook_filters;

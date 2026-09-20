@@ -68,6 +68,23 @@ impl ClientRuntime {
         }
     }
 
+    /// Sends one server-backed preference and mirrors it after transport acceptance.
+    pub(super) async fn set_character_option(
+        &mut self,
+        option: CharacterOption,
+        value: bool,
+    ) -> Result<()> {
+        self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
+            SetSingleCharacterOptionActionData { option, value },
+        )))
+        .await?;
+        self.world
+            .player
+            .set_character_option_enabled(option, value);
+        self.emit_player_options_updated();
+        Ok(())
+    }
+
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         if (self.equipment_operation.is_some() || self.pack_exchange.is_some())
             && matches!(
@@ -635,15 +652,7 @@ impl ClientRuntime {
             ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
             ClientCommand::SetCharacterOption { option, value } => {
                 log::info!(">>> Setting character option {:?} to {}", option, value);
-                self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
-                    SetSingleCharacterOptionActionData { option, value },
-                )))
-                .await?;
-                self.world
-                    .player
-                    .set_character_option_enabled(option, value);
-                self.emit_player_options_updated();
-                Ok(())
+                self.set_character_option(option, value).await
             }
             ClientCommand::AddPlayerPermission { player_name } => {
                 log::info!(">>> Permitting {} to loot corpse", player_name);

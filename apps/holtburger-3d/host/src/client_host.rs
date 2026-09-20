@@ -288,6 +288,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
+            character_options: None,
             known_spells: None,
             combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
             combat: Default::default(),
@@ -692,6 +693,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            character_options: None,
             known_spells: None,
             combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
             combat: Default::default(),

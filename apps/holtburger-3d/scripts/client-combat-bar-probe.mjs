@@ -126,11 +126,35 @@ export async function probeCombatBar(
 		),
 		"50",
 	);
-	assert.equal(
-		await read(
-			"getComputedStyle(document.querySelector('.power-control')).cursor",
-		),
-		"grab",
+	assert.deepEqual(
+		await read(`(() => {
+			const combat = document.querySelector('.combat-bar').getBoundingClientRect();
+			const backdrop = document.querySelector('.gauge-background').getBoundingClientRect();
+			const height = document.querySelector('.height.medium').getBoundingClientRect();
+			const hitsCombat = (x, y) =>
+				Boolean(document.elementFromPoint(x, y)?.closest('.combat-bar'));
+			return {
+				transparentMargin: hitsCombat(combat.left + 2, combat.top + 2),
+				backdropOnly: hitsCombat(backdrop.left + 2, backdrop.top + backdrop.height / 2),
+				heightButton: hitsCombat(height.left + height.width / 2, height.top + height.height / 2),
+			};
+		})()`),
+		{
+			transparentMargin: false,
+			backdropOnly: false,
+			heightButton: true,
+		},
+	);
+	const initialArcPoint = await arcPoint(0.5);
+	assert.deepEqual(
+		await read(`(() => {
+			const target = document.elementFromPoint(${initialArcPoint.x}, ${initialArcPoint.y});
+			return {
+				hitsCombat: Boolean(target?.closest('.combat-bar')),
+				cursor: target === null ? null : getComputedStyle(target).cursor,
+			};
+		})()`),
+		{ hitsCombat: true, cursor: "pointer" },
 	);
 	await dragArc(0.5, 0.25);
 	await settle();
@@ -157,6 +181,17 @@ export async function probeCombatBar(
 			{ shortcut: "2", opacity: "1" },
 			{ shortcut: "3", opacity: "1" },
 		],
+	);
+	assert.equal(
+		await read(`(() => {
+			const hint = document.querySelector('.breakpoint-1').getBoundingClientRect();
+			return Boolean(
+				document
+					.elementFromPoint(hint.left + hint.width / 2, hint.top + hint.height / 2)
+					?.closest('.combat-bar'),
+			);
+		})()`),
+		false,
 	);
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mouseMoved",
@@ -193,6 +228,22 @@ export async function probeCombatBar(
 			"getComputedStyle(document.querySelector('.combat-bar')).opacity",
 		),
 		opacityTiming.idle,
+	);
+	assert.deepEqual(
+		await read(`(async () => {
+			window.dispatchEvent(new KeyboardEvent('keydown', {
+				key: '2',
+				code: 'Digit2',
+				bubbles: true,
+				cancelable: true,
+			}));
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			return {
+				emphasized: document.querySelector('.combat-bar').classList.contains('profile-emphasized'),
+				value: document.querySelector('.power-control').getAttribute('aria-valuenow'),
+			};
+		})()`),
+		{ emphasized: true, value: "25" },
 	);
 
 	await read(`${api}.active('missile')`);

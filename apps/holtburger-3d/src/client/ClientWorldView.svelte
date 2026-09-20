@@ -115,6 +115,8 @@
 		readonly combatMode: ClientCombatMode;
 		readonly combatStatus: ClientCombatStatus;
 		readonly combatControls: ClientCharacterSettings["combatControls"];
+		/** Accepted setting interactions used to replay combat-HUD feedback. */
+		readonly combatProfileSelectionRevision: number;
 		readonly onCombatProfileSelect: (profile: ClientAttackProfile) => void;
 		/** Shared normal casting action used by the spell browser. */
 		readonly onCastSpell: (spellId: number) => void;
@@ -220,6 +222,7 @@
 		combatMode,
 		combatStatus,
 		combatControls,
+		combatProfileSelectionRevision,
 		onCombatProfileSelect,
 		onCastSpell,
 		combatEnabled,
@@ -704,6 +707,7 @@
 			editable={hudMode === "layout"}
 			{viewport}
 			status={combatStatus}
+			selectionRevision={combatProfileSelectionRevision}
 			profile={combatMode === "melee"
 				? { kind: "melee", ...combatControls.melee }
 				: { kind: "missile", ...combatControls.missile }}

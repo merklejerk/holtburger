@@ -198,6 +198,8 @@
 		state: "idle",
 		refill: null,
 	});
+	/** Accepted profile selections, including repeated selections of the current value. */
+	let combatProfileSelectionRevision = $state(0);
 	const defaultCombatControls: ClientCharacterSettings["combatControls"] = {
 		melee: { height: "medium", power: 0.5 },
 		missile: { height: "medium", accuracy: 0.5 },
@@ -227,6 +229,7 @@
 	}
 	function selectCombatProfile(profile: ClientAttackProfile): void {
 		if (!persistCombatProfile(profile)) return;
+		combatProfileSelectionRevision += 1;
 		if (selectedEntityGuid !== null) beginCombatEngagement(profile);
 		else if (combatStatus.desired !== null)
 			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
@@ -1418,6 +1421,7 @@
 		{combatMode}
 		{combatStatus}
 		{combatControls}
+		{combatProfileSelectionRevision}
 		onCombatProfileSelect={selectCombatProfile}
 		combatEnabled={lifecycle.kind === "in-world"}
 		onToggleCombat={() => void toggleCombatMode()}

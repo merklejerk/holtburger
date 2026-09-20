@@ -62,6 +62,14 @@ export const INPUT_DEFAULTS = {
 		previousNonCreature: [
 			{ key: "Tab", shift: true, ctrl: true, alt: false, meta: false },
 		],
+		/** Stable forward traversal over unopened corpses in the world-object ring. */
+		nextUnopenedCorpse: [
+			{ key: "v", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Stable reverse traversal over unopened corpses in the world-object ring. */
+		previousUnopenedCorpse: [
+			{ key: "v", shift: true, ctrl: false, alt: false, meta: false },
+		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r" }],
 		/** Request authoritative examination facts for the selected entity. */

@@ -33,6 +33,8 @@ export interface NameplateAppearance {
 	readonly fillColors: Readonly<Record<NameplateCategory, NameplateColor>>;
 	readonly fontFamily: string;
 	readonly horizontalPaddingPixels: number;
+	/** Typography for the optional final status-glyph row. */
+	readonly indicators: NameplateTextAppearance;
 	readonly level: NameplateTextAppearance;
 	readonly lineGapPixels: number;
 	readonly name: NameplateTextAppearance;
@@ -106,6 +108,7 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 	);
 	validateTextAppearance(settings.appearance.name, "name");
 	validateTextAppearance(settings.appearance.level, "level");
+	validateTextAppearance(settings.appearance.indicators, "indicators");
 }
 
 /** Refine only the locally driven player; every other producer class remains authoritative. */
@@ -121,7 +124,7 @@ export function resolveNameplateCategory(
 
 function validateTextAppearance(
 	appearance: NameplateTextAppearance,
-	role: "level" | "name",
+	role: "indicators" | "level" | "name",
 ): void {
 	if (
 		!Number.isFinite(appearance.fontSizePixels) ||

@@ -6,7 +6,7 @@ import type {
 } from "./nameplate-policy";
 import type { NameplateContent } from "../systems/dynamic-presentation-source";
 
-const NAMEPLATE_STYLE_REVISION = 2;
+const NAMEPLATE_STYLE_REVISION = 3;
 const MAX_NAMEPLATE_TEXTURE_BYTES = 16 * 1024 * 1024;
 
 export interface RasterizedNameplate {
@@ -224,6 +224,7 @@ export class WebGL2NameplateTextureCache {
 			visual.category,
 			visual.content.name,
 			visual.content.level,
+			visual.content.indicators,
 		]);
 		categoryKeys.set(visual.category, { generation: style.generation, key });
 		return key;
@@ -243,7 +244,7 @@ export class WebGL2NameplateTextureCache {
 }
 
 /** Browser Canvas implementation kept behind a small testable rasterizer port. */
-class Canvas2DNameplateRasterizer implements NameplateRasterizer {
+export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 	rasterize(
 		visual: NameplateVisual,
 		appearance: NameplateAppearance,
@@ -256,23 +257,28 @@ class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		if (!context)
 			throw new Error("Canvas2D is unavailable for nameplate rasterization.");
 		const { content } = visual;
-		const nameFont = canvasFont(appearance.name, appearance.fontFamily);
-		const levelFont = canvasFont(appearance.level, appearance.fontFamily);
-		context.font = nameFont;
-		const nameWidth = context.measureText(content.name).width;
-		context.font = levelFont;
-		const levelText = content.level === null ? null : `Level ${content.level}`;
-		const levelWidth =
-			levelText === null ? 0 : context.measureText(levelText).width;
+		const rows = [{ text: content.name, style: appearance.name }];
+		if (content.level !== null)
+			rows.push({ text: `Level ${content.level}`, style: appearance.level });
+		if (content.indicators.length > 0)
+			rows.push({
+				text: content.indicators.join("  "),
+				style: appearance.indicators,
+			});
+		let textWidth = 0;
+		let textHeight = 0;
+		for (const row of rows) {
+			context.font = canvasFont(row.style, appearance.fontFamily);
+			textWidth = Math.max(textWidth, context.measureText(row.text).width);
+			textHeight += row.style.fontSizePixels;
+		}
 		const cssWidth = Math.ceil(
-			Math.max(nameWidth, levelWidth) + appearance.horizontalPaddingPixels * 2,
+			textWidth + appearance.horizontalPaddingPixels * 2,
 		);
 		const cssHeight = Math.ceil(
 			appearance.verticalPaddingPixels * 2 +
-				appearance.name.fontSizePixels +
-				(levelText === null
-					? 0
-					: appearance.lineGapPixels + appearance.level.fontSizePixels),
+				textHeight +
+				(rows.length - 1) * appearance.lineGapPixels,
 		);
 		canvas.width = Math.max(1, Math.ceil(cssWidth * density));
 		canvas.height = Math.max(1, Math.ceil(cssHeight * density));
@@ -282,24 +288,15 @@ class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		context.lineJoin = "round";
 		context.strokeStyle = canvasColor(appearance.outlineColor);
 		context.fillStyle = canvasColor(appearance.fillColors[visual.category]);
-		context.lineWidth = appearance.name.outlineWidthPixels;
-		context.font = nameFont;
-		const nameY =
-			appearance.verticalPaddingPixels + appearance.name.fontSizePixels / 2;
-		if (appearance.name.outlineWidthPixels > 0)
-			context.strokeText(content.name, cssWidth / 2, nameY);
-		context.fillText(content.name, cssWidth / 2, nameY);
-		if (levelText !== null) {
-			context.font = levelFont;
-			context.lineWidth = appearance.level.outlineWidthPixels;
-			const levelY =
-				appearance.verticalPaddingPixels +
-				appearance.name.fontSizePixels +
-				appearance.lineGapPixels +
-				appearance.level.fontSizePixels / 2;
-			if (appearance.level.outlineWidthPixels > 0)
-				context.strokeText(levelText, cssWidth / 2, levelY);
-			context.fillText(levelText, cssWidth / 2, levelY);
+		let top = appearance.verticalPaddingPixels;
+		for (const row of rows) {
+			context.font = canvasFont(row.style, appearance.fontFamily);
+			context.lineWidth = row.style.outlineWidthPixels;
+			const centerY = top + row.style.fontSizePixels / 2;
+			if (row.style.outlineWidthPixels > 0)
+				context.strokeText(row.text, cssWidth / 2, centerY);
+			context.fillText(row.text, cssWidth / 2, centerY);
+			top += row.style.fontSizePixels + appearance.lineGapPixels;
 		}
 		return { height: canvas.height, pixels: canvas, width: canvas.width };
 	}

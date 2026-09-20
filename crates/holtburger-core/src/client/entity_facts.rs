@@ -23,9 +23,17 @@ pub struct ClientEntitySnapshot {
 impl ClientEntitySnapshot {
     /// Use exactly the same world query as incremental record publication.
     pub fn from_world(world: &WorldState) -> Result<Self, ScenePlacementError> {
+        Self::from_world_with_opened(world, &BTreeSet::new())
+    }
+
+    /// Apply client-session corpse history to the reconstructible world baseline.
+    pub fn from_world_with_opened(
+        world: &WorldState,
+        opened_corpses: &BTreeSet<Guid>,
+    ) -> Result<Self, ScenePlacementError> {
         let mut entities = Vec::new();
         for guid in world.client_entity_guids() {
-            if let Some(record) = world.client_entity_facts(guid)? {
+            if let Some(record) = session_entity_facts(world, guid, opened_corpses)? {
                 entities.push(record);
             }
         }
@@ -34,6 +42,22 @@ impl ClientEntitySnapshot {
             entities,
         })
     }
+}
+
+/// Shared snapshot/delta projection keeps session history identical at both publication boundaries.
+fn session_entity_facts(
+    world: &WorldState,
+    guid: Guid,
+    opened_corpses: &BTreeSet<Guid>,
+) -> Result<Option<ClientEntityFacts>, ScenePlacementError> {
+    let mut record = world.client_entity_facts(guid)?;
+    if let Some(record) = &mut record
+        && record.corpse.is_some()
+        && opened_corpses.contains(&guid)
+    {
+        record.corpse = Some(holtburger_world::entity_facts::CorpseState::Opened);
+    }
+    Ok(record)
 }
 
 /// One change to the semantic mirror, never a transaction across separate server messages.
@@ -59,6 +83,10 @@ pub(super) struct EntityFactsPublication {
 }
 
 impl EntityFactsPublication {
+    pub(super) fn invalidate(&mut self, guid: Guid) {
+        self.dirty.insert(guid);
+    }
+
     pub(super) fn observe(&mut self, event: &WorldEvent) {
         // Strength and enchantments change burden without changing an owned item.
         // Before the first collection, owner establishment already prepares the player.
@@ -84,9 +112,18 @@ impl EntityFactsPublication {
         }
     }
 
+    #[cfg(test)]
     fn collect(
         &mut self,
         world: &mut WorldState,
+    ) -> Result<ClientEntityDelta, ScenePlacementError> {
+        self.collect_with_opened(world, &BTreeSet::new())
+    }
+
+    fn collect_with_opened(
+        &mut self,
+        world: &mut WorldState,
+        opened_corpses: &BTreeSet<Guid>,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
         let storage_changes = world.take_storage_changes();
         let mut delta = ClientEntityDelta::default();
@@ -120,7 +157,7 @@ impl EntityFactsPublication {
         // Prepare before mutating the published cache so invalid world graphs fail coherently.
         let mut prepared = Vec::new();
         for guid in &self.dirty {
-            prepared.push((*guid, world.client_entity_facts(*guid)?));
+            prepared.push((*guid, session_entity_facts(world, *guid, opened_corpses)?));
         }
         // Reuse projected ownership to invalidate burden, including items just transferred out.
         // The player may already be prepared through an ordinary property/storage update.
@@ -135,7 +172,7 @@ impl EntityFactsPublication {
         {
             prepared.push((
                 world.player.guid,
-                world.client_entity_facts(world.player.guid)?,
+                session_entity_facts(world, world.player.guid, opened_corpses)?,
             ));
         }
         for (guid, record) in prepared {
@@ -159,7 +196,7 @@ impl super::ClientRuntime {
     pub(super) fn publish_entity_facts(&mut self) {
         let delta = self
             .entity_facts
-            .collect(&mut self.world)
+            .collect_with_opened(&mut self.world, self.opened_corpses.ids())
             .expect("accepted world relationships must project into coherent entity facts");
         if delta.world_container.is_some() || !delta.upserts.is_empty() || !delta.removed.is_empty()
         {

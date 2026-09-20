@@ -55,7 +55,7 @@ function fixture() {
 		],
 		"non-creature": [
 			{ guid: 8, distanceSquared: 9 },
-			{ guid: 9, distanceSquared: 4 },
+			{ guid: 9, distanceSquared: 4, unopenedCorpse: true },
 		],
 	};
 	const sample = vi.fn((category: CycleCategory) => candidates[category]);
@@ -140,6 +140,18 @@ describe("selection press lifecycle", () => {
 		]);
 		f.input.destroy();
 	});
+	it.each([false, true])(
+		"V cycles unopened corpses in direction Shift=%s",
+		(shiftKey) => {
+			const f = fixture();
+			const event = key({ key: shiftKey ? "V" : "v", code: "KeyV", shiftKey });
+			f.input.keydown(event, 0);
+			f.input.keyup(event, HOLD_MS - 1);
+			expect(f.selection.selectedGuid()).toBe(9);
+			expect(f.sample).toHaveBeenCalledWith("non-creature");
+			f.input.destroy();
+		},
+	);
 	it.each([false, true])(
 		"Shift holds select nearest once before release with Control=%s",
 		(ctrlKey) => {

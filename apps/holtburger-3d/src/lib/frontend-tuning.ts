@@ -406,6 +406,12 @@ export const SHARED_FRONTEND_TUNING = {
 				/** CSS font-family expression consumed directly by Canvas2D. */
 				fontFamily: "sans-serif",
 				horizontalPaddingPixels: 6,
+				indicators: {
+					fontSizePixels: 36,
+					fontStyle: "normal",
+					fontWeight: 600,
+					outlineWidthPixels: 2.5,
+				},
 				level: {
 					fontSizePixels: 42,
 					fontStyle: "normal",

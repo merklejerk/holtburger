@@ -70,7 +70,7 @@ interface FrontendNameplateTuning extends Omit<
 		readonly fillColors: Readonly<
 			Record<keyof NameplateAppearance["fillColors"], HexRgbaColor>
 		>;
-		/** Straight-alpha outline surrounding both text lines. */
+		/** Straight-alpha outline surrounding every text line. */
 		readonly outlineColor: HexRgbaColor;
 	};
 }

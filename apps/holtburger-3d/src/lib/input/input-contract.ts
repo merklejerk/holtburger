@@ -75,6 +75,8 @@ type ClientShortcut =
 	| "previousCreature"
 	| "nextNonCreature"
 	| "previousNonCreature"
+	| "nextUnopenedCorpse"
+	| "previousUnopenedCorpse"
 	| "interact"
 	| "examine"
 	| "give"

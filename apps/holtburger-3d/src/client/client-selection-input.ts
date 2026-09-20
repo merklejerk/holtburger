@@ -2,6 +2,7 @@ import { APP_INPUT } from "../lib/input/app-input";
 import type {
 	ClientCycleSelectionController,
 	CycleCategory,
+	CycleSubset,
 } from "./client-cycle-selection-controller";
 import type { ClientEntitySelection } from "./client-entity-selection";
 
@@ -11,6 +12,7 @@ interface PendingSelectionPress {
 	readonly key: string;
 	/** Category and direction captured for the short-press action. */
 	readonly category: CycleCategory;
+	readonly subset: CycleSubset;
 	readonly direction: 1 | -1;
 	/** Timer is cancelled when release or interruption consumes this press. */
 	readonly timer: ReturnType<typeof setTimeout>;
@@ -52,6 +54,8 @@ export class ClientSelectionInput {
 				"previousCreature",
 				"nextNonCreature",
 				"previousNonCreature",
+				"nextUnopenedCorpse",
+				"previousUnopenedCorpse",
 				"cancel",
 			] as const
 		).find((action) => APP_INPUT.shortcut(action, event));
@@ -78,6 +82,12 @@ export class ClientSelectionInput {
 			case "previousNonCreature":
 				this.#beginPress(event, "non-creature", -1, nowMs);
 				break;
+			case "nextUnopenedCorpse":
+				this.#beginPress(event, "non-creature", 1, nowMs, "unopened-corpse");
+				break;
+			case "previousUnopenedCorpse":
+				this.#beginPress(event, "non-creature", -1, nowMs, "unopened-corpse");
+				break;
 		}
 		return true;
 	}
@@ -90,8 +100,14 @@ export class ClientSelectionInput {
 			if (event.isComposing) return;
 			// Event-loop delays must not turn a completed hold into a short press.
 			if (nowMs - pending.startedAtMs >= this.#holdDelayMs)
-				this.#cycle.selectNearest(pending.category);
-			else this.#cycle.cycle(pending.category, pending.direction, nowMs);
+				this.#cycle.selectNearest(pending.category, pending.subset);
+			else
+				this.#cycle.cycle(
+					pending.category,
+					pending.direction,
+					nowMs,
+					pending.subset,
+				);
 		} else if (["Shift", "Control", "Alt", "Meta"].includes(event.key))
 			this.cancel();
 	}
@@ -114,18 +130,20 @@ export class ClientSelectionInput {
 		category: CycleCategory,
 		direction: 1 | -1,
 		nowMs: number,
+		subset: CycleSubset = "all",
 	): void {
 		// Express intent now, without changing selection or advancing the cycle before release.
 		this.#selection.beginAcquisition("cycle");
 		const pending: PendingSelectionPress = {
 			key: event.code || event.key,
 			category,
+			subset,
 			direction,
 			startedAtMs: nowMs,
 			timer: setTimeout(() => {
 				if (this.#press !== pending) return;
 				this.#press = null;
-				this.#cycle.selectNearest(category);
+				this.#cycle.selectNearest(category, subset);
 			}, this.#holdDelayMs),
 		};
 		this.#press = pending;

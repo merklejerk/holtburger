@@ -54,6 +54,7 @@ import type {
 	PrimaryCameraView,
 } from "../lib/game/runtime/types";
 import type { ResolvedSceneOrigin } from "../lib/game/scene";
+import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
 import type { RenderExtent } from "../lib/game/renderer/render-extent";
 import type { HostTransport } from "../lib/host/host-transport";
 import type {
@@ -283,6 +284,11 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
 	setViewerEntity(guid: number | null): void;
 	setSelectedEntityGuid(guid: number | null): void;
+	/** Apply or clear app-owned semantic decoration without rebuilding presentation. */
+	setDynamicEntityNameplateIndicators(
+		guid: number,
+		indicators: NameplateContent["indicators"],
+	): void;
 	selectedEntityPresentationState(
 		guid: number,
 	): SelectedDynamicEntityPresentationState;
@@ -1088,6 +1094,7 @@ export class ClientPresentationSession {
 			}
 			this.#owner = owner;
 			owner.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
+			this.#reconcileEntityNameplates();
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				owner.profileSource,
 			);
@@ -1126,6 +1133,10 @@ export class ClientPresentationSession {
 		switch (event.type) {
 			case "current-state":
 				this.#receiveCurrentState(event.state);
+				this.#reconcileEntityNameplates();
+				return;
+			case "entities":
+				this.#reconcileEntityNameplates();
 				return;
 			case "lifecycle":
 				return;
@@ -1210,6 +1221,7 @@ export class ClientPresentationSession {
 				this.#observePresentationCompletion(
 					this.#requestDynamicSnapshotReplacement(event.snapshot.entities),
 				);
+				this.#reconcileEntityNameplates();
 				return;
 			case "upserted":
 				if (event.entity.identity.guid === this.#playerGuid)
@@ -1219,6 +1231,7 @@ export class ClientPresentationSession {
 						this.#owner.runtime.upsertDynamicEntity(event.entity),
 					);
 				}
+				this.#reconcileEntityNameplate(event.entity.identity.guid);
 				return;
 			case "removed":
 				for (
@@ -1238,6 +1251,23 @@ export class ClientPresentationSession {
 				this.#owner?.runtime.removeDynamicEntity(event.guid, event.generation);
 				return;
 		}
+	}
+
+	/** Reconcile a complete semantic baseline, including decorations that were cleared. */
+	#reconcileEntityNameplates(): void {
+		for (const dynamic of this.#session.mirror.currentEntities())
+			this.#reconcileEntityNameplate(dynamic.identity.guid);
+	}
+
+	/** Project semantic corpse history into app-local indicators without copying display facts. */
+	#reconcileEntityNameplate(guid: number): void {
+		const runtime = this.#owner?.runtime;
+		const entities = this.#session.entities.read();
+		if (runtime === undefined || entities.kind !== "current") return;
+		runtime.setDynamicEntityNameplateIndicators(
+			guid,
+			entities.level.entities.get(guid)?.corpse === "opened" ? ["✓"] : [],
+		);
 	}
 
 	#deliverEntityCue(pending: PendingPresentationCue): void {

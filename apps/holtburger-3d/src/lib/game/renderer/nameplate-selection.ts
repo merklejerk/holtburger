@@ -5,10 +5,14 @@ import type { NameplateSettings } from "./nameplate-policy";
 export interface DistanceRankedNameplate {
 	readonly distanceSquared: number;
 	readonly identity: string;
+	/** Selected plates remain even when the ordinary visible budget is exhausted. */
+	readonly required?: boolean;
 }
 
 interface AnchoredNameplate {
 	readonly anchor: Vec3;
+	/** Selected plates bypass distance and count policy while still requiring camera-forward depth. */
+	readonly required?: boolean;
 }
 
 /** Derive the camera-forward cutoff from the exact pixel scaling used by the billboard shader. */
@@ -38,7 +42,7 @@ export function retainLegibleNameplates<T extends AnchoredNameplate>(
 			clipFromAnchor.m24 * anchor.y +
 			clipFromAnchor.m34 * anchor.z +
 			clipFromAnchor.m44;
-		if (depth <= 0 || depth > maximumDepth) continue;
+		if (depth <= 0 || (!candidate.required && depth > maximumDepth)) continue;
 		candidates[retainedCount] = candidate;
 		retainedCount += 1;
 	}
@@ -54,9 +58,24 @@ export function retainNearestNameplates<T extends DistanceRankedNameplate>(
 		throw new Error("Nameplate budget must be a nonnegative safe integer.");
 	candidates.sort(
 		(left, right) =>
+			Number(Boolean(right.required)) - Number(Boolean(left.required)) ||
 			left.distanceSquared - right.distanceSquared ||
 			left.identity.localeCompare(right.identity),
 	);
-	candidates.length = Math.min(candidates.length, maximumVisible);
-	candidates.reverse();
+	const requiredCount = candidates.findIndex(
+		(candidate) => !candidate.required,
+	);
+	candidates.length = Math.min(
+		candidates.length,
+		Math.max(
+			maximumVisible,
+			requiredCount < 0 ? candidates.length : requiredCount,
+		),
+	);
+	// Admission priority must not become blend order: a selected distant plate is still behind.
+	candidates.sort(
+		(left, right) =>
+			right.distanceSquared - left.distanceSquared ||
+			right.identity.localeCompare(left.identity),
+	);
 }

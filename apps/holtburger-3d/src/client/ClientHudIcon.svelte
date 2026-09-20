@@ -18,6 +18,8 @@
 		| "interact"
 		| "split"
 		| "examine"
+		| "helmet"
+		| "save-loadout"
 		/** Pointer over text for enabling chat-history selection. */
 		| "select-text"
 		| "locked"
@@ -79,6 +81,10 @@
 		<path d="M12 3v18M6 6h4v12H6Zm8 0h4v12h-4Z" />
 	{:else if name === "examine"}
 		<circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.3 15.3 5 5" />
+	{:else if name === "helmet"}
+		<path d="M5 16V9a7 7 0 0 1 14 0v7l-4 4v-8H9v8Zm4-8h6" />
+	{:else if name === "save-loadout"}
+		<path d="M4 3h13l3 3v15H4Zm4 0v6h8V3m-8 18v-8h8v8" />
 	{:else if name === "select-text"}
 		<path d="M3 5h15M3 10h6M3 15h5m4-6 9 7-5 1-2 5Z" />
 	{:else if name === "locked"}

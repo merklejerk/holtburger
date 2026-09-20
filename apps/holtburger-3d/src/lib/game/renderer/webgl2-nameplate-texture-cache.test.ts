@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
+import { nameplateIconId } from "../systems/dynamic-presentation-source";
 import type { NameplateVisual } from "./nameplate-policy";
 import {
 	Canvas2DNameplateRasterizer,
@@ -9,6 +10,7 @@ import {
 } from "./webgl2-nameplate-texture-cache";
 
 const APPEARANCE = SHARED_FRAME_SETTINGS.nameplates.appearance;
+const ICON_ID = nameplateIconId("fixture");
 const PLATE: NameplateVisual = {
 	category: "mob",
 	content: { indicators: [], level: 42, name: "Drudge" },
@@ -59,7 +61,9 @@ describe("WebGL2NameplateTextureCache", () => {
 	it("rasterizes indicators on a dedicated row below name and optional level", () => {
 		const fillText = vi.fn();
 		const strokeText = vi.fn();
+		const drawImage = vi.fn();
 		const context = {
+			drawImage,
 			fillText,
 			font: "",
 			lineJoin: "miter",
@@ -79,11 +83,21 @@ describe("WebGL2NameplateTextureCache", () => {
 			createElement: () => canvas,
 		});
 		try {
-			const raster = new Canvas2DNameplateRasterizer().rasterize(
+			const raster = new Canvas2DNameplateRasterizer({
+				read: () => ({
+					kind: "ready",
+					icon: {
+						height: 8,
+						image: {} as CanvasImageSource,
+						release: () => undefined,
+						width: 16,
+					},
+				}),
+			}).rasterize(
 				{
 					...PLATE,
 					content: {
-						indicators: ["✓"],
+						indicators: [{ kind: "icon", iconId: ICON_ID }],
 						level: null,
 						name: "Corpse",
 					},
@@ -97,26 +111,29 @@ describe("WebGL2NameplateTextureCache", () => {
 					APPEARANCE.verticalPaddingPixels * 2 +
 						APPEARANCE.name.fontSizePixels +
 						APPEARANCE.lineGapPixels +
-						APPEARANCE.indicators.fontSizePixels,
+						APPEARANCE.indicatorSizePixels,
 				),
 			);
-			expect(fillText.mock.calls.map(([text, , y]) => [text, y])).toEqual([
-				[
-					"Corpse",
-					APPEARANCE.verticalPaddingPixels + APPEARANCE.name.fontSizePixels / 2,
-				],
-				[
-					"✓",
-					APPEARANCE.verticalPaddingPixels +
-						APPEARANCE.name.fontSizePixels +
-						APPEARANCE.lineGapPixels +
-						APPEARANCE.indicators.fontSizePixels / 2,
-				],
-			]);
+			expect(fillText).toHaveBeenCalledOnce();
+			expect(fillText).toHaveBeenCalledWith(
+				"Corpse",
+				expect.any(Number),
+				APPEARANCE.verticalPaddingPixels + APPEARANCE.name.fontSizePixels / 2,
+			);
+			expect(drawImage).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.any(Number),
+				APPEARANCE.verticalPaddingPixels +
+					APPEARANCE.name.fontSizePixels +
+					APPEARANCE.lineGapPixels +
+					(APPEARANCE.indicatorSizePixels -
+						APPEARANCE.indicatorSizePixels / 2) /
+						2,
+				APPEARANCE.indicatorSizePixels,
+				APPEARANCE.indicatorSizePixels / 2,
+			);
 			expect(strokeText).toHaveBeenCalledTimes(
-				[APPEARANCE.name, APPEARANCE.indicators].filter(
-					(style) => style.outlineWidthPixels > 0,
-				).length,
+				APPEARANCE.name.outlineWidthPixels > 0 ? 1 : 0,
 			);
 		} finally {
 			vi.unstubAllGlobals();
@@ -211,16 +228,66 @@ describe("WebGL2NameplateTextureCache", () => {
 
 	it("keeps ordered indicator rows in the complete visual key", () => {
 		const fixture = createFixture();
-		const opened = {
+		const secondId = nameplateIconId("second");
+		const opened: NameplateVisual = {
 			...PLATE,
-			content: { ...PLATE.content, indicators: ["✓"] },
+			content: {
+				...PLATE.content,
+				indicators: [
+					{ kind: "icon", iconId: ICON_ID },
+					{ kind: "icon", iconId: secondId },
+				],
+			},
+		};
+		const equivalent: NameplateVisual = {
+			...opened,
+			content: {
+				...opened.content,
+				indicators: [
+					{ iconId: ICON_ID, kind: "icon" },
+					{ iconId: secondId, kind: "icon" },
+				],
+			},
+		};
+		const reordered: NameplateVisual = {
+			...opened,
+			content: {
+				...opened.content,
+				indicators: [...opened.content.indicators].reverse(),
+			},
+		};
+		fixture.cache.reconcile([opened, equivalent, reordered], APPEARANCE, 1);
+
+		expect(fixture.cache.acquire(equivalent)).toBe(
+			fixture.cache.acquire(opened),
+		);
+		fixture.cache.acquire(reordered);
+
+		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
+	});
+
+	it("invalidates only complete textures that depend on a settled icon", () => {
+		const fixture = createFixture();
+		const opened: NameplateVisual = {
+			...PLATE,
+			content: {
+				...PLATE.content,
+				indicators: [{ kind: "icon", iconId: ICON_ID }],
+			},
 		};
 		fixture.cache.reconcile([PLATE, opened], APPEARANCE, 1);
-
 		fixture.cache.acquire(PLATE);
 		fixture.cache.acquire(opened);
 
-		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
+		fixture.cache.invalidateIcons([ICON_ID]);
+
+		expect(fixture.cache.diagnostics()).toMatchObject({
+			liveEntryCount: 1,
+			releaseCount: 1,
+		});
+		expect(fixture.deletedTextures).toHaveLength(1);
+		fixture.cache.acquire(opened);
+		expect(fixture.rasterize).toHaveBeenCalledTimes(3);
 	});
 
 	it("records and rejects an oversized raster before allocating a texture", () => {

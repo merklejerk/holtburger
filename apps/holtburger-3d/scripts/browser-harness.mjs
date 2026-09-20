@@ -973,6 +973,9 @@ function parseArgs(args) {
 				if (
 					![
 						"repeated-100",
+						"svg-icon",
+						"svg-icon-level",
+						"svg-icons",
 						"unique-100",
 						"ordered-500",
 						"shadow-crowd-112x61",
@@ -1557,7 +1560,8 @@ Options:
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, outdoor-pssm, or portal-scope-atlas fixture.
   --nameplate-workload <name>
-                        Install repeated-100, unique-100, ordered-500, shadow-crowd-112x61,
+                        Install repeated-100, svg-icon/svg-icon-level/svg-icons, unique-100,
+                        ordered-500, shadow-crowd-112x61,
                         occlusion-open/wall, or portal-open/wall/plural synthetic dynamic
                          entities through the shared runtime without requiring a catalog record.
   --probe-dynamic-appearance
@@ -2135,6 +2139,19 @@ function assertNameplateWorkload(
 	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 		throw new Error(
 			`Synthetic ${workload} nameplate evidence mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}.`,
+		);
+	}
+	if (
+		workload.startsWith("svg-") &&
+		(diagnostics.icons.readyCount !== 1 ||
+			diagnostics.icons.loadingCount !== 0 ||
+			diagnostics.icons.failedCount !== 0 ||
+			diagnostics.icons.preparationCount !== 1 ||
+			diagnostics.cache.rasterizationCount < 2 ||
+			diagnostics.cache.releaseCount < 1)
+	) {
+		throw new Error(
+			`Synthetic SVG nameplate did not settle and replace its placeholder raster: ${JSON.stringify(diagnostics)}.`,
 		);
 	}
 }

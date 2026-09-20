@@ -733,6 +733,15 @@ interface RendererNameplateDiagnostics {
 	readonly submittedInstanceCount: number;
 	/** Physical per-texture instanced draws submitted across all views in the latest frame. */
 	readonly submittedDrawCount: number;
+	/** Browser SVG preparation state for installed indicator sources. */
+	readonly icons: {
+		readonly failedCount: number;
+		readonly loadingCount: number;
+		readonly preparationCount: number;
+		readonly readyCount: number;
+		readonly releaseCount: number;
+		readonly revision: number;
+	};
 	readonly cache: {
 		/** Exact RGBA8 bytes owned by live complete-plate textures. */
 		readonly byteCount: number;

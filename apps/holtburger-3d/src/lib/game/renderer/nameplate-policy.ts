@@ -33,8 +33,10 @@ export interface NameplateAppearance {
 	readonly fillColors: Readonly<Record<NameplateCategory, NameplateColor>>;
 	readonly fontFamily: string;
 	readonly horizontalPaddingPixels: number;
-	/** Typography for the optional final status-glyph row. */
-	readonly indicators: NameplateTextAppearance;
+	/** Horizontal separation between square slots in the optional icon row. */
+	readonly indicatorGapPixels: number;
+	/** Width and height of each icon slot in the optional final row. */
+	readonly indicatorSizePixels: number;
 	readonly level: NameplateTextAppearance;
 	readonly lineGapPixels: number;
 	readonly name: NameplateTextAppearance;
@@ -101,6 +103,15 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 		settings.appearance.horizontalPaddingPixels,
 		"horizontal padding",
 	);
+	validateNonnegativeFinite(
+		settings.appearance.indicatorGapPixels,
+		"indicator gap",
+	);
+	if (
+		!Number.isFinite(settings.appearance.indicatorSizePixels) ||
+		settings.appearance.indicatorSizePixels <= 0
+	)
+		throw new Error("Nameplate indicator size must be finite and positive.");
 	validateNonnegativeFinite(settings.appearance.lineGapPixels, "line gap");
 	validateNonnegativeFinite(
 		settings.appearance.verticalPaddingPixels,
@@ -108,7 +119,6 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 	);
 	validateTextAppearance(settings.appearance.name, "name");
 	validateTextAppearance(settings.appearance.level, "level");
-	validateTextAppearance(settings.appearance.indicators, "indicators");
 }
 
 /** Refine only the locally driven player; every other producer class remains authoritative. */
@@ -124,7 +134,7 @@ export function resolveNameplateCategory(
 
 function validateTextAppearance(
 	appearance: NameplateTextAppearance,
-	role: "indicators" | "level" | "name",
+	role: "level" | "name",
 ): void {
 	if (
 		!Number.isFinite(appearance.fontSizePixels) ||

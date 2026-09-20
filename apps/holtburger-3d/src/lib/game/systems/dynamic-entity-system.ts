@@ -949,7 +949,7 @@ export class DynamicEntitySystem<
 		if (
 			entity.nameplateContent?.name === content.name &&
 			entity.nameplateContent.level === content.level &&
-			orderedStringsEqual(
+			orderedIndicatorsEqual(
 				entity.nameplateContent.indicators,
 				content.indicators,
 			)
@@ -1699,14 +1699,18 @@ export class DynamicEntitySystem<
 	}
 }
 
-/** Compare small immutable compositor rows without making reference identity semantic. */
-function orderedStringsEqual(
-	left: readonly string[],
-	right: readonly string[],
+/** Compare small immutable compositor rows without making object identity semantic. */
+function orderedIndicatorsEqual(
+	left: NameplateContent["indicators"],
+	right: NameplateContent["indicators"],
 ): boolean {
 	return (
 		left.length === right.length &&
-		left.every((value, index) => value === right[index])
+		left.every(
+			(value, index) =>
+				value.kind === right[index]?.kind &&
+				value.iconId === right[index]?.iconId,
+		)
 	);
 }
 

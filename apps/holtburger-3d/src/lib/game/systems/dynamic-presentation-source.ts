@@ -5,12 +5,32 @@ import type { ResolvedObjectPresentation } from "../resolution/presentation";
 import type { SceneSpatialPlacement } from "../scene";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 
+declare const nameplateIconIdBrand: unique symbol;
+
+/** Stable app-local identity for one registered nameplate SVG source. */
+export type NameplateIconId = string & {
+	readonly [nameplateIconIdBrand]: true;
+};
+
+/** Construct a nonempty icon identity at the source-registration boundary. */
+export function nameplateIconId(value: string): NameplateIconId {
+	if (value.trim().length === 0)
+		throw new Error("Nameplate icon ID must not be empty.");
+	return value as NameplateIconId;
+}
+
+/** One ordered visual item in the final nameplate row. */
+interface NameplateIndicator {
+	readonly kind: "icon";
+	readonly iconId: NameplateIconId;
+}
+
 /** Complete visual value currently painted into one entity nameplate. */
 export interface NameplateContent {
 	readonly name: string;
 	readonly level: number | null;
-	/** Ordered lightweight status glyphs painted on a dedicated final row. */
-	readonly indicators: readonly string[];
+	/** Ordered app-local indicators painted on a dedicated final row. */
+	readonly indicators: readonly NameplateIndicator[];
 }
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */

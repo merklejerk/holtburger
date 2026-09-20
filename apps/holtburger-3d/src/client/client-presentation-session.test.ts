@@ -17,6 +17,7 @@ import { AABB3, Mat4, Vec3 } from "../lib/game/math/types";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import type { ScenePlacement } from "../lib/game/scene";
 import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
+import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../lib/game/renderer/nameplate-icon-source";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import type {
 	ClientCameraTick,
@@ -106,7 +107,9 @@ describe("ClientPresentationSession", () => {
 				},
 			});
 
-			expect(runtime.nameplateIndicators.get(corpseGuid)).toEqual(["✓"]);
+			expect(runtime.nameplateIndicators.get(corpseGuid)).toEqual([
+				{ kind: "icon", iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID },
+			]);
 			transport.emit("client-entity-facts-changed", {
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],

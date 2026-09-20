@@ -101,9 +101,16 @@ import {
 	WebGL2NameplatePass,
 } from "./webgl2-nameplate-pass";
 import {
+	Canvas2DNameplateRasterizer,
 	type NameplateTextureBinding,
 	WebGL2NameplateTextureCache,
 } from "./webgl2-nameplate-texture-cache";
+import {
+	browserNameplateIconServices,
+	NameplateIconRepository,
+} from "./nameplate-icon-repository";
+import { NAMEPLATE_ICON_CATALOG } from "./nameplate-icon-source";
+import type { NameplateIconId } from "../systems/dynamic-presentation-source";
 import { resolveNameplateAnchor } from "./nameplate-anchor";
 import {
 	retainLegibleNameplates,
@@ -903,11 +910,13 @@ export class WebGL2Renderer implements Renderer {
 	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
 	readonly #nameplatePass: WebGL2NameplatePass;
+	readonly #nameplateIconRepository: NameplateIconRepository;
 	readonly #nameplateTextureCache: WebGL2NameplateTextureCache;
 	readonly #nameplateDrawScratch: MutableNameplateDrawInstance[] = [];
 	readonly #scopedNameplateDrawScratch: MutableNameplateScopedDrawInstance[] =
 		[];
 	readonly #nameplatePopulationScratch: NameplateVisual[] = [];
+	readonly #nameplateIconScratch: NameplateIconId[] = [];
 	#reconciledNameplateAppearance: NameplateAppearance | null = null;
 	#reconciledNameplatePopulationRevision = -1;
 	#reconciledNameplateDensity = Number.NaN;
@@ -1283,7 +1292,14 @@ export class WebGL2Renderer implements Renderer {
 				wrap: TextureWrapMode.Clamp,
 			}),
 		);
-		this.#nameplateTextureCache = new WebGL2NameplateTextureCache(gl);
+		this.#nameplateIconRepository = new NameplateIconRepository(
+			NAMEPLATE_ICON_CATALOG,
+			browserNameplateIconServices(),
+		);
+		this.#nameplateTextureCache = new WebGL2NameplateTextureCache(
+			gl,
+			new Canvas2DNameplateRasterizer(this.#nameplateIconRepository),
+		);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
 		this.#dynamicPosePages = new WebGL2DynamicPosePages(gl);
 		this.#dynamicDepths = new DynamicDepthPreparations(
@@ -1351,6 +1367,7 @@ export class WebGL2Renderer implements Renderer {
 						this.#budgetRejectedNameplateCandidateCount,
 					cache: this.#nameplateTextureCache.diagnostics(),
 					eligibleCandidateCount: this.#eligibleNameplateCandidateCount,
+					icons: this.#nameplateIconRepository.diagnostics(),
 					submittedDrawCount: this.#submittedNameplateDrawCount,
 					submittedInstanceCount: this.#submittedNameplateInstanceCount,
 				},
@@ -2180,6 +2197,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#worldTrajectoryPass.destroy();
 		this.#nameplatePass.destroy();
 		this.#nameplateTextureCache.destroy();
+		this.#nameplateIconRepository.destroy();
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
 		this.#skyProgram = null;
 		if (this.#portalAtlasSkyProgram) {
@@ -3660,6 +3678,9 @@ export class WebGL2Renderer implements Renderer {
 		density: number,
 		viewerEntityIdentity: string | null,
 	): void {
+		this.#nameplateTextureCache.invalidateIcons(
+			this.#nameplateIconRepository.takeChanged(),
+		);
 		const revision = this.#world.getNameplatePopulationRevision();
 		if (
 			revision === this.#reconciledNameplatePopulationRevision &&
@@ -3669,16 +3690,21 @@ export class WebGL2Renderer implements Renderer {
 		)
 			return;
 		this.#nameplatePopulationScratch.length = 0;
+		this.#nameplateIconScratch.length = 0;
 		this.#world.forEachNameplateVisual((identity, visual) => {
-			this.#nameplatePopulationScratch.push({
+			const classified = {
 				...visual,
 				category: resolveNameplateCategory(
 					visual.entityClass,
 					identity,
 					viewerEntityIdentity,
 				),
-			});
+			};
+			this.#nameplatePopulationScratch.push(classified);
+			for (const { iconId } of classified.content.indicators)
+				this.#nameplateIconScratch.push(iconId);
 		});
+		this.#nameplateIconRepository.reconcile(this.#nameplateIconScratch);
 		this.#nameplateTextureCache.reconcile(
 			this.#nameplatePopulationScratch,
 			appearance,

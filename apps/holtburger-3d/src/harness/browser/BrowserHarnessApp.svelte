@@ -35,6 +35,7 @@
 		SyntheticNameplateSetupVisualSource,
 		type SyntheticNameplateWorkload,
 	} from "./synthetic-nameplate-workload";
+	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/nameplate-icon-source";
 	import {
 		DynamicOnlyLandblockSource,
 		WithoutAuthoredDynamicsLandblockSource,
@@ -2226,6 +2227,19 @@
 			cameraEvidence.envCellId,
 		);
 		await runtime.replaceDynamicEntitySnapshot(entities);
+		if (workload.startsWith("svg-")) {
+			const target = entities[0];
+			if (target === undefined)
+				throw new Error("Synthetic SVG nameplate workload has no target.");
+			const icon = {
+				kind: "icon" as const,
+				iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID,
+			};
+			runtime.setDynamicEntityNameplateIndicators(
+				target.identity.guid,
+				workload === "svg-icons" ? [icon, icon] : [icon],
+			);
+		}
 		spawnedEntities = entities;
 		return entities;
 	}

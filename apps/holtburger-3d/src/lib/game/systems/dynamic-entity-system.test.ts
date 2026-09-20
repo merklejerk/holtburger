@@ -13,7 +13,10 @@ import { EffectSystem } from "./effect-system";
 import { behaviorTargetId } from "../behavior/behavior-event-router";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
-import type { PlacedDynamicPresentationSource } from "./dynamic-presentation-source";
+import {
+	nameplateIconId,
+	type PlacedDynamicPresentationSource,
+} from "./dynamic-presentation-source";
 import {
 	createObjectGeometryKey,
 	type GeometrySource,
@@ -463,7 +466,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
 		system.updateNameplateContent(nodeId, {
-			indicators: ["✓"],
+			indicators: [{ kind: "icon", iconId: nameplateIconId("opened") }],
 			level: 13,
 			name: "Drudge",
 		});

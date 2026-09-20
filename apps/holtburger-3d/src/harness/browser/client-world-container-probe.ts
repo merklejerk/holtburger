@@ -142,6 +142,7 @@ export async function probeWorldContainer(options: {
 			worldName: "Fixture",
 			playerName: "Wayfarer",
 			knownSpells: null,
+			appearanceOptions: { showHelmet: true, showCloak: true },
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],

@@ -2447,8 +2447,8 @@ fn test_player_description_initialization() {
     assert_eq!(state.player.guid, player_guid);
     assert_eq!(state.player_name(), player_name);
     assert_eq!(state.player_position(), Some(bootstrap_pos));
-    assert_eq!(state.player.options1, options1);
-    assert_eq!(state.player.options2, options2);
+    assert_eq!(state.player.character_options.options1, options1);
+    assert_eq!(state.player.character_options.options2, options2);
     assert_eq!(state.player.hotbar_spells, hotbar_spells);
     assert_eq!(state.player.desired_comps, desired_comps);
     assert_eq!(state.player.spellbook_filters, spellbook_filters);

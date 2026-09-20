@@ -499,18 +499,8 @@ impl ClientRuntime {
             return Ok(());
         }
 
-        self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
-            SetSingleCharacterOptionActionData {
-                option: CharacterOption::AutoRepeatAttacks,
-                value: true,
-            },
-        )))
-        .await?;
-        self.world
-            .player
-            .set_character_option_enabled(CharacterOption::AutoRepeatAttacks, true);
-        self.emit_player_options_updated();
-        Ok(())
+        self.set_character_option(CharacterOption::AutoRepeatAttacks, true)
+            .await
     }
 
     pub(super) async fn handle_combat_command(&mut self, command: ClientCommand) -> Result<()> {
@@ -662,7 +652,7 @@ impl ClientRuntime {
         let Some(spell) = self.world.spell_catalog.get(spell_id) else {
             return Err("Spell definition is unavailable.");
         };
-        if self.known_spells_character == Some(self.world.player.guid)
+        if self.described_character == Some(self.world.player.guid)
             && !self.world.player.spells.contains_key(&spell_id)
         {
             return Err("You do not know this spell.");
@@ -1109,7 +1099,7 @@ mod tests {
                 .prepare_spell_cast(99, SpellCastAim::Untargeted)
                 .is_err()
         );
-        client.known_spells_character = Some(Guid(1));
+        client.described_character = Some(Guid(1));
         assert_eq!(
             client
                 .prepare_spell_cast(42, SpellCastAim::Untargeted)

@@ -10,9 +10,7 @@ use crate::client::precise_jump_runtime::{
 };
 use crate::client::selection_query::{EntitySelectionQueryRequest, EntitySelectionQueryResult};
 use holtburger_common::properties::DamageType;
-use holtburger_common::{
-    CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
-};
+use holtburger_common::{CharacterOption, ConfirmationType, Guid};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -30,6 +28,7 @@ use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
 use holtburger_world::book::BookData;
 use holtburger_world::entity::{Entity, EntityNetworkMotion};
+use holtburger_world::player::PlayerCharacterOptions;
 use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
@@ -361,6 +360,8 @@ pub enum ClientPresentationDiscontinuityKind {
 pub struct ClientApplicationSnapshot {
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
+    /// None until PlayerDescription establishes the active character's complete option masks.
+    pub character_options: Option<PlayerCharacterOptions>,
     /// Server-confirmed stance, undefined before the local player is established.
     pub combat_mode: CombatMode,
     /// Shared desired attack and server-repeat lifecycle.
@@ -570,12 +571,6 @@ pub enum CombatFeedback {
         victim_id: Guid,
         killer_id: Guid,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlayerCharacterOptions {
-    pub options1: CharacterOptions1,
-    pub options2: CharacterOptions2,
 }
 
 /// One pending server request and the receipt that authorizes answering this occurrence.

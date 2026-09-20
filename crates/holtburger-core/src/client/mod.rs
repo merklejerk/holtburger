@@ -4,6 +4,7 @@ use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_session::Session;
+use holtburger_world::player::PlayerCharacterOptions;
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -142,8 +143,8 @@ pub struct ClientRuntime {
     world_generation: u64,
     /// Latest server-provided world name retained for replacement application snapshots.
     world_name: Option<String>,
-    /// Character whose initial PlayerDescription established complete spell knowledge.
-    known_spells_character: Option<Guid>,
+    /// Character whose PlayerDescription established complete spell knowledge and options.
+    described_character: Option<Guid>,
     /// Character-bound inspection inputs and their publication revision.
     spell_inspection: spell_inspection::SpellInspectionState,
     /// Terminal cause selected by the authority before it publishes `Exiting`.
@@ -270,7 +271,7 @@ impl ClientRuntime {
 
     /// Availability is tied to description identity, never scene or lifecycle readiness.
     fn known_spell_ids(&self) -> Option<Vec<u32>> {
-        self.known_spells_character
+        self.described_character
             .filter(|&guid| guid == self.world.player.guid)
             .map(|_| self.world.player.spells.keys().copied().collect())
     }
@@ -297,6 +298,10 @@ impl ClientRuntime {
                 .player_entity()
                 .map(|entity| entity.name().to_string()),
             known_spells: self.known_spell_ids(),
+            character_options: self
+                .described_character
+                .filter(|&guid| guid == self.world.player.guid)
+                .map(|_| self.player_character_options()),
             combat_mode: if self.world.player.guid == Guid::NULL {
                 holtburger_protocol::messages::combat::CombatMode::Undef
             } else {
@@ -546,10 +551,7 @@ impl ClientRuntime {
     }
 
     fn player_character_options(&self) -> PlayerCharacterOptions {
-        PlayerCharacterOptions {
-            options1: self.world.player.options1,
-            options2: self.world.player.options2,
-        }
+        self.world.player.character_options
     }
 
     fn emit_player_options_updated(&self) {
@@ -846,7 +848,7 @@ impl ClientRuntime {
             }
             WorldEvent::SpellUpdated { spell_ids, .. }
             | WorldEvent::SpellRemoved { spell_ids, .. }
-                if self.known_spells_character == Some(self.world.player.guid) =>
+                if self.described_character == Some(self.world.player.guid) =>
             {
                 let _ = self
                     .client_view_event_tx

@@ -115,7 +115,7 @@ impl ClientRuntime {
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
-        self.known_spells_character = None;
+        self.described_character = None;
         self.refresh_spell_inspection_context();
         self.start_world_activation_with_reset(
             ClientWorldActivationState::InitialEntry,
@@ -331,7 +331,7 @@ impl ClientRuntime {
         if let GameMessage::GameEvent(event) = &message
             && let GameEvent::PlayerDescription(description) = &event.event
         {
-            self.known_spells_character = Some(description.guid);
+            self.described_character = Some(description.guid);
         }
         self.handle_world_events(world_events.clone()).await?;
         self.observe_container_message(&message, previous_container_root)
@@ -343,7 +343,7 @@ impl ClientRuntime {
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
                 self.clear_busy_operation();
-                self.known_spells_character = None;
+                self.described_character = None;
                 self.refresh_spell_inspection_context();
                 self.authenticating = false;
                 self.character_selection.characters = data.characters.clone();
@@ -878,6 +878,7 @@ mod tests {
     };
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_world::WorldEvent;
+    use holtburger_world::player::PlayerCharacterOptions;
     use holtburger_world::stats::CharacterLevelInfo;
 
     fn build_test_client() -> ClientRuntime {
@@ -1532,7 +1533,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spell_knowledge_requires_description_and_resets_on_character_entry() {
+    async fn character_knowledge_requires_description_and_resets_on_character_entry() {
         let mut client = build_test_client();
         let player = Guid(0x50000001);
         let mut events = client.subscribe_client_view_events();
@@ -1543,6 +1544,7 @@ mod tests {
             spell_ids: vec![7],
         });
         assert_eq!(client.application_snapshot().known_spells, None);
+        assert_eq!(client.application_snapshot().character_options, None);
         assert!(
             !std::iter::from_fn(|| events.try_recv().ok())
                 .any(|event| matches!(event, ClientViewEvent::PlayerSpellsUpdated { .. }))
@@ -1581,6 +1583,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.application_snapshot().known_spells, Some(vec![]));
+        assert_eq!(
+            client.application_snapshot().character_options,
+            Some(PlayerCharacterOptions::default())
+        );
         let mut changes = Vec::new();
         client.world.player.add_spell(3, &mut changes);
         client.world.player.add_spell(1, &mut changes);
@@ -1594,15 +1600,17 @@ mod tests {
         // Scene replacement is independent of character knowledge.
         client.start_world_activation(ClientWorldActivationState::Teleport, player);
         assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
+        assert!(client.application_snapshot().character_options.is_some());
         client.character_selection.character_id = Some(Guid(0x50000002));
         client.begin_world_entry_transition().await.unwrap();
         assert_eq!(client.application_snapshot().known_spells, None);
+        assert_eq!(client.application_snapshot().character_options, None);
     }
 
     #[tokio::test]
     async fn test_spell_world_event_projects_supplied_snapshot() {
         let mut client = build_test_client();
-        client.known_spells_character = Some(client.world.player.guid);
+        client.described_character = Some(client.world.player.guid);
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::SpellUpdated {
@@ -1838,8 +1846,9 @@ mod tests {
     async fn test_player_info_world_event_projects_player_options() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.world.player.options1 = CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG;
-        client.world.player.options2 = CharacterOptions2::SHOW_HELM;
+        client.world.player.character_options.options1 =
+            CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG;
+        client.world.player.character_options.options2 = CharacterOptions2::SHOW_HELM;
 
         client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(
             holtburger_world::PlayerInfoData {

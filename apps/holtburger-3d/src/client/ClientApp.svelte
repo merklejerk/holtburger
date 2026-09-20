@@ -83,6 +83,8 @@
 		ClientCharacterMotionCapabilities,
 		ClientCharacterMotionEventRequest,
 		ClientCharacterMotionRejection,
+		ClientAppearanceOption,
+		ClientAppearanceOptions,
 		ClientChatMessage,
 		ClientDriveRequest,
 		ClientVital,
@@ -299,9 +301,22 @@
 	function reportCommandFailure(error: unknown): void {
 		commandFailure = diagnostic(error);
 	}
+	async function setAppearanceOption(
+		option: ClientAppearanceOption,
+		enabled: boolean,
+	): Promise<void> {
+		const owner = session;
+		if (owner === null) return;
+		try {
+			await owner.setAppearanceOption(option, enabled);
+		} catch (error) {
+			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+		}
+	}
 	let playerName = $state<string | null>(null);
 	let worldName = $state<string | null>(null);
 	let vitals = $state<readonly ClientVital[]>([]);
+	let appearanceOptions = $state<ClientAppearanceOptions | null>(null);
 	let characterMotion = $state<ClientCharacterMotionCapabilities | null>(null);
 	let activeJumpBeginSequence = $state<number | null>(null);
 	let toast = $state<ClientToast | null>(null);
@@ -556,10 +571,14 @@
 			case "combat":
 				acceptCombatStatus(event.status);
 				return;
+			case "appearance-options":
+				appearanceOptions = event.options;
+				return;
 			case "current-state":
 				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
+				appearanceOptions = event.state.appearanceOptions;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
@@ -586,7 +605,11 @@
 					lifecycle: event.state.lifecycle,
 				});
 				return;
+			case "resyncing":
+				appearanceOptions = null;
+				return;
 			case "lifecycle":
+				appearanceOptions = session?.state().appearanceOptions ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
 					inputGate.cancel();
@@ -594,8 +617,9 @@
 				if (
 					event.lifecycle.kind === "entering-world" ||
 					event.lifecycle.kind === "character-selection"
-				)
+				) {
 					retireCharacterSettings();
+				}
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "authority",
 					lifecycle: event.lifecycle,
@@ -1430,6 +1454,8 @@
 		{playerName}
 		{worldName}
 		{vitals}
+		{appearanceOptions}
+		onAppearanceOptionChange={setAppearanceOption}
 		jumpChargeActive={activeJumpBeginSequence !== null}
 		readJumpExtent={() => inputController?.chargeExtent() ?? 0}
 		{toast}

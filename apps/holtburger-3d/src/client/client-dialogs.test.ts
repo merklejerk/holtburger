@@ -44,6 +44,7 @@ async function fixture() {
 			worldName: null,
 			playerName: null,
 			knownSpells: null,
+			appearanceOptions: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],

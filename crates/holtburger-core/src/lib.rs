@@ -73,7 +73,7 @@ pub use client::types::{
     ClientCombatEngagement, ClientCombatRefillEstimate, ClientCombatStatus, ClientCommand,
     ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause, ClientLifecycleState,
     ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
-    PlayerCharacterOptions, RetryState,
+    RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
@@ -127,6 +127,7 @@ pub use dynamic_scale_scripts::{
     PreparedDynamicScaleTimeline, PreparedScaleRecord, prepare_dynamic_scale_timeline,
 };
 pub use holtburger_content::LandblockCollisionAsset;
+pub use holtburger_world::player::PlayerCharacterOptions;
 pub use kinematic_boom::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
     KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,

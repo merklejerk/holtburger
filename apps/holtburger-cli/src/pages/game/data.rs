@@ -4,7 +4,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
-use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
+use holtburger_common::{CharacterOption, Guid};
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
@@ -153,49 +153,7 @@ impl CuratedCharacterOption {
     }
 
     pub fn is_enabled(self, options: PlayerCharacterOptions) -> bool {
-        match self {
-            Self::CraftSuccessDialog => options
-                .options1
-                .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG),
-            Self::AutoAcceptFellowshipRequests => options
-                .options1
-                .contains(CharacterOptions1::AUTO_ACCEPT_FELLOW_REQUEST),
-            Self::IgnoreAllegianceRequests => options
-                .options1
-                .contains(CharacterOptions1::IGNORE_ALLEGIANCE_REQUESTS),
-            Self::IgnoreFellowshipRequests => options
-                .options1
-                .contains(CharacterOptions1::IGNORE_FELLOWSHIP_REQUESTS),
-            Self::IgnoreTradeRequests => options
-                .options1
-                .contains(CharacterOptions1::IGNORE_TRADE_REQUESTS),
-            Self::AllowItemGive => options.options1.contains(CharacterOptions1::ALLOW_GIVE),
-            Self::ShareXp => options
-                .options1
-                .contains(CharacterOptions1::FELLOWSHIP_SHARE_XP),
-            Self::ShareLoot => options
-                .options1
-                .contains(CharacterOptions1::FELLOWSHIP_SHARE_LOOT),
-            Self::AcceptLootPermit => options
-                .options1
-                .contains(CharacterOptions1::ACCEPT_LOOT_PERMITS),
-            Self::AllegianceChat => options
-                .options1
-                .contains(CharacterOptions1::HEAR_ALLEGIANCE_CHAT),
-            Self::GeneralChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_GENERAL_CHAT),
-            Self::TradeChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_TRADE_CHAT),
-            Self::LfgChat => options.options2.contains(CharacterOptions2::HEAR_LFG_CHAT),
-            Self::RoleplayChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_ROLEPLAY_CHAT),
-            Self::SocietyChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_SOCIETY_CHAT),
-        }
+        options.is_enabled(self.character_option())
     }
 }
 

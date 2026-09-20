@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
+use holtburger_common::CharacterOption;
 use holtburger_core::ClientCommand;
 use serde::Deserialize;
 
@@ -224,6 +225,11 @@ pub enum ClientHostCommand {
     },
     /// Toggle peace and the current equipment-derived stance in core.
     ToggleClientCombatMode,
+    /// Change one server-backed appearance preference exposed by the client UI.
+    SetClientAppearanceOption {
+        option: ClientAppearanceOption,
+        enabled: bool,
+    },
     /// Submit a spellbook cast with caller-owned recipient intent.
     CastClientSpell {
         #[serde(rename = "spellId")]
@@ -314,6 +320,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "queue_client_character_motion_event",
     "send_client_chat",
     "toggle_client_combat_mode",
+    "set_client_appearance_option",
     "cast_client_spell",
     "begin_client_combat_engagement",
     "update_client_combat_profile",
@@ -332,6 +339,23 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "stop_client_camera",
     "disconnect_client",
 ];
+
+/// Appearance options intentionally exposed by the 3D client host boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientAppearanceOption {
+    Helmet,
+    Cloak,
+}
+
+impl From<ClientAppearanceOption> for CharacterOption {
+    fn from(option: ClientAppearanceOption) -> Self {
+        match option {
+            ClientAppearanceOption::Helmet => CharacterOption::ShowYourHelmOrHeadGear,
+            ClientAppearanceOption::Cloak => CharacterOption::ShowYourCloak,
+        }
+    }
+}
 
 struct ClientHostState {
     started: bool,
@@ -670,6 +694,14 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        SetClientAppearanceOption { option, enabled } => runtime
+            .send_command(ClientCommand::SetCharacterOption {
+                option: option.into(),
+                value: enabled,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         ExamineClientEntity { guid } => runtime
             .send_command(ClientCommand::Identify(guid))
             .await
@@ -818,6 +850,28 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appearance_command_accepts_only_the_two_exposed_options() {
+        for option in ["helmet", "cloak"] {
+            assert!(
+                serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                    "command": "set_client_appearance_option",
+                    "option": option,
+                    "enabled": true,
+                }))
+                .is_ok()
+            );
+        }
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "set_client_appearance_option",
+                "option": "auto-repeat-attacks",
+                "enabled": true,
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn examine_entity_command_requires_a_u32_guid() {

@@ -298,6 +298,19 @@ export function decodeClientSpells(value: unknown): number[] {
 		.spellIds;
 }
 
+const clientAppearanceOptionsSchema = z
+	.object({ showHelmet: z.boolean(), showCloak: z.boolean() })
+	.strict();
+export type ClientAppearanceOptions = z.infer<
+	typeof clientAppearanceOptionsSchema
+>;
+export type ClientAppearanceOption = "helmet" | "cloak";
+export function decodeClientAppearanceOptions(
+	value: unknown,
+): ClientAppearanceOptions {
+	return clientAppearanceOptionsSchema.parse(value);
+}
+
 const currentStateSchema = z
 	.object({
 		entityCollisionDisabled: z.boolean(),
@@ -308,6 +321,7 @@ const currentStateSchema = z
 		worldName: z.string().nullable(),
 		playerName: z.string().nullable(),
 		knownSpells: knownSpellIdsSchema.nullable(),
+		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,
 		vitals: z.array(vitalSchema),

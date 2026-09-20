@@ -22,6 +22,7 @@
 		ClientInventoryView,
 	} from "./client-inventory-state";
 	import ClientContentsSortButton from "./ClientContentsSortButton.svelte";
+	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
@@ -47,6 +48,8 @@
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
+	/** Visual-only prototype state; helmet rendering is not wired yet. */
+	let helmetVisible = $state(true);
 	/** Identity is resolved against each sampled view so removed or changed items cannot leave stale hints. */
 	let hoveredInventoryGuid = $state<number | null>(null);
 	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
@@ -180,18 +183,46 @@
 >
 	<div class="inventory-layout" inert={splitRequest !== null}>
 		<aside class="inventory-equipment-strip" aria-label="Equipped items">
-			<InventoryEquipmentStrip
-				{capacities}
-				equipment={view?.equipment ?? { rows: [], pending: true }}
-				{pending}
-				{iconFor}
-				{selectedGuid}
-				{onSelectItem}
-				{hoveredEquipLocations}
-				onHoverSlot={(mask) => {
-					hoveredEquipmentSlot = mask;
-				}}
-			/>
+			<div class="inventory-equipment-body">
+				<InventoryEquipmentStrip
+					{capacities}
+					equipment={view?.equipment ?? { rows: [], pending: true }}
+					{pending}
+					{iconFor}
+					{selectedGuid}
+					{onSelectItem}
+					{hoveredEquipLocations}
+					onHoverSlot={(mask) => {
+						hoveredEquipmentSlot = mask;
+					}}
+				/>
+			</div>
+			<div
+				class="inventory-equipment-toolbar"
+				role="group"
+				aria-label="Equipment tools"
+			>
+				<button
+					type="button"
+					class="inventory-tool helmet-tool ui-hud-button"
+					aria-label="Toggle helmet visibility"
+					aria-pressed={helmetVisible}
+					title={`Helmet ${helmetVisible ? "visible" : "hidden"} (visual stub)`}
+					onclick={() => {
+						helmetVisible = !helmetVisible;
+					}}
+				>
+					<ClientHudIcon name="helmet" />
+				</button>
+				<button
+					type="button"
+					class="inventory-tool ui-hud-button"
+					aria-label="Save loadout"
+					title="Save loadout (stub)"
+				>
+					<ClientHudIcon name="save-loadout" />
+				</button>
+			</div>
 		</aside>
 		<ClientContentsView
 			{sections}
@@ -343,8 +374,34 @@
 		.inventory-equipment-strip {
 			grid-column: 1;
 			grid-row: 1 / -1;
+			display: grid;
+			grid-template-rows: minmax(0, 1fr) auto;
 			min-height: 0;
 			border-right: var(--ui-inventory-divider);
+		}
+		.inventory-equipment-body {
+			min-height: 0;
+			overflow: hidden;
+		}
+		.inventory-equipment-toolbar {
+			display: flex;
+			align-items: center;
+			justify-content: space-evenly;
+			gap: 8px;
+			padding: 4px var(--ui-inventory-padding);
+			border-top: var(--ui-inventory-divider);
+		}
+		.inventory-tool {
+			width: 24px;
+			height: 24px;
+			padding: 2px;
+		}
+		.inventory-tool :global(svg) {
+			width: 20px;
+			height: 20px;
+		}
+		.helmet-tool[aria-pressed="true"] :global(svg) {
+			filter: drop-shadow(0 0 2px var(--ui-color-active));
 		}
 	}
 </style>

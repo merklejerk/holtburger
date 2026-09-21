@@ -3,7 +3,7 @@ import { AppInput } from "./app-input";
 import { INPUT_DEFAULTS } from "./input-defaults";
 import { InputContext, matchesKey } from "./input-context";
 
-it("remaps numbered focus, cells, navigation, confirm, cancel, and the pointer/key modifier", () => {
+it("remaps numbered focus, cells, navigation, confirm, shared cancel, and the pointer/key modifier", () => {
 	const input = new AppInput({
 		...INPUT_DEFAULTS,
 		actionBars: {
@@ -23,10 +23,10 @@ it("remaps numbered focus, cells, navigation, confirm, cancel, and the pointer/k
 				left: [{ key: "j" }],
 				right: [{ key: "l" }],
 				confirm: [{ key: "F6" }],
-				cancel: [{ key: "Backspace" }],
 			},
 			alternate: "ctrl",
 		},
+		client: { ...INPUT_DEFAULTS.client, cancel: [{ key: "Backspace" }] },
 	});
 	const event = {
 		key: "F5",
@@ -62,9 +62,7 @@ it("remaps numbered focus, cells, navigation, confirm, cancel, and the pointer/k
 	expect(input.actionBarDirection({ ...event, key: "J" })).toBe("left");
 	expect(input.actionBarDirection({ ...event, key: "ArrowLeft" })).toBeNull();
 	expect(input.actionBarCommand("confirm", { ...event, key: "F6" })).toBe(true);
-	expect(input.actionBarCommand("cancel", { ...event, key: "Backspace" })).toBe(
-		true,
-	);
+	expect(input.shortcut("cancel", { ...event, key: "Backspace" })).toBe(true);
 	expect(input.actionBarAlternate({ shiftKey: false, ctrlKey: true })).toBe(
 		true,
 	);

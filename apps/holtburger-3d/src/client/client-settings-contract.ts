@@ -2,6 +2,18 @@ import { z } from "zod";
 import { MAX_ACTION_BARS } from "./client-action-bar-contract.js";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
 import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state.js";
+import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes.js";
+import { TEXTURE_FILTERING_POLICIES } from "../lib/game/renderer/texture-filtering-policy.js";
+import {
+	CLIENT_FONT_FAMILY_OPTIONS,
+	CLIENT_GRAPHICS_RANGES,
+} from "./client-settings-values.js";
+import {
+	CLIENT_KEYBOARD_V6_DEFAULTS,
+	clientKeyboardSettingsSchema,
+	clientKeyboardSettingsV6Schema,
+	clientKeyboardSettingsV7Schema,
+} from "./client-input-settings.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
@@ -54,9 +66,15 @@ const clientHudLayoutV2Schema = clientHudLayoutV1Schema
 	.strict()
 	.readonly();
 
-const clientHudLayoutSchema = clientHudLayoutV2Schema
+const clientHudLayoutV3Schema = clientHudLayoutV2Schema
 	.unwrap()
 	.extend({ combatBar: hudPlacementSchema })
+	.strict()
+	.readonly();
+
+const clientHudLayoutSchema = clientHudLayoutV3Schema
+	.unwrap()
+	.extend({ settings: hudPlacementSchema })
 	.strict()
 	.readonly();
 
@@ -104,9 +122,84 @@ const clientUserSettingsV2Schema = clientUserSettingsV1Schema
 	.strict()
 	.readonly();
 
-export const clientUserSettingsSchema = clientUserSettingsV2Schema
+const clientUserSettingsV3Schema = clientUserSettingsV2Schema
 	.unwrap()
-	.extend({ hudLayout: clientHudLayoutSchema })
+	.extend({ hudLayout: clientHudLayoutV3Schema })
+	.strict()
+	.readonly();
+
+/** User-scoped graphics preferences; implementation tuning stays in renderer policy. */
+export const clientGraphicsSettingsSchema = z
+	.object({
+		viewDistance: z
+			.number()
+			.int()
+			.min(CLIENT_GRAPHICS_RANGES.viewDistance.minimum)
+			.max(CLIENT_GRAPHICS_RANGES.viewDistance.maximum),
+		ambientOcclusionEnabled: z.boolean(),
+		entityShadowMode: z.enum(ENTITY_SHADOW_MODES),
+		verticalFovDegrees: finiteNumber
+			.min(CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum)
+			.max(CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum),
+		textureFiltering: z.enum(TEXTURE_FILTERING_POLICIES),
+		renderScale: finiteNumber
+			.min(CLIENT_GRAPHICS_RANGES.renderScale.minimum)
+			.max(CLIENT_GRAPHICS_RANGES.renderScale.maximum),
+		weatherEnabled: z.boolean(),
+	})
+	.strict()
+	.readonly();
+export type ClientGraphicsSettings = z.infer<
+	typeof clientGraphicsSettingsSchema
+>;
+
+const clientUserSettingsV4Schema = clientUserSettingsV3Schema
+	.unwrap()
+	.omit({ weatherEnabled: true })
+	.extend({
+		hudLayout: clientHudLayoutSchema,
+		graphics: clientGraphicsSettingsSchema,
+	})
+	.strict()
+	.readonly();
+
+/** User-scoped font roles; scaling remains an intentionally disabled UI control. */
+export const clientUiSettingsSchema = z
+	.object({
+		fonts: z
+			.object({
+				body: z.enum(CLIENT_FONT_FAMILY_OPTIONS),
+				heading: z.enum(CLIENT_FONT_FAMILY_OPTIONS),
+				mono: z.enum(CLIENT_FONT_FAMILY_OPTIONS),
+			})
+			.strict()
+			.readonly(),
+	})
+	.strict()
+	.readonly();
+export type ClientUiSettings = z.infer<typeof clientUiSettingsSchema>;
+
+const clientUserSettingsV5Schema = clientUserSettingsV4Schema
+	.unwrap()
+	.extend({ ui: clientUiSettingsSchema })
+	.strict()
+	.readonly();
+
+const clientUserSettingsV6Schema = clientUserSettingsV5Schema
+	.unwrap()
+	.extend({ input: clientKeyboardSettingsV6Schema })
+	.strict()
+	.readonly();
+
+const clientUserSettingsV7Schema = clientUserSettingsV5Schema
+	.unwrap()
+	.extend({ input: clientKeyboardSettingsV7Schema })
+	.strict()
+	.readonly();
+
+export const clientUserSettingsSchema = clientUserSettingsV5Schema
+	.unwrap()
+	.extend({ input: clientKeyboardSettingsSchema })
 	.strict()
 	.readonly();
 export type ClientUserSettings = z.infer<typeof clientUserSettingsSchema>;
@@ -319,6 +412,96 @@ export const clientLocalSettingsDocumentV3Schema = z
 		user: z
 			.object({
 				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV3Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV3 = z.infer<
+	typeof clientLocalSettingsDocumentV3Schema
+>;
+
+export const clientLocalSettingsDocumentV4Schema = z
+	.object({
+		schemaVersion: z.literal(4),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV4Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV4 = z.infer<
+	typeof clientLocalSettingsDocumentV4Schema
+>;
+
+export const clientLocalSettingsDocumentV5Schema = z
+	.object({
+		schemaVersion: z.literal(5),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV5Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV5 = z.infer<
+	typeof clientLocalSettingsDocumentV5Schema
+>;
+
+export const clientLocalSettingsDocumentV6Schema = z
+	.object({
+		schemaVersion: z.literal(6),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV6Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV6 = z.infer<
+	typeof clientLocalSettingsDocumentV6Schema
+>;
+
+export const clientLocalSettingsDocumentV7Schema = z
+	.object({
+		schemaVersion: z.literal(7),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV7Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV7 = z.infer<
+	typeof clientLocalSettingsDocumentV7Schema
+>;
+
+export const clientLocalSettingsDocumentV8Schema = z
+	.object({
+		schemaVersion: z.literal(8),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
 				client: clientUserSettingsSchema,
 			})
 			.strict()
@@ -328,7 +511,7 @@ export const clientLocalSettingsDocumentV3Schema = z
 	.strict()
 	.readonly();
 export type ClientLocalSettingsDocument = z.infer<
-	typeof clientLocalSettingsDocumentV3Schema
+	typeof clientLocalSettingsDocumentV8Schema
 >;
 
 /**
@@ -366,7 +549,7 @@ function migrateClientLocalSettingsDocumentV1(
 
 function migrateClientLocalSettingsDocumentV2(
 	document: ClientLocalSettingsDocumentV2,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV3 {
 	return clientLocalSettingsDocumentV3Schema.parse({
 		...document,
 		schemaVersion: 3,
@@ -402,6 +585,122 @@ function migrateClientLocalSettingsDocumentV2(
 	});
 }
 
+/** Historical v4 additions retain their original absence values when defaults change. */
+const V4_SETTINGS_PLACEMENT = {
+	horizontal: { alignment: "end", offset: 16 },
+	vertical: { alignment: "center", offset: 0 },
+	preferredWidth: 430,
+	preferredHeight: 500,
+} as const;
+
+function migrateClientLocalSettingsDocumentV3(
+	document: ClientLocalSettingsDocumentV3,
+): ClientLocalSettingsDocumentV4 {
+	const { weatherEnabled, ...client } = document.user.client;
+	return clientLocalSettingsDocumentV4Schema.parse({
+		...document,
+		schemaVersion: 4,
+		user: {
+			...document.user,
+			client: {
+				...client,
+				hudLayout: {
+					...client.hudLayout,
+					settings: V4_SETTINGS_PLACEMENT,
+				},
+				graphics: {
+					viewDistance: 6,
+					ambientOcclusionEnabled: true,
+					entityShadowMode: "shadow-maps",
+					verticalFovDegrees: 75,
+					textureFiltering: "anisotropic-2x",
+					renderScale: 1,
+					weatherEnabled,
+				},
+			},
+		},
+	});
+}
+
+/** Historical v5 font defaults stay fixed if later theme preferences change. */
+const V5_UI_SETTINGS = {
+	fonts: { body: "theme", heading: "theme", mono: "theme" },
+} as const;
+
+function migrateClientLocalSettingsDocumentV4(
+	document: ClientLocalSettingsDocumentV4,
+): ClientLocalSettingsDocumentV5 {
+	return clientLocalSettingsDocumentV5Schema.parse({
+		...document,
+		schemaVersion: 5,
+		user: {
+			...document.user,
+			client: { ...document.user.client, ui: V5_UI_SETTINGS },
+		},
+	});
+}
+
+function migrateClientLocalSettingsDocumentV5(
+	document: ClientLocalSettingsDocumentV5,
+): ClientLocalSettingsDocumentV6 {
+	return clientLocalSettingsDocumentV6Schema.parse({
+		...document,
+		schemaVersion: 6,
+		user: {
+			...document.user,
+			client: {
+				...document.user.client,
+				input: CLIENT_KEYBOARD_V6_DEFAULTS,
+			},
+		},
+	});
+}
+
+/** Retire the duplicate focused-bar cancel binding; the shared client cancel now owns it. */
+function migrateClientLocalSettingsDocumentV6(
+	document: ClientLocalSettingsDocumentV6,
+): ClientLocalSettingsDocumentV7 {
+	const { cancel, ...commands } =
+		document.user.client.input.actionBars.commands;
+	void cancel;
+	return clientLocalSettingsDocumentV7Schema.parse({
+		...document,
+		schemaVersion: 7,
+		user: {
+			...document.user,
+			client: {
+				...document.user.client,
+				input: {
+					...document.user.client.input,
+					actionBars: {
+						...document.user.client.input.actionBars,
+						commands,
+					},
+				},
+			},
+		},
+	});
+}
+
+/** Character selection now uses native form controls, so its old shortcut is discarded. */
+function migrateClientLocalSettingsDocumentV7(
+	document: ClientLocalSettingsDocumentV7,
+): ClientLocalSettingsDocument {
+	const { enterWorld, ...client } = document.user.client.input.client;
+	void enterWorld;
+	return clientLocalSettingsDocumentV8Schema.parse({
+		...document,
+		schemaVersion: 8,
+		user: {
+			...document.user,
+			client: {
+				...document.user.client,
+				input: { ...document.user.client.input, client },
+			},
+		},
+	});
+}
+
 /** Validate a user snapshot at an IPC or composition boundary. */
 export function parseClientUserSettings(value: unknown): ClientUserSettings {
 	return clientUserSettingsSchema.parse(value);
@@ -415,9 +714,9 @@ export function parseClientCharacterSettings(
 }
 
 /** Dispatch durable versions explicitly so older clients never overwrite newer state. */
-export function parseClientLocalSettingsDocument(
+function parseClientLocalSettingsDocumentV7(
 	value: unknown,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV7 {
 	if (
 		typeof value !== "object" ||
 		value === null ||
@@ -426,20 +725,80 @@ export function parseClientLocalSettingsDocument(
 		throw new Error("Client settings document has no schemaVersion");
 	switch (value.schemaVersion) {
 		case 1:
-			return migrateClientLocalSettingsDocumentV2(
-				migrateClientLocalSettingsDocumentV1(
-					clientLocalSettingsDocumentV1Schema.parse(value),
+			return migrateClientLocalSettingsDocumentV6(
+				migrateClientLocalSettingsDocumentV5(
+					migrateClientLocalSettingsDocumentV4(
+						migrateClientLocalSettingsDocumentV3(
+							migrateClientLocalSettingsDocumentV2(
+								migrateClientLocalSettingsDocumentV1(
+									clientLocalSettingsDocumentV1Schema.parse(value),
+								),
+							),
+						),
+					),
 				),
 			);
 		case 2:
-			return migrateClientLocalSettingsDocumentV2(
-				clientLocalSettingsDocumentV2Schema.parse(value),
+			return migrateClientLocalSettingsDocumentV6(
+				migrateClientLocalSettingsDocumentV5(
+					migrateClientLocalSettingsDocumentV4(
+						migrateClientLocalSettingsDocumentV3(
+							migrateClientLocalSettingsDocumentV2(
+								clientLocalSettingsDocumentV2Schema.parse(value),
+							),
+						),
+					),
+				),
 			);
 		case 3:
-			return clientLocalSettingsDocumentV3Schema.parse(value);
+			return migrateClientLocalSettingsDocumentV6(
+				migrateClientLocalSettingsDocumentV5(
+					migrateClientLocalSettingsDocumentV4(
+						migrateClientLocalSettingsDocumentV3(
+							clientLocalSettingsDocumentV3Schema.parse(value),
+						),
+					),
+				),
+			);
+		case 4:
+			return migrateClientLocalSettingsDocumentV6(
+				migrateClientLocalSettingsDocumentV5(
+					migrateClientLocalSettingsDocumentV4(
+						clientLocalSettingsDocumentV4Schema.parse(value),
+					),
+				),
+			);
+		case 5:
+			return migrateClientLocalSettingsDocumentV6(
+				migrateClientLocalSettingsDocumentV5(
+					clientLocalSettingsDocumentV5Schema.parse(value),
+				),
+			);
+		case 6:
+			return migrateClientLocalSettingsDocumentV6(
+				clientLocalSettingsDocumentV6Schema.parse(value),
+			);
+		case 7:
+			return clientLocalSettingsDocumentV7Schema.parse(value);
 		default:
 			throw new Error(
 				`Unsupported client settings schema version ${String(value.schemaVersion)}`,
 			);
 	}
+}
+
+/** Upgrade every supported document to the current user-scoped settings contract. */
+export function parseClientLocalSettingsDocument(
+	value: unknown,
+): ClientLocalSettingsDocument {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"schemaVersion" in value &&
+		value.schemaVersion === 8
+	)
+		return clientLocalSettingsDocumentV8Schema.parse(value);
+	return migrateClientLocalSettingsDocumentV7(
+		parseClientLocalSettingsDocumentV7(value),
+	);
 }

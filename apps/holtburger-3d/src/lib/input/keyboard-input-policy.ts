@@ -16,6 +16,8 @@ export interface KeyboardScope {
 	readonly passthrough?: boolean;
 	/** One-shot command scopes end on cancellation and are not restored after modals. */
 	readonly transient?: boolean;
+	/** Allow native button/range focus and Tab traversal inside this deliberate UI surface. */
+	readonly nativeControls?: boolean;
 	/** Optional command that enters this scope from the game or another explicit scope. */
 	readonly activation?: (event: KeyboardEvent) => boolean;
 	/** Scope-local behavior runs before native editing. */
@@ -373,6 +375,7 @@ export class KeyboardInputPolicy {
 			!event.defaultPrevented &&
 			this.#owner === owner &&
 			!editor &&
+			(owner === null || !this.#nativeControlsFor(owner)) &&
 			this.#modals.length === 0 &&
 			this.viewport.allowed &&
 			fresh
@@ -415,8 +418,12 @@ export class KeyboardInputPolicy {
 			this.#presses.set(key, "game");
 			this.#game?.keydown(event);
 		} else if (owner === null) this.#presses.set(key, "cancelled");
-		// A configured Tab command can run, but the browser must never traverse focus.
-		if (event.key === "Tab") event.preventDefault();
+		// Native UI scopes retain Tab traversal; gameplay keeps its configured Tab commands.
+		if (
+			event.key === "Tab" &&
+			(this.#owner === null || !this.#nativeControlsFor(this.#owner))
+		)
+			event.preventDefault();
 		if (event.defaultPrevented) event.stopImmediatePropagation();
 	};
 
@@ -464,13 +471,19 @@ export class KeyboardInputPolicy {
 		return undefined;
 	}
 
+	#nativeControlsFor(element: HTMLElement): boolean {
+		return this.#scopeFor(element)?.nativeControls === true;
+	}
+
 	#eligible(element: HTMLElement): boolean {
 		const modal = this.#modals.at(-1);
 		return (
 			element.isConnected &&
 			!element.closest("[inert], [disabled], [hidden], dialog:not([open])") &&
 			(modal === undefined
-				? isEditor(element) || this.#scopes.has(element)
+				? isEditor(element) ||
+					this.#scopes.has(element) ||
+					this.#nativeControlsFor(element)
 				: modal.element.contains(element))
 		);
 	}
@@ -504,7 +517,11 @@ export class KeyboardInputPolicy {
 	readonly #focusIn = (event: FocusEvent): void => {
 		const target = event.target;
 		if (!(target instanceof HTMLElement)) return;
-		if (isEditor(target) || this.#modals.at(-1)?.element.contains(target)) {
+		if (
+			isEditor(target) ||
+			this.#nativeControlsFor(target) ||
+			this.#modals.at(-1)?.element.contains(target)
+		) {
 			this.#setOwner(target);
 		} else if (target !== this.#owner) {
 			// Native range drags and label activation keep their pointer defaults, but not keyboard ownership.
@@ -534,7 +551,11 @@ export class KeyboardInputPolicy {
 		if (target.closest("[data-game-viewport]") && this.#modals.length === 0)
 			this.returnToGame();
 		// Preventing focus on buttons leaves clicks intact. Other native controls retain their gestures.
-		if (this.#modals.length === 0 && target.closest("button, [role='button']"))
+		if (
+			this.#modals.length === 0 &&
+			target.closest("button, [role='button']") &&
+			!(target instanceof HTMLElement && this.#nativeControlsFor(target))
+		)
 			event.preventDefault();
 	};
 }

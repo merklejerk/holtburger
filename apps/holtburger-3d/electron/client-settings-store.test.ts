@@ -79,7 +79,7 @@ describe("ClientSettingsStore", () => {
 			8,
 		);
 		const source = {
-			schemaVersion: 3,
+			schemaVersion: 8,
 			user: { window: initialWindow, client: user },
 			characters: {},
 		};
@@ -103,7 +103,7 @@ describe("ClientSettingsStore", () => {
 		await writeFile(
 			path,
 			JSON.stringify({
-				schemaVersion: 3,
+				schemaVersion: 8,
 				user: { window: initialWindow, client: originalUser },
 				characters: {
 					"example:9000/0x50000001": {
@@ -124,7 +124,10 @@ describe("ClientSettingsStore", () => {
 
 		const replacementUser = {
 			...originalUser,
-			weatherEnabled: !originalUser.weatherEnabled,
+			graphics: {
+				...originalUser.graphics,
+				weatherEnabled: !originalUser.graphics.weatherEnabled,
+			},
 		};
 		const replacementCharacter = {
 			...originalCharacter,
@@ -179,7 +182,10 @@ describe("ClientSettingsStore", () => {
 		await writeFile(collidingTemporaryPath, "occupied", "utf8");
 		const second = {
 			...first,
-			weatherEnabled: !first.weatherEnabled,
+			graphics: {
+				...first.graphics,
+				weatherEnabled: !first.graphics.weatherEnabled,
+			},
 		};
 		await expect(store.saveUser(second)).rejects.toMatchObject({
 			code: "EEXIST",

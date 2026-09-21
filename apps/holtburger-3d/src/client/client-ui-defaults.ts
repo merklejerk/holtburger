@@ -72,6 +72,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 330, height: 310 },
 		minSize: { width: 280, height: 220 },
 	},
+	settings: {
+		anchor: "center-right",
+		offset: { x: 16, y: 0 },
+		size: { width: 430, height: 500 },
+		minSize: { width: 340, height: 300 },
+	},
 	frameRate: {
 		anchor: "top-center",
 		offset: { x: 0, y: 8 },

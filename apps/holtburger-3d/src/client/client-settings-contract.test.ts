@@ -3,6 +3,11 @@ import {
 	clientLocalSettingsDocumentV1Schema,
 	clientLocalSettingsDocumentV2Schema,
 	clientLocalSettingsDocumentV3Schema,
+	clientLocalSettingsDocumentV4Schema,
+	clientLocalSettingsDocumentV5Schema,
+	clientLocalSettingsDocumentV6Schema,
+	clientLocalSettingsDocumentV7Schema,
+	clientLocalSettingsDocumentV8Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -16,7 +21,7 @@ const viewport = { width: 1440, height: 900 };
 
 function document() {
 	return {
-		schemaVersion: 3 as const,
+		schemaVersion: 8 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -29,6 +34,88 @@ function document() {
 				lastKnownName: "Example",
 				settings: createDefaultClientCharacterSettings(),
 			},
+		},
+	};
+}
+
+function versionSevenDocument() {
+	const current = document();
+	return {
+		...current,
+		schemaVersion: 7 as const,
+		user: {
+			...current.user,
+			client: {
+				...current.user.client,
+				input: {
+					...current.user.client.input,
+					client: {
+						...current.user.client.input.client,
+						enterWorld: [{ key: "Enter" }],
+					},
+				},
+			},
+		},
+	};
+}
+
+function versionSixDocument() {
+	const current = versionSevenDocument();
+	return {
+		...current,
+		schemaVersion: 6 as const,
+		user: {
+			...current.user,
+			client: {
+				...current.user.client,
+				input: {
+					...current.user.client.input,
+					actionBars: {
+						...current.user.client.input.actionBars,
+						commands: {
+							...current.user.client.input.actionBars.commands,
+							cancel: [{ key: "Escape" }],
+						},
+					},
+				},
+			},
+		},
+	};
+}
+
+function versionFiveDocument() {
+	const current = versionSixDocument();
+	const { input, ...client } = current.user.client;
+	void input;
+	return {
+		...current,
+		schemaVersion: 5 as const,
+		user: { ...current.user, client },
+	};
+}
+
+function versionFourDocument() {
+	const current = versionFiveDocument();
+	const { ui, ...client } = current.user.client;
+	void ui;
+	return {
+		...current,
+		schemaVersion: 4 as const,
+		user: { ...current.user, client },
+	};
+}
+
+function versionThreeDocument() {
+	const current = versionFourDocument();
+	const { graphics, ...client } = current.user.client;
+	const { settings, ...hudLayout } = client.hudLayout;
+	void settings;
+	return {
+		...current,
+		schemaVersion: 3 as const,
+		user: {
+			...current.user,
+			client: { ...client, hudLayout, weatherEnabled: graphics.weatherEnabled },
 		},
 	};
 }
@@ -50,7 +137,7 @@ function versionOneDocument() {
 }
 
 function versionTwoDocument() {
-	const current = document();
+	const current = versionThreeDocument();
 	const client = { ...current.user.client };
 	const hudLayout = { ...client.hudLayout };
 	Reflect.deleteProperty(hudLayout, "combatBar");
@@ -84,7 +171,7 @@ describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
-		expect(clientLocalSettingsDocumentV3Schema.parse(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV8Schema.parse(value)).toEqual(value);
 	});
 
 	it("migrates v1 with stable inspection layout defaults", () => {
@@ -99,6 +186,85 @@ describe("client settings contract", () => {
 		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
 	});
 
+	it("migrates v3 weather and HUD placement into user preferences", () => {
+		const value = versionThreeDocument();
+		expect(clientLocalSettingsDocumentV3Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
+	});
+
+	it("migrates v4 font roles without changing graphics or character settings", () => {
+		const value = versionFourDocument();
+		expect(clientLocalSettingsDocumentV4Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
+	});
+
+	it("migrates v5 keyboard defaults into user preferences", () => {
+		const value = versionFiveDocument();
+		expect(clientLocalSettingsDocumentV5Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
+	});
+
+	it("migrates v6 by retiring only the duplicate focused-bar cancel binding", () => {
+		const value = versionSixDocument();
+		expect(clientLocalSettingsDocumentV6Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
+		const remapped = {
+			...value,
+			user: {
+				...value.user,
+				client: {
+					...value.user.client,
+					input: {
+						...value.user.client.input,
+						client: {
+							...value.user.client.input.client,
+							cancel: [{ key: "Backspace" }],
+						},
+						actionBars: {
+							...value.user.client.input.actionBars,
+							commands: {
+								...value.user.client.input.actionBars.commands,
+								cancel: [{ key: "Delete" }],
+							},
+						},
+					},
+				},
+			},
+		};
+		const migrated = parseClientLocalSettingsDocument(remapped);
+		expect(migrated.user.client.input.client.cancel).toEqual([
+			{ key: "Backspace" },
+		]);
+		expect(migrated.user.client.input.actionBars.commands).not.toHaveProperty(
+			"cancel",
+		);
+	});
+
+	it("migrates v7 by retiring character-picker confirmation without changing other keys", () => {
+		const value = versionSevenDocument();
+		expect(clientLocalSettingsDocumentV7Schema.parse(value)).toEqual(value);
+		const remapped = {
+			...value,
+			user: {
+				...value.user,
+				client: {
+					...value.user.client,
+					input: {
+						...value.user.client.input,
+						client: {
+							...value.user.client.input.client,
+							enterWorld: [{ key: "F5" }],
+							chat: [{ key: "F6" }],
+						},
+					},
+				},
+			},
+		};
+		const migrated = parseClientLocalSettingsDocument(remapped);
+		expect(migrated.user.client.input.client).not.toHaveProperty("enterWorld");
+		expect(migrated.user.client.input.client.chat).toEqual([{ key: "F6" }]);
+	});
+
 	it("rejects unknown fields and unsupported versions", () => {
 		expect(() => parseClientLocalSettingsDocument({})).toThrow(
 			"Client settings document has no schemaVersion",
@@ -107,8 +273,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 4 }),
-		).toThrow("Unsupported client settings schema version 4");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 9 }),
+		).toThrow("Unsupported client settings schema version 9");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {

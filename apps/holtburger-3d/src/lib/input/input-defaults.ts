@@ -71,7 +71,7 @@ export const INPUT_DEFAULTS = {
 			{ key: "v", shift: true, ctrl: false, alt: false, meta: false },
 		],
 		/** Use the currently selected entity. */
-		interact: [{ key: "r" }],
+		interact: [{ key: "r", ctrl: false, alt: false, meta: false }],
 		/** Request authoritative examination facts for the selected entity. */
 		examine: [{ key: "e", shift: false, ctrl: false, alt: false, meta: false }],
 		/** Toggle peace/combat with either character on the backquote key. */
@@ -87,10 +87,8 @@ export const INPUT_DEFAULTS = {
 		preciseJump: [{ key: "j", shift: true }],
 		/** Cancel the active context, then clear selection when gameplay owns Escape. */
 		cancel: [{ key: "Escape" }],
-		/** Submit the selected character before entering gameplay. */
-		enterWorld: [{ key: "Enter" }],
 		/** Activate chat while the game owns the keyboard. */
-		chat: [{ key: "Enter" }],
+		chat: [{ key: "Enter", ctrl: false, alt: false, meta: false }],
 		/** Scroll toward earlier messages while chat owns focus. */
 		chatPreviousPage: [{ key: "PageUp" }],
 		/** Scroll toward later messages while chat owns focus. */
@@ -249,7 +247,6 @@ export const INPUT_DEFAULTS = {
 			left: [{ key: "ArrowLeft" }],
 			right: [{ key: "ArrowRight" }],
 			confirm: [{ key: "Enter" }],
-			cancel: [{ key: "Escape" }],
 		},
 		alternate: "shift",
 	},

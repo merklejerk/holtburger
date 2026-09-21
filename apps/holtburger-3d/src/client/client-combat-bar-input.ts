@@ -1,4 +1,4 @@
-import { APP_INPUT } from "../lib/input/app-input";
+import type { AppInput } from "../lib/input/app-input";
 import type {
 	CombatBreakpointIndex,
 	CombatHeightIndex,
@@ -6,14 +6,15 @@ import type {
 
 /** Gameplay dispatch for physical-combat shortcuts after keyboard scope arbitration. */
 export function handleCombatBarKeydown(
+	input: AppInput,
 	event: KeyboardEvent,
 	enabled: boolean,
 	selectBreakpoint: (index: CombatBreakpointIndex) => void,
 	selectHeight: (index: CombatHeightIndex) => void,
 ): boolean {
 	if (!enabled || event.defaultPrevented || event.isComposing) return false;
-	const height = APP_INPUT.combatHeight(event);
-	const breakpoint = APP_INPUT.combatBreakpoint(event);
+	const height = input.combatHeight(event);
+	const breakpoint = input.combatBreakpoint(event);
 	if (height === null && breakpoint === null) return false;
 	event.preventDefault();
 	if (!event.repeat) {

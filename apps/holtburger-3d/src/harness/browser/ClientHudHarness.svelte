@@ -35,7 +35,9 @@
 		ClientViewportTargetResult,
 	} from "../../client/client-pointer-selection-controller";
 	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
-	import { APP_INPUT } from "../../lib/input/app-input";
+	import { clientInputConfiguration } from "../../client/client-input-settings";
+	import { AppInput } from "../../lib/input/app-input";
+	import { provideClientInput } from "../../client/client-input-context";
 	import {
 		itemUseRequestSchema,
 		itemUseResultSchema,
@@ -59,7 +61,7 @@
 	} from "../../client/client-dialogs";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { probeBrowserInput } from "./input-browser-probe";
-	import { onMount, tick } from "svelte";
+	import { onMount, tick, untrack } from "svelte";
 	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
@@ -118,6 +120,9 @@
 			{ width: window.innerWidth, height: window.innerHeight },
 			9,
 		),
+	);
+	const clientInput = provideClientInput(
+		new AppInput(clientInputConfiguration(untrack(() => userSettings.input))),
 	);
 	let characterSettings = $state.raw<ReturnType<
 		typeof createDefaultClientCharacterSettings
@@ -234,6 +239,7 @@
 			releaseSpellKeys = keyboard.bindGame({
 				keydown: (event) => {
 					handleSpellBarKeydown(
+						clientInput,
 						event,
 						spellBarEnabled,
 						selectSpellTab,
@@ -316,6 +322,7 @@
 			releaseCombatKeys = keyboard.bindGame({
 				keydown: (event) => {
 					handleCombatBarKeydown(
+						clientInput,
 						event,
 						true,
 						selectCombatBreakpoint,
@@ -648,11 +655,11 @@
 		});
 		const releaseKeys = keyboard.bindGame({
 			keydown: (event) => {
-				if (APP_INPUT.shortcut("interact", event)) {
+				if (clientInput.shortcut("interact", event)) {
 					event.preventDefault();
 					if (!event.repeat) itemInteractions.interactSelected(false);
 				} else if (
-					APP_INPUT.shortcut("cancel", event) &&
+					clientInput.shortcut("cancel", event) &&
 					itemInteractions.cancel()
 				)
 					event.preventDefault();
@@ -1144,7 +1151,7 @@
 			selection.select(7);
 			releaseGiveKeys = keyboard.bindGame({
 				keydown: (event) => {
-					if (APP_INPUT.shortcut("give", event) && !event.isComposing) {
+					if (clientInput.shortcut("give", event) && !event.isComposing) {
 						event.preventDefault();
 						if (!event.repeat) itemInteractions.giveSelected();
 					}
@@ -1562,7 +1569,7 @@
 			selection.select(null);
 			releaseInspectionKeys = keyboard.bindGame({
 				keydown: (event) => {
-					if (!APP_INPUT.shortcut("examine", event) || event.isComposing)
+					if (!clientInput.shortcut("examine", event) || event.isComposing)
 						return;
 					event.preventDefault();
 					if (!event.repeat) examineHarnessSelection();
@@ -3027,6 +3034,17 @@
 			};
 		}}
 		inspectionPreviewHeight={userSettings.inspection.previewHeight}
+		graphics={userSettings.graphics}
+		ui={userSettings.ui}
+		input={userSettings.input}
+		textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
+		onGraphicsChange={(graphics) =>
+			(userSettings = { ...userSettings, graphics })}
+		onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
+		onInputChange={(input) => {
+			clientInput.replaceConfiguration(clientInputConfiguration(input));
+			userSettings = { ...userSettings, input };
+		}}
 		onInspectionPreviewHeightChange={(previewHeight) =>
 			(userSettings = {
 				...userSettings,

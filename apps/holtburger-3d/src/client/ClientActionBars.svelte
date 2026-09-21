@@ -30,13 +30,19 @@
 	} from "./client-hud-layout";
 	import {
 		findActionBarClonePlacement,
+		resetActionBarPlacements,
 		type ActionBarGeometry,
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
 	interface Props {
+		/** Accepted user keyboard map for accurate shortcut hints. */
+		readonly input: ClientKeyboardConfiguration;
 		/** Character-owned complete action-bar configuration. */
 		readonly bars: readonly ClientActionBar[];
 		readonly onBarsChange: (bars: readonly ClientActionBar[]) => void;
+		/** Expose a reset operation only while mounted bar geometry is available. */
+		readonly onResetOwner: (reset: (() => boolean) | null) => void;
 		/** Expose the mounted item gesture owner to common HUD cancellation. */
 		onDragOwner: (owner: ClientItemDrag | null) => void;
 		/** Resolve world inventory destinations without changing selection. */
@@ -59,8 +65,10 @@
 		viewport: ClientHudViewport;
 	}
 	let {
+		input,
 		bars,
 		onBarsChange,
+		onResetOwner,
 		root,
 		onDragOwner,
 		inventory,
@@ -81,6 +89,26 @@
 			throw new Error(`Missing action bar geometry ${id}`);
 		return read();
 	}
+	function resetPlacements(): boolean {
+		const reset = resetActionBarPlacements(
+			bars,
+			readGeometry,
+			viewport,
+			CLIENT_ACTION_BAR_TUNING.cloneGap,
+		);
+		if (reset === null) {
+			inventory.reportFailure(
+				"Not enough room to separate every action bar. Enlarge the window and retry.",
+			);
+			return false;
+		}
+		onBarsChange(reset);
+		return true;
+	}
+	onMount(() => {
+		onResetOwner(resetPlacements);
+		return () => onResetOwner(null);
+	});
 	/** Bounded UI sample; the inventory owner retains authoritative item facts. */
 	let items = $state<ReadonlyMap<number, ActionItemDisplay>>(new Map());
 	function change(bar: ClientActionBar) {
@@ -281,6 +309,7 @@
 
 {#each bars as bar, index (bar.id)}
 	<ClientActionBarView
+		{input}
 		{bar}
 		sequence={index + 1}
 		count={bars.length}

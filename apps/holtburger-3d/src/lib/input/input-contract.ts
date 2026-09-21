@@ -51,15 +51,17 @@ export interface InputKeyEvent {
 }
 
 /** Character intent shared by client play and Explorer possession. */
-export type CharacterAction =
-	| "forward"
-	| "backward"
-	| "turnLeft"
-	| "turnRight"
-	| "strafeLeft"
-	| "strafeRight"
-	| "walk"
-	| "jump";
+export const CHARACTER_ACTIONS = [
+	"forward",
+	"backward",
+	"turnLeft",
+	"turnRight",
+	"strafeLeft",
+	"strafeRight",
+	"walk",
+	"jump",
+] as const;
+export type CharacterAction = (typeof CHARACTER_ACTIONS)[number];
 
 /** Explorer camera intent, independent of keyboard layout. */
 export type FlyAction =
@@ -69,25 +71,26 @@ export type FlyAction =
 	| "precision";
 
 /** Client commands whose bindings are resolved by their active UI owner. */
-type ClientShortcut =
-	| "selectSelf"
-	| "nextCreature"
-	| "previousCreature"
-	| "nextNonCreature"
-	| "previousNonCreature"
-	| "nextUnopenedCorpse"
-	| "previousUnopenedCorpse"
-	| "interact"
-	| "examine"
-	| "give"
-	| "toggleCombat"
-	| "toggleAutoRun"
-	| "preciseJump"
-	| "cancel"
-	| "enterWorld"
-	| "chat"
-	| "chatPreviousPage"
-	| "chatNextPage";
+export const CLIENT_SHORTCUT_ACTIONS = [
+	"selectSelf",
+	"nextCreature",
+	"previousCreature",
+	"nextNonCreature",
+	"previousNonCreature",
+	"nextUnopenedCorpse",
+	"previousUnopenedCorpse",
+	"interact",
+	"examine",
+	"give",
+	"toggleCombat",
+	"toggleAutoRun",
+	"preciseJump",
+	"cancel",
+	"chat",
+	"chatPreviousPage",
+	"chatNextPage",
+] as const;
+export type ClientShortcut = (typeof CLIENT_SHORTCUT_ACTIONS)[number];
 
 /** Viewport gestures with configurable activation buttons. */
 type ViewportPointerAction =
@@ -123,12 +126,35 @@ export interface InputConfiguration {
 	readonly pointer: Readonly<Record<ViewportPointerAction, readonly number[]>>;
 }
 
+/** User-scoped keyboard groups; Explorer-only fly and fixed pointer policy stay separate. */
+export type ClientKeyboardConfiguration = Pick<
+	InputConfiguration,
+	"character" | "client" | "spellBar" | "combatBar" | "actionBars"
+>;
+
 /** Zero-based positions of the ten numbered bars and cells. */
 export type InputDigitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+/** Serializable object keys for numbered keyboard binding groups. */
+export const INPUT_DIGIT_KEYS = [
+	"0",
+	"1",
+	"2",
+	"3",
+	"4",
+	"5",
+	"6",
+	"7",
+	"8",
+	"9",
+] as const;
 /** Zero-based positions of the five combat breakpoints bound to keys 1–5. */
 export type CombatBreakpointIndex = 0 | 1 | 2 | 3 | 4;
+export const COMBAT_BREAKPOINT_INDICES = [0, 1, 2, 3, 4] as const;
+export const COMBAT_BREAKPOINT_KEYS = ["0", "1", "2", "3", "4"] as const;
 /** Zero-based top-to-bottom positions of the three physical attack heights. */
 export type CombatHeightIndex = 0 | 1 | 2;
+export const COMBAT_HEIGHT_INDICES = [0, 1, 2] as const;
+export const COMBAT_HEIGHT_KEYS = ["0", "1", "2"] as const;
 /** Each numbered position accepts any number of alternative bindings, including none. */
 type NumberedInputBindings = Readonly<
 	Record<InputDigitIndex, readonly KeyBinding[]>
@@ -141,14 +167,22 @@ type CombatHeightInputBindings = Readonly<
 >;
 /** Spatial intent independent of the physical navigation keys. */
 export type ActionBarDirection = "up" | "down" | "left" | "right";
+/** Focused action-bar commands interpreted after focus acquisition. */
+export const ACTION_BAR_COMMANDS = [
+	"up",
+	"down",
+	"left",
+	"right",
+	"confirm",
+] as const;
 /** Bindings interpreted only by a focused action bar, except focus acquisition. */
 interface ActionBarInputConfiguration {
 	/** Position order is 1–9, then 0; these acquire the bar's keyboard scope. */
 	readonly focus: NumberedInputBindings;
 	/** Position order is 1–9, then 0; these immediately activate a cell. */
 	readonly cells: NumberedInputBindings;
-	/** Navigation, execution, and dismissal within the focused bar. */
-	readonly commands: InputBindings<ActionBarDirection | "confirm" | "cancel">;
-	/** Held modifier selecting the alternate equipment side for both keys and clicks. */
+	/** Navigation and execution within the focused bar; client cancel dismisses it. */
+	readonly commands: InputBindings<ActionBarDirection | "confirm">;
+	/** Held modifier choosing an action cell's alternate use for keys and clicks. */
 	readonly alternate: "shift" | "ctrl" | "alt" | "meta";
 }

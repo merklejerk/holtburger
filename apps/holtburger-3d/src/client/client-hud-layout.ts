@@ -263,6 +263,7 @@ export function createClientHudLayout(
 		inspection: place(defaults.inspection),
 		spells: place(defaults.spells),
 		debug: place(defaults.debug),
+		settings: place(defaults.settings),
 		frameRate: place(defaults.frameRate),
 		jumpPower: place(defaults.jumpPower),
 		minimap: place({

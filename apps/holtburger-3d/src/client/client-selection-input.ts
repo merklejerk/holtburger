@@ -1,4 +1,4 @@
-import { APP_INPUT } from "../lib/input/app-input";
+import type { AppInput } from "../lib/input/app-input";
 import type {
 	ClientCycleSelectionController,
 	CycleCategory,
@@ -22,6 +22,7 @@ interface PendingSelectionPress {
 
 /** Gameplay input lifetime, invoked after focused UI and contextual cancellation have first refusal. */
 export class ClientSelectionInput {
+	readonly #input: AppInput;
 	readonly #selection: ClientEntitySelection;
 	readonly #cycle: ClientCycleSelectionController;
 	readonly #holdDelayMs: number;
@@ -30,11 +31,13 @@ export class ClientSelectionInput {
 	#destroyed = false;
 
 	constructor(options: {
+		readonly input: AppInput;
 		readonly selection: ClientEntitySelection;
 		readonly cycle: ClientCycleSelectionController;
 		/** Duration before a held cycle binding acquires its nearest target. */
 		readonly holdDelayMs: number;
 	}) {
+		this.#input = options.input;
 		this.#selection = options.selection;
 		this.#cycle = options.cycle;
 		this.#holdDelayMs = options.holdDelayMs;
@@ -58,7 +61,7 @@ export class ClientSelectionInput {
 				"previousUnopenedCorpse",
 				"cancel",
 			] as const
-		).find((action) => APP_INPUT.shortcut(action, event));
+		).find((action) => this.#input.shortcut(action, event));
 		if (action === undefined) return false;
 		event.preventDefault();
 		if (event.repeat) return true;

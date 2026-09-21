@@ -4778,6 +4778,106 @@ async function runClientHudHarness({ viteUrl }) {
 						)
 				: null,
 		);
+		await evaluateExpression(
+			client,
+			`document.querySelector('button[aria-label="Settings"]').click()`,
+		);
+		await delay(50);
+		const settingsWindow = await evaluateExpression(
+			client,
+			`(async () => {
+				const window = document.querySelector('.hud-window[aria-label="Settings"]');
+				if (!window) throw new Error('Settings shortcut did not open its HUD window');
+				const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
+				if (tabs.join(',') !== 'Graphics,UI,Input') throw new Error('Settings tabs are incomplete');
+				const graphicsTab = window.querySelector('#settings-tab-graphics');
+				graphicsTab.focus();
+				const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true });
+				graphicsTab.dispatchEvent(tabEvent);
+				if (tabEvent.defaultPrevented) throw new Error('Settings intercepted native Tab traversal');
+				const nextEvent = new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true });
+				graphicsTab.dispatchEvent(nextEvent);
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				const selectedAfterArrow = window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim();
+				if (selectedAfterArrow !== 'UI') throw new Error('Settings tabs ignored keyboard navigation');
+				window.querySelector('#settings-tab-graphics').click();
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				graphicsTab.focus();
+				return { tabs, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
+			})()`,
+		);
+		for (const type of ["keyDown", "keyUp"]) {
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "Enter",
+				code: "Enter",
+				windowsVirtualKeyCode: 13,
+			});
+		}
+		await evaluateExpression(
+			client,
+			`(() => {
+				if (document.activeElement?.id !== 'settings-tab-graphics')
+					throw new Error('Settings button activation yielded focus to a gameplay shortcut');
+			})()`,
+		);
+		if (options.screenshotPath) {
+			const shot = await client.send("Page.captureScreenshot", {
+				format: "png",
+				captureBeyondViewport: false,
+			});
+			await writeFile(
+				`${options.screenshotPath}.settings.png`,
+				Buffer.from(shot.data, "base64"),
+			);
+		}
+		const settingsSections = await evaluateExpression(
+			client,
+			`(async () => {
+				const panel = document.querySelector('.hud-window[aria-label="Settings"]');
+				const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+				panel.querySelector('#settings-tab-ui').click();
+				await frame();
+				const fonts = panel.querySelectorAll('#settings-section-ui select');
+				if (fonts.length !== 3) throw new Error('UI font roles are missing');
+				fonts[0].value = 'serif';
+				fonts[0].dispatchEvent(new Event('change', { bubbles: true }));
+				await frame();
+				if (panel.querySelector('#settings-section-ui select').value !== 'serif') throw new Error('UI font edit did not stick');
+				if ([...panel.querySelectorAll('#settings-section-ui input[type="range"]')].some((range) => !range.disabled)) throw new Error('Planned scaling controls are active');
+				panel.querySelector('#settings-tab-input').click();
+				await frame();
+				const movement = panel.querySelector('#settings-section-input .binding-group');
+				if (!movement || !movement.open) throw new Error('Input movement group did not open');
+				const spellGroups = [...panel.querySelectorAll('#settings-section-input .binding-group')].filter((group) => group.querySelector('summary')?.textContent === 'Spells');
+				const spellLabels = [...(spellGroups[0]?.querySelectorAll('.binding-label') ?? [])].map((label) => label.textContent);
+				if (spellGroups.length !== 1 || spellLabels.length !== 20 || spellLabels.slice(0, 10).some((label) => !label.startsWith('Select spell tab')) || spellLabels.slice(10).some((label) => !label.startsWith('Cast spell slot'))) throw new Error('Spell tab and slot bindings are interleaved');
+				const actionBarsGroup = [...panel.querySelectorAll('#settings-section-input .binding-group')].find((group) => group.querySelector('summary')?.textContent === 'Action bars');
+				if (!actionBarsGroup?.textContent.includes('Alternate action modifier') || actionBarsGroup.textContent.includes('Leave focused bar')) throw new Error('Action bar input controls still have duplicate cancellation or detached modifier policy');
+				const forward = movement.querySelector('.binding-row');
+				forward.querySelector('.binding-actions button').click();
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', bubbles: true, cancelable: true }));
+				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'p', code: 'KeyP', bubbles: true, cancelable: true }));
+				await frame();
+				if (![...forward.querySelectorAll('kbd')].some((key) => key.textContent === 'p')) throw new Error('Captured binding did not appear');
+				forward.querySelector('.binding-actions button:last-child').click();
+				await frame();
+				if ([...forward.querySelectorAll('kbd')].some((key) => key.textContent === 'p')) throw new Error('Per-action default did not restore');
+				forward.querySelector('.binding-actions button').click();
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', bubbles: true, cancelable: true }));
+				window.dispatchEvent(new KeyboardEvent('keyup', { key: 's', code: 'KeyS', bubbles: true, cancelable: true }));
+				await frame();
+				const conflict = panel.querySelector('.binding-conflict');
+				if (!conflict || !conflict.textContent.includes('Move backward')) throw new Error('Binding conflict was not explained');
+				conflict.querySelector('button').click();
+				await frame();
+				if (!movement.querySelectorAll('.binding-row')[1].textContent.includes('Unbound')) throw new Error('Conflict replacement did not clear the old action');
+				panel.querySelector('#settings-section-input > button').click();
+				await frame();
+				panel.querySelector('#settings-tab-graphics').click();
+				return { fonts: fonts.length, groups: panel.querySelectorAll('#settings-section-input .binding-group').length, captured: true };
+			})()`,
+		);
 		const theme = await probeClientTheme(
 			client,
 			evaluateExpression,
@@ -4792,6 +4892,8 @@ async function runClientHudHarness({ viteUrl }) {
 		);
 
 		const clientHud = {
+			settingsWindow,
+			settingsSections,
 			breadcrumbAfterDiscontinuity,
 			breadcrumbAfterIdentityChange,
 			breadcrumbBelowSpacing,
@@ -5221,7 +5323,7 @@ function assertClientHudHarness(evidence) {
 		);
 	}
 	for (const state of Object.values(evidence)) {
-		if (state.preciseJumpEnterCount !== 0) {
+		if ("preciseJumpEnterCount" in state && state.preciseJumpEnterCount !== 0) {
 			throw new Error(
 				"Client HUD layout preview dispatched precise-jump input.",
 			);

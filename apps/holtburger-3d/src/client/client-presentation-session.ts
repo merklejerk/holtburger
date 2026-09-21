@@ -48,6 +48,13 @@ import {
 	type SceneInterestTarget,
 } from "../lib/game/runtime/scene-target";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
+import { validateSceneInterestRadiiOrThrow } from "../lib/game/runtime/scene-interest";
+import type { SceneInterestRadii } from "../lib/game/runtime/types";
+import {
+	CLIENT_GRAPHICS_DEFAULTS,
+	clientSceneInterestRadii,
+} from "./client-settings-policy";
+import { CLIENT_GRAPHICS_RANGES } from "./client-settings-values";
 import type {
 	AudioListenerPlacement,
 	Camera,
@@ -57,6 +64,7 @@ import type { ResolvedSceneOrigin } from "../lib/game/scene";
 import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
 import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../lib/game/renderer/nameplate-icon-source";
 import type { RenderExtent } from "../lib/game/renderer/render-extent";
+import type { TextureFilteringCapabilities } from "../lib/game/renderer/texture-filtering-policy";
 import type { HostTransport } from "../lib/host/host-transport";
 import type {
 	SceneActivationReceipt,
@@ -341,6 +349,8 @@ export interface ClientPresentationOwner {
 	readonly profileSource: LandblockProfileSource;
 	readonly runtime: ClientPresentationRuntime;
 	readonly objectPreviewResources?: ObjectPreviewResources;
+	/** GPU capability published once when the concrete renderer owner is ready. */
+	readonly textureFilteringCapabilities?: TextureFilteringCapabilities;
 	destroy(): Promise<void>;
 }
 
@@ -355,6 +365,9 @@ export interface ClientPresentationSessionDependencies {
 	readonly canvas: HTMLCanvasElement;
 	readonly hostTransport: HostTransport;
 	readonly onError?: (error: unknown) => void;
+	readonly onTextureFilteringCapabilities?: (
+		capabilities: TextureFilteringCapabilities | null,
+	) => void;
 	readonly ownerFactory?: ClientPresentationOwnerFactory;
 	/** Inject shared update clocks only for an explicit diagnostic client launch. */
 	readonly enablePerformanceProfiling?: boolean;
@@ -390,11 +403,19 @@ export class ClientPresentationSession {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #hostTransport: HostTransport;
 	readonly #onError: (error: unknown) => void;
+	readonly #onTextureFilteringCapabilities:
+		((capabilities: TextureFilteringCapabilities | null) => void) | undefined;
 	readonly #ownerFactory: ClientPresentationOwnerFactory;
 	/** Client-only diagnostic observer; absent from ordinary non-debug composition. */
 	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	#owner: ClientPresentationOwner | null = null;
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
+	#sceneInterestRadii: SceneInterestRadii = clientSceneInterestRadii(
+		CLIENT_GRAPHICS_DEFAULTS.viewDistance,
+	);
+	#sceneInterestRevision = 0;
+	#fieldOfView: number = CLIENT_GRAPHICS_DEFAULTS.verticalFovDegrees;
+	#pendingFieldOfView: number | null = null;
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
 	#unsubscribe: (() => void) | null = null;
 	#playerGuid: number | null = null;
@@ -430,6 +451,8 @@ export class ClientPresentationSession {
 		this.#canvas = dependencies.canvas;
 		this.#hostTransport = dependencies.hostTransport;
 		this.#onError = dependencies.onError ?? (() => undefined);
+		this.#onTextureFilteringCapabilities =
+			dependencies.onTextureFilteringCapabilities;
 		this.#ownerFactory =
 			dependencies.ownerFactory ?? defaultClientPresentationOwnerFactory;
 		this.#tickProfiler = dependencies.enablePerformanceProfiling
@@ -485,7 +508,9 @@ export class ClientPresentationSession {
 				? null
 				: owner.runtime.spawnedEntityPlacement(playerGuid);
 		return {
-			cameraFovRadians: (CLIENT_TUNING.camera.fov * Math.PI) / 180,
+			cameraFovRadians:
+				((this.#lastPrimaryView?.camera.fov ?? this.#fieldOfView) * Math.PI) /
+				180,
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
 				owner?.runtime.listPresentedSpawnedEntities() ?? [],
@@ -803,6 +828,38 @@ export class ClientPresentationSession {
 		this.#owner?.runtime.setFrameSettings(settings);
 	}
 
+	/** Reissue static demand on the next frame even if the player has not moved. */
+	setSceneInterestRadii(radii: SceneInterestRadii): void {
+		validateSceneInterestRadiiOrThrow(radii);
+		if (
+			this.#sceneInterestRadii.terrainRadius === radii.terrainRadius &&
+			this.#sceneInterestRadii.buildingRadius === radii.buildingRadius &&
+			this.#sceneInterestRadii.explicitObjectRadius ===
+				radii.explicitObjectRadius &&
+			this.#sceneInterestRadii.generatedObjectRadius ===
+				radii.generatedObjectRadius &&
+			this.#sceneInterestRadii.envCellRadius === radii.envCellRadius
+		)
+			return;
+		this.#sceneInterestRadii = radii;
+		this.#sceneInterestRevision += 1;
+	}
+
+	/** The host acknowledges a projection revision before the new FOV becomes visible. */
+	setFieldOfView(degrees: number): void {
+		if (
+			!Number.isFinite(degrees) ||
+			degrees < CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum ||
+			degrees > CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum
+		)
+			throw new Error(
+				"Client vertical field of view is outside the configurable range.",
+			);
+		if (this.#portalTransition.activeGeneration() !== null)
+			this.#pendingFieldOfView = degrees;
+		else this.#fieldOfView = degrees;
+	}
+
 	/**
 	 * Tick and render one browser frame.
 	 *
@@ -891,6 +948,10 @@ export class ClientPresentationSession {
 			this.#syncSceneActivation(player, portalGeneration);
 		} else {
 			this.#portalTransition.reset();
+			if (this.#pendingFieldOfView !== null) {
+				this.#fieldOfView = this.#pendingFieldOfView;
+				this.#pendingFieldOfView = null;
+			}
 			owner.runtime.setPortalTransition(undefined);
 			if (this.#portalSceneActivation?.kind === "accepted") {
 				owner.runtime.completeSceneActivation(
@@ -934,6 +995,7 @@ export class ClientPresentationSession {
 					readiness.origin,
 					readiness.cameraPresentation,
 					this.camera.acknowledgedProjection(timeMs),
+					this.#fieldOfView,
 				);
 				primaryView = { camera, extent: readiness.extent };
 				this.#portalDestinationFrame = {
@@ -991,6 +1053,7 @@ export class ClientPresentationSession {
 				resolvedOrigin,
 				presentation,
 				this.camera.acknowledgedProjection(timeMs),
+				this.#fieldOfView,
 			);
 			primaryView = { camera, extent };
 		}
@@ -1103,6 +1166,9 @@ export class ClientPresentationSession {
 				return;
 			}
 			this.#owner = owner;
+			this.#onTextureFilteringCapabilities?.(
+				owner.textureFilteringCapabilities ?? null,
+			);
 			owner.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
 			owner.runtime.setHoveredEntityGuid(this.#hoveredEntityGuid);
 			this.#reconcileEntityNameplates();
@@ -1495,12 +1561,13 @@ export class ClientPresentationSession {
 		if (
 			current !== null &&
 			current.extent.width === extent.width &&
-			current.extent.height === extent.height
+			current.extent.height === extent.height &&
+			current.fov === this.#fieldOfView
 		)
 			return current;
 		const projection = createProjectionClearanceRevision(
 			(current?.revision ?? 0) + 1,
-			{ fov: CLIENT_TUNING.camera.fov, near: CLIENT_TUNING.camera.near },
+			{ fov: this.#fieldOfView, near: CLIENT_TUNING.camera.near },
 			extent,
 		);
 		this.#cameraProjection = projection;
@@ -1664,7 +1731,7 @@ export class ClientPresentationSession {
 			generation: worldGeneration,
 			key,
 		};
-		const request = coordinator.request(target, CLIENT_TUNING.sceneInterest);
+		const request = coordinator.request(target, this.#sceneInterestRadii);
 		void request.promise
 			.then((resolved) =>
 				owner.runtime.activateScene({
@@ -1713,13 +1780,13 @@ export class ClientPresentationSession {
 			return;
 		}
 		const target = clientSceneInterestTarget(player.placement);
-		const key = sceneInterestTargetKey(target);
+		const key = `${this.#sceneInterestRevision}:${sceneInterestTargetKey(target)}`;
 		if (key === this.#sceneTargetKey) return;
 		const coordinator = this.#sceneInterestCoordinator;
 		const owner = this.#owner;
 		if (coordinator === null || owner === null) return;
 		this.#sceneTargetKey = key;
-		const request = coordinator.request(target, CLIENT_TUNING.sceneInterest);
+		const request = coordinator.request(target, this.#sceneInterestRadii);
 		void request.promise
 			.then((resolved) => {
 				if (
@@ -1866,6 +1933,7 @@ function createClientCamera(
 	origin: ResolvedSceneOrigin,
 	boom: HostKinematicBoomPresentation | null,
 	projection: ProjectionClearanceRevision | null,
+	requestedFieldOfView: number,
 ): Camera {
 	if (player.placement.kind !== "world") {
 		throw new Error("Client camera requires a world-placed player.");
@@ -1888,7 +1956,7 @@ function createClientCamera(
 		);
 		return {
 			far: CLIENT_TUNING.camera.far,
-			fov: projection?.fov ?? CLIENT_TUNING.camera.fov,
+			fov: projection?.fov ?? requestedFieldOfView,
 			near: projection?.near ?? CLIENT_TUNING.camera.near,
 			placement: {
 				...boom.placement.residency,
@@ -1918,7 +1986,7 @@ function createClientCamera(
 	);
 	return {
 		far: CLIENT_TUNING.camera.far,
-		fov: CLIENT_TUNING.camera.fov,
+		fov: projection?.fov ?? requestedFieldOfView,
 		near: CLIENT_TUNING.camera.near,
 		placement: {
 			envCellId: origin.envCellId,

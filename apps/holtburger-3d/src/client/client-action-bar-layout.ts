@@ -3,6 +3,10 @@ import type {
 	ClientHudViewport,
 	ResolvedClientHudPlacement,
 } from "./client-hud-layout";
+import {
+	anchorClientHudPlacement,
+	resolveClientHudPlacement,
+} from "./client-hud-layout";
 
 import {
 	ACTION_SLOT_INDICES,
@@ -130,4 +134,47 @@ export function findActionBarClonePlacement(
 		if (clear) return { ...point, width, height };
 	}
 	return null;
+}
+
+/** Reset every mounted bar near the lower center using measured, theme-dependent extents. */
+export function resetActionBarPlacements(
+	bars: readonly ClientActionBar[],
+	readGeometry: (id: number) => ActionBarGeometry,
+	viewport: ClientHudViewport,
+	gap: number,
+): readonly ClientActionBar[] | null {
+	const occupied: ResolvedClientHudPlacement[] = [];
+	const placed: ClientActionBar[] = [];
+	for (const bar of bars) {
+		const preferred = readGeometry(bar.id).preferred;
+		const origin = resolveClientHudPlacement(
+			{
+				horizontal: { alignment: "center", offset: 0 },
+				vertical: { alignment: "end", offset: 0 },
+				preferredWidth: preferred.width,
+				preferredHeight: preferred.height,
+			},
+			viewport,
+			preferred,
+		);
+		const bounds =
+			occupied.length === 0
+				? origin
+				: findActionBarClonePlacement(
+						{ bounds: origin, preferred },
+						bar.orientation,
+						occupied,
+						viewport,
+						gap,
+					);
+		if (bounds === null) return null;
+		occupied.push(bounds);
+		const { horizontal, vertical } = anchorClientHudPlacement(
+			bounds,
+			viewport,
+			preferred,
+		);
+		placed.push({ ...bar, anchor: { horizontal, vertical } });
+	}
+	return placed;
 }

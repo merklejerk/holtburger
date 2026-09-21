@@ -108,14 +108,15 @@ export async function probeClientTheme(
 			),
 	);
 	await read(() => {
-		const option = document.querySelector('[role="option"]');
+		const option = document.querySelector('input[name="character"]');
 		option.click();
+		option.focus();
 	});
 	await read(() => new Promise((resolve) => requestAnimationFrame(resolve)));
 	await capture("characters");
 	for (const [key, windowsVirtualKeyCode, index] of [
-		["End", 35, -1],
-		["Home", 36, 0],
+		["ArrowDown", 40, 1],
+		["ArrowUp", 38, 0],
 	]) {
 		await client.send("Input.dispatchKeyEvent", {
 			type: "keyDown",
@@ -132,14 +133,14 @@ export async function probeClientTheme(
 		const valid = await evaluateExpression(
 			client,
 			`(() => {
-			const options = [...document.querySelectorAll('.client-character')];
-			return options.at(${index}).getAttribute('aria-selected') === 'true' &&
-				document.activeElement.classList.contains('client-character-list');
+			const options = [...document.querySelectorAll('input[name="character"]')];
+			return options.at(${index}).checked &&
+				document.activeElement === options.at(${index});
 		})()`,
 		);
 		if (!valid)
 			throw new Error(
-				`Character selection did not handle ${key} with its local keyboard handler.`,
+				`Character selection did not handle ${key} through its native radio group.`,
 			);
 	}
 	// Character selection is an ordinary page: Tab reaches its native action buttons.
@@ -182,22 +183,14 @@ export async function probeClientTheme(
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		if (!enter.disabled || !enter.textContent.includes("Entering"))
 			throw new Error("Character entry did not publish its pending state.");
-		const selected = document.querySelector(
-			'.client-character[aria-selected="true"]',
-		);
-		const other = [...document.querySelectorAll(".client-character")].find(
-			(option) => option !== selected,
-		);
+		const selected = document.querySelector('input[name="character"]:checked');
+		const other = [
+			...document.querySelectorAll('input[name="character"]'),
+		].find((option) => option !== selected);
 		other.click();
 		other.focus();
-		other.dispatchEvent(
-			new KeyboardEvent("keydown", { key: "End", bubbles: true }),
-		);
 		await new Promise((resolve) => requestAnimationFrame(resolve));
-		if (
-			document.querySelector('.client-character[aria-selected="true"]') !==
-			selected
-		)
+		if (document.querySelector('input[name="character"]:checked') !== selected)
 			throw new Error("Pending character entry allowed selection to change.");
 	});
 	// Exercise the actual startup/error shell without opening a live server connection.

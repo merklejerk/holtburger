@@ -12,6 +12,8 @@ import type {
 } from "./client-settings-contract";
 import { CLIENT_TUNING } from "./client-tuning";
 import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
+import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy";
+import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
 
 /** Build absence defaults from the same constants consumed by the live client. */
 export function createDefaultClientUserSettings(
@@ -27,7 +29,11 @@ export function createDefaultClientUserSettings(
 		spellBarShape: "single",
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
-		weatherEnabled: CLIENT_TUNING.frameSettings.weatherEnabled,
+		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
+		ui: {
+			fonts: { body: "theme", heading: "theme", mono: "theme" },
+		},
+		input: structuredClone(CLIENT_KEYBOARD_DEFAULTS),
 		inspection: {
 			previewHeight: CLIENT_TUNING.objectPreview.height.initial,
 		},

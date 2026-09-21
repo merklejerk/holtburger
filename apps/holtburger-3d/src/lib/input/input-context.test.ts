@@ -252,4 +252,33 @@ describe("InputContext", () => {
 		expect(input.pointer("clientInteract", { button: 0 })).toBe(false);
 		expect(input.pointer("clientExamine", { button: 2 })).toBe(true);
 	});
+
+	it("replaces live client shortcuts and held movement without a release action", () => {
+		const input = new AppInput(INPUT_DEFAULTS);
+		const action = vi.fn();
+		const context = input.characterContext(action);
+		const oldPress = { key: "w", code: "KeyW", shiftKey: false };
+		const newPress = { key: "i", code: "KeyI", shiftKey: false };
+		context.apply(oldPress, true);
+		const next = {
+			...INPUT_DEFAULTS,
+			character: { ...INPUT_DEFAULTS.character, forward: [{ key: "i" }] },
+			client: { ...INPUT_DEFAULTS.client, interact: [{ key: "f" }] },
+		};
+		context.replaceBindings(next.character);
+		input.replaceConfiguration(next);
+		expect(context.apply(oldPress, false)).toBe(false);
+		expect(context.apply(oldPress, true)).toBe(false);
+		expect(context.apply(newPress, true)).toBe(true);
+		expect(action.mock.calls).toEqual([
+			["forward", true],
+			["forward", true],
+		]);
+		expect(input.shortcut("interact", { key: "r", shiftKey: false })).toBe(
+			false,
+		);
+		expect(input.shortcut("interact", { key: "f", shiftKey: false })).toBe(
+			true,
+		);
+	});
 });

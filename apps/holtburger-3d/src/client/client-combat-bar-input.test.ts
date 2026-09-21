@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
 import { handleCombatBarKeydown } from "./client-combat-bar-input";
+import { AppInput } from "../lib/input/app-input";
+import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+
+const TEST_INPUT = new AppInput(INPUT_DEFAULTS);
 
 /** Physical digit facts exercised through the production combat dispatcher. */
 function digit(
@@ -28,6 +32,7 @@ it("routes plain digits to power and shifted digits to attack height", () => {
 	for (const value of [1, 2, 3]) {
 		expect(
 			handleCombatBarKeydown(
+				TEST_INPUT,
 				digit(value),
 				true,
 				selectBreakpoint,
@@ -37,6 +42,7 @@ it("routes plain digits to power and shifted digits to attack height", () => {
 		expect(selectBreakpoint).toHaveBeenLastCalledWith(value - 1);
 		expect(
 			handleCombatBarKeydown(
+				TEST_INPUT,
 				digit(value, { shiftKey: true }),
 				true,
 				selectBreakpoint,
@@ -52,6 +58,7 @@ it("consumes repeats without selecting and yields when combat is inactive", () =
 	const selectHeight = vi.fn();
 	expect(
 		handleCombatBarKeydown(
+			TEST_INPUT,
 			digit(1, { shiftKey: true, repeat: true }),
 			true,
 			selectBreakpoint,
@@ -62,6 +69,7 @@ it("consumes repeats without selecting and yields when combat is inactive", () =
 	expect(selectHeight).not.toHaveBeenCalled();
 	expect(
 		handleCombatBarKeydown(
+			TEST_INPUT,
 			digit(1, { shiftKey: true }),
 			false,
 			selectBreakpoint,

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { sameConsumableIdentity } from "./client-action-item";
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { useClientInput } from "./client-input-context";
+	import { formatClientBindings } from "./client-binding-catalog";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	import { onMount } from "svelte";
@@ -26,6 +28,8 @@
 	} from "./client-hud-layout";
 	import type { ActionItemDisplay } from "./client-action-item";
 	interface Props {
+		/** Accepted user keyboard map for shortcut hints. */
+		input: ClientKeyboardConfiguration;
 		/** Cold bar configuration from the collection owner. */
 		bar: ClientActionBar;
 		/** Current one-based hotkey position and collection size. */
@@ -46,6 +50,7 @@
 		onactivate: (slot: ActionSlotIndex, alternate: boolean) => void;
 	}
 	let {
+		input,
 		bar,
 		sequence,
 		count,
@@ -58,6 +63,13 @@
 		onactivate,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
+	const clientInput = useClientInput();
+	const focusSlot = $derived.by(() => {
+		const slot = ACTION_SLOT_INDICES.find((index) => index + 1 === sequence);
+		if (slot === undefined)
+			throw new Error(`Invalid action bar sequence ${sequence}.`);
+		return slot;
+	});
 	let focused = $state<ActionSlotIndex | null>(null);
 	// Cold modifier edges drive hints only; activation still reads the actual input event.
 	let alternateHeld = $state(false);
@@ -122,16 +134,16 @@
 		// Focus chords retain priority over cell bindings when switching between bars.
 		if (
 			ACTION_SLOT_INDICES.some((index) =>
-				APP_INPUT.actionBarFocus(index, event),
+				clientInput.actionBarFocus(index, event),
 			)
 		)
 			return;
-		if (APP_INPUT.actionBarCommand("cancel", event)) {
+		if (clientInput.shortcut("cancel", event)) {
 			event.preventDefault();
 			keyboard.returnToGame();
 			return;
 		}
-		const direction = APP_INPUT.actionBarDirection(event);
+		const direction = clientInput.actionBarDirection(event);
 		if (
 			direction !== null &&
 			(direction === "left" || direction === "right"
@@ -148,14 +160,14 @@
 				?.scrollIntoView({ block: "nearest", inline: "nearest" });
 			return;
 		}
-		const slot = APP_INPUT.actionBarCommand("confirm", event)
+		const slot = clientInput.actionBarCommand("confirm", event)
 			? focused
 			: (ACTION_SLOT_INDICES.find((index) =>
-					APP_INPUT.actionBarCell(index, event),
+					clientInput.actionBarCell(index, event),
 				) ?? null);
 		if (slot !== null) {
 			event.preventDefault();
-			if (!event.repeat) activate(slot, APP_INPUT.actionBarAlternate(event));
+			if (!event.repeat) activate(slot, clientInput.actionBarAlternate(event));
 		}
 	}
 	function operate(operation: "rotate" | "cycle" | "clone" | "delete") {
@@ -204,17 +216,18 @@
 				if (
 					!ACTION_SLOT_INDICES.some(
 						(index) =>
-							index + 1 === sequence && APP_INPUT.actionBarFocus(index, event),
+							index + 1 === sequence &&
+							clientInput.actionBarFocus(index, event),
 					)
 				)
 					return false;
-				alternateHeld = APP_INPUT.actionBarAlternate(event);
+				alternateHeld = clientInput.actionBarAlternate(event);
 				focused = 0;
 				return true;
 			},
 			keydown,
 			modifiersChanged: (event) => {
-				alternateHeld = APP_INPUT.actionBarAlternate(event);
+				alternateHeld = clientInput.actionBarAlternate(event);
 			},
 			cancel: () => {
 				focused = null;
@@ -228,7 +241,7 @@
 			type="button"
 			class="action-menu-strip ui-button"
 			aria-label={`Action bar ${sequence} menu`}
-			title={`Action bar ${sequence} menu`}
+			title={`Action bar ${sequence} menu (focus: ${formatClientBindings(input.actionBars.focus[focusSlot])})`}
 			bind:this={menuButton}
 			aria-haspopup="menu"
 			aria-expanded={menuOpen}
@@ -251,6 +264,7 @@
 						style:grid-column={position.column + 1}
 					>
 						<ActionCell
+							bindingHint={formatClientBindings(input.actionBars.cells[slot])}
 							bar={bar.id}
 							digit={String((slot + 1) % ACTION_SLOT_INDICES.length)}
 							{content}

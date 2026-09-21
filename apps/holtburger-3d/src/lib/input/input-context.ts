@@ -29,27 +29,44 @@ function bindingIdentitiesOverlap(a: KeyBinding, b: KeyBinding): boolean {
 	return false;
 }
 
+/** Static overlap proof for matching selector identities and compatible modifier constraints. */
+export function keyBindingsOverlap(a: KeyBinding, b: KeyBinding): boolean {
+	return (
+		bindingIdentitiesOverlap(a, b) &&
+		(["shift", "ctrl", "alt", "meta"] as const).every(
+			(modifier) =>
+				a[modifier] === undefined ||
+				b[modifier] === undefined ||
+				a[modifier] === b[modifier],
+		)
+	);
+}
+
 /** Owns physical-key lifetimes for one active context and emits semantic action edges. */
 export class InputContext<Action extends string> {
 	readonly #held = new Map<string, Action>();
 	constructor(
-		private readonly bindings: InputBindings<Action>,
+		private bindings: InputBindings<Action>,
 		private readonly onAction: (action: Action, pressed: boolean) => void,
 	) {
+		this.#validateBindings(bindings);
+	}
+
+	/** Replace accepted bindings without emitting release edges for held actions. */
+	replaceBindings(bindings: InputBindings<Action>): void {
+		this.#validateBindings(bindings);
+		this.reset();
+		this.bindings = bindings;
+	}
+
+	#validateBindings(bindings: InputBindings<Action>): void {
 		const actions = Object.keys(bindings) as Action[];
 		for (const [index, action] of actions.entries()) {
 			for (const other of actions.slice(index + 1)) {
 				if (
 					bindings[action].some((binding) =>
-						bindings[other].some(
-							(candidate) =>
-								bindingIdentitiesOverlap(binding, candidate) &&
-								(["shift", "ctrl", "alt", "meta"] as const).every(
-									(modifier) =>
-										binding[modifier] === undefined ||
-										candidate[modifier] === undefined ||
-										binding[modifier] === candidate[modifier],
-								),
+						bindings[other].some((candidate) =>
+							keyBindingsOverlap(binding, candidate),
 						),
 					)
 				)

@@ -13,7 +13,12 @@ import type {
 
 /** Shared configuration and input resolution; each mounted owner retains its own context lifetime. */
 export class AppInput {
-	constructor(private readonly configuration: InputConfiguration) {}
+	constructor(private configuration: InputConfiguration) {}
+
+	/** Replace resolved policy after its owner cancels held input and validates the snapshot. */
+	replaceConfiguration(configuration: InputConfiguration): void {
+		this.configuration = configuration;
+	}
 
 	/** Create an independently owned character context using the shared character map. */
 	characterContext(

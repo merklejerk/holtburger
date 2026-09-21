@@ -64,7 +64,6 @@ export const CLIENT_TUNING = {
 	camera: {
 		/** Projection used by the host-authored third-person camera. */
 		far: 2_000,
-		fov: 75,
 		height: 2,
 		near: 0.1,
 		pitchRadians: -0.2,
@@ -130,13 +129,6 @@ export const CLIENT_TUNING = {
 		manaStoneColor: hexRgba("#67e8f9ff"),
 		/** Names change rarely and do not need to follow pointer sampling cadence. */
 		displayIntervalMs: 250,
-	},
-	sceneInterest: {
-		buildingRadius: 6,
-		envCellRadius: 1,
-		explicitObjectRadius: 1,
-		generatedObjectRadius: 2,
-		terrainRadius: 6,
 	},
 	/** Client-owned starting display policy. */
 	frameSettings: CLIENT_FRAME_SETTINGS,

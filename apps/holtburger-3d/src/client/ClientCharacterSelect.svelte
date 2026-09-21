@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from "svelte";
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { onMount } from "svelte";
 	import type { ClientLifecycleUiState } from "./client-lifecycle-state";
 
 	/** The authority-owned character roster and current frontend selection. */
@@ -25,94 +24,20 @@
 
 	let { state, entryPending, onChoose, onEnter, onDisconnect }: Props =
 		$props();
-
-	let listElement: HTMLDivElement;
-	onMount(() => listElement.focus({ preventScroll: true }));
-
-	/** Keystrokes within this interval form a name prefix; repeated letters cycle matches. */
-	const TYPEAHEAD_INTERVAL_MS = 500;
-	let search = { prefix: "", time: 0 };
-
-	function handleKeydown(event: KeyboardEvent): void {
-		if (
-			entryPending ||
-			event.altKey ||
-			event.ctrlKey ||
-			event.metaKey ||
-			event.isComposing
-		)
-			return;
-		if (APP_INPUT.shortcut("enterWorld", event)) {
-			event.preventDefault();
-			if (!event.repeat && state.selectedGuid !== null) void onEnter();
-			return;
-		}
-		const list = listElement;
-		const options = Array.from(
-			list.querySelectorAll<HTMLElement>('[role="option"]'),
+	let formElement: HTMLFormElement;
+	onMount(() => {
+		const selected = formElement.querySelector<HTMLInputElement>(
+			'input[name="character"]:checked',
 		);
-		if (options.length === 0) return;
-		const current = state.characters.findIndex(
-			(character) => character.guid === state.selectedGuid,
+		const first = formElement.querySelector<HTMLInputElement>(
+			'input[name="character"]',
 		);
-		let next: number;
-		switch (event.key) {
-			case "ArrowDown":
-				next = Math.min(current + 1, options.length - 1);
-				break;
-			case "ArrowUp":
-				next = Math.max(current - 1, 0);
-				break;
-			case "Home":
-				next = 0;
-				break;
-			case "End":
-				next = options.length - 1;
-				break;
-			case " ":
-				event.preventDefault();
-				return;
-			default: {
-				if (event.key.length !== 1) return;
-				const time = performance.now();
-				const letter = event.key.toLocaleLowerCase();
-				const prefix =
-					time - search.time < TYPEAHEAD_INTERVAL_MS
-						? search.prefix + letter
-						: letter;
-				search = { prefix, time };
-				const match = [...prefix].every((character) => character === letter)
-					? letter
-					: prefix;
-				// A new single-letter search starts after the current row; a longer prefix includes it.
-				const start = current + (match.length === 1 ? 1 : 0);
-				next = -1;
-				for (let offset = 0; offset < options.length; offset++) {
-					const index = (Math.max(start, 0) + offset) % options.length;
-					if (
-						state.characters[index].name.toLocaleLowerCase().startsWith(match)
-					) {
-						next = index;
-						break;
-					}
-				}
-			}
-		}
+		(selected ?? first)?.focus({ preventScroll: true });
+	});
+
+	function handleSubmit(event: SubmitEvent): void {
 		event.preventDefault();
-		const option = options[next];
-		if (option) {
-			onChoose(state.characters[next].guid);
-			option.scrollIntoView({ block: "nearest" });
-		}
-		if (event.key.length !== 1) search = { prefix: "", time: 0 };
-	}
-
-	async function enterCharacter(guid: number): Promise<void> {
-		if (entryPending) return;
-		onChoose(guid);
-		// Publish the clicked row to the parent before invoking its selected-character action.
-		await tick();
-		if (!entryPending) await onEnter();
+		if (!entryPending && state.selectedGuid !== null) void onEnter();
 	}
 </script>
 
@@ -121,60 +46,45 @@
 	Select a character, then explicitly enter the world.
 </p>
 
-<div
-	class="client-character-list"
-	role="listbox"
-	aria-label="Characters"
-	aria-activedescendant={state.selectedGuid === null
-		? undefined
-		: `client-character-${state.selectedGuid}`}
-	aria-disabled={entryPending}
-	tabindex="0"
-	bind:this={listElement}
-	onkeydown={handleKeydown}
-	onblur={() => {
-		search = { prefix: "", time: 0 };
-	}}
->
-	{#each state.characters as character (character.guid)}
+<form bind:this={formElement} onsubmit={handleSubmit}>
+	<fieldset
+		class="client-character-list"
+		aria-label="Characters"
+		disabled={entryPending}
+	>
+		{#each state.characters as character (character.guid)}
+			<label class="client-character ui-option">
+				<input
+					type="radio"
+					name="character"
+					value={character.guid}
+					checked={state.selectedGuid === character.guid}
+					onchange={() => onChoose(character.guid)}
+				/>
+				<strong>{character.name}</strong>
+				<span>Slot {character.slot + 1}</span>
+			</label>
+		{/each}
+	</fieldset>
+
+	<div class="client-actions">
+		<button
+			type="submit"
+			class="client-action ui-button"
+			disabled={state.selectedGuid === null || entryPending}
+		>
+			{entryPending ? "Entering…" : "Enter World"}
+		</button>
 		<button
 			type="button"
-			tabindex="-1"
-			id={`client-character-${character.guid}`}
-			class="client-character ui-option"
-			role="option"
-			aria-selected={state.selectedGuid === character.guid}
+			class="client-action ui-button"
 			disabled={entryPending}
-			onclick={() => {
-				if (!entryPending) {
-					onChoose(character.guid);
-					listElement.focus({ preventScroll: true });
-				}
-			}}
-			ondblclick={() => void enterCharacter(character.guid)}
+			onclick={() => void onDisconnect()}
 		>
-			<strong>{character.name}</strong>
-			<span>Slot {character.slot + 1}</span>
+			Disconnect
 		</button>
-	{/each}
-</div>
-
-<div class="client-actions">
-	<button
-		class="client-action ui-button"
-		disabled={state.selectedGuid === null || entryPending}
-		onclick={() => void onEnter()}
-	>
-		{entryPending ? "Entering…" : "Enter World"}
-	</button>
-	<button
-		class="client-action ui-button"
-		disabled={entryPending}
-		onclick={() => void onDisconnect()}
-	>
-		Disconnect
-	</button>
-</div>
+	</div>
+</form>
 
 <style>
 	@layer components {
@@ -189,23 +99,31 @@
 			max-height: min(45vh, 360px);
 			overflow-y: auto;
 			padding: 6px;
+			margin: 0;
+			border: 0;
 		}
 		.client-character {
-			display: flex;
+			display: grid;
+			grid-template-columns: auto 1fr auto;
 			align-items: baseline;
-			justify-content: space-between;
 			gap: 14px;
 			min-height: 32px;
 			padding: 4px 8px;
 			text-align: left;
-			font: inherit;
-			border: 0;
 			border-bottom: 1px solid
 				var(--ui-option-border-color, var(--ui-color-border));
 			cursor: pointer;
 			user-select: none;
 		}
-		.client-character:disabled {
+		.client-character:has(input:checked) {
+			background: var(--ui-option-background, var(--ui-color-control));
+			border-color: var(--ui-option-border-color, var(--ui-color-accent));
+		}
+		.client-character:has(input:focus-visible) {
+			outline: 2px solid var(--ui-color-accent);
+			outline-offset: -2px;
+		}
+		.client-character-list:disabled .client-character {
 			cursor: not-allowed;
 		}
 		.client-character span {

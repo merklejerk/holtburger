@@ -1,5 +1,7 @@
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
 import { describe, expect, it, vi } from "vitest";
+import { AppInput } from "../lib/input/app-input";
+import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
 import { ClientEntityMirror } from "./client-entity-mirror";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import { ClientEntitySelection } from "./client-entity-selection";
@@ -189,6 +191,7 @@ describe("stable cycle acquisition", () => {
 	it("routes exact modifiers, self, Escape, repeat and already consumed events", () => {
 		const f = fixture();
 		const input = new ClientSelectionInput({
+			input: new AppInput(INPUT_DEFAULTS),
 			selection: f.selection,
 			cycle: f.cycle,
 			holdDelayMs: 1000,

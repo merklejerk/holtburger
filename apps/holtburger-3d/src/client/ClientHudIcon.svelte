@@ -23,6 +23,8 @@
 		| "save-loadout"
 		/** Pointer over text for enabling chat-history selection. */
 		| "select-text"
+		| "add"
+		| "reset"
 		| "locked"
 		| "unlocked";
 
@@ -90,6 +92,10 @@
 		<path d="M4 3h13l3 3v15H4Zm4 0v6h8V3m-8 18v-8h8v8" />
 	{:else if name === "select-text"}
 		<path d="M3 5h15M3 10h6M3 15h5m4-6 9 7-5 1-2 5Z" />
+	{:else if name === "add"}
+		<path d="M12 4v16M4 12h16" />
+	{:else if name === "reset"}
+		<path d="M20 8a8 8 0 1 0 0 8M20 8V3m0 5h-5" />
 	{:else if name === "locked"}
 		<rect x="5" y="10" width="14" height="11" rx="2" /><path
 			d="M8 10V7a4 4 0 0 1 8 0v3"

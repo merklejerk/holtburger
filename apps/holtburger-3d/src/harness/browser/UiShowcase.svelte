@@ -50,6 +50,7 @@
 		| "worldContainer"
 		| "inspection"
 		| "debug"
+		| "settings"
 		| "spells"
 		| "spellBar"
 		| "combatBar"

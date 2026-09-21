@@ -7,6 +7,8 @@ import {
 	sampleCycleCandidates,
 } from "../../client/client-cycle-selection-controller";
 import { ClientSelectionInput } from "../../client/client-selection-input";
+import { AppInput } from "../../lib/input/app-input";
+import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 import { ClientInputArbiter } from "../../client/client-input-arbiter";
 import { CLIENT_TUNING } from "../../client/client-tuning";
 import {
@@ -103,6 +105,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	});
 	let nowMs = 0;
 	const input = new ClientSelectionInput({
+		input: new AppInput(INPUT_DEFAULTS),
 		selection,
 		cycle,
 		holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,

@@ -815,7 +815,7 @@ fn build_server_controlled_motion(
     let directive = EntityMotionDirective::from_movement_event(data)?;
     let object_target = directive
         .target_guid()
-        .and_then(|target| world.server_directed_target(target));
+        .and_then(|target| world.server_directed_target(guid, target));
     let target_pose = match directive {
         EntityMotionDirective::MoveToPosition { target, .. } => Some(target.world_position()),
         EntityMotionDirective::MoveToObject {

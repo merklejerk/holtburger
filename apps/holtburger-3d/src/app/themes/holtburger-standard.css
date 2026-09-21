@@ -50,14 +50,14 @@
 	}
 	/* Component properties stay the same across states; selectors choose their values.
 	   Equal state specificity lets later hover/press rules provide interaction feedback. */
-	.ui-theme :is(.ui-button, .ui-tab):where(:hover:not(:disabled)) {
+	.ui-theme .ui-button:where(:hover:not(:disabled)) {
 		--ui-button-background-color: color-mix(
 			in srgb,
 			var(--ui-color-control) 88%,
 			var(--ui-color-highlight)
 		);
 	}
-	.ui-theme :is(.ui-button, .ui-tab):where(:active:not(:disabled)) {
+	.ui-theme .ui-button:where(:active:not(:disabled)) {
 		--ui-button-background-color: var(--ui-color-well);
 	}
 

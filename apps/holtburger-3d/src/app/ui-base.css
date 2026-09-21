@@ -302,8 +302,7 @@
 		box-shadow: none;
 	}
 
-	.ui-theme .ui-button,
-	.ui-theme .ui-tab {
+	.ui-theme .ui-button {
 		min-height: 24px;
 		padding: 2px 7px;
 		border: 1px solid var(--ui-button-border-color, var(--ui-color-border));
@@ -332,23 +331,23 @@
 	/* State rules change defaults, not the property vocabulary. Explicit component
 	   variables are consumed in every state; themes select their values with CSS. */
 	.ui-theme
-		:is(.ui-button, .ui-tab):where(
+		.ui-button:where(
 			[aria-selected="true"]:not(:disabled),
 			[aria-pressed="true"]:not(:disabled)
 		) {
 		border-color: var(--ui-button-border-color, var(--ui-color-accent));
 	}
-	.ui-theme :is(.ui-button, .ui-tab):where(:hover:not(:disabled)) {
+	.ui-theme .ui-button:where(:hover:not(:disabled)) {
 		border-color: var(--ui-button-border-color, var(--ui-color-accent));
 		background: var(
 			--ui-button-background-color,
 			color-mix(in srgb, var(--ui-color-control) 88%, var(--ui-color-highlight))
 		);
 	}
-	.ui-theme :is(.ui-button, .ui-tab):where(:active:not(:disabled)) {
+	.ui-theme .ui-button:where(:active:not(:disabled)) {
 		background: var(--ui-button-background-color, var(--ui-color-well));
 	}
-	.ui-theme :is(.ui-button, .ui-tab):where(:disabled) {
+	.ui-theme .ui-button:where(:disabled) {
 		color: var(--ui-color-muted);
 		background: hsl(
 			from var(--ui-button-background-color, var(--ui-color-surface)) h
@@ -429,11 +428,37 @@
 	}
 	.ui-theme .ui-tabs {
 		display: flex;
-		gap: 4px;
-		padding-bottom: 4px;
+		gap: 0;
+		border-bottom: 1px solid var(--ui-color-border);
 	}
 	.ui-theme .ui-tab {
-		border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
+		min-height: 28px;
+		padding: 4px 10px;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+		color: var(--ui-color-muted);
+		font: inherit;
+		cursor: pointer;
+	}
+	.ui-theme .ui-tab:where(:hover:not(:disabled)) {
+		background: color-mix(in srgb, var(--ui-color-accent) 12%, transparent);
+		color: var(--ui-color-text);
+	}
+	.ui-theme .ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+		box-shadow: inset 0 -2px var(--ui-color-accent);
+		color: var(--ui-color-highlight);
+	}
+	.ui-theme .ui-tabs[aria-orientation="vertical"] {
+		flex-direction: column;
+		border-right: 1px solid var(--ui-color-border);
+		border-bottom: 0;
+	}
+	.ui-theme
+		.ui-tabs[aria-orientation="vertical"]
+		.ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+		box-shadow: inset -2px 0 var(--ui-color-accent);
 	}
 
 	.ui-theme .ui-meter {
@@ -590,7 +615,7 @@
 		border: 1px solid var(--ui-color-border);
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.ui-theme :is(.ui-button, .ui-tab),
+		.ui-theme .ui-button,
 		.ui-theme .ui-hud-button svg {
 			transition: none;
 		}

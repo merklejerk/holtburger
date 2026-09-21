@@ -307,9 +307,10 @@
 	{#if expanded}
 		<div class="explorer-tools-expanded">
 			<div
-				class="explorer-tab-list"
+				class="explorer-tab-list ui-tabs"
 				role="tablist"
 				aria-label="Explorer tool tabs"
+				aria-orientation="vertical"
 			>
 				{#each tabs as tab}
 					<button

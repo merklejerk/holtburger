@@ -556,10 +556,6 @@
 			background: var(--_ui-hud-background-color);
 			pointer-events: auto;
 		}
-		.chat-filters .ui-tabs {
-			padding: 0;
-			gap: 2px;
-		}
 		.chat-entry {
 			display: grid;
 			grid-template-columns: 1fr 26px;

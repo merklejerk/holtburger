@@ -229,14 +229,14 @@
 
 		<p class="explorer-section-label">Curves</p>
 		<div
-			class="explorer-grade-channels"
+			class="explorer-grade-channels ui-tabs"
 			role="tablist"
 			aria-label="Curve channel"
 		>
 			{#each COLOR_GRADE_CURVE_CHANNELS as option}
 				<button
 					type="button"
-					class="explorer-grade-channel ui-button"
+					class="explorer-grade-channel ui-tab"
 					role="tab"
 					aria-selected={option === channel}
 					onclick={() => (channel = option)}
@@ -317,8 +317,7 @@
 <style>
 	@layer components {
 		.explorer-grade-channels {
-			display: flex;
-			gap: 0.25rem;
+			margin-bottom: 4px;
 		}
 
 		.explorer-grade-channel {

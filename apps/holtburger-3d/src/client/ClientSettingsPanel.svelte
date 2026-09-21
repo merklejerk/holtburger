@@ -224,7 +224,11 @@
 		keyup: handleCaptureKeyup,
 	}}
 >
-	<div class="settings-tabs" role="tablist" aria-label="Settings sections">
+	<div
+		class="settings-tabs ui-tabs"
+		role="tablist"
+		aria-label="Settings sections"
+	>
 		{#each tabs as tab}
 			<button
 				type="button"
@@ -548,8 +552,6 @@
 			padding: 12px;
 		}
 		.settings-tabs {
-			display: flex;
-			gap: 4px;
 			margin-bottom: 12px;
 		}
 		.settings-tabs button {

@@ -66,9 +66,7 @@
 	}
 
 	.explorer-tab-list {
-		display: grid;
-		align-content: start;
-		gap: 4px;
+		align-items: stretch;
 		padding-top: 12px;
 	}
 

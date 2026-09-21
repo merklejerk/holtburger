@@ -18,6 +18,10 @@ pub struct SpellReference<'a> {
     pub description: &'a str,
     /// Authored school identity.
     pub school: u32,
+    /// Authored spell category, preserved for app-owned presentation policy.
+    pub category: u32,
+    /// Authored spell power, preserved without interpreting its category-specific scale.
+    pub power: u32,
     /// Whether ACE executes this spell through one of its projectile handlers.
     pub uses_projectile_handler: bool,
     /// Authored base mana, before casting economy adjustments.
@@ -43,6 +47,8 @@ pub fn spell_reference(table: &SpellTable, id: u32) -> Option<SpellReference<'_>
         name: &spell.name,
         description: &spell.description,
         school: spell.school,
+        category: spell.category,
+        power: spell.power,
         uses_projectile_handler: matches!(
             spell.meta_spell_type,
             PROJECTILE_SPELL_TYPE | LIFE_PROJECTILE_SPELL_TYPE | ENCHANTMENT_PROJECTILE_SPELL_TYPE

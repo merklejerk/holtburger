@@ -1,5 +1,7 @@
 //! App-local spell reference projection and artwork selection over static content.
 
+mod cantrips;
+
 use std::{collections::HashSet, num::NonZeroU32};
 
 use anyhow::{Result, ensure};
@@ -10,6 +12,9 @@ use holtburger_content::{
 use holtburger_dat::file_type::SpellTable;
 use holtburger_world::spell::SpellCastingRoute;
 use serde::{Deserialize, Serialize};
+
+pub use cantrips::CantripTier;
+use cantrips::classify_cantrip;
 
 use crate::{shared_host_content::SharedHostContent, ui_icons::UiIconSpec};
 
@@ -73,6 +78,8 @@ pub struct SpellDetails {
     pub mana_per_target: u32,
     /// Positive authored duration, when applicable.
     pub duration_seconds: Option<f64>,
+    /// Item-enchantment presentation tier, when the authored spell is a cantrip.
+    pub cantrip_tier: Option<CantripTier>,
 }
 
 /// Exactly one result per requested spell identity.
@@ -138,6 +145,12 @@ fn project_references(
                     base_mana: spell.base_mana,
                     mana_per_target: spell.mana_mod,
                     duration_seconds: spell.duration_seconds,
+                    cantrip_tier: classify_cantrip(
+                        spell.name,
+                        spell.category,
+                        spell.flags,
+                        spell.power,
+                    ),
                 },
                 artwork,
             }
@@ -267,6 +280,7 @@ mod tests {
                 base_mana: 10,
                 mana_per_target: 2,
                 duration_seconds: Some(60.0),
+                cantrip_tier: None,
             },
             artwork: SpellArtwork::Ready {
                 spec: spell_icon_spec(&mut Mappings, 1, 10, 0x2008).unwrap(),
@@ -276,7 +290,7 @@ mod tests {
             serde_json::to_value(reference).unwrap(),
             serde_json::json!({
                 "kind":"known", "id":1, "name":"Spell",
-                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":3, "usesProjectileHandler":false, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0}, "artwork": {
+                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":3, "usesProjectileHandler":false, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0, "cantripTier":null}, "artwork": {
                     "kind":"ready", "spec":{"kind":"spell", "base":1,"background":610,"effects":702,"overlay":704}
                 }
             })
@@ -375,17 +389,26 @@ mod tests {
             spells: HashMap::from([(
                 1,
                 SpellBase {
-                    name: "Known spell".into(),
+                    name: "Minor Strength".into(),
                     icon_id: 1,
+                    category: 261,
+                    power: 5,
+                    bitfield: 0x4,
                     ..SpellBase::default()
                 },
             )]),
             spell_sets: HashMap::new(),
         };
         let results = project_references(&table, &mut Mappings, &[1, 2]);
-        assert!(
-            matches!(&results[0],SpellReferenceResult::Known {name,artwork:SpellArtwork::Failed {detail},..} if name=="Known spell" && detail.contains("no entry"))
-        );
+        assert!(matches!(
+            &results[0],
+            SpellReferenceResult::Known {
+                name,
+                details: SpellDetails { cantrip_tier: Some(CantripTier::Minor), .. },
+                artwork: SpellArtwork::Failed { detail },
+                ..
+            } if name == "Minor Strength" && detail.contains("no entry")
+        ));
         assert!(matches!(
             &results[1],
             SpellReferenceResult::Missing { id: 2 }

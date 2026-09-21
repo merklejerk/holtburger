@@ -1269,6 +1269,8 @@
 		end(): void;
 		select(guid: number | null): void;
 		respond(kind: InspectionResponseKind, guid: number): void;
+		deferSpellReferences(): void;
+		releaseSpellReferences(): void;
 		resync(): void;
 		restore(): void;
 		setArtworkFailure(failed: boolean): void;
@@ -1525,6 +1527,11 @@
 							useText: "Use this item to recall to a remembered sanctuary.",
 							spells: [
 								{ id: 2000, activeEnchantment: true },
+								{ id: 2001, activeEnchantment: false },
+								{ id: 2002, activeEnchantment: false },
+								{ id: 2003, activeEnchantment: false },
+								{ id: 2004, activeEnchantment: false },
+								{ id: 2005, activeEnchantment: false },
 								{ id: 999999, activeEnchantment: false },
 							],
 						},
@@ -1535,6 +1542,7 @@
 	}
 
 	let releaseInspectionKeys: (() => void) | null = null;
+	let releaseInspectionSpellReferences: (() => void) | null = null;
 	let inspectionCommandOffset = 0;
 	function examineHarnessSelection(): void {
 		const guid = selection.selectedGuid();
@@ -1567,6 +1575,8 @@
 		end: () => {
 			releaseInspectionKeys?.();
 			releaseInspectionKeys = null;
+			releaseInspectionSpellReferences?.();
+			releaseInspectionSpellReferences = null;
 			objectInspectionOwner.close();
 			selection.select(null);
 		},
@@ -1576,6 +1586,17 @@
 				"client-object-inspection-result",
 				inspectionResult(kind, guid),
 			),
+		deferSpellReferences: () => {
+			if (releaseInspectionSpellReferences !== null)
+				throw new Error("Inspection spell references are already deferred.");
+			releaseInspectionSpellReferences = holdSpellReferences();
+		},
+		releaseSpellReferences: () => {
+			if (releaseInspectionSpellReferences === null)
+				throw new Error("Inspection spell references are not deferred.");
+			releaseInspectionSpellReferences();
+			releaseInspectionSpellReferences = null;
+		},
 		resync: () => emitInteractionEvent("client-state-resyncing", null),
 		restore: emitInteractionBaseline,
 		setArtworkFailure: (failed) => {
@@ -2820,6 +2841,16 @@
 									baseMana: 10,
 									manaPerTarget: 2,
 									durationSeconds: 60,
+									cantripTier:
+										id === 2001
+											? "major"
+											: id === 2002
+												? "epic"
+												: id === 2003 || id === 2004
+													? "legendary"
+													: id === 2005
+														? "other"
+														: null,
 									classification: {
 										beneficial: id !== 2000,
 										level: ((id - 1) % 8) + 1,

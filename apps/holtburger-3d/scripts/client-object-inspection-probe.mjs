@@ -169,6 +169,7 @@ export async function probeObjectInspection(
 		assert.equal((await snapshot()).commandCount, 1);
 
 		// Selection replacement cannot retarget an already captured request or resulting snapshot.
+		await read(probe + ".deferSpellReferences()");
 		await select(8);
 		await respond("item", 7);
 		let item = await waitFor(
@@ -178,11 +179,56 @@ export async function probeObjectInspection(
 		assert.equal(item.selectedGuid, 8);
 		assert.equal(item.state.guid, 7);
 		assert.equal(item.window.count, 1);
+		assert.deepEqual(
+			await read(`[
+				...document.querySelectorAll('.inspection-cantrip-pill'),
+			].map((pill) => pill.textContent.trim())`),
+			["Cantrips…"],
+		);
+
+		// Replacing the inspected item retires its pending spell join. Its late reply cannot
+		// publish pills into the replacement creature inspection.
+		await click('button[aria-label="Examine"]');
+		await respond("creature", 8);
+		await waitFor(
+			(value) => value.window?.title === "Holtmage",
+			"Replacement inspection did not open",
+		);
+		await read(probe + ".releaseSpellReferences()");
+		await settle(100);
+		assert.equal(
+			await read("document.querySelector('.inspection-cantrip-pill') === null"),
+			true,
+		);
+
+		// Reopen the item after the shared references settle for complete presentation checks.
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("item", 7);
+		item = await waitFor(
+			(value) =>
+				value.window?.title?.startsWith("Ancient Atlan") === true &&
+				value.window.text.includes("Leg. ×2"),
+			"Resolved item inspection did not reopen",
+		);
 		assert.match(item.window.text, /Black Garnet/);
 		assert.match(item.window.text, /125,000/);
 		assert.match(item.window.text, /9,802 \/ 10,000/);
 		assert.match(item.window.text, /Harm Other I \(active\)/);
 		assert.match(item.window.text, /definition missing/);
+		const cantripPills = await read(`[
+			...document.querySelectorAll('.inspection-cantrip-pill'),
+		].map((pill) => ({
+			text: pill.textContent.trim(),
+			label: pill.getAttribute('aria-label'),
+		}))`);
+		assert.deepEqual(cantripPills, [
+			{ text: "Maj.", label: "Major cantrip: 1" },
+			{ text: "Epic", label: "Epic cantrip: 1" },
+			{ text: "Leg. ×2", label: "Legendary cantrips: 2" },
+			{ text: "Other", label: "Other cantrip: 1" },
+			{ text: "Incomplete", label: null },
+		]);
 		assert.match(item.window.text, /\[See more\]/);
 		assert.doesNotMatch(item.window.text, /final archival sentence/);
 		await click(".inspection-description-toggle");
@@ -224,7 +270,7 @@ export async function probeObjectInspection(
 		const commandsBeforeClose = item.commandCount;
 		await click('button[aria-label^="Close Ancient Atlan Sword"]');
 		assert.equal((await snapshot()).window, null);
-		assert.equal((await snapshot()).selectedGuid, 8);
+		assert.equal((await snapshot()).selectedGuid, 7);
 		assert.equal((await snapshot()).commandCount, commandsBeforeClose);
 
 		// A failed artwork lease leaves the inspected identity and textual facts usable.

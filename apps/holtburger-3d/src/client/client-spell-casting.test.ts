@@ -18,6 +18,7 @@ function details(overrides: Partial<SpellDetails> = {}): SpellDetails {
 		baseMana: 10,
 		manaPerTarget: 0,
 		durationSeconds: null,
+		cantripTier: null,
 		...overrides,
 	};
 }

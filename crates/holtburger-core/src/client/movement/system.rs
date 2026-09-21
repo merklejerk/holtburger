@@ -876,7 +876,7 @@ impl MovementSystem {
                 .unwrap_or_default();
             let target = state
                 .target_guid()
-                .and_then(|target| world.server_directed_target(target));
+                .and_then(|target| world.server_directed_target(guid, target));
             let contact = world
                 .player_entity()
                 .ok_or_else(|| anyhow::anyhow!("server-directed player entity is unavailable"))?

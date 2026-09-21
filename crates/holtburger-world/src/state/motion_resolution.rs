@@ -643,7 +643,7 @@ impl WorldState {
             target: snapshot
                 .directive
                 .and_then(|directive| directive.target_guid())
-                .and_then(|target| self.server_directed_target(target)),
+                .and_then(|target| self.server_directed_target(guid, target)),
             frame_policy: body.map_or(RemoteFramePolicy::Body, SpatialBody::remote_frame_policy),
             omega: body.map_or(entity.omega, |body| body.nominal.omega),
         })
@@ -1021,7 +1021,7 @@ impl WorldState {
         let target = snapshot
             .directive
             .and_then(|directive| directive.target_guid())
-            .and_then(|target| self.server_directed_target(target));
+            .and_then(|target| self.server_directed_target(guid, target));
         let Some(table) = self
             .motion_sequences
             .table(motion_table_id_for_source(source))
@@ -1044,14 +1044,21 @@ impl WorldState {
     }
 
     /// Samples the current target facts used by retail object-directed movement.
-    pub fn server_directed_target(&self, guid: Guid) -> Option<ServerDirectedTarget> {
-        let entity = self.entities.get(guid)?;
+    ///
+    /// Object identity remains available while physical preparation is pending. The movement
+    /// reducer can therefore wait for cylinder distance without converting a resolved object into
+    /// retail's admission-time fixed-position fallback.
+    pub fn server_directed_target(
+        &self,
+        actor: Guid,
+        target: Guid,
+    ) -> Option<ServerDirectedTarget> {
+        let entity = self.entities.get(target)?;
         let pose = self
-            .runtime_body_id_for_guid(guid)
+            .runtime_body_id_for_guid(target)
             .and_then(|body_id| self.scene.body(body_id))
             .map_or(entity.position, |body| body.pose);
-        let use_radius = entity.use_radius().unwrap_or(0.0) as f32;
-        ServerDirectedTarget::new(pose, use_radius)
+        ServerDirectedTarget::new(pose, self.physical_cylinder_distance(actor, target))
     }
 
     /// Resolves the motion table every playback and presentation consumer must use for an entity.

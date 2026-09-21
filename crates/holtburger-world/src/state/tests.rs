@@ -15,7 +15,10 @@ use crate::{
     SpatialSampleMode, WorldBootstrap,
 };
 
-use crate::motion::AuthoredCollisionPose;
+use crate::motion::{
+    AuthoredCollisionPose, MotionContact, MotionOrder, ServerDirectedMotionResolution,
+    begin_server_directed_motion, resolve_server_directed_motion,
+};
 use crate::state::motion_resolution::test_support::{
     FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
 };
@@ -5662,7 +5665,7 @@ fn login_combat_mode_defaults_to_peace_without_overriding_explicit_server_modes(
 }
 
 #[test]
-fn world_container_range_uses_scaled_canonical_bodies_and_tolerates_pending_geometry() {
+fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geometry() {
     let mut world = WorldState::synthetic();
     let actor = Guid(0x5000_0201);
     let target = Guid(0x8000_0202);
@@ -5682,7 +5685,48 @@ fn world_container_range_uses_scaled_canonical_bodies_and_tolerates_pending_geom
         },
     ));
     world.confirm_world_container(target);
+    let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+    let directive = EntityMotionDirective::MoveToObject {
+        admission: EntityMotionAdmission {
+            object_instance_sequence: 1,
+            movement_sequence: 1,
+            server_control_sequence: 1,
+            is_autonomous: false,
+        },
+        target,
+        fallback_target: OrderedMotionPosition {
+            cell_id: pose.landblock_id,
+            x: scalar(2.0),
+            y: scalar(0.0),
+            z: scalar(0.0),
+        },
+        params: EntityMoveToParameters {
+            flags: 0x601, // CanWalk | MoveTowards | UseSpheres.
+            distance_to_object: scalar(0.75),
+            min_distance: scalar(0.0),
+            fail_distance: scalar(100.0),
+            speed: scalar(1.0),
+            walk_run_threshold: scalar(5.0),
+            desired_heading_degrees: scalar(0.0),
+        },
+        run_rate: scalar(1.0),
+    };
+    let state =
+        begin_server_directed_motion(directive, pose, world.server_directed_target(actor, target));
+    let resolve = |world: &WorldState| {
+        resolve_server_directed_motion(
+            state,
+            MotionOrder::default(),
+            pose,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            world.server_directed_target(actor, target),
+        )
+    };
     assert_eq!(world.within_use_radius(actor, target), None);
+    let ServerDirectedMotionResolution::Active(waiting) = resolve(&world) else {
+        panic!("pending geometry must preserve the object approach");
+    };
+    assert_eq!(waiting.order, MotionOrder::default());
     let configuration = set_state_dynamic_definition();
     for guid in [actor, target] {
         world
@@ -5697,10 +5741,20 @@ fn world_container_range_uses_scaled_canonical_bodies_and_tolerates_pending_geom
     }
     // Two half-metre radii leave a metre of separation, beyond ACE's absent-property default.
     assert_eq!(world.within_use_radius(actor, target), Some(false));
+    assert!(matches!(
+        resolve(&world),
+        ServerDirectedMotionResolution::Active(_)
+    ));
     world
         .apply_entity_script_scale(target, 2.0, 0.0, 1.0)
         .unwrap();
     assert_eq!(world.within_use_radius(actor, target), Some(true));
+    assert_eq!(
+        resolve(&world),
+        ServerDirectedMotionResolution::Complete {
+            sticky_target: None
+        }
+    );
     // An authored radius replaces the protocol default, including a zero radius.
     world
         .entities
@@ -5721,6 +5775,12 @@ fn world_container_range_uses_scaled_canonical_bodies_and_tolerates_pending_geom
     // Semantic/server placement can lag simulation; it must not replace the canonical body pose.
     world.entities.get_mut(target).unwrap().position.coords.x = 100.0;
     assert_eq!(world.within_use_radius(actor, target), Some(true));
+    assert_eq!(
+        resolve(&world),
+        ServerDirectedMotionResolution::Complete {
+            sticky_target: None
+        }
+    );
     world
         .scene
         .set_dynamic_physical_body(

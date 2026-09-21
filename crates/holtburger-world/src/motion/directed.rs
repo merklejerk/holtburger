@@ -1,6 +1,6 @@
 //! Retail server-directed MoveTo/TurnTo reduction into ordinary authored motion orders.
 
-use crate::entity::{EntityMotionDirective, EntityMoveToParameters, OrderedMotionPosition};
+use crate::entity::{EntityMotionDirective, EntityMoveToParameters};
 use crate::spatial::ContactState;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -19,6 +19,7 @@ const USE_FINAL_HEADING: u32 = 0x0000_0040;
 const STICKY: u32 = 0x0000_0080;
 const MOVE_AWAY: u32 = 0x0000_0100;
 const MOVE_TOWARDS: u32 = 0x0000_0200;
+const USE_SPHERES: u32 = 0x0000_0400;
 const STOP_COMPLETELY: u32 = 0x0001_0000;
 
 /// Current authoritative facts for an object targeted by a server directive.
@@ -26,14 +27,19 @@ const STOP_COMPLETELY: u32 = 0x0001_0000;
 pub struct ServerDirectedTarget {
     /// Current authoritative target pose.
     pub pose: WorldPosition,
-    /// Collision/use radius added to the desired center separation.
-    pub use_radius: f32,
+    /// Current retail cylinder separation from the moving actor, when both bodies are prepared.
+    pub cylinder_distance: Option<f32>,
 }
 
 impl ServerDirectedTarget {
-    /// Builds a target only when its radius is a usable physical distance.
-    pub fn new(pose: WorldPosition, use_radius: f32) -> Option<Self> {
-        (use_radius.is_finite() && use_radius >= 0.0).then_some(Self { pose, use_radius })
+    /// Couples one target pose to the geometry-owned distance sampled for the same tick.
+    pub fn new(pose: WorldPosition, cylinder_distance: Option<f32>) -> Option<Self> {
+        cylinder_distance
+            .is_none_or(f32::is_finite)
+            .then_some(Self {
+                pose,
+                cylinder_distance,
+            })
     }
 }
 
@@ -85,13 +91,11 @@ struct DirectedTurnProgress {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum MoveToTarget {
     /// Fixed position command, including MoveToObject's retail fallback when lookup initially fails.
-    Position(ServerDirectedTarget),
+    Position(WorldPosition),
     /// Object lookup succeeded at admission and must remain available for tracking.
     Object {
         /// Target object identity.
         guid: Guid,
-        /// Most recently sampled target facts.
-        current: ServerDirectedTarget,
     },
 }
 
@@ -219,7 +223,7 @@ pub fn begin_server_directed_motion(
                 params,
                 run_rate: run_rate.to_f32(),
                 starting_pose: current_pose,
-                target: MoveToTarget::Position(position_target(target)),
+                target: MoveToTarget::Position(target.world_position()),
                 phase: MoveToPhase::InitialTurn { progress: None },
             }),
         },
@@ -235,11 +239,8 @@ pub fn begin_server_directed_motion(
                 run_rate: run_rate.to_f32(),
                 starting_pose: current_pose,
                 target: object_target.map_or_else(
-                    || MoveToTarget::Position(position_target(fallback_target)),
-                    |current| MoveToTarget::Object {
-                        guid: target,
-                        current,
-                    },
+                    || MoveToTarget::Position(fallback_target.world_position()),
+                    |_| MoveToTarget::Object { guid: target },
                 ),
                 phase: MoveToPhase::InitialTurn { progress: None },
             }),
@@ -311,20 +312,34 @@ fn resolve_move_to(
     contact: MotionContact,
     object_target: Option<ServerDirectedTarget>,
 ) -> ServerDirectedMotionResolution {
-    if let MoveToTarget::Object { guid, current } = &mut state.target {
-        let Some(sample) = object_target else {
-            return ServerDirectedMotionResolution::Failed(
-                ServerDirectedMotionFailure::TargetUnavailable { guid: *guid },
-            );
-        };
-        *current = sample;
-    }
-    let target = move_to_target(state.target);
-    let distance = effective_target_distance(current_pose, target);
+    let (target_pose, distance) = match state.target {
+        MoveToTarget::Position(pose) => (pose, Some(current_pose.distance_to(&pose))),
+        MoveToTarget::Object { guid } => {
+            let Some(target) = object_target else {
+                return ServerDirectedMotionResolution::Failed(
+                    ServerDirectedMotionFailure::TargetUnavailable { guid },
+                );
+            };
+            // Retail object approach uses cylinder separation with UseSpheres, otherwise origin
+            // distance (acclient.c:331036-331058). Interaction reach is the wire threshold, not
+            // a physical radius to subtract from this sample.
+            let distance = if state.params.flags & USE_SPHERES != 0 {
+                target.cylinder_distance
+            } else {
+                Some(current_pose.distance_to(&target.pose))
+            };
+            (target.pose, distance)
+        }
+    };
 
     loop {
-        match state.phase {
-            MoveToPhase::InitialTurn { progress } => {
+        match (state.phase, distance) {
+            (MoveToPhase::InitialTurn { .. } | MoveToPhase::Moving { .. }, None) => {
+                // Missing geometry pauses approach, but cannot block a final heading already
+                // admitted after arrival. Target identity and phase survive preparation.
+                return active_move_step(state, directed_order(steady_order, None, None), contact);
+            }
+            (MoveToPhase::InitialTurn { progress }, Some(distance)) => {
                 let Some((command, speed_mod, moving_away, turn_speed_mod)) =
                     select_move_command(state.params, state.run_rate, distance)
                 else {
@@ -339,7 +354,7 @@ fn resolve_move_to(
                     continue;
                 };
                 let desired_heading =
-                    travel_heading(current_pose, target.pose, command, moving_away);
+                    travel_heading(current_pose, target_pose, command, moving_away);
                 if let Some((turn, progress)) = progressing_turn_order(
                     current_pose,
                     desired_heading,
@@ -363,12 +378,15 @@ fn resolve_move_to(
                     turn_speed_mod,
                 };
             }
-            MoveToPhase::Moving {
-                command,
-                speed_mod,
-                moving_away,
-                turn_speed_mod,
-            } => {
+            (
+                MoveToPhase::Moving {
+                    command,
+                    speed_mod,
+                    moving_away,
+                    turn_speed_mod,
+                },
+                Some(distance),
+            ) => {
                 if contact.physical() == ContactState::Grounded
                     && move_completed(state.params, distance, moving_away)
                 {
@@ -384,19 +402,19 @@ fn resolve_move_to(
                     );
                 }
                 let desired_heading =
-                    travel_heading(current_pose, target.pose, command, moving_away);
+                    travel_heading(current_pose, target_pose, command, moving_away);
                 let turn = turn_order(current_pose, desired_heading, turn_speed_mod, true);
                 let order = directed_order(steady_order, Some((command, speed_mod)), turn);
                 return active_move_step(state, order, contact);
             }
-            MoveToPhase::FinalTurn { progress } => {
+            (MoveToPhase::FinalTurn { progress }, _) => {
                 if state.params.flags & USE_FINAL_HEADING == 0 {
                     return complete_move(state);
                 }
                 let desired_heading = final_move_heading(
                     state.params,
                     current_pose,
-                    target.pose,
+                    target_pose,
                     matches!(state.target, MoveToTarget::Object { .. }),
                 );
                 let Some((turn, progress)) = progressing_turn_order(
@@ -666,26 +684,6 @@ fn turn_direction(delta: f32) -> DirectedTurnDirection {
     }
 }
 
-fn effective_target_distance(current: WorldPosition, target: ServerDirectedTarget) -> f32 {
-    (current.distance_to(&target.pose) - target.use_radius).max(0.0)
-}
-
-fn move_to_target(target: MoveToTarget) -> ServerDirectedTarget {
-    match target {
-        MoveToTarget::Position(target)
-        | MoveToTarget::Object {
-            current: target, ..
-        } => target,
-    }
-}
-
-fn position_target(position: OrderedMotionPosition) -> ServerDirectedTarget {
-    ServerDirectedTarget {
-        pose: position.world_position(),
-        use_radius: 0.0,
-    }
-}
-
 fn degrees_to_heading(degrees: f32) -> f32 {
     normalize_heading(degrees.to_radians())
 }
@@ -708,7 +706,8 @@ fn signed_heading_delta(current: f32, desired: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::entity::{
-        EntityMotionAdmission, EntityMoveToParameters, EntityTurnToParameters, OrderedMotionScalar,
+        EntityMotionAdmission, EntityMoveToParameters, EntityTurnToParameters,
+        OrderedMotionPosition, OrderedMotionScalar,
     };
     use holtburger_common::{Quaternion, Vector3};
 
@@ -766,7 +765,7 @@ mod tests {
     #[test]
     fn completed_object_move_hands_off_sticky_only_for_a_resolved_object() {
         let current = position(0.0, 0.0, 0.0);
-        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), 0.0).unwrap();
+        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), Some(0.0)).unwrap();
         let guid = Guid(2);
         for resolved in [false, true] {
             for sticky in [false, true] {
@@ -796,15 +795,145 @@ mod tests {
     }
 
     #[test]
-    fn sticky_handoff_waits_for_final_heading() {
+    fn spherical_object_move_uses_sampled_cylinder_separation_once() {
+        let target_pose = position(4.0, 0.0, 0.0);
+        let current = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let guid = Guid(2);
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: guid,
+            fallback_target: target_position(4.0, 0.0),
+            params: EntityMoveToParameters {
+                distance_to_object: scalar(2.0),
+                ..move_params(CAN_WALK | MOVE_TOWARDS | USE_SPHERES)
+            },
+            run_rate: scalar(1.0),
+        };
+        let outside = ServerDirectedTarget::new(target_pose, Some(2.1)).unwrap();
+        let state = begin_server_directed_motion(directive, current, Some(outside));
+
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            Some(outside),
+        ) else {
+            panic!("cylinder separation outside the use radius must keep approaching");
+        };
+        assert!(moving.order.forward.is_some());
+
+        let boundary = ServerDirectedTarget::new(target_pose, Some(2.0)).unwrap();
+        assert_eq!(
+            resolve_server_directed_motion(
+                moving.state,
+                steady(),
+                current,
+                MotionContact::RequiresSupport(ContactState::Grounded),
+                Some(boundary),
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
+    }
+
+    #[test]
+    fn spherical_object_move_waits_for_geometry_without_losing_object_identity() {
+        let target_pose = position(4.0, 0.0, 0.0);
+        let current = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let guid = Guid(2);
+        let target = ServerDirectedTarget::new(target_pose, None).unwrap();
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: guid,
+            fallback_target: target_position(20.0, 0.0),
+            params: move_params(CAN_WALK | MOVE_TOWARDS | USE_SPHERES),
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, Some(target));
+
+        let ServerDirectedMotionResolution::Active(waiting) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            Some(target),
+        ) else {
+            panic!("an existing target with pending geometry must remain admitted");
+        };
+        assert_eq!(waiting.order.forward, None);
+
+        let ready = ServerDirectedTarget::new(target_pose, Some(3.0)).unwrap();
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            waiting.state,
+            steady(),
+            current,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            Some(ready),
+        ) else {
+            panic!("the retained object directive must resume when geometry becomes ready");
+        };
+        assert!(moving.order.forward.is_some());
+    }
+
+    #[test]
+    fn non_spherical_object_move_uses_origin_distance() {
+        let target_pose = position(4.0, 0.0, 0.0);
+        let current = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let target = ServerDirectedTarget::new(target_pose, Some(0.0)).unwrap();
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: Guid(2),
+            fallback_target: target_position(4.0, 0.0),
+            params: EntityMoveToParameters {
+                distance_to_object: scalar(2.0),
+                ..move_params(CAN_WALK | MOVE_TOWARDS)
+            },
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, Some(target));
+
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            MotionContact::RequiresSupport(ContactState::Grounded),
+            Some(target),
+        ) else {
+            panic!("non-spherical movement must ignore the supplied cylinder separation");
+        };
+        assert!(moving.order.forward.is_some());
+    }
+
+    #[test]
+    fn sticky_handoff_finishes_final_heading_even_if_geometry_is_repreparing() {
         let current = position(0.0, 0.0, 0.0);
-        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), 0.0).unwrap();
+        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), Some(0.0)).unwrap();
         let guid = Guid(2);
         let directive = EntityMotionDirective::MoveToObject {
             admission: admission(),
             target: guid,
             fallback_target: target_position(0.0, 1.0),
-            params: move_params(CAN_WALK | MOVE_TOWARDS | STICKY | USE_FINAL_HEADING),
+            params: move_params(CAN_WALK | MOVE_TOWARDS | STICKY | USE_FINAL_HEADING | USE_SPHERES),
             run_rate: scalar(1.0),
         };
         let state = begin_server_directed_motion(directive, current, Some(target));
@@ -818,6 +947,7 @@ mod tests {
             panic!("arrival must finish the requested turn before sticky handoff");
         };
         assert!(turn.order.turn.is_some());
+        let target = ServerDirectedTarget::new(target.pose, None).unwrap();
         assert_eq!(
             resolve_server_directed_motion(
                 turn.state,
@@ -987,8 +1117,10 @@ mod tests {
     #[test]
     fn active_turn_to_object_keeps_its_queued_heading_when_the_target_moves() {
         let current = position(0.0, 0.0, 90.0);
-        let initial_target = ServerDirectedTarget::new(position(20.0, 0.0, 0.0), 0.5).unwrap();
-        let moved_target = ServerDirectedTarget::new(position(-20.0, 0.0, 0.0), 0.5).unwrap();
+        let initial_target =
+            ServerDirectedTarget::new(position(20.0, 0.0, 0.0), Some(19.0)).unwrap();
+        let moved_target =
+            ServerDirectedTarget::new(position(-20.0, 0.0, 0.0), Some(19.0)).unwrap();
         let state = begin_server_directed_motion(
             EntityMotionDirective::TurnToObject {
                 admission: admission(),
@@ -1068,7 +1200,7 @@ mod tests {
     #[test]
     fn an_object_resolved_at_admission_fails_if_it_disappears() {
         let current = position(0.0, 0.0, 0.0);
-        let target = ServerDirectedTarget::new(position(20.0, 0.0, 0.0), 0.5).unwrap();
+        let target = ServerDirectedTarget::new(position(20.0, 0.0, 0.0), Some(19.0)).unwrap();
         let state = begin_server_directed_motion(
             EntityMotionDirective::MoveToObject {
                 admission: admission(),

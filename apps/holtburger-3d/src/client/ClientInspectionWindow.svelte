@@ -366,6 +366,74 @@
 			width: 84px;
 			text-align: center;
 		}
+		.inspection-scroll :global(.inspection-hero-aside) {
+			display: grid;
+			justify-items: center;
+			align-self: start;
+			gap: 6px;
+			width: 84px;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pills) {
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: center;
+			gap: 3px;
+			width: 84px;
+			padding: 0;
+			list-style: none;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill) {
+			--cantrip-tier-color: var(--ui-color-accent);
+			/* Flex gap owns spacing; override the inspector's li + li margin. */
+			margin: 0;
+			padding: 2px 6px;
+			border: 1px solid
+				color-mix(
+					in srgb,
+					var(--cantrip-tier-color) 70%,
+					var(--ui-color-border)
+				);
+			border-radius: 999px;
+			background: color-mix(
+				in srgb,
+				var(--cantrip-tier-color) 16%,
+				var(--ui-color-well)
+			);
+			color: var(--cantrip-tier-color);
+			font-size: 0.64rem;
+			font-weight: 650;
+			line-height: 1.15;
+			white-space: nowrap;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="feeble"]) {
+			--cantrip-tier-color: #b8b6af;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="minor"]) {
+			--cantrip-tier-color: #82d998;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="moderate"]) {
+			--cantrip-tier-color: #79cbea;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="major"]) {
+			--cantrip-tier-color: #c0a2ff;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="epic"]) {
+			--cantrip-tier-color: #ff9d6c;
+		}
+		.inspection-scroll
+			:global(.inspection-cantrip-pill[data-tier="legendary"]) {
+			--cantrip-tier-color: #f2d05c;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="other"]) {
+			--cantrip-tier-color: #e6a4cf;
+		}
+		.inspection-scroll :global(.inspection-cantrip-pending),
+		.inspection-scroll :global(.inspection-cantrip-incomplete) {
+			border-color: var(--ui-color-border);
+			background: var(--ui-color-well);
+			color: var(--ui-color-muted);
+			font-weight: 500;
+		}
 		.inspection-scroll :global(.inspection-artwork-image) {
 			display: grid;
 			place-items: center;

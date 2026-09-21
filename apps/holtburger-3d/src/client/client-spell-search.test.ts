@@ -25,6 +25,7 @@ const details: SpellDetails = {
 	baseMana: 10,
 	manaPerTarget: 0,
 	durationSeconds: null,
+	cantripTier: null,
 	classification: {
 		beneficial: true,
 		level: 7,

@@ -56,6 +56,7 @@ function fixture() {
 				baseMana: 10,
 				manaPerTarget: 0,
 				durationSeconds: 60,
+				cantripTier: null,
 				castingRoute: "self-target",
 				classification: {
 					beneficial: true,
@@ -172,6 +173,7 @@ describe("ClientSpellState artwork lifetime", () => {
 							baseMana: 10,
 							manaPerTarget: 0,
 							durationSeconds: 60,
+							cantripTier: null,
 							castingRoute: "self-target",
 							classification: {
 								beneficial: true,

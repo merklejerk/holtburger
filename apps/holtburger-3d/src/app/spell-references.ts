@@ -3,6 +3,18 @@ import type { HostTransport } from "../lib/host/host-transport";
 
 /** Bound static lookup work independently from image preparation. */
 export const MAX_SPELL_REFERENCE_BATCH = 128;
+/** Stable display order for item cantrip summaries. */
+export const CANTRIP_TIERS = [
+	"feeble",
+	"minor",
+	"moderate",
+	"major",
+	"epic",
+	"legendary",
+	"other",
+] as const;
+const cantripTierSchema = z.enum(CANTRIP_TIERS);
+export type CantripTier = z.infer<typeof cantripTierSchema>;
 const id = z.number().int().positive().max(0xffff_ffff);
 const spellSpec = z
 	.object({
@@ -60,6 +72,7 @@ const referenceSchema = z.discriminatedUnion("kind", [
 					baseMana: z.number().int().nonnegative().max(0xffff_ffff),
 					manaPerTarget: z.number().int().nonnegative().max(0xffff_ffff),
 					durationSeconds: z.number().finite().positive().nullable(),
+					cantripTier: cantripTierSchema.nullable(),
 				})
 				.strict()
 				.readonly(),

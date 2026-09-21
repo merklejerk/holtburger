@@ -3,6 +3,7 @@
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import type { HexRgbaColor } from "../lib/frontend-color";
 	import ClientInspectionArtwork from "./ClientInspectionArtwork.svelte";
+	import { summarizeItemCantrips } from "./client-item-cantrips";
 	import type { ClientSpellServices } from "./client-spells";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import type {
@@ -46,11 +47,14 @@
 	let descriptionExpanded = $state(false);
 	let spellReferences = $state<readonly SpellReference[] | null>(null);
 	let spellFailure = $state<string | null>(null);
+	const cantripSummary = $derived(
+		summarizeItemCantrips(item.spells, spellReferences, spellFailure !== null),
+	);
 
 	$effect(() => {
-		if (item.spells.length === 0) return;
 		spellReferences = null;
 		spellFailure = null;
+		if (item.spells.length === 0) return;
 		if (spells === null) {
 			spellFailure = "Spell-reference service is unavailable.";
 			return;
@@ -94,11 +98,43 @@
 
 <article class="inspection-body inspection-item">
 	<header class="inspection-hero">
-		<ClientInspectionArtwork
-			artwork={item.artwork}
-			{icons}
-			name={inspection.name}
-		/>
+		<div class="inspection-hero-aside">
+			<ClientInspectionArtwork
+				artwork={item.artwork}
+				{icons}
+				name={inspection.name}
+			/>
+			{#if cantripSummary.kind === "loading"}
+				<div
+					class="inspection-cantrip-pills"
+					aria-label="Loading cantrip summary"
+				>
+					<span class="inspection-cantrip-pill inspection-cantrip-pending"
+						>Cantrips…</span
+					>
+				</div>
+			{:else if cantripSummary.kind === "ready" && (cantripSummary.pills.length > 0 || cantripSummary.incompleteCount > 0)}
+				<ul class="inspection-cantrip-pills" aria-label="Cantrips">
+					{#each cantripSummary.pills as pill}
+						<li
+							class="inspection-cantrip-pill"
+							data-tier={pill.tier}
+							aria-label={`${pill.label} cantrip${pill.count === 1 ? "" : "s"}: ${pill.count}`}
+						>
+							{pill.abbreviatedLabel}{pill.count === 1 ? "" : ` ×${pill.count}`}
+						</li>
+					{/each}
+					{#if cantripSummary.incompleteCount > 0}
+						<li
+							class="inspection-cantrip-pill inspection-cantrip-incomplete"
+							title={`${cantripSummary.incompleteCount} intrinsic spell definition${cantripSummary.incompleteCount === 1 ? " is" : "s are"} unavailable`}
+						>
+							Incomplete
+						</li>
+					{/if}
+				</ul>
+			{/if}
+		</div>
 		<div>
 			<h2 class="inspection-name" style:color={nameColor}>{inspection.name}</h2>
 			{#if inspection.level !== null}<p class="inspection-kicker">

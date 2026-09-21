@@ -7,6 +7,7 @@
 	import type {
 		CombatBreakpointIndex,
 		CombatHeightIndex,
+		ClientKeyboardConfiguration,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
 	import { handleCombatBarKeydown } from "./client-combat-bar-input";
@@ -38,7 +39,12 @@
 	} from "./client-dialogs";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { AppInput } from "../lib/input/app-input";
+	import { provideClientInput } from "./client-input-context";
+	import {
+		clientInputConfiguration,
+		clientKeyboardSettingsSchema,
+	} from "./client-input-settings";
 	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
@@ -94,10 +100,28 @@
 		ClientChatLine,
 	} from "./client-chat-policy";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
+	import {
+		resolveTextureFilteringPolicy,
+		type TextureFilteringCapabilities,
+	} from "../lib/game/renderer/texture-filtering-policy";
 	import type {
 		ClientCharacterSettings,
+		ClientGraphicsSettings,
+		ClientUiSettings,
 		ClientUserSettings,
 	} from "./client-settings-contract";
+	import {
+		clientGraphicsSettingsSchema,
+		clientUiSettingsSchema,
+	} from "./client-settings-contract";
+	import {
+		CLIENT_FONT_FAMILY_CSS,
+		type ClientFontFamily,
+	} from "./client-settings-values";
+	import {
+		clientSceneInterestRadii,
+		frameSettingsWithGraphics,
+	} from "./client-settings-policy";
 	import {
 		ClientCharacterSettingsOwner,
 		type ClientCharacterSettingsState,
@@ -149,6 +173,9 @@
 	const startupSettingsSaveFailure = untrack(() => initialSettingsSaveFailure);
 	const startupSettingsTransport = untrack(() => settingsTransport);
 	let userSettings = $state.raw<ClientUserSettings>(startupUserSettings);
+	const clientInput = provideClientInput(
+		new AppInput(clientInputConfiguration(startupUserSettings.input)),
+	);
 
 	let entityCollisionDisabled = $state(false);
 	let lifecycle = $state<ClientLifecycleUiState>(
@@ -402,6 +429,22 @@
 		userSettings = settings;
 		userSettingsPersistence.publish(settings);
 	}
+	function changeUi(ui: ClientUiSettings): void {
+		changeUserSettings({
+			...userSettings,
+			ui: clientUiSettingsSchema.parse(ui),
+		});
+	}
+	function changeInput(input: ClientKeyboardConfiguration): void {
+		const accepted = clientKeyboardSettingsSchema.parse(input);
+		keyboard.cancel();
+		characterInput.replaceBindings(accepted.character);
+		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+		changeUserSettings({ ...userSettings, input: accepted });
+	}
+	function fontCss(family: ClientFontFamily): string | undefined {
+		return family === "theme" ? undefined : CLIENT_FONT_FAMILY_CSS[family];
+	}
 	function changeCharacterSettings(settings: ClientCharacterSettings): void {
 		characterSettingsOwner.change(settings);
 	}
@@ -428,10 +471,56 @@
 		};
 	});
 	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
-	let frameSettings = $state.raw<FrameSettings>({
-		...CLIENT_TUNING.frameSettings,
-		weatherEnabled: startupUserSettings.weatherEnabled,
-	});
+	let frameSettings = $state.raw<FrameSettings>(
+		frameSettingsWithGraphics(
+			CLIENT_TUNING.frameSettings,
+			startupUserSettings.graphics,
+		),
+	);
+	let textureFilteringCapabilities =
+		$state.raw<TextureFilteringCapabilities | null>(null);
+	function applyFrameGraphics(graphics: ClientGraphicsSettings): void {
+		const effective =
+			textureFilteringCapabilities === null
+				? graphics
+				: {
+						...graphics,
+						textureFiltering: resolveTextureFilteringPolicy(
+							graphics.textureFiltering,
+							textureFilteringCapabilities,
+						),
+					};
+		frameSettings = frameSettingsWithGraphics(frameSettings, effective);
+		presentationSession?.setFrameSettings(frameSettings);
+	}
+	function changeGraphics(graphics: ClientGraphicsSettings): void {
+		const accepted = clientGraphicsSettingsSchema.parse(graphics);
+		const previous = userSettings.graphics;
+		if (
+			Object.keys(accepted).every(
+				(key) =>
+					accepted[key as keyof ClientGraphicsSettings] ===
+					previous[key as keyof ClientGraphicsSettings],
+			)
+		)
+			return;
+		changeUserSettings({ ...userSettings, graphics: accepted });
+		if (accepted.viewDistance !== previous.viewDistance)
+			presentationSession?.setSceneInterestRadii(
+				clientSceneInterestRadii(accepted.viewDistance),
+			);
+		if (accepted.verticalFovDegrees !== previous.verticalFovDegrees)
+			presentationSession?.setFieldOfView(accepted.verticalFovDegrees);
+		if (
+			accepted.ambientOcclusionEnabled !== previous.ambientOcclusionEnabled ||
+			accepted.entityShadowMode !== previous.entityShadowMode ||
+			accepted.textureFiltering !== previous.textureFiltering ||
+			accepted.renderScale !== previous.renderScale ||
+			accepted.weatherEnabled !== previous.weatherEnabled
+		) {
+			applyFrameGraphics(accepted);
+		}
+	}
 	let inputController: CharacterInputController | null = null;
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 	/** Explicit attack intent owns cancellation; passive status updates can only retire it. */
@@ -447,7 +536,7 @@
 		if (status.desired === null) retireCombatEscapeContext();
 	}
 	let inputArbiter: ClientInputArbiter | null = null;
-	const characterInput = APP_INPUT.characterContext((action, pressed) => {
+	const characterInput = clientInput.characterContext((action, pressed) => {
 		if (
 			action === "jump" &&
 			characterMotion === null &&
@@ -796,6 +885,7 @@
 		if (event.defaultPrevented) return;
 		if (
 			handleCombatBarKeydown(
+				clientInput,
 				event,
 				(combatMode === "melee" || combatMode === "missile") &&
 					characterSettings.kind === "ready" &&
@@ -808,6 +898,7 @@
 			return;
 		if (
 			handleSpellBarKeydown(
+				clientInput,
 				event,
 				spellBarEnabled,
 				selectSpellTab,
@@ -816,7 +907,7 @@
 		)
 			return;
 		if (
-			APP_INPUT.shortcut("toggleAutoRun", event) &&
+			clientInput.shortcut("toggleAutoRun", event) &&
 			!event.isComposing &&
 			inputArbiter !== null
 		) {
@@ -824,38 +915,32 @@
 			if (!event.repeat) inputArbiter.toggleAutoRun();
 			return;
 		}
-		if (APP_INPUT.shortcut("toggleCombat", event) && !event.isComposing) {
+		if (clientInput.shortcut("toggleCombat", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) void toggleCombatMode();
 			return;
 		}
-		if (APP_INPUT.shortcut("cancel", event) && itemInteractions?.cancel()) {
+		if (clientInput.shortcut("cancel", event) && itemInteractions?.cancel()) {
 			event.preventDefault();
 			return;
 		}
-		if (APP_INPUT.shortcut("give", event) && !event.isComposing) {
+		if (clientInput.shortcut("give", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) itemInteractions?.giveSelected();
 			return;
 		}
-		if (APP_INPUT.shortcut("examine", event) && !event.isComposing) {
+		if (clientInput.shortcut("examine", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) examineSelectedEntity();
 			return;
 		}
 		if (selectionInput?.keydown(event, performance.now())) return;
-		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
+		if (clientInput.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
 			if (!event.repeat) enterPreciseJump();
 			return;
 		}
-		if (
-			APP_INPUT.shortcut("interact", event) &&
-			!event.ctrlKey &&
-			!event.altKey &&
-			!event.metaKey &&
-			!event.isComposing
-		) {
+		if (clientInput.shortcut("interact", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) itemInteractions?.interactSelected(unrestrictedUse);
 			return;
@@ -1024,11 +1109,23 @@
 			hostTransport: currentTransport,
 			session: currentSession,
 			onError: reportPresentationError,
+			onTextureFilteringCapabilities: (capabilities) => {
+				textureFilteringCapabilities = capabilities;
+				if (capabilities !== null) applyFrameGraphics(userSettings.graphics);
+			},
 			enablePerformanceProfiling: debugEnabled,
 		});
 		// Frame settings are cold presentation policy, not renderer identity. The control handler
 		// updates the live owner directly; this snapshot only initializes a genuinely new owner.
 		presentation.setFrameSettings(untrack(() => frameSettings));
+		presentation.setSceneInterestRadii(
+			clientSceneInterestRadii(
+				untrack(() => userSettings.graphics.viewDistance),
+			),
+		);
+		presentation.setFieldOfView(
+			untrack(() => userSettings.graphics.verticalFovDegrees),
+		);
 		const currentFrameRateSampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
@@ -1273,6 +1370,7 @@
 				),
 		});
 		const input = new ClientSelectionInput({
+			input: clientInput,
 			selection,
 			cycle,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
@@ -1370,219 +1468,241 @@
 	});
 </script>
 
-{#if dialogPresentation !== null}
-	<ClientMessageDialog
-		presentation={dialogPresentation}
-		onDismiss={(id) => dialogs?.dismissPopup(id)}
-		onRespond={(id, accepted) => {
-			void dialogs?.respond(id, accepted);
-		}}
-	/>
-{/if}
-{#if !usesWorldPresentation}
-	<ClientToastOverlay {toast} persistentMessage={null} />
-{/if}
+<div
+	class="client-font-scope"
+	style:--ui-font-body={fontCss(userSettings.ui.fonts.body)}
+	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
+	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
+>
+	{#if dialogPresentation !== null}
+		<ClientMessageDialog
+			presentation={dialogPresentation}
+			onDismiss={(id) => dialogs?.dismissPopup(id)}
+			onRespond={(id, accepted) => {
+				void dialogs?.respond(id, accepted);
+			}}
+		/>
+	{/if}
+	{#if !usesWorldPresentation}
+		<ClientToastOverlay {toast} persistentMessage={null} />
+	{/if}
 
-{#if usesWorldPresentation && startupError === null && commandFailure === null}
-	<ClientWorldView
-		itemSession={session}
-		hudLayout={userSettings.hudLayout}
-		onHudLayoutChange={(hudLayout) =>
-			changeUserSettings({ ...userSettings, hudLayout })}
-		spellBarShape={userSettings.spellBarShape}
-		onSpellBarShapeChange={(spellBarShape) =>
-			changeUserSettings({ ...userSettings, spellBarShape })}
-		minimapViewDiameters={userSettings.minimapViewDiameters}
-		onMinimapViewDiametersChange={(minimapViewDiameters) =>
-			changeUserSettings({ ...userSettings, minimapViewDiameters })}
-		chatFilters={userSettings.chatFilters}
-		onChatFiltersChange={(chatFilters) =>
-			changeUserSettings({ ...userSettings, chatFilters })}
-		inspectionPreviewHeight={userSettings.inspection.previewHeight}
-		onInspectionPreviewHeightChange={(previewHeight) =>
-			changeUserSettings({
-				...userSettings,
-				inspection: { previewHeight },
-			})}
-		{hudMode}
-		onHudModeChange={(mode) => (hudMode = mode)}
-		{spellBar}
-		onSpellBarChange={changeSpellBar}
-		actionBars={characterSettings.kind === "ready"
-			? characterSettings.settings.actionBars
-			: null}
-		onActionBarsChange={(actionBars) => {
-			if (characterSettings.kind === "ready")
-				changeCharacterSettings({ ...characterSettings.settings, actionBars });
-		}}
-		{spellBarEnabled}
-		onSelectSpellTab={selectSpellTab}
-		onActivateSpellCell={activateSpellCell}
-		{combatMode}
-		{combatStatus}
-		{combatControls}
-		{combatProfileSelectionRevision}
-		onCombatProfileSelect={selectCombatProfile}
-		combatEnabled={lifecycle.kind === "in-world"}
-		onToggleCombat={() => void toggleCombatMode()}
-		onCastSpell={(spellId) => void castSpell(spellId)}
-		{entityMetadata}
-		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
-		{debugEnabled}
-		{readMinimapFrame}
-		{readDiagnostics}
-		{readSelectedEntity}
-		{readFrameRates}
-		{readTargetIndicatorFrame}
-		{readSelectedEntityDisplay}
-		{spells}
-		{inventory}
-		{worldContainer}
-		{itemInteractions}
-		{objectInspection}
-		{objectPreviewService}
-		onSelectContentsItem={(guid, mode) =>
-			entitySelection?.selectContentsItem(guid, mode)}
-		onInteractEntity={() => itemInteractions?.interactSelected(unrestrictedUse)}
-		onExamineEntity={examineSelectedEntity}
-		onExamineItem={examineItem}
-		onCloseInspection={() => objectInspectionOwner?.close()}
-		{selectedEntityGuid}
-		{hoveredEntityGuid}
-		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
-		onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
-		{entityCollisionDisabled}
-		onEntityCollisionDisabledChange={setEntityCollisionDisabled}
-		{unrestrictedUse}
-		onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-		{playerName}
-		{worldName}
-		{vitals}
-		{appearanceOptions}
-		onAppearanceOptionChange={setAppearanceOption}
-		jumpChargeActive={activeJumpBeginSequence !== null}
-		readJumpExtent={() => inputController?.chargeExtent() ?? 0}
-		{toast}
-		{preciseJumpActive}
-		onPreciseJumpAim={aimPreciseJump}
-		onPreciseJumpActivate={activatePreciseJump}
-		onPreciseJumpEnter={enterPreciseJump}
-		onInventoryNotice={(message) =>
-			toastCenter.publish({ message, tone: "status" })}
-		onPickInventoryTarget={(x, y, destination) => {
-			if (pointerSelection === null)
-				destination.commit({
-					kind: "unavailable",
-					reason: "World picking is unavailable.",
-				});
-			else pointerSelection.acquireTarget(x, y, destination);
-		}}
-		onViewportSelect={(clientX, clientY) => {
-			const state = itemInteractions?.snapshot();
-			if (state?.kind === "acquiring") {
-				const current = itemInteractions;
-				pointerSelection?.acquireTarget(clientX, clientY, {
-					isCurrent: () => {
-						const latest = current?.snapshot();
-						return (
-							latest?.kind === "acquiring" &&
-							latest.generation === state.generation
-						);
-					},
-					commit: (result) => {
-						if (result.kind === "unavailable")
-							toastCenter.publish({ message: result.reason, tone: "status" });
-						else
-							current?.target(
-								result.kind === "entity" ? result.guid : null,
-								state.generation,
+	{#if usesWorldPresentation && startupError === null && commandFailure === null}
+		<ClientWorldView
+			itemSession={session}
+			hudLayout={userSettings.hudLayout}
+			onHudLayoutChange={(hudLayout) =>
+				changeUserSettings({ ...userSettings, hudLayout })}
+			spellBarShape={userSettings.spellBarShape}
+			onSpellBarShapeChange={(spellBarShape) =>
+				changeUserSettings({ ...userSettings, spellBarShape })}
+			minimapViewDiameters={userSettings.minimapViewDiameters}
+			onMinimapViewDiametersChange={(minimapViewDiameters) =>
+				changeUserSettings({ ...userSettings, minimapViewDiameters })}
+			chatFilters={userSettings.chatFilters}
+			onChatFiltersChange={(chatFilters) =>
+				changeUserSettings({ ...userSettings, chatFilters })}
+			inspectionPreviewHeight={userSettings.inspection.previewHeight}
+			graphics={userSettings.graphics}
+			ui={userSettings.ui}
+			input={userSettings.input}
+			{textureFilteringCapabilities}
+			onGraphicsChange={changeGraphics}
+			onUiChange={changeUi}
+			onInputChange={changeInput}
+			onInspectionPreviewHeightChange={(previewHeight) =>
+				changeUserSettings({
+					...userSettings,
+					inspection: { previewHeight },
+				})}
+			{hudMode}
+			onHudModeChange={(mode) => (hudMode = mode)}
+			{spellBar}
+			onSpellBarChange={changeSpellBar}
+			actionBars={characterSettings.kind === "ready"
+				? characterSettings.settings.actionBars
+				: null}
+			onActionBarsChange={(actionBars) => {
+				if (characterSettings.kind === "ready")
+					changeCharacterSettings({
+						...characterSettings.settings,
+						actionBars,
+					});
+			}}
+			{spellBarEnabled}
+			onSelectSpellTab={selectSpellTab}
+			onActivateSpellCell={activateSpellCell}
+			{combatMode}
+			{combatStatus}
+			{combatControls}
+			{combatProfileSelectionRevision}
+			onCombatProfileSelect={selectCombatProfile}
+			combatEnabled={lifecycle.kind === "in-world"}
+			onToggleCombat={() => void toggleCombatMode()}
+			onCastSpell={(spellId) => void castSpell(spellId)}
+			{entityMetadata}
+			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
+			{debugEnabled}
+			{readMinimapFrame}
+			{readDiagnostics}
+			{readSelectedEntity}
+			{readFrameRates}
+			{readTargetIndicatorFrame}
+			{readSelectedEntityDisplay}
+			{spells}
+			{inventory}
+			{worldContainer}
+			{itemInteractions}
+			{objectInspection}
+			{objectPreviewService}
+			onSelectContentsItem={(guid, mode) =>
+				entitySelection?.selectContentsItem(guid, mode)}
+			onInteractEntity={() =>
+				itemInteractions?.interactSelected(unrestrictedUse)}
+			onExamineEntity={examineSelectedEntity}
+			onExamineItem={examineItem}
+			onCloseInspection={() => objectInspectionOwner?.close()}
+			{selectedEntityGuid}
+			{hoveredEntityGuid}
+			showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
+			onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
+			{entityCollisionDisabled}
+			onEntityCollisionDisabledChange={setEntityCollisionDisabled}
+			{unrestrictedUse}
+			onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
+			{playerName}
+			{worldName}
+			{vitals}
+			{appearanceOptions}
+			onAppearanceOptionChange={setAppearanceOption}
+			jumpChargeActive={activeJumpBeginSequence !== null}
+			readJumpExtent={() => inputController?.chargeExtent() ?? 0}
+			{toast}
+			{preciseJumpActive}
+			onPreciseJumpAim={aimPreciseJump}
+			onPreciseJumpActivate={activatePreciseJump}
+			onPreciseJumpEnter={enterPreciseJump}
+			onInventoryNotice={(message) =>
+				toastCenter.publish({ message, tone: "status" })}
+			onPickInventoryTarget={(x, y, destination) => {
+				if (pointerSelection === null)
+					destination.commit({
+						kind: "unavailable",
+						reason: "World picking is unavailable.",
+					});
+				else pointerSelection.acquireTarget(x, y, destination);
+			}}
+			onViewportSelect={(clientX, clientY) => {
+				const state = itemInteractions?.snapshot();
+				if (state?.kind === "acquiring") {
+					const current = itemInteractions;
+					pointerSelection?.acquireTarget(clientX, clientY, {
+						isCurrent: () => {
+							const latest = current?.snapshot();
+							return (
+								latest?.kind === "acquiring" &&
+								latest.generation === state.generation
 							);
+						},
+						commit: (result) => {
+							if (result.kind === "unavailable")
+								toastCenter.publish({ message: result.reason, tone: "status" });
+							else
+								current?.target(
+									result.kind === "entity" ? result.guid : null,
+									state.generation,
+								);
+						},
+					});
+				} else pointerSelection?.acquireViewportPoint(clientX, clientY);
+			}}
+			onViewportExamine={(clientX, clientY) => {
+				if (entitySelection === null || pointerSelection === null) return;
+				const selection = entitySelection;
+				const intent = selection.beginAcquisition("external");
+				pointerSelection.acquireViewportSelection(clientX, clientY, {
+					isCurrent: () => selection.isCurrentAcquisition(intent),
+					commit: (result) => {
+						if (result.kind === "unavailable") return;
+						const guid = result.kind === "entity" ? result.guid : null;
+						selection.commitAcquisition(intent, guid);
+						if (guid !== null) void objectInspectionOwner?.examine(guid);
 					},
 				});
-			} else pointerSelection?.acquireViewportPoint(clientX, clientY);
-		}}
-		onViewportExamine={(clientX, clientY) => {
-			if (entitySelection === null || pointerSelection === null) return;
-			const selection = entitySelection;
-			const intent = selection.beginAcquisition("external");
-			pointerSelection.acquireViewportSelection(clientX, clientY, {
-				isCurrent: () => selection.isCurrentAcquisition(intent),
-				commit: (result) => {
-					if (result.kind === "unavailable") return;
-					const guid = result.kind === "entity" ? result.guid : null;
-					selection.commitAcquisition(intent, guid);
-					if (guid !== null) void objectInspectionOwner?.examine(guid);
-				},
-			});
-		}}
-		onViewportHover={(clientX, clientY) =>
-			pointerSelection?.acquireViewportHover(clientX, clientY)}
-		onViewportHoverClear={() => pointerSelection?.clearViewportHover()}
-		onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
-		onSelectEntity={(guid) => entitySelection?.select(guid)}
-		{chatMessages}
-		onSendChat={sendChat}
-		onCanvas={(canvas) => (canvasElement = canvas)}
-	/>
-{:else}
-	<main class="client-screen ui-theme" aria-label="Holtburger client">
-		<section class="client-panel ui-panel">
-			<header class="ui-frame">
-				<span>Client</span>
-			</header>
+			}}
+			onViewportHover={(clientX, clientY) =>
+				pointerSelection?.acquireViewportHover(clientX, clientY)}
+			onViewportHoverClear={() => pointerSelection?.clearViewportHover()}
+			onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
+			onSelectEntity={(guid) => entitySelection?.select(guid)}
+			{chatMessages}
+			onSendChat={sendChat}
+			onCanvas={(canvas) => (canvasElement = canvas)}
+		/>
+	{:else}
+		<main class="client-screen ui-theme" aria-label="Holtburger client">
+			<section class="client-panel ui-panel">
+				<header class="ui-frame">
+					<span>Client</span>
+				</header>
 
-			<div class="client-panel-body ui-body">
-				<p class="ui-muted">Holtburger 3D Client</p>
-				{#if startupError !== null}
-					<h1>Client unavailable</h1>
-					<p class="client-status ui-error" role="alert">
-						{startupError}
-					</p>
-				{:else if commandFailure !== null}
-					<h1>Client stopped</h1>
-					<p class="client-status client-status-error" role="alert">
-						{commandFailure}
-					</p>
-				{:else if lifecycle.kind === "connecting"}
-					<h1>Connecting</h1>
-					<p class="client-status" aria-live="polite">
-						Opening the game session…
-					</p>
-				{:else if lifecycle.kind === "authenticating"}
-					<h1>Authenticating</h1>
-					<p class="client-status" aria-live="polite">
-						Checking the launch account…
-					</p>
-				{:else if lifecycle.kind === "character-selection"}
-					<ClientCharacterSelect
-						state={lifecycle}
-						{entryPending}
-						onChoose={chooseCharacter}
-						onEnter={enterWorld}
-						onDisconnect={disconnect}
-					/>
-				{:else if lifecycle.kind === "entering-world"}
-					<h1>Entering world</h1>
-					<p class="client-status" aria-live="polite">
-						Preparing character 0x{lifecycle.characterGuid
-							.toString(16)
-							.padStart(8, "0")}…
-					</p>
-				{:else}
-					<h1>Disconnecting</h1>
-					<p class="client-status" aria-live="polite">
-						{lifecycle.kind === "exiting" && lifecycle.diagnostic !== null
-							? lifecycle.diagnostic
-							: "Closing the game session…"}
-					</p>
-				{/if}
-			</div>
-		</section>
-	</main>
-{/if}
+				<div class="client-panel-body ui-body">
+					<p class="ui-muted">Holtburger 3D Client</p>
+					{#if startupError !== null}
+						<h1>Client unavailable</h1>
+						<p class="client-status ui-error" role="alert">
+							{startupError}
+						</p>
+					{:else if commandFailure !== null}
+						<h1>Client stopped</h1>
+						<p class="client-status client-status-error" role="alert">
+							{commandFailure}
+						</p>
+					{:else if lifecycle.kind === "connecting"}
+						<h1>Connecting</h1>
+						<p class="client-status" aria-live="polite">
+							Opening the game session…
+						</p>
+					{:else if lifecycle.kind === "authenticating"}
+						<h1>Authenticating</h1>
+						<p class="client-status" aria-live="polite">
+							Checking the launch account…
+						</p>
+					{:else if lifecycle.kind === "character-selection"}
+						<ClientCharacterSelect
+							state={lifecycle}
+							{entryPending}
+							onChoose={chooseCharacter}
+							onEnter={enterWorld}
+							onDisconnect={disconnect}
+						/>
+					{:else if lifecycle.kind === "entering-world"}
+						<h1>Entering world</h1>
+						<p class="client-status" aria-live="polite">
+							Preparing character 0x{lifecycle.characterGuid
+								.toString(16)
+								.padStart(8, "0")}…
+						</p>
+					{:else}
+						<h1>Disconnecting</h1>
+						<p class="client-status" aria-live="polite">
+							{lifecycle.kind === "exiting" && lifecycle.diagnostic !== null
+								? lifecycle.diagnostic
+								: "Closing the game session…"}
+						</p>
+					{/if}
+				</div>
+			</section>
+		</main>
+	{/if}
+</div>
 
 <style>
 	@layer components {
+		.client-font-scope {
+			display: contents;
+			font-family: var(--ui-font-body);
+		}
 		.client-screen {
 			display: grid;
 			min-height: 100vh;

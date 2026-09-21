@@ -1,8 +1,12 @@
 import { expect, it, vi } from "vitest";
 import { handleSpellBarKeydown } from "./client-spell-bar-input";
+import { AppInput } from "../lib/input/app-input";
+import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { ViewportInputGate } from "../lib/input/viewport-input-gate";
+
+const TEST_INPUT = new AppInput(INPUT_DEFAULTS);
 
 /** Physical key facts exercised through the production game-dispatch function. */
 function event(
@@ -28,10 +32,13 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 	const tab = vi.fn();
 	const cast = vi.fn();
 	for (const index of SPELL_BAR_INDICES) {
-		expect(handleSpellBarKeydown(event(index, {}), true, tab, cast)).toBe(true);
+		expect(
+			handleSpellBarKeydown(TEST_INPUT, event(index, {}), true, tab, cast),
+		).toBe(true);
 		expect(cast).toHaveBeenLastCalledWith(index);
 		expect(
 			handleSpellBarKeydown(
+				TEST_INPUT,
 				event(index, { shiftKey: true, key: ")" }),
 				true,
 				tab,
@@ -40,7 +47,13 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 		).toBe(true);
 		expect(tab).toHaveBeenLastCalledWith(index);
 	}
-	handleSpellBarKeydown(event(0, { repeat: true }), true, tab, cast);
+	handleSpellBarKeydown(
+		TEST_INPUT,
+		event(0, { repeat: true }),
+		true,
+		tab,
+		cast,
+	);
 	expect(cast).toHaveBeenCalledTimes(SPELL_BAR_INDICES.length);
 	expect(tab).toHaveBeenCalledTimes(SPELL_BAR_INDICES.length);
 	for (const modifier of [
@@ -49,14 +62,18 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 		{ metaKey: true },
 		{ isComposing: true },
 	]) {
-		expect(handleSpellBarKeydown(event(0, modifier), true, tab, cast)).toBe(
-			false,
-		);
+		expect(
+			handleSpellBarKeydown(TEST_INPUT, event(0, modifier), true, tab, cast),
+		).toBe(false);
 	}
-	expect(handleSpellBarKeydown(event(0, {}), false, tab, cast)).toBe(false);
+	expect(
+		handleSpellBarKeydown(TEST_INPUT, event(0, {}), false, tab, cast),
+	).toBe(false);
 	const consumed = event(0, {});
 	consumed.preventDefault();
-	expect(handleSpellBarKeydown(consumed, true, tab, cast)).toBe(false);
+	expect(handleSpellBarKeydown(TEST_INPUT, consumed, true, tab, cast)).toBe(
+		false,
+	);
 });
 it("uses the existing keyboard gate and quarantines repeat presses across blocking", () => {
 	const viewport = new ViewportInputGate();
@@ -64,7 +81,7 @@ it("uses the existing keyboard gate and quarantines repeat presses across blocki
 	const cast = vi.fn();
 	keyboard.bindGame({
 		keydown: (key) => {
-			handleSpellBarKeydown(key, true, () => {}, cast);
+			handleSpellBarKeydown(TEST_INPUT, key, true, () => {}, cast);
 		},
 		keyup: () => {},
 		cancel: () => {},

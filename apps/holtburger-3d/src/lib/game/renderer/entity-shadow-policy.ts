@@ -1,6 +1,12 @@
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { ObjectPresentationFootprint } from "./render-world";
+import {
+	ENTITY_SHADOW_MODES,
+	type EntityShadowMode,
+} from "./entity-shadow-modes";
+export { ENTITY_SHADOW_MODES } from "./entity-shadow-modes";
+export type { EntityShadowMode } from "./entity-shadow-modes";
 
 /** Complete cascade capacity compiled into the bounded outdoor shadow shader family. */
 export const MAX_OUTDOOR_PSSM_CASCADES = 2;
@@ -40,10 +46,6 @@ if (
 /** Build-time analytic-caster capacity shared by CPU selection and generated GLSL. */
 export const MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER =
 	configuredAnalyticCasterCapacity;
-
-/** Exhaustive entity-shadow quality policy consumed directly by renderer scheduling. */
-export const ENTITY_SHADOW_MODES = ["none", "simple", "shadow-maps"] as const;
-export type EntityShadowMode = (typeof ENTITY_SHADOW_MODES)[number];
 
 /** Complete runtime-adjustable outdoor directional-shadow policy. */
 export interface OutdoorPssmSettings {

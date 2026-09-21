@@ -1,16 +1,19 @@
 <script lang="ts">
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { useClientInput } from "./client-input-context";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import type { ItemStructure } from "../app/item-structure";
 	import type { ItemCapacity } from "../app/item-capacity";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { ActionContent } from "./client-action-bar-state";
+	const clientInput = useClientInput();
 	interface Props {
 		/** Stable bar identity for binding gestures. */
 		bar: number;
 		/** One of the visible digit addresses 1–9/0. */
 		digit: string;
+		/** Current user shortcut, separate from the stable cell address. */
+		bindingHint: string;
 		/** Persistent reference, including temporarily unavailable items. */
 		content: ActionContent | null;
 		/** Current resolved name, or an unavailable identity label. */
@@ -37,6 +40,7 @@
 	let {
 		bar,
 		digit,
+		bindingHint,
 		content,
 		label,
 		display,
@@ -82,10 +86,10 @@
 	data-action-item={content?.item}
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}
-	aria-label={`${digit}: ${statusLabel}`}
-	title={`${digit}: ${statusLabel}`}
+	aria-label={`${digit}: ${statusLabel} (key: ${bindingHint})`}
+	title={`${digit}: ${statusLabel} (key: ${bindingHint})`}
 	aria-pressed={selected}
-	onclick={(event) => onactivate(APP_INPUT.actionBarAlternate(event))}
+	onclick={(event) => onactivate(clientInput.actionBarAlternate(event))}
 >
 	{#if content !== null}
 		<ItemCellVisual

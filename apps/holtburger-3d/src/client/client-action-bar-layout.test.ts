@@ -1,8 +1,10 @@
 import { expect, it } from "vitest";
 import {
 	findActionBarClonePlacement,
+	resetActionBarPlacements,
 	type ActionBarGeometry,
 } from "./client-action-bar-layout";
+import { initialActionBar } from "./client-action-bar-state";
 import {
 	anchorClientHudPlacement,
 	resolveClientHudPlacement,
@@ -119,4 +121,42 @@ it("refuses a packed viewport rather than overlapping or shrinking to fit", () =
 			gap,
 		),
 	).toBeNull();
+});
+
+it("resets mounted bar anchors while preserving identities and slots", () => {
+	const first = initialActionBar();
+	const bars = [
+		{
+			...first,
+			anchor: {
+				horizontal: { alignment: "start" as const, offset: 91 },
+				vertical: { alignment: "start" as const, offset: 73 },
+			},
+		},
+		{ ...first, id: 2, slots: [...first.slots] as typeof first.slots },
+	];
+	const result = resetActionBarPlacements(
+		bars,
+		() => horizontal,
+		viewport,
+		gap,
+	);
+	if (result === null) throw new Error("Expected room for both bars");
+	const bounds = result.map((bar) =>
+		resolveClientHudPlacement(
+			{
+				...bar.anchor,
+				preferredWidth: horizontal.preferred.width,
+				preferredHeight: horizontal.preferred.height,
+			},
+			viewport,
+			horizontal.preferred,
+		),
+	);
+	for (const [index, bar] of result.entries()) {
+		expect(bar.id).toBe(bars[index].id);
+		expect(bar.slots).toBe(bars[index].slots);
+	}
+	expect(bounds[0].top - bounds[1].top).toBe(horizontal.preferred.height + gap);
+	expect(bounds[0].left).toBe(bounds[1].left);
 });

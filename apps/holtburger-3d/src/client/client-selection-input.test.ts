@@ -8,6 +8,8 @@ import {
 	type CycleCategory,
 } from "./client-cycle-selection-controller";
 import { ClientSelectionInput } from "./client-selection-input";
+import { AppInput } from "../lib/input/app-input";
+import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 
 const HOLD_MS = 100;
@@ -65,6 +67,7 @@ function fixture() {
 		policy: { radiusMeters: 50, idleResetMs: 10, viewMarginMeters: 2 },
 	});
 	const input = new ClientSelectionInput({
+		input: new AppInput(INPUT_DEFAULTS),
 		selection,
 		cycle,
 		holdDelayMs: HOLD_MS,

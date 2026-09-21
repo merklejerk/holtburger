@@ -7,7 +7,10 @@
 	import type { ClientItemDrag } from "./client-item-drag";
 	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
 	import type { ClientSpellBarState } from "./client-spell-bar-state";
-	import type { InputDigitIndex } from "../lib/input/input-contract";
+	import type {
+		ClientKeyboardConfiguration,
+		InputDigitIndex,
+	} from "../lib/input/input-contract";
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
@@ -19,7 +22,7 @@
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { useClientInput } from "./client-input-context";
 	import { onMount, untrack } from "svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import Minimap from "../app/Minimap.svelte";
@@ -62,11 +65,20 @@
 		ClientAppearanceOptions,
 		ClientVital,
 	} from "./client-host-contract";
-	import type { ClientCharacterSettings } from "./client-settings-contract";
+	import type {
+		ClientCharacterSettings,
+		ClientGraphicsSettings,
+		ClientUiSettings,
+	} from "./client-settings-contract";
+	import ClientSettingsPanel, {
+		type SettingsTab,
+	} from "./ClientSettingsPanel.svelte";
+	import type { TextureFilteringCapabilities } from "../lib/game/renderer/texture-filtering-policy";
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
+		createClientHudLayout,
 		resolveClientHudSquarePlacement,
 		type ClientHudLayout,
 		type ClientHudViewport,
@@ -97,6 +109,14 @@
 		) => void;
 		/** User-scoped divider height inside creature inspections. */
 		readonly inspectionPreviewHeight: number;
+		/** User graphics snapshot and focused edit operation. */
+		readonly graphics: ClientGraphicsSettings;
+		readonly ui: ClientUiSettings;
+		readonly input: ClientKeyboardConfiguration;
+		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
+		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
+		readonly onUiChange: (ui: ClientUiSettings) => void;
+		readonly onInputChange: (input: ClientKeyboardConfiguration) => void;
 		readonly onInspectionPreviewHeightChange: (height: number) => void;
 		/** App-owned layout mode also gates gameplay shortcuts. */
 		readonly hudMode: "runtime" | "layout";
@@ -210,6 +230,13 @@
 		onChatFiltersChange,
 		inspectionPreviewHeight,
 		onInspectionPreviewHeightChange,
+		graphics,
+		ui,
+		input,
+		textureFilteringCapabilities,
+		onGraphicsChange,
+		onUiChange,
+		onInputChange,
 		hudMode,
 		onHudModeChange,
 		spellBar,
@@ -281,6 +308,7 @@
 		onCanvas,
 	}: Props = $props();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
+	const clientInput = useClientInput();
 	/** Pointer surface changes are cold; world geometry still uses the existing hover picker. */
 	let combineSurface = $state<number | "world" | null>(null);
 	function considerPointer(event: PointerEvent): void {
@@ -372,12 +400,20 @@
 		height: window.innerHeight,
 	};
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	let settingsTab = $state<SettingsTab>("graphics");
 	/** One selected-HUD request retained only until the inventory panel accepts it. */
 	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
 	const shortcuts = untrack(() => createClientShortcuts(debugEnabled));
+	let resetActionBars = $state<(() => boolean) | null>(null);
+	function resetHudPlacements(): void {
+		if (resetActionBars === null || !resetActionBars()) return;
+		onHudLayoutChange(
+			createClientHudLayout(CLIENT_UI_DEFAULTS, viewport, shortcuts.length),
+		);
+	}
 	const resolvedMapPlacement = $derived(
 		resolveClientHudSquarePlacement(
 			hudLayout.minimap,
@@ -485,19 +521,22 @@
 
 	function handlePointerDown(event: PointerEvent): void {
 		if (!inputGate.allowed) return;
-		if (APP_INPUT.pointer("clientExamine", event)) {
+		if (clientInput.pointer("clientExamine", event)) {
 			event.preventDefault();
 			onViewportExamine(event.clientX, event.clientY);
 			return;
 		}
-		if (preciseJumpActive && APP_INPUT.pointer("preciseJumpActivate", event)) {
+		if (
+			preciseJumpActive &&
+			clientInput.pointer("preciseJumpActivate", event)
+		) {
 			event.preventDefault();
 			onPreciseJumpActivate();
 			return;
 		}
 		if (
 			cameraController === null ||
-			!APP_INPUT.pointer("clientInteract", event) ||
+			!clientInput.pointer("clientInteract", event) ||
 			viewportGesture !== null
 		)
 			return;
@@ -666,8 +705,10 @@
 	{#if actionBars !== null && inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
+				{input}
 				bars={actionBars}
 				onBarsChange={onActionBarsChange}
+				onResetOwner={(reset) => (resetActionBars = reset)}
 				session={itemSession}
 				{worldContainer}
 				onDragOwner={(owner) => (itemDrag = owner)}
@@ -906,7 +947,9 @@
 					? "Inventory"
 					: panel === "spells"
 						? "Spells"
-						: "Client diagnostics"}
+						: panel === "settings"
+							? "Settings"
+							: "Client diagnostics"}
 				placement={hudLayout[panel]}
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
@@ -938,6 +981,20 @@
 							/>
 						{/key}
 					{/if}
+				{:else if panel === "settings"}
+					<ClientSettingsPanel
+						{graphics}
+						{ui}
+						{input}
+						{textureFilteringCapabilities}
+						selectedTab={settingsTab}
+						onSelectTab={(tab) => (settingsTab = tab)}
+						{onGraphicsChange}
+						{onUiChange}
+						{onInputChange}
+						canResetHudPlacements={resetActionBars !== null}
+						onResetHudPlacements={resetHudPlacements}
+					/>
 				{:else}
 					<ClientDebugPanel
 						{entityMetadata}

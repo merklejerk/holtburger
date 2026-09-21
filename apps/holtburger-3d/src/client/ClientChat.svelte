@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { useClientInput } from "./client-input-context";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import {
 		CLIENT_CHAT_FILTER_TAGS,
@@ -25,6 +25,7 @@
 	const { messages, onSend, enabledTags, onEnabledTagsChange }: Props =
 		$props();
 	const { keyboard } = useAppInputPolicy();
+	const clientInput = useClientInput();
 
 	let inputElement = $state<HTMLInputElement | null>(null);
 	let message = $state("");
@@ -47,7 +48,7 @@
 	});
 
 	function handleKeydown(event: KeyboardEvent): void {
-		if (APP_INPUT.shortcut("cancel", event)) {
+		if (clientInput.shortcut("cancel", event)) {
 			event.preventDefault();
 			message = "";
 			failure = null;
@@ -57,13 +58,13 @@
 
 	function scrollHistory(event: KeyboardEvent): void {
 		if (
-			APP_INPUT.shortcut("chatPreviousPage", event) ||
-			APP_INPUT.shortcut("chatNextPage", event)
+			clientInput.shortcut("chatPreviousPage", event) ||
+			clientInput.shortcut("chatNextPage", event)
 		) {
 			event.preventDefault();
 			bufferElement?.scrollBy({
 				top:
-					(APP_INPUT.shortcut("chatPreviousPage", event) ? -1 : 1) *
+					(clientInput.shortcut("chatPreviousPage", event) ? -1 : 1) *
 					bufferElement.clientHeight *
 					0.85,
 			});
@@ -226,11 +227,7 @@
 			aria-label="Chat message"
 			autocomplete="off"
 			use:keyboard.scope={{
-				activation: (event) =>
-					APP_INPUT.shortcut("chat", event) &&
-					!event.ctrlKey &&
-					!event.altKey &&
-					!event.metaKey,
+				activation: (event) => clientInput.shortcut("chat", event),
 				keydown: handleKeydown,
 			}}
 		/>

@@ -7,7 +7,6 @@ import type {
 } from "../lib/game/camera/possession-camera-controller";
 import type { HostKinematicBoomDistancePolicy } from "../lib/game/camera/host-kinematic-boom-session";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
-import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type {
 	FrontendAudioTuning,
 	FrontendPortalTransitionTuning,
@@ -18,8 +17,6 @@ import type {
 interface ClientCameraTuning {
 	/** Far clipping distance in world units. */
 	readonly far: number;
-	/** Vertical field of view in degrees. */
-	readonly fov: number;
 	/** Camera height above its unrotated target origin. */
 	readonly height: number;
 	/** Near clipping distance in world units. */
@@ -148,8 +145,6 @@ export interface ClientTuning {
 		/** Bounded cadence for refreshing selected-entity display text. */
 		readonly displayIntervalMs: number;
 	};
-	/** Initial static-content demand around the controlled player. */
-	readonly sceneInterest: SceneInterestRadii;
 	/** Complete starting renderer display policy. */
 	readonly frameSettings: FrameSettings;
 }

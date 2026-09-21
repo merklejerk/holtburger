@@ -2,10 +2,13 @@
 	import type { ClientHudIconName } from "./ClientHudIcon.svelte";
 
 	/** Implemented floating system windows; the combat action does not open a panel. */
-	export type ClientSystemPanel = "inventory" | "debug" | "spells";
+	export type ClientSystemPanel = "inventory" | "debug" | "spells" | "settings";
 
 	function systemPanel(icon: ClientHudIconName): ClientSystemPanel | null {
-		return icon === "inventory" || icon === "debug" || icon === "spells"
+		return icon === "inventory" ||
+			icon === "debug" ||
+			icon === "spells" ||
+			icon === "settings"
 			? icon
 			: null;
 	}

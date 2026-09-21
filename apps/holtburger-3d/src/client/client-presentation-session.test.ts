@@ -385,6 +385,72 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
+	it("reissues scene demand when view distance changes without moving", async () => {
+		const playerGuid = 0x0101_0001;
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(currentState(playerGuid)),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			presentation.frame(1_000);
+			await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+			const expanded = {
+				terrainRadius: 8,
+				buildingRadius: 8,
+				explicitObjectRadius: 1,
+				generatedObjectRadius: 2,
+				envCellRadius: 1,
+			};
+			presentation.setSceneInterestRadii(expanded);
+			presentation.frame(1_016);
+			await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
+			expect(runtime.sceneRequests.at(-1)).toMatchObject({ radii: expanded });
+			presentation.setSceneInterestRadii(expanded);
+			presentation.frame(1_032);
+			expect(runtime.sceneRequests).toHaveLength(2);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
+	it("submits a new FOV clearance revision without restarting the camera", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			presentation.frame(1_000);
+			await vi.waitFor(() => expect(transport.cameraStarts).toBe(1));
+			presentation.setFieldOfView(90);
+			presentation.frame(1_016);
+			await vi.waitFor(() =>
+				expect(transport.cameraClearances).toHaveLength(1),
+			);
+			expect(transport.cameraClearances[0]?.projectionRevision).toBe(2);
+			expect(transport.cameraStarts).toBe(1);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
 	it("installs before identity and binds possession from the authority edge", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
@@ -1157,6 +1223,11 @@ describe("ClientPresentationSession", () => {
 class FakeClientTransport implements ClientLifecycleTransport {
 	readonly handlers = new Map<string, (payload: unknown) => void>();
 	readonly acknowledgedWorldReveals: number[] = [];
+	readonly cameraClearances: {
+		projectionRevision: number;
+		clearanceRadius: number;
+	}[] = [];
+	cameraStarts = 0;
 	#currentState: ClientCurrentState;
 	#emitLaggedAdvance = false;
 	#cameraGeneration = 0;
@@ -1184,6 +1255,7 @@ class FakeClientTransport implements ClientLifecycleTransport {
 			return;
 		}
 		if (command === "start_client_camera") {
+			this.cameraStarts += 1;
 			const request = args?.request as {
 				playerGuid: number;
 				entityGeneration: number;
@@ -1205,6 +1277,15 @@ class FakeClientTransport implements ClientLifecycleTransport {
 				this.#cameraOutput === "fallback"
 					? fallbackCameraTick(tickIdentity)
 					: cameraTick(tickIdentity),
+			);
+			return;
+		}
+		if (command === "set_client_camera_clearance") {
+			this.cameraClearances.push(
+				args?.request as {
+					projectionRevision: number;
+					clearanceRadius: number;
+				},
 			);
 			return;
 		}

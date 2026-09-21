@@ -61,6 +61,8 @@ export interface ClientUiDefaults {
 	readonly inspection: Omit<ClientUiPanel, "resizable">;
 	/** Diagnostics window with independently retained geometry; borders always resize. */
 	readonly debug: Omit<ClientUiPanel, "resizable">;
+	/** Floating client preferences window. */
+	readonly settings: Omit<ClientUiPanel, "resizable">;
 	/** Frame-rate readout. */
 	readonly frameRate: ClientUiPanel;
 	/** Conditional jump-charge control. */

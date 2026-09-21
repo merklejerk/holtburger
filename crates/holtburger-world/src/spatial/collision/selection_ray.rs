@@ -11,7 +11,9 @@ use super::{
     CollisionQueryError, CollisionScene, PhysicalCollisionFilter, StaticSurfaceRayRequest,
     point_between_landblocks,
 };
-use crate::{ResolvedScenePlacement, ScenePlacementError, WorldState};
+use crate::{
+    ResolvedScenePlacement, ScenePlacementError, SelectionEnvelope, SelectionGeometry, WorldState,
+};
 
 /// Camera ray normalized into one outdoor anchor frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,10 +57,13 @@ pub enum EntitySelectionQueryError {
 
 impl WorldState {
     /// Returns every ordinary-residency candidate before browser animated-mesh refinement.
+    /// The provider supplies prepared bounds for current geometry; unavailable bounds omit that
+    /// candidate. World applies the entity's current scale once, after the lookup.
     pub fn query_entity_selection_candidates(
         &self,
         collision: &CollisionScene,
         request: EntitySelectionRayRequest,
+        mut envelope_for: impl FnMut(&SelectionGeometry) -> Option<SelectionEnvelope>,
     ) -> Result<EntitySelectionCandidateResult, EntitySelectionQueryError> {
         let static_request = StaticSurfaceRayRequest {
             anchor: request.anchor,
@@ -134,7 +139,11 @@ impl WorldState {
             if !body.spatial_membership().intersects_reached(&trace.reached) {
                 continue;
             }
-            let Some(envelope) = entity.selection_envelope else {
+            let Some(envelope) = self
+                .selection_geometry(entity.guid)
+                .as_ref()
+                .and_then(&mut envelope_for)
+            else {
                 continue;
             };
             let center = point_between_landblocks(
@@ -179,7 +188,7 @@ fn finite_ray_hits_sphere(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     use holtburger_common::properties::{
         PropertyBool, PropertyDataId, WorldObjectPropertyAccessorsMut as _,
@@ -280,26 +289,48 @@ mod tests {
         }
     }
 
-    fn ready_entity(world: &mut WorldState, guid: Guid, x: f32, radius: f32) {
+    fn ready_entity(
+        world: &mut WorldState,
+        envelopes: &mut HashMap<SelectionGeometry, SelectionEnvelope>,
+        guid: Guid,
+        x: f32,
+        radius: f32,
+    ) {
         let entity = Entity::new(guid, "candidate".to_owned(), position(x, 10.0));
         world.add_entity(entity);
-        assert!(world.install_entity_selection_envelope(
-            guid,
-            0,
+        prepare_bounds(world, envelopes, guid, radius);
+    }
+
+    fn prepare_bounds(
+        world: &mut WorldState,
+        envelopes: &mut HashMap<SelectionGeometry, SelectionEnvelope>,
+        guid: Guid,
+        radius: f32,
+    ) {
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        envelopes.insert(
+            world.selection_geometry(guid).unwrap(),
             SelectionEnvelope::new(radius).unwrap(),
-        ));
+        );
     }
 
     #[test]
     fn direct_spheres_are_clipped_by_static_geometry_and_sorted_by_guid() {
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
-        ready_entity(&mut world, Guid(30), 70.0, 2.0);
-        ready_entity(&mut world, Guid(20), 20.0, 2.0);
-        ready_entity(&mut world, Guid(10), 30.0, 2.0);
+        let mut envelopes = HashMap::new();
+        ready_entity(&mut world, &mut envelopes, Guid(30), 70.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, Guid(20), 20.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, Guid(10), 30.0, 2.0);
 
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -312,7 +343,8 @@ mod tests {
     fn pending_envelope_omits_only_that_entity() {
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
-        ready_entity(&mut world, Guid(10), 20.0, 2.0);
+        let mut envelopes = HashMap::new();
+        ready_entity(&mut world, &mut envelopes, Guid(10), 20.0, 2.0);
         let pending = Guid(20);
         world.add_entity(Entity::new(
             pending,
@@ -320,8 +352,15 @@ mod tests {
             position(30.0, 10.0),
         ));
 
+        world
+            .entities
+            .get_mut(pending)
+            .unwrap()
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0002));
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -333,8 +372,9 @@ mod tests {
     fn attached_entity_inherits_parent_scope_without_a_host_envelope() {
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let parent = Guid(10);
-        ready_entity(&mut world, parent, 20.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, parent, 20.0, 2.0);
         let child = Guid(20);
         let mut attached = Entity::new(child, "attached".to_owned(), position(0.0, 0.0));
         attached.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
@@ -346,7 +386,9 @@ mod tests {
         world.entities.insert(attached);
 
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -360,11 +402,12 @@ mod tests {
 
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let candidate = Guid(10);
         let parent = Guid(0x8000_1323);
         let child = Guid(0x8000_1596);
-        ready_entity(&mut world, candidate, 20.0, 2.0);
-        ready_entity(&mut world, parent, 30.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, candidate, 20.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, parent, 30.0, 2.0);
         let mut item = Entity::new(child, "ammo".into(), position(30.0, 10.0));
         item.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         world.add_entity(item);
@@ -380,7 +423,9 @@ mod tests {
         world.remove_entity(parent);
         world.handle_message(&attach);
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("fixture has complete collision coverage");
@@ -393,8 +438,9 @@ mod tests {
     fn ui_hidden_roots_and_attachments_are_not_selection_candidates() {
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let parent = Guid(10);
-        ready_entity(&mut world, parent, 20.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, parent, 20.0, 2.0);
         world
             .entities
             .get_mut(parent)
@@ -413,7 +459,9 @@ mod tests {
         world.entities.insert(attached);
 
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -425,8 +473,9 @@ mod tests {
     fn attachment_without_a_setup_is_not_a_selection_candidate() {
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let parent = Guid(10);
-        ready_entity(&mut world, parent, 20.0, 2.0);
+        ready_entity(&mut world, &mut envelopes, parent, 20.0, 2.0);
         let child = Guid(20);
         let mut attached = Entity::new(child, "bare attached".to_owned(), position(0.0, 0.0));
         attached.set_attachment(Some(PhysicsAttachment {
@@ -437,7 +486,9 @@ mod tests {
         world.entities.insert(attached);
 
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -448,8 +499,11 @@ mod tests {
     #[test]
     fn query_reports_missing_collision_coverage_without_an_empty_candidate_lie() {
         let world = WorldState::synthetic();
+        let envelopes: HashMap<SelectionGeometry, SelectionEnvelope> = HashMap::new();
         let result = world
-            .query_entity_selection_candidates(&CollisionScene::new(), request())
+            .query_entity_selection_candidates(&CollisionScene::new(), request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap();
         assert_eq!(
             result,
@@ -463,12 +517,13 @@ mod tests {
     fn current_whole_object_scale_is_applied_once_at_query_time() {
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let guid = Guid(10);
         world.add_entity(Entity::new(guid, "scaled".to_owned(), position(20.0, 13.5)));
-        world.install_entity_selection_envelope(guid, 0, SelectionEnvelope::new(2.0).unwrap());
+        prepare_bounds(&mut world, &mut envelopes, guid, 2.0);
         assert!(matches!(
             world
-                .query_entity_selection_candidates(&collision, request())
+                .query_entity_selection_candidates(&collision, request(), |geometry| envelopes.get(geometry).copied())
                 .unwrap(),
             EntitySelectionCandidateResult::Available(result) if result.candidate_guids.is_empty()
         ));
@@ -481,7 +536,9 @@ mod tests {
             .reconcile(2.0)
             .unwrap();
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -495,6 +552,7 @@ mod tests {
 
         let collision = scene_with_wall(50.0);
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let guid = Guid(10);
         let mut entity = Entity::new(guid, "ethereal mover".to_owned(), position(20.0, 10.0));
         entity.velocity = Vector3::new(3.0, 0.0, 0.0);
@@ -504,10 +562,12 @@ mod tests {
                 PhysicsState::ETHEREAL,
             ));
         world.add_entity(entity);
-        world.install_entity_selection_envelope(guid, 0, SelectionEnvelope::new(2.0).unwrap());
+        prepare_bounds(&mut world, &mut envelopes, guid, 2.0);
 
         let EntitySelectionCandidateResult::Available(result) = world
-            .query_entity_selection_candidates(&collision, request())
+            .query_entity_selection_candidates(&collision, request(), |geometry| {
+                envelopes.get(geometry).copied()
+            })
             .unwrap()
         else {
             panic!("installed collision owner should cover the ray");
@@ -519,6 +579,7 @@ mod tests {
     fn portal_trace_reaches_connected_exact_cell_and_excludes_overlapping_disconnected_cell() {
         let (collision, source, target, disconnected) = portal_scene();
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let connected_guid = Guid(10);
         let disconnected_guid = Guid(20);
         let mut connected_position = position(15.0, 10.0);
@@ -528,11 +589,7 @@ mod tests {
             "connected".to_owned(),
             connected_position,
         ));
-        world.install_entity_selection_envelope(
-            connected_guid,
-            0,
-            SelectionEnvelope::new(2.0).unwrap(),
-        );
+        prepare_bounds(&mut world, &mut envelopes, connected_guid, 2.0);
         let mut disconnected_position = connected_position;
         disconnected_position.landblock_id = disconnected;
         world.add_entity(Entity::new(
@@ -540,11 +597,7 @@ mod tests {
             "disconnected".to_owned(),
             disconnected_position,
         ));
-        world.install_entity_selection_envelope(
-            disconnected_guid,
-            0,
-            SelectionEnvelope::new(2.0).unwrap(),
-        );
+        prepare_bounds(&mut world, &mut envelopes, disconnected_guid, 2.0);
 
         let EntitySelectionCandidateResult::Available(result) = world
             .query_entity_selection_candidates(
@@ -554,6 +607,7 @@ mod tests {
                     start: Vector3::new(5.0, 10.0, 1.0),
                     ..request()
                 },
+                |geometry| envelopes.get(geometry).copied(),
             )
             .unwrap()
         else {
@@ -566,11 +620,12 @@ mod tests {
     fn regular_residency_can_omit_an_envelope_protruding_across_a_portal() {
         let (collision, source, _target, _disconnected) = portal_scene();
         let mut world = WorldState::synthetic();
+        let mut envelopes = HashMap::new();
         let guid = Guid(10);
         let mut source_position = position(9.0, 10.0);
         source_position.landblock_id = source;
         world.add_entity(Entity::new(guid, "boundary".to_owned(), source_position));
-        world.install_entity_selection_envelope(guid, 0, SelectionEnvelope::new(4.0).unwrap());
+        prepare_bounds(&mut world, &mut envelopes, guid, 4.0);
 
         let EntitySelectionCandidateResult::Available(result) = world
             .query_entity_selection_candidates(
@@ -580,6 +635,7 @@ mod tests {
                     start: Vector3::new(11.0, 10.0, 1.0),
                     ..request()
                 },
+                |geometry| envelopes.get(geometry).copied(),
             )
             .unwrap()
         else {

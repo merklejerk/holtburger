@@ -1,6 +1,6 @@
 //! Asynchronous preparation and reuse of conservative animated selection envelopes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
@@ -9,29 +9,19 @@ use holtburger_content::{
     SelectionEnvelopeProfile, compute_selection_envelope_radius, resolve_selection_envelope_profile,
 };
 use holtburger_dat::file_type::{Animation, GfxObj, MotionTable, SetupModel};
-use holtburger_world::SelectionEnvelope;
+use holtburger_world::{SelectionEnvelope, SelectionGeometry};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::{ContentAsset, ContentAssetRequest, ContentAssetService, DynamicScaleTarget};
+use crate::{ContentAsset, ContentAssetRequest, ContentAssetService};
 
 /// Final geometry identity for a reusable unit-scale selection envelope.
 pub type ClientSelectionEnvelopeProfile = SelectionEnvelopeProfile;
-
-/// Authoritative generation facts captured before content preparation leaves the world turn.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientSelectionEnvelopeFacts {
-    pub target: DynamicScaleTarget,
-    pub setup_did: u32,
-    /// Only geometry-changing appearance state participates in this product.
-    pub part_changes: Vec<holtburger_world::EntityPartChange>,
-    pub motion_table_did: Option<u32>,
-}
 
 /// Synchronous content seam run only on blocking workers.
 pub trait ClientSelectionEnvelopeSource: Send + Sync + 'static {
     fn resolve_profile(
         &self,
-        facts: &ClientSelectionEnvelopeFacts,
+        geometry: &SelectionGeometry,
     ) -> Result<ClientSelectionEnvelopeProfile>;
 
     fn prepare_envelope(
@@ -84,16 +74,16 @@ impl ContentClientSelectionEnvelopeSource {
 impl ClientSelectionEnvelopeSource for ContentClientSelectionEnvelopeSource {
     fn resolve_profile(
         &self,
-        facts: &ClientSelectionEnvelopeFacts,
+        geometry: &SelectionGeometry,
     ) -> Result<ClientSelectionEnvelopeProfile> {
-        let setup = self.setup(facts.setup_did)?;
+        let setup = self.setup(geometry.setup_did)?;
         Ok(resolve_selection_envelope_profile(
             &setup,
-            facts
+            geometry
                 .part_changes
                 .iter()
                 .map(|change| (change.part_index, change.gfx_obj_did)),
-            facts.motion_table_did,
+            geometry.motion_table_did,
         ))
     }
 
@@ -117,36 +107,10 @@ impl ClientSelectionEnvelopeSource for ContentClientSelectionEnvelopeSource {
     }
 }
 
-/// Captures only facts that change the unit-scale geometry profile.
-fn client_selection_envelope_facts(
-    world: &holtburger_world::WorldState,
-    guid: Guid,
-) -> Result<ClientSelectionEnvelopeFacts> {
-    use holtburger_common::properties::WorldObjectExt as _;
-
-    let entity = world
-        .entities
-        .get(guid)
-        .ok_or_else(|| anyhow!("selection-envelope entity 0x{guid:08X} is not registered"))?;
-    let setup_did = entity
-        .csetup_id()
-        .map(u32::from)
-        .ok_or_else(|| anyhow!("selection-envelope entity 0x{guid:08X} has no setup DID"))?;
-    Ok(ClientSelectionEnvelopeFacts {
-        target: DynamicScaleTarget {
-            guid,
-            instance_sequence: entity.instance_sequence(),
-        },
-        setup_did,
-        part_changes: entity.appearance.part_changes.clone(),
-        motion_table_did: world.effective_motion_table_id_for_guid(guid),
-    })
-}
-
 #[derive(Debug)]
 enum Completion {
     Profile {
-        facts: ClientSelectionEnvelopeFacts,
+        geometry: SelectionGeometry,
         result: std::result::Result<ClientSelectionEnvelopeProfile, String>,
     },
     Envelope {
@@ -155,24 +119,27 @@ enum Completion {
     },
 }
 
-struct Demand {
-    facts: ClientSelectionEnvelopeFacts,
-    profile: Option<ClientSelectionEnvelopeProfile>,
-    worker: Option<tokio::task::JoinHandle<()>>,
+/// Resolution is shared by all entities with the same content inputs.
+enum ProfileResolution {
+    Preparing,
+    Resolved(ClientSelectionEnvelopeProfile),
+    Unavailable,
 }
 
+/// The sole owner of prepared bounds for a resolved content profile.
 enum CachedEnvelope {
     Preparing,
     Ready(SelectionEnvelope),
     Unavailable,
 }
 
-/// Owns off-turn profile resolution and persistent final-profile envelope reuse.
+/// Resolves geometry inputs once and shares envelopes by final content profile.
+/// Async work never targets an entity, so replacement and removal cannot invalidate its result.
 pub(super) struct ClientSelectionEnvelopeCoordinator {
     source: Arc<dyn ClientSelectionEnvelopeSource>,
     completion_tx: UnboundedSender<Completion>,
     completion_rx: UnboundedReceiver<Completion>,
-    demands: BTreeMap<Guid, Demand>,
+    profiles: HashMap<SelectionGeometry, ProfileResolution>,
     cache: BTreeMap<ClientSelectionEnvelopeProfile, CachedEnvelope>,
 }
 
@@ -183,170 +150,82 @@ impl ClientSelectionEnvelopeCoordinator {
             source,
             completion_tx,
             completion_rx,
-            demands: BTreeMap::new(),
+            profiles: HashMap::new(),
             cache: BTreeMap::new(),
         }
     }
 
-    pub fn observe_entity(
+    /// Reads bounds for exactly these geometry inputs, scheduling preparation on first demand.
+    /// Pending and failed preparation remain unavailable to the selection query.
+    pub(super) fn request_envelope(
         &mut self,
-        world: &mut holtburger_world::WorldState,
-        guid: Guid,
-    ) -> Result<()> {
-        if world
-            .entities
-            .get(guid)
-            .is_some_and(|entity| entity.attachment().is_some())
-        {
-            // Attached candidates inherit their world ancestor's reached scope and bypass host
-            // sphere testing; only the browser owns their animated attachment transform.
-            self.retire_demand(guid);
-            world.clear_entity_selection_envelope(guid);
-            return Ok(());
-        }
-        let facts = match client_selection_envelope_facts(world, guid) {
-            Ok(facts) => facts,
-            Err(error) => {
-                self.retire_demand(guid);
-                world.clear_entity_selection_envelope(guid);
-                return Err(error);
+        geometry: &SelectionGeometry,
+    ) -> Option<SelectionEnvelope> {
+        match self.profiles.get(geometry) {
+            Some(ProfileResolution::Resolved(profile)) => match self
+                .cache
+                .get(profile)
+                .expect("resolved selection profiles have an envelope preparation entry")
+            {
+                CachedEnvelope::Ready(envelope) => Some(*envelope),
+                CachedEnvelope::Preparing | CachedEnvelope::Unavailable => None,
+            },
+            Some(ProfileResolution::Preparing | ProfileResolution::Unavailable) => None,
+            None => {
+                self.start_profile_resolution(geometry.clone());
+                None
             }
-        };
-        if self
-            .demands
-            .get(&guid)
-            .is_some_and(|demand| demand.facts == facts)
-        {
-            return Ok(());
         }
-        self.retire_demand(guid);
-        world.clear_entity_selection_envelope(guid);
+    }
+
+    fn start_profile_resolution(&mut self, geometry: SelectionGeometry) {
+        self.profiles
+            .insert(geometry.clone(), ProfileResolution::Preparing);
         let source = Arc::clone(&self.source);
         let completion_tx = self.completion_tx.clone();
-        let worker_facts = facts.clone();
-        let completion_facts = facts.clone();
-        let worker = tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || source.resolve_profile(&worker_facts))
-                .await
-                .map_err(|error| format!("selection profile task failed: {error}"))
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = completion_tx.send(Completion::Profile {
-                facts: completion_facts,
-                result,
-            });
+        tokio::spawn(async move {
+            let worker_geometry = geometry.clone();
+            let result =
+                tokio::task::spawn_blocking(move || source.resolve_profile(&worker_geometry))
+                    .await
+                    .map_err(|error| format!("selection profile task failed: {error}"))
+                    .and_then(|result| result.map_err(|error| format!("{error:#}")));
+            let _ = completion_tx.send(Completion::Profile { geometry, result });
         });
-        self.demands.insert(
-            guid,
-            Demand {
-                facts,
-                profile: None,
-                worker: Some(worker),
-            },
-        );
-        Ok(())
     }
 
-    pub fn remove_entity(&mut self, target: DynamicScaleTarget) {
-        if self
-            .demands
-            .get(&target.guid)
-            .is_some_and(|demand| demand.facts.target == target)
-        {
-            self.retire_demand(target.guid);
-        }
-    }
-
-    fn retire_demand(&mut self, guid: Guid) {
-        if let Some(demand) = self.demands.remove(&guid)
-            && let Some(worker) = demand.worker
-        {
-            worker.abort();
-        }
-    }
-
-    pub fn poll(&mut self, world: &mut holtburger_world::WorldState) -> Vec<String> {
+    pub(super) fn poll(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
         while let Ok(completion) = self.completion_rx.try_recv() {
             match completion {
-                Completion::Profile { facts, result } => {
-                    if !self.exact(world, &facts) {
-                        continue;
-                    }
-                    self.demands
-                        .get_mut(&facts.target.guid)
-                        .expect("validated selection demand disappeared")
-                        .worker = None;
-                    let profile = match result {
-                        Ok(profile) => profile,
+                Completion::Profile { geometry, result } => {
+                    let state = match result {
+                        Ok(profile) => {
+                            if !self.cache.contains_key(&profile) {
+                                self.start_envelope_preparation(profile.clone());
+                            }
+                            ProfileResolution::Resolved(profile)
+                        }
                         Err(error) => {
                             errors.push(error);
-                            continue;
+                            ProfileResolution::Unavailable
                         }
                     };
-                    let demand = self
-                        .demands
-                        .get_mut(&facts.target.guid)
-                        .expect("validated selection demand disappeared");
-                    demand.profile = Some(profile.clone());
-                    match self.cache.get(&profile) {
-                        Some(CachedEnvelope::Ready(envelope)) => {
-                            world.install_entity_selection_envelope(
-                                facts.target.guid,
-                                facts.target.instance_sequence,
-                                *envelope,
-                            );
-                        }
-                        Some(CachedEnvelope::Unavailable | CachedEnvelope::Preparing) => {}
-                        None => {
-                            self.start_envelope_preparation(profile);
-                        }
-                    }
+                    self.profiles.insert(geometry, state);
                 }
                 Completion::Envelope { profile, result } => {
-                    let envelope = match result {
-                        Ok(envelope) => {
-                            self.cache
-                                .insert(profile.clone(), CachedEnvelope::Ready(envelope));
-                            Some(envelope)
-                        }
+                    let state = match result {
+                        Ok(envelope) => CachedEnvelope::Ready(envelope),
                         Err(error) => {
-                            self.cache
-                                .insert(profile.clone(), CachedEnvelope::Unavailable);
                             errors.push(error);
-                            None
+                            CachedEnvelope::Unavailable
                         }
                     };
-                    if let Some(envelope) = envelope {
-                        let targets = self
-                            .demands
-                            .values()
-                            .filter(|demand| demand.profile.as_ref() == Some(&profile))
-                            .map(|demand| demand.facts.target)
-                            .collect::<Vec<_>>();
-                        for target in targets {
-                            world.install_entity_selection_envelope(
-                                target.guid,
-                                target.instance_sequence,
-                                envelope,
-                            );
-                        }
-                    }
+                    self.cache.insert(profile, state);
                 }
             }
         }
         errors
-    }
-
-    fn exact(
-        &self,
-        world: &holtburger_world::WorldState,
-        facts: &ClientSelectionEnvelopeFacts,
-    ) -> bool {
-        self.demands
-            .get(&facts.target.guid)
-            .is_some_and(|demand| demand.facts == *facts)
-            && client_selection_envelope_facts(world, facts.target.guid)
-                .is_ok_and(|current| current == *facts)
     }
 
     fn start_envelope_preparation(&mut self, profile: ClientSelectionEnvelopeProfile) {
@@ -360,7 +239,7 @@ impl ClientSelectionEnvelopeCoordinator {
                 tokio::task::spawn_blocking(move || source.prepare_envelope(&worker_profile))
                     .await
                     .map_err(|error| format!("selection envelope task failed: {error}"))
-                    .and_then(|result| result.map_err(|error| error.to_string()));
+                    .and_then(|result| result.map_err(|error| format!("{error:#}")));
             let _ = completion_tx.send(Completion::Envelope { profile, result });
         });
     }
@@ -368,29 +247,19 @@ impl ClientSelectionEnvelopeCoordinator {
 
 impl super::ClientRuntime {
     pub(super) fn observe_selection_envelope_entity(&mut self, guid: Guid) {
-        let Some(mut coordinator) = self.selection_envelope_coordinator.take() else {
-            return;
-        };
-        if let Err(error) = coordinator.observe_entity(&mut self.world, guid) {
-            log::debug!("selection envelope unavailable for {guid}: {error:#}");
-        }
-        self.selection_envelope_coordinator = Some(coordinator);
-    }
-
-    pub(super) fn remove_selection_envelope_entity(&mut self, target: DynamicScaleTarget) {
-        if let Some(coordinator) = self.selection_envelope_coordinator.as_mut() {
-            coordinator.remove_entity(target);
+        if let Some(coordinator) = self.selection_envelope_coordinator.as_mut()
+            && let Some(geometry) = self.world.selection_geometry(guid)
+        {
+            coordinator.request_envelope(&geometry);
         }
     }
 
     pub(super) fn poll_selection_envelopes(&mut self) {
-        let Some(mut coordinator) = self.selection_envelope_coordinator.take() else {
-            return;
-        };
-        for error in coordinator.poll(&mut self.world) {
-            log::warn!("selection envelope preparation rejected: {error}");
+        if let Some(coordinator) = self.selection_envelope_coordinator.as_mut() {
+            for error in coordinator.poll() {
+                log::warn!("selection envelope preparation rejected: {error}");
+            }
         }
-        self.selection_envelope_coordinator = Some(coordinator);
     }
 }
 
@@ -398,26 +267,38 @@ impl super::ClientRuntime {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyDataId, PropertyUpdate};
-    use holtburger_common::{ParentLocation, Placement};
-    use holtburger_world::entity::Entity;
+    use holtburger_common::{
+        position::WorldPosition,
+        properties::{PropertyDataId, WorldObjectPropertyAccessorsMut as _},
+    };
+    use holtburger_protocol::messages::{GameMessage, ObjectDescriptionData};
+    use holtburger_world::{EntityPartChange, WorldEvent, WorldState, entity::Entity};
 
     use super::*;
 
-    struct SharedProfileSource {
+    const SETUP: Guid = Guid(0x0200_0001);
+    const PART: u32 = 0x0100_0001;
+    const RADIUS: f32 = 3.5;
+
+    struct TestSource {
         preparations: Arc<AtomicUsize>,
     }
 
-    impl ClientSelectionEnvelopeSource for SharedProfileSource {
+    impl ClientSelectionEnvelopeSource for TestSource {
         fn resolve_profile(
             &self,
-            facts: &ClientSelectionEnvelopeFacts,
+            geometry: &SelectionGeometry,
         ) -> Result<ClientSelectionEnvelopeProfile> {
+            let mut parts = vec![PART];
+            for change in &geometry.part_changes {
+                if let Some(part) = parts.get_mut(usize::from(change.part_index)) {
+                    *part = change.gfx_obj_did;
+                }
+            }
             Ok(ClientSelectionEnvelopeProfile {
-                setup_did: facts.setup_did,
-                effective_parts: vec![0x0100_0001],
-                motion_table_did: facts.motion_table_did,
+                setup_did: geometry.setup_did,
+                effective_parts: parts,
+                motion_table_did: geometry.motion_table_did,
             })
         }
 
@@ -426,108 +307,151 @@ mod tests {
             _profile: &ClientSelectionEnvelopeProfile,
         ) -> Result<SelectionEnvelope> {
             self.preparations.fetch_add(1, Ordering::SeqCst);
-            Ok(SelectionEnvelope::new(3.5)?)
+            Ok(SelectionEnvelope::new(RADIUS)?)
         }
     }
 
     fn setup_entity(guid: Guid) -> Entity {
         let mut entity = Entity::new(guid, "candidate".to_owned(), WorldPosition::default());
-        entity.set_property(PropertyUpdate::DataId(
-            PropertyDataId::Setup,
-            Guid(0x0200_0001),
-        ));
+        entity.set_did_prop(PropertyDataId::Setup, SETUP);
         entity
     }
 
-    #[tokio::test]
-    async fn coordinator_prepares_one_envelope_for_a_shared_resolved_profile() {
-        let mut world = holtburger_world::WorldState::synthetic();
-        let first = Guid(0x7000_0001);
-        let second = Guid(0x7000_0002);
-        world.entities.insert(setup_entity(first));
-        world.entities.insert(setup_entity(second));
+    fn coordinator() -> (ClientSelectionEnvelopeCoordinator, Arc<AtomicUsize>) {
         let preparations = Arc::new(AtomicUsize::new(0));
-        let mut coordinator =
-            ClientSelectionEnvelopeCoordinator::new(Arc::new(SharedProfileSource {
+        (
+            ClientSelectionEnvelopeCoordinator::new(Arc::new(TestSource {
                 preparations: Arc::clone(&preparations),
-            }));
+            })),
+            preparations,
+        )
+    }
 
-        coordinator.observe_entity(&mut world, first).unwrap();
-        coordinator.observe_entity(&mut world, second).unwrap();
+    async fn prepared(
+        coordinator: &mut ClientSelectionEnvelopeCoordinator,
+        geometry: &SelectionGeometry,
+    ) -> SelectionEnvelope {
         tokio::time::timeout(std::time::Duration::from_secs(1), async {
             loop {
-                assert!(coordinator.poll(&mut world).is_empty());
-                let both_ready = [first, second].into_iter().all(|guid| {
-                    world
-                        .entities
-                        .get(guid)
-                        .and_then(|entity| entity.selection_envelope)
-                        .is_some_and(|envelope| envelope.radius() == 3.5)
-                });
-                if both_ready {
-                    break;
+                assert!(coordinator.poll().is_empty());
+                if let Some(envelope) = coordinator.request_envelope(geometry) {
+                    break envelope;
                 }
                 tokio::task::yield_now().await;
             }
         })
         .await
-        .expect("shared profile preparation should complete");
+        .expect("synthetic profile preparation should complete")
+    }
 
+    #[tokio::test]
+    async fn prepared_geometry_survives_same_instance_create_and_guid_reuse() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x7000_0001);
+        world.entities.insert(setup_entity(guid));
+        let (mut coordinator, preparations) = coordinator();
+        let geometry = world.selection_geometry(guid).unwrap();
+        let envelope = prepared(&mut coordinator, &geometry).await;
+
+        let mut description = ObjectDescriptionData::with_guid(guid);
+        description.csetup_id = Some(SETUP.0);
+        let events = world.handle_message(&GameMessage::ObjectCreate(Box::new(description)));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntityReplaced(_)))
+        );
+        // No coordinator observation or repair runs between replacement and lookup.
+        assert_eq!(
+            coordinator.request_envelope(&world.selection_geometry(guid).unwrap()),
+            Some(envelope)
+        );
+
+        world.remove_entity(guid);
+        let mut replacement = setup_entity(guid);
+        replacement.sequences[8] = 1;
+        world.entities.insert(replacement);
+        assert_eq!(
+            coordinator.request_envelope(&world.selection_geometry(guid).unwrap()),
+            Some(envelope)
+        );
         assert_eq!(preparations.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
-    async fn losing_profile_facts_retires_the_old_demand() {
+    async fn equivalent_geometry_inputs_share_final_profile_preparation() {
+        let mut world = WorldState::synthetic();
+        let first = Guid(0x7000_0001);
+        let second = Guid(0x7000_0002);
+        world.entities.insert(setup_entity(first));
+        let mut equivalent = setup_entity(second);
+        equivalent.appearance.part_changes.push(EntityPartChange {
+            part_index: 0,
+            gfx_obj_did: PART,
+        });
+        world.entities.insert(equivalent);
+        let first_geometry = world.selection_geometry(first).unwrap();
+        let second_geometry = world.selection_geometry(second).unwrap();
+        assert_ne!(first_geometry, second_geometry);
+        let (mut coordinator, preparations) = coordinator();
+        coordinator.request_envelope(&first_geometry);
+        coordinator.request_envelope(&second_geometry);
+        assert_eq!(
+            prepared(&mut coordinator, &first_geometry).await.radius(),
+            RADIUS
+        );
+        assert_eq!(
+            prepared(&mut coordinator, &second_geometry).await.radius(),
+            RADIUS
+        );
+        assert_eq!(preparations.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn late_completions_cannot_supply_bounds_for_changed_geometry() {
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x7000_0001);
-        let mut world = holtburger_world::WorldState::synthetic();
         world.entities.insert(setup_entity(guid));
-        let mut coordinator =
-            ClientSelectionEnvelopeCoordinator::new(Arc::new(SharedProfileSource {
-                preparations: Arc::new(AtomicUsize::new(0)),
-            }));
-        coordinator.observe_entity(&mut world, guid).unwrap();
+        let (mut coordinator, preparations) = coordinator();
+        let original = world.selection_geometry(guid).unwrap();
+        assert_eq!(coordinator.request_envelope(&original), None);
 
         world
             .entities
             .get_mut(guid)
             .unwrap()
-            .properties
-            .dids
-            .0
-            .remove(&PropertyDataId::Setup);
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0002));
+        let changed_setup = world.selection_geometry(guid).unwrap();
+        // Deliver the old result only after the world's geometry has changed.
+        prepared(&mut coordinator, &original).await;
+        assert_eq!(coordinator.request_envelope(&changed_setup), None);
 
-        assert!(coordinator.observe_entity(&mut world, guid).is_err());
-        assert!(coordinator.demands.is_empty());
-    }
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(0x0900_0001));
+        let changed_motion = world.selection_geometry(guid).unwrap();
+        prepared(&mut coordinator, &changed_setup).await;
+        assert_eq!(coordinator.request_envelope(&changed_motion), None);
 
-    #[test]
-    fn coordinator_does_not_prepare_browser_placed_attachments() {
-        let guid = Guid(0x7000_0001);
-        let mut world = holtburger_world::WorldState::synthetic();
-        let mut entity = setup_entity(guid);
-        entity.set_attachment(Some(holtburger_world::PhysicsAttachment {
-            parent: Guid(0x7000_0002),
-            location: ParentLocation::RightHand,
-            placement: Placement::RightHandCombat,
-        }));
-        world.entities.insert(entity);
-        let preparations = Arc::new(AtomicUsize::new(0));
-        let mut coordinator =
-            ClientSelectionEnvelopeCoordinator::new(Arc::new(SharedProfileSource {
-                preparations: Arc::clone(&preparations),
-            }));
-
-        coordinator.observe_entity(&mut world, guid).unwrap();
-
-        assert!(coordinator.demands.is_empty());
-        assert_eq!(preparations.load(Ordering::SeqCst), 0);
-        assert!(
-            world
-                .entities
-                .get(guid)
-                .unwrap()
-                .selection_envelope
-                .is_none()
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .appearance
+            .part_changes
+            .push(EntityPartChange {
+                part_index: 0,
+                gfx_obj_did: 0x0100_0002,
+            });
+        let changed_parts = world.selection_geometry(guid).unwrap();
+        prepared(&mut coordinator, &changed_motion).await;
+        assert_eq!(coordinator.request_envelope(&changed_parts), None);
+        assert_eq!(
+            prepared(&mut coordinator, &changed_parts).await.radius(),
+            RADIUS
         );
+        assert_eq!(preparations.load(Ordering::SeqCst), 4);
     }
 }

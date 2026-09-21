@@ -67,6 +67,11 @@ impl super::ClientRuntime {
                     direction: request.direction,
                     previous_cell: request.previous_cell,
                 },
+                |geometry| {
+                    self.selection_envelope_coordinator
+                        .as_mut()
+                        .and_then(|coordinator| coordinator.request_envelope(geometry))
+                },
             )? {
                 EntitySelectionCandidateResult::Available(available) => {
                     EntitySelectionQueryOutcome::Available {

@@ -6,7 +6,6 @@ pub mod motion_resolution;
 pub mod mutations;
 mod pose_orientation;
 mod scene_placement;
-mod selection;
 pub mod self_movement;
 pub mod storage;
 #[cfg(test)]

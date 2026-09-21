@@ -62,7 +62,7 @@ pub use client::precise_jump_prediction::{
 };
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::selection_envelope::{
-    ClientSelectionEnvelopeFacts, ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource,
+    ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource,
     ContentClientSelectionEnvelopeSource,
 };
 pub use client::types::{

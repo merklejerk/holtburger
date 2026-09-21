@@ -57,7 +57,7 @@ pub use entity_physics::{
 pub use entity_scale::{EntityScaleError, EntityScaleState, EntityScaleUpdate};
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use motion::{authored_grounded_actuation, grounded_character_actuation};
-pub use selection::{SelectionEnvelope, SelectionEnvelopeError};
+pub use selection::{SelectionEnvelope, SelectionEnvelopeError, SelectionGeometry};
 pub use spatial::{
     AcceptedBodyMotion, AuthoritativeBodyVectors, AuthoritativePoseEffect,
     AuthoritativePoseResetCause, AvailableEntitySelectionCandidates, CellTransitRequest,

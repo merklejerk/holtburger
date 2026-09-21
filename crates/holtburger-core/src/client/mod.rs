@@ -1011,11 +1011,6 @@ impl ClientRuntime {
                     instance_sequence: u16::try_from(*generation)
                         .expect("world entity generation is the protocol instance sequence"),
                 });
-                self.remove_selection_envelope_entity(crate::DynamicScaleTarget {
-                    guid: *guid,
-                    instance_sequence: u16::try_from(*generation)
-                        .expect("world entity generation is the protocol instance sequence"),
-                });
                 if *guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }

@@ -1171,8 +1171,6 @@ pub struct Entity {
     pub physics: EntityPhysicsRuntimeState,
     /// Server-owned authored scale and temporary PhysicsScript ramp as one invariant.
     pub scale: EntityScaleState,
-    /// Prepared unit-scale visual envelope, absent until or unless content preparation succeeds.
-    pub selection_envelope: Option<crate::SelectionEnvelope>,
     /// Lossless ordered visual substitutions normalized from the producer's source format.
     pub appearance: EntityAppearance,
     /// Received placement authority; retained coordinates alone cannot override withdrawal.
@@ -1731,7 +1729,6 @@ impl Entity {
                 PhysicsState::NONE,
             )),
             scale: EntityScaleState::default(),
-            selection_envelope: None,
             appearance: EntityAppearance::default(),
             placement_intent: EntityPlacementIntent::Independent,
             placement_frame: 0,

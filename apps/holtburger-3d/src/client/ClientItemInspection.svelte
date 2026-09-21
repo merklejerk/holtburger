@@ -47,6 +47,22 @@
 	let descriptionExpanded = $state(false);
 	let spellReferences = $state<readonly SpellReference[] | null>(null);
 	let spellFailure = $state<string | null>(null);
+	const spellGroups = $derived(
+		[
+			{
+				heading: "Spells",
+				indexes: item.spells.flatMap((spell, index) =>
+					spell.activeEnchantment ? [] : [index],
+				),
+			},
+			{
+				heading: "Active Spells",
+				indexes: item.spells.flatMap((spell, index) =>
+					spell.activeEnchantment ? [index] : [],
+				),
+			},
+		].filter(({ indexes }) => indexes.length > 0),
+	);
 	const cantripSummary = $derived(
 		summarizeItemCantrips(item.spells, spellReferences, spellFailure !== null),
 	);
@@ -95,6 +111,42 @@
 			: `${formatInspectionNumber(range.min)} – ${formatInspectionNumber(range.max)}`;
 	}
 </script>
+
+{#snippet spellList(indexes: readonly number[])}
+	<ul class="inspection-spells">
+		{#each indexes as index}
+			{@const reference = spellReferences?.[index]}
+			<li>
+				<details class="inspection-spell">
+					<summary>{spellLabel(index)}</summary>
+					<div class="inspection-spell-description">
+						{#if reference?.kind === "known"}
+							<p>
+								{reference.details.description.length > 0
+									? reference.details.description
+									: "No description available."}
+							</p>
+						{:else if reference?.kind === "missing"}
+							<p class="inspection-diagnostic">
+								Spell definition is unavailable.
+							</p>
+						{:else if reference?.kind === "failed"}
+							<p class="inspection-diagnostic">
+								Spell description unavailable: {reference.detail}
+							</p>
+						{:else if spellFailure !== null}
+							<p class="inspection-diagnostic">
+								Spell description unavailable.
+							</p>
+						{:else}
+							<p class="inspection-diagnostic">Loading description…</p>
+						{/if}
+					</div>
+				</details>
+			</li>
+		{/each}
+	</ul>
+{/snippet}
 
 <article class="inspection-body inspection-item">
 	<header class="inspection-hero">
@@ -370,49 +422,15 @@
 			<h3>Use</h3>
 			<p>{item.useText}</p>
 		</section>{/if}
-	{#if item.spells.length > 0}
+	{#each spellGroups as group}
 		<section aria-busy={spellReferences === null && spellFailure === null}>
-			<h3>Spells</h3>
+			<h3>{group.heading}</h3>
 			{#if spellFailure !== null}<p class="inspection-diagnostic">
 					Spell names unavailable: {spellFailure}
 				</p>{/if}
-			<ul class="inspection-spells">
-				{#each item.spells as spell, index}
-					{@const reference = spellReferences?.[index]}
-					<li>
-						<details class="inspection-spell">
-							<summary>
-								{spellLabel(index)}{spell.activeEnchantment ? " (active)" : ""}
-							</summary>
-							<div class="inspection-spell-description">
-								{#if reference?.kind === "known"}
-									<p>
-										{reference.details.description.length > 0
-											? reference.details.description
-											: "No description available."}
-									</p>
-								{:else if reference?.kind === "missing"}
-									<p class="inspection-diagnostic">
-										Spell definition is unavailable.
-									</p>
-								{:else if reference?.kind === "failed"}
-									<p class="inspection-diagnostic">
-										Spell description unavailable: {reference.detail}
-									</p>
-								{:else if spellFailure !== null}
-									<p class="inspection-diagnostic">
-										Spell description unavailable.
-									</p>
-								{:else}
-									<p class="inspection-diagnostic">Loading description…</p>
-								{/if}
-							</div>
-						</details>
-					</li>
-				{/each}
-			</ul>
+			{@render spellList(group.indexes)}
 		</section>
-	{/if}
+	{/each}
 	{#if item.inscription !== null}
 		<section>
 			<h3>Inscription</h3>

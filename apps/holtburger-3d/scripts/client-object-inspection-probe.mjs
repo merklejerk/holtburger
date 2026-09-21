@@ -214,7 +214,28 @@ export async function probeObjectInspection(
 		assert.match(item.window.text, /Black Garnet/);
 		assert.match(item.window.text, /125,000/);
 		assert.match(item.window.text, /9,802 \/ 10,000/);
-		assert.match(item.window.text, /Harm Other I \(active\)/);
+		const spellGroups = await read(`[
+			...document.querySelectorAll('.inspection-item section'),
+		]
+			.filter((section) => ['Spells', 'Active Spells'].includes(section.querySelector('h3')?.textContent))
+			.map((section) => ({
+				heading: section.querySelector('h3').textContent,
+				spells: [...section.querySelectorAll('.inspection-spell > summary')].map((summary) => summary.textContent.trim()),
+			}))`);
+		assert.deepEqual(spellGroups, [
+			{
+				heading: "Spells",
+				spells: [
+					"Impenetrability I",
+					"Spell 2002 Frost Protection Self",
+					"Spell 2003 Acid Protection Other",
+					"Spell 2004 Frost Protection Self",
+					"Spell 2005 Acid Protection Other",
+					"Spell 999999 (definition missing)",
+				],
+			},
+			{ heading: "Active Spells", spells: ["Harm Other I"] },
+		]);
 		assert.match(item.window.text, /definition missing/);
 		const cantripPills = await read(`[
 			...document.querySelectorAll('.inspection-cantrip-pill'),

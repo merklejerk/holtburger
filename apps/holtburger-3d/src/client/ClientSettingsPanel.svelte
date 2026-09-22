@@ -4,7 +4,6 @@
 	import {
 		CLIENT_BINDING_GROUPS,
 		conflictingClientBindings,
-		formatClientBinding,
 		replaceConflictingClientBindings,
 		type ClientBindingRow,
 	} from "./client-binding-catalog";
@@ -30,12 +29,19 @@
 		ClientKeyboardConfiguration,
 		KeyBinding,
 	} from "../lib/input/input-contract";
+	import {
+		formatInputBinding,
+		formatInputPill,
+		modifierName,
+		type InputDisplayPlatform,
+	} from "../lib/input/input-presentation";
 
 	export type SettingsTab = "graphics" | "ui" | "input";
 	interface Props {
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
 		readonly input: ClientKeyboardConfiguration;
+		readonly displayPlatform: InputDisplayPlatform;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly selectedTab: SettingsTab;
 		readonly onSelectTab: (tab: SettingsTab) => void;
@@ -49,6 +55,7 @@
 		graphics,
 		ui,
 		input,
+		displayPlatform,
 		textureFilteringCapabilities,
 		selectedTab,
 		onSelectTab,
@@ -158,7 +165,7 @@
 					row.read(input).some((other) => keyBindingsOverlap(binding, other)),
 				),
 			)
-			.map(formatClientBinding)
+			.map((binding) => formatInputBinding(binding, displayPlatform))
 			.join(" / ");
 	}
 	function handleSettingsKeydown(event: KeyboardEvent): void {
@@ -481,10 +488,14 @@
 										},
 									})}
 							>
-								<option value="shift">Shift</option><option value="ctrl"
-									>Ctrl</option
-								><option value="alt">Alt</option><option value="meta"
-									>Meta</option
+								<option value="shift"
+									>{modifierName("shift", displayPlatform)}</option
+								><option value="ctrl"
+									>{modifierName("ctrl", displayPlatform)}</option
+								><option value="alt"
+									>{modifierName("alt", displayPlatform)}</option
+								><option value="meta"
+									>{modifierName("meta", displayPlatform)}</option
 								>
 							</select>
 						</label>
@@ -502,10 +513,11 @@
 									<button
 										type="button"
 										class="binding-key"
-										aria-label={`Remove ${formatClientBinding(binding)} from ${row.label}`}
-										title="Remove binding"
+										aria-label={`Remove ${formatInputBinding(binding, displayPlatform)} from ${row.label}`}
+										title={`Remove binding: ${formatInputBinding(binding, displayPlatform)}`}
 										onclick={() => clearBinding(row, index)}
-										><kbd aria-hidden="true">{formatClientBinding(binding)}</kbd
+										><kbd aria-hidden="true"
+											>{formatInputPill(binding, displayPlatform)}</kbd
 										><span class="binding-key-remove" aria-hidden="true">×</span
 										></button
 									>

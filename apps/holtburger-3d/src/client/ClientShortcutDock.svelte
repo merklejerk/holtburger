@@ -43,9 +43,17 @@
 
 <script lang="ts">
 	import type { ClientCombatMode } from "./client-host-contract";
+	import type { KeyBinding } from "../lib/input/input-contract";
+	import {
+		formatInputBindings,
+		type InputDisplayPlatform,
+	} from "../lib/input/input-presentation";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 
 	interface Props {
+		/** Accepted stance shortcut alternatives. */
+		readonly bindings: readonly KeyBinding[];
+		readonly displayPlatform: InputDisplayPlatform;
 		/** Server-confirmed stance, independent of the active panel. */
 		readonly combatMode: ClientCombatMode;
 		/** Whether gameplay currently accepts stance changes. */
@@ -59,6 +67,8 @@
 	}
 
 	const {
+		bindings,
+		displayPlatform,
 		shortcuts,
 		activePanel,
 		onToggle,
@@ -81,13 +91,15 @@
 			type="button"
 			class="ui-hud-button"
 			title={combat
-				? `Combat stance: ${combatMode}. Toggle peace/combat (~)`
+				? `Combat stance: ${combatMode}. Toggle peace/combat (${formatInputBindings(bindings, displayPlatform)})`
 				: panel === null
 					? `${shortcut.label} (stub)`
 					: panel === "debug"
 						? "Client diagnostics"
 						: shortcut.label}
-			aria-label={shortcut.label}
+			aria-label={combat
+				? `${shortcut.label} (${formatInputBindings(bindings, displayPlatform)})`
+				: shortcut.label}
 			aria-pressed={combat
 				? combatActive
 				: panel === null

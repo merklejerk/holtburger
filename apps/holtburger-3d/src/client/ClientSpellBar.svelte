@@ -1,7 +1,15 @@
 <script lang="ts">
 	import { tick, untrack } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import type { InputDigitIndex } from "../lib/input/input-contract";
+	import type {
+		ClientKeyboardConfiguration,
+		InputDigitIndex,
+	} from "../lib/input/input-contract";
+	import {
+		compactInputHint,
+		formatInputBindings,
+		type InputDisplayPlatform,
+	} from "../lib/input/input-presentation";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import {
 		SPELL_BAR_INDICES,
@@ -28,6 +36,9 @@
 		type WieldedCasterSpell,
 	} from "./client-inventory-equipment";
 	interface Props {
+		/** Accepted spell shortcuts for visible hints and full descriptions. */
+		input: ClientKeyboardConfiguration["spellBar"];
+		displayPlatform: InputDisplayPlatform;
 		/** Retained HUD anchors; natural extent is derived from measured theme geometry. */
 		placement: ClientHudPlacement;
 		/** Retained shape survives stance hiding and tab switches. */
@@ -55,6 +66,8 @@
 		onActivateCell: (slot: InputDigitIndex) => void;
 	}
 	let {
+		input,
+		displayPlatform,
 		placement,
 		shape,
 		editable,
@@ -249,7 +262,7 @@
 				{@const row = rows.get(caster.spell)}
 				<div class="caster-spell" data-caster-spell={caster.spell}>
 					<SpellCell
-						address={null}
+						shortcut={null}
 						spell={caster.spell}
 						label={`${row?.name ?? `Spell ${caster.spell}`} (${caster.name})${row?.artwork.kind === "failed" ? `: ${row.artwork.detail}` : ""}`}
 						display={row?.artwork.kind === "icon"
@@ -270,12 +283,17 @@
 						<button
 							type="button"
 							class="ui-hud-button"
-							aria-label={`Spell tab ${(tab + 1) % 10}`}
+							aria-label={`Spell tab ${(tab + 1) % 10} (${formatInputBindings(input.tabs[tab], displayPlatform)})`}
+							title={`Spell tab ${(tab + 1) % 10} — ${formatInputBindings(input.tabs[tab], displayPlatform)}`}
 							aria-pressed={configuration.selected === tab}
 							onclick={() => {
 								keyboard.returnToGame();
 								onSelectTab(tab);
-							}}>{(tab + 1) % 10}</button
+							}}
+							><span class="spell-tab-hint"
+								>{compactInputHint(input.tabs[tab], displayPlatform) ??
+									"—"}</span
+							></button
 						>
 					{/each}
 				</div>
@@ -291,7 +309,14 @@
 						{@const available =
 							enabled && spell !== null && known?.includes(spell) === true}
 						<SpellCell
-							address={{ tab: configuration.selected, slot }}
+							shortcut={{
+								address: { tab: configuration.selected, slot },
+								hint: compactInputHint(input.cells[slot], displayPlatform),
+								description: formatInputBindings(
+									input.cells[slot],
+									displayPlatform,
+								),
+							}}
 							{spell}
 							label={spell === null
 								? "Empty spell slot"
@@ -374,6 +399,12 @@
 			color: var(--ui-spell-tab-color, var(--ui-color-text));
 			border: var(--ui-spell-tab-border, 0);
 			border-radius: var(--ui-spell-tab-radius, 0);
+		}
+		.spell-tab-hint {
+			max-width: 100%;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 		.spell-tabs button[aria-pressed="true"] {
 			--ui-hud-button-background: var(

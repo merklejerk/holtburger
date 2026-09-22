@@ -396,6 +396,8 @@
 					persistentMessage={{ kind: "preview", message: toastMessage }}
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
+					bindings={[]}
+					displayPlatform="unknown"
 					combatMode="peace"
 					combatEnabled={false}
 					onToggleCombat={() => {}}

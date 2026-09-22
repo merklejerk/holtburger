@@ -11,6 +11,7 @@ import {
 } from "../lib/input/input-contract";
 import { keyBindingsOverlap } from "../lib/input/input-context";
 import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
+import { COMBAT_BREAKPOINTS } from "./client-combat-bar-state";
 
 type BindingContext =
 	"game-peace" | "game-magic" | "game-physical" | "focused-bar" | "chat";
@@ -152,7 +153,7 @@ const spellSlotRows: ClientBindingRow[] = ACTION_SLOT_INDICES.map((index) => ({
 const combatRows: ClientBindingRow[] = [
 	...COMBAT_BREAKPOINT_INDICES.map((index): ClientBindingRow => ({
 		id: `combatBar.breakpoints.${index}`,
-		label: `Attack preset ${index + 1}`,
+		label: `Melee power / missile accuracy ${Math.round(COMBAT_BREAKPOINTS[index] * 100)}%`,
 		group: "Combat",
 		contexts: ["game-physical"],
 		read: (settings) => settings.combatBar.breakpoints[index],
@@ -301,41 +302,4 @@ export function replaceConflictingClientBindings(
 		);
 	}
 	return row.write(next, bindings);
-}
-
-/** One visible binding label; code selectors are physical keys. */
-export function formatClientBinding(binding: KeyBinding): string {
-	const selfModifier =
-		binding.key === "Shift"
-			? "shift"
-			: binding.key === "Control"
-				? "ctrl"
-				: binding.key === "Alt"
-					? "alt"
-					: binding.key === "Meta"
-						? "meta"
-						: null;
-	const modifiers = [
-		binding.ctrl && selfModifier !== "ctrl" ? "Ctrl" : null,
-		binding.alt && selfModifier !== "alt" ? "Alt" : null,
-		binding.shift && selfModifier !== "shift" ? "Shift" : null,
-		binding.meta && selfModifier !== "meta" ? "Meta" : null,
-	].filter((part) => part !== null);
-	const selector =
-		binding.key !== undefined
-			? binding.key === " "
-				? "Space"
-				: binding.key
-			: binding.code?.startsWith("Digit")
-				? binding.code.slice(5)
-				: binding.code?.startsWith("Key")
-					? binding.code.slice(3)
-					: binding.code;
-	return [...modifiers, selector].join("+");
-}
-
-export function formatClientBindings(bindings: readonly KeyBinding[]): string {
-	return bindings.length === 0
-		? "Unbound"
-		: bindings.map(formatClientBinding).join(" / ");
 }

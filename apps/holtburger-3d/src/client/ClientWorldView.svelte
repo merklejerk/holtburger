@@ -11,6 +11,7 @@
 		ClientKeyboardConfiguration,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
+	import { inputDisplayPlatform } from "../lib/input/input-presentation";
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
@@ -309,6 +310,7 @@
 	}: Props = $props();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
+	const displayPlatform = inputDisplayPlatform(navigator.userAgent);
 	/** Pointer surface changes are cold; world geometry still uses the existing hover picker. */
 	let combineSurface = $state<number | "world" | null>(null);
 	function considerPointer(event: PointerEvent): void {
@@ -706,6 +708,7 @@
 		{#key inventory}
 			<ClientActionBars
 				{input}
+				{displayPlatform}
 				bars={actionBars}
 				onBarsChange={onActionBarsChange}
 				onResetOwner={(reset) => (resetActionBars = reset)}
@@ -726,6 +729,8 @@
 
 	{#if actionBars !== null && spells !== null && (spellBarEnabled || (hudMode === "layout" && combatMode !== "melee" && combatMode !== "missile"))}
 		<ClientSpellBar
+			input={input.spellBar}
+			{displayPlatform}
 			{spells}
 			{inventory}
 			{itemInteractions}
@@ -744,6 +749,8 @@
 	{/if}
 	{#if combatMode === "melee" || combatMode === "missile"}
 		<ClientCombatBar
+			input={input.combatBar}
+			{displayPlatform}
 			placement={hudLayout.combatBar}
 			editable={hudMode === "layout"}
 			{viewport}
@@ -896,6 +903,8 @@
 			changeHudPlacement("shortcuts", placement)}
 	>
 		<ClientShortcutDock
+			bindings={input.client.toggleCombat}
+			{displayPlatform}
 			{combatMode}
 			{combatEnabled}
 			{onToggleCombat}
@@ -983,6 +992,7 @@
 					{/if}
 				{:else if panel === "settings"}
 					<ClientSettingsPanel
+						{displayPlatform}
 						{graphics}
 						{ui}
 						{input}

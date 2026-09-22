@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { sameConsumableIdentity } from "./client-action-item";
 	import { useClientInput } from "./client-input-context";
-	import { formatClientBindings } from "./client-binding-catalog";
+	import {
+		compactInputHint,
+		formatInputBindings,
+		modifierName,
+		type InputDisplayPlatform,
+	} from "../lib/input/input-presentation";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
@@ -30,6 +35,7 @@
 	interface Props {
 		/** Accepted user keyboard map for shortcut hints. */
 		input: ClientKeyboardConfiguration;
+		displayPlatform: InputDisplayPlatform;
 		/** Cold bar configuration from the collection owner. */
 		bar: ClientActionBar;
 		/** Current one-based hotkey position and collection size. */
@@ -51,6 +57,7 @@
 	}
 	let {
 		input,
+		displayPlatform,
 		bar,
 		sequence,
 		count,
@@ -240,14 +247,20 @@
 		<button
 			type="button"
 			class="action-menu-strip ui-button"
-			aria-label={`Action bar ${sequence} menu`}
-			title={`Action bar ${sequence} menu (focus: ${formatClientBindings(input.actionBars.focus[focusSlot])})`}
+			aria-label={`Action bar ${sequence} menu (focus: ${formatInputBindings(input.actionBars.focus[focusSlot], displayPlatform)})`}
+			title={`Action bar ${sequence} menu (focus: ${formatInputBindings(input.actionBars.focus[focusSlot], displayPlatform)})`}
 			bind:this={menuButton}
 			aria-haspopup="menu"
 			aria-expanded={menuOpen}
 			onclick={() => {
 				menuOpen = !menuOpen;
-			}}>{sequence}</button
+			}}
+			><span class="action-menu-hint"
+				>{compactInputHint(
+					input.actionBars.focus[focusSlot],
+					displayPlatform,
+				) ?? "—"}</span
+			></button
 		>
 		<div class="action-bar-scroll">
 			<div
@@ -264,7 +277,19 @@
 						style:grid-column={position.column + 1}
 					>
 						<ActionCell
-							bindingHint={formatClientBindings(input.actionBars.cells[slot])}
+							bindingHint={compactInputHint(
+								input.actionBars.cells[slot],
+								displayPlatform,
+							)}
+							bindingDescription={formatInputBindings(
+								input.actionBars.cells[slot],
+								displayPlatform,
+							)}
+							alternateModifier={modifierName(
+								input.actionBars.alternate,
+								displayPlatform,
+							)}
+							alternateAction={item?.alternateLabel ?? null}
 							bar={bar.id}
 							digit={String((slot + 1) % ACTION_SLOT_INDICES.length)}
 							{content}
@@ -371,6 +396,12 @@
 			padding: 0;
 			border-radius: 0;
 			font-weight: bold;
+		}
+		.action-menu-hint {
+			max-width: 100%;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 	}
 </style>

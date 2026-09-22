@@ -8,8 +8,9 @@ import {
 	type ClientKeyboardConfiguration,
 	type ClientShortcut,
 	type KeyBinding,
+	type InputKeyEvent,
 } from "../lib/input/input-contract";
-import { keyBindingsOverlap } from "../lib/input/input-context";
+import { keyBindingsOverlap, matchesKey } from "../lib/input/input-context";
 import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
 import { COMBAT_BREAKPOINTS } from "./client-combat-bar-state";
 
@@ -264,11 +265,37 @@ export const CLIENT_BINDING_ROWS = CLIENT_BINDING_GROUPS.flatMap(
 	(group) => group.rows,
 );
 
+/** Capture digit keys by position, keeping the top row and numpad distinct. */
+export function captureClientBinding(event: InputKeyEvent): KeyBinding {
+	const modifiers = {
+		shift: event.shiftKey,
+		ctrl: Boolean(event.ctrlKey),
+		alt: Boolean(event.altKey),
+		meta: Boolean(event.metaKey),
+	};
+	return event.code !== undefined && /^(?:Digit|Numpad)[0-9]$/.test(event.code)
+		? { code: event.code, ...modifiers }
+		: { key: event.key, ...modifiers };
+}
+
+/** A captured event proves mixed key/code overlap on this layout. */
+export function clientBindingsOverlap(
+	a: KeyBinding,
+	b: KeyBinding,
+	witness: InputKeyEvent | null,
+): boolean {
+	return (
+		keyBindingsOverlap(a, b) ||
+		(witness !== null && matchesKey(witness, [a]) && matchesKey(witness, [b]))
+	);
+}
+
 /** Detect conflicts only where two actions can claim the same actual keyboard event. */
 export function conflictingClientBindings(
 	settings: ClientKeyboardConfiguration,
 	row: ClientBindingRow,
 	candidate: KeyBinding,
+	witness: InputKeyEvent | null,
 ): readonly ClientBindingRow[] {
 	return CLIENT_BINDING_ROWS.filter(
 		(other) =>
@@ -276,7 +303,7 @@ export function conflictingClientBindings(
 			other.contexts.some((context) => row.contexts.includes(context)) &&
 			other
 				.read(settings)
-				.some((binding) => keyBindingsOverlap(candidate, binding)),
+				.some((binding) => clientBindingsOverlap(candidate, binding, witness)),
 	);
 }
 
@@ -286,6 +313,7 @@ export function replaceConflictingClientBindings(
 	row: ClientBindingRow,
 	bindings: readonly KeyBinding[],
 	conflicts: readonly ClientBindingRow[],
+	witness: InputKeyEvent | null,
 ): ClientKeyboardConfiguration {
 	let next = settings;
 	for (const other of conflicts) {
@@ -296,7 +324,7 @@ export function replaceConflictingClientBindings(
 				.filter(
 					(binding) =>
 						!bindings.some((candidate) =>
-							keyBindingsOverlap(candidate, binding),
+							clientBindingsOverlap(candidate, binding, witness),
 						),
 				),
 		);

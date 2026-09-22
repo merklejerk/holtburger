@@ -12,8 +12,14 @@
 		bar: number;
 		/** One of the visible digit addresses 1–9/0. */
 		digit: string;
-		/** Current user shortcut, separate from the stable cell address. */
-		bindingHint: string;
+		/** Compact first shortcut, separate from the stable cell address. */
+		bindingHint: string | null;
+		/** All configured keyboard alternatives in readable form. */
+		bindingDescription: string;
+		/** Configured modifier for alternate pointer or keyboard activation. */
+		alternateModifier: string;
+		/** Alternate action available for this item, independent of held modifiers. */
+		alternateAction: string | null;
 		/** Persistent reference, including temporarily unavailable items. */
 		content: ActionContent | null;
 		/** Current resolved name, or an unavailable identity label. */
@@ -41,6 +47,9 @@
 		bar,
 		digit,
 		bindingHint,
+		bindingDescription,
+		alternateModifier,
+		alternateAction,
 		content,
 		label,
 		display,
@@ -70,10 +79,14 @@
 		}),
 	);
 	const activeAlternate = $derived(available ? alternateLabel : null);
-	const statusLabel = $derived(
-		activeAlternate === null
-			? presentation.label
-			: `${presentation.label} (${activeAlternate})`,
+	const tooltip = $derived(
+		[
+			`${digit}: ${presentation.label}`,
+			`Key (focused bar): ${bindingDescription}`,
+			...(alternateAction === null
+				? []
+				: [`Alternate: ${alternateAction} (${alternateModifier}+click)`]),
+		].join("\n"),
 	);
 </script>
 
@@ -86,8 +99,8 @@
 	data-action-item={content?.item}
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}
-	aria-label={`${digit}: ${statusLabel} (key: ${bindingHint})`}
-	title={`${digit}: ${statusLabel} (key: ${bindingHint})`}
+	aria-label={tooltip}
+	title={tooltip}
 	aria-pressed={selected}
 	onclick={(event) => onactivate(clientInput.actionBarAlternate(event))}
 >
@@ -96,7 +109,7 @@
 			{display}
 			name={label}
 			{presentation}
-			tooltipLabel={statusLabel}
+			tooltipLabel={tooltip}
 		/>
 	{/if}
 	{#if activeAlternate !== null}<span
@@ -116,7 +129,9 @@
 				<path d={alternateArrowPath} />
 			</svg>
 		</span>{/if}
-	<span class="ui-shortcut-digit" aria-hidden="true">{digit}</span>
+	{#if bindingHint !== null}<span class="ui-shortcut-hint" aria-hidden="true"
+			>{bindingHint}</span
+		>{/if}
 </button>
 
 <style>

@@ -83,6 +83,17 @@ export async function probeSpellBar(
 			`(() => { const bar=document.querySelector('.spell-bar-scroll'); return {width:bar.clientWidth,scrollWidth:bar.scrollWidth,height:bar.clientHeight,scrollHeight:bar.scrollHeight}; })()`,
 		);
 	await settled();
+	assert.deepEqual(
+		await read(
+			`(() => ({ hint: document.querySelector('[data-spell-cell="0"] .ui-shortcut-hint')?.textContent, tooltip: document.querySelector('[data-spell-cell="0"]').title, tabHint: document.querySelector('.spell-tabs button').textContent, tab: document.querySelector('.spell-tabs button').title }))()`,
+		),
+		{
+			hint: "1",
+			tooltip: "1: Empty spell slot (key: 1)",
+			tabHint: "S1",
+			tab: "Spell tab 1 — Shift + 1",
+		},
+	);
 	const geometry = await fits();
 	assert.equal(
 		geometry.width,
@@ -242,7 +253,7 @@ export async function probeSpellBar(
 	assert.equal(await binding(1), 1, "Shape toggle preserves spell binding");
 	await key("@", "Digit2", 8);
 	// Tab clicks remain usable while editing; keyboard tab commands stay gated.
-	await click('[aria-label="Spell tab 2"]');
+	await click(".spell-tabs button:nth-child(2)");
 	assert.equal(
 		await read(
 			`document.querySelector('[data-spell-bar-surface]').dataset.spellBarShape`,
@@ -250,14 +261,14 @@ export async function probeSpellBar(
 		"double",
 	);
 	for (let tab = 0; tab < 10; tab++) {
-		await click(`[aria-label="Spell tab ${(tab + 1) % 10}"]`);
+		await click(`.spell-tabs button:nth-child(${tab + 1})`);
 		assert.equal(
 			await read(`${probe}.bindings().selected`),
 			tab,
 			"Layout handles leave every tab clickable",
 		);
 	}
-	await click('[aria-label="Spell tab 1"]');
+	await click(".spell-tabs button:nth-child(1)");
 	await click('[aria-label="Lock UI layout"]');
 	await read(`${probe}.mode('peace')`);
 	await read(`${probe}.mode('magic')`);

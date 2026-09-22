@@ -1,5 +1,15 @@
 <script lang="ts">
 	import { onDestroy, untrack } from "svelte";
+	import {
+		COMBAT_BREAKPOINT_INDICES,
+		COMBAT_HEIGHT_INDICES,
+		type ClientKeyboardConfiguration,
+	} from "../lib/input/input-contract";
+	import {
+		compactInputHint,
+		formatInputBindings,
+		type InputDisplayPlatform,
+	} from "../lib/input/input-presentation";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import type {
@@ -115,6 +125,9 @@
 	});
 
 	interface Props {
+		/** Accepted physical-combat shortcuts. */
+		readonly input: ClientKeyboardConfiguration["combatBar"];
+		readonly displayPlatform: InputDisplayPlatform;
 		readonly placement: ClientHudPlacement;
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
@@ -129,6 +142,8 @@
 	}
 
 	let {
+		input,
+		displayPlatform,
 		placement,
 		editable,
 		viewport,
@@ -392,30 +407,43 @@
 			style:gap={`${GAUGE_TUNING.heightRowGap}px`}
 			aria-label="Attack height"
 		>
-			{#each COMBAT_HEIGHTS as height, index}
+			{#each COMBAT_HEIGHT_INDICES as index}
+				{@const height = COMBAT_HEIGHTS[index]}
 				<button
 					type="button"
 					class="height {height}"
 					class:selected={profile.height === height}
-					data-shortcut={index + 1}
+					data-shortcut={compactInputHint(
+						input.heights[index],
+						displayPlatform,
+					) ?? ""}
 					disabled={!enabled}
-					aria-label={`${height[0].toUpperCase()}${height.slice(1)} attack (Shift+${index + 1})`}
+					aria-label={`${height[0].toUpperCase()}${height.slice(1)} attack (${formatInputBindings(input.heights[index], displayPlatform)})`}
+					title={`${height[0].toUpperCase()}${height.slice(1)} attack — ${formatInputBindings(input.heights[index], displayPlatform)}`}
 					aria-pressed={profile.height === height}
 					onclick={() => onProfileSelect({ ...profile, height })}
 				></button>
 			{/each}
 		</div>
 
-		{#each breakpointMarkers as marker, index}
+		{#each COMBAT_BREAKPOINT_INDICES as index}
+			{@const marker = breakpointMarkers[index]}
+			{@const percent = Math.round(COMBAT_BREAKPOINTS[index] * 100)}
+			{@const setting =
+				profile.kind === "melee" ? "Melee power" : "Missile accuracy"}
 			<span
 				class="breakpoint breakpoint-{index + 1}"
+				role="img"
+				aria-label={`${setting} ${percent}%. Key: ${formatInputBindings(input.breakpoints[index], displayPlatform)}`}
+				title={`${setting}: ${percent}%\nKey: ${formatInputBindings(input.breakpoints[index], displayPlatform)}`}
 				style:left={`${marker.left}px`}
 				style:top={`${marker.top}px`}
 				style:width={`${GAUGE_TUNING.breakpointLabelSize}px`}
 				style:height={`${GAUGE_TUNING.breakpointLabelSize}px`}
 				style:--breakpoint-outward-x={`${marker.outwardX}px`}
 				style:--breakpoint-outward-y={`${marker.outwardY}px`}
-				aria-hidden="true">{index + 1}</span
+				>{compactInputHint(input.breakpoints[index], displayPlatform) ??
+					""}</span
 			>
 		{/each}
 	</div>
@@ -448,6 +476,7 @@
 	}
 	.gauge {
 		position: absolute;
+		z-index: 2;
 		display: block;
 		overflow: visible;
 	}
@@ -539,7 +568,7 @@
 	}
 	.breakpoint {
 		position: absolute;
-		z-index: 3;
+		z-index: 1;
 		display: grid;
 		place-items: center;
 		font-size: 0.9rem;
@@ -555,6 +584,7 @@
 	.combat-bar:hover .breakpoint,
 	.combat-bar:focus-within .breakpoint {
 		opacity: 1;
+		pointer-events: auto;
 		transform: translate(
 				var(--breakpoint-outward-x),
 				var(--breakpoint-outward-y)

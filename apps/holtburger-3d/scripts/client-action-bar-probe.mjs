@@ -82,7 +82,7 @@ export async function probeActionBars(
 	};
 	const menu = async (sequence, operation) => {
 		await click(
-			await point(`button[aria-label="Action bar ${sequence} menu"]`),
+			await point(`button[aria-label^="Action bar ${sequence} menu"]`),
 		);
 		const position = await read(`(() => {
    const menu = document.querySelector('[role="menu"]:popover-open');
@@ -105,7 +105,7 @@ export async function probeActionBars(
    const strip = bar.querySelector('.action-menu-strip');
    return { gap: Number.parseFloat(getComputedStyle(bar).gap), strip: bounds(strip), grid: bounds(bar.querySelector('.action-grid')), label: strip.textContent.trim() };
   })()`);
-		assert.equal(geometry.label, "1");
+		assert.equal(geometry.label, "C1");
 		if (orientation === "horizontal") {
 			assert.equal(geometry.strip.right + geometry.gap, geometry.grid.left);
 			assert.equal(geometry.strip.top, geometry.grid.top);
@@ -159,7 +159,13 @@ export async function probeActionBars(
   const menu = document.querySelector('[role="menu"]:popover-open');
   return document.getElementById(menu.getAttribute('aria-activedescendant')).textContent;
  })()`);
-	const trigger = await point('button[aria-label="Action bar 1 menu"]');
+	const trigger = await point(".action-menu-strip");
+	assert.deepEqual(
+		await read(
+			`(() => { const menu = document.querySelector('.action-menu-strip'); return { hint: menu.textContent, title: menu.title }; })()`,
+		),
+		{ hint: "C1", title: "Action bar 1 menu (focus: Ctrl + 1)" },
+	);
 	await click(trigger);
 	assert.equal(await openMenu(), true);
 	assert.equal(await activeCommand(), "Clone");

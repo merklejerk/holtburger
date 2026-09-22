@@ -115,6 +115,14 @@ export async function probeCombatBar(
 		"none",
 	);
 	assert.equal(
+		await read("document.querySelector('.breakpoint-3').title"),
+		"Melee power: 50%\nKey: 3",
+	);
+	assert.equal(
+		await read("document.querySelector('.height.high').title"),
+		"High attack — Shift + 1",
+	);
+	assert.equal(
 		await read(
 			"getComputedStyle(document.querySelector('.combat-bar')).opacity",
 		),
@@ -177,9 +185,9 @@ export async function probeCombatBar(
 			"[...document.querySelectorAll('.height')].map(button => ({ shortcut: button.dataset.shortcut, opacity: getComputedStyle(button, '::after').opacity }))",
 		),
 		[
-			{ shortcut: "1", opacity: "1" },
-			{ shortcut: "2", opacity: "1" },
-			{ shortcut: "3", opacity: "1" },
+			{ shortcut: "S1", opacity: "1" },
+			{ shortcut: "S2", opacity: "1" },
+			{ shortcut: "S3", opacity: "1" },
 		],
 	);
 	assert.equal(
@@ -188,10 +196,10 @@ export async function probeCombatBar(
 			return Boolean(
 				document
 					.elementFromPoint(hint.left + hint.width / 2, hint.top + hint.height / 2)
-					?.closest('.combat-bar'),
+					?.closest('.breakpoint-1'),
 			);
 		})()`),
-		false,
+		true,
 	);
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mouseMoved",
@@ -251,6 +259,10 @@ export async function probeCombatBar(
 	assert.equal(
 		await read("document.querySelector('.combat-bar').dataset.combatMode"),
 		"missile",
+	);
+	assert.equal(
+		await read("document.querySelector('.breakpoint-5').title"),
+		"Missile accuracy: 100%\nKey: 5",
 	);
 	const chargeLength = await read(
 		"parseFloat(document.querySelector('.gauge-fill').style.strokeDasharray)",

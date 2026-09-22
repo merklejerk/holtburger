@@ -35,9 +35,11 @@
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
 	interface Props {
 		/** Accepted user keyboard map for accurate shortcut hints. */
 		readonly input: ClientKeyboardConfiguration;
+		readonly displayPlatform: InputDisplayPlatform;
 		/** Character-owned complete action-bar configuration. */
 		readonly bars: readonly ClientActionBar[];
 		readonly onBarsChange: (bars: readonly ClientActionBar[]) => void;
@@ -66,6 +68,7 @@
 	}
 	let {
 		input,
+		displayPlatform,
 		bars,
 		onBarsChange,
 		onResetOwner,
@@ -310,6 +313,7 @@
 {#each bars as bar, index (bar.id)}
 	<ClientActionBarView
 		{input}
+		{displayPlatform}
 		{bar}
 		sequence={index + 1}
 		count={bars.length}

@@ -96,6 +96,9 @@ export const INPUT_DEFAULTS = {
 	},
 	/** Exact modifier chords for gameplay spell tabs and casting. */
 	spellBar: {
+		caster: [
+			{ code: "Digit1", ctrl: true, shift: true, alt: false, meta: false },
+		],
 		tabs: {
 			0: [
 				{ code: "Digit1", shift: true, ctrl: false, alt: false, meta: false },

@@ -3,9 +3,12 @@
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { SpellCellAddress } from "./client-spell-bar-state";
 	interface Props {
-		/** Address and shortcut belong together; null for the unnumbered caster cell. */
+		/** Optional grid placement; the bar owns its two-row slot ordering. */
+		gridPosition?: { readonly column: number; readonly row: number };
+		/** Persistent address for spell bar cells; null for the equipped-caster cell. */
+		address: SpellCellAddress | null;
+		/** Numbered shortcuts cover the first ten bar cells; the caster has its own. */
 		shortcut: {
-			readonly address: SpellCellAddress;
 			readonly hint: string | null;
 			readonly description: string;
 		} | null;
@@ -20,23 +23,35 @@
 		/** App-owned activation shared with keyboard input. */
 		onactivate: () => void;
 	}
-	let { shortcut, spell, label, display, available, onactivate }: Props =
-		$props();
+	let {
+		gridPosition,
+		address,
+		shortcut,
+		spell,
+		label,
+		display,
+		available,
+		onactivate,
+	}: Props = $props();
 	const digit = $derived(
-		shortcut === null ? null : String((shortcut.address.slot + 1) % 10),
+		shortcut === null || address === null
+			? null
+			: String((address.slot + 1) % 10),
 	);
 	const accessibleLabel = $derived(
 		shortcut === null
 			? label
-			: `${digit}: ${label} (key: ${shortcut.description})`,
+			: `${digit === null ? "" : `${digit}: `}${label} (key: ${shortcut.description})`,
 	);
 </script>
 
 <button
 	type="button"
 	class="spell-cell ui-shortcut-cell ui-item-cell ui-item-selection ui-hud-button"
-	data-spell-tab={shortcut?.address.tab}
-	data-spell-cell={shortcut?.address.slot}
+	style:grid-column={gridPosition?.column}
+	style:grid-row={gridPosition?.row}
+	data-spell-tab={address?.tab}
+	data-spell-cell={address?.slot}
 	data-bound-spell={spell}
 	data-empty={spell === null}
 	data-dimmed={spell !== null && !available}

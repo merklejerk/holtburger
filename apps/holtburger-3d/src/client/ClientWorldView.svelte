@@ -128,7 +128,8 @@
 		/** App-owned casting availability, independent of membership. */
 		readonly spellBarEnabled: boolean;
 		readonly onSelectSpellTab: (tab: InputDigitIndex) => void;
-		readonly onActivateSpellCell: (slot: InputDigitIndex) => void;
+		readonly onActivateSpellCell: (slot: number) => void;
+		readonly onActivateCasterSpell: () => void;
 		/** Null while no authoritative character profile is ready. */
 		readonly actionBars: readonly ClientActionBar[] | null;
 		readonly onActionBarsChange: (bars: readonly ClientActionBar[]) => void;
@@ -245,6 +246,7 @@
 		spellBarEnabled,
 		onSelectSpellTab,
 		onActivateSpellCell,
+		onActivateCasterSpell,
 		actionBars,
 		onActionBarsChange,
 		combatMode,
@@ -745,6 +747,7 @@
 			onShapeChange={onSpellBarShapeChange}
 			onSelectTab={onSelectSpellTab}
 			onActivateCell={onActivateSpellCell}
+			onActivateCaster={onActivateCasterSpell}
 		/>
 	{/if}
 	{#if combatMode === "melee" || combatMode === "missile"}

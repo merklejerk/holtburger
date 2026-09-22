@@ -15,6 +15,7 @@
 		bindSpellCell,
 		initialSpellBar,
 	} from "../../client/client-spell-bar-state";
+	import { findWieldedCasterSpell } from "../../client/client-inventory-equipment";
 
 	import { z } from "zod";
 	import { spellInspectionQuerySchema } from "../../client/client-spell-inspection-contract";
@@ -141,7 +142,7 @@
 	function selectSpellTab(selected: InputDigitIndex): void {
 		spellBar = { ...spellBar, selected };
 	}
-	function activateSpellCell(slot: InputDigitIndex): void {
+	function activateSpellCell(slot: number): void {
 		const id = spellBar.tabs[spellBar.selected][slot];
 		if (
 			spellBarEnabled &&
@@ -149,6 +150,11 @@
 			interactionLifecycle.state().knownSpells?.includes(id)
 		)
 			void castSpell(id);
+	}
+	function activateCasterSpell(): void {
+		if (!spellBarEnabled || inventory === null) return;
+		const caster = findWieldedCasterSpell(inventory.readItems().items.values());
+		if (caster !== null) itemInteractions.castWieldedSpell(caster.item);
 	}
 	async function castSpell(id: number): Promise<void> {
 		const spellState = spells;
@@ -244,6 +250,7 @@
 						spellBarEnabled,
 						selectSpellTab,
 						activateSpellCell,
+						activateCasterSpell,
 					);
 				},
 				keyup: () => {},
@@ -257,7 +264,7 @@
 		},
 		knowledge: (spellIds: readonly number[]) =>
 			emitInteractionEvent("client-player-spells-updated", { spellIds }),
-		bind: (slot: InputDigitIndex, spell: number | null) => {
+		bind: (slot: number, spell: number | null) => {
 			spellBar = bindSpellCell(
 				spellBar,
 				{ tab: spellBar.selected, slot },
@@ -3083,6 +3090,7 @@
 		{spellBarEnabled}
 		onSelectSpellTab={selectSpellTab}
 		onActivateSpellCell={activateSpellCell}
+		onActivateCasterSpell={activateCasterSpell}
 		combatMode={spellCombatMode}
 		{combatStatus}
 		{combatProfileSelectionRevision}

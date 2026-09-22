@@ -20,6 +20,7 @@
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientItemInteractions } from "./client-item-interactions";
 	import { ClientInventoryState } from "./client-inventory-state";
+	import { findWieldedCasterSpell } from "./client-inventory-equipment";
 	import { browserUiIconRepository } from "../app/ui-icon-repository";
 	import { prepareUiIcons } from "../app/ui-icon-source";
 	import {
@@ -211,11 +212,17 @@
 				spellBarBindings: { tabs: value.tabs },
 			});
 	}
-	function activateSpellCell(slot: InputDigitIndex): void {
+	function activateSpellCell(slot: number): void {
 		if (!spellBarEnabled) return;
 		const id = spellBar.tabs[spellBar.selected][slot];
 		if (id !== null && session?.state().knownSpells?.includes(id))
 			void castSpell(id);
+	}
+	function activateCasterSpell(): void {
+		if (!spellBarEnabled || inventory === null || itemInteractions === null)
+			return;
+		const caster = findWieldedCasterSpell(inventory.readItems().items.values());
+		if (caster !== null) itemInteractions.castWieldedSpell(caster.item);
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	/** Event-driven stance consumed by combat controls and spell shortcuts. */
@@ -903,6 +910,7 @@
 				spellBarEnabled,
 				selectSpellTab,
 				activateSpellCell,
+				activateCasterSpell,
 			)
 		)
 			return;
@@ -1532,6 +1540,7 @@
 			{spellBarEnabled}
 			onSelectSpellTab={selectSpellTab}
 			onActivateSpellCell={activateSpellCell}
+			onActivateCasterSpell={activateCasterSpell}
 			{combatMode}
 			{combatStatus}
 			{combatControls}

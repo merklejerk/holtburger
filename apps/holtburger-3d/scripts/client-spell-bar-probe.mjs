@@ -469,6 +469,145 @@ export async function probeSpellBar(
 			Buffer.from(shot.data, "base64"),
 		);
 	}
+	// The eleventh cell appears only when the tenth is full, and is a real drag target.
+	for (let slot = 0; slot < 10; slot++) await read(`${probe}.bind(${slot},1)`);
+	await settled();
+	assert.equal(
+		await read(`document.querySelectorAll('[data-spell-cell]').length`),
+		11,
+	);
+	assert.equal(
+		await read(`document.querySelectorAll('.spell-scroll-handle').length`),
+		1,
+	);
+	assert.equal(
+		await read(`document.querySelector('${cell(10)} .ui-shortcut-hint')`),
+		null,
+	);
+	const overflowGeometry = await read(`(() => {
+		const viewport=document.querySelector('.spell-cells-viewport');
+		const cell=document.querySelector('[data-spell-cell="0"]');
+		return {visible:viewport.clientWidth/cell.clientWidth, total:viewport.scrollWidth/cell.clientWidth};
+	})()`);
+	assert.deepEqual(overflowGeometry, { visible: 10, total: 11 });
+	if (screenshotPath) {
+		const shot = await client.send("Page.captureScreenshot", {
+			format: "png",
+			captureBeyondViewport: false,
+		});
+		await writeFile(
+			`${screenshotPath}.spell-bar-overflow.png`,
+			Buffer.from(shot.data, "base64"),
+		);
+	}
+	await mouse("mouseMoved", { x: 30, y: 180 }, 0);
+	const handleOpacity = () =>
+		read(
+			`getComputedStyle(document.querySelector('.spell-scroll-handle')).getPropertyValue('--spell-scrollbar-thumb-opacity').trim()`,
+		);
+	const idleOpacity = await handleOpacity();
+	await mouse("mouseMoved", await point(".spell-scroll-handle"), 0);
+	const hoverOpacity = await handleOpacity();
+	assert.ok(parseFloat(hoverOpacity) > parseFloat(idleOpacity));
+	if (screenshotPath) {
+		const shot = await client.send("Page.captureScreenshot", {
+			format: "png",
+			captureBeyondViewport: false,
+		});
+		await writeFile(
+			`${screenshotPath}.spell-bar-overflow-hover.png`,
+			Buffer.from(shot.data, "base64"),
+		);
+	}
+	await mouse("mouseMoved", { x: 30, y: 180 }, 0);
+	assert.equal(await handleOpacity(), idleOpacity);
+	const beforeTheme = await read(`(() => ({
+		handle:document.querySelector('.spell-scroll-handle').getBoundingClientRect().height,
+		bar:document.querySelector('[data-spell-bar-surface]').getBoundingClientRect().height
+	}))()`);
+	await read(`(() => {
+		document.documentElement.style.setProperty('--ui-spell-scrollbar-height','18px');
+		document.documentElement.style.setProperty('--ui-spell-scrollbar-color','#ff0000');
+		document.documentElement.style.setProperty('--ui-spell-scrollbar-thumb-opacity','40%');
+	})()`);
+	await settled();
+	const themedScrollbar = await read(`(() => {
+		const handle=document.querySelector('.spell-scroll-handle');
+		return {
+			height:handle.getBoundingClientRect().height,
+			bar:document.querySelector('[data-spell-bar-surface]').getBoundingClientRect().height,
+			color:getComputedStyle(handle).getPropertyValue('--ui-spell-scrollbar-color').trim(),
+			opacity:getComputedStyle(handle).getPropertyValue('--ui-spell-scrollbar-thumb-opacity').trim()
+		};
+	})()`);
+	assert.equal(themedScrollbar.height, 18);
+	assert.equal(themedScrollbar.bar, beforeTheme.bar + 18 - beforeTheme.handle);
+	assert.equal(themedScrollbar.color, "#ff0000");
+	assert.equal(themedScrollbar.opacity, "40%");
+	await read(`(() => {
+		document.documentElement.style.removeProperty('--ui-spell-scrollbar-height');
+		document.documentElement.style.removeProperty('--ui-spell-scrollbar-color');
+		document.documentElement.style.removeProperty('--ui-spell-scrollbar-thumb-opacity');
+	})()`);
+	await settled();
+	await click('[aria-label="Spells"]');
+	await drag('[data-spell-drag-source="1"]', cell(10));
+	assert.equal(await binding(10), 1);
+	assert.equal(
+		await read(`document.querySelectorAll('[data-spell-cell]').length`),
+		12,
+	);
+	await read(`document.querySelector('.spell-cells-viewport').scrollLeft=0`);
+	await settled();
+	const scrollHandle = await point(".spell-scroll-handle");
+	await mouse("mousePressed", scrollHandle, 1);
+	await mouse("mouseMoved", { x: scrollHandle.x + 40, y: scrollHandle.y }, 1);
+	await mouse(
+		"mouseReleased",
+		{ x: scrollHandle.x + 40, y: scrollHandle.y },
+		0,
+	);
+	await settled();
+	assert.ok(
+		await read(
+			`document.querySelector('.spell-cells-viewport').scrollLeft > 0`,
+		),
+	);
+	await read(
+		`(() => { const handle=document.querySelector('.spell-scroll-handle'); handle.value=handle.max; handle.dispatchEvent(new Event('input',{bubbles:true})); })()`,
+	);
+	await settled();
+	assert.ok(
+		await read(
+			`document.querySelector('.spell-cells-viewport').scrollLeft > 0`,
+		),
+	);
+	await click('[aria-label="Close Spells"]');
+	await click('[aria-label="Unlock UI layout"]');
+	await toggleShape();
+	const overflowFolded = await read(`(() => {
+		const first=document.querySelector('[data-spell-cell="0"]').getBoundingClientRect();
+		const fifth=document.querySelector('[data-spell-cell="4"]').getBoundingClientRect();
+		const sixth=document.querySelector('[data-spell-cell="5"]').getBoundingClientRect();
+		const extra=document.querySelector('[data-spell-cell="10"]').getBoundingClientRect();
+		return {firstY:first.y,fifthY:fifth.y,sixthY:sixth.y,extraX:extra.x,fifthX:fifth.x};
+	})()`);
+	assert.equal(overflowFolded.firstY, overflowFolded.fifthY);
+	assert.ok(overflowFolded.sixthY > overflowFolded.firstY);
+	assert.ok(overflowFolded.extraX > overflowFolded.fifthX);
+	await toggleShape();
+	await click('[aria-label="Lock UI layout"]');
+	await read(`${probe}.bind(10,null)`);
+	await read(`${probe}.bind(9,null)`);
+	await settled();
+	assert.equal(
+		await read(`document.querySelectorAll('[data-spell-cell]').length`),
+		10,
+	);
+	assert.equal(
+		await read(`document.querySelectorAll('.spell-scroll-handle').length`),
+		0,
+	);
 	// Built-in spells remain usable without learned-spell membership and follow equipment updates.
 	await read(`${probe}.knowledge([])`);
 	const casterGuid = await read(`${probe}.caster(1, true)`);
@@ -494,6 +633,10 @@ export async function probeSpellBar(
 		return {left:caster.right <= first.left, square:Math.abs(caster.width-caster.height)<1};
 	})()`);
 	assert.deepEqual(casterGeometry, { left: true, square: true });
+	assert.match(
+		await read(`document.querySelector('[data-caster-spell] button').title`),
+		/Ctrl \+ Shift \+ 1/,
+	);
 	await click("[data-caster-spell] button");
 	await read(`${probe}.resolveCaster()`);
 	const itemCast = await read(
@@ -504,6 +647,24 @@ export async function probeSpellBar(
 		source: casterGuid,
 		target: 7,
 	});
+	const itemCastCount = await read(
+		`${api}.inventoryDragCommands().filter(c=>c.command==='submit_client_item_use').length`,
+	);
+	await key("!", "Digit1", 10);
+	await read(`${probe}.resolveCaster()`);
+	assert.equal(
+		await read(
+			`${api}.inventoryDragCommands().filter(c=>c.command==='submit_client_item_use').length`,
+		),
+		itemCastCount + 1,
+		"Caster shortcut should submit one cast",
+	);
+	assert.deepEqual(
+		await read(
+			`${api}.inventoryDragCommands().filter(c=>c.command==='submit_client_item_use').at(-1).args.request.intent`,
+		),
+		itemCast.args.request.intent,
+	);
 	if (screenshotPath) {
 		const shot = await client.send("Page.captureScreenshot", {
 			format: "png",
@@ -520,6 +681,14 @@ export async function probeSpellBar(
 	);
 	await read(`${probe}.caster(2, false)`);
 	await waitCaster(`document.querySelector('[data-caster-spell]') === null`);
+	await key("!", "Digit1", 10);
+	assert.equal(
+		await read(
+			`${api}.inventoryDragCommands().filter(c=>c.command==='submit_client_item_use').length`,
+		),
+		itemCastCount + 1,
+		"Caster shortcut should not cast after the weapon is unwielded",
+	);
 	await read(`${probe}.caster(null, true)`);
 	await settled();
 	assert.equal(

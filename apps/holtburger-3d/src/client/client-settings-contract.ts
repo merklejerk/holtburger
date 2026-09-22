@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+	normalizeSpellTab,
+	SPELL_BAR_INDICES,
+} from "./client-spell-bar-state.js";
 import { MAX_ACTION_BARS } from "./client-action-bar-contract.js";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
 import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state.js";
@@ -13,6 +17,7 @@ import {
 	clientKeyboardSettingsSchema,
 	clientKeyboardSettingsV6Schema,
 	clientKeyboardSettingsV7Schema,
+	clientKeyboardSettingsV8Schema,
 } from "./client-input-settings.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
@@ -197,6 +202,12 @@ const clientUserSettingsV7Schema = clientUserSettingsV5Schema
 	.strict()
 	.readonly();
 
+const clientUserSettingsV8Schema = clientUserSettingsV5Schema
+	.unwrap()
+	.extend({ input: clientKeyboardSettingsV8Schema })
+	.strict()
+	.readonly();
+
 export const clientUserSettingsSchema = clientUserSettingsV5Schema
 	.unwrap()
 	.extend({ input: clientKeyboardSettingsSchema })
@@ -255,19 +266,9 @@ const actionBarSchema = z
 
 const spellIdSchema = unsigned.positive().nullable();
 const spellTabSchema = z
-	.tuple([
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-		spellIdSchema,
-	])
-	.readonly();
+	.array(spellIdSchema)
+	.min(SPELL_BAR_INDICES.length)
+	.transform(normalizeSpellTab);
 const spellTabsSchema = z
 	.tuple([
 		spellTabSchema,
@@ -502,6 +503,25 @@ export const clientLocalSettingsDocumentV8Schema = z
 		user: z
 			.object({
 				window: clientWindowSettingsSchema,
+				client: clientUserSettingsV8Schema,
+			})
+			.strict()
+			.readonly(),
+		characters: z.record(z.string().min(1), characterProfileSchema).readonly(),
+	})
+	.strict()
+	.readonly();
+type ClientLocalSettingsDocumentV8 = z.infer<
+	typeof clientLocalSettingsDocumentV8Schema
+>;
+
+/** Current durable document with a configurable wielded-caster shortcut. */
+export const clientLocalSettingsDocumentV9Schema = z
+	.object({
+		schemaVersion: z.literal(9),
+		user: z
+			.object({
+				window: clientWindowSettingsSchema,
 				client: clientUserSettingsSchema,
 			})
 			.strict()
@@ -511,7 +531,7 @@ export const clientLocalSettingsDocumentV8Schema = z
 	.strict()
 	.readonly();
 export type ClientLocalSettingsDocument = z.infer<
-	typeof clientLocalSettingsDocumentV8Schema
+	typeof clientLocalSettingsDocumentV9Schema
 >;
 
 /**
@@ -685,7 +705,7 @@ function migrateClientLocalSettingsDocumentV6(
 /** Character selection now uses native form controls, so its old shortcut is discarded. */
 function migrateClientLocalSettingsDocumentV7(
 	document: ClientLocalSettingsDocumentV7,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV8 {
 	const { enterWorld, ...client } = document.user.client.input.client;
 	void enterWorld;
 	return clientLocalSettingsDocumentV8Schema.parse({
@@ -696,6 +716,37 @@ function migrateClientLocalSettingsDocumentV7(
 			client: {
 				...document.user.client,
 				input: { ...document.user.client.input, client },
+			},
+		},
+	});
+}
+
+/** Add the original caster chord without changing historical migration defaults. */
+function migrateClientLocalSettingsDocumentV8(
+	document: ClientLocalSettingsDocumentV8,
+): ClientLocalSettingsDocument {
+	return clientLocalSettingsDocumentV9Schema.parse({
+		...document,
+		schemaVersion: 9,
+		user: {
+			...document.user,
+			client: {
+				...document.user.client,
+				input: {
+					...document.user.client.input,
+					spellBar: {
+						...document.user.client.input.spellBar,
+						caster: [
+							{
+								code: "Digit1",
+								ctrl: true,
+								shift: true,
+								alt: false,
+								meta: false,
+							},
+						],
+					},
+				},
 			},
 		},
 	});
@@ -795,10 +846,21 @@ export function parseClientLocalSettingsDocument(
 		typeof value === "object" &&
 		value !== null &&
 		"schemaVersion" in value &&
+		value.schemaVersion === 9
+	)
+		return clientLocalSettingsDocumentV9Schema.parse(value);
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"schemaVersion" in value &&
 		value.schemaVersion === 8
 	)
-		return clientLocalSettingsDocumentV8Schema.parse(value);
-	return migrateClientLocalSettingsDocumentV7(
-		parseClientLocalSettingsDocumentV7(value),
+		return migrateClientLocalSettingsDocumentV8(
+			clientLocalSettingsDocumentV8Schema.parse(value),
+		);
+	return migrateClientLocalSettingsDocumentV8(
+		migrateClientLocalSettingsDocumentV7(
+			parseClientLocalSettingsDocumentV7(value),
+		),
 	);
 }

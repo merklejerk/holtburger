@@ -32,7 +32,7 @@
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import type { ClientItemInteractions } from "./client-item-interactions";
 	import {
-		wieldedCasterSpell,
+		findWieldedCasterSpell,
 		type WieldedCasterSpell,
 	} from "./client-inventory-equipment";
 	interface Props {
@@ -63,7 +63,9 @@
 		enabled: boolean;
 		/** Tab selection and casting share the keyboard entry points. */
 		onSelectTab: (tab: InputDigitIndex) => void;
-		onActivateCell: (slot: InputDigitIndex) => void;
+		onActivateCell: (slot: number) => void;
+		/** The caster cell and its shortcut use the same app-owned activation. */
+		onActivateCaster: () => void;
 	}
 	let {
 		input,
@@ -81,6 +83,7 @@
 		enabled,
 		onSelectTab,
 		onActivateCell,
+		onActivateCaster,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	/** Bounded inventory-cadence display snapshot; never subscribes to raw world publications. */
@@ -88,13 +91,10 @@
 	$effect(() => {
 		const owner = inventory;
 		const sample = () => {
-			let next: WieldedCasterSpell | null = null;
-			if (owner !== null) {
-				for (const item of owner.readItems().items.values()) {
-					next = wieldedCasterSpell(item);
-					if (next !== null) break;
-				}
-			}
+			const next =
+				owner === null
+					? null
+					: findWieldedCasterSpell(owner.readItems().items.values());
 			if (
 				next?.item !== caster?.item ||
 				next?.spell !== caster?.spell ||
@@ -111,18 +111,57 @@
 		return () => clearInterval(timer);
 	});
 	/** Cold measured CSS geometry also drives HUD placement and strip geometry. */
-	let metrics = $state<{ cell: number; tabs: number }>({
+	let metrics = $state<{ cell: number; tabs: number; scrollbar: number }>({
 		cell: CLIENT_ACTION_BAR_TUNING.initialCellSize,
 		tabs: 0,
+		scrollbar: 0,
 	});
 	const grid = $derived.by(() => {
 		const rows = shape === "single" ? 1 : 2;
 		return { rows, columns: SPELL_BAR_INDICES.length / rows };
 	});
+	const cells = $derived(configuration.tabs[configuration.selected]);
+	// Each group of ten keeps slots 1–5 above 6–10 in two-row mode.
+	const totalColumns = $derived(
+		Math.floor((cells.length - 1) / SPELL_BAR_INDICES.length) * grid.columns +
+			Math.min(
+				grid.columns,
+				((cells.length - 1) % SPELL_BAR_INDICES.length) + 1,
+			),
+	);
+	const overflowColumns = $derived(totalColumns - grid.columns);
+	function shortcut(
+		slot: number,
+	): { hint: string | null; description: string } | null {
+		const index = SPELL_BAR_INDICES.find((numbered) => numbered === slot);
+		if (index === undefined) return null;
+		return {
+			hint: compactInputHint(input.cells[index], displayPlatform),
+			description: formatInputBindings(input.cells[index], displayPlatform),
+		};
+	}
+	let cellsViewport: HTMLDivElement;
+	let scrollHandle = $state<HTMLInputElement>();
+	let previousView: {
+		tab: InputDigitIndex;
+		shape: "single" | "double";
+	} | null = null;
+	$effect(() => {
+		const tab = configuration.selected;
+		if (previousView?.tab === tab && previousView.shape === shape) return;
+		previousView = { tab, shape };
+		void tick().then(() => {
+			if (cellsViewport) cellsViewport.scrollLeft = 0;
+			if (scrollHandle) scrollHandle.value = "0";
+		});
+	});
 	const naturalPlacement = $derived({
 		...placement,
 		preferredWidth: (grid.columns + (caster === null ? 0 : 1)) * metrics.cell,
-		preferredHeight: grid.rows * metrics.cell + metrics.tabs,
+		preferredHeight:
+			grid.rows * metrics.cell +
+			metrics.tabs +
+			(overflowColumns > 0 ? metrics.scrollbar : 0),
 	});
 	const minimum = $derived({
 		width: metrics.cell,
@@ -132,20 +171,29 @@
 		resolveClientHudPlacement(naturalPlacement, viewport, minimum),
 	);
 	function measureMetrics(node: HTMLElement) {
+		const scrollbarMetric = node.querySelector<HTMLElement>(
+			".spell-scrollbar-metrics",
+		);
+		if (scrollbarMetric === null)
+			throw new Error("Missing spell scrollbar metric");
 		const update = () => {
 			const { width, height } = node.getBoundingClientRect();
+			const scrollbar = scrollbarMetric.getBoundingClientRect().height;
 			if (
 				!Number.isFinite(width) ||
 				width <= 0 ||
 				!Number.isFinite(height) ||
-				height <= 0
+				height <= 0 ||
+				!Number.isFinite(scrollbar) ||
+				scrollbar <= 0
 			)
 				throw new Error("Invalid spell bar theme dimensions");
-			metrics = { cell: width, tabs: height };
+			metrics = { cell: width, tabs: height, scrollbar };
 		};
 		update();
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
+		observer.observe(scrollbarMetric);
 		return { destroy: () => observer.disconnect() };
 	}
 
@@ -255,14 +303,19 @@
 		style:--spell-cell-size={`${metrics.cell}px`}
 		data-spell-bar-shape={shape}
 	>
-		<span class="spell-bar-metrics" aria-hidden="true" use:measureMetrics
-		></span>
+		<span class="spell-bar-metrics" aria-hidden="true" use:measureMetrics>
+			<span class="spell-scrollbar-metrics"></span>
+		</span>
 		<div class="spell-bar-scroll">
 			{#if caster !== null}
 				{@const row = rows.get(caster.spell)}
 				<div class="caster-spell" data-caster-spell={caster.spell}>
 					<SpellCell
-						shortcut={null}
+						address={null}
+						shortcut={{
+							hint: compactInputHint(input.caster, displayPlatform),
+							description: formatInputBindings(input.caster, displayPlatform),
+						}}
 						spell={caster.spell}
 						label={`${row?.name ?? `Spell ${caster.spell}`} (${caster.name})${row?.artwork.kind === "failed" ? `: ${row.artwork.detail}` : ""}`}
 						display={row?.artwork.kind === "icon"
@@ -271,8 +324,7 @@
 						available={enabled && itemInteractions !== null}
 						onactivate={() => {
 							keyboard.returnToGame();
-							if (caster !== null)
-								itemInteractions?.castWieldedSpell(caster.item);
+							onActivateCaster();
 						}}
 					/>
 				</div>
@@ -298,40 +350,71 @@
 					{/each}
 				</div>
 				<div
-					class="spell-cells"
-					style:grid-template-columns={`repeat(${grid.columns}, ${metrics.cell}px)`}
-					role="group"
-					aria-label={`Spell bar ${(configuration.selected + 1) % 10}`}
+					class="spell-cells-viewport"
+					bind:this={cellsViewport}
+					style:width={`${grid.columns * metrics.cell}px`}
+					onscroll={() => {
+						if (scrollHandle)
+							scrollHandle.value = String(
+								cellsViewport.scrollLeft / metrics.cell,
+							);
+					}}
 				>
-					{#each SPELL_BAR_INDICES as slot}
-						{@const spell = configuration.tabs[configuration.selected][slot]}
-						{@const row = spell === null ? undefined : rows.get(spell)}
-						{@const available =
-							enabled && spell !== null && known?.includes(spell) === true}
-						<SpellCell
-							shortcut={{
-								address: { tab: configuration.selected, slot },
-								hint: compactInputHint(input.cells[slot], displayPlatform),
-								description: formatInputBindings(
-									input.cells[slot],
-									displayPlatform,
-								),
-							}}
-							{spell}
-							label={spell === null
-								? "Empty spell slot"
-								: `${row === undefined ? `Spell ${spell}` : row.artwork.kind === "failed" ? `${row.name}: ${row.artwork.detail}` : row.name}${known?.includes(spell) === true ? "" : " (unavailable)"}`}
-							display={row?.artwork.kind === "icon"
-								? displays.get(row.artwork.key)
-								: undefined}
-							{available}
-							onactivate={() => {
-								keyboard.returnToGame();
-								onActivateCell(slot);
-							}}
-						/>
-					{/each}
+					<div
+						class="spell-cells"
+						style:grid-template-rows={`repeat(${grid.rows}, ${metrics.cell}px)`}
+						role="group"
+						aria-label={`Spell bar ${(configuration.selected + 1) % 10}`}
+					>
+						{#each cells as spell, slot}
+							{@const row = spell === null ? undefined : rows.get(spell)}
+							{@const available =
+								enabled && spell !== null && known?.includes(spell) === true}
+							<SpellCell
+								gridPosition={{
+									column:
+										Math.floor(slot / SPELL_BAR_INDICES.length) * grid.columns +
+										(slot % grid.columns) +
+										1,
+									row:
+										Math.floor(
+											(slot % SPELL_BAR_INDICES.length) / grid.columns,
+										) + 1,
+								}}
+								address={{ tab: configuration.selected, slot }}
+								shortcut={shortcut(slot)}
+								{spell}
+								label={spell === null
+									? "Empty spell slot"
+									: `${row === undefined ? `Spell ${spell}` : row.artwork.kind === "failed" ? `${row.name}: ${row.artwork.detail}` : row.name}${known?.includes(spell) === true ? "" : " (unavailable)"}`}
+								display={row?.artwork.kind === "icon"
+									? displays.get(row.artwork.key)
+									: undefined}
+								{available}
+								onactivate={() => {
+									keyboard.returnToGame();
+									onActivateCell(slot);
+								}}
+							/>
+						{/each}
+					</div>
 				</div>
+				{#if overflowColumns > 0}
+					<input
+						class="spell-scroll-handle"
+						bind:this={scrollHandle}
+						type="range"
+						aria-label="Scroll spell bar cells"
+						min="0"
+						max={overflowColumns}
+						step="any"
+						value="0"
+						style:--scroll-thumb-width={`${(grid.columns / totalColumns) * 100}%`}
+						oninput={(event) =>
+							(cellsViewport.scrollLeft =
+								Number(event.currentTarget.value) * metrics.cell)}
+					/>
+				{/if}
 			</div>
 		</div>
 		{#if editable}<ShortcutBarShapeToggle
@@ -359,6 +442,11 @@
 			pointer-events: none;
 			width: var(--ui-item-cell-min-size);
 			height: var(--ui-spell-tab-height);
+		}
+		.spell-scrollbar-metrics {
+			display: block;
+			width: 0;
+			height: var(--ui-spell-scrollbar-height);
 		}
 		.spell-bar-scroll {
 			display: flex;
@@ -426,7 +514,74 @@
 			color: var(--ui-spell-tab-hover-color, var(--ui-color-highlight));
 		}
 		.spell-cells {
-			grid-auto-rows: var(--spell-cell-size);
+			grid-auto-flow: column;
+			grid-auto-columns: var(--spell-cell-size);
+		}
+		.spell-cells-viewport {
+			overflow-x: auto;
+			scrollbar-width: none;
+		}
+		.spell-cells-viewport::-webkit-scrollbar {
+			display: none;
+		}
+		.spell-scroll-handle {
+			--spell-scrollbar-track-opacity: var(--ui-spell-scrollbar-track-opacity);
+			--spell-scrollbar-thumb-opacity: var(--ui-spell-scrollbar-thumb-opacity);
+			display: block;
+			width: calc(100% - 4px);
+			height: var(--ui-spell-scrollbar-height);
+			margin: 0 2px;
+			padding: 0;
+			appearance: none;
+			background: transparent;
+			cursor: pointer;
+		}
+		.spell-scroll-handle:is(:hover, :focus-visible, :active) {
+			--spell-scrollbar-track-opacity: var(
+				--ui-spell-scrollbar-hover-track-opacity
+			);
+			--spell-scrollbar-thumb-opacity: var(
+				--ui-spell-scrollbar-hover-thumb-opacity
+			);
+		}
+		.spell-scroll-handle::-webkit-slider-runnable-track {
+			height: 3px;
+			background: color-mix(
+				in srgb,
+				var(--ui-spell-scrollbar-color) var(--spell-scrollbar-track-opacity),
+				transparent
+			);
+		}
+		.spell-scroll-handle::-webkit-slider-thumb {
+			width: var(--scroll-thumb-width);
+			height: calc(var(--ui-spell-scrollbar-height) - 2px);
+			margin-top: calc((5px - var(--ui-spell-scrollbar-height)) / 2);
+			appearance: none;
+			border-radius: 3px;
+			background: color-mix(
+				in srgb,
+				var(--ui-spell-scrollbar-color) var(--spell-scrollbar-thumb-opacity),
+				transparent
+			);
+		}
+		.spell-scroll-handle::-moz-range-track {
+			height: 3px;
+			background: color-mix(
+				in srgb,
+				var(--ui-spell-scrollbar-color) var(--spell-scrollbar-track-opacity),
+				transparent
+			);
+		}
+		.spell-scroll-handle::-moz-range-thumb {
+			width: var(--scroll-thumb-width);
+			height: calc(var(--ui-spell-scrollbar-height) - 2px);
+			border: 0;
+			border-radius: 3px;
+			background: color-mix(
+				in srgb,
+				var(--ui-spell-scrollbar-color) var(--spell-scrollbar-thumb-opacity),
+				transparent
+			);
 		}
 	}
 </style>

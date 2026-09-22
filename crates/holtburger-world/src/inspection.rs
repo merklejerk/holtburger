@@ -210,6 +210,8 @@ pub struct ItemInspection {
     pub imbued_effects: ImbuedEffectType,
     /// Additional proven special item properties.
     pub effects: Vec<Effect>,
+    /// Server-authored portal destination display text, absent when undisclosed.
+    pub portal_destination: Option<String>,
     /// Server-authored use text.
     pub use_text: Option<String>,
     /// Item and active-enchantment spells with the wire marker decoded.
@@ -1103,6 +1105,9 @@ impl ItemInspection {
             inscription: InscriptionInfo::from_object(object),
             imbued_effects: get_imbued_effects(object),
             effects: Effect::from_object(object),
+            portal_destination: object
+                .get_string_prop(PropertyString::AppraisalPortalDestination)
+                .map(str::to_owned),
             use_text: object
                 .get_string_prop(PropertyString::Use)
                 .map(|s| s.to_string()),
@@ -1914,6 +1919,36 @@ mod tests {
     fn inspect_entity(entity: &Entity) -> Result<ObjectInspection, ObjectInspectionError> {
         let titles = CharacterTitleCatalog::default();
         ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
+
+    #[test]
+    fn portal_destination_survives_appraisal_merge_and_preserves_server_text() {
+        let guid = Guid(0x6000_0001);
+        for destination in [
+            None,
+            Some("Holtburg (42.1N, 33.6E)."),
+            Some("Hidden Sanctuary"),
+        ] {
+            let mut entity = Entity::new(guid, "Portal".into(), WorldPosition::default());
+            let mut response = IdentifyObjectResponseEventData {
+                object_guid: guid,
+                flags: IdentifyResponseFlags::STRING_STATS_TABLE,
+                success: true,
+                ..Default::default()
+            };
+            if let Some(destination) = destination {
+                response.properties.set_string_prop(
+                    PropertyString::AppraisalPortalDestination,
+                    destination.to_owned(),
+                );
+            }
+            assert!(entity.apply_identify_response(&response));
+            let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details
+            else {
+                panic!("portal should use item inspection");
+            };
+            assert_eq!(item.portal_destination.as_deref(), destination);
+        }
     }
 
     fn inspect_vendor_item(

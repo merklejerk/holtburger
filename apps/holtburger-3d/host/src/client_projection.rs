@@ -1313,6 +1313,10 @@ mod tests {
             "Test Item".into(),
             holtburger_common::position::WorldPosition::default(),
         );
+        item.set_string_prop(
+            PropertyString::AppraisalPortalDestination,
+            "Holtburg (42.1N, 33.6E).".into(),
+        );
         item.inspection_supplement = Some(InspectionSupplement {
             equipment_unenchantable: Some(true),
             ..InspectionSupplement::default()

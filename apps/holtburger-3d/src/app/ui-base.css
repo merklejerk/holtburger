@@ -40,6 +40,13 @@
 		--ui-spell-tab-font-size: 10px;
 		--ui-spell-tab-background-opacity: 15%;
 		--ui-spell-tab-active-background-opacity: 55%;
+		/* Spell overflow handle geometry and tint; themes may adjust these independently. */
+		--ui-spell-scrollbar-height: 12px;
+		--ui-spell-scrollbar-color: var(--ui-spell-bar-color);
+		--ui-spell-scrollbar-track-opacity: 8%;
+		--ui-spell-scrollbar-thumb-opacity: 18%;
+		--ui-spell-scrollbar-hover-track-opacity: 25%;
+		--ui-spell-scrollbar-hover-thumb-opacity: 70%;
 		--ui-font-body: Arial, Helvetica, sans-serif;
 		--ui-font-heading: Georgia, "Times New Roman", serif;
 		--ui-font-mono: "Courier New", monospace;

@@ -7,7 +7,7 @@ import { CLIENT_TUNING } from "./client-tuning";
 /** Mutations and availability belong to the HUD composition, not DOM elements. */
 interface SpellDragBindings {
 	/** Resolve the current source binding before accepting a transfer. */
-	readonly read: (address: SpellCellAddress) => number | null;
+	readonly read: (address: SpellCellAddress) => number | null | undefined;
 	/** Copy a spellbook entry into a destination cell. */
 	readonly bind: (address: SpellCellAddress, spell: number) => void;
 	/** Swap bound cells, or clear the source on a completed drag off the bar. */
@@ -37,15 +37,15 @@ interface SpellGesture {
 	/** Crossing the threshold enables transfer and suppresses the trailing click. */
 	dragging: boolean;
 }
-/** Parse only fixed numbered cell addresses emitted by SpellCell. */
+/** Parse tab identities and any nonnegative cell address emitted by SpellCell. */
 function address(element: HTMLElement): SpellCellAddress | null {
 	const tab = SPELL_BAR_INDICES.find(
 		(index) => String(index) === element.dataset.spellTab,
 	);
-	const slot = SPELL_BAR_INDICES.find(
-		(index) => String(index) === element.dataset.spellCell,
-	);
-	return tab === undefined || slot === undefined ? null : { tab, slot };
+	const slot = Number(element.dataset.spellCell);
+	return tab === undefined || !Number.isSafeInteger(slot) || slot < 0
+		? null
+		: { tab, slot };
 }
 /** Narrow spell shortcut gesture owner; spellbook entries are copied, bindings are moved. */
 export class ClientSpellDrag {
@@ -135,7 +135,13 @@ export class ClientSpellDrag {
 			origin === null
 				? Number(element.dataset.spellDragSource)
 				: this.bindings.read(origin);
-		if (spell === null || !Number.isSafeInteger(spell) || spell <= 0) return;
+		if (
+			spell === null ||
+			spell === undefined ||
+			!Number.isSafeInteger(spell) ||
+			spell <= 0
+		)
+			return;
 		this.cancel();
 		this.#gesture = {
 			element,

@@ -36,6 +36,17 @@ export function wieldedCasterSpell(
 	};
 }
 
+/** Select the same confirmed wielded caster for HUD display and keyboard activation. */
+export function findWieldedCasterSpell(
+	items: Iterable<ClientEntityFacts>,
+): WieldedCasterSpell | null {
+	for (const item of items) {
+		const caster = wieldedCasterSpell(item);
+		if (caster !== null) return caster;
+	}
+	return null;
+}
+
 /** Display order and slot masks follow gmPaperDollUI::SetUIItemIntoLocation
  * (acclient.c:211927). Clothing uses chest/upper-leg anchors for shirt/pants:
  * raw clothing-location bits are not exclusive slots. ACE checks ClothingPriority

@@ -115,6 +115,8 @@ export interface InputConfiguration {
 	readonly spellBar: {
 		readonly tabs: NumberedInputBindings;
 		readonly cells: NumberedInputBindings;
+		/** Cast the spell built into the currently wielded caster. */
+		readonly caster: readonly KeyBinding[];
 	};
 	/** Five attack-power/accuracy breakpoints interpreted while melee or missile combat is active. */
 	readonly combatBar: {

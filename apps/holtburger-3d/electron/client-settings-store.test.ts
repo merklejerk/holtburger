@@ -8,6 +8,7 @@ import {
 	createDefaultClientUserSettings,
 } from "../src/client/client-settings-defaults";
 import { parseClientLocalSettingsDocument } from "../src/client/client-settings-contract";
+import { SPELL_BAR_INDICES } from "../src/client/client-spell-bar-state";
 
 const initialWindow = {
 	normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -72,6 +73,29 @@ describe("ClientSettingsStore", () => {
 		});
 	});
 
+	it("persists and reloads spell tabs with overflow cells", async () => {
+		const path = await temporarySettingsPath();
+		const profileKey = "example:9000/0x50000001";
+		const store = new ClientSettingsStore(path, initialWindow);
+		await store.saveUser(
+			createDefaultClientUserSettings({ width: 1440, height: 900 }, 8),
+		);
+		const defaults = createDefaultClientCharacterSettings();
+		const tabs = [...defaults.spellBarBindings.tabs];
+		tabs[0] = [...SPELL_BAR_INDICES.map((slot) => slot + 1), 11, null];
+		await store.saveCharacter(
+			profileKey,
+			{ ...defaults, spellBarBindings: { tabs } },
+			null,
+		);
+		const reloaded = new ClientSettingsStore(path, initialWindow);
+		await reloaded.load();
+		const profile = reloaded.readCharacter(profileKey, "persisted");
+		expect(profile.kind).toBe("loaded");
+		if (profile.kind !== "loaded") throw new Error("Expected saved character");
+		expect(profile.settings.spellBarBindings.tabs[0]).toEqual(tabs[0]);
+	});
+
 	it("loads a complete document without changing it", async () => {
 		const path = await temporarySettingsPath();
 		const user = createDefaultClientUserSettings(
@@ -79,7 +103,7 @@ describe("ClientSettingsStore", () => {
 			8,
 		);
 		const source = {
-			schemaVersion: 8,
+			schemaVersion: 9,
 			user: { window: initialWindow, client: user },
 			characters: {},
 		};
@@ -103,7 +127,7 @@ describe("ClientSettingsStore", () => {
 		await writeFile(
 			path,
 			JSON.stringify({
-				schemaVersion: 8,
+				schemaVersion: 9,
 				user: { window: initialWindow, client: originalUser },
 				characters: {
 					"example:9000/0x50000001": {

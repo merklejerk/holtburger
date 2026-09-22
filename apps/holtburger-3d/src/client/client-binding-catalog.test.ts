@@ -33,6 +33,7 @@ describe("client binding catalog", () => {
 		expect(groups).toHaveLength(1);
 		expect(groups[0].rows.map((row) => row.id)).toEqual([
 			...ACTION_SLOT_INDICES.map((index) => `spellBar.tabs.${index}`),
+			"spellBar.caster",
 			...ACTION_SLOT_INDICES.map((index) => `spellBar.cells.${index}`),
 		]);
 	});

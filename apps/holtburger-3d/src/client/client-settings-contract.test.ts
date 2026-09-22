@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import {
 	clientLocalSettingsDocumentV1Schema,
 	clientLocalSettingsDocumentV2Schema,
@@ -8,6 +9,7 @@ import {
 	clientLocalSettingsDocumentV6Schema,
 	clientLocalSettingsDocumentV7Schema,
 	clientLocalSettingsDocumentV8Schema,
+	clientLocalSettingsDocumentV9Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -21,7 +23,7 @@ const viewport = { width: 1440, height: 900 };
 
 function document() {
 	return {
-		schemaVersion: 8 as const,
+		schemaVersion: 9 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -38,8 +40,25 @@ function document() {
 	};
 }
 
-function versionSevenDocument() {
+function versionEightDocument() {
 	const current = document();
+	const { caster, ...spellBar } = current.user.client.input.spellBar;
+	void caster;
+	return {
+		...current,
+		schemaVersion: 8 as const,
+		user: {
+			...current.user,
+			client: {
+				...current.user.client,
+				input: { ...current.user.client.input, spellBar },
+			},
+		},
+	};
+}
+
+function versionSevenDocument() {
+	const current = versionEightDocument();
 	return {
 		...current,
 		schemaVersion: 7 as const,
@@ -171,7 +190,7 @@ describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
-		expect(clientLocalSettingsDocumentV8Schema.parse(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV9Schema.parse(value)).toEqual(value);
 	});
 
 	it("migrates v1 with stable inspection layout defaults", () => {
@@ -265,6 +284,12 @@ describe("client settings contract", () => {
 		expect(migrated.user.client.input.client.chat).toEqual([{ key: "F6" }]);
 	});
 
+	it("migrates v8 with the default wielded-caster shortcut", () => {
+		const value = versionEightDocument();
+		expect(clientLocalSettingsDocumentV8Schema.parse(value)).toEqual(value);
+		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
+	});
+
 	it("rejects unknown fields and unsupported versions", () => {
 		expect(() => parseClientLocalSettingsDocument({})).toThrow(
 			"Client settings document has no schemaVersion",
@@ -273,8 +298,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 9 }),
-		).toThrow("Unsupported client settings schema version 9");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 10 }),
+		).toThrow("Unsupported client settings schema version 10");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {
@@ -293,6 +318,23 @@ describe("client settings contract", () => {
 				actionBars: [defaults.actionBars[0], defaults.actionBars[0]],
 			}),
 		).toThrow("action bar identities must be unique");
+	});
+
+	it("normalizes saved spell tabs while preserving occupied overflow addresses", () => {
+		const defaults = createDefaultClientCharacterSettings();
+		const tabs = [...defaults.spellBarBindings.tabs];
+		tabs[0] = SPELL_BAR_INDICES.map(() => 1);
+		tabs[1] = [...SPELL_BAR_INDICES.map(() => null), 2, null, null];
+		const parsed = parseClientCharacterSettings({
+			...defaults,
+			spellBarBindings: { tabs },
+		});
+		expect(parsed.spellBarBindings.tabs[0]).toEqual([...tabs[0], null]);
+		expect(parsed.spellBarBindings.tabs[1]).toEqual([
+			...SPELL_BAR_INDICES.map(() => null),
+			2,
+			null,
+		]);
 	});
 
 	it("rejects non-finite geometry and non-canonical chat filters", () => {

@@ -32,8 +32,8 @@ const digitBindingsSchema = z
 	.record(z.enum(INPUT_DIGIT_KEYS), bindingListSchema)
 	.readonly();
 
-/** Strict, user-scoped keyboard map; Explorer camera and pointer fields are excluded. */
-export const clientKeyboardSettingsSchema = z
+/** Historical keyboard map before the wielded-caster shortcut. */
+export const clientKeyboardSettingsV8Schema = z
 	.object({
 		character: z
 			.record(z.enum(CHARACTER_ACTIONS), bindingListSchema)
@@ -72,7 +72,7 @@ export const clientKeyboardSettingsSchema = z
 	.readonly();
 
 /** Historical v7 map included a configurable character-picker confirmation key. */
-export const clientKeyboardSettingsV7Schema = clientKeyboardSettingsSchema
+export const clientKeyboardSettingsV7Schema = clientKeyboardSettingsV8Schema
 	.unwrap()
 	.extend({
 		client: z
@@ -106,6 +106,20 @@ export const clientKeyboardSettingsV6Schema = clientKeyboardSettingsV7Schema
 	.strict()
 	.readonly();
 
+/** Strict, user-scoped keyboard map; Explorer camera and pointer fields are excluded. */
+export const clientKeyboardSettingsSchema = clientKeyboardSettingsV8Schema
+	.unwrap()
+	.extend({
+		spellBar: clientKeyboardSettingsV8Schema
+			.unwrap()
+			.shape.spellBar.unwrap()
+			.extend({ caster: bindingListSchema })
+			.strict()
+			.readonly(),
+	})
+	.strict()
+	.readonly();
+
 /** Current user keyboard defaults; Explorer and pointer policy stay outside persistence. */
 export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	character: INPUT_DEFAULTS.character,
@@ -118,6 +132,10 @@ export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 /** Last v6 default shape, retained for migration of v5 documents. */
 export const CLIENT_KEYBOARD_V6_DEFAULTS = {
 	...CLIENT_KEYBOARD_DEFAULTS,
+	spellBar: {
+		tabs: CLIENT_KEYBOARD_DEFAULTS.spellBar.tabs,
+		cells: CLIENT_KEYBOARD_DEFAULTS.spellBar.cells,
+	},
 	client: {
 		...CLIENT_KEYBOARD_DEFAULTS.client,
 		enterWorld: [{ key: "Enter" }],

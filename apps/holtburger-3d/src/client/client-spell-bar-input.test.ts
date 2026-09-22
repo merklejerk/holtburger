@@ -31,9 +31,17 @@ function event(
 it("maps every numbered tab/cell and consumes repeats without executing", () => {
 	const tab = vi.fn();
 	const cast = vi.fn();
+	const caster = vi.fn();
 	for (const index of SPELL_BAR_INDICES) {
 		expect(
-			handleSpellBarKeydown(TEST_INPUT, event(index, {}), true, tab, cast),
+			handleSpellBarKeydown(
+				TEST_INPUT,
+				event(index, {}),
+				true,
+				tab,
+				cast,
+				caster,
+			),
 		).toBe(true);
 		expect(cast).toHaveBeenLastCalledWith(index);
 		expect(
@@ -43,6 +51,7 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 				true,
 				tab,
 				cast,
+				caster,
 			),
 		).toBe(true);
 		expect(tab).toHaveBeenLastCalledWith(index);
@@ -53,6 +62,7 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 		true,
 		tab,
 		cast,
+		caster,
 	);
 	expect(cast).toHaveBeenCalledTimes(SPELL_BAR_INDICES.length);
 	expect(tab).toHaveBeenCalledTimes(SPELL_BAR_INDICES.length);
@@ -63,17 +73,62 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 		{ isComposing: true },
 	]) {
 		expect(
-			handleSpellBarKeydown(TEST_INPUT, event(0, modifier), true, tab, cast),
+			handleSpellBarKeydown(
+				TEST_INPUT,
+				event(0, modifier),
+				true,
+				tab,
+				cast,
+				caster,
+			),
 		).toBe(false);
 	}
 	expect(
-		handleSpellBarKeydown(TEST_INPUT, event(0, {}), false, tab, cast),
+		handleSpellBarKeydown(TEST_INPUT, event(0, {}), false, tab, cast, caster),
 	).toBe(false);
 	const consumed = event(0, {});
 	consumed.preventDefault();
-	expect(handleSpellBarKeydown(TEST_INPUT, consumed, true, tab, cast)).toBe(
-		false,
-	);
+	expect(
+		handleSpellBarKeydown(TEST_INPUT, consumed, true, tab, cast, caster),
+	).toBe(false);
+	expect(caster).not.toHaveBeenCalled();
+});
+
+it("casts the wielded-caster spell only in the active gameplay scope", () => {
+	const caster = vi.fn();
+	const chord = event(0, { ctrlKey: true, shiftKey: true, key: "!" });
+	expect(
+		handleSpellBarKeydown(
+			TEST_INPUT,
+			chord,
+			true,
+			() => {},
+			() => {},
+			caster,
+		),
+	).toBe(true);
+	expect(caster).toHaveBeenCalledOnce();
+	expect(
+		handleSpellBarKeydown(
+			TEST_INPUT,
+			event(0, { ctrlKey: true, shiftKey: true, repeat: true }),
+			true,
+			() => {},
+			() => {},
+			caster,
+		),
+	).toBe(true);
+	expect(caster).toHaveBeenCalledOnce();
+	expect(
+		handleSpellBarKeydown(
+			TEST_INPUT,
+			event(0, { ctrlKey: true, shiftKey: true }),
+			false,
+			() => {},
+			() => {},
+			caster,
+		),
+	).toBe(false);
 });
 it("uses the existing keyboard gate and quarantines repeat presses across blocking", () => {
 	const viewport = new ViewportInputGate();
@@ -81,7 +136,14 @@ it("uses the existing keyboard gate and quarantines repeat presses across blocki
 	const cast = vi.fn();
 	keyboard.bindGame({
 		keydown: (key) => {
-			handleSpellBarKeydown(TEST_INPUT, key, true, () => {}, cast);
+			handleSpellBarKeydown(
+				TEST_INPUT,
+				key,
+				true,
+				() => {},
+				cast,
+				() => {},
+			);
 		},
 		keyup: () => {},
 		cancel: () => {},

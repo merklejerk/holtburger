@@ -137,6 +137,17 @@ const spellTabRows: ClientBindingRow[] = ACTION_SLOT_INDICES.map((index) => ({
 		},
 	}),
 }));
+const spellCasterRow: ClientBindingRow = {
+	id: "spellBar.caster",
+	label: "Cast wielded caster spell",
+	group: "Spells",
+	contexts: ["game-magic"],
+	read: (settings) => settings.spellBar.caster,
+	write: (settings, bindings) => ({
+		...settings,
+		spellBar: { ...settings.spellBar, caster: bindings },
+	}),
+};
 const spellSlotRows: ClientBindingRow[] = ACTION_SLOT_INDICES.map((index) => ({
 	id: `spellBar.cells.${index}`,
 	label: `Cast spell slot ${(index + 1) % ACTION_SLOT_INDICES.length}`,
@@ -254,7 +265,10 @@ export const CLIENT_BINDING_GROUPS: readonly {
 			...combatRows,
 		],
 	},
-	{ title: "Spells", rows: [...spellTabRows, ...spellSlotRows] },
+	{
+		title: "Spells",
+		rows: [...spellTabRows, spellCasterRow, ...spellSlotRows],
+	},
 	{ title: "Action bars", rows: actionBarRows },
 	{
 		title: "Chat",

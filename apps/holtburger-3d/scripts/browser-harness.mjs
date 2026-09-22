@@ -4939,7 +4939,7 @@ async function runClientHudHarness({ viteUrl }) {
 				if (!movement || !movement.open) throw new Error('Input movement group did not open');
 				const spellGroups = [...panel.querySelectorAll('#settings-section-input .binding-group')].filter((group) => group.querySelector('summary')?.textContent === 'Spells');
 				const spellLabels = [...(spellGroups[0]?.querySelectorAll('.binding-label') ?? [])].map((label) => label.textContent);
-				if (spellGroups.length !== 1 || spellLabels.length !== 20 || spellLabels.slice(0, 10).some((label) => !label.startsWith('Select spell tab')) || spellLabels.slice(10).some((label) => !label.startsWith('Cast spell slot'))) throw new Error('Spell tab and slot bindings are interleaved');
+				if (spellGroups.length !== 1 || spellLabels.length !== 21 || spellLabels.slice(0, 10).some((label) => !label.startsWith('Select spell tab')) || spellLabels[10] !== 'Cast wielded caster spell' || spellLabels.slice(11).some((label) => !label.startsWith('Cast spell slot'))) throw new Error('Spell binding rows are out of order');
 				const actionBarsGroup = [...panel.querySelectorAll('#settings-section-input .binding-group')].find((group) => group.querySelector('summary')?.textContent === 'Action bars');
 				if (!actionBarsGroup?.textContent.includes('Alternate action modifier') || actionBarsGroup.textContent.includes('Leave focused bar')) throw new Error('Action bar input controls still have duplicate cancellation or detached modifier policy');
 				const actionCellRow = [...actionBarsGroup.querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Activate action cell 1');

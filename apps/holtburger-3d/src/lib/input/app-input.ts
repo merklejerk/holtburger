@@ -43,10 +43,14 @@ export class AppInput {
 	}
 
 	/** Resolve spell intent only after keyboard ownership admits game input. */
-	spellBarCommand(event: InputKeyEvent): {
-		readonly kind: "tabs" | "cells";
-		readonly index: InputDigitIndex;
-	} | null {
+	spellBarCommand(
+		event: InputKeyEvent,
+	):
+		| { readonly kind: "tabs" | "cells"; readonly index: InputDigitIndex }
+		| { readonly kind: "caster" }
+		| null {
+		if (matchesKey(event, this.configuration.spellBar.caster))
+			return { kind: "caster" };
 		const indices: readonly InputDigitIndex[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 		for (const kind of ["tabs", "cells"] as const) {
 			const index = indices.find((index) =>

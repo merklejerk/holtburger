@@ -167,6 +167,7 @@ describe("ClientObjectInspection", () => {
 		const session = new FakeInspectionSession({
 			kind: "current",
 			level: {
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
 				revision: 1,
 				entities: new Map([

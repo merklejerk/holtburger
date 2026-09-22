@@ -6,6 +6,13 @@ import type {
 /** Protocol EquipMask::CASTER, distinct from the combined main-hand display slot. */
 export const CASTER_EQUIP_MASK = 0x01000000;
 
+/** Ammunition slot identity shared by the equipment strip and projectile HUD icon. */
+export const AMMUNITION_SLOT = {
+	mask: 0x00800000,
+	label: "Ammunition",
+	symbol: "ammo",
+} as const;
+
 /** A currently wielded activation spell, independent of learned spellbook membership. */
 export interface WieldedCasterSpell {
 	/** Source instance sent with UseWithTarget. */
@@ -56,7 +63,7 @@ export function findWieldedCasterSpell(
 export const EQUIPMENT_SLOTS = [
 	{ mask: 0x03500000, label: "Main hand", symbol: "weapon" },
 	{ mask: 0x00200000, label: "Off hand", symbol: "shield" },
-	{ mask: 0x00800000, label: "Ammunition", symbol: "ammo" },
+	AMMUNITION_SLOT,
 	{ mask: 0x00000001, label: "Head", symbol: "head" },
 	{ mask: 0x00000200, label: "Chest armor", symbol: "chest" },
 	{ mask: 0x00000400, label: "Abdomen armor", symbol: "abdomen" },

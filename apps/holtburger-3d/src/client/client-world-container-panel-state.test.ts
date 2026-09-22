@@ -72,7 +72,11 @@ function fixture() {
 	) =>
 		mirror.commit(
 			mirror.prepareSnapshot(
-				{ worldContainer: access, entities: [entityFacts(1), ...records] },
+				{
+					projectileSupply: { kind: "not-applicable" },
+					worldContainer: access,
+					entities: [entityFacts(1), ...records],
+				},
 				1,
 			),
 		);

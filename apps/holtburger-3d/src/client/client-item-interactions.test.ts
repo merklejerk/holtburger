@@ -63,6 +63,7 @@ async function fixture() {
 		activeConfirmation: null,
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
 		entities: {
+			projectileSupply: { kind: "not-applicable" },
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
@@ -139,6 +140,7 @@ describe("shared frontend item interaction flow", () => {
 			},
 		};
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [caster],
 			removed: [],
@@ -168,6 +170,7 @@ describe("shared frontend item interaction flow", () => {
 		f.interactions.castWieldedSpell(2);
 		expect(f.interactions.snapshot().kind).toBe("acquiring");
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [
 				{
@@ -194,6 +197,7 @@ describe("shared frontend item interaction flow", () => {
 			.spyOn(f.lifecycle, "submitInventory")
 			.mockResolvedValue(undefined);
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [entityFacts(4, { canReceiveGive: true })],
 			removed: [],
@@ -208,6 +212,7 @@ describe("shared frontend item interaction flow", () => {
 			target: { kind: "give", guid: 4 },
 		});
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [],
 			removed: [4],
@@ -226,6 +231,7 @@ describe("shared frontend item interaction flow", () => {
 			.spyOn(f.lifecycle, "submitInventory")
 			.mockResolvedValue(undefined);
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [entityFacts(4, { canPickUp: true })],
 			removed: [],
@@ -258,6 +264,7 @@ describe("shared frontend item interaction flow", () => {
 			unrestricted: false,
 		});
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [entityFacts(4, { canPickUp: true })],
 			removed: [],
@@ -478,6 +485,7 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		const id = question();
 		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [],
 			removed: [2],

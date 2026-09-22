@@ -127,6 +127,8 @@ pub struct ClientRuntime {
     active_confirmation: Option<ActiveCharacterConfirmation>,
     /// Cached narrow entity records and pending semantic invalidation.
     entity_facts: entity_facts::EntityFactsPublication,
+    /// Equipped source already requested while its consumption policy remains unknown.
+    projectile_appraisal: Option<Guid>,
     active_busy_operation: Option<PendingBusyOperation>,
     /// Close acknowledgements outstanding after local access has been revoked.
     closing_containers: std::collections::BTreeMap<Guid, Instant>,
@@ -789,6 +791,12 @@ impl ClientRuntime {
     }
 
     fn emit_world_view_projection(&mut self, event: &WorldEvent) {
+        // A fresh description retires any outstanding request for the old instance.
+        if let WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) = event
+            && self.projectile_appraisal == Some(entity.guid)
+        {
+            self.projectile_appraisal = None;
+        }
         self.entity_facts.observe(event);
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {

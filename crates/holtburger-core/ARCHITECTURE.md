@@ -336,6 +336,12 @@ character-only preparation and do not acquire motion-table/run-stat requirements
 
 `client/equipment_plan.rs` resolves a single requested assignment through world-owned public equipment facts and allocates every displaced item before mutation. Source-pack storage is preferred, then the main pack and carried packs in native order. The incoming item’s future free slot is not credited.
 
+The entity snapshot/delta feed also carries world's equipped `ProjectileSupply`, independently
+of attack timing and engagement state. Core appraises an unresolved projectile source once per
+continuous pending source; a fresh entity description permits a new request. Rejected or unanswered
+appraisals leave supply unknown without repeated requests. Frontends consume the published supply
+at their display cadence; they do not classify weapons or subtract locally for shots.
+
 `client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor.
 
 `client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,

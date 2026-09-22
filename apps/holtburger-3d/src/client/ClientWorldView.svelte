@@ -752,6 +752,7 @@
 	{/if}
 	{#if combatMode === "melee" || combatMode === "missile"}
 		<ClientCombatBar
+			{inventory}
 			input={input.combatBar}
 			{displayPlatform}
 			placement={hudLayout.combatBar}

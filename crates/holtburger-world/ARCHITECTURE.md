@@ -474,6 +474,15 @@ Anything that changes the player's physical position or velocity must update tha
 the `WorldState` movement helpers so the authoritative entity state and the runtime-body state stay
 in sync. `PlayerState` is for local-player overlays and sequencing, not duplicate world storage.
 
+### Projectile supply
+
+`projectile_supply.rs` resolves the local player's equipped projectile source from accepted storage
+and public missile/ammunition facts. Launchers use the ammunition slot; thrown weapons use their
+own quantity, including a single non-stackable item. Supply distinguishes finite, unlimited,
+pending, and not applicable. `UnlimitedUse` is an assessment property: a successful full appraisal
+establishes omitted values as false; before that, missing evidence remains pending. The offline
+weenie catalog does not supply live consumption policy.
+
 ### Handler boundary
 
 Handlers should orchestrate domain flows; they should not become mini state stores.

@@ -6,6 +6,7 @@ import type {
 /** Minimal established player root for transport fixtures unrelated to inventory. */
 export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
 	return {
+		projectileSupply: { kind: "not-applicable" },
 		worldContainer: { kind: "closed" },
 		entities: [entityFacts(playerGuid)],
 	};

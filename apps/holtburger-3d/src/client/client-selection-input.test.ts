@@ -33,7 +33,11 @@ function fixture() {
 	const entities = new ClientEntityMirror();
 	entities.commit(
 		entities.prepareSnapshot(
-			{ worldContainer: { kind: "closed" }, entities: [entityFacts(1)] },
+			{
+				projectileSupply: { kind: "not-applicable" },
+				worldContainer: { kind: "closed" },
+				entities: [entityFacts(1)],
+			},
 			1,
 		),
 	);

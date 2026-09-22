@@ -2,7 +2,11 @@ import { retainContentsVisuals } from "./client-contents-visuals";
 import { clientInventoryMembership } from "./client-inventory-sections";
 import type { ItemCapacity } from "../app/item-capacity";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
-import type { ClientEntityRead } from "./client-entity-mirror";
+import type {
+	ClientEntityRead,
+	ClientEntityFacts,
+	ProjectileSupply,
+} from "./client-entity-mirror";
 import type { ClientLifecycle } from "./client-host-contract";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 import {
@@ -13,7 +17,6 @@ import {
 	type ClientContentsSection,
 	type ContentsSortMode,
 } from "./client-container-contents";
-import type { ClientEntityFacts } from "./client-entity-mirror";
 import { CLIENT_TUNING } from "./client-tuning";
 import { PYREAL_ICON_SPEC } from "./client-inventory-art";
 import {
@@ -172,6 +175,15 @@ export class ClientInventoryState {
 	readItem(guid: number): ClientEntityFacts | undefined {
 		this.#refresh();
 		return this.#pending ? undefined : this.#baseline?.items.get(guid);
+	}
+
+	/** Bounded HUD readers consume world semantics without building inventory layouts. */
+	readProjectileSupply(): ProjectileSupply {
+		this.#refresh();
+		const read = this.#lifecycle.entities.read();
+		return this.#pending || read.kind === "pending"
+			? { kind: "pending", appraisal: null }
+			: read.level.projectileSupply;
 	}
 
 	cycleSort(): void {

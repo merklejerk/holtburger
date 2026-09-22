@@ -35,6 +35,7 @@ function commit(
 	removed: number[] = [],
 ): void {
 	const prepared = mirror.prepareDelta({
+		projectileSupply: null,
 		worldContainer: null,
 		upserts,
 		removed,
@@ -45,6 +46,53 @@ function commit(
 }
 
 describe("ClientEntityMirror", () => {
+	it("accepts supply-only changes and replaces supply on resynchronization", () => {
+		const store = mirror();
+		const prepared = store.prepareDelta({
+			projectileSupply: { kind: "finite", count: 17 },
+			worldContainer: null,
+			upserts: [],
+			removed: [],
+		});
+		if (prepared === null) throw new Error("Current mirror required");
+		store.commit(prepared);
+		expect(store.read()).toMatchObject({
+			kind: "current",
+			level: { projectileSupply: { kind: "finite", count: 17 } },
+		});
+		commit(store, [entityFacts(player)]);
+		expect(store.read()).toMatchObject({
+			kind: "current",
+			level: { projectileSupply: { kind: "finite", count: 17 } },
+		});
+		const pending = store.prepareDelta({
+			projectileSupply: { kind: "pending", appraisal: null },
+			worldContainer: null,
+			upserts: [],
+			removed: [],
+		});
+		if (pending === null) throw new Error("Current mirror required");
+		store.commit(pending);
+		expect(store.read()).toMatchObject({
+			kind: "current",
+			level: { projectileSupply: { kind: "pending", appraisal: null } },
+		});
+		store.awaitSnapshot();
+		expect(store.read()).toEqual({ kind: "pending" });
+		store.commit(
+			store.prepareSnapshot(
+				{
+					...playerEntitySnapshot(player),
+					projectileSupply: { kind: "unlimited" },
+				},
+				player,
+			),
+		);
+		expect(store.read()).toMatchObject({
+			kind: "current",
+			level: { projectileSupply: { kind: "unlimited" } },
+		});
+	});
 	it("preserves icon appearance through inventory-only deltas and recovery snapshots", () => {
 		const store = mirror();
 		const before = owned(item, player);
@@ -70,6 +118,7 @@ describe("ClientEntityMirror", () => {
 		store.commit(
 			store.prepareSnapshot(
 				{
+					projectileSupply: { kind: "not-applicable" },
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(player), updated],
 				},
@@ -103,6 +152,7 @@ describe("ClientEntityMirror", () => {
 		const store = mirror();
 		const before = store.read();
 		const next = store.prepareDelta({
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [owned(item, pack), owned(pack, player)],
 			removed: [],
@@ -135,6 +185,7 @@ describe("ClientEntityMirror", () => {
 		expect(() =>
 			store.prepareSnapshot(
 				{
+					projectileSupply: { kind: "not-applicable" },
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(player), entityFacts(player)],
 				},
@@ -143,6 +194,7 @@ describe("ClientEntityMirror", () => {
 		).toThrow("Duplicate");
 		expect(() =>
 			store.prepareDelta({
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [owned(item, player)],
 				removed: [item],
@@ -150,6 +202,7 @@ describe("ClientEntityMirror", () => {
 		).toThrow("both upserted and removed");
 		expect(() =>
 			store.prepareDelta({
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [owned(item, pack)],
 				removed: [],
@@ -165,6 +218,7 @@ describe("ClientEntityMirror", () => {
 		expect(store.read().kind).toBe("pending");
 		expect(
 			store.prepareDelta({
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [owned(pack, player)],
 				removed: [],

@@ -1,5 +1,5 @@
 use crate::inspection::InspectionSupplement;
-use holtburger_common::properties::WorldObjectProperties;
+use holtburger_common::properties::{PropertyBool, WorldObjectProperties};
 use holtburger_protocol::messages::object::events::{
     IdentifyObjectResponseEventData, IdentifyResponseFlags,
 };
@@ -57,6 +57,17 @@ pub(crate) fn apply_identify_response(
     let flags = data.flags;
 
     properties.merge(data.properties.clone());
+    // ACE AppraiseInfo.BuildProperties includes all authored assessment bools.
+    // A successful full appraisal establishes absent UnlimitedUse as false (ACE's
+    // WorldObject_Properties.cs default); before appraisal its absence is unknown.
+    properties.bools.insert(
+        PropertyBool::UnlimitedUse,
+        data.properties
+            .bools
+            .get(&PropertyBool::UnlimitedUse)
+            .copied()
+            .unwrap_or(false),
+    );
 
     if flags.contains(IdentifyResponseFlags::ARMOR_PROFILE) {
         *armor_profile = data.armor_profile.clone();

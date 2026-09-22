@@ -412,6 +412,9 @@ impl ClientRuntime {
                     }
 
                     self.publish_entity_facts();
+                    if active_world {
+                        self.hydrate_projectile_supply().await?;
+                    }
                     self.publish_character_motion_capabilities_if_changed();
 
                     let dynamic_batch = if !before_dynamic.is_empty() {

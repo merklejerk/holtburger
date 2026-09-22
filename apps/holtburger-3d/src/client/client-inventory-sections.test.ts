@@ -39,6 +39,7 @@ describe("contentsSections", () => {
 		const mirror = new ClientEntityMirror();
 		const prepared = mirror.prepareSnapshot(
 			{
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -106,6 +107,7 @@ describe("contentsSections", () => {
 		};
 		const prepared = mirror.prepareSnapshot(
 			{
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -159,6 +161,7 @@ describe("contentsPackSlots", () => {
 		const mirror = new ClientEntityMirror();
 		const { level } = mirror.prepareSnapshot(
 			{
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
 				entities: [root, bag, foci, ordinary],
 			},
@@ -179,7 +182,11 @@ describe("contentsPackSlots", () => {
 			},
 		};
 		const pending = mirror.prepareSnapshot(
-			{ worldContainer: { kind: "closed" }, entities: [unknown, bag] },
+			{
+				projectileSupply: { kind: "not-applicable" },
+				worldContainer: { kind: "closed" },
+				entities: [unknown, bag],
+			},
 			1,
 		);
 		expect(
@@ -203,6 +210,7 @@ describe("contentsPackSlots", () => {
 		const mirror = new ClientEntityMirror();
 		const { level } = mirror.prepareSnapshot(
 			{
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),

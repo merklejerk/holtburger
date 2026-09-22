@@ -192,6 +192,11 @@
 			{#if inspection.level !== null}<p class="inspection-kicker">
 					Level {formatInspectionNumber(inspection.level)}
 				</p>{/if}
+			{#if item.portalDestination !== null}
+				<p class="inspection-description" data-inspection-portal-destination>
+					Destination: {item.portalDestination}
+				</p>
+			{/if}
 			{#if inspection.description !== null}<p class="inspection-description">
 					{#if collapsedDescription !== null && !descriptionExpanded}
 						{collapsedDescription}…

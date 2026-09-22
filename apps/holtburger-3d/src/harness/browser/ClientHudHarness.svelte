@@ -1566,6 +1566,7 @@
 									data: { creatureType: "Olthoi", bonus: 0.2 },
 								},
 							],
+							portalDestination: "Holtburg (42.1N, 33.6E).",
 							useText: "Use this item to recall to a remembered sanctuary.",
 							spells: [
 								{ id: 2000, activeEnchantment: true },

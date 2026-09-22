@@ -9,6 +9,14 @@ describe("object inspection host contract", () => {
 		}
 	});
 
+	it("accepts an undisclosed portal destination", () => {
+		const item = structuredClone(fixture.item);
+		const details: { portalDestination: string | null } =
+			item.outcome.inspection.details.details;
+		details.portalDestination = null;
+		expect(decodeObjectInspectionResult(item)).toEqual(item);
+	});
+
 	it("rejects malformed discriminants, fields, and nested payloads", () => {
 		expect(() =>
 			decodeObjectInspectionResult({

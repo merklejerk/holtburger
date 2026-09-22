@@ -263,6 +263,8 @@ const itemInspectionSchema = z
 			.nullable(),
 		imbuedEffects: u32,
 		effects: z.array(effectSchema),
+		/** Server-authored portal destination display text, absent when undisclosed. */
+		portalDestination: z.string().nullable(),
 		useText: z.string().nullable(),
 		spells: z.array(
 			z.object({ id: u32, activeEnchantment: z.boolean() }).strict(),

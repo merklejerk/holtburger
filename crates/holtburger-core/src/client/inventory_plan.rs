@@ -13,7 +13,7 @@ use holtburger_common::{
 };
 use holtburger_world::{
     WorldState,
-    context::WorldContextExt,
+    context::{WorldContext, WorldContextExt},
     state::storage::{PackEntryKind, RosterCoverage, StorageLocation, StorageSlot},
 };
 use serde::{Deserialize, Serialize};
@@ -282,11 +282,31 @@ pub fn plan_inventory_intent(
             })
         }
 
-        InventoryTarget::Equipment { mask } => Ok(InventoryPlan::Equip(plan_equipment_change(
-            world,
-            intent.item,
-            Some(TargetSlot::EquipMask(EquipMask::from_bits_retain(mask))),
-        )?)),
+        InventoryTarget::Equipment { mask } => {
+            if mask == EquipMask::MISSILE_AMMO.bits() {
+                // Retail tops up equipped ammo before considering replacement (acclient.c:382078).
+                // Resolve before equipment planning: a merge needs no storage for displacement.
+                for guid in world.iter_equipment() {
+                    let location = world
+                        .equipment_mask(guid)
+                        .ok_or(InventoryPlanError::Pending(guid))?;
+                    if location == EquipMask::MISSILE_AMMO {
+                        if intent.item == guid {
+                            return Ok(InventoryPlan::Noop);
+                        }
+                        if let Some(plan) = plan_stack_merge(world, intent.item, guid)? {
+                            return Ok(plan);
+                        }
+                        break;
+                    }
+                }
+            }
+            Ok(InventoryPlan::Equip(plan_equipment_change(
+                world,
+                intent.item,
+                Some(TargetSlot::EquipMask(EquipMask::from_bits_retain(mask))),
+            )?))
+        }
         InventoryTarget::Container { guid } => {
             plan_move(world, intent.item, guid, None).map(InventoryPlan::Move)
         }
@@ -296,32 +316,13 @@ pub fn plan_inventory_intent(
                 return Ok(InventoryPlan::Noop);
             }
             require_accessible_item(world, guid)?;
-            let source = world
-                .get_visible_entity(intent.item)
-                .ok_or(InventoryPlanError::Pending(intent.item))?;
-            let target = world
-                .get_visible_entity(guid)
-                .ok_or(InventoryPlanError::Pending(guid))?;
-            let source_template = source
-                .wcid
-                .ok_or(InventoryPlanError::Pending(intent.item))?;
-            let target_template = target.wcid.ok_or(InventoryPlanError::Pending(guid))?;
-            if source_template == target_template && source.is_stackable() && target.is_stackable()
-            {
-                let amount = world
-                    .resolve_merge_stack_amount(intent.item, guid, None)
-                    .ok_or(InventoryPlanError::Pending(guid))?;
-                if amount > 0 {
-                    i32::try_from(amount).map_err(|_| InventoryPlanError::ProtocolRange)?;
-                    return Ok(InventoryPlan::Merge {
-                        source: intent.item,
-                        destination: guid,
-                        amount,
-                    });
-                }
-                if matches!(intent.target, InventoryTarget::Stack { .. }) {
-                    return Err(InventoryPlanError::StackFull);
-                }
+            match plan_stack_merge(world, intent.item, guid) {
+                Ok(Some(plan)) => return Ok(plan),
+                // Positional item drops retain their move fallback when the stack is full.
+                Err(InventoryPlanError::StackFull)
+                    if matches!(intent.target, InventoryTarget::Item { .. }) => {}
+                Err(error) => return Err(error),
+                Ok(None) => {}
             }
             if matches!(intent.target, InventoryTarget::Stack { .. }) {
                 return Err(InventoryPlanError::IncompatibleStacks);
@@ -330,6 +331,48 @@ pub fn plan_inventory_intent(
             plan_move(world, intent.item, container, Some(slot)).map(InventoryPlan::Move)
         }
     }
+}
+
+/// Incompatible items permit replacement; compatible stacks must merge or reject.
+fn plan_stack_merge(
+    world: &WorldState,
+    source: Guid,
+    destination: Guid,
+) -> Result<Option<InventoryPlan>, InventoryPlanError> {
+    let from = world
+        .get_visible_entity(source)
+        .ok_or(InventoryPlanError::Pending(source))?;
+    let to = world
+        .get_visible_entity(destination)
+        .ok_or(InventoryPlanError::Pending(destination))?;
+    let source_template = from.wcid.ok_or(InventoryPlanError::Pending(source))?;
+    let target_template = to.wcid.ok_or(InventoryPlanError::Pending(destination))?;
+    if source_template != target_template {
+        return Ok(None);
+    }
+    if !from.is_stackable() && !to.is_stackable() {
+        return Ok(None);
+    }
+    for (guid, entity) in [(source, from), (destination, to)] {
+        entity
+            .get_int_prop(PropertyInt::MaxStackSize)
+            .ok_or(InventoryPlanError::Pending(guid))?;
+    }
+    if !from.is_stackable() || !to.is_stackable() {
+        return Ok(None);
+    }
+    let amount = world
+        .resolve_merge_stack_amount(source, destination, None)
+        .ok_or(InventoryPlanError::Pending(destination))?;
+    if amount == 0 {
+        return Err(InventoryPlanError::StackFull);
+    }
+    i32::try_from(amount).map_err(|_| InventoryPlanError::ProtocolRange)?;
+    Ok(Some(InventoryPlan::Merge {
+        source,
+        destination,
+        amount,
+    }))
 }
 
 /// Retail searches main-pack items, then each carried pack's items in native order
@@ -609,7 +652,7 @@ impl super::ClientRuntime {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::equipment_plan::tests::{event, outfit};
     use super::*;
     use holtburger_common::properties::{InventoryEntryKind, PropertyInt};
@@ -650,6 +693,133 @@ mod tests {
             place(&mut world, guid, PACK, slot, InventoryEntryKind::Item);
         }
         world
+    }
+
+    /// Carried source and equipped matching ammo, with no free storage slots.
+    pub(in crate::client) fn ammo_inventory() -> WorldState {
+        let mut world = inventory();
+        for (guid, count) in [(SOURCE, 20), (TARGET, 90)] {
+            let entity = world.entities.get_mut(guid).unwrap();
+            entity.wcid = Some(1);
+            for (property, value) in [
+                (PropertyInt::StackSize, count),
+                (PropertyInt::MaxStackSize, 100),
+                (
+                    PropertyInt::ValidLocations,
+                    EquipMask::MISSILE_AMMO.bits() as i32,
+                ),
+                (
+                    PropertyInt::ItemType,
+                    holtburger_common::properties::ItemType::MISSILE_WEAPON.bits() as i32,
+                ),
+            ] {
+                entity.properties.ints.insert(property, value);
+            }
+        }
+        event(
+            &mut world,
+            GameEvent::WieldObject(Box::new(
+                holtburger_protocol::messages::WieldObjectEventData {
+                    object_guid: TARGET,
+                    equip_mask: EquipMask::MISSILE_AMMO,
+                },
+            )),
+        );
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 2);
+        world
+    }
+
+    #[test]
+    fn ammo_drop_tops_up_without_allocating_or_replacing() {
+        let mut world = ammo_inventory();
+        let intent = InventoryIntent {
+            item: SOURCE,
+            target: InventoryTarget::Equipment {
+                mask: EquipMask::MISSILE_AMMO.bits(),
+            },
+        };
+        for (count, expected) in [(90, 10), (80, 20)] {
+            world
+                .entities
+                .get_mut(TARGET)
+                .unwrap()
+                .properties
+                .ints
+                .insert(PropertyInt::StackSize, count);
+            let plan = plan_inventory_intent(&world, intent).unwrap();
+            assert_eq!(
+                plan,
+                InventoryPlan::Merge {
+                    source: SOURCE,
+                    destination: TARGET,
+                    amount: expected
+                }
+            );
+            assert_eq!(
+                InventoryPreview::from(&plan),
+                InventoryPreview::Merge { amount: expected }
+            );
+        }
+        world
+            .entities
+            .get_mut(TARGET)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::StackSize, 100);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::StackFull)
+        );
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: TARGET,
+                    ..intent
+                }
+            ),
+            Ok(InventoryPlan::Noop)
+        );
+        for property in [PropertyInt::StackSize, PropertyInt::MaxStackSize] {
+            let mut incomplete = ammo_inventory();
+            incomplete
+                .entities
+                .get_mut(TARGET)
+                .unwrap()
+                .properties
+                .ints
+                .0
+                .remove(&property);
+            assert_eq!(
+                plan_inventory_intent(&incomplete, intent),
+                Err(InventoryPlanError::Pending(TARGET))
+            );
+        }
+        world.entities.get_mut(TARGET).unwrap().wcid = Some(2);
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 3);
+        let InventoryPlan::Equip(plan) = plan_inventory_intent(&world, intent).unwrap() else {
+            panic!("different ammo should replace")
+        };
+        assert_eq!(plan.unequips.len(), 1);
+        assert_eq!(plan.unequips[0].item, TARGET);
+        place(&mut world, TARGET, PACK, 2, InventoryEntryKind::Item);
+        let InventoryPlan::Equip(plan) = plan_inventory_intent(&world, intent).unwrap() else {
+            panic!("empty slot should equip")
+        };
+        assert!(plan.unequips.is_empty());
     }
 
     const EXTERNAL: Guid = Guid(0x8000_0100);

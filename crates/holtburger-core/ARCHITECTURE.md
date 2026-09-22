@@ -340,7 +340,10 @@ character-only preparation and do not acquire motion-table/run-stat requirements
 
 `client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,
 append, merge-only targets, splits, equipment targets, pickup, ground drop, give, and
-native pack exchanges. Pickup admission comes from world's `pickup_candidate`.
+native pack exchanges. Explicit ammo-slot drops top up matching equipped stacks before
+replacement planning, leaving any remainder in the source slot; full matching stacks
+reject instead of replacing. Preview and submission share this decision. Pickup
+admission comes from world's `pickup_candidate`.
 Stack pickups first seek a carried stack that can absorb the entire quantity, in
 main-pack then native pack/item order; otherwise they allocate a slot for the whole
 source without partially merging. Container preference affects only slot allocation;

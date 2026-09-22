@@ -287,6 +287,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pickup_rejects_partial_fit_without_sending_and_submits_whole_merge_once() {
+        use super::super::{inventory_plan::InventoryTarget, types::ClientViewEvent};
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        let mut client = build_test_client(ClientState::InWorld);
+        client.world = outfit(0, 1);
+        let ground = Guid(0x8000_0042);
+        let mut entity =
+            holtburger_world::entity::Entity::new(ground, "Loose stack".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        client.world.add_entity(entity);
+        const MAXIMUM: i32 = 100;
+        const QUANTITY: i32 = 20;
+        let carried = Guid(3);
+        for (guid, count) in [(ground, QUANTITY), (carried, MAXIMUM - 1)] {
+            let entity = client.world.entities.get_mut(guid).unwrap();
+            entity.wcid = Some(1);
+            entity.properties.ints.insert(PropertyInt::StackSize, count);
+            entity
+                .properties
+                .ints
+                .insert(PropertyInt::MaxStackSize, MAXIMUM);
+        }
+        let intent = InventoryIntent {
+            item: ground,
+            target: InventoryTarget::Pickup { container: None },
+        };
+        let mut events = client.subscribe_client_view_events();
+        let before = client.session.game_action_sequence;
+        client.submit_inventory_intent(intent).await.unwrap();
+        assert_eq!(client.session.game_action_sequence, before);
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
+            source: ActionResultSource::Client,
+            reason: ActionResultReason::General(message),
+        } if message == super::super::inventory_plan::InventoryPlanError::PickupStackFull.to_string())
+        );
+        client
+            .world
+            .entities
+            .get_mut(carried)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::StackSize, MAXIMUM - QUANTITY);
+        client.submit_inventory_intent(intent).await.unwrap();
+        assert_eq!(client.session.game_action_sequence, before + 1);
+        assert!(client.pack_exchange.is_none());
+        assert!(client.equipment_operation.is_none());
+    }
+
+    #[tokio::test]
     async fn pickup_equipped_drop_and_give_emit_the_exact_native_actions() {
         use super::super::inventory_plan::InventoryTarget;
         use byteorder::{LittleEndian, ReadBytesExt};

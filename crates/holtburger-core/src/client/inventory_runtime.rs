@@ -287,6 +287,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ammo_drop_sends_one_merge_without_equipment_operation() {
+        use super::super::inventory_plan::{InventoryTarget, tests::ammo_inventory};
+        let mut client = build_test_client(ClientState::InWorld);
+        client.world = ammo_inventory();
+        let before = client.session.game_action_sequence;
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: Guid(3),
+                target: InventoryTarget::Equipment {
+                    mask: holtburger_common::properties::EquipMask::MISSILE_AMMO.bits(),
+                },
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before + 1);
+        assert!(client.equipment_operation.is_none());
+        assert!(client.pack_exchange.is_none());
+        client
+            .world
+            .entities
+            .get_mut(Guid(6))
+            .unwrap()
+            .properties
+            .ints
+            .insert(holtburger_common::properties::PropertyInt::StackSize, 100);
+        let mut events = client.subscribe_client_view_events();
+        client
+            .submit_inventory_intent(InventoryIntent {
+                item: Guid(3),
+                target: InventoryTarget::Equipment {
+                    mask: holtburger_common::properties::EquipMask::MISSILE_AMMO.bits(),
+                },
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before + 1);
+        assert!(
+            matches!(events.try_recv().unwrap(), super::super::types::ClientViewEvent::ActionResult {
+            source: ActionResultSource::Client,
+            reason: ActionResultReason::General(message),
+        } if message == super::super::inventory_plan::InventoryPlanError::StackFull.to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn pickup_rejects_partial_fit_without_sending_and_submits_whole_merge_once() {
         use super::super::{inventory_plan::InventoryTarget, types::ClientViewEvent};
         use holtburger_common::properties::{ItemType, PropertyInt};

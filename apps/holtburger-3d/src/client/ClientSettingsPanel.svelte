@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import ClientBindingDialog from "./ClientBindingDialog.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import {
 		CLIENT_BINDING_GROUPS,
+		captureClientBinding,
+		clientBindingsOverlap,
 		conflictingClientBindings,
 		replaceConflictingClientBindings,
 		type ClientBindingRow,
 	} from "./client-binding-catalog";
 	import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
-	import { keyBindingsOverlap } from "../lib/input/input-context";
 	import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes";
 	import {
 		resolveTextureFilteringPolicy,
@@ -27,6 +29,7 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type {
 		ClientKeyboardConfiguration,
+		InputKeyEvent,
 		KeyBinding,
 	} from "../lib/input/input-contract";
 	import {
@@ -67,112 +70,183 @@
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	type Capture = {
+		readonly kind: "capture";
 		readonly row: ClientBindingRow;
-		readonly modifier: KeyBinding | null;
+		readonly source: HTMLButtonElement;
+		/** Modifier-only capture completes on release using its press-time event. */
+		readonly modifier: {
+			readonly binding: KeyBinding;
+			readonly witness: InputKeyEvent;
+		} | null;
 	};
 	type Conflict = {
+		readonly kind: "conflict";
 		readonly row: ClientBindingRow;
+		readonly source: HTMLButtonElement;
 		readonly bindings: readonly KeyBinding[];
 		readonly rows: readonly ClientBindingRow[];
+		/** The captured event proves mixed key/code overlap during replacement. */
+		readonly witness: InputKeyEvent | null;
 	};
-	let capture = $state<Capture | null>(null);
-	let conflict = $state<Conflict | null>(null);
+	let bindingDialog = $state<Capture | Conflict | null>(null);
 	onMount(() => {
-		const cancel = () => {
-			capture = null;
-			conflict = null;
-		};
+		const cancel = () => (bindingDialog = null);
 		window.addEventListener("blur", cancel);
 		return () => window.removeEventListener("blur", cancel);
 	});
-	function exactBinding(event: KeyboardEvent): KeyBinding {
+	function closeBindingDialog(): void {
+		const source = bindingDialog?.source;
+		bindingDialog = null;
+		requestAnimationFrame(() => {
+			if (source?.isConnected) source.focus({ preventScroll: true });
+		});
+	}
+	function captureWitness(event: KeyboardEvent): InputKeyEvent {
 		return {
 			key: event.key,
-			shift: event.shiftKey,
-			ctrl: event.ctrlKey,
-			alt: event.altKey,
-			meta: event.metaKey,
+			code: event.code,
+			shiftKey: event.shiftKey,
+			ctrlKey: event.ctrlKey,
+			altKey: event.altKey,
+			metaKey: event.metaKey,
 		};
 	}
 	function proposeBindings(
 		row: ClientBindingRow,
 		bindings: readonly KeyBinding[],
+		witness: InputKeyEvent | null,
+		source: HTMLButtonElement,
 	): void {
 		const proposal = row.write(input, bindings);
 		const rows = [
 			...new Set(
 				bindings.flatMap((binding) =>
-					conflictingClientBindings(proposal, row, binding),
+					conflictingClientBindings(proposal, row, binding, witness),
 				),
 			),
 		];
 		if (rows.length > 0) {
-			conflict = { row, bindings, rows };
+			bindingDialog = {
+				kind: "conflict",
+				row,
+				source,
+				bindings,
+				rows,
+				witness,
+			};
 			return;
 		}
 		onInputChange(proposal);
+		if (bindingDialog !== null) closeBindingDialog();
 	}
-	function addBinding(row: ClientBindingRow, binding: KeyBinding): void {
-		capture = null;
+	function addBinding(
+		row: ClientBindingRow,
+		binding: KeyBinding,
+		witness: InputKeyEvent,
+	): void {
+		if (bindingDialog?.kind !== "capture") return;
 		if (
-			row.read(input).some((existing) => keyBindingsOverlap(existing, binding))
-		)
+			row
+				.read(input)
+				.some((existing) => clientBindingsOverlap(existing, binding, witness))
+		) {
+			closeBindingDialog();
 			return;
-		proposeBindings(row, [...row.read(input), binding]);
+		}
+		proposeBindings(
+			row,
+			[...row.read(input), binding],
+			witness,
+			bindingDialog.source,
+		);
 	}
-	function handleCaptureKeydown(event: KeyboardEvent): void {
-		if (capture === null) return;
+	function handleDialogKeydown(event: KeyboardEvent): void {
+		if (bindingDialog === null) return;
+		if (bindingDialog.kind === "conflict") {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				closeBindingDialog();
+			}
+			return;
+		}
 		event.preventDefault();
 		if (event.repeat) return;
 		if (event.key === "Escape") {
-			capture = null;
+			closeBindingDialog();
 			return;
 		}
-		const binding = exactBinding(event);
+		const witness = captureWitness(event);
+		const binding = captureClientBinding(witness);
 		if (["Shift", "Control", "Alt", "Meta"].includes(event.key)) {
-			capture = { ...capture, modifier: binding };
+			bindingDialog = {
+				...bindingDialog,
+				modifier: { binding, witness },
+			};
 			return;
 		}
-		addBinding(capture.row, binding);
+		addBinding(bindingDialog.row, binding, witness);
 	}
-	function handleCaptureKeyup(event: KeyboardEvent): void {
-		if (capture === null) return;
+	function handleDialogKeyup(event: KeyboardEvent): void {
+		if (bindingDialog?.kind !== "capture") return;
 		event.preventDefault();
-		if (capture.modifier?.key !== event.key) return;
-		addBinding(capture.row, capture.modifier);
+		if (bindingDialog.modifier?.binding.key !== event.key) return;
+		addBinding(
+			bindingDialog.row,
+			bindingDialog.modifier.binding,
+			bindingDialog.modifier.witness,
+		);
 	}
 	function startCapture(
 		row: ClientBindingRow,
 		button: HTMLButtonElement,
 	): void {
-		conflict = null;
-		capture = { row, modifier: null };
-		button.focus();
+		bindingDialog = { kind: "capture", row, source: button, modifier: null };
 	}
-	function clearBinding(row: ClientBindingRow, index: number): void {
+	function clearBinding(
+		row: ClientBindingRow,
+		index: number,
+		source: HTMLButtonElement,
+	): void {
 		proposeBindings(
 			row,
 			row.read(input).filter((_, position) => position !== index),
+			null,
+			source,
 		);
 	}
-	function restoreBinding(row: ClientBindingRow): void {
-		proposeBindings(row, row.read(CLIENT_KEYBOARD_DEFAULTS));
+	function restoreBinding(
+		row: ClientBindingRow,
+		source: HTMLButtonElement,
+	): void {
+		proposeBindings(row, row.read(CLIENT_KEYBOARD_DEFAULTS), null, source);
 	}
-	function conflictingBindingLabels(candidate: Conflict): string {
+	function conflictingBindingPills(candidate: Conflict): string[] {
 		return candidate.bindings
 			.filter((binding) =>
 				candidate.rows.some((row) =>
-					row.read(input).some((other) => keyBindingsOverlap(binding, other)),
+					row
+						.read(input)
+						.some((other) =>
+							clientBindingsOverlap(binding, other, candidate.witness),
+						),
 				),
 			)
-			.map((binding) => formatInputBinding(binding, displayPlatform))
-			.join(" / ");
+			.map((binding) => formatInputPill(binding, displayPlatform));
+	}
+	function replaceDialogConflict(): void {
+		if (bindingDialog?.kind !== "conflict") return;
+		onInputChange(
+			replaceConflictingClientBindings(
+				input,
+				bindingDialog.row,
+				bindingDialog.bindings,
+				bindingDialog.rows,
+				bindingDialog.witness,
+			),
+		);
+		closeBindingDialog();
 	}
 	function handleSettingsKeydown(event: KeyboardEvent): void {
-		if (capture !== null) {
-			handleCaptureKeydown(event);
-			return;
-		}
 		if (
 			!(event.target instanceof HTMLElement) ||
 			event.target.getAttribute("role") !== "tab"
@@ -222,343 +296,328 @@
 		];
 </script>
 
-<section
-	class="settings-panel ui-body"
-	aria-label="Client settings"
-	use:keyboard.scope={{
-		nativeControls: true,
-		keydown: handleSettingsKeydown,
-		keyup: handleCaptureKeyup,
-	}}
->
+<section class="settings-panel ui-body" aria-label="Client settings">
 	<div
-		class="settings-tabs ui-tabs"
-		role="tablist"
-		aria-label="Settings sections"
+		class="settings-scroll"
+		inert={bindingDialog !== null}
+		use:keyboard.scope={{
+			nativeControls: true,
+			keydown: handleSettingsKeydown,
+		}}
 	>
-		{#each tabs as tab}
-			<button
-				type="button"
-				class="ui-tab"
-				role="tab"
-				id={`settings-tab-${tab.id}`}
-				aria-controls={`settings-section-${tab.id}`}
-				aria-selected={selectedTab === tab.id}
-				tabindex={selectedTab === tab.id ? 0 : -1}
-				onclick={() => onSelectTab(tab.id)}>{tab.label}</button
-			>
-		{/each}
-	</div>
-	{#if selectedTab === "graphics"}
 		<div
-			role="tabpanel"
-			id="settings-section-graphics"
-			aria-labelledby="settings-tab-graphics"
-			class="settings-section"
+			class="settings-tabs ui-tabs"
+			role="tablist"
+			aria-label="Settings sections"
 		>
-			<label
-				>View distance: {graphics.viewDistance} landblocks
-				<input
-					type="range"
-					min={CLIENT_GRAPHICS_RANGES.viewDistance.minimum}
-					max={CLIENT_GRAPHICS_RANGES.viewDistance.maximum}
-					step={CLIENT_GRAPHICS_RANGES.viewDistance.step}
-					value={graphics.viewDistance}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							viewDistance: event.currentTarget.valueAsNumber,
-						})}
-				/>
-			</label>
-			<p class="ui-muted">
-				Terrain and buildings extend to this distance; smaller objects stay
-				nearby.
-			</p>
-			<label
-				>Field of view: {graphics.verticalFovDegrees}°
-				<input
-					type="range"
-					min={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum}
-					max={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum}
-					step={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.step}
-					value={graphics.verticalFovDegrees}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							verticalFovDegrees: event.currentTarget.valueAsNumber,
-						})}
-				/>
-			</label>
-			<label class="checkbox"
-				><input
-					type="checkbox"
-					checked={graphics.ambientOcclusionEnabled}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							ambientOcclusionEnabled: event.currentTarget.checked,
-						})}
-				/> Ambient occlusion</label
-			>
-			<label
-				>Entity shadows
-				<select
-					value={graphics.entityShadowMode}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							entityShadowMode: event.currentTarget
-								.value as ClientGraphicsSettings["entityShadowMode"],
-						})}
+			{#each tabs as tab}
+				<button
+					type="button"
+					class="ui-tab"
+					role="tab"
+					id={`settings-tab-${tab.id}`}
+					aria-controls={`settings-section-${tab.id}`}
+					aria-selected={selectedTab === tab.id}
+					tabindex={selectedTab === tab.id ? 0 : -1}
+					onclick={() => onSelectTab(tab.id)}>{tab.label}</button
 				>
-					{#each ENTITY_SHADOW_MODES as mode}<option value={mode}
-							>{mode === "none"
-								? "Off"
-								: mode === "simple"
-									? "Simple"
-									: "Shadow maps"}</option
-						>{/each}
-				</select>
-			</label>
-			<label
-				>Texture filtering
-				<select
-					value={graphics.textureFiltering}
-					disabled={textureFilteringCapabilities === null}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							textureFiltering: event.currentTarget
-								.value as ClientGraphicsSettings["textureFiltering"],
-						})}
-				>
-					{#if textureFilteringCapabilities === null}<option
-							value={graphics.textureFiltering}>Detecting GPU…</option
-						>{/if}
-					{#if textureFilteringCapabilities !== null && effectiveFiltering !== graphics.textureFiltering}
-						<option value={graphics.textureFiltering}
-							>{graphics.textureFiltering} (saved; using {effectiveFiltering})</option
-						>
-					{/if}
-					{#each supportedFiltering as mode}<option value={mode}>{mode}</option
-						>{/each}
-				</select>
-			</label>
-			<label
-				>Render scale
-				<select
-					value={graphics.renderScale}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							renderScale: Number(event.currentTarget.value),
-						})}
-				>
-					{#each renderScales as scale}<option value={scale}>{scale}×</option
-						>{/each}
-				</select>
-			</label>
-			<label class="checkbox"
-				><input
-					type="checkbox"
-					checked={graphics.weatherEnabled}
-					onchange={(event) =>
-						onGraphicsChange({
-							...graphics,
-							weatherEnabled: event.currentTarget.checked,
-						})}
-				/> Weather</label
-			>
+			{/each}
 		</div>
-	{:else if selectedTab === "ui"}
-		<div
-			role="tabpanel"
-			id="settings-section-ui"
-			aria-labelledby="settings-tab-ui"
-			class="settings-section"
-		>
-			{#each fontRoles as role}
+		{#if selectedTab === "graphics"}
+			<div
+				role="tabpanel"
+				id="settings-section-graphics"
+				aria-labelledby="settings-tab-graphics"
+				class="settings-section"
+			>
 				<label
-					>{role.label} font
-					<select
-						value={ui.fonts[role.id]}
+					>View distance: {graphics.viewDistance} landblocks
+					<input
+						type="range"
+						min={CLIENT_GRAPHICS_RANGES.viewDistance.minimum}
+						max={CLIENT_GRAPHICS_RANGES.viewDistance.maximum}
+						step={CLIENT_GRAPHICS_RANGES.viewDistance.step}
+						value={graphics.viewDistance}
 						onchange={(event) =>
-							onUiChange({
-								...ui,
-								fonts: {
-									...ui.fonts,
-									[role.id]: event.currentTarget.value as ClientFontFamily,
-								},
+							onGraphicsChange({
+								...graphics,
+								viewDistance: event.currentTarget.valueAsNumber,
+							})}
+					/>
+				</label>
+				<p class="ui-muted">
+					Terrain and buildings extend to this distance; smaller objects stay
+					nearby.
+				</p>
+				<label
+					>Field of view: {graphics.verticalFovDegrees}°
+					<input
+						type="range"
+						min={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum}
+						max={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum}
+						step={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.step}
+						value={graphics.verticalFovDegrees}
+						onchange={(event) =>
+							onGraphicsChange({
+								...graphics,
+								verticalFovDegrees: event.currentTarget.valueAsNumber,
+							})}
+					/>
+				</label>
+				<label class="checkbox"
+					><input
+						type="checkbox"
+						checked={graphics.ambientOcclusionEnabled}
+						onchange={(event) =>
+							onGraphicsChange({
+								...graphics,
+								ambientOcclusionEnabled: event.currentTarget.checked,
+							})}
+					/> Ambient occlusion</label
+				>
+				<label
+					>Entity shadows
+					<select
+						value={graphics.entityShadowMode}
+						onchange={(event) =>
+							onGraphicsChange({
+								...graphics,
+								entityShadowMode: event.currentTarget
+									.value as ClientGraphicsSettings["entityShadowMode"],
 							})}
 					>
-						{#each CLIENT_FONT_FAMILY_OPTIONS as family}
-							<option value={family}>{fontFamilyLabels[family]}</option>
-						{/each}
+						{#each ENTITY_SHADOW_MODES as mode}<option value={mode}
+								>{mode === "none"
+									? "Off"
+									: mode === "simple"
+										? "Simple"
+										: "Shadow maps"}</option
+							>{/each}
 					</select>
 				</label>
-			{/each}
-			<label
-				>Text scaling (planned)
-				<input type="range" min="50" max="200" value="100" disabled />
-			</label>
-			<label
-				>Icon scaling (planned)
-				<input type="range" min="50" max="200" value="100" disabled />
-			</label>
-			<button
-				type="button"
-				class="ui-button"
-				disabled={!canResetHudPlacements}
-				onclick={onResetHudPlacements}>Reset HUD placements</button
-			>
-			<p class="ui-muted">
-				Repositions windows and this character’s action bars without clearing
-				their contents.
-			</p>
-		</div>
-	{:else}
-		<div
-			role="tabpanel"
-			id="settings-section-input"
-			aria-labelledby="settings-tab-input"
-			class="settings-section"
-		>
-			<p class="ui-muted">
-				Use the plus icon to add a key or chord; the circular arrow restores an
-				action's defaults. Escape cancels capture. An action can have multiple
-				keys.
-			</p>
-			<button
-				type="button"
-				class="ui-button"
-				onclick={() => {
-					capture = null;
-					conflict = null;
-					onInputChange(structuredClone(CLIENT_KEYBOARD_DEFAULTS));
-				}}>Restore all default bindings</button
-			>
-			{#if conflict !== null}
-				<div class="binding-conflict" role="alert">
-					<p>
-						{conflictingBindingLabels(conflict)} conflicts with
-						{conflict.rows.map((row) => row.label).join(", ")}.
-					</p>
-					<button
-						type="button"
-						class="ui-button"
-						onclick={() => {
-							if (conflict !== null) {
-								onInputChange(
-									replaceConflictingClientBindings(
-										input,
-										conflict.row,
-										conflict.bindings,
-										conflict.rows,
-									),
-								);
-								conflict = null;
-							}
-						}}>Replace conflicting bindings</button
+				<label
+					>Texture filtering
+					<select
+						value={graphics.textureFiltering}
+						disabled={textureFilteringCapabilities === null}
+						onchange={(event) =>
+							onGraphicsChange({
+								...graphics,
+								textureFiltering: event.currentTarget
+									.value as ClientGraphicsSettings["textureFiltering"],
+							})}
 					>
-					<button
-						type="button"
-						class="ui-button"
-						onclick={() => {
-							conflict = null;
-						}}>Cancel</button
-					>
-				</div>
-			{/if}
-			{#each CLIENT_BINDING_GROUPS as group}
-				<details class="binding-group" open={group.title === "Movement"}>
-					<summary>{group.title}</summary>
-					{#if group.title === "Action bars"}
-						<label
-							>Alternate action modifier
-							<select
-								value={input.actionBars.alternate}
-								onchange={(event) =>
-									onInputChange({
-										...input,
-										actionBars: {
-											...input.actionBars,
-											alternate: event.currentTarget
-												.value as ClientKeyboardConfiguration["actionBars"]["alternate"],
-										},
-									})}
+						{#if textureFilteringCapabilities === null}<option
+								value={graphics.textureFiltering}>Detecting GPU…</option
+							>{/if}
+						{#if textureFilteringCapabilities !== null && effectiveFiltering !== graphics.textureFiltering}
+							<option value={graphics.textureFiltering}
+								>{graphics.textureFiltering} (saved; using {effectiveFiltering})</option
 							>
-								<option value="shift"
-									>{modifierName("shift", displayPlatform)}</option
-								><option value="ctrl"
-									>{modifierName("ctrl", displayPlatform)}</option
-								><option value="alt"
-									>{modifierName("alt", displayPlatform)}</option
-								><option value="meta"
-									>{modifierName("meta", displayPlatform)}</option
+						{/if}
+						{#each supportedFiltering as mode}<option value={mode}
+								>{mode}</option
+							>{/each}
+					</select>
+				</label>
+				<label
+					>Render scale
+					<select
+						value={graphics.renderScale}
+						onchange={(event) =>
+							onGraphicsChange({
+								...graphics,
+								renderScale: Number(event.currentTarget.value),
+							})}
+					>
+						{#each renderScales as scale}<option value={scale}>{scale}×</option
+							>{/each}
+					</select>
+				</label>
+				<label class="checkbox"
+					><input
+						type="checkbox"
+						checked={graphics.weatherEnabled}
+						onchange={(event) =>
+							onGraphicsChange({
+								...graphics,
+								weatherEnabled: event.currentTarget.checked,
+							})}
+					/> Weather</label
+				>
+			</div>
+		{:else if selectedTab === "ui"}
+			<div
+				role="tabpanel"
+				id="settings-section-ui"
+				aria-labelledby="settings-tab-ui"
+				class="settings-section"
+			>
+				{#each fontRoles as role}
+					<label
+						>{role.label} font
+						<select
+							value={ui.fonts[role.id]}
+							onchange={(event) =>
+								onUiChange({
+									...ui,
+									fonts: {
+										...ui.fonts,
+										[role.id]: event.currentTarget.value as ClientFontFamily,
+									},
+								})}
+						>
+							{#each CLIENT_FONT_FAMILY_OPTIONS as family}
+								<option value={family}>{fontFamilyLabels[family]}</option>
+							{/each}
+						</select>
+					</label>
+				{/each}
+				<label
+					>Text scaling (planned)
+					<input type="range" min="50" max="200" value="100" disabled />
+				</label>
+				<label
+					>Icon scaling (planned)
+					<input type="range" min="50" max="200" value="100" disabled />
+				</label>
+				<button
+					type="button"
+					class="ui-button"
+					disabled={!canResetHudPlacements}
+					onclick={onResetHudPlacements}>Reset HUD placements</button
+				>
+				<p class="ui-muted">
+					Repositions windows and this character’s action bars without clearing
+					their contents.
+				</p>
+			</div>
+		{:else}
+			<div
+				role="tabpanel"
+				id="settings-section-input"
+				aria-labelledby="settings-tab-input"
+				class="settings-section"
+			>
+				<p class="ui-muted">
+					Use the plus icon to add a key or chord; the circular arrow restores
+					an action's defaults. Escape cancels capture. An action can have
+					multiple keys.
+				</p>
+				<button
+					type="button"
+					class="ui-button"
+					onclick={() => {
+						onInputChange(structuredClone(CLIENT_KEYBOARD_DEFAULTS));
+					}}>Restore all default bindings</button
+				>
+				{#each CLIENT_BINDING_GROUPS as group}
+					<details class="binding-group" open={group.title === "Movement"}>
+						<summary>{group.title}</summary>
+						{#if group.title === "Action bars"}
+							<label
+								>Alternate action modifier
+								<select
+									value={input.actionBars.alternate}
+									onchange={(event) =>
+										onInputChange({
+											...input,
+											actionBars: {
+												...input.actionBars,
+												alternate: event.currentTarget
+													.value as ClientKeyboardConfiguration["actionBars"]["alternate"],
+											},
+										})}
 								>
-							</select>
-						</label>
-						<p class="ui-muted">
-							Hold this while activating an action cell to use its alternate
-							effect, such as equipping the other side or using an item on the
-							selected target.
-						</p>
-					{/if}
-					{#each group.rows as row (row.id)}
-						<div class="binding-row">
-							<span class="binding-label">{row.label}</span>
-							<div class="binding-keys">
-								{#each row.read(input) as binding, index}
+									<option value="shift"
+										>{modifierName("shift", displayPlatform)}</option
+									><option value="ctrl"
+										>{modifierName("ctrl", displayPlatform)}</option
+									><option value="alt"
+										>{modifierName("alt", displayPlatform)}</option
+									><option value="meta"
+										>{modifierName("meta", displayPlatform)}</option
+									>
+								</select>
+							</label>
+							<p class="ui-muted">
+								Hold this while activating an action cell to use its alternate
+								effect, such as equipping the other side or using an item on the
+								selected target.
+							</p>
+						{/if}
+						{#each group.rows as row (row.id)}
+							<div class="binding-row">
+								<span class="binding-label">{row.label}</span>
+								<div class="binding-keys">
+									{#each row.read(input) as binding, index}
+										<button
+											type="button"
+											class="binding-key"
+											aria-label={`Remove ${formatInputBinding(binding, displayPlatform)} from ${row.label}`}
+											title={`Remove binding: ${formatInputBinding(binding, displayPlatform)}`}
+											onclick={(event) =>
+												clearBinding(row, index, event.currentTarget)}
+											><kbd aria-hidden="true"
+												>{formatInputPill(binding, displayPlatform)}</kbd
+											><span class="binding-key-remove" aria-hidden="true"
+												>×</span
+											></button
+										>
+									{:else}<span class="ui-muted">Unbound</span>{/each}
+								</div>
+								<div class="binding-actions">
 									<button
 										type="button"
-										class="binding-key"
-										aria-label={`Remove ${formatInputBinding(binding, displayPlatform)} from ${row.label}`}
-										title={`Remove binding: ${formatInputBinding(binding, displayPlatform)}`}
-										onclick={() => clearBinding(row, index)}
-										><kbd aria-hidden="true"
-											>{formatInputPill(binding, displayPlatform)}</kbd
-										><span class="binding-key-remove" aria-hidden="true">×</span
-										></button
+										class="ui-button ui-icon-button"
+										aria-label={`Add key for ${row.label}`}
+										title={`Add key for ${row.label}`}
+										onclick={(event) => startCapture(row, event.currentTarget)}
+										><ClientHudIcon name="add" /></button
 									>
-								{:else}<span class="ui-muted">Unbound</span>{/each}
+									<button
+										type="button"
+										class="ui-button ui-icon-button"
+										aria-label={`Restore default keys for ${row.label}`}
+										title={`Restore default keys for ${row.label}`}
+										onclick={(event) =>
+											restoreBinding(row, event.currentTarget)}
+										><ClientHudIcon name="reset" /></button
+									>
+								</div>
 							</div>
-							<div class="binding-actions">
-								<button
-									type="button"
-									class="ui-button ui-icon-button"
-									aria-label={capture?.row.id === row.id
-										? `Press a key for ${row.label}`
-										: `Add key for ${row.label}`}
-									title={capture?.row.id === row.id
-										? `Press a key for ${row.label}`
-										: `Add key for ${row.label}`}
-									aria-pressed={capture?.row.id === row.id}
-									onclick={(event) => startCapture(row, event.currentTarget)}
-									onblur={() => {
-										if (capture?.row.id === row.id) capture = null;
-									}}><ClientHudIcon name="add" /></button
-								>
-								<button
-									type="button"
-									class="ui-button ui-icon-button"
-									aria-label={`Restore default keys for ${row.label}`}
-									title={`Restore default keys for ${row.label}`}
-									onclick={() => restoreBinding(row)}
-									><ClientHudIcon name="reset" /></button
-								>
-							</div>
-						</div>
-					{/each}
-				</details>
-			{/each}
-		</div>
+						{/each}
+					</details>
+				{/each}
+			</div>
+		{/if}
+	</div>
+	{#if bindingDialog !== null}
+		<ClientBindingDialog
+			action={bindingDialog.row.label}
+			conflict={bindingDialog.kind === "conflict"
+				? {
+						bindings: conflictingBindingPills(bindingDialog),
+						actions: bindingDialog.rows.map((row) => row.label).join(", "),
+					}
+				: null}
+			onKeydown={handleDialogKeydown}
+			onKeyup={handleDialogKeyup}
+			onReplace={replaceDialogConflict}
+			onCancel={closeBindingDialog}
+		/>
 	{/if}
 </section>
 
 <style>
 	@layer components {
 		.settings-panel {
+			position: relative;
+			height: 100%;
+			overflow: hidden;
+		}
+		.settings-scroll {
+			box-sizing: border-box;
 			height: 100%;
 			overflow: auto;
 			padding: 12px;
@@ -672,14 +731,6 @@
 		.binding-key:hover .binding-key-remove,
 		.binding-key:focus-visible .binding-key-remove {
 			opacity: 1;
-		}
-		.binding-conflict {
-			display: flex;
-			flex-wrap: wrap;
-			align-items: center;
-			gap: 8px;
-			padding: 8px;
-			border: 1px solid var(--ui-color-warning);
 		}
 	}
 </style>

@@ -4831,11 +4831,99 @@ async function runClientHudHarness({ viteUrl }) {
 				Buffer.from(shot.data, "base64"),
 			);
 		}
+		const addKeyPoint = await evaluateExpression(
+			client,
+			`(async () => {
+				const panel = document.querySelector('.hud-window[aria-label="Settings"]');
+				panel.querySelector('#settings-tab-input').click();
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				const button = panel.querySelector('#settings-section-input .binding-actions button');
+				const bounds = button.getBoundingClientRect();
+				return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+			})()`,
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			x: addKeyPoint.x,
+			y: addKeyPoint.y,
+			button: "left",
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			x: addKeyPoint.x,
+			y: addKeyPoint.y,
+			button: "left",
+			clickCount: 1,
+		});
+		const addKeyState = await evaluateExpression(
+			client,
+			`(async () => {
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				const dialog = document.querySelector('.hud-window[aria-label="Settings"] .binding-dialog');
+				return { open: dialog?.open, focused: document.activeElement === dialog, prompt: dialog?.textContent };
+			})()`,
+		);
+		if (
+			addKeyState.open !== true ||
+			!addKeyState.focused ||
+			!addKeyState.prompt?.includes("Press a key or chord")
+		)
+			throw new Error(
+				`Pointer click did not arm Add key: ${JSON.stringify(addKeyState)}`,
+			);
+		for (const type of ["keyDown", "keyUp"]) {
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "Escape",
+				code: "Escape",
+				windowsVirtualKeyCode: 27,
+			});
+		}
+		await evaluateExpression(
+			client,
+			`(async () => {
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				const panel = document.querySelector('.hud-window[aria-label="Settings"]');
+				const button = panel?.querySelector('#settings-section-input .binding-actions button');
+				if (!button || panel.querySelector('.binding-dialog') || document.activeElement !== button) throw new Error('Escape did not close binding capture and restore focus');
+				button.click();
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				if (!panel.querySelector('.binding-dialog')?.open) throw new Error('Add key did not reopen after Escape');
+			})()`,
+		);
+		for (const type of ["keyDown", "keyUp"]) {
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "p",
+				code: "KeyP",
+				windowsVirtualKeyCode: 80,
+			});
+		}
+		await evaluateExpression(
+			client,
+			`(async () => {
+				const panel = document.querySelector('.hud-window[aria-label="Settings"]');
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				const row = panel.querySelector('#settings-section-input .binding-row');
+				if (![...row.querySelectorAll('kbd')].some((key) => key.textContent === 'p')) throw new Error('Pointer-armed binding did not capture a real key');
+				panel.querySelector('#settings-section-input > button').click();
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				panel.querySelector('#settings-tab-graphics').click();
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				panel.querySelector('#settings-tab-graphics').focus();
+			})()`,
+		);
 		const settingsSections = await evaluateExpression(
 			client,
 			`(async () => {
 				const panel = document.querySelector('.hud-window[aria-label="Settings"]');
 				const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+				const beginCapture = async (row) => {
+					row.querySelector('.binding-actions button').click();
+					await frame();
+					if (!panel.querySelector('.binding-dialog')?.textContent.includes('Press a key or chord')) throw new Error('Add key did not open the panel dialog');
+				};
 				panel.querySelector('#settings-tab-ui').click();
 				await frame();
 				const fonts = panel.querySelectorAll('#settings-section-ui select');
@@ -4861,12 +4949,12 @@ async function runClientHudHarness({ viteUrl }) {
 				actionCellRow.querySelector('.binding-key').click();
 				await frame();
 				if (actionCell.querySelector('.ui-shortcut-hint') || !actionCell.title.includes('Unbound')) throw new Error('Unbound action cell retained a shortcut hint');
-				actionCellRow.querySelector('.binding-actions button').click();
+				await beginCapture(actionCellRow);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', code: 'KeyQ', ctrlKey: true, bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'q', code: 'KeyQ', ctrlKey: true, bubbles: true, cancelable: true }));
 				await frame();
 				if (actionCell.querySelector('.ui-shortcut-hint')?.textContent !== 'CQ' || !actionCell.title.includes('Ctrl + q') || actionCell.dataset.actionCell !== '1') throw new Error('Remapped action cell lost its shortcut or stable address');
-				actionCellRow.querySelector('.binding-actions button').click();
+				await beginCapture(actionCellRow);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', code: 'KeyR', altKey: true, bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'r', code: 'KeyR', altKey: true, bubbles: true, cancelable: true }));
 				await frame();
@@ -4877,7 +4965,7 @@ async function runClientHudHarness({ viteUrl }) {
 				const focusRow = [...actionBarsGroup.querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Focus action bar 1');
 				focusRow.querySelector('.binding-key').click();
 				await frame();
-				focusRow.querySelector('.binding-actions button').click();
+				await beginCapture(focusRow);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F9', code: 'F9', ctrlKey: true, bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'F9', code: 'F9', ctrlKey: true, bubbles: true, cancelable: true }));
 				await frame();
@@ -4886,10 +4974,31 @@ async function runClientHudHarness({ viteUrl }) {
 				focusRow.querySelector('.binding-actions button:last-child').click();
 				await frame();
 				if (actionMenu.textContent !== 'C1') throw new Error('Restored action-bar focus hint is wrong');
+				await beginCapture(focusRow);
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', code: 'Digit2', ctrlKey: true, bubbles: true, cancelable: true }));
+				window.dispatchEvent(new KeyboardEvent('keyup', { key: '2', code: 'Digit2', ctrlKey: true, bubbles: true, cancelable: true }));
+				await frame();
+				const focusConflict = panel.querySelector('.binding-dialog');
+				if (!focusConflict?.textContent.includes('Focus action bar 2') || focusConflict.querySelector('button:last-child')?.textContent !== 'Replace' || focusConflict.querySelector('.binding-dialog-key')?.textContent !== 'Ctrl+2') throw new Error('Physical digit binding did not open the replacement dialog with a shortcut pill');
+				focusConflict.querySelector('button').click();
+				await frame();
+				if (panel.querySelector('.binding-dialog') || ![...actionBarsGroup.querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Focus action bar 2')?.textContent.includes('Ctrl+2')) throw new Error('Cancelling replacement changed the existing binding');
+				await beginCapture(focusRow);
+				window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', code: 'Digit2', ctrlKey: true, bubbles: true, cancelable: true }));
+				window.dispatchEvent(new KeyboardEvent('keyup', { key: '2', code: 'Digit2', ctrlKey: true, bubbles: true, cancelable: true }));
+				await frame();
+				const replacement = panel.querySelector('.binding-dialog');
+				if (!replacement?.textContent.includes('Focus action bar 2')) throw new Error('Conflict did not recur after cancellation');
+				replacement.querySelector('button:last-child').click();
+				await frame();
+				const focusTwoRow = [...actionBarsGroup.querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Focus action bar 2');
+				if (!focusTwoRow?.textContent.includes('Unbound') || ![...focusRow.querySelectorAll('kbd')].some((key) => key.textContent === 'Ctrl+2')) throw new Error('Replacing digit conflict did not reassign the action-bar chord');
+				panel.querySelector('#settings-section-input > button').click();
+				await frame();
 				const tabRow = [...spellGroups[0].querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Select spell tab 1');
 				tabRow.querySelector('.binding-key').click();
 				await frame();
-				tabRow.querySelector('.binding-actions button').click();
+				await beginCapture(tabRow);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F9', code: 'F9', altKey: true, bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'F9', code: 'F9', altKey: true, bubbles: true, cancelable: true }));
 				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.spellBarProbe.mode('magic');
@@ -4903,7 +5012,7 @@ async function runClientHudHarness({ viteUrl }) {
 				if (!castRow) throw new Error('Spell shortcut fixture is missing');
 				castRow.querySelector('.binding-key').click();
 				await frame();
-				castRow.querySelector('.binding-actions button').click();
+				await beginCapture(castRow);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', code: 'KeyQ', altKey: true, bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'q', code: 'KeyQ', altKey: true, bubbles: true, cancelable: true }));
 				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.spellBarProbe.mode('magic');
@@ -4919,7 +5028,7 @@ async function runClientHudHarness({ viteUrl }) {
 				if (!heightRow) throw new Error('Combat shortcut fixture is missing');
 				heightRow.querySelector('.binding-key').click();
 				await frame();
-				heightRow.querySelector('.binding-actions button').click();
+				await beginCapture(heightRow);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F8', code: 'F8', ctrlKey: true, bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'F8', code: 'F8', ctrlKey: true, bubbles: true, cancelable: true }));
 				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.combatBarProbe.begin('melee');
@@ -4930,7 +5039,7 @@ async function runClientHudHarness({ viteUrl }) {
 				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.combatBarProbe.end();
 				await frame();
 				const forward = movement.querySelector('.binding-row');
-				forward.querySelector('.binding-actions button').click();
+				await beginCapture(forward);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 'p', code: 'KeyP', bubbles: true, cancelable: true }));
 				await frame();
@@ -4938,13 +5047,13 @@ async function runClientHudHarness({ viteUrl }) {
 				forward.querySelector('.binding-actions button:last-child').click();
 				await frame();
 				if ([...forward.querySelectorAll('kbd')].some((key) => key.textContent === 'p')) throw new Error('Per-action default did not restore');
-				forward.querySelector('.binding-actions button').click();
+				await beginCapture(forward);
 				window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', bubbles: true, cancelable: true }));
 				window.dispatchEvent(new KeyboardEvent('keyup', { key: 's', code: 'KeyS', bubbles: true, cancelable: true }));
 				await frame();
-				const conflict = panel.querySelector('.binding-conflict');
+				const conflict = panel.querySelector('.binding-dialog');
 				if (!conflict || !conflict.textContent.includes('Move backward')) throw new Error('Binding conflict was not explained');
-				conflict.querySelector('button').click();
+				conflict.querySelector('button:last-child').click();
 				await frame();
 				if (!movement.querySelectorAll('.binding-row')[1].textContent.includes('Unbound')) throw new Error('Conflict replacement did not clear the old action');
 				panel.querySelector('#settings-section-input > button').click();

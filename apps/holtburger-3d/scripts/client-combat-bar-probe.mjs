@@ -292,6 +292,31 @@ export async function probeCombatBar(
 		"true",
 	);
 	await capture("combat-missile");
+	for (const [supply, expected] of [
+		[{ kind: "finite", count: 147 }, "147"],
+		[{ kind: "finite", count: 146 }, "146"],
+		[{ kind: "finite", count: 1 }, "1"],
+		[{ kind: "finite", count: 0 }, "0"],
+		[{ kind: "unlimited" }, "∞"],
+		[{ kind: "pending", appraisal: null }, null],
+		[{ kind: "not-applicable" }, null],
+	]) {
+		await read(`${api}.supply(${JSON.stringify(supply)})`);
+		assert.equal(
+			await read(
+				"document.querySelector('.projectile-supply strong')?.textContent ?? null",
+			),
+			expected,
+		);
+	}
+	await read(`${api}.supply({kind: 'finite', count: 147})`);
+	await capture("combat-projectiles");
+	await read(`${api}.begin('melee')`);
+	await settle();
+	assert.equal(
+		await read("document.querySelector('.projectile-supply')"),
+		null,
+	);
 
 	await read(`${api}.end()`);
 	await settle();

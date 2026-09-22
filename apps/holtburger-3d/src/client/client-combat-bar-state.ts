@@ -5,4 +5,4 @@ export const COMBAT_BREAKPOINTS = [0, 0.25, 0.5, 0.75, 1] as const;
 export const COMBAT_HEIGHTS = ["high", "medium", "low"] as const;
 
 /** Fixed gauge dimensions shared by new layouts and saved-layout migration. */
-export const COMBAT_GAUGE_SIZE = { width: 320, height: 140 } as const;
+export const COMBAT_GAUGE_SIZE = { width: 320, height: 160 } as const;

@@ -95,6 +95,7 @@ describe("ClientPresentationSession", () => {
 		try {
 			await presentation.start();
 			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "opened" })],
 				removed: [],
@@ -114,6 +115,7 @@ describe("ClientPresentationSession", () => {
 				strikeThrough: true,
 			});
 			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],
 				removed: [],

@@ -233,13 +233,18 @@ export async function probeClientInventory(options: {
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
-			entities: { worldContainer: { kind: "closed" }, entities: records },
+			entities: {
+				projectileSupply: { kind: "not-applicable" },
+				worldContainer: { kind: "closed" },
+				entities: records,
+			},
 		});
 	const update = (record: ClientEntityFacts) => {
 		records = records.map((previous) =>
 			previous.guid === record.guid ? record : previous,
 		);
 		emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [record],
 			removed: [],
@@ -956,6 +961,7 @@ export async function probeClientInventory(options: {
 
 	records = records.filter((record) => record.guid !== 21);
 	emit("client-entity-facts-changed", {
+		projectileSupply: null,
 		worldContainer: null,
 		upserts: [],
 		removed: [21],

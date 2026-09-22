@@ -3,9 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use holtburger_common::Guid;
+use holtburger_protocol::messages::{GameAction, IdentifyObjectActionData};
 use holtburger_world::{
     WorldEvent, WorldState,
     entity_facts::{ClientEntityFacts, EntityStorageLocation},
+    projectile_supply::ProjectileSupply,
     state::{ScenePlacementError, WorldContainerState},
 };
 use serde::{Deserialize, Serialize};
@@ -14,6 +16,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientEntitySnapshot {
+    /// World-resolved equipped projectile supply, independent of attack control state.
+    pub projectile_supply: ProjectileSupply,
     /// Confirmed access published together with its descendant records.
     pub world_container: WorldContainerState,
     /// GUID-ordered records, including pending owned and accessible external identities.
@@ -38,6 +42,7 @@ impl ClientEntitySnapshot {
             }
         }
         Ok(Self {
+            projectile_supply: world.projectile_supply(),
             world_container: world.world_container(),
             entities,
         })
@@ -64,6 +69,8 @@ fn session_entity_facts(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientEntityDelta {
+    /// Replacement supply when changed; None keeps the previously accepted supply.
+    pub projectile_supply: Option<ProjectileSupply>,
     /// Replacement access when changed; None keeps the previously accepted level.
     pub world_container: Option<WorldContainerState>,
     /// Complete replacement records, applied together before observers run.
@@ -75,6 +82,8 @@ pub struct ClientEntityDelta {
 /// Last published facts plus invalidation; only core publication mutates this cache.
 #[derive(Default)]
 pub(super) struct EntityFactsPublication {
+    /// Last supply published alongside the entity domain.
+    projectile_supply: ProjectileSupply,
     records: BTreeMap<Guid, ClientEntityFacts>,
     dirty: BTreeSet<Guid>,
     owner: Option<Guid>,
@@ -126,7 +135,12 @@ impl EntityFactsPublication {
         opened_corpses: &BTreeSet<Guid>,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
         let storage_changes = world.take_storage_changes();
-        let mut delta = ClientEntityDelta::default();
+        let projectile_supply = world.projectile_supply();
+        let mut delta = ClientEntityDelta {
+            projectile_supply: (projectile_supply != self.projectile_supply)
+                .then_some(projectile_supply),
+            ..Default::default()
+        };
         if self.container != world.world_container() {
             self.dirty.extend(self.records.keys().copied());
             self.dirty.extend(world.client_entity_guids());
@@ -187,6 +201,7 @@ impl EntityFactsPublication {
         }
         self.dirty.clear();
         self.container = world.world_container();
+        self.projectile_supply = projectile_supply;
         Ok(delta)
     }
 }
@@ -198,7 +213,10 @@ impl super::ClientRuntime {
             .entity_facts
             .collect_with_opened(&mut self.world, self.opened_corpses.ids())
             .expect("accepted world relationships must project into coherent entity facts");
-        if delta.world_container.is_some() || !delta.upserts.is_empty() || !delta.removed.is_empty()
+        if delta.projectile_supply.is_some()
+            || delta.world_container.is_some()
+            || !delta.upserts.is_empty()
+            || !delta.removed.is_empty()
         {
             // Storage-only messages can change foci readiness without a separate world event.
             self.refresh_spell_inspection_context();
@@ -206,6 +224,26 @@ impl super::ClientRuntime {
                 .client_view_event_tx
                 .send(super::ClientViewEvent::EntityFactsChanged(delta));
         }
+    }
+
+    /// Appraise only an unresolved equipped source, once per continuous pending source.
+    /// Successful appraisal feeds ordinary entity publication; no frontend panel must open.
+    pub(super) async fn hydrate_projectile_supply(&mut self) -> anyhow::Result<()> {
+        let requested = match self.entity_facts.projectile_supply {
+            ProjectileSupply::Pending { appraisal } => appraisal,
+            _ => None,
+        };
+        if requested != self.projectile_appraisal {
+            if let Some(guid) = requested {
+                self.send_game_action(GameAction::IdentifyObject(Box::new(
+                    IdentifyObjectActionData { guid },
+                )))
+                .await?;
+            }
+            // Failed/rejected appraisal remains unknown, without retrying every tick.
+            self.projectile_appraisal = requested;
+        }
+        Ok(())
     }
 }
 
@@ -274,6 +312,125 @@ mod tests {
                 equipped_objects: Vec::new(),
             },
         )))
+    }
+
+    #[tokio::test]
+    async fn projectile_supply_hydrates_once_and_publishes_counts_with_equipment() {
+        use holtburger_common::properties::{CombatUse, ItemType};
+        use holtburger_protocol::messages::{
+            IdentifyObjectResponseEventData, inventory::types::SetStackSizeData,
+        };
+        let mut client =
+            super::super::builder::build_test_client(super::super::ClientState::InWorld);
+        client
+            .world
+            .seed_local_player_entity(PLAYER, "Player", Default::default());
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        client
+            .session
+            .set_capture(capture.path().to_str().unwrap())
+            .unwrap();
+        let mut receiver = client.client_view_event_tx.subscribe();
+        let mut weapon = ObjectDescriptionData::with_guid(ITEM);
+        weapon.public_weenie_desc.name = Some("Throwing Axe".into());
+        weapon.public_weenie_desc.item_type = ItemType::MISSILE_WEAPON.bits();
+        weapon.public_weenie_desc.combat_use = Some(CombatUse::Missile as u32);
+        weapon.public_weenie_desc.wielder_id = Some(PLAYER);
+        weapon.public_weenie_desc.currently_wielded_location =
+            Some(EquipMask::MISSILE_WEAPON.bits());
+        weapon.public_weenie_desc.stack_size = Some(12);
+        for message in [
+            player_baseline(),
+            event(GameEvent::WieldObject(Box::new(WieldObjectEventData {
+                object_guid: ITEM,
+                equip_mask: EquipMask::MISSILE_WEAPON,
+            }))),
+            GameMessage::ObjectCreate(Box::new(weapon.clone())),
+        ] {
+            for change in client.world.handle_message(&message) {
+                client.handle_world_event(&change);
+            }
+        }
+        client.publish_entity_facts();
+        assert_eq!(
+            client.entity_facts.projectile_supply,
+            ProjectileSupply::Pending {
+                appraisal: Some(ITEM)
+            }
+        );
+        client.hydrate_projectile_supply().await.unwrap();
+        let sent = std::fs::metadata(capture.path()).unwrap().len();
+        assert!(sent > 0);
+        client.hydrate_projectile_supply().await.unwrap();
+        assert_eq!(std::fs::metadata(capture.path()).unwrap().len(), sent);
+
+        // Recreation while a request is outstanding must not strand the new instance.
+        for change in client
+            .world
+            .handle_message(&GameMessage::UpdateObject(Box::new(weapon)))
+        {
+            client.handle_world_event(&change);
+        }
+        client.hydrate_projectile_supply().await.unwrap();
+        assert!(std::fs::metadata(capture.path()).unwrap().len() > sent);
+
+        for (message, expected) in [
+            (
+                event(GameEvent::IdentifyObjectResponse(Box::new(
+                    IdentifyObjectResponseEventData {
+                        object_guid: ITEM,
+                        success: true,
+                        ..Default::default()
+                    },
+                ))),
+                ProjectileSupply::Finite { count: 12 },
+            ),
+            (
+                GameMessage::SetStackSize(Box::new(SetStackSizeData {
+                    sequence: 1,
+                    object_guid: ITEM,
+                    stack_size: 11,
+                    value: 0,
+                })),
+                ProjectileSupply::Finite { count: 11 },
+            ),
+            (
+                GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
+                    object_guid: ITEM,
+                })),
+                ProjectileSupply::NotApplicable,
+            ),
+        ] {
+            while receiver.try_recv().is_ok() {}
+            for change in client.world.handle_message(&message) {
+                client.handle_world_event(&change);
+            }
+            client.publish_entity_facts();
+            let mut published = None;
+            while let Ok(event) = receiver.try_recv() {
+                if let super::super::ClientViewEvent::EntityFactsChanged(delta) = event
+                    && let Some(supply) = delta.projectile_supply
+                {
+                    published = Some(supply);
+                }
+            }
+            assert_eq!(published, Some(expected));
+            assert_eq!(
+                ClientEntitySnapshot::from_world(&client.world)
+                    .unwrap()
+                    .projectile_supply,
+                expected
+            );
+            assert_eq!(
+                client
+                    .entity_facts
+                    .collect(&mut client.world)
+                    .unwrap()
+                    .projectile_supply,
+                None,
+                "unchanged supply must not be repeated in later deltas"
+            );
+        }
     }
 
     #[test]

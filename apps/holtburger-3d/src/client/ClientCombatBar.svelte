@@ -11,7 +11,11 @@
 		type InputDisplayPlatform,
 	} from "../lib/input/input-presentation";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
+	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
+	import { AMMUNITION_SLOT } from "./client-inventory-equipment";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
+	import { CLIENT_TUNING } from "./client-tuning";
+	import type { ClientInventoryState } from "./client-inventory-state";
 	import type {
 		ClientAttackProfile,
 		ClientCombatStatus,
@@ -42,6 +46,8 @@
 		backdropBleedX: 15,
 		backdropBleedTop: 9,
 		backdropBleedBottom: 11,
+		/** Space between the gauge backdrop and its remaining-projectile readout. */
+		projectileSupplyGap: 4,
 		breakpointLabelSize: 24,
 		breakpointOutwardDistance: 16,
 		breakpointEndpointClearance: 10,
@@ -125,6 +131,8 @@
 	});
 
 	interface Props {
+		/** Session-owned world facts, available independently of inventory-panel visibility. */
+		readonly inventory: ClientInventoryState | null;
 		/** Accepted physical-combat shortcuts. */
 		readonly input: ClientKeyboardConfiguration["combatBar"];
 		readonly displayPlatform: InputDisplayPlatform;
@@ -142,6 +150,7 @@
 	}
 
 	let {
+		inventory,
 		input,
 		displayPlatform,
 		placement,
@@ -154,6 +163,32 @@
 		onPlacementChange,
 		onProfileSelect,
 	}: Props = $props();
+
+	/** Only a bounded display sample enters Svelte; unknown supply has no readout. */
+	let remaining = $state<string | null>(null);
+	const missileMode = $derived(profile.kind === "missile");
+	$effect(() => {
+		const owner = inventory;
+		if (!missileMode) {
+			remaining = null;
+			return;
+		}
+		const sample = () => {
+			const supply = owner?.readProjectileSupply();
+			remaining =
+				supply?.kind === "finite"
+					? String(supply.count)
+					: supply?.kind === "unlimited"
+						? "∞"
+						: null;
+		};
+		untrack(sample);
+		const timer = setInterval(
+			sample,
+			CLIENT_TUNING.inventory.displayIntervalMs,
+		);
+		return () => clearInterval(timer);
+	});
 
 	const naturalPlacement = $derived({
 		...placement,
@@ -446,10 +481,46 @@
 					""}</span
 			>
 		{/each}
+		{#if remaining !== null && profile.kind === "missile"}
+			<div
+				class="projectile-supply"
+				role="img"
+				aria-label={remaining === "∞"
+					? "Unlimited projectiles"
+					: `${remaining} projectiles remaining`}
+				style:top={`${arcBaseline + GAUGE_TUNING.backdropBleedBottom + GAUGE_TUNING.projectileSupplyGap}px`}
+			>
+				<span aria-hidden="true"
+					><EquipmentSlotIcon slot={AMMUNITION_SLOT} /></span
+				>
+				<strong>{remaining}</strong>
+			</div>
+		{/if}
 	</div>
 </ClientHudPanel>
 
 <style>
+	.projectile-supply {
+		--ui-inventory-equipment-slot-icon-size: 16px;
+		--ui-inventory-equipment-slot-icon-color: currentColor;
+
+		position: absolute;
+		left: 0;
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.projectile-supply span {
+		display: flex;
+	}
+	.projectile-supply strong {
+		font-weight: 600;
+	}
 	.combat-bar {
 		--combat-rest-opacity: var(--ui-combat-idle-opacity);
 

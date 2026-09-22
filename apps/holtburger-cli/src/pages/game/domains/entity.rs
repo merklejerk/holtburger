@@ -250,6 +250,7 @@ mod tests {
         reduce_view_event(
             &mut state,
             &ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
+                projectile_supply: Some(snapshot.projectile_supply),
                 world_container: Some(snapshot.world_container),
                 upserts: snapshot.entities,
                 removed: vec![],
@@ -295,6 +296,7 @@ mod tests {
         reduce_view_event(
             &mut state,
             &ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
+                projectile_supply: None,
                 world_container: Some(world.world_container()),
                 upserts: vec![],
                 removed: vec![pack, item],

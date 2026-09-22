@@ -2,6 +2,27 @@ import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
+/** World-owned projectile supply; pending appraisal identity is consumed by core. */
+const projectileSupplySchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("pending"), appraisal: guid.nullable() })
+		.strict()
+		.readonly(),
+	z
+		.object({ kind: z.literal("not-applicable") })
+		.strict()
+		.readonly(),
+	z
+		.object({ kind: z.literal("finite"), count: guid })
+		.strict()
+		.readonly(),
+	z
+		.object({ kind: z.literal("unlimited") })
+		.strict()
+		.readonly(),
+]);
+export type ProjectileSupply = z.infer<typeof projectileSupplySchema>;
+
 /** Server-authored icon-composition inputs shared by entity facts and inspection snapshots. */
 export const clientIconAppearanceSchema = z
 	.object({
@@ -173,6 +194,7 @@ const clientEntityFactsSchema = z
 /** Complete semantic domain for initial connection or replacement after receiver loss. */
 export const clientEntitySnapshotSchema = z
 	.object({
+		projectileSupply: projectileSupplySchema,
 		entities: z.array(clientEntityFactsSchema),
 		worldContainer: worldContainerSchema,
 	})
@@ -180,6 +202,8 @@ export const clientEntitySnapshotSchema = z
 /** One affected-record update of the semantic domain, not a render transaction. */
 export const clientEntityDeltaSchema = z
 	.object({
+		/** Null retains the previous supply; unknown supply is an explicit pending value. */
+		projectileSupply: projectileSupplySchema.nullable(),
 		upserts: z.array(clientEntityFactsSchema),
 		removed: z.array(guid),
 		worldContainer: worldContainerSchema.nullable(),
@@ -192,6 +216,8 @@ export type ClientEntityDelta = z.infer<typeof clientEntityDeltaSchema>;
 
 /** An immutable accepted level; the UI groups it without another mutable inventory cache. */
 export interface ClientEntityLevel {
+	/** Supply accepted together with equipment and item quantities. */
+	readonly projectileSupply: ProjectileSupply;
 	/** Access accepted in the same commit as contents and their pickup eligibility. */
 	readonly worldContainer: WorldContainerState;
 	/** Local display invalidation only; not a wire sequence or transport identity. */
@@ -276,6 +302,7 @@ export class ClientEntityMirror {
 				entities,
 				playerGuid,
 				worldContainer: snapshot.worldContainer,
+				projectileSupply: snapshot.projectileSupply,
 				revision: this.#revision + 1,
 			},
 		};
@@ -284,6 +311,7 @@ export class ClientEntityMirror {
 	prepareDelta(delta: ClientEntityDelta): PreparedClientEntities | null {
 		if (this.#read.kind === "pending") return null;
 		if (
+			delta.projectileSupply === null &&
 			delta.worldContainer === null &&
 			delta.upserts.length === 0 &&
 			delta.removed.length === 0
@@ -306,6 +334,10 @@ export class ClientEntityMirror {
 		return {
 			level: {
 				entities,
+				projectileSupply:
+					delta.projectileSupply === null
+						? level.projectileSupply
+						: delta.projectileSupply,
 				worldContainer:
 					delta.worldContainer === null
 						? level.worldContainer

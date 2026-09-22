@@ -30,6 +30,7 @@ pub mod item_use;
 pub mod magic;
 pub mod motion;
 pub mod player;
+pub mod projectile_supply;
 pub mod selection;
 pub mod spatial;
 pub mod spell;

@@ -26,7 +26,10 @@
 	} from "../../client/client-spells";
 	import { resolveClientSpellCastAim } from "../../client/client-spell-casting";
 	import { probeClientSpells } from "./client-spells-probe";
-	import type { ClientEntityFacts } from "../../client/client-entity-mirror";
+	import type {
+		ClientEntityFacts,
+		ProjectileSupply,
+	} from "../../client/client-entity-mirror";
 	import {
 		CASTER_EQUIP_MASK,
 		inventoryEquipment,
@@ -185,6 +188,7 @@
 				throw new Error("Caster fixture required");
 			savedCaster = source;
 			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -224,6 +228,7 @@
 			if (savedCaster === null) throw new Error("No saved caster fixture");
 			itemInteractions.cancel();
 			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [savedCaster],
 				removed: [],
@@ -320,6 +325,18 @@
 	};
 	let releaseCombatKeys: (() => void) | null = null;
 	const combatBarProbe = {
+		/** Supply enters through the production semantic mirror, not component-local state. */
+		supply: async (supply: ProjectileSupply) => {
+			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: supply,
+				worldContainer: null,
+				upserts: [],
+				removed: [],
+			});
+			await new Promise((resolve) =>
+				setTimeout(resolve, CLIENT_TUNING.inventory.displayIntervalMs * 2),
+			);
+		},
 		begin: (mode: "melee" | "missile") => {
 			hudMode = "runtime";
 			spellCombatMode = mode;
@@ -636,6 +653,7 @@
 			return { ...item, description: item.description };
 		});
 		emitInteractionEvent("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: saved.map((item, index) => ({
 				...item,
@@ -699,6 +717,7 @@
 				)
 					throw new Error("Expected bound supply");
 				emitInteractionEvent("client-entity-facts-changed", {
+					projectileSupply: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -726,6 +745,7 @@
 			},
 			removeSupply: () =>
 				emitInteractionEvent("client-entity-facts-changed", {
+					projectileSupply: null,
 					worldContainer: null,
 					upserts: [],
 					removed: [995],
@@ -739,6 +759,7 @@
 				if (item?.description.kind !== "known")
 					throw new Error("Expected food fixture");
 				emitInteractionEvent("client-entity-facts-changed", {
+					projectileSupply: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -758,6 +779,7 @@
 				if (item?.description.kind !== "known")
 					throw new Error("Expected tool fixture");
 				emitInteractionEvent("client-entity-facts-changed", {
+					projectileSupply: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -801,6 +823,7 @@
 				dialogOwner = null;
 				dialogPresentation = null;
 				emitInteractionEvent("client-entity-facts-changed", {
+					projectileSupply: null,
 					worldContainer: null,
 					upserts: saved,
 					removed: [995],
@@ -1001,6 +1024,7 @@
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
 				entities: [1, 7, 8].map((guid) => ({
 					guid,
@@ -1135,6 +1159,7 @@
 			if (recipient?.description.kind !== "known")
 				throw new Error("Give fixture recipient missing");
 			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -1176,6 +1201,7 @@
 			if (source === undefined)
 				throw new Error("Source removal requires an existing source");
 			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [],
 				removed: [guid],
@@ -1184,6 +1210,7 @@
 		},
 		restoreSource: (source: ClientEntityFacts) =>
 			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [source],
 				removed: [],
@@ -1199,6 +1226,7 @@
 		},
 		end: () => {
 			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
 				worldContainer: null,
 				upserts: [],
 				removed: [7],

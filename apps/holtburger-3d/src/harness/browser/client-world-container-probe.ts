@@ -150,6 +150,7 @@ export async function probeWorldContainer(options: {
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
+				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "open", root: externalRoot.guid },
 				entities: [
 					entityFacts(1, {
@@ -277,6 +278,7 @@ export async function probeWorldContainer(options: {
 		openingSizes.push({ count, columns, width: box.width, height: box.height });
 		// Later hydration/content changes must not replace this opening's chosen geometry.
 		emit("client-entity-facts-changed", {
+			projectileSupply: null,
 			worldContainer: null,
 			upserts: [
 				named(1900, "Later arrival", {
@@ -679,6 +681,7 @@ export async function probeWorldContainer(options: {
 	count = pickups().length;
 	request = release(begin(itemCell(owned, 300), packCell(external, 100)));
 	emit("client-entity-facts-changed", {
+		projectileSupply: { kind: "not-applicable" },
 		worldContainer: { kind: "closed" },
 		upserts: [],
 		removed: [],
@@ -697,11 +700,13 @@ export async function probeWorldContainer(options: {
 		301,
 	);
 	emit("client-entity-facts-changed", {
+		projectileSupply: { kind: "not-applicable" },
 		worldContainer: { kind: "closed" },
 		upserts: [],
 		removed: [],
 	});
 	emit("client-entity-facts-changed", {
+		projectileSupply: null,
 		worldContainer: null,
 		upserts: [
 			{
@@ -771,6 +776,7 @@ export async function probeWorldContainer(options: {
 		closes[0]?.args?.guid ===
 			400, "Popup close did not target its root exactly once");
 	emit("client-entity-facts-changed", {
+		projectileSupply: { kind: "not-applicable" },
 		worldContainer: { kind: "closed" },
 		upserts: [],
 		removed: [],

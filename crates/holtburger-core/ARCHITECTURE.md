@@ -340,7 +340,10 @@ character-only preparation and do not acquire motion-table/run-stat requirements
 
 `client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,
 append, merge-only targets, splits, equipment targets, pickup, ground drop, give, and
-native pack exchanges. Pickup admission comes from world's `pickup_candidate`;
+native pack exchanges. Pickup admission comes from world's `pickup_candidate`.
+Stack pickups first seek a carried stack that can absorb the entire quantity, in
+main-pack then native pack/item order; otherwise they allocate a slot for the whole
+source without partially merging. Container preference affects only slot allocation;
 ground drop and give support owned carried and equipped sources. Give recipient
 admission comes from world's coarse `give_recipient_candidate`; the resolved plan
 carries the authoritative source quantity in the signed wire range. `inventory_storage.rs`

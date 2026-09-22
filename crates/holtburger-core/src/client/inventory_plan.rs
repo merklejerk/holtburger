@@ -110,6 +110,11 @@ pub enum InventoryPlanError {
     /// Shared free-space allocation failure.
     #[error(transparent)]
     Storage(#[from] StorageAllocationError),
+    /// No whole-stack merge or fresh storage destination is available for pickup.
+    #[error(
+        "Cannot pick up item: no existing stack can hold the full quantity, and no inventory slot is free"
+    )]
+    PickupStackFull,
     /// Source must be carried or equipped by this player.
     #[error("Item is not owned by the player")]
     NotOwned,
@@ -186,8 +191,28 @@ pub fn plan_inventory_intent(
                 Some(guid) => guid,
                 None => world.player.guid,
             };
+            if entity.is_stackable() {
+                let amount = entity
+                    .get_int_prop(PropertyInt::StackSize)
+                    .filter(|amount| *amount > 0)
+                    .ok_or(InventoryPlanError::Pending(intent.item))?
+                    as u32;
+                if let Some(destination) = pickup_merge_target(world, intent.item, amount) {
+                    return Ok(InventoryPlan::Merge {
+                        source: intent.item,
+                        destination,
+                        amount,
+                    });
+                }
+            }
             let destinations =
-                allocate_storage(world, preferred, &[entity.uses_player_container_slot()])?;
+                allocate_storage(world, preferred, &[entity.uses_player_container_slot()])
+                    .map_err(|error| match error {
+                        StorageAllocationError::NoSpace if entity.is_stackable() => {
+                            InventoryPlanError::PickupStackFull
+                        }
+                        error => InventoryPlanError::Storage(error),
+                    })?;
             let destination = destinations[0];
             Ok(InventoryPlan::Move(InventoryMove {
                 item: intent.item,
@@ -305,6 +330,42 @@ pub fn plan_inventory_intent(
             plan_move(world, intent.item, container, Some(slot)).map(InventoryPlan::Move)
         }
     }
+}
+
+/// Retail searches main-pack items, then each carried pack's items in native order
+/// (acclient.c:413654, 417674). Container preference only affects free-slot fallback.
+/// Unknown stack facts cannot authorize a merge; ordinary storage remains available.
+fn pickup_merge_target(world: &WorldState, source: Guid, amount: u32) -> Option<Guid> {
+    let mut packs: Vec<_> = world
+        .container_contents(world.player.guid)
+        .filter_map(|(guid, slot)| match slot {
+            StorageSlot::Pack {
+                index,
+                kind: PackEntryKind::Container,
+            } => Some((index, guid)),
+            _ => None,
+        })
+        .collect();
+    packs.sort_unstable();
+    for container in
+        std::iter::once(world.player.guid).chain(packs.into_iter().map(|(_, guid)| guid))
+    {
+        let mut items: Vec<_> = world
+            .container_contents(container)
+            .filter_map(|(guid, slot)| match slot {
+                StorageSlot::Item { index } => Some((index, guid)),
+                _ => None,
+            })
+            .collect();
+        items.sort_unstable();
+        if let Some((_, destination)) = items
+            .into_iter()
+            .find(|(_, guid)| world.resolve_merge_stack_amount(source, *guid, None) == Some(amount))
+        {
+            return Some(destination);
+        }
+    }
+    None
 }
 
 /// Access is distinct from ownership; the root is a destination, not a movable contents item.
@@ -942,6 +1003,111 @@ mod tests {
         assert_eq!(
             plan_inventory_intent(&world, intent),
             Err(InventoryPlanError::NotOwned)
+        );
+    }
+
+    #[test]
+    fn pickup_merges_only_a_whole_stack_before_allocating_storage() {
+        const MAXIMUM: i32 = 100;
+        const QUANTITY: i32 = 20;
+        let mut world = inventory();
+        let ground = Guid(0x8000_0042);
+        let mut entity = Entity::new(ground, "Loose stack".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity.properties.ints.insert(
+            PropertyInt::ItemType,
+            holtburger_common::properties::ItemType::FOOD.bits() as i32,
+        );
+        world.add_entity(entity);
+        for (guid, count) in [
+            (ground, QUANTITY),
+            (SOURCE, MAXIMUM - 1),
+            (TARGET, MAXIMUM - QUANTITY),
+            (LAST, 1),
+        ] {
+            let entity = world.entities.get_mut(guid).unwrap();
+            entity.wcid = Some(1);
+            entity.properties.ints.insert(PropertyInt::StackSize, count);
+            entity
+                .properties
+                .ints
+                .insert(PropertyInt::MaxStackSize, MAXIMUM);
+        }
+        let intent = InventoryIntent {
+            item: ground,
+            target: InventoryTarget::Pickup { container: None },
+        };
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Merge {
+                source: ground,
+                destination: TARGET,
+                amount: QUANTITY as u32,
+            })
+        );
+        // Native position, rather than GUID, chooses the first whole-stack fit.
+        place(&mut world, LAST, PACK, 0, InventoryEntryKind::Item);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Ok(InventoryPlan::Merge {
+                source: ground,
+                destination: LAST,
+                amount: QUANTITY as u32,
+            })
+        );
+        // Main-pack stacks precede preferred side-pack stacks.
+        place(&mut world, TARGET, PLAYER, 0, InventoryEntryKind::Item);
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    target: InventoryTarget::Pickup {
+                        container: Some(PACK)
+                    },
+                    ..intent
+                }
+            ),
+            Ok(InventoryPlan::Merge {
+                source: ground,
+                destination: TARGET,
+                amount: QUANTITY as u32,
+            })
+        );
+        for guid in [TARGET, LAST] {
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .properties
+                .ints
+                .insert(PropertyInt::StackSize, MAXIMUM - 1);
+        }
+        // A partial fit does not consume any source quantity; use the free pack slot.
+        assert!(
+            matches!(plan_inventory_intent(&world, intent), Ok(InventoryPlan::Move(InventoryMove { item, container: PACK, .. })) if item == ground)
+        );
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 2);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::PickupStackFull)
+        );
+        world
+            .entities
+            .get_mut(ground)
+            .unwrap()
+            .properties
+            .ints
+            .0
+            .remove(&PropertyInt::StackSize);
+        assert_eq!(
+            plan_inventory_intent(&world, intent),
+            Err(InventoryPlanError::Pending(ground))
         );
     }
 

@@ -95,8 +95,14 @@ impl CollisionScene {
         let trace = self.traverse_surface_ray(
             request,
             CollisionQueryPolicy::RequireCollisionCoverage,
+            super::PortalTraversalPolicy::Physical,
+            |_, _| false,
             |interval, placement| {
-                let environment = self.cast_static_ray_in_domain(interval, placement);
+                let environment = self.cast_static_ray_in_domain(
+                    interval,
+                    placement,
+                    super::PortalTraversalPolicy::Physical,
+                );
                 let entity_request = StaticSurfaceRayRequest {
                     maximum_distance: environment
                         .as_ref()

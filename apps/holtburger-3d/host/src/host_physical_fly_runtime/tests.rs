@@ -168,6 +168,8 @@ fn thin_viewer_volumes(overlap_first_cell: bool) -> Vec<CellVolume> {
             normal: Vector3::new(normal_x, 0.0, 0.0),
             d,
         },
+        aperture_vertices: Vec::new(),
+        reciprocal_visibility_vertices: None,
         positive_side: true,
         target,
         outdoor_building: None,

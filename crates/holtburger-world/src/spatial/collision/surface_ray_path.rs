@@ -1,11 +1,12 @@
 //! Ordered query-domain traversal for finite rays, without body endpoint recovery.
 
-use holtburger_common::Vector3;
+use holtburger_common::{Guid, Vector3};
 
 use super::static_surface_ray::{ray_sweep, validate_ray};
 use super::{
     CollisionQueryError, CollisionQueryPolicy, CollisionScene, PlacementMotionSegment,
-    SpatialMembership, StaticSurfaceRayRequest, UncoveredCollisionQuery, touched_landblocks,
+    PortalTraversalPolicy, SpatialMembership, StaticSurfaceRayRequest, UncoveredCollisionQuery,
+    touched_landblocks,
 };
 
 /// A nearest candidate placed back into the original ray frame.
@@ -37,6 +38,8 @@ impl CollisionScene {
         &self,
         request: StaticSurfaceRayRequest,
         policy: CollisionQueryPolicy,
+        portal_policy: PortalTraversalPolicy,
+        is_portal_cap_hit: impl Fn(&T, Option<Guid>) -> bool,
         mut cast: impl FnMut(StaticSurfaceRayRequest, &SpatialMembership) -> Result<Option<(f32, T)>, E>,
     ) -> Result<UncoveredCollisionQuery<TraversedRay<T>>, E> {
         validate_ray(request)?;
@@ -61,6 +64,10 @@ impl CollisionScene {
                 ..request
             };
             let candidate = cast(segment_request, &placement)?;
+            let candidate_is_portal_cap = portal_policy == PortalTraversalPolicy::VisibleSelection
+                && candidate
+                    .as_ref()
+                    .is_some_and(|(_, hit)| is_portal_cap_hit(hit, current_cell));
             let limit = candidate
                 .as_ref()
                 .map_or(segment_request.maximum_distance, |(distance, _)| *distance);
@@ -77,9 +84,14 @@ impl CollisionScene {
                 },
                 None,
                 current_cell,
+                portal_policy,
             )?;
-            // A coincident surface wins the boundary tie in its source domain.
-            let transition = transition.filter(|transition| transition.fraction < 1.0);
+            // Physical rays stop at a coincident surface. Selection may cross a portal cap only
+            // inside its effective visible aperture; other static geometry wins the boundary tie.
+            let transition = transition.filter(|transition| {
+                transition.fraction < 1.0
+                    || (candidate_is_portal_cap && limit < segment_request.maximum_distance)
+            });
             let accepted_distance = transition
                 .as_ref()
                 .map_or(limit, |transition| limit * transition.fraction);

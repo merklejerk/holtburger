@@ -10,6 +10,7 @@ import {
 	clientLocalSettingsDocumentV7Schema,
 	clientLocalSettingsDocumentV8Schema,
 	clientLocalSettingsDocumentV9Schema,
+	clientLocalSettingsDocumentV10Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -23,7 +24,7 @@ const viewport = { width: 1440, height: 900 };
 
 function document() {
 	return {
-		schemaVersion: 9 as const,
+		schemaVersion: 10 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -40,8 +41,19 @@ function document() {
 	};
 }
 
-function versionEightDocument() {
+function versionNineDocument() {
 	const current = document();
+	const { vendor, ...hudLayout } = current.user.client.hudLayout;
+	void vendor;
+	return {
+		...current,
+		schemaVersion: 9 as const,
+		user: { ...current.user, client: { ...current.user.client, hudLayout } },
+	};
+}
+
+function versionEightDocument() {
+	const current = versionNineDocument();
 	const { caster, ...spellBar } = current.user.client.input.spellBar;
 	void caster;
 	return {
@@ -190,7 +202,7 @@ describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
-		expect(clientLocalSettingsDocumentV9Schema.parse(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV10Schema.parse(value)).toEqual(value);
 	});
 
 	it("migrates v1 with stable inspection layout defaults", () => {
@@ -290,6 +302,34 @@ describe("client settings contract", () => {
 		expect(parseClientLocalSettingsDocument(value)).toEqual(document());
 	});
 
+	it("adds vendor geometry to v9 while preserving edited existing placements", () => {
+		const previous = versionNineDocument();
+		const placement = {
+			...previous.user.client.hudLayout.inventory,
+			preferredWidth: 678,
+		};
+		const value = {
+			...previous,
+			user: {
+				...previous.user,
+				client: {
+					...previous.user.client,
+					hudLayout: {
+						...previous.user.client.hudLayout,
+						inventory: placement,
+					},
+				},
+			},
+		};
+		expect(clientLocalSettingsDocumentV9Schema.parse(value)).toEqual(value);
+		const migrated = parseClientLocalSettingsDocument(value);
+		const { vendor, ...preserved } = migrated.user.client.hudLayout;
+		expect(preserved).toEqual(value.user.client.hudLayout);
+		expect(vendor.preferredWidth).toBeGreaterThan(0);
+		expect(vendor.preferredHeight).toBeGreaterThan(0);
+		expect(parseClientLocalSettingsDocument(migrated)).toEqual(migrated);
+	});
+
 	it("rejects unknown fields and unsupported versions", () => {
 		expect(() => parseClientLocalSettingsDocument({})).toThrow(
 			"Client settings document has no schemaVersion",
@@ -298,8 +338,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 10 }),
-		).toThrow("Unsupported client settings schema version 10");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 11 }),
+		).toThrow("Unsupported client settings schema version 11");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {

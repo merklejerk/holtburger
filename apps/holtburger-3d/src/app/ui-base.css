@@ -197,6 +197,19 @@
 		);
 		--ui-inventory-section-gap: 14px;
 		--ui-inventory-divider: 1px solid currentColor;
+		/* Vendor catalog density, offer surface, and independent transaction colors. */
+		--ui-vendor-inset: 8px;
+		--ui-vendor-offer-row-gap: 2px;
+		--ui-vendor-offer-icon-size: 32px;
+		--ui-vendor-offer-column-gap: 8px;
+		--ui-vendor-offer-padding: 3px 8px;
+		--ui-vendor-offer-background: color-mix(
+			in srgb,
+			var(--ui-color-well) 55%,
+			transparent
+		);
+		--ui-vendor-buy-color: var(--ui-color-success);
+		--ui-vendor-sell-color: var(--ui-color-warning);
 	}
 	@supports (backdrop-filter: blur(1px)) {
 		.ui-theme .ui-panel {

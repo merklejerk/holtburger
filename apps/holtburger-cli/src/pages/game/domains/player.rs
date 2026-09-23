@@ -14,6 +14,9 @@ fn log_busy_operation_result(
     };
 
     match result {
+        holtburger_core::BusyOperationResult::Failed { message } => {
+            log::warn!("{} failed: {}", label, message);
+        }
         holtburger_core::BusyOperationResult::Completed {
             error: holtburger_protocol::errors::WeenieError::None,
             ..

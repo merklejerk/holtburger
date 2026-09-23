@@ -639,7 +639,7 @@ pub trait WorldContextExt: WorldContext {
         let src = self.get_entity(src_guid)?;
         let dst = self.get_entity(dst_guid)?;
 
-        if src.wcid? != dst.wcid? || !src.is_stackable() || !dst.is_stackable() {
+        if src.stack_compatibility_key(src.wcid)? != dst.stack_compatibility_key(dst.wcid)? {
             return None;
         }
 

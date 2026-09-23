@@ -219,6 +219,14 @@ pub enum ClientHostCommand {
     PreviewClientInventory {
         request: holtburger_core::client::inventory_plan::InventoryPreviewRequest,
     },
+    /// Evaluate a candidate vendor draft using shared world semantics.
+    PreviewClientVendor {
+        request: holtburger_core::client::vendor_transaction::VendorTradeRequest,
+    },
+    /// Submit one sell-then-buy execution to core.
+    SubmitClientVendor {
+        request: holtburger_core::client::vendor_transaction::VendorTradeRequest,
+    },
     /// Private Electron-main launch command; renderers never receive this inventory entry.
     StartClient {
         startup: ClientLaunchConfiguration,
@@ -308,6 +316,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "examine_client_entity",
     "close_client_container",
     "preview_client_inventory",
+    "preview_client_vendor",
+    "submit_client_vendor",
     "submit_client_inventory",
     "equip_client_item",
     "submit_client_item_use",
@@ -757,6 +767,16 @@ pub async fn dispatch_client(
             .map_err(application_error),
         SubmitClientInventory { intent } => runtime
             .send_command(ClientCommand::SubmitInventory(intent))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientVendor { request } => runtime
+            .send_command(ClientCommand::PreviewVendorTrade(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientVendor { request } => runtime
+            .send_command(ClientCommand::VendorTrade(request))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

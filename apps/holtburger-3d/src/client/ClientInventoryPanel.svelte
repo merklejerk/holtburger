@@ -3,7 +3,7 @@
 	import type { ClientItemInteractions } from "./client-item-interactions";
 	import { onMount } from "svelte";
 	import { startUiIconDisplay } from "../app/ui-icon-display";
-	import InventorySplitDialog from "./InventorySplitDialog.svelte";
+	import ClientQuantityDialog from "./ClientQuantityDialog.svelte";
 	import {
 		ClientInventorySplit,
 		type InventorySplitRequest,
@@ -342,7 +342,7 @@
 		</ClientContentsView>
 	</div>
 	{#if splitRequest !== null}
-		<InventorySplitDialog
+		<ClientQuantityDialog
 			request={splitRequest}
 			onSubmit={(amount) => splitOwner?.submit(amount)}
 			onCancel={() => splitOwner?.close()}

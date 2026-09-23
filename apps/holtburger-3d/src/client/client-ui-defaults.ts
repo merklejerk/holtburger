@@ -48,6 +48,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 370, height: 330 },
 		minSize: { width: 240, height: 190 },
 	},
+	vendor: {
+		anchor: "top-left",
+		offset: { x: 370, y: 170 },
+		size: { width: 420, height: 500 },
+		minSize: { width: 300, height: 260 },
+	},
 	inspection: {
 		anchor: "center-right",
 		offset: { x: 32, y: 0 },

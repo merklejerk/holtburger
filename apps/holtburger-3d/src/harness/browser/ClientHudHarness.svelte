@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { createVendorFixture } from "./client-vendor-fixture";
+	import { ClientVendorState } from "../../client/client-vendor-state";
 	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
 	import { handleCombatBarKeydown } from "../../client/client-combat-bar-input";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
@@ -865,6 +867,8 @@
 		>;
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
+		/** Synthetic replies through the real vendor session and HUD. */
+		readonly vendorProbe: ReturnType<typeof createVendorFixture>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
@@ -990,6 +994,7 @@
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
+	let vendor = $state<ClientVendorState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	function readInventoryEntities() {
 		inventorySampleCount += 1;
@@ -2834,6 +2839,14 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		worldContainer = containerOwner;
+		const vendorOwner = new ClientVendorState(
+			interactionLifecycle,
+			icons,
+			(message) => inventoryToasts.publish({ message, tone: "warning" }),
+			// The isolated HUD fixture has no world poses; its vendor stays in reach.
+			() => 0,
+		);
+		vendor = vendorOwner;
 		let spellReferenceRequests = 0;
 		const references = new SpellReferences({
 			invoke: async (command, args) => {
@@ -2947,6 +2960,11 @@
 				return keyboardFixture;
 			},
 			probeInventory,
+			vendorProbe: createVendorFixture({
+				emit: emitInteractionEvent,
+				baseline: emitInteractionBaseline,
+				commands: interactionCommands,
+			}),
 			probeWorldContainer: async () => {
 				// Match ClientApp's feedback composition for server-refused transfer fixtures.
 				const unsubscribe = interactionLifecycle.subscribe((event) => {
@@ -3033,6 +3051,8 @@
 			spells = null;
 			inventoryOwner.destroy();
 			containerOwner.destroy();
+			vendorOwner.destroy();
+			vendor = null;
 			worldContainer = null;
 			unsubscribeInventoryToasts();
 			inventoryToasts.destroy();
@@ -3188,6 +3208,7 @@
 		{spells}
 		{inventory}
 		{worldContainer}
+		{vendor}
 		onSelectContentsItem={(guid, mode) =>
 			selection.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}

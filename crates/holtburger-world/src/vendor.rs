@@ -11,6 +11,14 @@ use holtburger_protocol::messages::object::types::{
 };
 use serde::{Deserialize, Serialize};
 
+mod commerce;
+pub use commerce::{VendorQuoteError, VendorSaleRejection, VendorValueLimits};
+mod draft;
+pub use draft::{
+    PYREAL_WCID, VendorCurrencyQuote, VendorDraft, VendorDraftQuote, VendorLineQuote,
+    VendorPurchase,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CoreVendorItem {
     pub guid: Guid,
@@ -108,6 +116,8 @@ pub struct VendorState {
     pub buy_multiplier: f32,
     pub sell_multiplier: f32,
     pub merchandise_item_types: u32,
+    /// Retail's inclusive per-unit acceptance bounds, consumed by sale eligibility.
+    pub value_limits: VendorValueLimits,
     pub alternate_currency_wcid: u32,
     pub alternate_currency_amount: u32,
     pub alternate_currency_name: String,

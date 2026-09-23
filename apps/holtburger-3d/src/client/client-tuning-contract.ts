@@ -128,6 +128,11 @@ export interface ClientTuning {
 			readonly maxRows: number;
 		};
 	};
+	/** App-local vendor window and trade reach. */
+	readonly vendor: {
+		/** Maximum player-to-vendor world distance while the shop remains usable. */
+		readonly maximumDistanceMeters: number;
+	};
 	/** Mounted inventory display sampling policy. */
 	readonly inventory: {
 		/** Pointer travel required before an inventory selection becomes a drag. */

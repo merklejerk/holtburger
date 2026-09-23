@@ -49,6 +49,7 @@ pub mod selection_query;
 mod simulation;
 pub mod spell_inspection;
 pub mod types;
+pub mod vendor_transaction;
 mod world_container;
 pub use builder::ClientRuntimeBuilder;
 use camera::ClientCameraSettlement;
@@ -80,7 +81,7 @@ const PHYSICS_TICK_MS: u64 = 30;
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Operation context retained until completion, failure, timeout, or world reset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum PendingOperation {
     /// Direct-use source retained until the server completes the operation.
     Use {
@@ -91,23 +92,21 @@ pub(super) enum PendingOperation {
     SpellCast {
         target: Option<Guid>,
     },
-    Buy,
-    Sell,
+    Vendor(Box<vendor_transaction::VendorExecution>),
 }
 
 impl PendingOperation {
-    fn kind(self) -> BusyOperationKind {
+    fn kind(&self) -> BusyOperationKind {
         match self {
             Self::Use { .. } => BusyOperationKind::Use,
             Self::UseWithTarget => BusyOperationKind::UseWithTarget,
             Self::SpellCast { .. } => BusyOperationKind::SpellCast,
-            Self::Buy => BusyOperationKind::Buy,
-            Self::Sell => BusyOperationKind::Sell,
+            Self::Vendor(execution) => execution.kind(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct PendingBusyOperation {
     operation: PendingOperation,
     deadline: Instant,
@@ -602,6 +601,9 @@ impl ClientRuntime {
         reason: ActionResultReason,
     ) {
         if source == ActionResultSource::Wire {
+            if self.vendor_owns_feedback(&reason) {
+                return;
+            }
             self.observe_combat_action_result(&reason);
         }
         let _ = self
@@ -645,7 +647,8 @@ impl ClientRuntime {
 
     /// Release local operation ownership without claiming server completion.
     pub(super) fn clear_busy_operation(&mut self) {
-        if self.active_busy_operation.take().is_some() {
+        if let Some(pending) = self.active_busy_operation.take() {
+            self.emit_vendor_abort(&pending.operation, "Vendor interaction ended".to_string());
             self.emit_busy_state_updated();
         }
     }
@@ -1171,6 +1174,9 @@ impl ClientRuntime {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::VendorItemIdentified(item.clone()));
+                // Catalog consumers need updated appearance/value facts without
+                // reconstructing a vendor snapshot from partial appraisal events.
+                self.emit_vendor_state_updated();
             }
             WorldEvent::FellowshipStateUpdated(fellowship) => {
                 let _ = self
@@ -4181,7 +4187,7 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::Connected);
         let mut events = client.subscribe_client_view_events();
 
-        assert!(client.arm_busy_operation(crate::client::PendingOperation::Buy));
+        assert!(client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget));
         client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT + Duration::from_secs(1));
 
         assert!(client.active_busy_operation.is_none());
@@ -4192,7 +4198,7 @@ mod tests {
             match event {
                 ClientViewEvent::BusyStateUpdated { busy: None } => saw_busy_clear = true,
                 ClientViewEvent::BusyOperationFinished {
-                    operation: BusyOperationKind::Buy,
+                    operation: BusyOperationKind::UseWithTarget,
                     result: BusyOperationResult::TimedOut,
                 } => saw_timeout = true,
                 _ => {}
@@ -4207,13 +4213,15 @@ mod tests {
     fn arm_busy_operation_rejects_overlap_and_preserves_original_pending_state() {
         let mut client = builder::build_test_client(ClientState::Connected);
 
-        assert!(client.arm_busy_operation(crate::client::PendingOperation::Buy));
-        assert!(!client.arm_busy_operation(crate::client::PendingOperation::Sell));
+        assert!(client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget));
+        assert!(
+            !client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None })
+        );
 
         assert!(matches!(
             client.active_busy_operation,
             Some(PendingBusyOperation {
-                operation: PendingOperation::Buy,
+                operation: PendingOperation::UseWithTarget,
                 ..
             })
         ));

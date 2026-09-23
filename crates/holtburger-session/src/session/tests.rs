@@ -1004,3 +1004,103 @@ async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
         original_header.flags | packet_flags::RETRANSMISSION
     );
 }
+
+/// ACE NetworkSession.SendBundle keeps UIQueue messages ordered when stock spans packets.
+/// Datagram reordering must not let the terminal UseDone overtake sale receipts or refresh.
+#[tokio::test]
+async fn fragmented_vendor_refresh_preserves_sale_receipts_before_completion() {
+    use holtburger_common::Guid;
+    use holtburger_common::properties::InventoryEntryKind;
+    use holtburger_protocol::errors::WeenieError;
+
+    const UI_QUEUE: u16 = 9;
+    let vendor = Guid(100);
+    let receipt = |item| {
+        GameEvent::InventoryPutObjInContainer(Box::new(InventoryPutObjInContainerEventData {
+            item_guid: Guid(item),
+            container_guid: vendor,
+            slot: 0,
+            container_type: InventoryEntryKind::Item,
+        }))
+    };
+    let expected = vec![
+        receipt(200),
+        GameEvent::ApproachVendor(Box::new(ApproachVendorEventData {
+            vendor_guid: vendor,
+            items: (0..100)
+                .map(|index| VendorItemEventData {
+                    packed_stack_size: u32::MAX,
+                    description: PublicWeenieDescription {
+                        guid: Guid(1000 + index),
+                        name: Some(format!("Vendor offer {index}")),
+                        icon_id: 0x06000010,
+                        ..Default::default()
+                    },
+                })
+                .collect(),
+            ..Default::default()
+        })),
+        receipt(201),
+        GameEvent::UseDone(Box::new(UseDoneEventData {
+            error: WeenieError::None,
+        })),
+    ];
+    let chunk_size =
+        transport::MAX_PACKET_SIZE - transport::HEADER_SIZE - transport::FRAGMENT_HEADER_SIZE;
+    let mut packets = Vec::new();
+    for (index, event) in expected.iter().enumerate() {
+        let mut message = Vec::new();
+        GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(1),
+            sequence: index as u32 + 1,
+            event: event.clone(),
+        }))
+        .pack(&mut message);
+        let count = message.len().div_ceil(chunk_size);
+        if index == 1 {
+            assert!(count > 1, "Stock fixture must actually fragment");
+        }
+        for (part, data) in message.chunks(chunk_size).enumerate() {
+            let mut body = Vec::new();
+            FragmentHeader {
+                sequence: index as u32 + 1,
+                id: 1,
+                count: count as u16,
+                index: part as u16,
+                size: (transport::FRAGMENT_HEADER_SIZE + data.len()) as u16,
+                queue: UI_QUEUE,
+            }
+            .pack(&mut body);
+            body.extend_from_slice(data);
+            packets.push(build_transport_packet(
+                PacketHeader {
+                    sequence: packets.len() as u32 + 2,
+                    flags: packet_flags::BLOB_FRAGMENTS,
+                    ..Default::default()
+                },
+                &body,
+            ));
+        }
+    }
+    let packet_count = packets.len();
+    // Completion physically arrives before the fragmented catalog and second receipt.
+    packets.swap(1, packet_count - 1);
+    let mut session = Session::new_test();
+    session.has_server_seq = true;
+    session.last_server_seq = 1;
+    session.transport = Box::new(ScriptedTransport::new(packets, session.server_addr));
+    let mut actual = Vec::new();
+    for _ in 0..packet_count {
+        for event in session.recv_message().await.unwrap() {
+            let SessionEvent::Message(bytes) = event else {
+                panic!("Unexpected clock update")
+            };
+            let GameMessage::GameEvent(message) = GameMessage::unpack(&bytes, &mut 0).unwrap()
+            else {
+                panic!("Expected UI event")
+            };
+            actual.push(message.event);
+        }
+    }
+    assert_eq!(actual, expected);
+}

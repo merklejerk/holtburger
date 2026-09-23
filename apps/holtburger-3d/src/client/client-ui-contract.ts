@@ -57,6 +57,8 @@ export interface ClientUiDefaults {
 	readonly inventory: Omit<ClientUiPanel, "resizable">;
 	/** Independent, server-confirmed external storage window. */
 	readonly worldContainer: Omit<ClientUiPanel, "resizable">;
+	/** Vendor catalog, currencies, and combined trade draft. */
+	readonly vendor: Omit<ClientUiPanel, "resizable">;
 	/** Independent server-confirmed object inspection window. */
 	readonly inspection: Omit<ClientUiPanel, "resizable">;
 	/** Diagnostics window with independently retained geometry; borders always resize. */

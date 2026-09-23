@@ -46,6 +46,12 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
         self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(0) > 1
     }
 
+    /// Same-template stackability shared by physical merges and display grouping;
+    /// destination capacity and current quantities are separate decisions.
+    fn stack_compatibility_key(&self, wcid: Option<u32>) -> Option<u32> {
+        self.is_stackable().then_some(wcid).flatten()
+    }
+
     fn plural_name(&self) -> Option<&str> {
         self.get_string_prop(PropertyString::PluralName)
     }

@@ -1,9 +1,6 @@
 <script lang="ts">
 	import type { ClientVital } from "./client-host-contract";
 	import { formatQuantity } from "../app/quantity-format";
-	import ClientHudIcon, {
-		type ClientHudIconName,
-	} from "./ClientHudIcon.svelte";
 
 	interface Props {
 		readonly playerName: string | null;
@@ -12,12 +9,6 @@
 	}
 
 	const { playerName, worldName, vitals }: Props = $props();
-	const conditions: readonly { name: ClientHudIconName; label: string }[] = [
-		{ name: "buffed", label: "Buffed" },
-		{ name: "debuffed", label: "Debuffed" },
-		{ name: "encumbered", label: "Encumbered" },
-		{ name: "sick", label: "Sick" },
-	];
 	const bars = [
 		{ kind: "health", label: "Health" },
 		{ kind: "mana", label: "Mana" },
@@ -72,17 +63,6 @@
 			</div>
 		{/each}
 	</div>
-	<div class="conditions ui-hud-group" aria-label="Character conditions">
-		{#each conditions as condition}
-			<div
-				class="condition"
-				title={`${condition.label} status (stub)`}
-				aria-label={`${condition.label} status`}
-			>
-				<ClientHudIcon name={condition.name} />
-			</div>
-		{/each}
-	</div>
 </section>
 
 <style>
@@ -91,7 +71,7 @@
 			display: grid;
 			box-sizing: border-box;
 			height: 100%;
-			grid-template-rows: auto auto 1fr;
+			grid-template-rows: auto auto;
 			gap: 4px;
 		}
 		header {
@@ -142,22 +122,6 @@
 			opacity: 1;
 			visibility: visible;
 			transition-delay: 40ms, 0s;
-		}
-		.conditions {
-			display: flex;
-			align-items: end;
-			align-self: start;
-			gap: 10px;
-			justify-self: start;
-			height: fit-content;
-			width: fit-content;
-			padding-block: 4px 0;
-		}
-		.condition {
-			box-sizing: border-box;
-			width: 32px;
-			height: 32px;
-			padding: 6px;
 		}
 		@media (prefers-reduced-motion: reduce) {
 			.vital,

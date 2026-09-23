@@ -6,6 +6,7 @@
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
 	import ClientCharacterHud from "../../client/ClientCharacterHud.svelte";
+	import ClientStatusTray from "../../client/ClientStatusTray.svelte";
 	import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 	import ClientChat from "../../client/ClientChat.svelte";
 	import ClientFpsCounter from "../../client/ClientFpsCounter.svelte";
@@ -45,6 +46,7 @@
 	/** Production HUD surfaces whose component inputs do not require a GPU owner. */
 	type HudSurface = Exclude<
 		keyof ClientHudLayout,
+		| "statusTray"
 		| "minimap"
 		| "inventory"
 		| "worldContainer"
@@ -71,7 +73,8 @@
 			preferredHeight: h,
 		});
 		return {
-			character: place(16, 16, width, 132),
+			character: place(16, 16, width, 72),
+			statusTray: place(16, 96, 158, 32),
 			selectedEntity: place(16, 164, width, 72),
 			shortcuts: place(16, 252, width, 42),
 			frameRate: place(16, 320, 120, 26),
@@ -407,6 +410,13 @@
 					onToggle={() => (windowOpen = !windowOpen)}
 				/>{/snippet}
 			{@render hud("character", character)}
+			<ClientStatusTray
+				placement={layout.statusTray}
+				{editable}
+				{viewport}
+				onPlacementChange={(placement) =>
+					(adjustments = { ...adjustments, statusTray: placement })}
+			/>
 			{@render hud("selectedEntity", target)}
 			{@render hud("chat", chat)}
 			{@render hud("frameRate", fps)}

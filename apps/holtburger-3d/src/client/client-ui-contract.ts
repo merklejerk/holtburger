@@ -45,6 +45,8 @@ export interface ClientUiPanel extends ClientUiPlacement {
 export interface ClientUiDefaults {
 	/** Player identity and vitals. */
 	readonly character: ClientUiPanel;
+	/** Persistent condition and connection indicators, independently positioned. */
+	readonly statusTray: ClientUiPanel;
 	/** Tabbed combat spell shortcuts; a custom button toggles the strip arrangement. */
 	readonly spellBar: Omit<ClientUiPanel, "resizable">;
 	/** Targeted melee/missile controls; defaults overlap the stance-exclusive spell bar. */

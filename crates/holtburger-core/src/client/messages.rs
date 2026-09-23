@@ -592,7 +592,12 @@ impl ClientRuntime {
                     );
                     Ok(())
                 }
+                GameEvent::InventoryPutObjInContainer(data) => {
+                    self.observe_vendor_transfer(data.item_guid, data.container_guid);
+                    Ok(())
+                }
                 GameEvent::InventoryServerSaveFailed(data) => {
+                    self.observe_vendor_failure(data.item_guid, data.error);
                     self.reject_equipment_item(data.item_guid);
                     self.reject_pack_exchange_item(data.item_guid);
                     self.emit_action_result(
@@ -605,8 +610,11 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
-                    self.finish_busy_operation_from_use_done(data.error);
-                    if data.error != WeenieError::None {
+                    let vendor_completed = self.finish_vendor_use_done(data.error).await?;
+                    if !vendor_completed {
+                        self.finish_busy_operation_from_use_done(data.error);
+                    }
+                    if !vendor_completed && data.error != WeenieError::None {
                         self.emit_action_result(
                             ActionResultSource::Wire,
                             ActionResultReason::Weenie(data.error, None),
@@ -1901,7 +1909,7 @@ mod tests {
     async fn use_done_finishes_busy_operation_with_weenie_hint() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(crate::client::PendingOperation::Sell);
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget);
 
         let encoded_error = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -1928,7 +1936,7 @@ mod tests {
             if matches!(
                 event,
                 ClientViewEvent::BusyOperationFinished {
-                    operation: BusyOperationKind::Sell,
+                    operation: BusyOperationKind::UseWithTarget,
                     result: BusyOperationResult::Completed {
                         error: WeenieError::FullInventoryLocation,
                         parameter: None,
@@ -1947,7 +1955,7 @@ mod tests {
     async fn use_done_with_explicit_error_finishes_busy_operation_directly() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(crate::client::PendingOperation::Buy);
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget);
 
         let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -1963,7 +1971,7 @@ mod tests {
             if matches!(
                 event,
                 ClientViewEvent::BusyOperationFinished {
-                    operation: BusyOperationKind::Buy,
+                    operation: BusyOperationKind::UseWithTarget,
                     result: BusyOperationResult::Completed {
                         error: WeenieError::NoObject,
                         parameter: None,

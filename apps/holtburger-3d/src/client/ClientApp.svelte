@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ClientVendorState } from "./client-vendor-state";
+	import { sampleVendorDistanceMeters } from "./client-vendor-range";
 	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import {
 		initialSpellBarBindings,
@@ -331,6 +333,7 @@
 	);
 
 	let inventory = $state<ClientInventoryState | null>(null);
+	let vendor = $state<ClientVendorState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
@@ -1340,6 +1343,14 @@
 			(message) => toastCenter.publish({ message, tone: "warning" }),
 		);
 		worldContainer = containerOwner;
+		const vendorOwner = new ClientVendorState(
+			owner,
+			icons,
+			(message) => toastCenter.publish({ message, tone: "warning" }),
+			(vendorGuid) =>
+				sampleVendorDistanceMeters(owner.entities, owner.mirror, vendorGuid),
+		);
+		vendor = vendorOwner;
 		const spellReferences = new SpellReferences(transport);
 		const spellState = new ClientSpellState(owner, spellReferences, icons);
 		spells = spellState;
@@ -1436,6 +1447,8 @@
 			retireCharacterSettings();
 			inventoryOwner.destroy();
 			containerOwner.destroy();
+			vendorOwner.destroy();
+			vendor = null;
 			worldContainer = null;
 			inventory = null;
 			icons.dispose();
@@ -1561,6 +1574,7 @@
 			{spells}
 			{inventory}
 			{worldContainer}
+			{vendor}
 			{itemInteractions}
 			{objectInspection}
 			{objectPreviewService}

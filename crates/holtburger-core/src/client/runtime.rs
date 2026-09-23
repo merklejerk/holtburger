@@ -108,6 +108,10 @@ impl ClientRuntime {
             .take()
             .expect("busy operation should still exist when timing out");
         self.emit_busy_state_updated();
+        self.emit_vendor_abort(
+            &pending.operation,
+            "Vendor transaction timed out".to_string(),
+        );
         self.emit_busy_operation_finished(pending.operation.kind(), BusyOperationResult::TimedOut);
     }
 

@@ -77,7 +77,7 @@ const clientHudLayoutV3Schema = clientHudLayoutV2Schema
 	.strict()
 	.readonly();
 
-const clientHudLayoutSchema = clientHudLayoutV3Schema
+const clientHudLayoutV4Schema = clientHudLayoutV3Schema
 	.unwrap()
 	.extend({ settings: hudPlacementSchema })
 	.strict()
@@ -162,7 +162,7 @@ const clientUserSettingsV4Schema = clientUserSettingsV3Schema
 	.unwrap()
 	.omit({ weatherEnabled: true })
 	.extend({
-		hudLayout: clientHudLayoutSchema,
+		hudLayout: clientHudLayoutV4Schema,
 		graphics: clientGraphicsSettingsSchema,
 	})
 	.strict()
@@ -208,9 +208,21 @@ const clientUserSettingsV8Schema = clientUserSettingsV5Schema
 	.strict()
 	.readonly();
 
-export const clientUserSettingsSchema = clientUserSettingsV5Schema
+const clientUserSettingsV9Schema = clientUserSettingsV5Schema
 	.unwrap()
 	.extend({ input: clientKeyboardSettingsSchema })
+	.strict()
+	.readonly();
+/** Vendor placement joins the current layout without changing historical documents. */
+export const clientUserSettingsSchema = clientUserSettingsV9Schema
+	.unwrap()
+	.extend({
+		hudLayout: clientHudLayoutV4Schema
+			.unwrap()
+			.extend({ vendor: hudPlacementSchema })
+			.strict()
+			.readonly(),
+	})
 	.strict()
 	.readonly();
 export type ClientUserSettings = z.infer<typeof clientUserSettingsSchema>;
@@ -515,14 +527,14 @@ type ClientLocalSettingsDocumentV8 = z.infer<
 	typeof clientLocalSettingsDocumentV8Schema
 >;
 
-/** Current durable document with a configurable wielded-caster shortcut. */
+/** Version nine introduced a configurable wielded-caster shortcut. */
 export const clientLocalSettingsDocumentV9Schema = z
 	.object({
 		schemaVersion: z.literal(9),
 		user: z
 			.object({
 				window: clientWindowSettingsSchema,
-				client: clientUserSettingsSchema,
+				client: clientUserSettingsV9Schema,
 			})
 			.strict()
 			.readonly(),
@@ -530,8 +542,28 @@ export const clientLocalSettingsDocumentV9Schema = z
 	})
 	.strict()
 	.readonly();
-export type ClientLocalSettingsDocument = z.infer<
+type ClientLocalSettingsDocumentV9 = z.infer<
 	typeof clientLocalSettingsDocumentV9Schema
+>;
+
+/** Current durable document includes independently retained vendor geometry. */
+export const clientLocalSettingsDocumentV10Schema =
+	clientLocalSettingsDocumentV9Schema
+		.unwrap()
+		.extend({
+			schemaVersion: z.literal(10),
+			user: z
+				.object({
+					window: clientWindowSettingsSchema,
+					client: clientUserSettingsSchema,
+				})
+				.strict()
+				.readonly(),
+		})
+		.strict()
+		.readonly();
+export type ClientLocalSettingsDocument = z.infer<
+	typeof clientLocalSettingsDocumentV10Schema
 >;
 
 /**
@@ -724,7 +756,7 @@ function migrateClientLocalSettingsDocumentV7(
 /** Add the original caster chord without changing historical migration defaults. */
 function migrateClientLocalSettingsDocumentV8(
 	document: ClientLocalSettingsDocumentV8,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV9 {
 	return clientLocalSettingsDocumentV9Schema.parse({
 		...document,
 		schemaVersion: 9,
@@ -839,9 +871,9 @@ function parseClientLocalSettingsDocumentV7(
 }
 
 /** Upgrade every supported document to the current user-scoped settings contract. */
-export function parseClientLocalSettingsDocument(
+function parseClientLocalSettingsDocumentV9(
 	value: unknown,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV9 {
 	if (
 		typeof value === "object" &&
 		value !== null &&
@@ -863,4 +895,40 @@ export function parseClientLocalSettingsDocument(
 			parseClientLocalSettingsDocumentV7(value),
 		),
 	);
+}
+
+/** Fixed migration data; changing live HUD defaults must not move existing users' windows. */
+const V10_VENDOR_PLACEMENT = {
+	horizontal: { alignment: "start", offset: 370 },
+	vertical: { alignment: "start", offset: 170 },
+	preferredWidth: 420,
+	preferredHeight: 500,
+} as const;
+
+/** Upgrade every supported document while retaining every existing panel placement. */
+export function parseClientLocalSettingsDocument(
+	value: unknown,
+): ClientLocalSettingsDocument {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"schemaVersion" in value &&
+		value.schemaVersion === 10
+	)
+		return clientLocalSettingsDocumentV10Schema.parse(value);
+	const previous = parseClientLocalSettingsDocumentV9(value);
+	return clientLocalSettingsDocumentV10Schema.parse({
+		...previous,
+		schemaVersion: 10,
+		user: {
+			...previous.user,
+			client: {
+				...previous.user.client,
+				hudLayout: {
+					...previous.user.client.hudLayout,
+					vendor: V10_VENDOR_PLACEMENT,
+				},
+			},
+		},
+	});
 }

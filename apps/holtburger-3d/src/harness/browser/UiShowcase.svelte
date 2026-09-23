@@ -48,6 +48,7 @@
 		| "minimap"
 		| "inventory"
 		| "worldContainer"
+		| "vendor"
 		| "inspection"
 		| "debug"
 		| "settings"

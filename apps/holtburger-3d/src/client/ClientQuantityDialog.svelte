@@ -1,18 +1,28 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import type { InventorySplitRequest } from "./client-inventory-split";
 	interface Props {
-		/** Preflighted source and amount bound. */
-		readonly request: InventorySplitRequest;
+		/** Frontend-confirmed bounds; the owning operation validates again on submit. */
+		readonly request: {
+			readonly name: string;
+			readonly maxAmount: number;
+			readonly minAmount?: number;
+			readonly initialAmount?: number;
+		};
+		readonly purpose?: "split" | "buy";
 		/** Submit the entered quantity to the panel interaction owner. */
 		readonly onSubmit: (amount: number) => void;
 		/** Cancel without an inventory command. */
 		readonly onCancel: () => void;
 	}
-	const { request, onSubmit, onCancel }: Props = $props();
+	const { request, purpose = "split", onSubmit, onCancel }: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	let amount = $state<number | undefined>(1);
+	$effect(() => {
+		amount = request.initialAmount ?? 1;
+	});
+	const minimum = $derived(request.minAmount ?? 1);
+	const action = $derived(purpose === "buy" ? "Add to trade" : "Split");
 	let input: HTMLInputElement;
 	let dialog: HTMLDialogElement;
 	function handleKeydown(event: KeyboardEvent): void {
@@ -49,11 +59,16 @@
 	});
 </script>
 
-<div class="inventory-split-overlay">
+<div
+	class="quantity-overlay"
+	class:inventory-split-overlay={purpose === "split"}
+>
 	<dialog
 		open
-		class="inventory-split-dialog ui-panel"
-		aria-label={`Split ${request.name}`}
+		class="quantity-dialog ui-panel"
+		class:inventory-split-dialog={purpose === "split"}
+		class:vendor-quantity-dialog={purpose === "buy"}
+		aria-label={`${action} ${request.name}`}
 		bind:this={dialog}
 	>
 		<form
@@ -62,7 +77,7 @@
 				if (amount !== undefined) onSubmit(amount);
 			}}
 		>
-			<strong>Split {request.name}</strong>
+			<strong>{action} {request.name}</strong>
 			<label
 				>Amount <input
 					bind:this={input}
@@ -70,24 +85,29 @@
 					bind:value={amount}
 					class="ui-input"
 					type="number"
-					min="1"
+					min={minimum}
 					max={request.maxAmount}
 					step="1"
 					required
-				/><span class="inventory-split-maximum"
-					>/ {request.maxAmount.toLocaleString()}</span
-				></label
+				/>{#if purpose === "split" || request.maxAmount <= 1000}<span
+						class="inventory-split-maximum"
+						>/ {request.maxAmount.toLocaleString()}</span
+					>{/if}</label
 			>
-			<input
-				type="range"
-				use:keyboard.scope={{ keydown: handleKeydown }}
-				aria-label="Split amount"
-				min="1"
-				max={request.maxAmount}
-				step="1"
-				bind:value={amount}
-			/>
-			<div class="inventory-split-actions">
+			{#if minimum === request.maxAmount}
+				<p>Sold as one whole stack.</p>
+			{:else if request.maxAmount <= 1000}
+				<input
+					type="range"
+					use:keyboard.scope={{ keydown: handleKeydown }}
+					aria-label={`${action} amount`}
+					min={minimum}
+					max={request.maxAmount}
+					step="1"
+					bind:value={amount}
+				/>
+			{/if}
+			<div class="quantity-actions">
 				<button
 					type="button"
 					class="ui-button"
@@ -97,7 +117,7 @@
 				<button
 					type="submit"
 					class="ui-button"
-					use:keyboard.scope={{ keydown: handleKeydown }}>Split</button
+					use:keyboard.scope={{ keydown: handleKeydown }}>{action}</button
 				>
 			</div>
 		</form>
@@ -106,15 +126,15 @@
 
 <style>
 	@layer components {
-		.inventory-split-overlay {
+		.quantity-overlay {
 			position: absolute;
 			inset: 0;
 			z-index: 5;
 			display: grid;
 			place-items: center;
-			background: rgb(0 0 0 / 35%);
+			background: color-mix(in srgb, var(--ui-color-shadow) 35%, transparent);
 		}
-		.inventory-split-dialog {
+		.quantity-dialog {
 			position: relative;
 			margin: 8px;
 			max-width: calc(100% - 16px);
@@ -137,7 +157,7 @@
 		input[type="range"] {
 			width: 100%;
 		}
-		.inventory-split-actions {
+		.quantity-actions {
 			display: flex;
 			justify-content: end;
 			gap: 8px;

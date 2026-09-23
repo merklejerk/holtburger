@@ -10,8 +10,7 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::types::TradeFocus;
 use crate::utils::format_item_name;
-use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
-use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectExt as _};
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_world::context::WorldContextExt;
 
 fn clamp_selected_index(selected_index: usize, content_len: usize) -> usize {
@@ -266,31 +265,10 @@ pub fn render_trade_tab(
                 let color = get_entity_color(class);
                 let full_name = format!("[{}] {}", emoji, display_name);
 
-                // Calculate vendor's sell price (player pays this)
-                // Ground truth: Math.Max(1, (uint)Math.Ceiling(((float)sellRate * (value ?? 0)) - 0.1))
-                // Promissory notes have a special rate.
-                let mut sell_rate = vendor.sell_multiplier;
-                let item_type_bits = m
-                    .properties
-                    .ints
-                    .get(&PropertyInt::ItemType)
-                    .copied()
-                    .unwrap_or(0) as u32;
-
-                if item_type_bits & ItemType::PROMISSORY_NOTE.bits() != 0 {
-                    sell_rate = PROMISSORY_NOTE_SELL_RATE;
-                }
-
-                let base_value = m
-                    .properties
-                    .ints
-                    .get(&PropertyInt::Value)
-                    .copied()
-                    .unwrap_or(0) as f32;
-
-                let price = ((sell_rate * base_value) - VENDOR_CEIL_OFFSET)
-                    .ceil()
-                    .max(DEFAULT_PRICE as f32) as u32;
+                let price = match vendor.purchase_price(m, m.stack_size()) {
+                    Ok(price) => price.to_string(),
+                    Err(error) => format!("Unavailable: {error}"),
+                };
 
                 let is_selected = i == selected_index;
 

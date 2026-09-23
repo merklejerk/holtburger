@@ -1,3 +1,7 @@
+import vendorFixture from "./fixtures/vendor-wire.json";
+import { ClientVendorState } from "./client-vendor-state";
+import { UiIconRepository } from "../app/ui-icon-repository";
+import { vendorRequestSchema } from "./client-vendor-contract";
 import {
 	entityFacts,
 	playerEntitySnapshot,
@@ -1122,3 +1126,81 @@ function view(guid: number): DynamicEntityView {
 		motion: null,
 	};
 }
+
+it("delivers host-projected vendor contracts through the real session into the draft owner", async () => {
+	const transport = new FakeClientTransport();
+	const session = new ClientLifecycleSession(transport);
+	await session.start();
+	const failures: string[] = [];
+	const icons = new UiIconRepository({
+		prepare: async (requests) =>
+			requests.map(({ key }) => ({
+				kind: "ready",
+				key,
+				image: new Uint8Array([1]),
+			})),
+		createImage: async () => "blob:fixture",
+		revokeImage: () => {},
+		report: () => {},
+	});
+	const model = new ClientVendorState(
+		session,
+		icons,
+		(message) => failures.push(message),
+		() => 0,
+	);
+	const latest = () => {
+		const args = transport.invocations.at(-1)?.args;
+		if (args === undefined) throw new Error("No vendor command");
+		return vendorRequestSchema.parse(args.request);
+	};
+	try {
+		transport.emit(
+			vendorFixture.snapshot.event,
+			vendorFixture.snapshot.payload,
+		);
+		model.read();
+		const opening = latest();
+		transport.emit(vendorFixture.preview.event, {
+			...vendorFixture.preview.payload,
+			sequence: opening.sequence,
+			outcome: {
+				kind: "ready",
+				quote: { ...vendorFixture.preview.payload.outcome.quote, buys: [] },
+			},
+		});
+		model.queueBuy(1000);
+		model.confirmBuyQuantity(1000, 10);
+		const candidate = latest();
+		expect(candidate.draft).toEqual({
+			vendor: 100,
+			buys: [{ item: 1000, amount: 10 }],
+			sells: [],
+		});
+		transport.emit(vendorFixture.preview.event, {
+			...vendorFixture.preview.payload,
+			sequence: candidate.sequence,
+		});
+		expect(model.read()?.queue).toMatchObject([
+			{ name: "Food", amount: 10, total: 100 },
+		]);
+		expect(model.read()?.quote?.currencies).toHaveLength(2);
+		model.trade();
+		const submitted = latest();
+		expect(transport.invocations.at(-1)?.command).toBe("submit_client_vendor");
+		transport.emit(vendorFixture.phase.event, vendorFixture.phase.payload);
+		expect(model.read()?.phase).toBe("buying");
+		transport.emit(vendorFixture.failed.event, {
+			...vendorFixture.failed.payload,
+			sequence: submitted.sequence,
+		});
+		expect(failures).toEqual(["Purchase failed. Purchase refused"]);
+		expect(latest().draft.buys).toEqual(submitted.draft.buys);
+		transport.emit(vendorFixture.closed.event, vendorFixture.closed.payload);
+		expect(model.read()).toBeNull();
+	} finally {
+		model.destroy();
+		icons.dispose();
+		session.stop();
+	}
+});

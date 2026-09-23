@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientVendorWindow from "./ClientVendorWindow.svelte";
+	import type { ClientVendorState } from "./client-vendor-state";
 	import type { ItemDragSession } from "./client-item-drag";
 	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
 	import ClientInspectionWindow from "./ClientInspectionWindow.svelte";
@@ -165,6 +167,8 @@
 		readonly inventory: ClientInventoryState | null;
 		/** Direct authority for cross-panel item gestures. */
 		readonly itemSession: ItemDragSession | null;
+		/** Session-owned vendor draft and catalog presentation. */
+		readonly vendor: ClientVendorState | null;
 		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
 		readonly worldContainer: ClientWorldContainerPanelState | null;
 		/** Shared use/combining owner for all mounted entry points. */
@@ -269,6 +273,7 @@
 		inventory,
 		itemSession,
 		worldContainer,
+		vendor,
 		itemInteractions,
 		onSelectContentsItem,
 		onPickInventoryTarget,
@@ -716,6 +721,7 @@
 				onResetOwner={(reset) => (resetActionBars = reset)}
 				session={itemSession}
 				{worldContainer}
+				{vendor}
 				onDragOwner={(owner) => (itemDrag = owner)}
 				{onPickInventoryTarget}
 				{onInventoryNotice}
@@ -928,6 +934,18 @@
 				{viewport}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("worldContainer", placement)}
+			/>
+		{/key}
+	{/if}
+	{#if vendor !== null}
+		{#key vendor}
+			<ClientVendorWindow
+				model={vendor}
+				placement={hudLayout.vendor}
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("vendor", placement)}
+				{onExamineItem}
 			/>
 		{/key}
 	{/if}

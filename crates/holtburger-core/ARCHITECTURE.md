@@ -31,6 +31,24 @@ We use a narrow runtime surface that keeps protocol and UI concerns distinct wit
 - **ClientCommand**: Commands sent from the UI to the engine (e.g., `DriveMovement`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
 - **Producer-Only Pattern**: The Core Engine is strictly _producer-only_ for the public event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from decoded protocol -> state -> view.
 
+### Vendor execution
+
+World owns `VendorDraft` evaluation: sale eligibility, source quantities, per-object
+rounded prices, compatible-stack keys, and currency projections. Core's
+`client/vendor_transaction.rs` owns execution under the existing busy-operation
+lifetime. `VendorTrade` sends Sell first, retains matching source receipts and
+failures, and transitions directly to Buy after the sale's terminal `UseDone`,
+including a partial or refused sale. There is no idle gap, pre-buy balance recheck,
+rollback, or retry. The terminal typed receipt preserves transferred sale sources
+and any sale issue independently of the purchase outcome. Timeouts and failed sends
+stop execution without advancing to the next phase.
+
+Standalone `Buy` and `Sell` commands share completion handling, preserving the
+TUI's separate workflows. The 3D host projects catalog/quote/result contracts;
+h3d owns draft editing, visual merging, categories, gestures, and HUD geometry.
+Display groups retain all source identities, so partial outcomes can remove only
+fulfilled contributions. They never become physical inventory stacks or entities.
+
 ### Command and Controller Boundary
 
 The core crate exposes two layers of client-facing behavior:

@@ -1633,11 +1633,6 @@ impl Entity {
         self.weenie_flags = data.public_weenie_desc.weenie_flags;
         self.weenie_flags2 = data.public_weenie_desc.weenie_flags2;
 
-        self.properties.ints.0.insert(
-            PropertyInt::ItemType,
-            data.public_weenie_desc.item_type as i32,
-        );
-
         self.physics
             .reconcile(resolve_effective_entity_physics_state(data.physics_state));
         self.appearance = EntityAppearance::from(&data.model_data);

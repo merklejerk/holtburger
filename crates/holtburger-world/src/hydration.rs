@@ -41,6 +41,9 @@ pub fn decode_vendor_item_supply(packed_stack_size: u32) -> Option<u32> {
 
 impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
     fn hydrate_from_pwd(&mut self, pwd: &PublicWeenieDescription) {
+        // Vendor offers and spatial entities carry the same mandatory item-type field.
+        self.ints
+            .insert(PropertyInt::ItemType, pwd.item_type as i32);
         // Base art is mandatory in public descriptions, including explicit zero.
         // Store it alongside updates so recreation and property deltas share one source.
         self.dids

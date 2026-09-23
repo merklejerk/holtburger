@@ -252,7 +252,7 @@ Source: `ACE.Entity.Enum.Properties`
 | 71 | NumFollowFailures | | |
 | 72 | FriendType | | Creature type this entity is friendly towards (`CreatureType`). |
 | 73 | FoeType | | Creature type this entity treats as an enemy (`CreatureType`). |
-| 74 | MerchandiseItemTypes | | Categories of items this vendor sells (bitmask of `ItemType`). |
+| 74 | MerchandiseItemTypes | | Categories of items this vendor buys from players (bitmask of `ItemType`). |
 | 75 | MerchandiseMinValue | | Minimum value of items this vendor will buy. |
 | 76 | MerchandiseMaxValue | | Maximum value of items this vendor will buy. |
 | 77 | NumItemsSold | | |
@@ -621,8 +621,8 @@ Source: `ACE.Entity.Enum.Properties`
 | 34 | PowerupTime | | AI delay in seconds before performing an action or attack. |
 | 35 | MaxChargeDistance | | Max distance in meters an object can "charge" during movement. |
 | 36 | ChargeSpeed | | Movement speed modifier during a "charge" state. |
-| 37 | BuyPrice | | Economics: Unit price for purchasing from a vendor. |
-| 38 | SellPrice | | Economics: Unit price for selling to a vendor. |
+| 37 | BuyPrice | | Economics: Vendor buying multiplier applied to items sold by the player. |
+| 38 | SellPrice | | Economics: Vendor selling multiplier applied to items purchased by the player. |
 | 39 | DefaultScale | | Global scaling factor for the model size (1.0 = normal). |
 | 40 | LockpickMod | | Modifier for lockpicking success chance on this object. |
 | 41 | RegenerationInterval | | Time in seconds between vital regeneration ticks. |

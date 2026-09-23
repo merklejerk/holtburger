@@ -604,22 +604,71 @@ Sent when a merchant interaction begins. Includes full inventory and pricing.
 | :--- | :--- | :--- |
 | `uint32` | `VendorID` | GUID of the vendor. |
 | `uint32` | `ItemTypes` | Bitmask of item types accepted. |
-| `uint32` | `MinValue` | Minimum item value accepted. |
-| `uint32` | `MaxValue` | Maximum item value accepted. |
+| `uint32` | `MinValue` | Retail inclusive minimum per-unit sale value; `0xFFFFFFFF` means unbounded. |
+| `uint32` | `MaxValue` | Retail inclusive maximum per-unit sale value; `0xFFFFFFFF` means unbounded. |
 | `uint32` | `DealMagical` | Whether vendor handles magical items. |
-| `float32` | `BuyMultiplier` | Price multiplier for buying (e.g. 1.25). |
-| `float32` | `SellMultiplier` | Price multiplier for selling (e.g. 0.75). |
+| `float32` | `BuyMultiplier` | Vendor buying multiplier: pyreal proceeds when the player sells. |
+| `float32` | `SellMultiplier` | Vendor selling multiplier: cost when the player buys. |
 | `uint32` | `AltWCID` | WCID of alternate currency (if used). |
-| `uint32` | `AltAmount` | Amount of alternate currency required. |
+| `uint32` | `AltAmount` | Player alternate-currency count, plus currency spent during a purchase refresh. |
 | `String16L` | `AltName` | Name of alternate currency. |
 | `uint32` | `ItemCount` | Number of items in vendor's inventory. |
 | `VendorItem[]` | `Items` | List of items available for purchase. |
+
+The catalog is one complete flat list, also sent after trades; category sections are
+client presentation. Each `VendorItem` is a packed `uint32` followed by a
+`PublicWeenieDescription`. The low 24 bits hold supply (`0xFFFFFF` means unlimited),
+and the high byte identifies the description format (`0xFF` is the current format).
+Supply is distinct from the description's stack quantity. The message is padded to
+four-byte alignment and may span multiple transport fragments.
+
+Retail `VendorProfile::InqAcceptability` (`acclient.c:485596`) divides item value by
+nonzero stack count with integer truncation, otherwise uses the object's value.
+Zero unit value is refused. Bounds include equality. An over-maximum promissory
+note (`ItemType` bit `0x40000`) returns acceptable before the minimum check. ACE's
+`Player_Commerce.VerifySellItems` enforces types, sellability, retained state,
+positive value, and container/trade restrictions, but not these retail value
+bounds. The client deliberately applies the retail bounds during draft evaluation.
+The retail predicate does not consult `DealMagical`.
 
 #### `0xF7B1:0x005F` Buy (C2S)
 Request to purchase items. Payload: `VendorID` (u32), `ItemCount` (u32), `ItemProfile[]`.
 
 #### `0xF7B1:0x0060` Sell (C2S)
 Request to sell items. Payload: `VendorID` (u32), `ItemCount` (u32), `ItemProfile[]`.
+
+Both actions carry each `ItemProfile` as `Amount` (`int32`, positive) followed by
+`ObjectGUID` (`uint32`). They are separate operations; the protocol does not offer
+an atomic mixed barter transaction.
+
+For default stock, ACE interprets purchase amounts as units and creates physical
+stacks up to the template's maximum. For unique resale stock, it transfers the
+existing whole object. The catalog does not explicitly identify these two server
+collections, so this client quotes finite offers as whole displayed stacks. Each
+created/transferred object is priced separately: ACE multiplies value by the
+single-precision vendor rate, then uses `ceil(product - 0.1)` for purchases and
+`floor(product + 0.1)` for sales. Promissory notes have fixed purchase/sale rates
+of `1.15` and `1.0`. Sales pay pyreals even at alternate-currency vendors.
+
+A sale may accept only a subset of requested sources. Successful removals emit
+`InventoryPutObjInContainer` with the item GUID and vendor destination, including
+items the vendor subsequently destroys. Match that receipt set to requested
+sources; a stock refresh is not evidence that every item sold. ACE sends the
+refresh before payout completion and terminal `UseDone`. A reasonless
+`InventoryServerSaveFailed` keyed by the player GUID still means failure;
+`UseDone(None)` alone does not prove success. A combined client operation waits
+for the sale's terminal `UseDone` before sending Buy, even when the sale was
+partially or fully refused. It preserves the sale issue alongside the purchase
+outcome. Timeouts and failed sends stop progression. If Buy fails, the completed
+sale remains committed.
+
+Sources: `ACE/Source/ACE.Server/Network/GameEvent/Events/GameEventApproachVendor.cs`,
+`ACE/Source/ACE.Server/WorldObjects/Vendor.cs` (`ItemProfileToWorldObjects`,
+`BuyItems_ValidateTransaction`, `GetSellCost`, `CalculatePayoutCoinAmount`), and
+`ACE/Source/ACE.Server/WorldObjects/Player_Commerce.cs` (`HandleActionSellItem`).
+`NetworkSession.SendBundle` preserves UIQueue order when a fragment does not fit;
+client transport orders datagrams and reassembles complete messages before dispatch.
+
 
 ---
 
@@ -636,4 +685,3 @@ Request to sell items. Payload: `VendorID` (u32), `ItemCount` (u32), `ItemProfil
 | `0xF7B0:0x0205` | `ResetTrade` | S2C | Acceptance cleared due to change. |
 | `0xF7B1:0x01FA` | `AcceptTrade` | C2S | Client accepts current offer. |
 | `0xF7B1:0x01FB` | `DeclineTrade` | C2S | Client cancels trade. |
-

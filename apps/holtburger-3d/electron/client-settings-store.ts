@@ -165,7 +165,7 @@ export class ClientSettingsStore {
 		if (this.#state.user === null)
 			throw new Error("Cannot create settings document before user bootstrap");
 		return {
-			schemaVersion: 9,
+			schemaVersion: 10,
 			user: { window: this.#state.window, client: this.#state.user },
 			characters: this.#state.characters,
 		};

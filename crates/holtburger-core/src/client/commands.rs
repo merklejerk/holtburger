@@ -98,6 +98,7 @@ impl ClientRuntime {
                     | ClientCommand::UseWithTarget { .. }
                     | ClientCommand::SalvageItemsWith { .. }
                     | ClientCommand::GiveObjectRequest { .. }
+                    | ClientCommand::VendorTrade(_)
                     | ClientCommand::Buy { .. }
                     | ClientCommand::Sell { .. }
                     | ClientCommand::OpenTrade(_)
@@ -110,6 +111,10 @@ impl ClientRuntime {
                     | ClientCommand::TargetedMissileAttack { .. }
             )
         {
+            if let ClientCommand::VendorTrade(request) = &cmd {
+                self.reject_vendor_request(request, "An inventory change is still pending".into());
+                return Ok(());
+            }
             self.emit_action_result(
                 ActionResultSource::Client,
                 ActionResultReason::General("An inventory change is still pending".into()),
@@ -117,6 +122,10 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::PreviewVendorTrade(request) => {
+                self.preview_vendor_trade(request);
+                Ok(())
+            }
             ClientCommand::QuerySpellInspection(query) => {
                 self.query_spell_inspection(query);
                 Ok(())
@@ -162,6 +171,7 @@ impl ClientRuntime {
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
+            | ClientCommand::VendorTrade(_)
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
             | ClientCommand::OpenTrade(_)
@@ -582,25 +592,14 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::VendorTrade(request) => self.submit_vendor_trade(request).await,
             ClientCommand::Buy { vendor, items } => {
-                if !self.arm_busy_operation(crate::client::PendingOperation::Buy) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
-                    vendor_guid: vendor,
-                    items,
-                })))
-                .await
+                self.start_vendor_trade(None, vendor, items, Vec::new())
+                    .await
             }
             ClientCommand::Sell { vendor, items } => {
-                if !self.arm_busy_operation(crate::client::PendingOperation::Sell) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::Sell(Box::new(SellActionData {
-                    vendor_guid: vendor,
-                    items,
-                })))
-                .await
+                self.start_vendor_trade(None, vendor, Vec::new(), items)
+                    .await
             }
             ClientCommand::OpenTrade(target) => {
                 self.send_game_action(GameAction::OpenTradeNegotiations(Box::new(
@@ -1215,7 +1214,7 @@ mod tests {
     use holtburger_protocol::messages::combat::CombatMode;
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
-        SkillAdvancementClass,
+        ItemProfileActionData, SkillAdvancementClass,
     };
     use holtburger_world::RuntimeBodyResetCause;
     use holtburger_world::entity::Entity;
@@ -1498,6 +1497,7 @@ mod tests {
             buy_multiplier: 1.0,
             sell_multiplier: 1.0,
             merchandise_item_types: 0xDEAD_BEEF,
+            value_limits: Default::default(),
             alternate_currency_wcid: 0,
             alternate_currency_amount: 0,
             alternate_currency_name: String::from("Pyreals"),
@@ -2216,7 +2216,10 @@ mod tests {
         client
             .handle_command(ClientCommand::Buy {
                 vendor: Guid(0x7000_0001),
-                items: Vec::new(),
+                items: vec![ItemProfileActionData {
+                    object_guid: Guid(42),
+                    amount: 1,
+                }],
             })
             .await
             .unwrap();
@@ -2224,7 +2227,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: crate::client::PendingOperation::Buy,
+                operation: crate::client::PendingOperation::Vendor(_),
                 ..
             })
         ));
@@ -2252,7 +2255,10 @@ mod tests {
         client
             .handle_command(ClientCommand::Buy {
                 vendor: Guid(0x7000_0001),
-                items: Vec::new(),
+                items: vec![ItemProfileActionData {
+                    object_guid: Guid(42),
+                    amount: 1,
+                }],
             })
             .await
             .unwrap();
@@ -2262,7 +2268,10 @@ mod tests {
         client
             .handle_command(ClientCommand::Sell {
                 vendor: Guid(0x7000_0001),
-                items: Vec::new(),
+                items: vec![ItemProfileActionData {
+                    object_guid: Guid(42),
+                    amount: 1,
+                }],
             })
             .await
             .unwrap();
@@ -2271,7 +2280,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: crate::client::PendingOperation::Buy,
+                operation: crate::client::PendingOperation::Vendor(_),
                 ..
             })
         ));

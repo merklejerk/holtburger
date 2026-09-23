@@ -1,4 +1,16 @@
 import {
+	vendorRequestSchema,
+	vendorSnapshotSchema,
+	vendorPreviewSchema,
+	vendorResultSchema,
+	vendorPhaseSchema,
+	type VendorRequest,
+	type VendorSnapshot,
+	type VendorPreview,
+	type VendorResult,
+	type VendorPhase,
+} from "./client-vendor-contract";
+import {
 	spellInspectionQuerySchema,
 	spellInspectionContextSchema,
 	spellInspectionResultSchema,
@@ -140,6 +152,8 @@ type ClientCommandName = Extract<
 	| "stop_client_combat_engagement"
 	| "query_client_entity_health"
 	| "preview_client_inventory"
+	| "preview_client_vendor"
+	| "submit_client_vendor"
 	| "submit_client_inventory"
 	| "close_client_container"
 	| "equip_client_item"
@@ -165,6 +179,10 @@ type ClientEventName = Extract<
 	| "client-object-preview-result"
 	| "client-current-state"
 	| "client-inventory-preview"
+	| "client-vendor-snapshot"
+	| "client-vendor-preview"
+	| "client-vendor-result"
+	| "client-vendor-phase"
 	| "client-item-use-target-result"
 	| "client-spell-inspection-context"
 	| "client-spell-inspection-result"
@@ -240,6 +258,10 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "vendor-snapshot"; readonly vendor: VendorSnapshot }
+	| { readonly type: "vendor-preview"; readonly result: VendorPreview }
+	| { readonly type: "vendor-result"; readonly result: VendorResult }
+	| { readonly type: "vendor-phase"; readonly phase: VendorPhase }
 	| {
 			readonly type: "object-inspection-result";
 			readonly result: ObjectInspectionResult;
@@ -359,6 +381,7 @@ export class ClientLifecycleSession {
 	readonly #dynamicSession: DynamicEntitySession;
 	#unlisten: readonly (() => void)[] | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
+	#vendor: VendorSnapshot = null;
 	#entryRequestGuid: number | null = null;
 
 	constructor(
@@ -386,6 +409,7 @@ export class ClientLifecycleSession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
+		this.#vendor = null;
 		let siblingUnlisteners: readonly (() => void)[] = [];
 		try {
 			await this.#dynamicSession.start({
@@ -492,6 +516,23 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("respond_to_client_confirmation", {
 			request_id: requestId,
 			accepted,
+		});
+	}
+
+	/** Latest catalog survives panel mounts; the draft remains app-local. */
+	vendorSnapshot(): VendorSnapshot {
+		return this.#vendor;
+	}
+
+	async previewVendor(request: VendorRequest): Promise<void> {
+		await this.#transport.invoke("preview_client_vendor", {
+			request: vendorRequestSchema.parse(request),
+		});
+	}
+
+	async submitVendor(request: VendorRequest): Promise<void> {
+		await this.#transport.invoke("submit_client_vendor", {
+			request: vendorRequestSchema.parse(request),
 		});
 	}
 
@@ -851,6 +892,28 @@ export class ClientLifecycleSession {
 					this.#emit({
 						type: "item-use-result",
 						result: itemUseResultSchema.parse(payload),
+					});
+				}),
+				await this.#transport.listen("client-vendor-snapshot", (payload) => {
+					this.#vendor = vendorSnapshotSchema.parse(payload);
+					this.#emit({ type: "vendor-snapshot", vendor: this.#vendor });
+				}),
+				await this.#transport.listen("client-vendor-preview", (payload) => {
+					this.#emit({
+						type: "vendor-preview",
+						result: vendorPreviewSchema.parse(payload),
+					});
+				}),
+				await this.#transport.listen("client-vendor-result", (payload) => {
+					this.#emit({
+						type: "vendor-result",
+						result: vendorResultSchema.parse(payload),
+					});
+				}),
+				await this.#transport.listen("client-vendor-phase", (payload) => {
+					this.#emit({
+						type: "vendor-phase",
+						phase: vendorPhaseSchema.parse(payload),
 					});
 				}),
 				await this.#transport.listen("client-inventory-preview", (payload) => {

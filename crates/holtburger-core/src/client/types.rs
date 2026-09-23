@@ -621,6 +621,10 @@ pub enum BusyOperationKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BusyOperationResult {
+    /// Explicit refusal or incomplete vendor receipt, including reasonless wire failures.
+    Failed {
+        message: String,
+    },
     Completed {
         error: WeenieError,
         parameter: Option<String>,
@@ -838,6 +842,10 @@ pub enum ClientViewEvent {
     VendorStateUpdated {
         vendor: Option<VendorState>,
     },
+    /// Terminal vendor receipt used to retire fulfilled draft sources.
+    VendorTradeFinished(super::vendor_transaction::VendorTradeResult),
+    /// Shared quote for a candidate vendor draft.
+    VendorDraftPreview(super::vendor_transaction::VendorPreviewResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
     FellowshipStateUpdated {
         fellowship: Option<FellowshipState>,
@@ -1049,6 +1057,10 @@ pub enum ClientCommand {
         item: Guid,
         amount: u32,
     },
+    /// Execute an optional sale followed by an optional purchase under one busy owner.
+    VendorTrade(super::vendor_transaction::VendorTradeRequest),
+    /// Evaluate a draft without changing inventory or sending a server action.
+    PreviewVendorTrade(super::vendor_transaction::VendorTradeRequest),
     Buy {
         vendor: Guid,
         items: Vec<ItemProfileActionData>,

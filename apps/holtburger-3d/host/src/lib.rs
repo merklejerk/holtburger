@@ -23,6 +23,7 @@ pub mod cell_struct_projection;
 pub mod client_host;
 pub mod client_projection;
 pub mod client_runtime;
+pub mod client_vendor;
 pub mod env_cell_source;
 pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;

@@ -1636,6 +1636,10 @@ impl WorldState {
             buy_multiplier: data.buy_multiplier,
             sell_multiplier: data.sell_multiplier,
             merchandise_item_types: data.merchandise_item_types,
+            value_limits: crate::vendor::VendorValueLimits::from_wire(
+                data.merchandise_min_value,
+                data.merchandise_max_value,
+            ),
             alternate_currency_wcid: data.alternate_currency_wcid,
             alternate_currency_amount: data.alternate_currency_amount,
             alternate_currency_name: data.alternate_currency_name.clone(),

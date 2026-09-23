@@ -386,6 +386,7 @@ mod tests {
                 buy_multiplier: 1.0,
                 sell_multiplier: 1.0,
                 merchandise_item_types: 0,
+                value_limits: Default::default(),
                 alternate_currency_wcid: 0,
                 alternate_currency_amount: 0,
                 alternate_currency_name: String::new(),

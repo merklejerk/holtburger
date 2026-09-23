@@ -1,4 +1,10 @@
 import type {
+	VendorSnapshot,
+	VendorPreview,
+	VendorResult,
+	VendorPhase,
+} from "../../client/client-vendor-contract";
+import type {
 	SpellInspectionContext,
 	SpellInspectionResult,
 } from "../../client/client-spell-inspection-contract";
@@ -107,6 +113,8 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"stop_client_combat_engagement",
 	"query_client_entity_health",
 	"preview_client_inventory",
+	"preview_client_vendor",
+	"submit_client_vendor",
 	"submit_client_inventory",
 	"close_client_container",
 	"equip_client_item",
@@ -167,6 +175,10 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-object-preview-result",
 	"client-current-state",
 	"client-inventory-preview",
+	"client-vendor-snapshot",
+	"client-vendor-preview",
+	"client-vendor-result",
+	"client-vendor-phase",
 	"client-item-use-result",
 	"client-item-use-target-result",
 	"client-spell-inspection-context",
@@ -247,6 +259,10 @@ export interface HostEventPayloadMap {
 	"client-object-inspection-result": ObjectInspectionResult;
 	"client-object-preview-result": ObjectPreviewResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;
+	"client-vendor-snapshot": VendorSnapshot;
+	"client-vendor-preview": VendorPreview;
+	"client-vendor-result": VendorResult;
+	"client-vendor-phase": VendorPhase;
 	"client-item-use-result": ClientItemUseResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;
 	"client-spell-inspection-context": SpellInspectionContext;

@@ -753,6 +753,14 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Complete vendor stock and terms needed by the app-local catalog.
+    VendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
+    /// Correlated shared draft quote.
+    VendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
+    /// Terminal receipt identifying which sale sources actually transferred.
+    VendorResult(holtburger_core::client::vendor_transaction::VendorTradeResult),
+    /// Current operation label while the submitted draft is locked.
+    VendorPhase(holtburger_core::client::vendor_transaction::VendorTradePhase),
     /// One world-populated examination outcome; presentation lifetime remains frontend-owned.
     ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
     /// Captured creature visual facts correlated with the preceding examination result.
@@ -999,6 +1007,22 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::VendorStateUpdated { vendor } => {
+            Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))
+        }
+        ClientViewEvent::VendorDraftPreview(result) => Some(ClientHostEvent::VendorPreview(result)),
+        ClientViewEvent::VendorTradeFinished(result) => Some(ClientHostEvent::VendorResult(result)),
+        ClientViewEvent::BusyStateUpdated {
+            busy: Some(BusyOperationKind::Buy),
+        } => Some(ClientHostEvent::VendorPhase(
+            holtburger_core::client::vendor_transaction::VendorTradePhase::Buying,
+        )),
+        ClientViewEvent::BusyStateUpdated {
+            busy: Some(BusyOperationKind::Sell),
+        } => Some(ClientHostEvent::VendorPhase(
+            holtburger_core::client::vendor_transaction::VendorTradePhase::Selling,
+        )),
+
         ClientViewEvent::ObjectInspectionResult(result) => {
             Some(ClientHostEvent::ObjectInspectionResult(result))
         }
@@ -1119,8 +1143,8 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 BusyOperationKind::UseWithTarget => "Use with target",
                 BusyOperationKind::Salvage => "Salvage",
                 BusyOperationKind::SpellCast => "Spell cast",
-                BusyOperationKind::Buy => "Purchase",
-                BusyOperationKind::Sell => "Sale",
+                // Vendor receipts already own the terminal notice, including partial progress.
+                BusyOperationKind::Buy | BusyOperationKind::Sell => return None,
             };
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                 message: format!("{operation} timed out waiting for the server."),

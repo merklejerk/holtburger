@@ -3,6 +3,7 @@ import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
+import { probeVendor } from "./client-vendor-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
 import { existsSync } from "node:fs";
@@ -4778,6 +4779,18 @@ async function runClientHudHarness({ viteUrl }) {
 						)
 				: null,
 		);
+		inventory.vendor = await probeVendor(
+			client,
+			evaluateExpression,
+			options.screenshotPath
+				? async (name, data) =>
+						writeFile(
+							`${options.screenshotPath}.${name}.png`,
+							Buffer.from(data, "base64"),
+						)
+				: null,
+		);
+
 		await evaluateExpression(
 			client,
 			`document.querySelector('button[aria-label="Settings"]').click()`,

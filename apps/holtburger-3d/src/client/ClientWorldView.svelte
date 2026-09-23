@@ -32,6 +32,7 @@
 	import type { FrameRates } from "../app/frame-rate-sampler";
 	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
+	import ClientStatusTray from "./ClientStatusTray.svelte";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
@@ -790,6 +791,13 @@
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
 	</ClientHudPanel>
+	<ClientStatusTray
+		placement={hudLayout.statusTray}
+		editable={hudMode === "layout"}
+		{viewport}
+		onPlacementChange={(placement) =>
+			changeHudPlacement("statusTray", placement)}
+	/>
 	{#if jumpChargeActive || hudMode === "layout"}
 		<ClientHudPanel
 			label="Jump power"

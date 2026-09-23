@@ -11,6 +11,7 @@ import {
 	clientLocalSettingsDocumentV8Schema,
 	clientLocalSettingsDocumentV9Schema,
 	clientLocalSettingsDocumentV10Schema,
+	clientLocalSettingsDocumentV11Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -19,12 +20,25 @@ import {
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
 } from "./client-settings-defaults";
+import { resolveClientHudPlacement } from "./client-hud-layout";
+import {
+	rotateStatusTray,
+	statusTrayOrientation,
+} from "./client-status-tray-layout";
 
 const viewport = { width: 1440, height: 900 };
 
+/** Historical v11 migration output stays fixed when live HUD defaults change. */
+const migratedStatusTray = {
+	horizontal: { alignment: "start", offset: 16 },
+	vertical: { alignment: "start", offset: 96 },
+	preferredWidth: 158,
+	preferredHeight: 32,
+} as const;
+
 function document() {
 	return {
-		schemaVersion: 10 as const,
+		schemaVersion: 11 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -41,8 +55,28 @@ function document() {
 	};
 }
 
-function versionNineDocument() {
+function versionTenDocument() {
 	const current = document();
+	const { statusTray, ...hudLayout } = current.user.client.hudLayout;
+	void statusTray;
+	return {
+		...current,
+		schemaVersion: 10 as const,
+		user: {
+			...current.user,
+			client: {
+				...current.user.client,
+				hudLayout: {
+					...hudLayout,
+					character: { ...hudLayout.character, preferredHeight: 132 },
+				},
+			},
+		},
+	};
+}
+
+function versionNineDocument() {
+	const current = versionTenDocument();
 	const { vendor, ...hudLayout } = current.user.client.hudLayout;
 	void vendor;
 	return {
@@ -202,7 +236,50 @@ describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
-		expect(clientLocalSettingsDocumentV10Schema.parse(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV11Schema.parse(value)).toEqual(value);
+	});
+
+	it("persists a rotated status tray and restores its original geometry", () => {
+		const current = document();
+		const horizontal = current.user.client.hudLayout.statusTray;
+		const vertical = rotateStatusTray(horizontal);
+		const rotated = {
+			...current,
+			user: {
+				...current.user,
+				client: {
+					...current.user.client,
+					hudLayout: { ...current.user.client.hudLayout, statusTray: vertical },
+				},
+			},
+		};
+		expect(statusTrayOrientation(vertical)).toBe("vertical");
+		expect(parseClientLocalSettingsDocument(rotated)).toEqual(rotated);
+		expect(rotateStatusTray(vertical)).toEqual(horizontal);
+	});
+
+	it("rejects a tray placement that cannot encode an orientation", () => {
+		const current = document();
+		const invalid = {
+			...current,
+			user: {
+				...current.user,
+				client: {
+					...current.user.client,
+					hudLayout: {
+						...current.user.client.hudLayout,
+						statusTray: {
+							...current.user.client.hudLayout.statusTray,
+							preferredHeight:
+								current.user.client.hudLayout.statusTray.preferredWidth,
+						},
+					},
+				},
+			},
+		};
+		expect(() => parseClientLocalSettingsDocument(invalid)).toThrow(
+			"status tray needs positive dimensions with a distinct long axis",
+		);
 	});
 
 	it("migrates v1 with stable inspection layout defaults", () => {
@@ -317,17 +394,85 @@ describe("client settings contract", () => {
 					hudLayout: {
 						...previous.user.client.hudLayout,
 						inventory: placement,
+						character: {
+							...previous.user.client.hudLayout.character,
+							preferredHeight: 180,
+						},
 					},
 				},
 			},
 		};
 		expect(clientLocalSettingsDocumentV9Schema.parse(value)).toEqual(value);
 		const migrated = parseClientLocalSettingsDocument(value);
-		const { vendor, ...preserved } = migrated.user.client.hudLayout;
+		const { vendor, statusTray, ...preserved } = migrated.user.client.hudLayout;
 		expect(preserved).toEqual(value.user.client.hudLayout);
 		expect(vendor.preferredWidth).toBeGreaterThan(0);
 		expect(vendor.preferredHeight).toBeGreaterThan(0);
+		expect(statusTray).toEqual(migratedStatusTray);
 		expect(parseClientLocalSettingsDocument(migrated)).toEqual(migrated);
+	});
+
+	it("adds independent status tray geometry to v10 while preserving edited placements", () => {
+		const previous = versionTenDocument();
+		const character = {
+			...previous.user.client.hudLayout.character,
+			preferredWidth: 678,
+			preferredHeight: 180,
+		};
+		const value = {
+			...previous,
+			user: {
+				...previous.user,
+				client: {
+					...previous.user.client,
+					hudLayout: { ...previous.user.client.hudLayout, character },
+				},
+			},
+		};
+		expect(clientLocalSettingsDocumentV10Schema.parse(value)).toEqual(value);
+		const migrated = parseClientLocalSettingsDocument(value);
+		const { statusTray, ...preserved } = migrated.user.client.hudLayout;
+		expect(preserved).toEqual(value.user.client.hudLayout);
+		expect(statusTray).toEqual(migratedStatusTray);
+	});
+
+	it("shrinks the historical default character height after moving its icons", () => {
+		const previous = versionTenDocument();
+		const migrated = parseClientLocalSettingsDocument(previous);
+		expect(migrated.user.client.hudLayout.character).toEqual({
+			...previous.user.client.hudLayout.character,
+			preferredHeight: 72,
+		});
+	});
+
+	it("places a migrated tray beside a moved character across different anchors", () => {
+		const previous = versionTenDocument();
+		const character = {
+			...previous.user.client.hudLayout.character,
+			horizontal: { alignment: "end" as const, offset: 30 },
+			vertical: { alignment: "center" as const, offset: -25 },
+		};
+		const migrated = parseClientLocalSettingsDocument({
+			...previous,
+			user: {
+				...previous.user,
+				client: {
+					...previous.user.client,
+					hudLayout: { ...previous.user.client.hudLayout, character },
+				},
+			},
+		});
+		const priorRect = resolveClientHudPlacement(character, viewport, {
+			width: 0,
+			height: 0,
+		});
+		const trayRect = resolveClientHudPlacement(
+			migrated.user.client.hudLayout.statusTray,
+			viewport,
+			{ width: 0, height: 0 },
+		);
+		expect(trayRect.left).toBe(priorRect.left);
+		expect(trayRect.top - priorRect.top).toBe(80);
 	});
 
 	it("rejects unknown fields and unsupported versions", () => {
@@ -338,8 +483,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 11 }),
-		).toThrow("Unsupported client settings schema version 11");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 12 }),
+		).toThrow("Unsupported client settings schema version 12");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {

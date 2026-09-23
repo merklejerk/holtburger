@@ -42,6 +42,7 @@
 	function placement(
 		name:
 			| "character"
+			| "statusTray"
 			| "chat"
 			| "debug"
 			| "frameRate"
@@ -214,7 +215,9 @@
 				</div>
 			{/each}
 		</div>
-		<div class="conditions ui-hud-group">
+	</section>
+	<section class="hud status-tray" style={placement("statusTray")}>
+		<div class="status-icons ui-hud-group">
 			{#each ["buffed", "debuffed", "encumbered", "sick"] as const as name}
 				<span class="ui-readout" title={name}><ClientHudIcon {name} /></span>
 			{/each}
@@ -461,17 +464,16 @@
 			font-size: var(--ui-font-size-micro);
 			line-height: 16px;
 		}
-		.conditions {
+		.status-icons {
 			display: flex;
 			gap: 6px;
-			margin-top: 6px;
 			width: fit-content;
 		}
-		.conditions .ui-readout {
+		.status-icons .ui-readout {
 			padding: 3px;
 			opacity: 0.7;
 		}
-		.conditions :global(svg) {
+		.status-icons :global(svg) {
 			width: 16px;
 			height: 16px;
 		}

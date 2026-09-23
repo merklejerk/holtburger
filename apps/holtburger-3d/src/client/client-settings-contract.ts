@@ -46,6 +46,17 @@ const hudPlacementSchema = z
 	.strict()
 	.readonly();
 
+/** A fixed-size tray uses its longer saved axis to encode orientation. */
+const statusTrayPlacementSchema = hudPlacementSchema.refine(
+	(placement) =>
+		placement.preferredWidth > 0 &&
+		placement.preferredHeight > 0 &&
+		placement.preferredWidth !== placement.preferredHeight,
+	{
+		message: "status tray needs positive dimensions with a distinct long axis",
+	},
+);
+
 const clientHudLayoutV1Schema = z
 	.object({
 		character: hudPlacementSchema,
@@ -213,13 +224,26 @@ const clientUserSettingsV9Schema = clientUserSettingsV5Schema
 	.extend({ input: clientKeyboardSettingsSchema })
 	.strict()
 	.readonly();
-/** Vendor placement joins the current layout without changing historical documents. */
-export const clientUserSettingsSchema = clientUserSettingsV9Schema
+/** Historical v10 user settings included vendor geometry but not the status tray. */
+const clientHudLayoutV10Schema = clientHudLayoutV4Schema
+	.unwrap()
+	.extend({ vendor: hudPlacementSchema })
+	.strict()
+	.readonly();
+
+const clientUserSettingsV10Schema = clientUserSettingsV9Schema
+	.unwrap()
+	.extend({ hudLayout: clientHudLayoutV10Schema })
+	.strict()
+	.readonly();
+
+/** Current user settings retain the status tray independently of character vitals. */
+export const clientUserSettingsSchema = clientUserSettingsV10Schema
 	.unwrap()
 	.extend({
-		hudLayout: clientHudLayoutV4Schema
+		hudLayout: clientHudLayoutV10Schema
 			.unwrap()
-			.extend({ vendor: hudPlacementSchema })
+			.extend({ statusTray: statusTrayPlacementSchema })
 			.strict()
 			.readonly(),
 	})
@@ -555,6 +579,26 @@ export const clientLocalSettingsDocumentV10Schema =
 			user: z
 				.object({
 					window: clientWindowSettingsSchema,
+					client: clientUserSettingsV10Schema,
+				})
+				.strict()
+				.readonly(),
+		})
+		.strict()
+		.readonly();
+type ClientLocalSettingsDocumentV10 = z.infer<
+	typeof clientLocalSettingsDocumentV10Schema
+>;
+
+/** Current durable document includes independently retained status tray geometry. */
+export const clientLocalSettingsDocumentV11Schema =
+	clientLocalSettingsDocumentV10Schema
+		.unwrap()
+		.extend({
+			schemaVersion: z.literal(11),
+			user: z
+				.object({
+					window: clientWindowSettingsSchema,
 					client: clientUserSettingsSchema,
 				})
 				.strict()
@@ -563,7 +607,7 @@ export const clientLocalSettingsDocumentV10Schema =
 		.strict()
 		.readonly();
 export type ClientLocalSettingsDocument = z.infer<
-	typeof clientLocalSettingsDocumentV10Schema
+	typeof clientLocalSettingsDocumentV11Schema
 >;
 
 /**
@@ -905,10 +949,10 @@ const V10_VENDOR_PLACEMENT = {
 	preferredHeight: 500,
 } as const;
 
-/** Upgrade every supported document while retaining every existing panel placement. */
-export function parseClientLocalSettingsDocument(
+/** Upgrade every supported historical document to v10. */
+function parseClientLocalSettingsDocumentV10(
 	value: unknown,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV10 {
 	if (
 		typeof value === "object" &&
 		value !== null &&
@@ -927,6 +971,90 @@ export function parseClientLocalSettingsDocument(
 				hudLayout: {
 					...previous.user.client.hudLayout,
 					vendor: V10_VENDOR_PLACEMENT,
+				},
+			},
+		},
+	});
+}
+
+/** The old default character height reserved room for icons now owned by the tray. */
+const V11_OLD_CHARACTER_HEIGHT = 132;
+const V11_CHARACTER_HEIGHT = 72;
+const V11_TRAY_WIDTH = 158;
+const V11_TRAY_HEIGHT = 32;
+const V11_TRAY_TOP_FROM_CHARACTER = 80;
+
+/** Retain an icon row's old position relative to its character panel across anchor modes. */
+function migratedTrayAxisOffset(
+	alignment: "start" | "center" | "end",
+	offset: number,
+	characterSize: number,
+	traySize: number,
+	displacement: number,
+): number {
+	switch (alignment) {
+		case "start":
+			return offset + displacement;
+		case "center":
+			return offset + displacement + (traySize - characterSize) / 2;
+		case "end":
+			return offset + characterSize - displacement - traySize;
+	}
+}
+
+/** Upgrade every supported document while retaining every existing panel placement. */
+export function parseClientLocalSettingsDocument(
+	value: unknown,
+): ClientLocalSettingsDocument {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"schemaVersion" in value &&
+		value.schemaVersion === 11
+	)
+		return clientLocalSettingsDocumentV11Schema.parse(value);
+	const previous = parseClientLocalSettingsDocumentV10(value);
+	const character = previous.user.client.hudLayout.character;
+	return clientLocalSettingsDocumentV11Schema.parse({
+		...previous,
+		schemaVersion: 11,
+		user: {
+			...previous.user,
+			client: {
+				...previous.user.client,
+				hudLayout: {
+					...previous.user.client.hudLayout,
+					character: {
+						...character,
+						preferredHeight:
+							character.preferredHeight === V11_OLD_CHARACTER_HEIGHT
+								? V11_CHARACTER_HEIGHT
+								: character.preferredHeight,
+					},
+					statusTray: {
+						horizontal: {
+							alignment: character.horizontal.alignment,
+							offset: migratedTrayAxisOffset(
+								character.horizontal.alignment,
+								character.horizontal.offset,
+								character.preferredWidth,
+								V11_TRAY_WIDTH,
+								0,
+							),
+						},
+						vertical: {
+							alignment: character.vertical.alignment,
+							offset: migratedTrayAxisOffset(
+								character.vertical.alignment,
+								character.vertical.offset,
+								character.preferredHeight,
+								V11_TRAY_HEIGHT,
+								V11_TRAY_TOP_FROM_CHARACTER,
+							),
+						},
+						preferredWidth: V11_TRAY_WIDTH,
+						preferredHeight: V11_TRAY_HEIGHT,
+					},
 				},
 			},
 		},

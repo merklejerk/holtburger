@@ -4312,6 +4312,83 @@ async function runClientHudHarness({ viteUrl }) {
 			captureBeyondViewport: false,
 			format: "png",
 		});
+		if (options.screenshotPath)
+			await writeFile(
+				`${options.screenshotPath}.status-tray-horizontal.png`,
+				Buffer.from(wideScreenshot.data, "base64"),
+			);
+		const statusTrayBefore = layout.surfaces["Status tray"];
+		if (statusTrayBefore === undefined)
+			throw new Error("Status tray is absent from the editable HUD.");
+		const rotatePoint = await evaluateExpression(
+			client,
+			`(() => {
+			const tray = document.querySelector('section[aria-label="Status tray"]');
+			const button = document.querySelector('[aria-label="Rotate status tray"]');
+			if (!tray || !button) throw new Error('Status tray rotate control is absent.');
+			const bounds = tray.getBoundingClientRect();
+			const rect = button.getBoundingClientRect();
+			if (rect.left < bounds.left || rect.top < bounds.top || rect.right > bounds.right || rect.bottom > bounds.bottom)
+				throw new Error('Status tray rotate control escaped the panel bounds.');
+			const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+			if (document.elementFromPoint(point.x, point.y) !== button)
+				throw new Error('Status tray rotate control is occluded.');
+			return point;
+		})()`,
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+			...rotatePoint,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+			...rotatePoint,
+		});
+		await delay(50);
+		const statusTrayRotated = (await capture()).surfaces["Status tray"];
+		if (
+			statusTrayRotated?.width !== statusTrayBefore.height ||
+			statusTrayRotated.height !== statusTrayBefore.width
+		)
+			throw new Error("Status tray did not rotate its HUD extent.");
+		await evaluateExpression(
+			client,
+			`(() => {
+			const icons = [...document.querySelectorAll('.status-tray .status-icon')];
+			if (icons.length < 2) throw new Error('Status tray has too few icons to verify orientation.');
+			const first = icons[0].getBoundingClientRect();
+			const second = icons[1].getBoundingClientRect();
+			if (first.left !== second.left || second.top <= first.top)
+				throw new Error('Status tray icons did not form a vertical column.');
+		})()`,
+		);
+		if (options.screenshotPath) {
+			const verticalScreenshot = await client.send("Page.captureScreenshot", {
+				captureBeyondViewport: false,
+				format: "png",
+			});
+			await writeFile(
+				`${options.screenshotPath}.status-tray-vertical.png`,
+				Buffer.from(verticalScreenshot.data, "base64"),
+			);
+		}
+		await evaluateExpression(
+			client,
+			`document.querySelector('[aria-label="Rotate status tray"]').click()`,
+		);
+		await delay(50);
+		const statusTrayRestored = (await capture()).surfaces["Status tray"];
+		if (
+			statusTrayRestored?.width !== statusTrayBefore.width ||
+			statusTrayRestored.height !== statusTrayBefore.height
+		)
+			throw new Error("Status tray did not restore its horizontal HUD extent.");
 		await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.dragSurface",
@@ -5167,6 +5244,7 @@ function assertClientHudHarness(evidence) {
 		"Frame rate",
 		"Game shortcuts",
 		"Minimap",
+		"Status tray",
 	].toSorted();
 	const layoutLabels = [
 		...runtimeLabels,

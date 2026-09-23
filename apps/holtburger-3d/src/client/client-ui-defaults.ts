@@ -31,9 +31,16 @@ export const CLIENT_UI_DEFAULTS = {
 	character: {
 		anchor: "top-left",
 		offset: { x: 16, y: 16 },
-		size: { width: 340, height: 132 },
-		minSize: { width: 250, height: 116 },
+		size: { width: 340, height: 72 },
+		minSize: { width: 250, height: 60 },
 		resizable: true,
+	},
+	statusTray: {
+		anchor: "top-left",
+		offset: { x: 16, y: 96 },
+		size: { width: 158, height: 32 },
+		minSize: { width: 158, height: 32 },
+		resizable: false,
 	},
 	chat: {
 		anchor: "bottom-left",

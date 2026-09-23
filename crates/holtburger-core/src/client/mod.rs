@@ -4866,6 +4866,8 @@ mod tests {
                                 normal: Vector3::new(1.0, 0.0, 0.0),
                                 d: -12.0,
                             },
+                            aperture_vertices: Vec::new(),
+                            reciprocal_visibility_vertices: None,
                             positive_side: true,
                             target: holtburger_content::CellCollisionPortalTarget::Outdoor,
                             outdoor_building: None,

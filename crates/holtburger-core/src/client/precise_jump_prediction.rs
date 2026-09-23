@@ -1531,6 +1531,8 @@ mod tests {
                             }],
                             portals: vec![CellCollisionPortal {
                                 plane,
+                                aperture_vertices: Vec::new(),
+                                reciprocal_visibility_vertices: None,
                                 positive_side: true,
                                 target: CellCollisionPortalTarget::EnvCell(target.0 as u16),
                                 outdoor_building: None,
@@ -1545,6 +1547,8 @@ mod tests {
                             planes: vec![plane],
                             portals: vec![CellCollisionPortal {
                                 plane,
+                                aperture_vertices: Vec::new(),
+                                reciprocal_visibility_vertices: None,
                                 positive_side: false,
                                 target: CellCollisionPortalTarget::EnvCell(source.0 as u16),
                                 outdoor_building: None,

@@ -84,8 +84,12 @@ impl WorldState {
         };
         // RETAIL DIVERGENCE: retail refines drawable polygons after portal-view acceptance and does
         // not compare against static collision (`acclient.c:363547-363620`, `437720-437776`). This
-        // one Client-mode acquisition query clips at collision to prevent through-wall selection;
-        // no server-authoritative or authored-content consumer observes the difference.
+        // one Client-mode acquisition query clips at collision to prevent through-wall selection,
+        // except at a visible portal cap. The 2026-09-23 archive census found 1,266,400 directed
+        // source apertures and 109,801 reciprocal intersections; the four sampled Renald rays met
+        // one exact 0xA9B4014F -> 0xA9B40141 cap. Other differences between physics and drawing
+        // geometry remain an acquisition approximation. Removing this clip without replacement
+        // would admit picks behind static walls because browser refinement tests only entities.
         let static_limit_distance = trace
             .static_hit
             .as_ref()
@@ -266,6 +270,13 @@ mod tests {
                                     normal: Vector3::new(1.0, 0.0, 0.0),
                                     d: -10.0,
                                 },
+                                aperture_vertices: vec![
+                                    Vector3::new(10.0, 0.0, 0.0),
+                                    Vector3::new(10.0, 0.0, 2.0),
+                                    Vector3::new(10.0, 20.0, 2.0),
+                                    Vector3::new(10.0, 20.0, 0.0),
+                                ],
+                                reciprocal_visibility_vertices: None,
                                 positive_side: true,
                                 target: CellCollisionPortalTarget::EnvCell(0x010b),
                                 outdoor_building: None,

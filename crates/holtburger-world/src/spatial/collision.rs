@@ -770,6 +770,13 @@ struct PlacementTransition {
     target_cell: Option<Guid>,
 }
 
+/// Physical traversal follows portal planes; visual selection also requires the visible aperture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortalTraversalPolicy {
+    Physical,
+    VisibleSelection,
+}
+
 /// One geometric segment evaluated against currently installed placement topology.
 #[derive(Debug, Clone, Copy)]
 struct PlacementMotionSegment<'a> {
@@ -1907,9 +1914,12 @@ impl CollisionScene {
         let mut transition_count = 0;
         // No crossing has been consumed yet: a doorway at the segment start is eligible.
         let mut cursor = None;
-        while let Some(transition) =
-            self.next_placement_transition(segment, cursor, current_cell)?
-        {
+        while let Some(transition) = self.next_placement_transition(
+            segment,
+            cursor,
+            current_cell,
+            PortalTraversalPolicy::Physical,
+        )? {
             transition_count += 1;
             if transition_count > self.motion_transition_limit {
                 return Err(CollisionQueryError::MotionTransitionLimitExceeded);
@@ -2147,6 +2157,7 @@ impl CollisionScene {
         segment: PlacementMotionSegment<'_>,
         cursor: Option<f32>,
         current_cell: Option<Guid>,
+        portal_policy: PortalTraversalPolicy,
     ) -> Result<Option<PlacementTransition>, CollisionQueryError> {
         let segment_length = segment.start.distance(&segment.end);
         if segment_length <= f32::EPSILON {
@@ -2185,6 +2196,14 @@ impl CollisionScene {
                 ) else {
                     continue;
                 };
+                if portal_policy == PortalTraversalPolicy::VisibleSelection
+                    && !portal_aperture_contains_point(
+                        portal,
+                        interpolate_point(local_start, local_end, fraction),
+                    )
+                {
+                    continue;
+                }
                 let target_cell = match portal.target {
                     CellCollisionPortalTarget::Outdoor => self
                         .coincident_outdoor_target_after_crossing(
@@ -2239,6 +2258,14 @@ impl CollisionScene {
                         ) else {
                             continue;
                         };
+                        if portal_policy == PortalTraversalPolicy::VisibleSelection
+                            && !portal_aperture_contains_point(
+                                portal,
+                                interpolate_point(local_start, local_end, fraction),
+                            )
+                        {
+                            continue;
+                        }
                         let target_cell =
                             Guid((owner.0 & 0xffff_0000) | u32::from(source.cell_selector));
                         if !self.target_contains_after_crossing(
@@ -2969,6 +2996,60 @@ fn directed_plane_crossing_fraction(
     Some(fraction.clamp(0.0, 1.0))
 }
 
+/// Admit selection crossings only inside the effective visibility opening.
+fn portal_aperture_contains_point(portal: &CellCollisionPortal, point: Vector3) -> bool {
+    polygon_contains_projected_point(&portal.aperture_vertices, portal.plane.normal, point)
+        && portal
+            .reciprocal_visibility_vertices
+            .as_ref()
+            .is_none_or(|vertices| {
+                // Renderer visibility for a non-exact reciprocal is the intersection of its two
+                // authored polygons. Testing both polygons gives the same point membership without
+                // materializing a second triangulation in the selection hot path.
+                polygon_contains_projected_point(vertices, portal.plane.normal, point)
+            })
+}
+
+fn polygon_contains_projected_point(vertices: &[Vector3], normal: Vector3, point: Vector3) -> bool {
+    if vertices.len() < 3 {
+        return false;
+    }
+    let project = |vertex: Vector3| {
+        if normal.x.abs() >= normal.y.abs() && normal.x.abs() >= normal.z.abs() {
+            (vertex.y, vertex.z)
+        } else if normal.y.abs() >= normal.z.abs() {
+            (vertex.x, vertex.z)
+        } else {
+            (vertex.x, vertex.y)
+        }
+    };
+    let (px, py) = project(point);
+    let mut inside = false;
+    for index in 0..vertices.len() {
+        let (ax, ay) = project(vertices[index]);
+        let (bx, by) = project(vertices[(index + 1) % vertices.len()]);
+        let dx = bx - ax;
+        let dy = by - ay;
+        let length = dx.hypot(dy);
+        // Repeated corners have no edge extent and must not accept every queried point.
+        if length == 0.0 {
+            continue;
+        }
+        let cross = (px - ax) * dy - (py - ay) * dx;
+        let along = (px - ax) * dx + (py - ay) * dy;
+        if cross.abs() <= CELL_PLANE_TOLERANCE * length
+            && along >= -CELL_PLANE_TOLERANCE * length
+            && along <= length * length + CELL_PLANE_TOLERANCE * length
+        {
+            return true;
+        }
+        if (ay > py) != (by > py) && px < ax + (py - ay) * dx / dy {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
 fn interpolate_point(start: Vector3, end: Vector3, fraction: f32) -> Vector3 {
     start + (end - start) * fraction
 }
@@ -3224,6 +3305,28 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn aperture_membership_ignores_repeated_corners() {
+        let vertices = [
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 2.0, 0.0),
+            Vector3::new(0.0, 2.0, 2.0),
+            Vector3::new(0.0, 0.0, 2.0),
+        ];
+        let normal = Vector3::new(1.0, 0.0, 0.0);
+        for (point, expected) in [
+            (Vector3::new(0.0, 1.0, 1.0), true),
+            (Vector3::new(0.0, 0.0, 1.0), true),
+            (Vector3::new(0.0, 3.0, 1.0), false),
+        ] {
+            assert_eq!(
+                polygon_contains_projected_point(&vertices, normal, point),
+                expected
+            );
+        }
+    }
+
     fn collider_at(x: f32, source_placement: StaticColliderPlacement) -> PlacedCollider {
         let center = Vector3::new(x, 0.0, 0.0);
         let bounds = Sphere {
@@ -3413,6 +3516,8 @@ mod tests {
                     normal: Vector3::new(1.0, 0.0, 0.0),
                     d: -boundary,
                 },
+                aperture_vertices: Vec::new(),
+                reciprocal_visibility_vertices: None,
                 positive_side: true,
                 target: CellCollisionPortalTarget::Outdoor,
                 outdoor_building: None,
@@ -3455,6 +3560,8 @@ mod tests {
                     normal: Vector3::new(1.0, 0.0, 0.0),
                     d: -boundary,
                 },
+                aperture_vertices: Vec::new(),
+                reciprocal_visibility_vertices: None,
                 positive_side: true,
                 target: CellCollisionPortalTarget::Outdoor,
                 outdoor_building: None,
@@ -4141,6 +4248,8 @@ mod tests {
                 normal: Vector3::new(normal_x, 0.0, 0.0),
                 d,
             },
+            aperture_vertices: Vec::new(),
+            reciprocal_visibility_vertices: None,
             positive_side: true,
             target,
             outdoor_building: None,
@@ -4552,6 +4661,8 @@ mod tests {
                 normal: Vector3::new(0.0, 0.0, 1.0),
                 d: 11.0,
             },
+            aperture_vertices: Vec::new(),
+            reciprocal_visibility_vertices: None,
             positive_side: true,
             target: CellCollisionPortalTarget::EnvCell(0x010b),
             outdoor_building: None,
@@ -4988,6 +5099,8 @@ mod tests {
     fn doorway_start_follows_connected_cells_without_recovery() {
         let portal = |normal, d, positive_side, target| CellCollisionPortal {
             plane: Plane { normal, d },
+            aperture_vertices: Vec::new(),
+            reciprocal_visibility_vertices: None,
             positive_side,
             target: CellCollisionPortalTarget::EnvCell(target),
             outdoor_building: None,
@@ -5082,6 +5195,8 @@ mod tests {
                         normal: Vector3::new(0.0, 1.0, 0.0),
                         d: -5.6,
                     },
+                    aperture_vertices: Vec::new(),
+                    reciprocal_visibility_vertices: None,
                     positive_side: true,
                     target: CellCollisionPortalTarget::EnvCell(0x010b),
                     outdoor_building: None,
@@ -5170,6 +5285,8 @@ mod tests {
                         normal: Vector3::new(0.0, 1.0, 0.0),
                         d: 5.0,
                     },
+                    aperture_vertices: Vec::new(),
+                    reciprocal_visibility_vertices: None,
                     positive_side: false,
                     target: CellCollisionPortalTarget::EnvCell(0x011a),
                     outdoor_building: None,
@@ -5460,6 +5577,8 @@ mod tests {
                             normal: Vector3::new(1.0, 0.0, 0.0),
                             d: 0.0,
                         },
+                        aperture_vertices: Vec::new(),
+                        reciprocal_visibility_vertices: None,
                         positive_side: true,
                         target: CellCollisionPortalTarget::EnvCell(0x0101),
                         outdoor_building: None,
@@ -5523,6 +5642,8 @@ mod tests {
                                 normal: Vector3::new(1.0, 0.0, 0.0),
                                 d: -192.0,
                             },
+                            aperture_vertices: Vec::new(),
+                            reciprocal_visibility_vertices: None,
                             positive_side: true,
                             target: CellCollisionPortalTarget::Outdoor,
                             outdoor_building: Some(OutdoorBuildingTransit {

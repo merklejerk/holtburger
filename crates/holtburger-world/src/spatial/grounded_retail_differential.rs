@@ -495,6 +495,8 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
                 normal: Vector3::new(0.0, 0.0, 1.0),
                 d: -2.0,
             },
+            aperture_vertices: Vec::new(),
+            reciprocal_visibility_vertices: None,
             positive_side: true,
             target: CellCollisionPortalTarget::Outdoor,
             outdoor_building: None,
@@ -593,6 +595,8 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         planes: vec![portal_plane],
         portals: vec![CellCollisionPortal {
             plane: portal_plane,
+            aperture_vertices: Vec::new(),
+            reciprocal_visibility_vertices: None,
             positive_side: true,
             target: CellCollisionPortalTarget::Outdoor,
             outdoor_building: None,

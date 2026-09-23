@@ -301,6 +301,8 @@ mod tests {
                                     normal: Vector3::new(x, 0.0, 0.0),
                                     d,
                                 },
+                                aperture_vertices: Vec::new(),
+                                reciprocal_visibility_vertices: None,
                                 positive_side: true,
                                 target: CellCollisionPortalTarget::Outdoor,
                                 outdoor_building: None,

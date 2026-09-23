@@ -607,10 +607,15 @@ pub struct CellVolume {
 }
 
 /// One cell portal enriched with the source-cell plane needed by collision traversal.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CellCollisionPortal {
     /// Authored portal plane in the source CellStruct's local frame.
     pub plane: Plane,
+    /// Authored aperture polygon in the same frame, used by selection ray traversal.
+    pub aperture_vertices: Vec<Vector3>,
+    /// Reciprocal polygon in the source frame when a non-exact internal portal renders only the
+    /// overlap of its two authored apertures. Absent for exact or unpaired portals.
+    pub reciprocal_visibility_vertices: Option<Vec<Vector3>>,
     /// Side selected by retail's static part-bound traversal.
     pub positive_side: bool,
     /// Cell domain reached through the portal.
@@ -959,6 +964,15 @@ impl LandblockColliderAssembler {
                                 cell.env_cell_id, portal.source.portal_index, portal.polygon_id
                             )
                         })?;
+                    let reciprocal_visibility_vertices = match &portal.endpoint {
+                        crate::interior::LandblockPortalEndpoint::Internal {
+                            validated_target: Some(target),
+                            ..
+                        } if (portal.flags & 0x01) == 0 => Some(
+                            resolve_reciprocal_visibility_vertices(interior, cell.placement, *target)?,
+                        ),
+                        _ => None,
+                    };
                     let (target, outdoor_building) = match &portal.endpoint {
                         crate::interior::LandblockPortalEndpoint::Internal {
                             target_env_cell_id,
@@ -1000,6 +1014,8 @@ impl LandblockColliderAssembler {
                             normal: resolved.normal,
                             d: resolved.d,
                         },
+                        aperture_vertices: resolved.vertices,
+                        reciprocal_visibility_vertices,
                         // `CellPortal::PortalSide` is the inverse of authored flag bit 1.
                         positive_side: (portal.flags & 0x02) == 0,
                         target,
@@ -1018,6 +1034,65 @@ impl LandblockColliderAssembler {
 
         Ok(LandblockColliders::new(colliders, cell_volumes))
     }
+}
+
+/// Resolve the second polygon of a non-exact reciprocal visibility opening into the source frame.
+fn resolve_reciprocal_visibility_vertices(
+    interior: &crate::LandblockInteriorSystemAsset,
+    source_placement: LandblockPlacement,
+    target: crate::LandblockEnvCellPortalRef,
+) -> Result<Vec<Vector3>> {
+    let cell = interior
+        .cells
+        .iter()
+        .find(|cell| cell.env_cell_id == target.env_cell_id)
+        .with_context(|| format!("missing reciprocal EnvCell 0x{:08X}", target.env_cell_id))?;
+    let portal = interior
+        .topology
+        .portals
+        .iter()
+        .find(|portal| portal.source == target)
+        .with_context(|| {
+            format!(
+                "missing reciprocal portal {} in EnvCell 0x{:08X}",
+                target.portal_index, target.env_cell_id
+            )
+        })?;
+    let structure = interior
+        .environments
+        .get(&cell.structure.environment_id)
+        .and_then(|environment| environment.cells.get(&cell.structure.local_selector))
+        .with_context(|| {
+            format!(
+                "missing reciprocal CellStruct 0x{:08X}/0x{:04X}",
+                cell.structure.environment_id, cell.structure.local_selector
+            )
+        })?;
+    let polygon = structure
+        .polygons
+        .get(&portal.polygon_id)
+        .with_context(|| {
+            format!(
+                "missing reciprocal polygon {} in EnvCell 0x{:08X}",
+                portal.polygon_id, target.env_cell_id
+            )
+        })?;
+    let resolved =
+        CollisionPolygon::resolve(polygon, &structure.vertex_array).with_context(|| {
+            format!(
+                "degenerate reciprocal polygon {} in EnvCell 0x{:08X}",
+                portal.polygon_id, target.env_cell_id
+            )
+        })?;
+    Ok(resolved
+        .vertices
+        .into_iter()
+        .map(|vertex| {
+            source_placement.to_local_space(
+                cell.placement.origin + cell.placement.orientation.rotate_vector(vertex),
+            )
+        })
+        .collect())
 }
 
 /// Shapes resolved so far in one assembly.

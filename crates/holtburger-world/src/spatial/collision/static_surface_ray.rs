@@ -1,7 +1,9 @@
 //! Finite rays against resident static collision geometry.
 
 use holtburger_common::{Guid, Vector3};
-use holtburger_content::{CollisionPolygon, CollisionShape, PlacedCollisionShape};
+use holtburger_content::{
+    CollisionPolygon, CollisionShape, PlacedCollisionShape, StaticColliderPlacement,
+};
 use parry3d::math::Pose;
 use parry3d::query::{Ray, RayCast};
 use parry3d::shape::{Ball, Cylinder, Triangle};
@@ -11,8 +13,9 @@ use super::static_sphere_sweep::{
 };
 use super::{
     CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, SpatialMembership, SphereSweep,
-    UncoveredCollisionQuery, anchor_to_landblock, touched_landblocks, validate_point_sweep,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PortalTraversalPolicy, SpatialMembership,
+    SphereSweep, UncoveredCollisionQuery, anchor_to_landblock, touched_landblocks,
+    validate_point_sweep,
 };
 
 const DIRECTION_LENGTH_TOLERANCE: f32 = 0.000_1;
@@ -61,6 +64,8 @@ pub(super) struct SurfaceCandidate {
     pub(super) distance: f32,
     pub(super) normal: Vector3,
     pub(super) owner: Guid,
+    /// Collider provenance used only by selection to distinguish shell caps from obstructions.
+    pub(super) source_placement: Option<StaticColliderPlacement>,
 }
 
 impl CollisionScene {
@@ -73,6 +78,7 @@ impl CollisionScene {
             .trace_static_surface_ray_with_policy(
                 request,
                 CollisionQueryPolicy::RequireCollisionCoverage,
+                PortalTraversalPolicy::Physical,
             )?
             .value
             .static_hit)
@@ -84,7 +90,11 @@ impl CollisionScene {
         request: StaticSurfaceRayRequest,
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<Option<StaticSurfaceRayHit>>, CollisionQueryError> {
-        let traced = self.trace_static_surface_ray_with_policy(request, policy)?;
+        let traced = self.trace_static_surface_ray_with_policy(
+            request,
+            policy,
+            PortalTraversalPolicy::Physical,
+        )?;
         Ok(UncoveredCollisionQuery {
             value: traced.value.static_hit,
             unavailable_owner: traced.unavailable_owner,
@@ -100,6 +110,7 @@ impl CollisionScene {
             .trace_static_surface_ray_with_policy(
                 request,
                 CollisionQueryPolicy::RequireCollisionCoverage,
+                PortalTraversalPolicy::VisibleSelection,
             )?
             .value)
     }
@@ -108,13 +119,26 @@ impl CollisionScene {
         &self,
         request: StaticSurfaceRayRequest,
         policy: CollisionQueryPolicy,
+        portal_policy: PortalTraversalPolicy,
     ) -> Result<UncoveredCollisionQuery<StaticSelectionRayTrace>, CollisionQueryError> {
-        let traced = self.traverse_surface_ray(request, policy, |interval, placement| {
-            Ok::<_, CollisionQueryError>(
-                self.cast_static_ray_in_domain(interval, placement)
-                    .map(|candidate| (candidate.distance, candidate)),
-            )
-        })?;
+        let traced = self.traverse_surface_ray(
+            request,
+            policy,
+            portal_policy,
+            |candidate: &SurfaceCandidate, current_cell| match candidate.source_placement {
+                Some(StaticColliderPlacement::EnvCellShell { cell_id }) => {
+                    current_cell == Some(Guid(cell_id))
+                }
+                Some(StaticColliderPlacement::BuildingShell { .. }) => current_cell.is_none(),
+                _ => false,
+            },
+            |interval, placement| {
+                Ok::<_, CollisionQueryError>(
+                    self.cast_static_ray_in_domain(interval, placement, portal_policy)
+                        .map(|candidate| (candidate.distance, candidate)),
+                )
+            },
+        )?;
         Ok(UncoveredCollisionQuery {
             value: StaticSelectionRayTrace {
                 static_hit: traced.value.hit.map(|hit| StaticSurfaceRayHit {
@@ -137,6 +161,7 @@ impl CollisionScene {
         &self,
         request: StaticSurfaceRayRequest,
         swept_placement: &SpatialMembership,
+        portal_policy: PortalTraversalPolicy,
     ) -> Option<SurfaceCandidate> {
         let end = request.start + request.direction * request.maximum_distance;
         let full_sweep = ray_sweep(request, end);
@@ -171,14 +196,15 @@ impl CollisionScene {
             let collider = &self.landblocks[&selected.reference.owner]
                 .static_geometry
                 .colliders[selected.reference.collider_index];
-            if let Some(candidate) = cast_placed_collision_shape(
+            if let Some(mut candidate) = cast_placed_collision_shape(
                 &ray,
                 request.maximum_distance,
                 collider,
                 selected.reference.owner,
                 request.anchor,
             ) {
-                update_earliest(&mut earliest, candidate);
+                candidate.source_placement = Some(collider.source_placement);
+                update_domain_hit(&mut earliest, candidate, portal_policy);
             }
         }
 
@@ -204,13 +230,15 @@ impl CollisionScene {
                 if let Some(hit) =
                     landblock_entry_hit(local_start, request.direction * request.maximum_distance)
                 {
-                    update_earliest(
+                    update_domain_hit(
                         &mut earliest,
                         SurfaceCandidate {
                             distance: hit.time_of_impact * request.maximum_distance,
                             normal: hit.normal,
                             owner: *owner,
+                            source_placement: None,
                         },
+                        portal_policy,
                     );
                 }
             }
@@ -374,6 +402,7 @@ fn update_triangle_hit(
                 distance: hit.time_of_impact,
                 normal,
                 owner,
+                source_placement: None,
             },
         );
     }
@@ -394,6 +423,7 @@ fn update_shape_hit(
                 distance: hit.time_of_impact,
                 normal: world_vector(hit.normal),
                 owner,
+                source_placement: None,
             },
         );
     }
@@ -406,6 +436,39 @@ fn update_earliest(earliest: &mut Option<SurfaceCandidate>, candidate: SurfaceCa
     }) {
         *earliest = Some(candidate);
     }
+}
+
+/// Selection prioritizes a real obstruction over a coincident cap; physical hit ordering is stable.
+fn update_domain_hit(
+    earliest: &mut Option<SurfaceCandidate>,
+    candidate: SurfaceCandidate,
+    portal_policy: PortalTraversalPolicy,
+) {
+    if portal_policy == PortalTraversalPolicy::VisibleSelection
+        && let Some(current) = *earliest
+        && candidate.distance == current.distance
+    {
+        let candidate_is_shell = is_portal_shell(&candidate.source_placement);
+        let current_is_shell = is_portal_shell(&current.source_placement);
+        if candidate_is_shell != current_is_shell {
+            // A coincident door or other object must still block selection through a portal cap.
+            if !candidate_is_shell {
+                *earliest = Some(candidate);
+            }
+            return;
+        }
+    }
+    update_earliest(earliest, candidate);
+}
+
+fn is_portal_shell(source: &Option<StaticColliderPlacement>) -> bool {
+    matches!(
+        source,
+        Some(
+            StaticColliderPlacement::EnvCellShell { .. }
+                | StaticColliderPlacement::BuildingShell { .. }
+        )
+    )
 }
 
 #[cfg(test)]
@@ -835,6 +898,8 @@ mod tests {
                                 normal: Vector3::new(1.0, 0.0, 0.0),
                                 d: -10.0,
                             },
+                            aperture_vertices: Vec::new(),
+                            reciprocal_visibility_vertices: None,
                             positive_side: true,
                             target: CellCollisionPortalTarget::EnvCell(0x010b),
                             outdoor_building: None,
@@ -873,6 +938,186 @@ mod tests {
             sealed_scene.cast_static_surface_ray(indoor_ray).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn selection_crosses_only_the_effective_portal_aperture() {
+        let source = Guid(0xda55_010a);
+        let target = Guid(0xda55_010b);
+        let vertices = vec![
+            Vector3::new(10.0, 8.0, 8.0),
+            Vector3::new(10.0, 8.0, 12.0),
+            Vector3::new(10.0, 12.0, 12.0),
+            Vector3::new(10.0, 12.0, 8.0),
+        ];
+        let bounds = holtburger_common::Sphere {
+            center: Vector3::new(10.0, 10.0, 10.0),
+            radius: 3.0,
+        };
+        let cap = PlacedCollider::new(
+            Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: Some(bounds),
+                    poly_ids: vec![1],
+                }),
+                bounds,
+                box_bounds: CollisionBox::from_points(vertices.iter().copied()).unwrap(),
+                polygons: std::collections::HashMap::from([(
+                    1,
+                    CollisionPolygon {
+                        vertices,
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 10.0,
+                    },
+                )]),
+            })),
+            LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::EnvCellShell { cell_id: source.0 },
+        )
+        .unwrap();
+        let aperture_vertices = vec![
+            Vector3::new(10.0, 9.0, 9.0),
+            Vector3::new(10.0, 9.0, 11.0),
+            Vector3::new(10.0, 11.0, 11.0),
+            Vector3::new(10.0, 11.0, 9.0),
+        ];
+        let mut target_volume = volume(0x010b, Vec::new());
+        target_volume.planes.push(Plane {
+            normal: Vector3::new(1.0, 0.0, 0.0),
+            d: -10.0,
+        });
+        let collision_asset = asset(
+            OWNER,
+            TerrainCollisionSurface::empty(),
+            vec![cap],
+            vec![
+                volume(
+                    0x010a,
+                    vec![CellCollisionPortal {
+                        plane: Plane {
+                            normal: Vector3::new(1.0, 0.0, 0.0),
+                            d: -10.0,
+                        },
+                        aperture_vertices,
+                        reciprocal_visibility_vertices: None,
+                        positive_side: true,
+                        target: CellCollisionPortalTarget::EnvCell(0x010b),
+                        outdoor_building: None,
+                    }],
+                ),
+                target_volume,
+            ],
+        );
+        let mut scene = CollisionScene::new();
+        scene.insert(collision_asset.clone()).unwrap();
+
+        for (y, reaches_target) in [(10.0, true), (11.5, false)] {
+            let ray = StaticSurfaceRayRequest {
+                previous_cell: Some(source),
+                ..request(
+                    Vector3::new(5.0, y, 10.0),
+                    Vector3::new(1.0, 0.0, 0.0),
+                    10.0,
+                )
+            };
+            let physical_hit = scene.cast_static_surface_ray(ray).unwrap().unwrap();
+            assert!((physical_hit.distance - 5.0).abs() < 0.000_1);
+            let selection = scene.trace_selection_ray(ray).unwrap();
+            assert_eq!(
+                selection.reached.reached_env_cells().contains(&target),
+                reaches_target,
+            );
+            assert_eq!(selection.static_hit.is_none(), reaches_target);
+        }
+
+        let mut narrowed_volumes = collision_asset.static_geometry.cell_volumes().to_vec();
+        narrowed_volumes[0].portals[0].reciprocal_visibility_vertices = Some(vec![
+            Vector3::new(10.0, 9.0, 9.0),
+            Vector3::new(10.0, 9.0, 11.0),
+            Vector3::new(10.0, 10.0, 11.0),
+            Vector3::new(10.0, 10.0, 9.0),
+        ]);
+        let mut open_scene = CollisionScene::new();
+        open_scene
+            .insert(asset(
+                OWNER,
+                TerrainCollisionSurface::empty(),
+                Vec::new(),
+                narrowed_volumes.clone(),
+            ))
+            .unwrap();
+        let mut narrowed_scene = CollisionScene::new();
+        narrowed_scene
+            .insert(asset(
+                OWNER,
+                TerrainCollisionSurface::empty(),
+                collision_asset.static_geometry.colliders.clone(),
+                narrowed_volumes,
+            ))
+            .unwrap();
+        for (y, reaches_target) in [(9.5, true), (10.5, false)] {
+            let ray = StaticSurfaceRayRequest {
+                previous_cell: Some(source),
+                ..request(
+                    Vector3::new(5.0, y, 10.0),
+                    Vector3::new(1.0, 0.0, 0.0),
+                    10.0,
+                )
+            };
+            let selection = narrowed_scene.trace_selection_ray(ray).unwrap();
+            assert_eq!(
+                selection.reached.reached_env_cells().contains(&target),
+                reaches_target,
+            );
+            let open_selection = open_scene.trace_selection_ray(ray).unwrap();
+            assert_eq!(
+                open_selection.reached.reached_env_cells().contains(&target),
+                reaches_target,
+            );
+        }
+
+        let mut obstructed_asset = collision_asset;
+        obstructed_asset
+            .static_geometry
+            .colliders
+            .push(ball_collider(
+                Vector3::new(11.0, 10.0, 10.0),
+                1.0,
+                StaticColliderPlacement::IndoorStatic {
+                    source_cell_id: source.0,
+                    source_index: 0,
+                },
+            ));
+        let mut obstructed_scene = CollisionScene::new();
+        obstructed_scene.insert(obstructed_asset).unwrap();
+        let ray = StaticSurfaceRayRequest {
+            previous_cell: Some(source),
+            ..request(
+                Vector3::new(5.0, 10.0, 10.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                10.0,
+            )
+        };
+        let physical = obstructed_scene
+            .cast_static_ray_in_domain(
+                ray,
+                &SpatialMembership::interior(source),
+                PortalTraversalPolicy::Physical,
+            )
+            .unwrap();
+        assert_eq!(
+            physical.source_placement,
+            Some(StaticColliderPlacement::EnvCellShell { cell_id: source.0 }),
+        );
+        let selection = obstructed_scene.trace_selection_ray(ray).unwrap();
+        assert!(!selection.reached.reached_env_cells().contains(&target));
+        assert!((selection.static_hit.unwrap().distance - 5.0).abs() < 0.000_1);
     }
 
     #[test]
@@ -920,6 +1165,8 @@ mod tests {
                     normal: Vector3::new(1.0, 0.0, 0.0),
                     d: -10.0,
                 },
+                aperture_vertices: Vec::new(),
+                reciprocal_visibility_vertices: None,
                 positive_side: true,
                 target: CellCollisionPortalTarget::Outdoor,
                 outdoor_building: None,
@@ -1007,6 +1254,8 @@ mod tests {
                     normal: Vector3::new(1.0, 0.0, 0.0),
                     d: -10.0,
                 },
+                aperture_vertices: Vec::new(),
+                reciprocal_visibility_vertices: None,
                 positive_side: true,
                 target: CellCollisionPortalTarget::EnvCell(0x0101),
                 outdoor_building: None,
@@ -1063,6 +1312,8 @@ mod tests {
                     normal: Vector3::new(1.0, 0.0, 0.0),
                     d: -210.0,
                 },
+                aperture_vertices: Vec::new(),
+                reciprocal_visibility_vertices: None,
                 positive_side: true,
                 target: CellCollisionPortalTarget::Outdoor,
                 outdoor_building: None,

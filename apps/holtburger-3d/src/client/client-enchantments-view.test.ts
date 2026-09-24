@@ -162,17 +162,57 @@ describe("enchantment presentation projection", () => {
 			"Strength",
 		]);
 		expect(sections[0]?.groups).toHaveLength(3);
-		expect(sections[0]?.groups.map((group) => group.source.channel)).toContain(
-			"attackSkills",
-		);
-		expect(sections[1]?.groups[0]?.effective.instance.key).toBe(ordinary);
 		expect(
-			sections[0]?.groups.find(
-				(group) =>
-					group.source.channel === "ordinary" &&
-					group.source.spellCategory === 7,
-			)?.effective.instance.key,
-		).toBe(ordinary);
+			sections[0]?.groups.map((group) => group.effective.instance.key),
+		).toEqual(expect.arrayContaining([ordinary, attack, harmful]));
+		expect(sections[1]?.groups[0]?.effective.instance.key).toBe(ordinary);
+	});
+
+	it("shows vitae under Harmful without ordinary stacking or cooldowns", () => {
+		const vitaeKey = { spellId: 666, layer: 0 };
+		const vitae: ResolvedEnchantments["instances"][number] = {
+			...instance(vitaeKey, "harmful", null, 30),
+			kind: "vitae",
+			statModValue: 0.95,
+		};
+		const cooldown = {
+			...instance({ spellId: 0x8000, layer: 0 }, "harmful", 10, 1),
+			kind: "cooldown" as const,
+		};
+		const snapshot = { instances: [vitae, cooldown], groups: [] };
+		const vitaeSpell: SpellRow = {
+			id: 666,
+			name: "Vitae",
+			details: null,
+			artwork: { kind: "failed", detail: "fixture" },
+		};
+		const references = new Map([[666, vitaeSpell]]);
+		expect(effectiveEnchantmentKinds(snapshot)).toEqual({
+			beneficial: false,
+			harmful: true,
+		});
+		expect(
+			effectiveEnchantmentKinds({ instances: [cooldown], groups: [] }),
+		).toEqual({ beneficial: false, harmful: false });
+		const query = (text: string, tags: ("harmful" | "beneficial")[]) =>
+			projectEnchantmentSections(snapshot, references, { text, tags }, "name");
+		const sections = query("penalty", ["harmful"]);
+		expect(sections.map((section) => [section.label, section.value])).toEqual([
+			["Vitae penalty", "5%"],
+		]);
+		expect(sections[0]?.groups[0]?.effective.spell?.name).toBe("Vitae");
+		expect(sections[0]?.groups[0]?.overridden).toEqual([]);
+		expect(
+			projectEnchantmentSections(
+				{ instances: [{ ...vitae, statModValue: 0.88 }], groups: [] },
+				references,
+				{ text: "", tags: ["harmful"] },
+				"name",
+			)[0]?.value,
+		).toBe("12%");
+		expect(query("vitae", ["harmful"])).toHaveLength(1);
+		expect(query("vitae", ["beneficial"])).toEqual([]);
+		expect(query("cooldown", [])).toEqual([]);
 	});
 
 	it("names known property headings and distinguishes unknown integer and float keys", () => {

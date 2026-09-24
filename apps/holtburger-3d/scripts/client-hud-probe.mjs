@@ -223,7 +223,7 @@ export async function probeClientHud(
 	await evaluateExpression(
 		client,
 		`(() => {
-		const labels = [...document.querySelectorAll('.status-tray .status-icon')].map((button) => button.getAttribute('aria-label'));
+		const labels = [...document.querySelectorAll('section[aria-label="Status tray"] .status-icon')].map((button) => button.getAttribute('aria-label'));
 		if (labels.join('|') !== 'Beneficial enchantments|Harmful enchantments')
 			throw new Error('Live status tray did not show both effective enchantment kinds.');
 	})()`,
@@ -308,7 +308,22 @@ export async function probeClientHud(
 			throw new Error('Overridden child did not expand beneath its effective spell.');
 		if (!panel.querySelector('section[aria-label="Strength"] .overridden [data-enchantment-key="2002:2"] .spell-details'))
 			throw new Error('Clicking an overridden spell did not expand its description.');
-		panel.querySelector('.filters summary').click();
+		if (!panel.querySelector('[data-filter-category="disposition"]'))
+			throw new Error('Disposition filters are not visible inline.');
+		if (panel.querySelector('[data-filter-category="school"]'))
+			throw new Error('School filters are visible before More is expanded.');
+		panel.querySelector('.more-filters').click();
+	})()`,
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		const pills = panel.querySelector('.filter-pills');
+		if (!pills.lastElementChild?.classList.contains('more-filters') ||
+			!pills.lastElementChild.textContent.includes('Less...'))
+			throw new Error('Less is not the last expanded filter control.');
 		[...panel.querySelectorAll('[data-filter-category="school"]')].find((button) => button.textContent === 'Item').click();
 	})()`,
 	);
@@ -319,6 +334,17 @@ export async function probeClientHud(
 		const panel = document.querySelector('[aria-label="Enchantments"]');
 		if (panel.querySelector('section[aria-label="Strength"] .overridden [data-enchantment-key="2002:2"]'))
 			throw new Error('School pill left a nonmatching overridden child visible.');
+		panel.querySelector('.more-filters').click();
+	})()`,
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		if (panel.querySelector('[data-filter-category="school"]') ||
+			!panel.querySelector('.more-filters').textContent.includes('(1)'))
+			throw new Error('Less did not hide selected school filters or reveal their count.');
 		panel.querySelector('.search-line button').click();
 		panel.querySelector('.sort-button').click();
 	})()`,
@@ -494,6 +520,91 @@ export async function probeClientHud(
 		client,
 		`document.querySelector('[aria-label="Close Enchantments"]').click()`,
 	);
+	const vitaeKey = { spellId: 666, layer: 0 };
+	const vitaeOnly = {
+		instances: [
+			{
+				...enchantmentInstance(vitaeKey, "vitae", 30, null),
+				statModValue: 0.95,
+			},
+		],
+		groups: [],
+	};
+	await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setEnchantments",
+		[vitaeOnly],
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		if (document.querySelector('[aria-label="Beneficial enchantments"]'))
+			throw new Error('Vitae alone showed the beneficial tray icon.');
+		if (!document.querySelector('[aria-label="Harmful enchantments"]'))
+			throw new Error('Vitae alone did not show the harmful tray icon.');
+	})()`,
+	);
+	await clickStatusIcon("harmful");
+	await delay(100);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		const section = panel.querySelector('section[aria-label="Vitae penalty"]');
+		if (!section?.textContent.includes('5%') || !section.textContent.includes('Vitae'))
+			throw new Error('Vitae penalty section is missing or inaccurate.');
+		if (!panel.textContent.includes('1 / 1 effects'))
+			throw new Error('Vitae was omitted from the effects count.');
+		section.querySelector('.spell-header').click();
+	})()`,
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		const section = panel.querySelector('section[aria-label="Vitae penalty"]');
+		if (!section.querySelector('.spell-details')?.textContent.includes('Fixture spell description.'))
+			throw new Error('Vitae did not open its spell description.');
+		panel.querySelector('[aria-label="Search enchantment and stat names"]').value = 'penalty';
+		panel.querySelector('[aria-label="Search enchantment and stat names"]').dispatchEvent(new Event('input', { bubbles: true }));
+	})()`,
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		if (!panel.querySelector('section[aria-label="Vitae penalty"]'))
+			throw new Error('Searching for the Vitae heading lost its spell.');
+		panel.querySelector('.more-filters').click();
+	})()`,
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		[...panel.querySelectorAll('[data-filter-category="school"]')]
+			.find((button) => button.textContent === 'Creature').click();
+	})()`,
+	);
+	await delay(50);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Enchantments"]');
+		if (!panel.querySelector('section[aria-label="Vitae penalty"]'))
+			throw new Error('Creature school filter hid Vitae.');
+		document.querySelector('[aria-label="Close Enchantments"]').click();
+	})()`,
+	);
+	await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setEnchantments",
+		[enchantmentFixture],
+	);
 	runtime.vitals = await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeCharacterVitals",
@@ -616,6 +727,43 @@ export async function probeClientHud(
 			`${options.screenshotPath}.status-tray-horizontal.png`,
 			Buffer.from(wideScreenshot, "base64"),
 		);
+	const shortcutsBefore = layout.surfaces["Game shortcuts"];
+	await evaluateExpression(
+		client,
+		`(() => {
+		const tray = document.querySelector('section[aria-label="Game shortcuts"]');
+		if (tray.querySelector('[aria-label="Resize Game shortcuts"]'))
+			throw new Error('Game shortcuts still exposes resizing.');
+		tray.querySelector('[aria-label="Rotate game shortcuts"]').click();
+	})()`,
+	);
+	await delay(50);
+	const shortcutsRotated = (await capture()).surfaces["Game shortcuts"];
+	if (
+		shortcutsRotated.width !== shortcutsBefore.height ||
+		shortcutsRotated.height !== shortcutsBefore.width
+	)
+		throw new Error("Game shortcuts did not rotate its HUD extent.");
+	await evaluateExpression(
+		client,
+		`(() => {
+		const buttons = [...document.querySelectorAll('.shortcut-dock > button')];
+		const first = buttons[0].getBoundingClientRect();
+		const second = buttons[1].getBoundingClientRect();
+		if (first.left !== second.left || second.top <= first.top)
+			throw new Error('Game shortcuts did not form a vertical column.');
+		document.querySelector('[aria-label="Rotate game shortcuts"]').click();
+	})()`,
+	);
+	await delay(50);
+	const shortcutsRestored = (await capture()).surfaces["Game shortcuts"];
+	if (
+		shortcutsRestored.width !== shortcutsBefore.width ||
+		shortcutsRestored.height !== shortcutsBefore.height
+	)
+		throw new Error(
+			"Game shortcuts did not restore its horizontal HUD extent.",
+		);
 	const statusTrayBefore = layout.surfaces["Status tray"];
 	if (statusTrayBefore === undefined)
 		throw new Error("Status tray is absent from the editable HUD.");
@@ -659,7 +807,7 @@ export async function probeClientHud(
 	await evaluateExpression(
 		client,
 		`(() => {
-		const icons = [...document.querySelectorAll('.status-tray .status-icon')];
+		const icons = [...document.querySelectorAll('section[aria-label="Status tray"] .status-icon')];
 		if (icons.length < 2) throw new Error('Status tray has too few icons to verify orientation.');
 		const first = icons[0].getBoundingClientRect();
 		const second = icons[1].getBoundingClientRect();

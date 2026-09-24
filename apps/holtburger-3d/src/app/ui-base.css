@@ -166,6 +166,11 @@
 		--ui-enchantments-heading-text-transform: uppercase;
 		--ui-enchantments-tree-gutter: 22px;
 		--ui-enchantments-child-indent: 8px;
+		/* Inline school-filter disclosure beside the disposition pills. */
+		--ui-enchantments-filter-toggle-color: var(--ui-color-highlight);
+		--ui-enchantments-filter-toggle-hover-color: var(--ui-color-active);
+		--ui-enchantments-filter-toggle-decoration: underline;
+		--ui-enchantments-filter-toggle-underline-offset: 2px;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
 		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;
 		/* Compact suffix size relative to the quantity's font size. */

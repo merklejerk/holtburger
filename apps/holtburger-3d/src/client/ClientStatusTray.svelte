@@ -74,7 +74,7 @@
 	{onPlacementChange}
 >
 	<div
-		class="status-tray ui-hud-group"
+		class="status-tray"
 		class:vertical={orientation === "vertical"}
 		class:editable
 		role="group"
@@ -83,7 +83,7 @@
 		{#each statuses as status}
 			<button
 				type="button"
-				class="status-icon"
+				class="status-icon ui-hud-button"
 				title={status.label}
 				aria-label={status.label}
 				onclick={() => onOpenEnchantments(status.kind)}
@@ -112,7 +112,7 @@
 			box-sizing: border-box;
 			display: flex;
 			align-items: center;
-			gap: 10px;
+			gap: var(--ui-hud-icon-gap);
 			position: relative;
 			width: 100%;
 			height: 100%;
@@ -121,7 +121,6 @@
 			flex-direction: column;
 		}
 		.status-tray.editable {
-			gap: 4px;
 			padding-inline: 26px;
 		}
 		.status-tray.vertical.editable {
@@ -143,17 +142,10 @@
 		}
 		.status-icon {
 			box-sizing: border-box;
+			flex: 0 0 32px;
 			width: 32px;
 			height: 32px;
-			padding: 6px;
-			cursor: pointer;
 			pointer-events: auto;
-		}
-		.editable .status-icon {
-			flex: 0 0 23px;
-			width: 23px;
-			height: 23px;
-			padding: 4px;
 		}
 	}
 </style>

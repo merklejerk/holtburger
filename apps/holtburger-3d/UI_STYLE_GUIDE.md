@@ -119,6 +119,13 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
+The Enchantments window shares the spell panel's padding, row, filter, and color
+tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
+`--ui-enchantments-heading-font-size`, `--ui-enchantments-heading-letter-spacing`,
+and `--ui-enchantments-heading-text-transform`. The overridden-spell tree uses
+`--ui-enchantments-tree-gutter` for both disclosure width and branch indentation;
+`--ui-enchantments-child-indent` offsets the child rows within that branch.
+
 Spell shortcuts use the same transparent cell face and feathered `ui-hud-button`
 backing as action cells. Their blue palette is independent of the mana meter:
 

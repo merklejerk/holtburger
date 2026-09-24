@@ -124,7 +124,7 @@
 			width: 100%;
 			height: 100%;
 			grid-template-columns: repeat(var(--shortcut-count), minmax(0, 1fr));
-			gap: 5px;
+			gap: var(--ui-hud-icon-gap);
 		}
 		button {
 			min-width: 0;

@@ -933,29 +933,21 @@
 			/>
 		</ClientHudPanel>
 	{/if}
-	<ClientHudPanel
-		label="Game shortcuts"
+	<ClientShortcutDock
 		placement={hudLayout.shortcuts}
 		editable={hudMode === "layout"}
-		minWidth={CLIENT_UI_DEFAULTS.shortcuts.minSize.width}
-		minHeight={CLIENT_UI_DEFAULTS.shortcuts.minSize.height}
-		resizable={CLIENT_UI_DEFAULTS.shortcuts.resizable}
-		contentHitTesting="surface"
 		{viewport}
 		onPlacementChange={(placement) =>
 			changeHudPlacement("shortcuts", placement)}
-	>
-		<ClientShortcutDock
-			bindings={input.client.toggleCombat}
-			{displayPlatform}
-			{combatMode}
-			{combatEnabled}
-			{onToggleCombat}
-			{shortcuts}
-			{activePanel}
-			onToggle={(panel) => (activePanel = activePanel === panel ? null : panel)}
-		/>
-	</ClientHudPanel>
+		bindings={input.client.toggleCombat}
+		{displayPlatform}
+		{combatMode}
+		{combatEnabled}
+		{onToggleCombat}
+		{shortcuts}
+		{activePanel}
+		onToggle={(panel) => (activePanel = activePanel === panel ? null : panel)}
+	/>
 	{#if worldContainer !== null && itemInteractions !== null}
 		{#key worldContainer}
 			<ClientWorldContainerWindow

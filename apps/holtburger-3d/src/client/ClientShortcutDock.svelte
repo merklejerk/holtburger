@@ -49,8 +49,21 @@
 		type InputDisplayPlatform,
 	} from "../lib/input/input-presentation";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import ClientHudTray from "./ClientHudTray.svelte";
+	import {
+		createClientHudPanelPlacement,
+		type ClientHudPlacement,
+		type ClientHudViewport,
+	} from "./client-hud-layout";
+	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
+	import { hudTrayOrientation } from "./client-hud-tray-layout";
 
 	interface Props {
+		/** Saved anchor and orientation; old resized dimensions are normalized to tray defaults. */
+		readonly placement: ClientHudPlacement;
+		readonly editable: boolean;
+		readonly viewport: ClientHudViewport;
+		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Accepted stance shortcut alternatives. */
 		readonly bindings: readonly KeyBinding[];
 		readonly displayPlatform: InputDisplayPlatform;
@@ -67,6 +80,10 @@
 	}
 
 	const {
+		placement,
+		editable,
+		viewport,
+		onPlacementChange,
 		bindings,
 		displayPlatform,
 		shortcuts,
@@ -76,45 +93,73 @@
 		combatEnabled,
 		onToggleCombat,
 	}: Props = $props();
+	const trayPlacement = $derived.by(() => {
+		const defaults = createClientHudPanelPlacement(
+			CLIENT_UI_DEFAULTS.shortcuts,
+			viewport,
+			shortcuts.length,
+		);
+		// Resizable saves had no orientation contract; square saves start horizontally.
+		const vertical = placement.preferredHeight > placement.preferredWidth;
+		return {
+			...placement,
+			preferredWidth: vertical
+				? defaults.preferredHeight
+				: defaults.preferredWidth,
+			preferredHeight: vertical
+				? defaults.preferredWidth
+				: defaults.preferredHeight,
+		};
+	});
+	const orientation = $derived(hudTrayOrientation(trayPlacement));
 </script>
 
-<nav
-	class="shortcut-dock"
-	style:--shortcut-count={shortcuts.length}
-	aria-label="Game shortcuts"
+<ClientHudTray
+	label="Game shortcuts"
+	placement={trayPlacement}
+	{editable}
+	{viewport}
+	{onPlacementChange}
 >
-	{#each shortcuts as shortcut}
-		{@const panel = systemPanel(shortcut.icon)}
-		{@const combat = shortcut.icon === "combat"}
-		{@const combatActive = combatMode !== "peace" && combatMode !== "unknown"}
-		<button
-			type="button"
-			class="ui-hud-button"
-			title={combat
-				? `Combat stance: ${combatMode}. Toggle peace/combat (${formatInputBindings(bindings, displayPlatform)})`
-				: panel === null
-					? `${shortcut.label} (stub)`
-					: panel === "debug"
-						? "Client diagnostics"
-						: shortcut.label}
-			aria-label={combat
-				? `${shortcut.label} (${formatInputBindings(bindings, displayPlatform)})`
-				: shortcut.label}
-			aria-pressed={combat
-				? combatActive
-				: panel === null
-					? undefined
-					: activePanel === panel}
-			disabled={combat && (!combatEnabled || combatMode === "unknown")}
-			onclick={() => {
-				if (combat) onToggleCombat();
-				else if (panel !== null) onToggle(panel);
-			}}
-		>
-			<ClientHudIcon name={shortcut.icon} />
-		</button>
-	{/each}
-</nav>
+	<nav
+		class="shortcut-dock"
+		class:vertical={orientation === "vertical"}
+		style:--shortcut-count={shortcuts.length}
+		aria-label="Game shortcuts"
+	>
+		{#each shortcuts as shortcut}
+			{@const panel = systemPanel(shortcut.icon)}
+			{@const combat = shortcut.icon === "combat"}
+			{@const combatActive = combatMode !== "peace" && combatMode !== "unknown"}
+			<button
+				type="button"
+				class="ui-hud-button"
+				title={combat
+					? `Combat stance: ${combatMode}. Toggle peace/combat (${formatInputBindings(bindings, displayPlatform)})`
+					: panel === null
+						? `${shortcut.label} (stub)`
+						: panel === "debug"
+							? "Client diagnostics"
+							: shortcut.label}
+				aria-label={combat
+					? `${shortcut.label} (${formatInputBindings(bindings, displayPlatform)})`
+					: shortcut.label}
+				aria-pressed={combat
+					? combatActive
+					: panel === null
+						? undefined
+						: activePanel === panel}
+				disabled={combat && (!combatEnabled || combatMode === "unknown")}
+				onclick={() => {
+					if (combat) onToggleCombat();
+					else if (panel !== null) onToggle(panel);
+				}}
+			>
+				<ClientHudIcon name={shortcut.icon} />
+			</button>
+		{/each}
+	</nav>
+</ClientHudTray>
 
 <style>
 	@layer components {
@@ -126,7 +171,12 @@
 			grid-template-columns: repeat(var(--shortcut-count), minmax(0, 1fr));
 			gap: var(--ui-hud-icon-gap);
 		}
+		.shortcut-dock.vertical {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-rows: repeat(var(--shortcut-count), minmax(0, 1fr));
+		}
 		button {
+			pointer-events: auto;
 			min-width: 0;
 			min-height: 0;
 			padding: 8px;

@@ -22,10 +22,7 @@ import {
 	createDefaultClientUserSettings,
 } from "./client-settings-defaults";
 import { resolveClientHudPlacement } from "./client-hud-layout";
-import {
-	rotateStatusTray,
-	statusTrayOrientation,
-} from "./client-status-tray-layout";
+import { rotateHudTray, hudTrayOrientation } from "./client-hud-tray-layout";
 
 const viewport = { width: 1440, height: 900 };
 
@@ -254,7 +251,7 @@ describe("client settings contract", () => {
 	it("persists a rotated status tray and restores its original geometry", () => {
 		const current = document();
 		const horizontal = current.user.client.hudLayout.statusTray;
-		const vertical = rotateStatusTray(horizontal);
+		const vertical = rotateHudTray(horizontal);
 		const rotated = {
 			...current,
 			user: {
@@ -265,9 +262,9 @@ describe("client settings contract", () => {
 				},
 			},
 		};
-		expect(statusTrayOrientation(vertical)).toBe("vertical");
+		expect(hudTrayOrientation(vertical)).toBe("vertical");
 		expect(parseClientLocalSettingsDocument(rotated)).toEqual(rotated);
-		expect(rotateStatusTray(vertical)).toEqual(horizontal);
+		expect(rotateHudTray(vertical)).toEqual(horizontal);
 	});
 
 	it("rejects a tray placement that cannot encode an orientation", () => {

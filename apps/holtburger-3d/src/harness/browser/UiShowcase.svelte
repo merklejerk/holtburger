@@ -343,9 +343,7 @@
 					minWidth={CLIENT_UI_DEFAULTS[name].minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS[name].minSize.height}
 					resizable={CLIENT_UI_DEFAULTS[name].resizable}
-					contentHitTesting={name === "character" ||
-					name === "jumpPower" ||
-					name === "shortcuts"
+					contentHitTesting={name === "character" || name === "jumpPower"
 						? "surface"
 						: "descendants"}
 					onPlacementChange={(placement) =>
@@ -401,6 +399,11 @@
 					persistentMessage={{ kind: "preview", message: toastMessage }}
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
+					placement={layout.shortcuts}
+					{editable}
+					{viewport}
+					onPlacementChange={(placement) =>
+						(adjustments = { ...adjustments, shortcuts: placement })}
 					bindings={[]}
 					displayPlatform="unknown"
 					combatMode="peace"
@@ -425,7 +428,7 @@
 			{@render hud("frameRate", fps)}
 			{@render hud("jumpPower", jump)}
 			{@render hud("toast", toast)}
-			{@render hud("shortcuts", dock)}
+			{@render dock()}
 
 			{#if windowOpen}
 				<ClientHudWindow

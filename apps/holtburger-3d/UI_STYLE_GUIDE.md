@@ -125,6 +125,11 @@ tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
 and `--ui-enchantments-heading-text-transform`. The overridden-spell tree uses
 `--ui-enchantments-tree-gutter` for both disclosure width and branch indentation;
 `--ui-enchantments-child-indent` offsets the child rows within that branch.
+The inline More.../Less... school-filter toggle uses
+`--ui-enchantments-filter-toggle-color`, `--ui-enchantments-filter-toggle-hover-color`,
+`--ui-enchantments-filter-toggle-decoration`, and
+`--ui-enchantments-filter-toggle-underline-offset`. Its pills retain the shared
+spell-filter color, radius, and spacing tokens.
 
 Spell shortcuts use the same transparent cell face and feathered `ui-hud-button`
 backing as action cells. Their blue palette is independent of the mana meter:

@@ -17,10 +17,9 @@ export interface EnchantmentDisplayRow {
 	readonly spell: SpellRow | null;
 }
 
-/** One effective category/query family and the children it overrides. */
+/** An effective spell with its overridden children, or a standalone vitae record. */
 interface EnchantmentDisplayGroup {
 	readonly id: string;
-	readonly source: Group;
 	readonly effective: EnchantmentDisplayRow;
 	readonly overridden: readonly EnchantmentDisplayRow[];
 	/** Search matched a child, so its effective parent is retained for context. */
@@ -31,6 +30,8 @@ interface EnchantmentDisplayGroup {
 export interface EnchantmentDisplaySection {
 	readonly id: string;
 	readonly label: string;
+	/** Display-only vitae percentage; the spell remains a distinct registry record. */
+	readonly value?: string;
 	/** Empty headings are omitted; the first group supplies the heading's sort priority. */
 	readonly groups: readonly [
 		EnchantmentDisplayGroup,
@@ -47,7 +48,7 @@ export function enchantmentKey(id: {
 	return `${id.spellId}:${id.layer}`;
 }
 
-/** Presence counts unique effective ordinary instances, not repeated stat rows. */
+/** Presence counts effective ordinary spells plus the separately applied vitae penalty. */
 export function effectiveEnchantmentKinds(
 	resolved: ResolvedEnchantments | null,
 ): { readonly beneficial: boolean; readonly harmful: boolean } {
@@ -59,11 +60,17 @@ export function effectiveEnchantmentKinds(
 		]),
 	);
 	// RETAIL DIVERGENCE: acclient.c:425784-425812 counts every ordinary registry insertion.
-	// These icons show only effective contributions, a client-only presentation choice;
-	// game content cannot observe the indicator count. The local DAT census contains 4,375
-	// enchantment definitions, but no live-registry population census was available.
+	// Ordinary icons show only effective contributions. This client-only presentation
+	// cannot affect game content. The local DAT census contains 4,375 enchantment
+	// definitions, but no live-registry population census was available.
 	let beneficial = false;
-	let harmful = false;
+	// RETAIL DIVERGENCE: acclient.c:266098-266100 uses a separate vitae indicator.
+	// Grouping it under Harmful keeps the panel reachable when vitae is the sole
+	// effect; restoring that retail icon would remove this route. The local DAT
+	// census found spell 666, but did not measure live registry populations.
+	let harmful = resolved.instances.some(
+		(instance) => instance.kind === "vitae",
+	);
 	for (const group of resolved.groups) {
 		const kind = instances.get(enchantmentKey(group.effective))?.kind;
 		if (kind === "beneficial") beneficial = true;
@@ -190,7 +197,9 @@ export function projectEnchantmentSections(
 		item: EnchantmentDisplayRow,
 		statWords: readonly string[],
 	): boolean => {
-		const tags = new Set<string>([item.instance.kind]);
+		const tags = new Set<string>([
+			item.instance.kind === "vitae" ? "harmful" : item.instance.kind,
+		]);
 		if (item.spell?.details !== null && item.spell?.details !== undefined)
 			tags.add(`school:${item.spell.details.school}`);
 		return matchesSpellSearch(
@@ -203,6 +212,7 @@ export function projectEnchantmentSections(
 		string,
 		{
 			label: string;
+			value?: string;
 			words: readonly string[];
 			groups: EnchantmentDisplayGroup[];
 		}
@@ -223,11 +233,38 @@ export function projectEnchantmentSections(
 		if (!parentMatches && overridden.length === 0) continue;
 		section.groups.push({
 			id: `${id}:${group.operation}:${group.channel}:${group.spellCategory}`,
-			source: group,
 			effective,
 			overridden,
 			contextualParent: !parentMatches,
 		});
+	}
+	const vitae = resolved.instances.filter(
+		(instance) => instance.kind === "vitae",
+	);
+	if (vitae.length > 0) {
+		const label = "Vitae penalty";
+		const words = spellSearchWords(label);
+		const groups = vitae.flatMap((instance): EnchantmentDisplayGroup[] => {
+			const effective = row(instance.key);
+			return matches(effective, words)
+				? [
+						{
+							id: `vitae:${enchantmentKey(instance.key)}`,
+							effective,
+							overridden: [],
+							contextualParent: false,
+						},
+					]
+				: [];
+		});
+		// ACE maintains one vitae record. Avoid inventing an aggregate percentage
+		// if a custom server sends several independently classified records.
+		const [singleVitae, secondVitae] = vitae;
+		const value =
+			singleVitae !== undefined && secondVitae === undefined
+				? `${Math.round((1 - singleVitae.statModValue) * 100)}%`
+				: undefined;
+		sections.set("vitae", { label, value, words, groups });
 	}
 	return [...sections.entries()]
 		.flatMap(([id, section]): EnchantmentDisplaySection[] => {
@@ -238,7 +275,14 @@ export function projectEnchantmentSections(
 			);
 			return first === undefined
 				? []
-				: [{ id, label: section.label, groups: [first, ...rest] }];
+				: [
+						{
+							id,
+							label: section.label,
+							value: section.value,
+							groups: [first, ...rest],
+						},
+					];
 		})
 		.sort((a, b) => {
 			const byLabel =

@@ -53,6 +53,17 @@
 		duration: { label: "Duration, soonest first", badge: null, next: "name" },
 	};
 	let search = $state<SpellSearch>({ text: "", tags: [] });
+	let showMoreFilters = $state(false);
+	const visibleFilters = $derived(
+		filterOptions.filter(
+			([, , category]) => showMoreFilters || category === "disposition",
+		),
+	);
+	const selectedSchoolCount = $derived(
+		filterOptions.filter(
+			([tag, , category]) => category === "school" && search.tags.includes(tag),
+		).length,
+	);
 	let sortField = $state<EnchantmentSortField>("name");
 	let expandedGroups = $state<ReadonlySet<string>>(new Set());
 	let expandedDescription = $state<string | null>(null);
@@ -78,16 +89,15 @@
 					sortField,
 				),
 	);
-	const allCount = $derived(
-		enchantments?.resolved.instances.filter(
-			(instance) =>
-				instance.kind === "beneficial" || instance.kind === "harmful",
-		).length ?? 0,
-	);
 	const visibleCount = $derived(
 		sections.reduce((count, section) => count + section.groups.length, 0),
 	);
-	const totalCount = $derived(enchantments?.resolved.groups.length ?? 0);
+	const totalCount = $derived(
+		(enchantments?.resolved.groups.length ?? 0) +
+			(enchantments?.resolved.instances.filter(
+				(instance) => instance.kind === "vitae",
+			).length ?? 0),
+	);
 	const spellIds = $derived(
 		enchantments === null
 			? []
@@ -96,7 +106,9 @@
 						enchantments.resolved.instances
 							.filter(
 								(instance) =>
-									instance.kind === "beneficial" || instance.kind === "harmful",
+									instance.kind === "beneficial" ||
+									instance.kind === "harmful" ||
+									instance.kind === "vitae",
 							)
 							.map((instance) => instance.key.spellId),
 					),
@@ -200,9 +212,7 @@
 	function toggleDescription(id: string): void {
 		expandedDescription = expandedDescription === id ? null : id;
 	}
-	function duration(row: EnchantmentDisplayRow): string {
-		const seconds = row.instance.remainingSeconds;
-		if (seconds === null) return "Permanent";
+	function duration(seconds: number): string {
 		const elapsedSeconds = Math.max(
 			0,
 			(nowMs - (enchantments?.receivedAtMs ?? nowMs)) / 1000,
@@ -245,7 +255,14 @@
 						>{row.spell.artwork.detail}</small
 					>{/if}</span
 			>
-			<span class="spell-duration">{duration(row)}</span>
+			{#if row.instance.remainingSeconds === null}<span
+					class="spell-duration"
+					role="img"
+					aria-label="Permanent duration"
+					title="Permanent">∞</span
+				>{:else}<span class="spell-duration"
+					>{duration(row.instance.remainingSeconds)}</span
+				>{/if}
 			<span class="expansion-indicator" aria-hidden="true"
 				>{expandedDescription === id ? "▾" : "▸"}</span
 			>
@@ -279,24 +296,26 @@
 				}}>Reset</button
 			>
 		</div>
-		<details class="filters">
-			<summary
-				>Filters{search.tags.length > 0
-					? ` · ${search.tags.length} selected`
-					: ""}</summary
+		<div class="filter-pills" role="group" aria-label="Enchantment filters">
+			{#each visibleFilters as [tag, label, category]}
+				<button
+					type="button"
+					data-filter-category={category}
+					aria-pressed={search.tags.includes(tag)}
+					class:active={search.tags.includes(tag)}
+					onclick={() => toggleTag(tag)}>{label}</button
+				>
+			{/each}
+			<button
+				type="button"
+				class="more-filters"
+				aria-expanded={showMoreFilters}
+				onclick={() => (showMoreFilters = !showMoreFilters)}
+				>{showMoreFilters
+					? "Less..."
+					: `More...${selectedSchoolCount > 0 ? ` (${selectedSchoolCount})` : ""}`}</button
 			>
-			<div class="filter-pills" role="group" aria-label="Enchantment filters">
-				{#each filterOptions as [tag, label, category]}
-					<button
-						type="button"
-						data-filter-category={category}
-						aria-pressed={search.tags.includes(tag)}
-						class:active={search.tags.includes(tag)}
-						onclick={() => toggleTag(tag)}>{label}</button
-					>
-				{/each}
-			</div>
-		</details>
+		</div>
 		<div class="sort-line">
 			<span class="count" role="status"
 				>{visibleCount} / {totalCount} effects</span
@@ -348,7 +367,7 @@
 		{#if enchantments === null}<p role="status">
 				Waiting for character enchantments…
 			</p>
-		{:else if allCount === 0}<p>No active enchantments.</p>
+		{:else if totalCount === 0}<p>No active enchantments.</p>
 		{:else}
 			{#if metadataStatus === "loading"}<p role="status">
 					Loading spell names and artwork…
@@ -361,7 +380,10 @@
 				</p>{/if}
 			{#each sections as section (section.id)}
 				<section class="stat-section" aria-label={section.label}>
-					<h3>{section.label}</h3>
+					<h3>
+						{section.label}{#if section.value !== undefined}
+							· {section.value}{/if}
+					</h3>
 					<ul>
 						{#each section.groups as group (group.id)}
 							<li
@@ -452,21 +474,24 @@
 			opacity: var(--ui-spell-control-disabled-opacity);
 			cursor: default;
 		}
-		.filters {
-			max-height: var(--ui-spell-filter-max-height);
-			overflow: auto;
-		}
-		.filters[open] {
-			margin-bottom: var(--ui-spell-filter-gap);
-		}
-		.filters summary {
-			cursor: pointer;
-			padding-block: var(--ui-spell-filter-gap);
-		}
 		.filter-pills {
 			display: flex;
 			flex-wrap: wrap;
 			gap: var(--ui-spell-filter-gap);
+			padding-block: var(--ui-spell-filter-gap);
+		}
+		.controls .more-filters {
+			border: 0;
+			background: transparent;
+			padding-inline: var(--ui-spell-filter-gap);
+			color: var(--ui-enchantments-filter-toggle-color);
+			text-decoration: var(--ui-enchantments-filter-toggle-decoration);
+			text-underline-offset: var(
+				--ui-enchantments-filter-toggle-underline-offset
+			);
+		}
+		.controls .more-filters:hover {
+			color: var(--ui-enchantments-filter-toggle-hover-color);
 		}
 		[data-filter-category="disposition"] {
 			--filter-color: var(--ui-spell-filter-disposition-color);
@@ -474,7 +499,7 @@
 		[data-filter-category="school"] {
 			--filter-color: var(--ui-spell-filter-school-color);
 		}
-		.filter-pills button {
+		.filter-pills button[data-filter-category] {
 			border-color: var(--filter-color);
 			background: color-mix(
 				in srgb,
@@ -484,7 +509,7 @@
 			border-radius: var(--ui-spell-filter-pill-radius);
 			padding: var(--ui-spell-filter-pill-padding);
 		}
-		.filter-pills button.active {
+		.filter-pills button.active[data-filter-category] {
 			background: color-mix(
 				in srgb,
 				var(--filter-color) var(--ui-spell-filter-active-tint),
@@ -633,6 +658,7 @@
 		}
 		.spell-header:focus-visible,
 		.tree-toggle:focus-visible,
+		.more-filters:focus-visible,
 		.sort-button:focus-visible {
 			outline: 2px solid var(--ui-color-focus);
 		}

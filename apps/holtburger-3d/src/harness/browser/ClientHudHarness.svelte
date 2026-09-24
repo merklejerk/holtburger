@@ -2894,18 +2894,21 @@
 								kind: "known",
 								id,
 								name:
-									id === 2000
-										? "Harm Other I"
-										: id === 2001
-											? "Impenetrability I"
-											: `Spell ${String(id).padStart(4, "0")} ${id % 2 === 0 ? "Frost Protection Self" : "Acid Protection Other"}`,
+									id === 666
+										? "Vitae"
+										: id === 2000
+											? "Harm Other I"
+											: id === 2001
+												? "Impenetrability I"
+												: `Spell ${String(id).padStart(4, "0")} ${id % 2 === 0 ? "Frost Protection Self" : "Acid Protection Other"}`,
 								details: {
 									castingRoute:
 										id !== 2000 && id % 2 === 0
 											? "self-target"
 											: "selected-target",
 									description: "Fixture spell description.",
-									school: id === 2000 ? 5 : id % 2 === 0 ? 2 : 3,
+									school:
+										id === 666 ? 4 : id === 2000 ? 5 : id % 2 === 0 ? 2 : 3,
 									usesProjectileHandler: id === 2000,
 									baseMana: 10,
 									manaPerTarget: 2,
@@ -2921,7 +2924,7 @@
 														? "other"
 														: null,
 									classification: {
-										beneficial: id !== 2000,
+										beneficial: id !== 2000 && id !== 666,
 										level: ((id - 1) % 8) + 1,
 										recipient: "creature",
 										fellowship: false,

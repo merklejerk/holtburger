@@ -130,7 +130,7 @@ export const CLIENT_UI_DEFAULTS = {
 		offset: { x: 16, y: 16 },
 		size: { width: { perShortcut: 42 }, height: 42 },
 		minSize: { width: 280, height: 36 },
-		resizable: true,
+		resizable: false,
 	},
 	toast: {
 		anchor: "bottom-center",

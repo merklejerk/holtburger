@@ -103,7 +103,7 @@ describe("ClientSettingsStore", () => {
 			8,
 		);
 		const source = {
-			schemaVersion: 11,
+			schemaVersion: 12,
 			user: { window: initialWindow, client: user },
 			characters: {},
 		};
@@ -127,7 +127,7 @@ describe("ClientSettingsStore", () => {
 		await writeFile(
 			path,
 			JSON.stringify({
-				schemaVersion: 11,
+				schemaVersion: 12,
 				user: { window: initialWindow, client: originalUser },
 				characters: {
 					"example:9000/0x50000001": {

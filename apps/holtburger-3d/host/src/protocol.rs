@@ -146,6 +146,7 @@ pub enum HostEvent {
         #[serde(rename = "spellIds")]
         spell_ids: Vec<u32>,
     },
+    ClientPlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
     ClientAppearanceOptionsUpdated(crate::client_projection::ClientAppearanceOptions),
     ClientPlayerVitalsUpdated {
         vitals: Vec<crate::client_projection::ClientVitalWire>,
@@ -480,6 +481,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::PlayerSpellsUpdated { spell_ids } => {
                 HostEvent::ClientPlayerSpellsUpdated { spell_ids }
+            }
+            crate::client_projection::ClientHostEvent::PlayerEnchantmentsUpdated(resolved) => {
+                HostEvent::ClientPlayerEnchantmentsUpdated(resolved)
             }
             crate::client_projection::ClientHostEvent::AppearanceOptionsUpdated(options) => {
                 HostEvent::ClientAppearanceOptionsUpdated(options)

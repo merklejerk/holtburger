@@ -287,9 +287,10 @@ mod tests {
     }
 
     fn snapshot_event() -> ClientViewEvent {
-        ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
+        ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
             character_options: None,
             known_spells: None,
+            enchantments: None,
             combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
             combat: Default::default(),
             entities: holtburger_core::ClientEntitySnapshot::default(),
@@ -308,7 +309,7 @@ mod tests {
                 Vec::new(),
             ),
             runtime_bodies: Vec::new().into(),
-        })
+        }))
     }
 
     #[test]
@@ -318,7 +319,7 @@ mod tests {
         };
         let access = holtburger_world::state::WorldContainerState::Open { root: Guid(10) };
         snapshot.entities.world_container = access;
-        let current = ClientCurrentState::from(&snapshot);
+        let current = ClientCurrentState::from(snapshot.as_ref());
         assert_eq!(
             serde_json::to_value(current).unwrap()["entities"]["worldContainer"],
             serde_json::json!({"kind": "open", "root": 10})
@@ -695,6 +696,7 @@ mod tests {
         let snapshot = ClientApplicationSnapshot {
             character_options: None,
             known_spells: None,
+            enchantments: None,
             combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
             combat: Default::default(),
             entities: holtburger_core::ClientEntitySnapshot::default(),

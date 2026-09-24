@@ -3,13 +3,14 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
 use holtburger_dat::file_type::skill_table::{SkillFormula, SkillTable};
-use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
+use holtburger_world::enchantments::{
+    AffectedStat, EnchantmentKind, EnchantmentOperation, ResolvedEnchantment,
+};
+use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel};
 
 use super::tab::CharacterTab;
 use crate::pages::game::{GameData, ViewState};
@@ -30,9 +31,30 @@ pub enum CharTabLine {
         stat_type: Option<StatType>,
         training: Option<TrainingLevel>,
     },
-    Enchantment(Enchantment),
-    Miscellaneous(Enchantment),
+    Enchantment(DisplayedEnchantment),
+    Miscellaneous(DisplayedEnchantment),
     Spacer,
+}
+
+#[derive(Clone)]
+pub struct DisplayedEnchantment {
+    instance: ResolvedEnchantment,
+    operation: EnchantmentOperation,
+    remaining_seconds: Option<f64>,
+    overridden: bool,
+}
+
+impl DisplayedEnchantment {
+    pub(super) fn key(&self) -> holtburger_world::enchantments::EnchantmentKey {
+        self.instance.key
+    }
+}
+
+/// Shared stat identity and its TUI rows, including overridden contributions.
+#[derive(Default)]
+struct StatEnchantments {
+    name: Option<String>,
+    rows: Vec<DisplayedEnchantment>,
 }
 
 pub fn render_character_tab(
@@ -208,30 +230,34 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 list_items.push(ListItem::new(Line::from(spans)).style(style));
             }
             CharTabLine::Enchantment(enchant) => {
-                let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-                let beneficial = flags.contains(EnchantmentTypeFlags::BENEFICIAL);
-                let multiplicative = flags.contains(EnchantmentTypeFlags::MULTIPLICATIVE);
-
-                let color = if beneficial { Color::Green } else { Color::Red };
+                let color = if enchant.instance.kind == EnchantmentKind::Beneficial {
+                    Color::Green
+                } else {
+                    Color::Red
+                };
                 let highlight_fg = if highlight {
                     Color::White
                 } else {
                     Color::DarkGray
                 };
                 let val_color = if highlight { Color::Cyan } else { color };
-                let time_str = format_duration(enchant.start_time, enchant.duration);
+                let time_str = format_duration(enchant.remaining_seconds);
 
-                let spell_name = data.spell_name_or_fallback(enchant.spell_id as u32);
+                let spell_name = data.spell_name_or_fallback(enchant.instance.key.spell_id as u32);
 
-                let val_str = if multiplicative {
-                    format!("x{:.2}", enchant.stat_mod_value)
+                let val_str = if enchant.operation == EnchantmentOperation::Multiplicative {
+                    format!("x{:.2}", enchant.instance.stat_mod_value)
                 } else {
-                    format!("{:+.2}", enchant.stat_mod_value)
+                    format!("{:+.2}", enchant.instance.stat_mod_value)
                 };
 
                 list_items.push(
                     ListItem::new(Line::from(vec![
-                        Span::raw("    "),
+                        Span::raw(if enchant.overridden {
+                            "      ↳ "
+                        } else {
+                            "    "
+                        }),
                         Span::styled(
                             format!("{} ", spell_name),
                             Style::default()
@@ -248,26 +274,23 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 );
             }
             CharTabLine::Miscellaneous(enchant) => {
-                let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-                let multiplicative = flags.contains(EnchantmentTypeFlags::MULTIPLICATIVE);
-
                 let highlight_fg = if highlight {
                     Color::White
                 } else {
                     Color::DarkGray
                 };
-                let name = data.spell_name_or_fallback(enchant.spell_id as u32);
-                let time_str = format_duration(enchant.start_time, enchant.duration);
+                let name = data.spell_name_or_fallback(enchant.instance.key.spell_id as u32);
+                let time_str = format_duration(enchant.remaining_seconds);
 
-                let val_str = if multiplicative {
-                    format!("x{:.2}", enchant.stat_mod_value)
+                let val_str = if enchant.operation == EnchantmentOperation::Multiplicative {
+                    format!("x{:.2}", enchant.instance.stat_mod_value)
                 } else {
-                    format!("{:+.2}", enchant.stat_mod_value)
+                    format!("{:+.2}", enchant.instance.stat_mod_value)
                 };
 
                 list_items.push(
                     ListItem::new(Line::from(vec![
-                        Span::raw("  "),
+                        Span::raw(if enchant.overridden { "    ↳ " } else { "  " }),
                         Span::styled(format!("{:<15} ", name), Style::default().fg(Color::Yellow)),
                         Span::styled(val_str, Style::default().fg(Color::Cyan)),
                         Span::styled(
@@ -290,111 +313,57 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
 pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     let mut lines = Vec::new();
 
-    let resists_props = [
-        PropertyFloat::ResistSlash,
-        PropertyFloat::ResistPierce,
-        PropertyFloat::ResistBludgeon,
-        PropertyFloat::ResistFire,
-        PropertyFloat::ResistCold,
-        PropertyFloat::ResistAcid,
-        PropertyFloat::ResistElectric,
-        PropertyFloat::ResistNether,
-    ];
-    let resists_set: std::collections::HashSet<u32> =
-        resists_props.iter().map(|&p| p as u32).collect();
-
-    // Group enchantments
-    let mut vital_enchants: HashMap<VitalType, Vec<Enchantment>> = HashMap::new();
-    let mut attr_enchants: HashMap<AttributeType, Vec<Enchantment>> = HashMap::new();
-    let mut skill_enchants: HashMap<SkillType, Vec<Enchantment>> = HashMap::new();
-    let mut float_enchants: HashMap<u32, Vec<Enchantment>> = HashMap::new();
-    let mut armor_enchants: Vec<Enchantment> = Vec::new();
-    let mut vitae_enchants: Vec<Enchantment> = Vec::new();
-    let mut misc_enchants: Vec<Enchantment> = Vec::new();
-
-    for enchant in &data.player_enchantments {
-        let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-        let mut categorized = true;
-
-        if flags.contains(EnchantmentTypeFlags::VITAE) {
-            vitae_enchants.push(*enchant);
-        } else if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
-            if let Some(at) = AttributeType::from_repr(enchant.stat_mod_key) {
-                attr_enchants.entry(at).or_default().push(*enchant);
-            } else {
-                categorized = false;
-            }
-        } else if flags.contains(EnchantmentTypeFlags::SKILL) {
-            if let Some(st) = SkillType::from_repr(enchant.stat_mod_key) {
-                skill_enchants.entry(st).or_default().push(*enchant);
-            } else {
-                categorized = false;
-            }
-        } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
-            let vt = match enchant.stat_mod_key {
-                1 | 2 => Some(VitalType::Health),
-                3 | 4 => Some(VitalType::Stamina),
-                5 | 6 => Some(VitalType::Mana),
-                _ => None,
+    let mut grouped: BTreeMap<AffectedStat, StatEnchantments> = BTreeMap::new();
+    let mut vitae_enchants = Vec::new();
+    if let Some(timed) = &data.resolved_enchantments {
+        let elapsed = timed.received_at.elapsed().as_secs_f64();
+        let instances: HashMap<_, _> = timed
+            .resolved
+            .instances
+            .iter()
+            .map(|instance| (instance.key, instance))
+            .collect();
+        let display =
+            |instance: &ResolvedEnchantment, operation, overridden| DisplayedEnchantment {
+                instance: instance.clone(),
+                operation,
+                remaining_seconds: instance
+                    .remaining_seconds
+                    .map(|seconds| (seconds - elapsed).max(0.0)),
+                overridden,
             };
-            if let Some(vt) = vt {
-                vital_enchants.entry(vt).or_default().push(*enchant);
-            } else {
-                categorized = false;
+        for instance in &timed.resolved.instances {
+            if instance.kind == EnchantmentKind::Vitae {
+                vitae_enchants.push(display(
+                    instance,
+                    EnchantmentOperation::Multiplicative,
+                    false,
+                ));
             }
-        } else if flags.contains(EnchantmentTypeFlags::FLOAT) {
-            if let Some(pf) = PropertyFloat::from_repr(enchant.stat_mod_key) {
-                if !pf.to_string().contains("WeaponAura")
-                    && resists_set.contains(&enchant.stat_mod_key)
-                {
-                    float_enchants
-                        .entry(enchant.stat_mod_key)
-                        .or_default()
-                        .push(*enchant);
-                } else {
-                    categorized = false;
-                }
-            } else {
-                categorized = false;
+        }
+        for group in &timed.resolved.groups {
+            let section = grouped
+                .entry(group.affected_stat)
+                .or_insert_with(|| StatEnchantments {
+                    name: group.stat_name.clone(),
+                    rows: Vec::new(),
+                });
+            let effective = instances
+                .get(&group.effective)
+                .expect("resolved group references a missing effective enchantment");
+            section
+                .rows
+                .push(display(effective, group.operation, false));
+            for key in &group.overridden {
+                let overridden = instances
+                    .get(key)
+                    .expect("resolved group references a missing overridden enchantment");
+                section
+                    .rows
+                    .push(display(overridden, group.operation, true));
             }
-        } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
-            armor_enchants.push(*enchant);
-        } else {
-            categorized = false;
-        }
-
-        if !categorized {
-            misc_enchants.push(*enchant);
         }
     }
-
-    let sort_enchants = |list: &mut Vec<Enchantment>| {
-        list.sort_by_key(|a| a.spell_id);
-    };
-    for v in vital_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    for v in attr_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    for v in skill_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    for v in float_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    sort_enchants(&mut armor_enchants);
-    sort_enchants(&mut vitae_enchants);
-
-    // Misc are sorted by name then ID
-    let sort_by_name = |list: &mut Vec<Enchantment>| {
-        list.sort_by(|a, b| {
-            let na = data.spell_name_or_fallback(a.spell_id as u32);
-            let nb = data.spell_name_or_fallback(b.spell_id as u32);
-            na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
-        });
-    };
-    sort_by_name(&mut misc_enchants);
 
     // 1. Vitals
     lines.push(CharTabLine::Header("VITALS"));
@@ -412,7 +381,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             stat_type: None,
             training: None,
         });
-        for &e in &vitae_enchants {
+        for e in vitae_enchants {
             lines.push(CharTabLine::Enchantment(e));
         }
     }
@@ -442,11 +411,11 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             stat_type: Some(StatType::Vital(v.vital_type)),
             training: None,
         });
-        if let Some(enchants) = vital_enchants.get(&v.vital_type) {
-            for &e in enchants {
-                lines.push(CharTabLine::Enchantment(e));
-            }
-        }
+        append_stat_enchantments(
+            &mut lines,
+            &mut grouped,
+            AffectedStat::Vital(v.vital_type as u32),
+        );
     }
     lines.push(CharTabLine::Spacer);
 
@@ -481,11 +450,11 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             stat_type: Some(StatType::Attribute(a.attr_type)),
             training: None,
         });
-        if let Some(enchants) = attr_enchants.get(&a.attr_type) {
-            for &e in enchants {
-                lines.push(CharTabLine::Enchantment(e));
-            }
-        }
+        append_stat_enchantments(
+            &mut lines,
+            &mut grouped,
+            AffectedStat::Attribute(a.attr_type as u32),
+        );
     }
     lines.push(CharTabLine::Spacer);
 
@@ -559,11 +528,11 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             stat_type: Some(StatType::Skill(s.skill_type)),
             training: Some(s.training),
         });
-        if let Some(enchants) = skill_enchants.get(&s.skill_type) {
-            for &e in enchants {
-                lines.push(CharTabLine::Enchantment(e));
-            }
-        }
+        append_stat_enchantments(
+            &mut lines,
+            &mut grouped,
+            AffectedStat::Skill(s.skill_type as u32),
+        );
     }
     lines.push(CharTabLine::Spacer);
 
@@ -582,9 +551,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             stat_type: None,
             training: None,
         });
-        for &e in &armor_enchants {
-            lines.push(CharTabLine::Enchantment(e));
-        }
+        append_stat_enchantments(&mut lines, &mut grouped, AffectedStat::Armor);
 
         let mut resists = vec![
             (PropertyFloat::ResistSlash, data.resistances.slash),
@@ -610,26 +577,66 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
                 stat_type: None,
                 training: None,
             });
-            if let Some(enchants) = float_enchants.get(&(prop as u32)) {
-                for &e in enchants {
-                    lines.push(CharTabLine::Enchantment(e));
-                }
-            }
+            append_stat_enchantments(
+                &mut lines,
+                &mut grouped,
+                AffectedStat::FloatProperty(prop as u32),
+            );
         }
     }
 
     lines.push(CharTabLine::Spacer);
 
     // 5. Misc
-    if !misc_enchants.is_empty() {
+    if !grouped.is_empty() {
         lines.push(CharTabLine::Header("MISC"));
-        for e in misc_enchants {
-            lines.push(CharTabLine::Miscellaneous(e));
+        for (affected_stat, section) in grouped {
+            lines.push(CharTabLine::Stat {
+                label: affected_stat_label(affected_stat, section.name.as_deref()),
+                value: String::new(),
+                formula: None,
+                xp_cost: None,
+                sp_cost: None,
+                has_xp: false,
+                has_sp: false,
+                stat_type: None,
+                training: None,
+            });
+            for enchant in section.rows {
+                lines.push(CharTabLine::Miscellaneous(enchant));
+            }
         }
         lines.push(CharTabLine::Spacer);
     }
 
     lines
+}
+
+fn append_stat_enchantments(
+    lines: &mut Vec<CharTabLine>,
+    grouped: &mut BTreeMap<AffectedStat, StatEnchantments>,
+    stat: AffectedStat,
+) {
+    if let Some(section) = grouped.remove(&stat) {
+        lines.extend(section.rows.into_iter().map(CharTabLine::Enchantment));
+    }
+}
+
+fn affected_stat_label(stat: AffectedStat, name: Option<&str>) -> String {
+    if let Some(name) = name {
+        return name.to_owned();
+    }
+    match stat {
+        AffectedStat::Attribute(key) => format!("Attribute {key}"),
+        AffectedStat::Vital(key) => format!("Vital {key}"),
+        AffectedStat::Skill(key) => format!("Skill {key}"),
+        AffectedStat::IntProperty(key) => format!("Integer property {key}"),
+        AffectedStat::FloatProperty(key) => format!("Float property {key}"),
+        AffectedStat::Armor => "Armor".to_string(),
+        AffectedStat::Damage => "Damage".to_string(),
+        AffectedStat::DamageVariance => "Damage variance".to_string(),
+        AffectedStat::Other(flags, key) => format!("Other effect {flags:#x} / {key}"),
+    }
 }
 
 fn skill_formula_text(skill_table: Option<&SkillTable>, skill_type: SkillType) -> Option<String> {
@@ -667,11 +674,8 @@ fn attribute_abbreviation(attribute_id: u32) -> Option<&'static str> {
     })
 }
 
-fn format_duration(start: f64, duration: f64) -> String {
-    if duration < 0.0 {
-        "Inf".to_string()
-    } else {
-        let remain = start + duration;
+fn format_duration(remaining: Option<f64>) -> String {
+    if let Some(remain) = remaining {
         if remain <= 0.0 {
             "0s".to_string()
         } else if remain > 60.0 {
@@ -679,6 +683,8 @@ fn format_duration(start: f64, duration: f64) -> String {
         } else {
             format!("{}s", remain as u32)
         }
+    } else {
+        "Inf".to_string()
     }
 }
 

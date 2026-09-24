@@ -25,6 +25,8 @@
 		/** Same glyph used by the panel's launcher in the system shortcut dock. */
 		readonly icon: ClientHudIconName;
 		readonly viewport: ClientHudViewport;
+		/** Launcher click revision promotes an already open independent window. */
+		readonly focusRevision?: number;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
@@ -37,6 +39,7 @@
 		title,
 		icon,
 		viewport,
+		focusRevision = 0,
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
@@ -60,6 +63,9 @@
 			escapeContext?.release();
 			escapeContext = null;
 		};
+	});
+	$effect(() => {
+		if (focusRevision > 0) escapeContext?.promote();
 	});
 	function focusWindow(): void {
 		// Pointer intent promotes the window; automatic editor/modal focus restoration does not.

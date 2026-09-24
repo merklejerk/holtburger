@@ -121,7 +121,7 @@ impl PlayerState {
             &self.enchantments,
             EnchantmentTypeFlags::SKILL.bits(),
             skill as u32,
-        )
+        ) + self.enchantments.skill_wide_additive(skill)
     }
 
     pub fn derive_skill_value(

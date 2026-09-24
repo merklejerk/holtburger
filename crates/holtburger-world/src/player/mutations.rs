@@ -309,7 +309,7 @@ impl PlayerState {
         _events: &mut Vec<WorldEvent>,
     ) {
         self.guid = data.guid;
-        self.enchantments = data.enchantments.clone();
+        self.enchantments.replace(&data.enchantments);
 
         self.spells = data.spells.clone();
         self.character_options = super::PlayerCharacterOptions {
@@ -426,15 +426,7 @@ impl PlayerState {
             return false;
         }
 
-        if let Some(existing) = self
-            .enchantments
-            .iter_mut()
-            .find(|e| e.spell_id == enchantment.spell_id && e.layer == enchantment.layer)
-        {
-            *existing = enchantment;
-        } else {
-            self.enchantments.push(enchantment);
-        }
+        self.enchantments.upsert(enchantment);
 
         self.emit_enchantments_updated(events);
         true
@@ -451,15 +443,7 @@ impl PlayerState {
         }
 
         for enchantment in enchantments {
-            if let Some(existing) = self
-                .enchantments
-                .iter_mut()
-                .find(|e| e.spell_id == enchantment.spell_id && e.layer == enchantment.layer)
-            {
-                *existing = *enchantment;
-            } else {
-                self.enchantments.push(*enchantment);
-            }
+            self.enchantments.upsert(*enchantment);
         }
 
         self.emit_enchantments_updated(events);
@@ -545,7 +529,7 @@ impl PlayerState {
 
     fn emit_enchantments_updated(&mut self, events: &mut Vec<WorldEvent>) {
         events.push(WorldEvent::PlayerEnchantmentsUpdated {
-            enchantments: self.enchantments.clone(),
+            enchantments: self.enchantments.wire(),
         });
     }
 }

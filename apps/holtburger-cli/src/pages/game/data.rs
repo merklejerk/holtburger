@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Instant;
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
@@ -22,6 +23,13 @@ use holtburger_world::stats::{
 use std::sync::Arc;
 
 const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
+
+/// Shared enchantment facts anchored to the TUI clock for countdown presentation.
+#[derive(Debug, Clone)]
+pub struct TimedResolvedEnchantments {
+    pub resolved: holtburger_world::enchantments::ResolvedEnchantments,
+    pub received_at: Instant,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CuratedCharacterOption {
@@ -240,6 +248,8 @@ pub struct GameData {
     pub player_grounded: Option<bool>,
     /// Active enchantments on the player.
     pub player_enchantments: Vec<Enchantment>,
+    /// Shared per-stat stacking interpretation for character presentation.
+    pub resolved_enchantments: Option<TimedResolvedEnchantments>,
     /// List of learned spell IDs.
     pub player_spells: Vec<u32>,
     /// Projected current player character option masks from the core client view.
@@ -295,6 +305,7 @@ impl Default for GameData {
             player_pos: None,
             player_grounded: None,
             player_enchantments: Vec::new(),
+            resolved_enchantments: None,
             player_spells: Vec::new(),
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),

@@ -55,6 +55,7 @@
 		| "debug"
 		| "settings"
 		| "spells"
+		| "enchantments"
 		| "spellBar"
 		| "combatBar"
 	>;
@@ -412,6 +413,8 @@
 			{@render hud("character", character)}
 			<ClientStatusTray
 				placement={layout.statusTray}
+				kinds={{ beneficial: true, harmful: true }}
+				onOpenEnchantments={() => {}}
 				{editable}
 				{viewport}
 				onPlacementChange={(placement) =>

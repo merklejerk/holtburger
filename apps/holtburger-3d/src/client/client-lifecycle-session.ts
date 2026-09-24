@@ -11,6 +11,10 @@ import {
 	type VendorPhase,
 } from "./client-vendor-contract";
 import {
+	decodeResolvedEnchantments,
+	type ResolvedEnchantments,
+} from "./client-enchantments-contract";
+import {
 	spellInspectionQuerySchema,
 	spellInspectionContextSchema,
 	spellInspectionResultSchema,
@@ -203,6 +207,7 @@ type ClientEventName = Extract<
 	| "client-player-entered"
 	| "client-player-vitals-updated"
 	| "client-player-spells-updated"
+	| "client-player-enchantments-updated"
 	| "client-appearance-options-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
@@ -235,6 +240,12 @@ export interface ClientLifecycleTransport {
 }
 
 /** Renderer-visible lifecycle values held independently of Svelte and presentation resources. */
+export interface ClientTimedEnchantments {
+	readonly resolved: ResolvedEnchantments;
+	/** Browser clock at snapshot receipt, used only for local countdown display. */
+	readonly receivedAtMs: number;
+}
+
 export interface ClientLifecycleSessionState {
 	readonly lifecycle: ClientLifecycle | null;
 	readonly playerGuid: number | null;
@@ -244,6 +255,8 @@ export interface ClientLifecycleSessionState {
 	readonly playerName: string | null;
 	/** Null until a complete description is available. */
 	readonly knownSpells: readonly number[] | null;
+	/** Shared enchantment facts sampled into this browser's clock on receipt. */
+	readonly enchantments: ClientTimedEnchantments | null;
 	/** Server-backed appearance preferences, null until PlayerDescription is available. */
 	readonly appearanceOptions: ClientAppearanceOptions | null;
 	/** Latest server stance, consumed by the combat shortcut. */
@@ -277,6 +290,10 @@ export type ClientLifecycleSessionEvent =
 			readonly options: ClientAppearanceOptions;
 	  }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
+	| {
+			readonly type: "enchantments";
+			readonly enchantments: ClientTimedEnchantments;
+	  }
 	| {
 			readonly type: "spell-inspection-context";
 			readonly context: SpellInspectionContext;
@@ -436,6 +453,7 @@ export class ClientLifecycleSession {
 		this.#state = {
 			...this.#state,
 			knownSpells: null,
+			enchantments: null,
 			appearanceOptions: null,
 		};
 		this.#emit({ type: "resyncing" });
@@ -756,6 +774,7 @@ export class ClientLifecycleSession {
 					this.#state = {
 						...this.#state,
 						knownSpells: null,
+						enchantments: null,
 						appearanceOptions: null,
 					};
 					this.entities.awaitSnapshot();
@@ -783,6 +802,19 @@ export class ClientLifecycleSession {
 						const spellIds = decodeClientSpells(payload);
 						this.#state = { ...this.#state, knownSpells: spellIds };
 						this.#emit({ type: "spells", spellIds });
+					},
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-player-enchantments-updated",
+					(payload) => {
+						const enchantments = {
+							resolved: decodeResolvedEnchantments(payload),
+							receivedAtMs: performance.now(),
+						};
+						this.#state = { ...this.#state, enchantments };
+						this.#emit({ type: "enchantments", enchantments });
 					},
 				),
 			);
@@ -1076,6 +1108,13 @@ export class ClientLifecycleSession {
 			worldName: state.worldName,
 			playerName: state.playerName,
 			knownSpells: state.knownSpells,
+			enchantments:
+				state.enchantments === null
+					? null
+					: {
+							resolved: state.enchantments,
+							receivedAtMs: performance.now(),
+						},
 			appearanceOptions: state.appearanceOptions,
 			combatMode: state.combatMode,
 			combat: state.combat,
@@ -1117,6 +1156,9 @@ export class ClientLifecycleSession {
 			...this.#state,
 			lifecycle,
 			knownSpells: retiresCharacterDescription ? null : this.#state.knownSpells,
+			enchantments: retiresCharacterDescription
+				? null
+				: this.#state.enchantments,
 			appearanceOptions: retiresCharacterDescription
 				? null
 				: this.#state.appearanceOptions,
@@ -1257,6 +1299,7 @@ function emptyState(): ClientLifecycleSessionState {
 		worldName: null,
 		playerName: null,
 		knownSpells: null,
+		enchantments: null,
 		appearanceOptions: null,
 		combatMode: "unknown",
 		combat: { desired: null, state: "idle", refill: null },

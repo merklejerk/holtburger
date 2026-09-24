@@ -7,15 +7,17 @@ export async function probeClientTheme(
 ) {
 	const read = (fn) => evaluateExpression(client, `(${fn.toString()})()`);
 	const capture = async (name) =>
-		save(
-			name,
-			(
-				await client.send("Page.captureScreenshot", {
-					format: "png",
-					captureBeyondViewport: false,
-				})
-			).data,
-		);
+		save === null
+			? undefined
+			: save(
+					name,
+					(
+						await client.send("Page.captureScreenshot", {
+							format: "png",
+							captureBeyondViewport: false,
+						})
+					).data,
+				);
 	await read(() =>
 		document.querySelector('button[aria-label="Debug"]').click(),
 	);

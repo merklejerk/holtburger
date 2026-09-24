@@ -360,6 +360,8 @@ pub enum ClientPresentationDiscontinuityKind {
 pub struct ClientApplicationSnapshot {
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
+    /// Shared enchantment semantics, absent until the complete player description.
+    pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
     /// None until PlayerDescription establishes the active character's complete option masks.
     pub character_options: Option<PlayerCharacterOptions>,
     /// Server-confirmed stance, undefined before the local player is established.
@@ -674,7 +676,7 @@ pub enum ClientViewEvent {
     /// Acknowledges the accepted local-player entity response policy.
     EntityCollisionDisabled(bool),
     /// Complete application-level replacement state for a shell remount or receiver recovery.
-    ApplicationSnapshot(ClientApplicationSnapshot),
+    ApplicationSnapshot(Box<ClientApplicationSnapshot>),
     /// Accepted semantic record changes, independent of renderer residency.
     EntityFactsChanged(super::entity_facts::ClientEntityDelta),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
@@ -719,6 +721,7 @@ pub enum ClientViewEvent {
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
+        resolved: holtburger_world::enchantments::ResolvedEnchantments,
     },
     ActiveCharacterConfirmationUpdated {
         confirmation: Option<ActiveCharacterConfirmation>,

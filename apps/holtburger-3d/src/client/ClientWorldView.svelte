@@ -33,6 +33,8 @@
 	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientStatusTray from "./ClientStatusTray.svelte";
+	import ClientEnchantmentsPanel from "./ClientEnchantmentsPanel.svelte";
+	import { effectiveEnchantmentKinds } from "./client-enchantments-view";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
@@ -164,6 +166,9 @@
 		readonly readFrameRates: () => FrameRates | null;
 		/** Lazily retained spell artwork, independent of floating-panel mounts. */
 		readonly spells: ClientSpellServices | null;
+		/** World-resolved active effects with a browser-local countdown anchor. */
+		readonly enchantments:
+			import("./client-lifecycle-session").ClientTimedEnchantments | null;
 		/** Session-owned inventory state, independent of floating-panel mounts. */
 		readonly inventory: ClientInventoryState | null;
 		/** Direct authority for cross-panel item gestures. */
@@ -271,6 +276,7 @@
 		readFrameRates,
 		readSelectedEntityDisplay,
 		spells,
+		enchantments,
 		inventory,
 		itemSession,
 		worldContainer,
@@ -410,6 +416,21 @@
 		height: window.innerHeight,
 	};
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	let enchantmentsOpen = $state(false);
+	let enchantmentLaunch = $state<{
+		kind: "beneficial" | "harmful";
+		revision: number;
+	} | null>(null);
+	const enchantmentKinds = $derived(
+		effectiveEnchantmentKinds(enchantments?.resolved ?? null),
+	);
+	function openEnchantments(kind: "beneficial" | "harmful"): void {
+		enchantmentsOpen = true;
+		enchantmentLaunch = {
+			kind,
+			revision: (enchantmentLaunch?.revision ?? 0) + 1,
+		};
+	}
 	let settingsTab = $state<SettingsTab>("graphics");
 	/** One selected-HUD request retained only until the inventory panel accepts it. */
 	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
@@ -791,13 +812,17 @@
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
 	</ClientHudPanel>
-	<ClientStatusTray
-		placement={hudLayout.statusTray}
-		editable={hudMode === "layout"}
-		{viewport}
-		onPlacementChange={(placement) =>
-			changeHudPlacement("statusTray", placement)}
-	/>
+	{#if hudMode === "layout" || enchantmentKinds.beneficial || enchantmentKinds.harmful}
+		<ClientStatusTray
+			placement={hudLayout.statusTray}
+			editable={hudMode === "layout"}
+			{viewport}
+			kinds={enchantmentKinds}
+			onOpenEnchantments={openEnchantments}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("statusTray", placement)}
+		/>
+	{/if}
 	{#if jumpChargeActive || hudMode === "layout"}
 		<ClientHudPanel
 			label="Jump power"
@@ -1050,6 +1075,26 @@
 				{/if}
 			</ClientHudWindow>
 		{/key}
+	{/if}
+	{#if enchantmentsOpen}
+		<ClientHudWindow
+			icon="buffed"
+			title="Enchantments"
+			placement={hudLayout.enchantments}
+			minWidth={CLIENT_UI_DEFAULTS.enchantments.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.enchantments.minSize.height}
+			{viewport}
+			focusRevision={enchantmentLaunch?.revision ?? 0}
+			onClose={() => (enchantmentsOpen = false)}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("enchantments", placement)}
+		>
+			<ClientEnchantmentsPanel
+				{enchantments}
+				{spells}
+				launch={enchantmentLaunch}
+			/>
+		</ClientHudWindow>
 	{/if}
 </main>
 

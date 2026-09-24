@@ -299,6 +299,15 @@ impl ClientRuntime {
                 .player_entity()
                 .map(|entity| entity.name().to_string()),
             known_spells: self.known_spell_ids(),
+            enchantments: self
+                .described_character
+                .filter(|&guid| guid == self.world.player.guid)
+                .map(|_| {
+                    self.world
+                        .player
+                        .enchantments
+                        .resolved(std::time::Instant::now())
+                }),
             character_options: self
                 .described_character
                 .filter(|&guid| guid == self.world.player.guid)
@@ -734,9 +743,9 @@ impl ClientRuntime {
         self.emit_runtime_body_snapshot();
         let _ = self
             .client_view_event_tx
-            .send(ClientViewEvent::ApplicationSnapshot(
+            .send(ClientViewEvent::ApplicationSnapshot(Box::new(
                 self.application_snapshot(),
-            ));
+            )));
     }
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
@@ -807,6 +816,11 @@ impl ClientRuntime {
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {
                             enchantments: enchantments.clone(),
+                            resolved: self
+                                .world
+                                .player
+                                .enchantments
+                                .resolved(std::time::Instant::now()),
                         });
             }
             WorldEvent::DerivedStatsUpdated(data) => {
@@ -873,6 +887,11 @@ impl ClientRuntime {
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {
                             enchantments: data.enchantments.clone(),
+                            resolved: self
+                                .world
+                                .player
+                                .enchantments
+                                .resolved(std::time::Instant::now()),
                         });
 
                 let attributes = data

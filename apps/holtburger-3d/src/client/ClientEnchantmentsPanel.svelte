@@ -520,10 +520,10 @@
 			flex: 1;
 		}
 		.stat-section h3 {
-			margin: 10px 0 4px;
-			font-size: 0.9em;
-			text-transform: uppercase;
-			letter-spacing: 0.04em;
+			margin: var(--ui-enchantments-heading-margin);
+			font-size: var(--ui-enchantments-heading-font-size);
+			text-transform: var(--ui-enchantments-heading-text-transform);
+			letter-spacing: var(--ui-enchantments-heading-letter-spacing);
 		}
 		.stat-section ul {
 			list-style: none;
@@ -547,8 +547,8 @@
 		}
 		.tree-toggle,
 		.tree-spacer {
-			flex: 0 0 22px;
-			width: 22px;
+			flex: 0 0 var(--ui-enchantments-tree-gutter);
+			width: var(--ui-enchantments-tree-gutter);
 			height: var(--ui-spell-icon-size);
 		}
 		.tree-toggle {
@@ -625,11 +625,11 @@
 			white-space: pre-wrap;
 		}
 		.stat-section ul.overridden {
-			margin-left: 22px;
+			margin-left: var(--ui-enchantments-tree-gutter);
 			border-left: 1px solid var(--ui-color-border);
 		}
 		.overridden .spell-entry {
-			margin-left: 8px;
+			margin-left: var(--ui-enchantments-child-indent);
 		}
 		.spell-header:focus-visible,
 		.tree-toggle:focus-visible,

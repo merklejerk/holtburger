@@ -63,6 +63,8 @@
 		/* Shared easing for small interactive embellishments. */
 		--ui-easing: cubic-bezier(0.238, 0.55, 0.546, 1.361);
 		--ui-hud-background-color: #00000044;
+		/* Spacing between independent icon actions in HUD strips. */
+		--ui-hud-icon-gap: 5px;
 		/* Combat gauge paint; geometry and hit targets remain component-owned. */
 		--ui-combat-idle-opacity: 0.5;
 		--ui-combat-emphasis-duration: 0.25s;
@@ -157,6 +159,13 @@
 		--ui-spell-component-icon-size: 20px;
 		--ui-spell-component-row-gap: 2px;
 		--ui-spell-component-label-gap: 6px;
+		/* Enchantment stat headings and overridden-spell tree geometry. */
+		--ui-enchantments-heading-margin: 10px 0 4px;
+		--ui-enchantments-heading-font-size: 0.9em;
+		--ui-enchantments-heading-letter-spacing: 0.04em;
+		--ui-enchantments-heading-text-transform: uppercase;
+		--ui-enchantments-tree-gutter: 22px;
+		--ui-enchantments-child-indent: 8px;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
 		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;
 		/* Compact suffix size relative to the quantity's font size. */

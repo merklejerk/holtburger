@@ -199,7 +199,10 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: -200.0,
         spell_set_id: None,
@@ -223,7 +226,10 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
         stat_mod_value: -100.0,
         spell_set_id: None,
@@ -257,7 +263,10 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::SECOND_ATT
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::VitalType::Health as u32,
         stat_mod_value: -200.0,
         spell_set_id: None,
@@ -289,7 +298,10 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::SKILL
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::SkillType::MeleeDefense as u32,
         stat_mod_value: -200.0,
         spell_set_id: None,
@@ -343,7 +355,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 1, // strength group
         power_level: 100,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: 20.0,
         ..Default::default()
@@ -353,7 +368,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 2, // axe group
         power_level: 100,
-        stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::MULTIPLICATIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::SKILL
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::MULTIPLICATIVE)
+            .bits(),
         stat_mod_key: stats::SkillType::Axe as u32,
         stat_mod_value: 1.10,
         ..Default::default()
@@ -380,7 +398,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 1, // same strength group
         power_level: 50,   // Lower power
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: 10.0,
         ..Default::default()
@@ -396,7 +417,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 1, // same group
         power_level: 200,  // Higher power
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: 30.0,
         ..Default::default()
@@ -433,7 +457,10 @@ fn test_health_rounding() {
     // Add an Endurance buff of +10 (Total 111)
     player.enchantments.push(Enchantment {
         spell_category: 3, // endurance group
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
         stat_mod_value: 10.0,
         power_level: 100,
@@ -523,7 +550,10 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
         spell_id: 200,
         layer: 1,
         spell_category: 200,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: -10.0,
         ..Default::default()

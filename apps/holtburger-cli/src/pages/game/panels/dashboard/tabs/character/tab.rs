@@ -165,7 +165,15 @@ fn get_selection_at_index(data: &GameData, index: usize) -> Option<CharacterSele
     let lines = get_char_tab_lines(data);
     lines.get(index).map(|line| match line {
         CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {
-            CharacterSelection::Enchantment(*e)
+            let key = e.key();
+            let enchantment = data
+                .player_enchantments
+                .iter()
+                .find(|enchantment| {
+                    enchantment.spell_id == key.spell_id && enchantment.layer == key.layer
+                })
+                .expect("displayed enchantment is missing its raw inspection record");
+            CharacterSelection::Enchantment(*enchantment)
         }
         CharTabLine::Stat {
             stat_type: Some(st),

@@ -237,13 +237,27 @@ const clientUserSettingsV10Schema = clientUserSettingsV9Schema
 	.strict()
 	.readonly();
 
-/** Current user settings retain the status tray independently of character vitals. */
-export const clientUserSettingsSchema = clientUserSettingsV10Schema
+/** Historical v11 user settings added the independent status tray. */
+const clientUserSettingsV11Schema = clientUserSettingsV10Schema
 	.unwrap()
 	.extend({
 		hudLayout: clientHudLayoutV10Schema
 			.unwrap()
 			.extend({ statusTray: statusTrayPlacementSchema })
+			.strict()
+			.readonly(),
+	})
+	.strict()
+	.readonly();
+
+/** Current settings retain the enchantments window's independent HUD placement. */
+export const clientUserSettingsSchema = clientUserSettingsV11Schema
+	.unwrap()
+	.extend({
+		hudLayout: clientUserSettingsV11Schema
+			.unwrap()
+			.shape.hudLayout.unwrap()
+			.extend({ enchantments: hudPlacementSchema })
 			.strict()
 			.readonly(),
 	})
@@ -590,12 +604,32 @@ type ClientLocalSettingsDocumentV10 = z.infer<
 	typeof clientLocalSettingsDocumentV10Schema
 >;
 
-/** Current durable document includes independently retained status tray geometry. */
+/** Historical v11 document includes independently retained status tray geometry. */
 export const clientLocalSettingsDocumentV11Schema =
 	clientLocalSettingsDocumentV10Schema
 		.unwrap()
 		.extend({
 			schemaVersion: z.literal(11),
+			user: z
+				.object({
+					window: clientWindowSettingsSchema,
+					client: clientUserSettingsV11Schema,
+				})
+				.strict()
+				.readonly(),
+		})
+		.strict()
+		.readonly();
+type ClientLocalSettingsDocumentV11 = z.infer<
+	typeof clientLocalSettingsDocumentV11Schema
+>;
+
+/** Current durable document adds independent enchantments window geometry. */
+export const clientLocalSettingsDocumentV12Schema =
+	clientLocalSettingsDocumentV11Schema
+		.unwrap()
+		.extend({
+			schemaVersion: z.literal(12),
 			user: z
 				.object({
 					window: clientWindowSettingsSchema,
@@ -607,7 +641,7 @@ export const clientLocalSettingsDocumentV11Schema =
 		.strict()
 		.readonly();
 export type ClientLocalSettingsDocument = z.infer<
-	typeof clientLocalSettingsDocumentV11Schema
+	typeof clientLocalSettingsDocumentV12Schema
 >;
 
 /**
@@ -1003,9 +1037,9 @@ function migratedTrayAxisOffset(
 }
 
 /** Upgrade every supported document while retaining every existing panel placement. */
-export function parseClientLocalSettingsDocument(
+function parseClientLocalSettingsDocumentV11(
 	value: unknown,
-): ClientLocalSettingsDocument {
+): ClientLocalSettingsDocumentV11 {
 	if (
 		typeof value === "object" &&
 		value !== null &&
@@ -1054,6 +1088,39 @@ export function parseClientLocalSettingsDocument(
 						},
 						preferredWidth: V11_TRAY_WIDTH,
 						preferredHeight: V11_TRAY_HEIGHT,
+					},
+				},
+			},
+		},
+	});
+}
+
+/** Upgrade every supported settings document without changing existing HUD placements. */
+export function parseClientLocalSettingsDocument(
+	value: unknown,
+): ClientLocalSettingsDocument {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"schemaVersion" in value &&
+		value.schemaVersion === 12
+	)
+		return clientLocalSettingsDocumentV12Schema.parse(value);
+	const previous = parseClientLocalSettingsDocumentV11(value);
+	return clientLocalSettingsDocumentV12Schema.parse({
+		...previous,
+		schemaVersion: 12,
+		user: {
+			...previous.user,
+			client: {
+				...previous.user.client,
+				hudLayout: {
+					...previous.user.client.hudLayout,
+					enchantments: {
+						horizontal: { alignment: "end", offset: 16 },
+						vertical: { alignment: "center", offset: 0 },
+						preferredWidth: 390,
+						preferredHeight: 460,
 					},
 				},
 			},

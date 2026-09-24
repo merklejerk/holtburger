@@ -397,15 +397,17 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
     fn enchantments(&self) -> Vec<ScriptEnchantmentView> {
         let mut best_by_spell_id: BTreeMap<u32, (f64, u16, u32)> = BTreeMap::new();
+        let Some(timed) = &self.data.resolved_enchantments else {
+            return Vec::new();
+        };
+        let elapsed = timed.received_at.elapsed().as_secs_f64();
 
-        for enchantment in &self.data.player_enchantments {
-            let spell_id = u32::from(enchantment.spell_id);
-            let end_time = if enchantment.duration < 0.0 {
-                f64::INFINITY
-            } else {
-                enchantment.start_time + enchantment.duration
-            };
-            let candidate = (end_time, enchantment.layer, enchantment.power_level);
+        for enchantment in &timed.resolved.instances {
+            let spell_id = u32::from(enchantment.key.spell_id);
+            let end_time = enchantment
+                .remaining_seconds
+                .map_or(f64::INFINITY, |seconds| (seconds - elapsed).max(0.0));
+            let candidate = (end_time, enchantment.key.layer, enchantment.power_level);
 
             best_by_spell_id
                 .entry(spell_id)
@@ -1663,6 +1665,27 @@ mod tests {
             },
         ];
 
+        let received_at = Instant::now();
+        let observations: Vec<_> = data
+            .player_enchantments
+            .iter()
+            .copied()
+            .map(
+                |enchantment| holtburger_world::enchantments::EnchantmentObservation {
+                    enchantment,
+                    received_at,
+                },
+            )
+            .collect();
+        data.resolved_enchantments = Some(crate::pages::game::data::TimedResolvedEnchantments {
+            resolved: holtburger_world::enchantments::resolve_enchantments(
+                &observations,
+                &holtburger_world::enchantments::EnchantmentRules::default(),
+                received_at,
+            ),
+            received_at,
+        });
+
         let script_view = TuiScriptClientView {
             data: &data,
             view: &ViewState::default(),
@@ -1670,18 +1693,16 @@ mod tests {
             script_name: None,
         };
 
+        let projected = script_view.enchantments();
+        assert_eq!(projected.len(), 2);
+        assert_eq!(projected[0].spell_id, 10);
+        assert!((134.0..=135.0).contains(&projected[0].end_time));
         assert_eq!(
-            script_view.enchantments(),
-            vec![
-                ScriptEnchantmentView {
-                    spell_id: 10,
-                    end_time: 135.0,
-                },
-                ScriptEnchantmentView {
-                    spell_id: 42,
-                    end_time: f64::INFINITY,
-                },
-            ]
+            projected[1],
+            ScriptEnchantmentView {
+                spell_id: 42,
+                end_time: f64::INFINITY
+            }
         );
     }
 

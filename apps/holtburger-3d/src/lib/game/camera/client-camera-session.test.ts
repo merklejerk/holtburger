@@ -319,6 +319,7 @@ function currentState(): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,
+		enchantments: null,
 		appearanceOptions: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },

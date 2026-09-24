@@ -386,6 +386,8 @@ pub enum ClientWorldActivationCauseWire {
 pub struct ClientCurrentState {
     /// Complete knowledge, absent until the initial character description.
     pub known_spells: Option<Vec<u32>>,
+    /// Shared player enchantment resolution, absent until character description.
+    pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
     /// Narrow server-backed appearance preferences consumed by client HUD controls.
     pub appearance_options: Option<ClientAppearanceOptions>,
     /// Server-confirmed stance for the combat shortcut.
@@ -809,6 +811,7 @@ pub enum ClientHostEvent {
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
     },
+    PlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
     AppearanceOptionsUpdated(ClientAppearanceOptions),
     PlayerVitalsUpdated {
         vitals: Vec<ClientVitalWire>,
@@ -985,6 +988,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             known_spells: snapshot.known_spells.clone(),
+            enchantments: snapshot.enchantments.clone(),
             appearance_options: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
             combat: snapshot.combat.into(),
@@ -1049,7 +1053,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::EntityCollisionDisabled(disabled))
         }
         ClientViewEvent::ApplicationSnapshot(snapshot) => {
-            Some(ClientHostEvent::CurrentState((&snapshot).into()))
+            Some(ClientHostEvent::CurrentState(snapshot.as_ref().into()))
         }
         ClientViewEvent::LifecycleChanged(lifecycle) => {
             Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
@@ -1098,6 +1102,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
             Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })
+        }
+        ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
+            Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
         ClientViewEvent::PlayerOptionsUpdated { options } => {
             Some(ClientHostEvent::AppearanceOptionsUpdated(options.into()))

@@ -1,4 +1,3 @@
-pub mod magic;
 pub mod movement;
 pub mod mutations;
 pub(crate) mod property_retention;

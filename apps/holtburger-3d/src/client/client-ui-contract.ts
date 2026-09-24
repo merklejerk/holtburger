@@ -55,6 +55,8 @@ export interface ClientUiDefaults {
 	readonly chat: ClientUiPanel;
 	/** Known-spells floating window. */
 	readonly spells: Omit<ClientUiPanel, "resizable">;
+	/** Independent active-enchantments floating window. */
+	readonly enchantments: Omit<ClientUiPanel, "resizable">;
 	/** Inventory window with independently retained geometry; borders always resize. */
 	readonly inventory: Omit<ClientUiPanel, "resizable">;
 	/** Independent, server-confirmed external storage window. */

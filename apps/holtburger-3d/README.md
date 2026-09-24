@@ -302,6 +302,10 @@ content-lifecycle, and WebGL verification. The harness is an agent-operated diag
 and is not limited to terrain scenarios. Pass `--vite-port 1432` (or another isolated port) when
 running it alongside another worktree.
 
+The `--client-hud` suite prints a compact summary after its assertions pass. Use
+`--full-report` when investigating the complete snapshot evidence. Screenshots are captured
+only when requested with `--screenshot`; ordinary behavior checks do not need image output.
+
 The non-interactive live client probe is kept separate from the interactive app and TUI. It accepts
 credentials from the environment, drives the private sidecar protocol, and reports lifecycle,
 entity, camera, movement, and encoded-frame measurements without putting secrets in process

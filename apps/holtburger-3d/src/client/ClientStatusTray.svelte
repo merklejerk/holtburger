@@ -20,18 +20,46 @@
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
+		/** World-resolved effective ordinary spell presence. */
+		readonly kinds: { readonly beneficial: boolean; readonly harmful: boolean };
+		readonly onOpenEnchantments: (kind: "beneficial" | "harmful") => void;
 	}
 
-	const { placement, editable, viewport, onPlacementChange }: Props = $props();
+	const {
+		placement,
+		editable,
+		viewport,
+		onPlacementChange,
+		kinds,
+		onOpenEnchantments,
+	}: Props = $props();
 	const orientation = $derived(statusTrayOrientation(placement));
-
-	/** Visual status placeholders; live condition and connection data will feed this tray later. */
-	const statuses: readonly { name: ClientHudIconName; label: string }[] = [
-		{ name: "buffed", label: "Buffed" },
-		{ name: "debuffed", label: "Debuffed" },
-		{ name: "encumbered", label: "Encumbered" },
-		{ name: "sick", label: "Sick" },
-	];
+	const statuses = $derived<
+		readonly {
+			name: ClientHudIconName;
+			label: string;
+			kind: "beneficial" | "harmful";
+		}[]
+	>([
+		...(kinds.beneficial
+			? [
+					{
+						name: "buffed" as const,
+						label: "Beneficial enchantments",
+						kind: "beneficial" as const,
+					},
+				]
+			: []),
+		...(kinds.harmful
+			? [
+					{
+						name: "debuffed" as const,
+						label: "Harmful enchantments",
+						kind: "harmful" as const,
+					},
+				]
+			: []),
+	]);
 </script>
 
 <ClientHudPanel
@@ -53,13 +81,15 @@
 		aria-label="Status icons"
 	>
 		{#each statuses as status}
-			<div
+			<button
+				type="button"
 				class="status-icon"
-				title={`${status.label} status (stub)`}
-				aria-label={`${status.label} status`}
+				title={status.label}
+				aria-label={status.label}
+				onclick={() => onOpenEnchantments(status.kind)}
 			>
 				<ClientHudIcon name={status.name} />
-			</div>
+			</button>
 		{/each}
 		{#if editable}
 			<button
@@ -116,6 +146,8 @@
 			width: 32px;
 			height: 32px;
 			padding: 6px;
+			cursor: pointer;
+			pointer-events: auto;
 		}
 		.editable .status-icon {
 			flex: 0 0 23px;

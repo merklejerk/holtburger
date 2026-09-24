@@ -226,6 +226,7 @@ export async function probeClientInventory(options: {
 			worldName: "Fixture",
 			playerName: "Wayfarer",
 			knownSpells: null,
+			enchantments: null,
 			appearanceOptions: { showHelmet: true, showCloak: true },
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },

@@ -26,6 +26,8 @@
 		ClientSpellState,
 		type ClientSpellServices,
 	} from "../../client/client-spells";
+	import type { ResolvedEnchantments } from "../../client/client-enchantments-contract";
+	import type { ClientTimedEnchantments } from "../../client/client-lifecycle-session";
 	import { resolveClientSpellCastAim } from "../../client/client-spell-casting";
 	import { probeClientSpells } from "./client-spells-probe";
 	import type {
@@ -872,6 +874,13 @@
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
+		/** Deliver a shared resolved snapshot through the real browser session event path. */
+		readonly setEnchantments: (resolved: ResolvedEnchantments) => void;
+		/** Hold one enchantment metadata response across session retirement. */
+		readonly deferEnchantmentReferences: () => void;
+		readonly releaseEnchantmentReferences: () => void;
+		readonly resyncEnchantments: () => void;
+		readonly reconnectEnchantments: () => void;
 		/** Controlled delayed responses around the production examination owner and UI. */
 		readonly objectInspectionProbe: () => ObjectInspectionProbe;
 		/** Production spell shortcut dispatch and session requests under browser input. */
@@ -980,6 +989,7 @@
 	/** Counts persistent inventory pulls, including while its panel is hidden. */
 	let inventorySampleCount = 0;
 	let spellReferenceGate: Promise<void> | null = null;
+	let releaseEnchantmentReferences: (() => void) | null = null;
 	function holdSpellReferences(): () => void {
 		if (spellReferenceGate !== null)
 			throw new Error("Spell references already held.");
@@ -993,6 +1003,7 @@
 		};
 	}
 	let spells = $state<ClientSpellServices | null>(null);
+	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
@@ -1011,16 +1022,18 @@
 		args: Record<string, unknown> | undefined;
 	}[] = [];
 	/** Establish actual session facts for the mounted HUD and its interaction probes. */
-	function emitInteractionBaseline(): void {
+	function emitInteractionBaseline(playerGuid = 1): void {
+		const playerName = playerGuid === 1 ? "Wayfarer" : "Wayfarer II";
 		emitInteractionEvent("client-current-state", {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
-			localPlayerGuid: 1,
+			localPlayerGuid: playerGuid,
 			serverTime: 10,
 			worldGeneration: 1,
 			worldName: "Fixture",
-			playerName: "Wayfarer",
+			playerName,
 			knownSpells: null,
+			enchantments: null,
 			appearanceOptions,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
@@ -1031,11 +1044,11 @@
 			entities: {
 				projectileSupply: { kind: "not-applicable" },
 				worldContainer: { kind: "closed" },
-				entities: [1, 7, 8].map((guid) => ({
+				entities: [playerGuid, 7, 8].map((guid) => ({
 					guid,
 					description: {
 						kind: "known",
-						name: guid === 1 ? "Wayfarer" : "Drudge",
+						name: guid === playerGuid ? playerName : "Drudge",
 						healthQuery: "eligible",
 						itemType: 0,
 						hasAlternateEquipSide: false,
@@ -1062,7 +1075,7 @@
 					corpse: null,
 					scenePlacement: "available",
 					storage:
-						guid === 1
+						guid === playerGuid
 							? {
 									kind: "container",
 									roster: "announced",
@@ -2998,6 +3011,35 @@
 					(ids) => references.load(ids),
 					() => spellReferenceRequests,
 				),
+			setEnchantments: (resolved) => {
+				emitInteractionEvent("client-player-enchantments-updated", resolved);
+				enchantments = interactionLifecycle.state().enchantments;
+				if (enchantments === null)
+					throw new Error(
+						"Enchantment update was not accepted by the browser session.",
+					);
+			},
+			deferEnchantmentReferences: () => {
+				if (releaseEnchantmentReferences !== null)
+					throw new Error("Enchantment references are already deferred.");
+				releaseEnchantmentReferences = holdSpellReferences();
+			},
+			releaseEnchantmentReferences: () => {
+				if (releaseEnchantmentReferences === null)
+					throw new Error("Enchantment references are not deferred.");
+				releaseEnchantmentReferences();
+				releaseEnchantmentReferences = null;
+			},
+			resyncEnchantments: () => {
+				emitInteractionEvent("client-state-resyncing", null);
+				enchantments = interactionLifecycle.state().enchantments;
+			},
+			reconnectEnchantments: () => {
+				emitInteractionBaseline(2);
+				if (interactionLifecycle.state().playerGuid !== 2)
+					throw new Error("Replacement character snapshot was not accepted.");
+				enchantments = interactionLifecycle.state().enchantments;
+			},
 			objectInspectionProbe: () => objectInspectionProbe,
 			inventoryDragCommands: () => interactionCommands,
 			selectInventoryItem: (guid) =>
@@ -3206,6 +3248,7 @@
 		readTargetIndicatorFrame={() => targetIndicatorFrame}
 		readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
 		{spells}
+		{enchantments}
 		{inventory}
 		{worldContainer}
 		{vendor}

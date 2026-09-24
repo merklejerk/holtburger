@@ -1,6 +1,6 @@
+use crate::enchantments::PlayerEnchantments;
 use crate::stats;
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -276,7 +276,7 @@ pub struct PlayerState {
     /// Session-local private position overlays keyed by packet `PositionType`.
     pub local_position_overlays: HashMap<PositionType, holtburger_common::position::WorldPosition>,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
-    pub enchantments: Vec<Enchantment>,
+    pub enchantments: PlayerEnchantments,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
     pub spells: BTreeMap<u32, f32>,
     /// Complete server-backed character preferences retained from PlayerDescription.
@@ -321,7 +321,7 @@ impl PlayerState {
             last_runtime_walkable: None,
             movement_sequence: 0,
             local_position_overlays: HashMap::new(),
-            enchantments: Vec::new(),
+            enchantments: PlayerEnchantments::default(),
             spells: BTreeMap::new(),
             character_options: PlayerCharacterOptions::default(),
             hotbar_spells: vec![Vec::new(); 8],

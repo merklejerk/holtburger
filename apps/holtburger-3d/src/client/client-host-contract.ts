@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
 import { clientEntitySnapshotSchema } from "./client-entity-mirror";
 import {
 	decodeDynamicEntitySnapshot,
@@ -321,6 +322,7 @@ const currentStateSchema = z
 		worldName: z.string().nullable(),
 		playerName: z.string().nullable(),
 		knownSpells: knownSpellIdsSchema.nullable(),
+		enchantments: resolvedEnchantmentsSchema.nullable(),
 		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,

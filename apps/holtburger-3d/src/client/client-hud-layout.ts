@@ -264,6 +264,7 @@ export function createClientHudLayout(
 		vendor: place(defaults.vendor),
 		inspection: place(defaults.inspection),
 		spells: place(defaults.spells),
+		enchantments: place(defaults.enchantments),
 		debug: place(defaults.debug),
 		settings: place(defaults.settings),
 		frameRate: place(defaults.frameRate),

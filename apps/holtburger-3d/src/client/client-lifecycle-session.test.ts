@@ -15,6 +15,7 @@ import type {
 	ClientCurrentState,
 	ClientLifecycle,
 } from "./client-host-contract";
+import type { ResolvedEnchantments } from "./client-enchantments-contract";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleTransport,
@@ -284,6 +285,71 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-player-spells-updated", { spellIds: [1] });
 		session.stop();
 		expect(session.state().knownSpells).toBeNull();
+	});
+
+	it("retains resolved enchantments across teleport and clears them on character retirement", async () => {
+		const transport = new FakeClientTransport();
+		const key = { spellId: 10, layer: 2 };
+		const active: ResolvedEnchantments = {
+			instances: [
+				{
+					key,
+					spellCategory: 3,
+					powerLevel: 6,
+					kind: "beneficial",
+					remainingSeconds: 40,
+					statModType: 0x9001,
+					statModKey: 1,
+					statModValue: 10,
+				},
+			],
+			groups: [
+				{
+					affectedStat: { kind: "attribute", key: 1 },
+					operation: "additive",
+					channel: "ordinary",
+					spellCategory: 3,
+					effective: key,
+					overridden: [],
+				},
+			],
+		};
+		transport.setCurrentState({
+			...currentState(0x5000_0001),
+			enchantments: active,
+		});
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.state().enchantments?.resolved).toEqual(active);
+		const firstAnchor = session.state().enchantments?.receivedAtMs;
+		expect(firstAnchor).toBeTypeOf("number");
+
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().enchantments?.receivedAtMs).toBe(firstAnchor);
+		transport.emit("client-player-enchantments-updated", {
+			instances: [],
+			groups: [],
+		});
+		expect(session.state().enchantments?.resolved.instances).toEqual([]);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().enchantments).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(0x5000_0002),
+			enchantments: active,
+		});
+		expect(session.state().enchantments?.resolved).toEqual(active);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().enchantments).toBeNull();
+		session.stop();
+		expect(session.state().enchantments).toBeNull();
 	});
 	it.each([false, true])(
 		"submits equipment identity and off-side preference %s",
@@ -863,6 +929,7 @@ describe("ClientLifecycleSession", () => {
 			playerGuid: 9,
 			playerName: "Mira",
 			knownSpells: null,
+			enchantments: null,
 			combatMode: "peace",
 			worldName: "Morningthaw",
 			vitals: [{ kind: "health", current: 80, maximum: 100 }],
@@ -1066,6 +1133,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,
+		enchantments: null,
 		appearanceOptions: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },

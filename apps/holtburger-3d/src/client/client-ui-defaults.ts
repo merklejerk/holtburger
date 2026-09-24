@@ -79,6 +79,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 350, height: 380 },
 		minSize: { width: 280, height: 220 },
 	},
+	enchantments: {
+		anchor: "center-right",
+		offset: { x: 16, y: 0 },
+		size: { width: 390, height: 460 },
+		minSize: { width: 300, height: 250 },
+	},
 	debug: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },

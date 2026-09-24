@@ -13,6 +13,7 @@ pub mod bootstrap;
 pub mod context;
 pub mod crafting;
 pub mod damage;
+pub mod enchantments;
 pub mod entity;
 pub mod entity_appearance;
 pub mod entity_classification;

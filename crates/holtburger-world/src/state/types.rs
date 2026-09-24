@@ -403,7 +403,12 @@ impl WorldState {
         Self {
             weenie_types: bootstrap.weenie_types.clone(),
             entities: EntityManager::new(),
-            player: PlayerState::new(),
+            player: PlayerState {
+                enchantments: crate::enchantments::PlayerEnchantments::with_rules(
+                    crate::enchantments::EnchantmentRules::from_catalog(&bootstrap.spell_catalog()),
+                ),
+                ..PlayerState::new()
+            },
             storage: super::storage::StorageState::default(),
             server_time: None,
             xp_table: Arc::clone(&bootstrap.xp_table),

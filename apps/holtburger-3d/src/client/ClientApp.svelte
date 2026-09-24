@@ -68,6 +68,7 @@
 		ClientLifecycleSession,
 		hostClientLifecycleTransport,
 		type ClientLifecycleSessionEvent,
+		type ClientTimedEnchantments,
 	} from "./client-lifecycle-session";
 	import {
 		ClientPresentationSession,
@@ -227,6 +228,7 @@
 		if (caster !== null) itemInteractions.castWieldedSpell(caster.item);
 	}
 	let spells = $state<ClientSpellServices | null>(null);
+	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
 	/** Event-driven stance consumed by combat controls and spell shortcuts. */
 	let combatMode = $state<ClientCombatMode>("unknown");
 	let combatStatus = $state<ClientCombatStatus>({
@@ -677,6 +679,7 @@
 				appearanceOptions = event.options;
 				return;
 			case "current-state":
+				enchantments = session?.state().enchantments ?? null;
 				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
@@ -708,9 +711,11 @@
 				});
 				return;
 			case "resyncing":
+				enchantments = null;
 				appearanceOptions = null;
 				return;
 			case "lifecycle":
+				enchantments = session?.state().enchantments ?? null;
 				appearanceOptions = session?.state().appearanceOptions ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
@@ -768,6 +773,9 @@
 				return;
 			case "vitals":
 				vitals = event.vitals;
+				return;
+			case "enchantments":
+				enchantments = event.enchantments;
 				return;
 			case "chat": {
 				appendChatLine(event.message);
@@ -1483,6 +1491,7 @@
 			if (preciseJumpSession === precise) preciseJumpSession = null;
 			unsubscribe();
 			owner.stop();
+			enchantments = null;
 			session = null;
 			hostTransport = null;
 		};
@@ -1572,6 +1581,7 @@
 			{readTargetIndicatorFrame}
 			{readSelectedEntityDisplay}
 			{spells}
+			{enchantments}
 			{inventory}
 			{worldContainer}
 			{vendor}

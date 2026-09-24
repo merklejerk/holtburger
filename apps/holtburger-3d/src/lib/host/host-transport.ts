@@ -199,6 +199,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-player-entered",
 	"client-player-vitals-updated",
 	"client-player-spells-updated",
+	"client-player-enchantments-updated",
 	"client-appearance-options-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
@@ -288,6 +289,7 @@ export interface HostEventPayloadMap {
 	"client-world-name-updated": { name: string };
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
+	"client-player-enchantments-updated": unknown;
 	"client-appearance-options-updated": ClientAppearanceOptions;
 	"client-combat-mode-updated": { mode: ClientCombatMode };
 	"client-combat-status-updated": ClientCombatStatus;

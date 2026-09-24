@@ -288,11 +288,13 @@ async fn wait_for_characters(
         match recv_before(events, deadline, "character selection").await? {
             ClientViewEvent::LifecycleChanged(ClientLifecycleState::CharacterSelection {
                 characters,
-            })
-            | ClientViewEvent::ApplicationSnapshot(holtburger_core::ClientApplicationSnapshot {
-                lifecycle: ClientLifecycleState::CharacterSelection { characters },
-                ..
             }) => return Ok(characters),
+            ClientViewEvent::ApplicationSnapshot(snapshot) => {
+                if let ClientLifecycleState::CharacterSelection { characters } = snapshot.lifecycle
+                {
+                    return Ok(characters);
+                }
+            }
             _ => {}
         }
     }

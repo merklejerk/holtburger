@@ -608,7 +608,7 @@ impl WorldState {
             attributes: self.player.attribute_snapshot(),
             vitals: self.player.vital_snapshot(),
             skills: self.player.skill_snapshot(),
-            enchantments: self.player.enchantments.clone(),
+            enchantments: self.player.enchantments.wire(),
             spells: self.player.spells.keys().cloned().collect(),
             level_info: self.get_level_info(),
             resistances: self.player_resistances(),

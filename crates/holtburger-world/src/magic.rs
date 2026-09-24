@@ -1,57 +1,11 @@
 use super::stats::{AttributeType, SkillType};
+use crate::enchantments::PlayerEnchantments;
 use holtburger_common::properties::{EnchantmentTypeFlags, PropertyFloat, PropertyInt};
 use holtburger_protocol::messages::magic::Enchantment;
 use std::collections::HashMap;
 
-fn is_higher_priority_enchantment(current: &Enchantment, challenger: &Enchantment) -> bool {
-    if challenger.power_level != current.power_level {
-        return challenger.power_level > current.power_level;
-    }
-
-    let current_is_set = current.spell_set_id.is_some();
-    let challenger_is_set = challenger.spell_set_id.is_some();
-    if current_is_set != challenger_is_set {
-        return challenger_is_set;
-    }
-
-    if challenger_is_set {
-        challenger.spell_id > current.spell_id
-    } else {
-        challenger.start_time > current.start_time
-    }
-}
-
-fn get_top_enchantments(
-    enchantments: &[Enchantment],
-    required_flags: u32,
-    stat_mod_key: u32,
-    is_keyless: bool,
-) -> Vec<&Enchantment> {
-    let mut top_by_category: HashMap<u16, &Enchantment> = HashMap::new();
-
-    for enchantment in enchantments {
-        if (enchantment.stat_mod_type & required_flags) != required_flags {
-            continue;
-        }
-        if !is_keyless && enchantment.stat_mod_key != stat_mod_key {
-            continue;
-        }
-
-        top_by_category
-            .entry(enchantment.spell_category)
-            .and_modify(|current| {
-                if is_higher_priority_enchantment(current, enchantment) {
-                    *current = enchantment;
-                }
-            })
-            .or_insert(enchantment);
-    }
-
-    top_by_category.into_values().collect()
-}
-
 pub fn get_enchantment_multiplier(
-    enchantments: &[Enchantment],
+    enchantments: &PlayerEnchantments,
     stat_mod_type: u32,
     stat_mod_key: u32,
 ) -> f32 {
@@ -65,13 +19,23 @@ pub fn get_enchantment_multiplier(
             | EnchantmentTypeFlags::VITAE.bits()))
         != 0;
 
-    get_top_enchantments(enchantments, required_flags, stat_mod_key, is_keyless)
+    enchantments
+        .top_for(
+            required_flags,
+            stat_mod_key,
+            (stat_mod_type
+                & (EnchantmentTypeFlags::ATTRIBUTE.bits()
+                    | EnchantmentTypeFlags::SECOND_ATT.bits()
+                    | EnchantmentTypeFlags::SKILL.bits()))
+                != 0,
+            is_keyless,
+        )
         .into_iter()
         .fold(1.0f32, |acc, enchantment| acc * enchantment.stat_mod_value)
 }
 
 pub fn get_enchantment_additive(
-    enchantments: &[Enchantment],
+    enchantments: &PlayerEnchantments,
     stat_mod_type: u32,
     stat_mod_key: u32,
 ) -> f32 {
@@ -85,7 +49,17 @@ pub fn get_enchantment_additive(
             | EnchantmentTypeFlags::VITAE.bits()))
         != 0;
 
-    get_top_enchantments(enchantments, required_flags, stat_mod_key, is_keyless)
+    enchantments
+        .top_for(
+            required_flags,
+            stat_mod_key,
+            (stat_mod_type
+                & (EnchantmentTypeFlags::ATTRIBUTE.bits()
+                    | EnchantmentTypeFlags::SECOND_ATT.bits()
+                    | EnchantmentTypeFlags::SKILL.bits()))
+                != 0,
+            is_keyless,
+        )
         .into_iter()
         .fold(0.0f32, |acc, enchantment| acc + enchantment.stat_mod_value)
 }
@@ -110,7 +84,7 @@ fn get_player_natural_resistance(
 
 pub fn get_player_enchanted_resistance(
     base_resistance: f32,
-    enchantments: &[Enchantment],
+    enchantments: &PlayerEnchantments,
     resistance_key: u32,
     strength_base: u32,
     endurance_base: u32,
@@ -119,8 +93,7 @@ pub fn get_player_enchanted_resistance(
     let required_flags = EnchantmentTypeFlags::FLOAT.bits()
         | EnchantmentTypeFlags::SINGLE_STAT.bits()
         | EnchantmentTypeFlags::MULTIPLICATIVE.bits();
-    let top_enchantments =
-        get_top_enchantments(enchantments, required_flags, resistance_key, false);
+    let top_enchantments = enchantments.top_for(required_flags, resistance_key, false, false);
 
     let mut protection_mod = 1.0f32;
     let mut vulnerability_mod = 1.0f32;
@@ -149,7 +122,7 @@ pub fn get_player_enchanted_resistance(
 
 pub fn get_enchanted_resistance(
     base_resistance: f32,
-    enchantments: &[Enchantment],
+    enchantments: &PlayerEnchantments,
     resistance_key: u32,
 ) -> f32 {
     let mult = get_enchantment_multiplier(
@@ -166,7 +139,7 @@ pub fn get_enchanted_resistance(
     ((base_resistance * mult) + add).clamp(-2.0, 2.0)
 }
 
-pub fn get_enchanted_armor(base_armor: i32, enchantments: &[Enchantment]) -> i32 {
+pub fn get_enchanted_armor(base_armor: i32, enchantments: &PlayerEnchantments) -> i32 {
     let key = 0; // ignored for BODY_ARMOR_VALUE
     let flags = EnchantmentTypeFlags::BODY_ARMOR_VALUE.bits();
 
@@ -176,7 +149,7 @@ pub fn get_enchanted_armor(base_armor: i32, enchantments: &[Enchantment]) -> i32
     ((base_armor as f32 * mult) + add).round() as i32
 }
 
-pub fn get_total_vitae(enchantments: &[Enchantment]) -> f32 {
+pub fn get_total_vitae(enchantments: &PlayerEnchantments) -> f32 {
     let key = 0;
     let flags = EnchantmentTypeFlags::VITAE.bits();
     get_enchantment_multiplier(enchantments, flags, key)
@@ -237,6 +210,12 @@ pub fn get_enchantment_name(enchant: &Enchantment, spell_names: &HashMap<u32, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn registry(enchantments: Vec<Enchantment>) -> PlayerEnchantments {
+        let mut registry = PlayerEnchantments::default();
+        registry.replace(&enchantments);
+        registry
+    }
 
     fn make_resist_enchant(
         category: u16,
@@ -300,11 +279,11 @@ mod tests {
     #[test]
     fn test_get_enchantment_multiplier_uses_top_layer_per_category() {
         let key = PropertyFloat::ResistSlash as u32;
-        let enchantments = vec![
+        let enchantments = registry(vec![
             make_resist_enchant(10, 100, 0.8, key, 5.0), // Winner category 10 (higher power)
             make_resist_enchant(10, 50, 0.7, key, 1.0),  // Loser category 10
             make_resist_enchant(20, 90, 0.9, key, 2.0),  // Winner category 20
-        ];
+        ]);
 
         let multiplier = get_enchantment_multiplier(
             &enchantments,
@@ -318,7 +297,7 @@ mod tests {
     #[test]
     fn test_get_enchanted_resistance_multiplies_base() {
         let key = PropertyFloat::ResistFire as u32;
-        let enchantments = vec![make_resist_enchant(10, 100, 0.6, key, 0.0)];
+        let enchantments = registry(vec![make_resist_enchant(10, 100, 0.6, key, 0.0)]);
 
         let result = get_enchanted_resistance(1.2, &enchantments, key);
         assert!((result - 0.72).abs() < 0.0001);
@@ -327,7 +306,7 @@ mod tests {
     #[test]
     fn test_get_player_enchanted_resistance_uses_best_protection_only() {
         let key = PropertyFloat::ResistFire as u32;
-        let enchantments = vec![make_resist_enchant(10, 100, 0.6, key, 0.0)];
+        let enchantments = registry(vec![make_resist_enchant(10, 100, 0.6, key, 0.0)]);
 
         let result = get_player_enchanted_resistance(1.0, &enchantments, key, 150, 100, 0);
 
@@ -337,7 +316,7 @@ mod tests {
     #[test]
     fn test_get_player_enchanted_resistance_prefers_natural_resistance_and_ignores_additive() {
         let key = PropertyFloat::ResistFire as u32;
-        let enchantments = vec![
+        let enchantments = registry(vec![
             make_resist_enchant(10, 100, 0.8, key, 0.0),
             make_resist_enchant(20, 100, 1.2, key, 0.0),
             Enchantment {
@@ -350,7 +329,7 @@ mod tests {
                 stat_mod_value: 0.67,
                 ..Default::default()
             },
-        ];
+        ]);
 
         let result = get_player_enchanted_resistance(1.0, &enchantments, key, 200, 200, 1);
 
@@ -361,14 +340,14 @@ mod tests {
     fn test_get_player_enchanted_resistance_nether_uses_innate_half_resistance() {
         let key = PropertyFloat::ResistNether as u32;
 
-        let result = get_player_enchanted_resistance(1.0, &[], key, 10, 10, 0);
+        let result = get_player_enchanted_resistance(1.0, &registry(vec![]), key, 10, 10, 0);
 
         assert!((result - 0.5).abs() < 0.0001);
     }
 
     #[test]
     fn test_get_enchanted_armor_ignores_key_for_body_armor_value() {
-        let enchantments = vec![Enchantment {
+        let enchantments = registry(vec![Enchantment {
             spell_category: 115,
             power_level: 400,
             stat_mod_type: (EnchantmentTypeFlags::BODY_ARMOR_VALUE
@@ -379,7 +358,7 @@ mod tests {
             stat_mod_key: 0, // Key is ignored
             stat_mod_value: 250.0,
             ..Default::default()
-        }];
+        }]);
 
         // Base 0 + 250 add = 250
         assert_eq!(get_enchanted_armor(0, &enchantments), 250);

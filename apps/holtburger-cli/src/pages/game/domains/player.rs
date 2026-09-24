@@ -54,8 +54,16 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             result.request_redraw(RedrawPriority::Immediate);
             handled = true;
         }
-        ClientViewEvent::PlayerEnchantmentsUpdated { enchantments } => {
+        ClientViewEvent::PlayerEnchantmentsUpdated {
+            enchantments,
+            resolved,
+        } => {
             state.data.player_enchantments = enchantments.clone();
+            state.data.resolved_enchantments =
+                Some(crate::pages::game::data::TimedResolvedEnchantments {
+                    resolved: resolved.clone(),
+                    received_at: std::time::Instant::now(),
+                });
             handled = true;
         }
         ClientViewEvent::PlayerStatsSkillsUpdated {
@@ -106,22 +114,13 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     result
 }
 
-pub(super) fn apply_tick(state: &mut GameState, elapsed: f64, result: &mut UpdateResult) {
-    let old_count = state.data.player_enchantments.len();
-    state.data.player_enchantments.retain(|enchantment| {
-        if enchantment.duration < 0.0 {
-            return true;
-        }
-        let expires_at = enchantment.start_time + enchantment.duration;
-        expires_at > 0.0
-    });
-    if state.data.player_enchantments.len() != old_count {
-        result.request_redraw(RedrawPriority::Immediate);
-    }
-
-    for enchantment in &mut state.data.player_enchantments {
-        if enchantment.duration >= 0.0 {
-            enchantment.start_time -= elapsed;
-        }
+pub(super) fn apply_tick(state: &mut GameState, result: &mut UpdateResult) {
+    if state
+        .data
+        .resolved_enchantments
+        .as_ref()
+        .is_some_and(|enchantments| !enchantments.resolved.instances.is_empty())
+    {
+        result.request_redraw(RedrawPriority::Motion);
     }
 }

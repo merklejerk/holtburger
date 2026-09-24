@@ -771,6 +771,13 @@ struct PlacementTransition {
 }
 
 /// Physical traversal follows portal planes; visual selection also requires the visible aperture.
+///
+/// A visibility portal does not guarantee physical passage. Renald's shop window
+/// (0xA9B4014F -> 0xA9B40141) has an authored physics face across its visible opening;
+/// user testing in retail confirmed that shots hit the barrier. Retail tests these faces through
+/// CEnvCell::find_env_collisions and BSPTREE::find_collisions (acclient.c:333731, :346460).
+/// Selection may cross that opening, but physical queries must retain the barrier. Making the
+/// selection cap exception universal would let physical queries pass through an authored obstacle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PortalTraversalPolicy {
     Physical,

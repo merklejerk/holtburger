@@ -4,6 +4,10 @@
 	import { useClientInput } from "./client-input-context";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import {
+		navigateSentChat,
+		type ChatInputRecall,
+	} from "./client-chat-input-history";
+	import {
 		CLIENT_CHAT_FILTER_TAGS,
 		clientChatChannelLabel,
 		clientChatFilterLabel,
@@ -15,6 +19,8 @@
 
 	interface Props {
 		readonly messages: readonly ClientChatLine[];
+		/** App-owned locally queued input, oldest first. */
+		readonly sentHistory: readonly string[];
 		readonly onSend: (message: string) => Promise<void>;
 		readonly enabledTags: readonly ClientChatFilterTag[];
 		readonly onEnabledTagsChange: (
@@ -22,13 +28,20 @@
 		) => void;
 	}
 
-	const { messages, onSend, enabledTags, onEnabledTagsChange }: Props =
-		$props();
+	const {
+		messages,
+		sentHistory,
+		onSend,
+		enabledTags,
+		onEnabledTagsChange,
+	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 
 	let inputElement = $state<HTMLInputElement | null>(null);
 	let message = $state("");
+	/** Navigation is local to the mounted editor; the sent entries outlive it. */
+	let recall = $state<ChatInputRecall | null>(null);
 	let sending = $state(false);
 	let failure = $state<string | null>(null);
 	let bufferElement = $state<HTMLDivElement | null>(null);
@@ -51,8 +64,29 @@
 		if (clientInput.shortcut("cancel", event)) {
 			event.preventDefault();
 			message = "";
+			recall = null;
 			failure = null;
 			keyboard.returnToGame();
+		} else if (
+			!event.ctrlKey &&
+			!event.altKey &&
+			!event.metaKey &&
+			!event.shiftKey &&
+			(event.key === "ArrowUp" || event.key === "ArrowDown")
+		) {
+			// Recall replaces text programmatically, so it must honor the editor's read-only state.
+			if (sending) return;
+			const next = navigateSentChat(
+				sentHistory,
+				recall,
+				message,
+				event.key === "ArrowUp" ? "older" : "newer",
+			);
+			if (next !== null) {
+				event.preventDefault();
+				recall = next.recall;
+				message = next.message;
+			}
 		} else scrollHistory(event);
 	}
 
@@ -86,6 +120,7 @@
 		try {
 			await onSend(text);
 			message = "";
+			recall = null;
 			if (document.activeElement === inputElement) keyboard.returnToGame();
 		} catch (error) {
 			failure = error instanceof Error ? error.message : "Chat send failed.";
@@ -222,7 +257,11 @@
 		<input
 			class="ui-input ui-hud-input"
 			bind:this={inputElement}
-			bind:value={message}
+			value={message}
+			oninput={(event) => {
+				message = event.currentTarget.value;
+				recall = null;
+			}}
 			readonly={sending}
 			aria-label="Chat message"
 			autocomplete="off"

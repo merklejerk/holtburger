@@ -82,6 +82,7 @@
 		type ObjectInspectionResult,
 	} from "../../client/client-object-inspection-contract";
 	import { CLIENT_TUNING } from "../../client/client-tuning";
+	import { recordSentChat } from "../../client/client-chat-input-history";
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
@@ -2240,6 +2241,9 @@
 	let minimapSubjectIndoor = false;
 	let readMinimapOverlayArcCalls = (): number => 0;
 
+	/** Keep the keyboard fixture's two submitted entries regardless of product tuning. */
+	const chatHistoryLimit = 2;
+	let sentChatHistory = $state<readonly string[]>([]);
 	const messages: readonly ClientChatLine[] = [
 		line(1, {
 			kind: "system",
@@ -3277,7 +3281,14 @@
 		readJumpExtent={() => jumpExtent}
 		{toast}
 		chatMessages={messages}
-		onSendChat={async () => {}}
+		{sentChatHistory}
+		onSendChat={async (message) => {
+			sentChatHistory = recordSentChat(
+				sentChatHistory,
+				message,
+				chatHistoryLimit,
+			);
+		}}
 		onCanvas={() => {}}
 	/>
 {/if}

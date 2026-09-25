@@ -9,6 +9,8 @@
 	import ClientStatusTray from "../../client/ClientStatusTray.svelte";
 	import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 	import ClientChat from "../../client/ClientChat.svelte";
+	import { recordSentChat } from "../../client/client-chat-input-history";
+	import { CLIENT_TUNING } from "../../client/client-tuning";
 	import ClientFpsCounter from "../../client/ClientFpsCounter.svelte";
 	import ClientJumpPowerBar from "../../client/ClientJumpPowerBar.svelte";
 	import ClientToastOverlay from "../../client/ClientToastOverlay.svelte";
@@ -188,7 +190,13 @@
 	let chatFilters = $state<readonly ClientChatFilterTag[]>([
 		...CLIENT_CHAT_FILTER_TAGS,
 	]);
+	let sentHistory = $state<readonly string[]>([]);
 	async function send(message: string): Promise<void> {
+		sentHistory = recordSentChat(
+			sentHistory,
+			message,
+			CLIENT_TUNING.chat.sentHistoryLimit,
+		);
 		messages = [
 			...messages,
 			{
@@ -379,6 +387,7 @@
 				/>{/snippet}
 			{#snippet chat()}<ClientChat
 					{messages}
+					{sentHistory}
 					onSend={send}
 					enabledTags={chatFilters}
 					onEnabledTagsChange={(value) => (chatFilters = value)}

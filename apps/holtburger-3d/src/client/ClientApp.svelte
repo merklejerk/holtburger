@@ -62,6 +62,7 @@
 		type CharacterInputEdge,
 	} from "../lib/game/controls/character-input-controller";
 	import { CLIENT_TUNING } from "./client-tuning";
+	import { recordSentChat } from "./client-chat-input-history";
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { HostTransport } from "../lib/host/host-transport";
 	import {
@@ -365,6 +366,8 @@
 	let dialogPresentation = $state<ClientDialogPresentation | null>(null);
 	let dialogs: ClientDialogs | null = null;
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
+	/** Sent input survives world-view remounts until this app closes. */
+	let sentChatHistory = $state<readonly string[]>([]);
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
 	let entryPending = $state(false);
@@ -884,6 +887,11 @@
 	async function sendChat(message: string): Promise<void> {
 		if (session === null) throw new Error("Chat session is unavailable.");
 		await session.sendChat(message);
+		sentChatHistory = recordSentChat(
+			sentChatHistory,
+			message,
+			CLIENT_TUNING.chat.sentHistoryLimit,
+		);
 	}
 
 	/** Keyboard and button activation capture the same selection before starting the request. */
@@ -1669,6 +1677,7 @@
 			onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
 			onSelectEntity={(guid) => entitySelection?.select(guid)}
 			{chatMessages}
+			{sentChatHistory}
 			onSendChat={sendChat}
 			onCanvas={(canvas) => (canvasElement = canvas)}
 		/>

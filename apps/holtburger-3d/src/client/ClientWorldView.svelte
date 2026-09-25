@@ -227,6 +227,8 @@
 		readonly onMaintainEntitySelection: () => void;
 		readonly onSelectEntity: (guid: number | null) => void;
 		readonly chatMessages: readonly ClientChatLine[];
+		/** App-session input recall entries, independent of received chat lines. */
+		readonly sentChatHistory: readonly string[];
 		readonly onSendChat: (message: string) => Promise<void>;
 		readonly onCanvas: (canvas: HTMLCanvasElement | null) => void;
 	}
@@ -319,6 +321,7 @@
 		onMaintainEntitySelection,
 		onSelectEntity,
 		chatMessages,
+		sentChatHistory,
 		onSendChat,
 		onCanvas,
 	}: Props = $props();
@@ -883,6 +886,7 @@
 	>
 		<ClientChat
 			messages={chatMessages}
+			sentHistory={sentChatHistory}
 			onSend={onSendChat}
 			enabledTags={chatFilters}
 			onEnabledTagsChange={onChatFiltersChange}

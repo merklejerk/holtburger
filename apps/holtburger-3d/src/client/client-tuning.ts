@@ -38,6 +38,10 @@ const CLIENT_PORTAL_TRANSITION = {
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
+	chat: {
+		/** Nonnegative maximum of locally queued chat inputs retained for recall. */
+		sentHistoryLimit: 100,
+	},
 	/** Maximum publication cadence for asynchronously prepared spell artwork. */
 	spells: { iconDisplayIntervalMs: 100 },
 	/** Shared audio policy selected explicitly by the client composition root. */

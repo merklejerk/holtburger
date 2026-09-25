@@ -270,6 +270,39 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		);
 		await press("Escape", "Escape", 27);
 		assert.equal((await capture()).gameActive, true);
+		const chatInput = '[aria-label="Chat message"]';
+		const chatValue = () =>
+			evaluate(`document.querySelector(${JSON.stringify(chatInput)}).value`);
+		for (const sent of ["first send", "second send"]) {
+			await click(chatInput);
+			await client.send("Input.insertText", { text: sent });
+			await evaluate(
+				`document.querySelector(${JSON.stringify(chatInput)}).form.requestSubmit()`,
+			);
+			await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
+		}
+		await click(chatInput);
+		await client.send("Input.insertText", { text: "unsent draft" });
+		await press("ArrowUp", "ArrowUp", 38);
+		assert.equal(await chatValue(), "second send");
+		await press("ArrowUp", "ArrowUp", 38);
+		assert.equal(await chatValue(), "first send");
+		await press("ArrowDown", "ArrowDown", 40);
+		assert.equal(await chatValue(), "second send");
+		await press("ArrowDown", "ArrowDown", 40);
+		assert.equal(await chatValue(), "unsent draft");
+		await press("ArrowUp", "ArrowUp", 38, { modifiers: 8 });
+		assert.equal(await chatValue(), "unsent draft");
+		await press("ArrowUp", "ArrowUp", 38);
+		await client.send("Input.insertText", { text: " edited" });
+		const editedDraft = await chatValue();
+		assert.notEqual(editedDraft, "second send");
+		await press("ArrowUp", "ArrowUp", 38);
+		assert.equal(await chatValue(), "second send");
+		await press("ArrowDown", "ArrowDown", 40);
+		assert.equal(await chatValue(), editedDraft);
+		assert.equal((await capture()).focusLabel, "Chat message");
+		await press("Escape", "Escape", 27);
 
 		const historyToggle = '[aria-label="Interact with chat history"]';
 		const historyState = () =>

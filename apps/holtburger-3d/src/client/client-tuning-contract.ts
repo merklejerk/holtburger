@@ -41,6 +41,8 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 
 /** Exhaustive client-owned tuning contract used to drive authoring completion. */
 export interface ClientTuning {
+	/** In-memory sent-chat input retained for this app session. */
+	readonly chat: { readonly sentHistoryLimit: number };
 	/** Mounted spell-list artwork sampling; membership itself is event-driven. */
 	readonly spells: { readonly iconDisplayIntervalMs: number };
 	/** Shared audio policy selected by the client composition. */

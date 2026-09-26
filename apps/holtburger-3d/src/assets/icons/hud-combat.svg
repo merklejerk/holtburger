@@ -1,19 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-	xmlns="http://www.w3.org/2000/svg"
-	viewBox="0 0 24 24"
-	aria-hidden="true"
-	style="
-		display: block;
-		width: 100%;
-		height: 100%;
-		fill: none;
-		stroke: currentColor;
-		stroke-width: 1.7;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-	"
->
-	<path
-		d="m4 3 4 1 12 15-2 2L5 7Zm16 0-4 1-4 5m-3 4-5 6 2 2 5-6M3 16l5 5m8-5 5 5"
-	/>
+   viewBox="0 0 24 24"
+   aria-hidden="true"
+   style="   display: block;   width: 100%;   height: 100%;   fill: none;   stroke: currentColor;   stroke-width: 1.7;   stroke-linecap: round;   stroke-linejoin: round;  "
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="hud-combat.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="true"
+     inkscape:zoom="13.222733"
+     inkscape:cx="6.2392546"
+     inkscape:cy="27.944298"
+     inkscape:window-width="1920"
+     inkscape:window-height="1132"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1">
+    <inkscape:grid
+       id="grid1"
+       units="px"
+       originx="0"
+       originy="0"
+       spacingx="1"
+       spacingy="1"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       enabled="true"
+       visible="true" />
+  </sodipodi:namedview>
+  <use
+     x="0"
+     y="0"
+     xlink:href="#g21"
+     id="use21" />
+  <g
+     id="g21"
+     transform="matrix(1.0975737,0,0,1.0975737,-0.58243935,-1.8104599)"
+     style="stroke-width:1.06234324;stroke-dasharray:none">
+    <path
+       d="m 9.0722656,12.693359 -3.234375,3.546875 1.96875,1.96875 3.6582034,-3.335937"
+       id="path21"
+       sodipodi:nodetypes="cccc"
+       style="stroke-width:1.06234324;stroke-dasharray:none" />
+    <path
+       d="M 13.855469,12.693359 19,8 19.664062,4.3828125 16.046875,5.046875 11.464844,10.072266"
+       id="path18"
+       sodipodi:nodetypes="ccccc"
+       style="stroke-width:1.06234324;stroke-dasharray:none" />
+    <path
+       style="fill:none;stroke-width:1.06234324;stroke-dasharray:none"
+       d="m 3.9819816,14.270229 5.7945447,5.794544"
+       id="path10" />
+    <path
+       style="fill:none;stroke-width:1.06234324;stroke-dasharray:none"
+       d="M 5.7693444,16.863197 C 3.3437199,19.288821 3.3437199,19.288821 3.3437199,19.288821 L 4.7579335,20.703035 7.1643388,18.29663"
+       id="path11" />
+    <path
+       d="m 13.855469,12.693359 -2.390625,2.179688 3.65625,3.335937 1.96875,-1.96875 z"
+       id="path20"
+       style="stroke-width:1.06234324;stroke-dasharray:none" />
+    <path
+       d="m 11.464844,10.072266 -2.3925784,2.621093 m 2.3925784,2.179688 2.390625,-2.179688"
+       id="path19"
+       sodipodi:nodetypes="cccc"
+       style="stroke-width:1.06234324;stroke-dasharray:none" />
+    <path
+       d="M 3.2636719,4.3828125 3.9277344,8 9.0722656,12.693359 11.464844,10.072266 6.8808594,5.046875 Z"
+       id="path17"
+       style="stroke-width:1.06234324;stroke-dasharray:none" />
+    <path
+       style="fill:none;stroke-width:1.06234324;stroke-dasharray:none"
+       d="m 18.94559,14.270228 -5.794545,5.794545"
+       id="path5" />
+    <path
+       style="fill:none;stroke-width:1.06234324;stroke-dasharray:none"
+       d="m 17.158227,16.863197 c 2.425624,2.425624 2.425624,2.425624 2.425624,2.425624 l -1.414213,1.414214 -2.406405,-2.406406"
+       id="path6" />
+  </g>
 </svg>

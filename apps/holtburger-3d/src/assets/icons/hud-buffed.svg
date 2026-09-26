@@ -1,17 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-	xmlns="http://www.w3.org/2000/svg"
-	viewBox="0 0 24 24"
-	aria-hidden="true"
-	style="
-		display: block;
-		width: 100%;
-		height: 100%;
-		fill: none;
-		stroke: currentColor;
-		stroke-width: 1.7;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-	"
->
-	<path d="M12 2 14.8 9.2 22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8Z" />
+   viewBox="0 0 24 24"
+   aria-hidden="true"
+   style="   display: block;   width: 100%;   height: 100%;   fill: none;   stroke: currentColor;   stroke-width: 1.7;   stroke-linecap: round;   stroke-linejoin: round;  "
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="hud-buffed.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="25.294271"
+     inkscape:cx="9.7057552"
+     inkscape:cy="14.963863"
+     inkscape:window-width="1920"
+     inkscape:window-height="1132"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1" />
+  <path
+     d="M 20.665115,12.66294 12.009542,21.23542 3.3539696,12.66294 A 5.7703818,5.7703818 0 1 1 12.009542,5.0852751 5.7703818,5.7703818 0 1 1 20.665115,12.669864"
+     id="path1"
+     style="stroke-width:1.96193" />
 </svg>

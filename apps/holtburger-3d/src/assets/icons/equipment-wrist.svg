@@ -1,14 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-	xmlns="http://www.w3.org/2000/svg"
-	viewBox="0 0 24 24"
-	aria-hidden="true"
-	width="24"
-	height="24"
-	fill="none"
-	stroke="currentColor"
-	stroke-width="1.5"
-	stroke-linecap="round"
-	stroke-linejoin="round"
->
-	<path d="M5 7c0-5 14-5 14 0v10c0 5-14 5-14 0Zm0 0c0 5 14 5 14 0" />
+   viewBox="0 0 24 24"
+   aria-hidden="true"
+   width="24"
+   height="24"
+   fill="none"
+   stroke="currentColor"
+   stroke-width="1.5"
+   stroke-linecap="round"
+   stroke-linejoin="round"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="equipment-wrist.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="28.024902"
+     inkscape:cx="10.151686"
+     inkscape:cy="15.432703"
+     inkscape:window-width="1920"
+     inkscape:window-height="1132"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg1" />
+  <g
+     id="g3"
+     transform="translate(0,2)">
+    <path
+       d="M 5,7 C 5,2 19,2 19,7 v 6 c 0,5 -14,5 -14,0 z m 0,0 c 0,5 14,5 14,0"
+       id="path1"
+       sodipodi:nodetypes="ssssscc" />
+    <path
+       d="M 5,11 C 5,6 19,6 19,11 v 2 C 19,18 5,18 5,13 Z M 5,7 c 0,5 14,5 14,0"
+       id="path3"
+       sodipodi:nodetypes="ssssscc" />
+  </g>
 </svg>

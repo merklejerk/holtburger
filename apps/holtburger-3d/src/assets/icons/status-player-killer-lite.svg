@@ -1,18 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-	xmlns="http://www.w3.org/2000/svg"
-	viewBox="0 0 24 24"
-	aria-hidden="true"
-	style="
-		display: block;
-		width: 16px;
-		height: 16px;
-		fill: none;
-		stroke: currentColor;
-		stroke-width: 1.8;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-	"
->
-	<path d="M12 2.5 20 5.5v6.2c0 5.1-3.2 8.2-8 10.3-4.8-2.1-8-5.2-8-10.3V5.5Z" />
-	<path d="m8 16 8-8m-6-2 2 2m4 6 2 2m-9.5.5-1 3 3-1Z" />
+   viewBox="0 0 24 24"
+   aria-hidden="true"
+   style="   display: block;   width: 16px;   height: 16px;   fill: none;   stroke: currentColor;   stroke-width: 1.8;   stroke-linecap: round;   stroke-linejoin: round;  "
+   version="1.1"
+   id="svg2"
+   sodipodi:docname="status-player-killer-lite.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs2" />
+  <sodipodi:namedview
+     id="namedview2"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="9.0248788"
+     inkscape:cx="10.692664"
+     inkscape:cy="23.656827"
+     inkscape:window-width="1920"
+     inkscape:window-height="1132"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg2" />
+  <path
+     d="M12 2.5 20 5.5v6.2c0 5.1-3.2 8.2-8 10.3-4.8-2.1-8-5.2-8-10.3V5.5Z"
+     id="path1" />
+  <path
+     d="m 10.161459,12.335055 -2.4864217,2.726656 1.5134742,1.513474 2.8122395,-2.564498"
+     id="path21"
+     sodipodi:nodetypes="cccc"
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none" />
+  <path
+     d="M 13.838541,12.335055 17.793393,8.7270405 18.30389,5.9463319 15.523182,6.4568292 12.000751,10.320093"
+     id="path18"
+     sodipodi:nodetypes="ccccc"
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none" />
+  <path
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none"
+     d="m 6.2483094,13.547272 4.4545496,4.454549"
+     id="path10" />
+  <path
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none"
+     d="m 7.6223425,15.540613 c -1.864696,1.864695 -1.864696,1.864695 -1.864696,1.864695 l 1.087175,1.087176 1.8499213,-1.849921"
+     id="path11" />
+  <path
+     d="m 13.838541,12.335055 -1.83779,1.675632 2.810738,2.564498 1.513474,-1.513474 z"
+     id="path20"
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none" />
+  <path
+     d="m 12.000751,10.320093 -1.839292,2.014962 m 1.839292,1.675632 1.83779,-1.675632"
+     id="path19"
+     sodipodi:nodetypes="cccc"
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none" />
+  <path
+     d="M 5.6961097,5.9463319 6.2066069,8.7270405 10.161459,12.335055 12.000751,10.320093 8.4768183,6.4568292 Z"
+     id="path17"
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none" />
+  <path
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none"
+     d="m 17.751566,13.547271 -4.45455,4.45455"
+     id="path5" />
+  <path
+     style="fill:none;stroke-width:1.384;stroke-dasharray:none"
+     d="m 16.377533,15.540613 c 1.864695,1.864695 1.864695,1.864695 1.864695,1.864695 l -1.087174,1.087176 -1.849921,-1.849922"
+     id="path6" />
 </svg>

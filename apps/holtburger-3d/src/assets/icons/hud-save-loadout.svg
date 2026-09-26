@@ -1,0 +1,17 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 24 24"
+	aria-hidden="true"
+	style="
+		display: block;
+		width: 100%;
+		height: 100%;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.7;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	"
+>
+	<path d="M4 3h13l3 3v15H4Zm4 0v6h8V3m-8 18v-8h8v8" />
+</svg>

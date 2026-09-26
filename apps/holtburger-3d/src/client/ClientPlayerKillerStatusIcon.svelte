@@ -1,4 +1,7 @@
 <script lang="ts">
+	import NonPlayerKillerIcon from "../assets/icons/status-non-player-killer.svg?component";
+	import PlayerKillerLiteIcon from "../assets/icons/status-player-killer-lite.svg?component";
+	import PlayerKillerIcon from "../assets/icons/status-player-killer.svg?component";
 	import type { CharacterIdentity } from "./client-object-inspection-contract";
 	import { formatPlayerKillerStatus } from "./client-object-inspection-format";
 
@@ -8,6 +11,15 @@
 
 	const { status }: Props = $props();
 	const label = $derived(formatPlayerKillerStatus(status));
+	const icons = {
+		"non-player-killer": NonPlayerKillerIcon,
+		"player-killer-lite": PlayerKillerLiteIcon,
+		"player-killer": PlayerKillerIcon,
+	} satisfies Record<
+		CharacterIdentity["playerKillerStatus"],
+		typeof NonPlayerKillerIcon
+	>;
+	const Icon = $derived(icons[status]);
 </script>
 
 <span
@@ -20,22 +32,7 @@
 	aria-label={label}
 	title={label}
 >
-	<svg viewBox="0 0 24 24" aria-hidden="true">
-		{#if status === "non-player-killer"}
-			<path
-				d="M12 2.5 20 5.5v6.2c0 5.1-3.2 8.2-8 10.3-4.8-2.1-8-5.2-8-10.3V5.5Z"
-			/>
-			<path d="m8.4 12.1 2.2 2.2 5-5" />
-		{:else if status === "player-killer-lite"}
-			<path
-				d="M12 2.5 20 5.5v6.2c0 5.1-3.2 8.2-8 10.3-4.8-2.1-8-5.2-8-10.3V5.5Z"
-			/>
-			<path d="m8 16 8-8m-6-2 2 2m4 6 2 2m-9.5.5-1 3 3-1Z" />
-		{:else}
-			<path d="m5 3 3 1 11 14-2 2L6 7Zm14 0-3 1-4 5m-3 4-4 5 2 2 4-5" />
-			<path d="M3 16 8 21m8-5 5 5" />
-		{/if}
-	</svg>
+	<Icon />
 </span>
 
 <style>
@@ -59,16 +56,6 @@
 		}
 		.player-killer-status-icon.player-killer {
 			color: var(--ui-color-danger);
-		}
-		svg {
-			display: block;
-			width: 16px;
-			height: 16px;
-			fill: none;
-			stroke: currentcolor;
-			stroke-width: 1.8;
-			stroke-linecap: round;
-			stroke-linejoin: round;
 		}
 	}
 </style>

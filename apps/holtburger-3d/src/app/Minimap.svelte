@@ -39,6 +39,7 @@
 </script>
 
 <script lang="ts">
+	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
 	import { onDestroy, onMount } from "svelte";
 	import LayoutControls from "./LayoutControls.svelte";
 
@@ -839,9 +840,7 @@
 				aria-label="Re-anchor minimap"
 				title="Re-anchor minimap"
 			>
-				<svg class="minimap-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
-					<path d="M 9.8 5 A 4 4 0 1 0 10 7 M 9.8 5 V 1.8 M 9.8 5 H 6.6" />
-				</svg>
+				<MinimapResetIcon />
 			</button>
 		{/if}
 		{#if tooltip}
@@ -965,18 +964,6 @@
 			top: 14.645%;
 			left: 85.355%;
 			cursor: pointer;
-		}
-
-		.minimap-handle-icon {
-			display: block;
-			width: 12px;
-			height: 12px;
-			fill: none;
-			stroke: currentcolor;
-			stroke-linecap: round;
-			stroke-linejoin: round;
-			stroke-width: 1.35;
-			pointer-events: none;
 		}
 
 		.minimap-coordinates {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ActionAlternateIcon from "../assets/icons/action-alternate.svg?component";
 	import { useClientInput } from "./client-input-context";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
@@ -62,8 +63,6 @@
 		alternateLabel,
 		onactivate,
 	}: Props = $props();
-	// Both strokes share geometry so theme outline changes cannot reveal a mismatched silhouette.
-	const alternateArrowPath = "M6 10h24m-6-6 6 6-6 6M30 20H6m6-6-6 6 6 6";
 	const anchorName = $derived(`--action-cell-${bar}-${digit}`);
 	function showAlternateMarker(element: HTMLElement): void {
 		// The top layer escapes the bar's scroll clipping; removing the marker closes its popover.
@@ -119,15 +118,7 @@
 			use:showAlternateMarker
 			aria-hidden="true"
 		>
-			<svg
-				viewBox="0 0 36 30"
-				fill="none"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-			>
-				<path class="alternate-outline" d={alternateArrowPath} />
-				<path d={alternateArrowPath} />
-			</svg>
+			<ActionAlternateIcon />
 		</span>{/if}
 	{#if bindingHint !== null}<span class="ui-shortcut-hint" aria-hidden="true"
 			>{bindingHint}</span
@@ -155,17 +146,6 @@
 		}
 		.action-alternate::backdrop {
 			display: none;
-		}
-		.action-alternate svg {
-			display: block;
-			width: 100%;
-			height: 100%;
-			stroke: currentColor;
-			stroke-width: var(--ui-action-alternate-stroke-width);
-		}
-		.action-alternate .alternate-outline {
-			stroke: var(--ui-action-alternate-outline-color);
-			stroke-width: var(--ui-action-alternate-outline-width);
 		}
 	}
 </style>

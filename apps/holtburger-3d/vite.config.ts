@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import svg from "@poppanator/sveltekit-svg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +8,14 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig({
-	plugins: [svelte()],
+	plugins: [
+		svelte(),
+		// Keep editor-authored artwork intact and leave cursor/nameplate asset loading alone.
+		svg({
+			includePaths: [resolve(rootDir, "src/assets/icons")],
+			svgoOptions: false,
+		}),
+	],
 	// Electron loads built entries from disk; assets must resolve beside those entries.
 	base: "./",
 	build: {

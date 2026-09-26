@@ -1,0 +1,18 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 12 12"
+	aria-hidden="true"
+	style="
+		display: block;
+		width: 12px;
+		height: 12px;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 1.35;
+		pointer-events: none;
+	"
+>
+	<path d="M 9.8 5 A 4 4 0 1 0 10 7 M 9.8 5 V 1.8 M 9.8 5 H 6.6" />
+</svg>

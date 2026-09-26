@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SortIcon from "../assets/icons/sort.svg?component";
 	import {
 		nextContentsSortMode,
 		type ContentsSortMode,
@@ -27,14 +28,7 @@
 	title={`Sort: ${sortLabels[mode]}. Click for ${sortLabels[nextContentsSortMode(mode)]}.`}
 	{onclick}
 >
-	<svg viewBox="0 0 24 24" aria-hidden="true"
-		><path
-			d="M5 4v16m-3-3 3 3 3-3M11 5h10M11 10h7M11 15h4"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-		/></svg
-	>
+	<SortIcon />
 	<span aria-hidden="true"
 		>{mode === "native" ? "#" : mode === "alphabetical" ? "A" : "T"}</span
 	>
@@ -46,10 +40,6 @@
 			display: flex;
 			align-items: center;
 			gap: 3px;
-		}
-		.contents-sort svg {
-			width: 18px;
-			height: 18px;
 		}
 	}
 </style>

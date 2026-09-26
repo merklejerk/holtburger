@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BurdenIcon from "../assets/icons/burden.svg?component";
 	import { bindContentsActivation } from "./client-contents-activation";
 	import type { ClientItemInteractions } from "./client-item-interactions";
 	import { onMount } from "svelte";
@@ -323,10 +324,7 @@
 									? "burdened"
 									: "normal"}
 					>
-						<svg viewBox="0 0 24 24" aria-hidden="true">
-							<circle cx="12" cy="5" r="3" />
-							<path d="M7 8h10l4 13H3Z" />
-						</svg>
+						<BurdenIcon />
 						<span>{burdenText}</span>
 					</span>
 					<ClientContentsSortButton
@@ -379,15 +377,6 @@
 			align-items: center;
 			gap: 3px;
 			color: var(--ui-inventory-burden-normal-color);
-		}
-		.inventory-burden svg {
-			width: 1em;
-			height: 1em;
-			flex: none;
-			fill: none;
-			stroke: currentColor;
-			stroke-width: 2;
-			stroke-linejoin: round;
 		}
 		.inventory-burden[data-level="burdened"] {
 			color: var(--ui-inventory-burden-warning-color);

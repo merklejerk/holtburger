@@ -1,4 +1,6 @@
 <script lang="ts">
+	import SortIcon from "../assets/icons/sort.svg?component";
+	import DurationIcon from "../assets/icons/duration.svg?component";
 	import { onMount } from "svelte";
 	import UiIcon from "../app/UiIcon.svelte";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
@@ -330,35 +332,11 @@
 					sortField = sortOptions[sortField].next;
 				}}
 			>
-				<svg viewBox="0 0 24 24" aria-hidden="true"
-					><path
-						d="M5 4v16m-3-3 3 3 3-3M11 5h10M11 10h7M11 15h4"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-					/></svg
-				>
+				<SortIcon />
 				{#if sortOptions[sortField].badge !== null}
 					<span aria-hidden="true">{sortOptions[sortField].badge}</span>
 				{:else}
-					<svg class="duration-icon" viewBox="0 0 24 24" aria-hidden="true">
-						<circle
-							cx="12"
-							cy="12"
-							r="9"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-						/>
-						<path
-							d="M12 7v5l3 2"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						/>
-					</svg>
+					<DurationIcon />
 				{/if}
 			</button>
 		</div>
@@ -530,14 +508,6 @@
 		}
 		.controls .sort-button:hover {
 			color: var(--ui-color-highlight);
-		}
-		.sort-button svg {
-			width: 18px;
-			height: 18px;
-		}
-		.sort-button .duration-icon {
-			width: 16px;
-			height: 16px;
 		}
 		.results {
 			min-height: 0;

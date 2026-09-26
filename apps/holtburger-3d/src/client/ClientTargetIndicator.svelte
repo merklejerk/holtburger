@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TargetIndicatorIcon from "../assets/icons/target-indicator.svg?component";
 	import { onMount } from "svelte";
 
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -37,10 +38,7 @@
 	aria-hidden="true"
 	style={`--target-size: ${tuning.sizeCssPixels}px; --target-fill: ${tuning.fillColor}; --target-outline: ${tuning.outlineColor}; --target-outline-width: ${tuning.outlineWidthCssPixels}px; --target-glow: ${tuning.glowColor}; --target-glow-blur: ${tuning.glowBlurCssPixels}px;`}
 >
-	<svg viewBox="0 0 28 28" aria-hidden="true">
-		<path class="target-indicator__glass" d="M14 2.5 25 23.5 14 18.8 3 23.5Z" />
-		<path class="target-indicator__facet" d="M14 4.3 14 17.1 5.8 20.6Z" />
-	</svg>
+	<TargetIndicatorIcon />
 </div>
 
 <div class="selection-announcement" role="status" aria-live="polite">
@@ -62,27 +60,6 @@
 			transform-origin: center;
 			will-change: transform;
 			filter: drop-shadow(0 0 var(--target-glow-blur) var(--target-glow));
-		}
-
-		.target-indicator svg {
-			display: block;
-			width: 100%;
-			height: 100%;
-			overflow: visible;
-		}
-
-		.target-indicator__glass {
-			fill: var(--target-fill);
-			stroke: var(--target-outline);
-			stroke-width: var(--target-outline-width);
-			stroke-linejoin: round;
-			paint-order: stroke fill;
-		}
-
-		.target-indicator__facet {
-			fill: var(--target-outline);
-			fill-opacity: 0.16;
-			stroke: none;
 		}
 
 		.selection-announcement {

@@ -69,6 +69,16 @@ pub enum WorldEvent {
         guid: Guid,
         health_fraction: f32,
     },
+    /// Complete book data received after use; consumers may open a reader.
+    EntityBookOpened {
+        /// Book object that supplied the full response.
+        guid: Guid,
+        /// Name captured from the entity at response time.
+        name: String,
+        /// Full page state, including any text included in the response.
+        book: Box<BookData>,
+    },
+    /// A single page response merged into the retained book.
     EntityBookUpdated {
         guid: Guid,
         book: Box<BookData>,

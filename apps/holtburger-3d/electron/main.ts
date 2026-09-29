@@ -26,11 +26,18 @@ import type {
 } from "../src/lib/host/host-transport.js";
 import type { ClientWindowSettings } from "../src/client/client-settings-contract.js";
 import {
+	clientCharacterSectionsSchema,
+	clientUserSettingsPatchSchema,
+} from "../src/client/client-settings-sections.js";
+import {
 	ClientSettingsStore,
 	type ClientSettingsReadMode,
 } from "./client-settings-store.js";
 import { clientCharacterProfileKey } from "./client-profile-key.js";
-import { clientUserDataPath } from "./client-user-data.js";
+import {
+	clientSettingsFilePath,
+	clientUserDataPath,
+} from "./client-user-data.js";
 import { clientWindowBoundsReachable } from "./client-window-settings.js";
 
 const WINDOW_BACKGROUND_COLOR = "#0b0a08";
@@ -70,10 +77,12 @@ function entryArguments(): {
 	mode: HostMode;
 	clientStartup?: ClientLaunchConfiguration;
 	ignorePersistedConfig: boolean;
+	settingsFile: string | null;
 } {
 	const entryArguments = electronApplicationArguments(
 		process.argv,
-		process.defaultApp === true,
+		!app.isPackaged,
+		app.getAppPath(),
 	);
 	const [entryName, ...rawArgs] = entryArguments;
 	const release = rawArgs.includes("--release");
@@ -83,11 +92,13 @@ function entryArguments(): {
 	const mode: HostMode = selectedEntryName === "client" ? "client" : "explorer";
 	let clientStartup: ClientLaunchConfiguration | undefined;
 	let ignorePersistedConfig = false;
+	let settingsFile: string | null = null;
 	let rendererArguments: readonly string[] = entryArgs;
 	if (mode === "client") {
 		const parsed = parseClientLaunchArguments(entryArgs);
 		clientStartup = parsed.startup;
 		ignorePersistedConfig = parsed.ignorePersistedConfig;
+		settingsFile = parsed.settingsFile;
 		rendererArguments = parsed.rendererArguments;
 	} else {
 		const clientArgument = entryArgs.find(isClientLaunchArgument);
@@ -103,6 +114,7 @@ function entryArguments(): {
 		mode,
 		clientStartup,
 		ignorePersistedConfig,
+		settingsFile,
 	};
 }
 
@@ -286,9 +298,13 @@ function installSettingsIpcBridge(
 		requireApplicationFrame(event, window);
 		return store.readUser(readMode);
 	});
-	ipcMain.handle("settings:save-user", async (event, settings: unknown) => {
+	ipcMain.handle("settings:save-user-patch", async (event, patch: unknown) => {
 		requireApplicationFrame(event, window);
-		await store.saveUser(settings);
+		await store.saveUserPatch(clientUserSettingsPatchSchema.parse(patch));
+	});
+	ipcMain.handle("settings:reset-user", async (event, settings: unknown) => {
+		requireApplicationFrame(event, window);
+		return store.resetUser(settings);
 	});
 	ipcMain.handle("settings:load-character", (event, guid: unknown) => {
 		requireApplicationFrame(event, window);
@@ -297,23 +313,21 @@ function installSettingsIpcBridge(
 			readMode,
 		);
 	});
-	ipcMain.handle("settings:save-character", async (event, request: unknown) => {
-		requireApplicationFrame(event, window);
-		if (typeof request !== "object" || request === null)
-			throw new Error("character settings request is malformed");
-		if (!("characterGuid" in request) || !("settings" in request))
-			throw new Error("character settings request is incomplete");
-		const guid = requireCharacterGuid(request.characterGuid);
-		const lastKnownName =
-			"lastKnownName" in request ? request.lastKnownName : null;
-		if (lastKnownName !== null && typeof lastKnownName !== "string")
-			throw new Error("last-known character name must be a string or null");
-		await store.saveCharacter(
-			clientCharacterProfileKey(startup, guid),
-			request.settings,
-			lastKnownName,
-		);
-	});
+	ipcMain.handle(
+		"settings:save-character-patch",
+		async (event, request: unknown) => {
+			requireApplicationFrame(event, window);
+			if (typeof request !== "object" || request === null)
+				throw new Error("character settings request is malformed");
+			if (!("characterGuid" in request) || !("patch" in request))
+				throw new Error("character settings request is incomplete");
+			const guid = requireCharacterGuid(request.characterGuid);
+			await store.saveCharacterPatch(
+				clientCharacterProfileKey(startup, guid),
+				clientCharacterSectionsSchema.parse(request.patch),
+			);
+		},
+	);
 }
 
 function createWindow(
@@ -498,7 +512,7 @@ app.whenReady().then(async () => {
 	if (entry.mode === "client") {
 		const primary = screen.getPrimaryDisplay().workArea;
 		settingsStore = new ClientSettingsStore(
-			join(app.getPath("userData"), "client-settings.json"),
+			entry.settingsFile ?? clientSettingsFilePath(app.getPath("userData")),
 			{
 				normalBounds: {
 					x: Math.round(
@@ -521,13 +535,15 @@ app.whenReady().then(async () => {
 		}
 	}
 	// Native window restoration is independent of the renderer-owned config bypass.
-	const loadedUser = settingsStore?.readUser("persisted");
-	const window = createWindow(
-		entry,
-		loadedUser?.kind === "loaded"
-			? (settingsStore?.readWindow() ?? null)
-			: null,
-	);
+	const restoredWindow = settingsStore?.readWindow();
+	if (
+		restoredWindow?.unavailable !== null &&
+		restoredWindow?.unavailable !== undefined
+	)
+		console.warn(
+			`Client window settings unavailable: ${restoredWindow.unavailable}`,
+		);
+	const window = createWindow(entry, restoredWindow?.settings ?? null);
 	if (settingsStore !== undefined && entry.clientStartup !== undefined) {
 		installSettingsIpcBridge(
 			window,

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 const ENTRY_PATHS = {
 	explorer: {
 		path: "explorer/index.html",
@@ -17,6 +19,7 @@ const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
 	"password",
 	"melee-max-chase-distance",
 	"ignore-config",
+	"settings-file",
 ]);
 const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 	["s", "server"],
@@ -86,29 +89,43 @@ export function collapseRendererArguments(args) {
  * inline/separated forms are accepted here so the wrapper cannot reject a valid client launch
  * before `parseClientLaunchArguments` gets to validate it.
  */
-export function partitionClientLaunchArguments(args) {
+export function partitionClientLaunchArguments(
+	args,
+	settingsDirectory = process.cwd(),
+) {
 	const launchArguments = [];
 	const rendererArgs = [];
 	for (let index = 0; index < args.length; index += 1) {
-		const parsed = parseClientLaunchArgument(args[index]);
+		const argument = args[index];
+		const parsed = parseClientLaunchArgument(argument);
 		if (parsed === null) {
-			rendererArgs.push(args[index]);
+			rendererArgs.push(argument);
 			continue;
 		}
-		launchArguments.push(args[index]);
 		if (CLIENT_BOOLEAN_ARGUMENT_NAMES.has(parsed.name)) {
 			if (parsed.value !== undefined) {
-				throw new Error(`${args[index]} does not accept a value.`);
+				throw new Error(`${argument} does not accept a value.`);
 			}
+			launchArguments.push(argument);
 			continue;
 		}
-		if (parsed.value === undefined) {
-			const value = args[index + 1];
+		let value = parsed.value;
+		if (value === undefined) {
+			value = args[index + 1];
 			if (value === undefined || value.startsWith("-")) {
-				throw new Error(`${args[index]} requires a value.`);
+				throw new Error(`${argument} requires a value.`);
 			}
-			launchArguments.push(value);
 			index += 1;
+		}
+		if (parsed.name === "settings-file") {
+			if (value.length === 0) throw new Error(`${argument} cannot be empty.`);
+			launchArguments.push(
+				"--settings-file",
+				resolve(settingsDirectory, value),
+			);
+		} else {
+			launchArguments.push(argument);
+			if (parsed.value === undefined) launchArguments.push(value);
 		}
 	}
 	return { launchArguments, rendererArguments: rendererArgs };

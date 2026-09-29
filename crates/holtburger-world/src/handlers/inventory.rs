@@ -233,8 +233,9 @@ pub(crate) fn handle_event(
             if let Some(entity) = state.entities.get_mut(guid) {
                 let book = BookData::from_response(data);
                 entity.book = Some(book.clone());
-                events.push(WorldEvent::EntityBookUpdated {
+                events.push(WorldEvent::EntityBookOpened {
                     guid,
+                    name: entity.name().to_string(),
                     book: Box::new(book),
                 });
                 true

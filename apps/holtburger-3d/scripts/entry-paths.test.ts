@@ -49,6 +49,52 @@ describe("development launcher arguments", () => {
 		).toThrow(/does not accept a value/);
 	});
 
+	it("keeps the settings-file path out of the renderer URL", () => {
+		expect(
+			partitionClientLaunchArguments([
+				"--account=ash",
+				"--settings-file",
+				"/tmp/settings.json",
+				"--debug",
+			]),
+		).toEqual({
+			launchArguments: [
+				"--account=ash",
+				"--settings-file",
+				"/tmp/settings.json",
+			],
+			rendererArguments: ["--debug"],
+		});
+	});
+
+	it("resolves separated and inline settings paths from the invoking directory", () => {
+		const invokingDirectory = "/workspace/apps/holtburger-3d";
+		for (const settingsFlag of [
+			["--settings-file", "../../.holtburger-local/settings.json"],
+			["--settings-file=../../.holtburger-local/settings.json"],
+		]) {
+			expect(
+				partitionClientLaunchArguments(
+					["--account=ash", ...settingsFlag, "--debug"],
+					invokingDirectory,
+				),
+			).toEqual({
+				launchArguments: [
+					"--account=ash",
+					"--settings-file",
+					"/workspace/.holtburger-local/settings.json",
+				],
+				rendererArguments: ["--debug"],
+			});
+		}
+		expect(() =>
+			partitionClientLaunchArguments(
+				["--account=ash", "--settings-file="],
+				invokingDirectory,
+			),
+		).toThrow("cannot be empty");
+	});
+
 	it("keeps abbreviated client options in Electron main", () => {
 		expect(
 			partitionClientLaunchArguments([

@@ -2,6 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 import { ClientSettingsPersistence } from "./client-settings-persistence";
 
 describe("ClientSettingsPersistence", () => {
+	it("merges separate pending sections before the save", async () => {
+		vi.useFakeTimers();
+		const saved: Array<Record<string, number>> = [];
+		const persistence = new ClientSettingsPersistence<Record<string, number>>({
+			delayMs: 100,
+			save: async (value) => void saved.push(value),
+			report: () => undefined,
+			merge: (pending, next) => ({ ...pending, ...next }),
+		});
+		persistence.publish({ graphics: 1 });
+		persistence.publish({ input: 2 });
+		await vi.advanceTimersByTimeAsync(100);
+		expect(saved).toEqual([{ graphics: 1, input: 2 }]);
+		vi.useRealTimers();
+	});
+
 	it("coalesces a quiet interval to the latest snapshot", async () => {
 		vi.useFakeTimers();
 		const saved: number[] = [];
@@ -60,5 +76,31 @@ describe("ClientSettingsPersistence", () => {
 		await persistence.flush();
 		expect(failures).toHaveLength(1);
 		expect(saved).toEqual([2]);
+	});
+
+	it("retains distinct pending sections when an in-flight patch fails", async () => {
+		let rejectFirst: ((error: Error) => void) | undefined;
+		const saved: Array<Record<string, number>> = [];
+		const persistence = new ClientSettingsPersistence<Record<string, number>>({
+			delayMs: 100,
+			save: async (patch) => {
+				if (rejectFirst === undefined) {
+					await new Promise<void>((_, reject) => {
+						rejectFirst = reject;
+					});
+				}
+				saved.push(patch);
+			},
+			report: () => undefined,
+			merge: (pending, next) => ({ ...pending, ...next }),
+		});
+		persistence.publish({ graphics: 1 });
+		const flushing = persistence.flush();
+		await Promise.resolve();
+		persistence.publish({ input: 2 });
+		rejectFirst?.(new Error("disk full"));
+		await expect(flushing).rejects.toThrow("disk full");
+		await persistence.flush();
+		expect(saved).toEqual([{ graphics: 1, input: 2 }]);
 	});
 });

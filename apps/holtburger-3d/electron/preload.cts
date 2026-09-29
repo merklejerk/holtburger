@@ -54,21 +54,19 @@ if (process.argv.includes("--holtburger-mode=client")) {
 		loadUser(): Promise<unknown> {
 			return ipcRenderer.invoke("settings:load-user");
 		},
-		saveUser(settings: unknown): Promise<void> {
-			return ipcRenderer.invoke("settings:save-user", settings);
+		saveUserPatch(patch: unknown): Promise<void> {
+			return ipcRenderer.invoke("settings:save-user-patch", patch);
+		},
+		resetUser(settings: unknown): Promise<unknown> {
+			return ipcRenderer.invoke("settings:reset-user", settings);
 		},
 		loadCharacter(characterGuid: number): Promise<unknown> {
 			return ipcRenderer.invoke("settings:load-character", characterGuid);
 		},
-		saveCharacter(
-			characterGuid: number,
-			settings: unknown,
-			lastKnownName: string | null,
-		): Promise<void> {
-			return ipcRenderer.invoke("settings:save-character", {
+		saveCharacterPatch(characterGuid: number, patch: unknown): Promise<void> {
+			return ipcRenderer.invoke("settings:save-character-patch", {
 				characterGuid,
-				settings,
-				lastKnownName,
+				patch,
 			});
 		},
 	});

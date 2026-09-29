@@ -82,7 +82,8 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             inventory::refresh_entity_context_if_visible(state, *guid, &mut result);
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::EntityBookUpdated { guid, book } => {
+        ClientViewEvent::EntityBookOpened { guid, book, .. }
+        | ClientViewEvent::EntityBookUpdated { guid, book } => {
             if let Some(entity) = state.data.entities.get_mut(guid) {
                 entity.book = Some(book.as_ref().clone());
             }

@@ -1,4 +1,5 @@
 import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
+import { resolve } from "node:path";
 
 /** Launch-only credentials and endpoint resolved by Electron main. */
 export interface ClientLaunchConfiguration {
@@ -14,16 +15,28 @@ export interface ParsedClientLaunchArguments {
 	readonly startup: ClientLaunchConfiguration;
 	/** Treat persisted renderer-owned settings as absent without disabling later saves. */
 	readonly ignorePersistedConfig: boolean;
+	/** Resolved path for the collection-format settings file. */
+	readonly settingsFile: string | null;
 	/** Arguments intentionally left for the renderer entry URL (for example --query). */
 	readonly rendererArguments: readonly string[];
 }
 
-/** Remove Electron's executable and, for default-app development, its application path. */
+/** Remove Electron's executable and, for unpackaged development, its application path. */
 export function electronApplicationArguments(
 	argv: readonly string[],
-	defaultApp: boolean,
+	unpackaged: boolean,
+	applicationPath: string,
 ): readonly string[] {
-	return argv.slice(defaultApp ? 2 : 1);
+	if (!unpackaged) return argv.slice(1);
+	const appIndex = argv.findIndex(
+		(argument, index) =>
+			index > 0 &&
+			!argument.startsWith("-") &&
+			resolve(argument) === resolve(applicationPath),
+	);
+	if (appIndex < 0)
+		throw new Error("Electron development application path is missing");
+	return argv.slice(appIndex + 1);
 }
 
 /** Identifies flags reserved for the client launch contract before entry-query construction. */
@@ -48,6 +61,7 @@ export function parseClientLaunchArguments(
 	let password = "";
 	let meleeMaxChaseDistance: number | undefined;
 	let ignorePersistedConfig = false;
+	let settingsFile: string | null = null;
 	const rendererArguments: string[] = [];
 	const seen = new Set<string>();
 
@@ -84,6 +98,9 @@ export function parseClientLaunchArguments(
 			throw new Error(`client launch argument --${name} cannot be empty`);
 
 		switch (name) {
+			case "settings-file":
+				settingsFile = resolve(value);
+				break;
 			case "server":
 				server = value;
 				break;
@@ -123,6 +140,7 @@ export function parseClientLaunchArguments(
 			...(meleeMaxChaseDistance === undefined ? {} : { meleeMaxChaseDistance }),
 		},
 		ignorePersistedConfig,
+		settingsFile,
 		rendererArguments,
 	};
 }

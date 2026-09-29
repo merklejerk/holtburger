@@ -74,6 +74,14 @@
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
 	import {
+		ClientBookReader,
+		type ClientBookReaderState,
+	} from "../../client/client-book-reader";
+	import type {
+		ClientBook,
+		ClientBookOpened,
+	} from "../../client/client-book-contract";
+	import {
 		ClientObjectInspection,
 		type ClientObjectInspectionState,
 	} from "../../client/client-object-inspection";
@@ -884,6 +892,16 @@
 		readonly reconnectEnchantments: () => void;
 		/** Controlled delayed responses around the production examination owner and UI. */
 		readonly objectInspectionProbe: () => ObjectInspectionProbe;
+		/** Inject decoded book receipts through the real session-to-reader HUD path. */
+		readonly bookProbe: {
+			readonly open: (receipt: ClientBookOpened) => void;
+			readonly update: (book: ClientBook) => void;
+			readonly read: () => ClientBookReaderState;
+			readonly requests: () => typeof interactionCommands;
+			readonly close: () => void;
+			readonly retry: () => void;
+			readonly failNextRequest: () => void;
+		};
 		/** Production spell shortcut dispatch and session requests under browser input. */
 		readonly spellBarProbe: typeof spellBarProbe;
 		/** Render and manipulate the production melee/missile HUD without a live server. */
@@ -1089,6 +1107,7 @@
 		});
 	}
 
+	let failNextBookPageRequest = false;
 	const interactionLifecycle = new ClientLifecycleSession({
 		listen: async (event, handler) => {
 			interactionHandlers.set(event, handler);
@@ -1098,6 +1117,10 @@
 		},
 		invoke: async (command, args) => {
 			interactionCommands.push({ command, args });
+			if (command === "read_client_book_page" && failNextBookPageRequest) {
+				failNextBookPageRequest = false;
+				throw new Error("Injected page request failure");
+			}
 			if (command === "query_client_spell_inspection") {
 				const { query } = z
 					.object({
@@ -1130,6 +1153,11 @@
 		},
 	});
 	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
+	let bookReader = $state<ClientBookReaderState>({ kind: "idle" });
+	const bookReaderOwner = new ClientBookReader(interactionLifecycle);
+	const unsubscribeBookReader = bookReaderOwner.subscribe(
+		(state) => (bookReader = state),
+	);
 	let inspectionFailure = $state<string | null>(null);
 	const objectInspectionOwner = new ClientObjectInspection(
 		interactionLifecycle,
@@ -3048,6 +3076,17 @@
 				enchantments = interactionLifecycle.state().enchantments;
 			},
 			objectInspectionProbe: () => objectInspectionProbe,
+			bookProbe: {
+				open: (receipt) => emitInteractionEvent("client-book-opened", receipt),
+				update: (book) => emitInteractionEvent("client-book-updated", book),
+				read: () => bookReaderOwner.read(),
+				requests: () => interactionCommands,
+				close: () => bookReaderOwner.close(),
+				retry: () => bookReaderOwner.retry(),
+				failNextRequest: () => {
+					failNextBookPageRequest = true;
+				},
+			},
 			inventoryDragCommands: () => interactionCommands,
 			selectInventoryItem: (guid) =>
 				selection.selectContentsItem(guid, "select"),
@@ -3093,6 +3132,8 @@
 		return () => {
 			objectInspectionProbe.end();
 			unsubscribeObjectInspection();
+			unsubscribeBookReader();
+			bookReaderOwner.destroy();
 			objectInspectionOwner.destroy();
 			keyboardFixture?.dispose();
 			spellState.destroy();
@@ -3165,8 +3206,12 @@
 		}}
 		itemSession={interactionLifecycle}
 		hudLayout={userSettings.hudLayout}
-		onHudLayoutChange={(hudLayout) =>
-			(userSettings = { ...userSettings, hudLayout })}
+		onHudPlacementChange={(surface, placement) =>
+			(userSettings = {
+				...userSettings,
+				hudLayout: { ...userSettings.hudLayout, [surface]: placement },
+			})}
+		onHudReset={(hudLayout) => (userSettings = { ...userSettings, hudLayout })}
 		spellBarShape={userSettings.spellBarShape}
 		onSpellBarShapeChange={(spellBarShape) =>
 			(userSettings = { ...userSettings, spellBarShape })}
@@ -3263,6 +3308,9 @@
 			selection.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}
 		{objectInspection}
+		{bookReader}
+		onCloseBook={() => bookReaderOwner.close()}
+		onRetryBook={() => bookReaderOwner.retry()}
 		onExamineEntity={examineHarnessSelection}
 		onExamineItem={examineHarnessItem}
 		onCloseInspection={() => objectInspectionOwner.close()}

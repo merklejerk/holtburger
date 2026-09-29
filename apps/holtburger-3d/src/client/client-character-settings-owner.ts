@@ -5,6 +5,7 @@ import type {
 	ClientSettingsTransport,
 } from "./client-settings-transport";
 import type { ClientCharacterSettings } from "./client-settings-contract";
+import type { ClientCharacterSettingsPatch } from "./client-settings-sections";
 
 export type ClientCharacterSettingsState =
 	| { readonly kind: "absent" }
@@ -23,18 +24,18 @@ export type ClientCharacterSettingsState =
 
 interface CharacterSettingsSave {
 	readonly characterGuid: number;
-	readonly settings: ClientCharacterSettings;
-	readonly lastKnownName: string | null;
+	readonly patch: ClientCharacterSettingsPatch;
 }
 
 /** Owns generation-gated character profile hydration and save publication. */
 export class ClientCharacterSettingsOwner {
 	readonly #transport: Pick<
 		ClientSettingsTransport,
-		"loadCharacter" | "saveCharacter"
+		"loadCharacter" | "saveCharacterPatch"
 	>;
 	readonly #publish: (state: ClientCharacterSettingsState) => void;
 	readonly #loadFailed: (error: unknown) => void;
+	readonly #unavailable: (reasons: readonly string[]) => void;
 	readonly #persistence: ClientSettingsPersistence<CharacterSettingsSave>;
 	#state: ClientCharacterSettingsState = { kind: "absent" };
 	#generation = 0;
@@ -46,25 +47,34 @@ export class ClientCharacterSettingsOwner {
 	constructor(options: {
 		readonly transport: Pick<
 			ClientSettingsTransport,
-			"loadCharacter" | "saveCharacter"
+			"loadCharacter" | "saveCharacterPatch"
 		>;
 		readonly publish: (state: ClientCharacterSettingsState) => void;
 		readonly loadFailed: (error: unknown) => void;
+		readonly unavailable: (reasons: readonly string[]) => void;
 		readonly saveFailed: (error: unknown) => void;
 		readonly saveDelayMs: number;
 	}) {
 		this.#transport = options.transport;
 		this.#publish = options.publish;
 		this.#loadFailed = options.loadFailed;
+		this.#unavailable = options.unavailable;
 		this.#persistence = new ClientSettingsPersistence({
 			delayMs: options.saveDelayMs,
 			save: (snapshot: CharacterSettingsSave) =>
-				this.#transport.saveCharacter(
+				this.#transport.saveCharacterPatch(
 					snapshot.characterGuid,
-					snapshot.settings,
-					snapshot.lastKnownName,
+					snapshot.patch,
 				),
 			report: options.saveFailed,
+			merge: (pending, next) => {
+				if (pending.characterGuid !== next.characterGuid)
+					throw new Error("Cannot merge settings for different characters");
+				return {
+					characterGuid: next.characterGuid,
+					patch: { ...pending.patch, ...next.patch },
+				};
+			},
 		});
 	}
 
@@ -96,13 +106,19 @@ export class ClientCharacterSettingsOwner {
 		)
 			return;
 		this.#set({ ...this.#state, lastKnownName: name });
-		this.#queueReady();
+		this.#queueReady({ lastKnownName: name });
 	}
 
-	change(settings: ClientCharacterSettings): void {
+	change<Key extends keyof ClientCharacterSettings>(
+		key: Key,
+		value: ClientCharacterSettings[Key],
+	): void {
 		if (this.#state.kind !== "ready") return;
-		this.#set({ ...this.#state, settings });
-		this.#queueReady();
+		this.#set({
+			...this.#state,
+			settings: { ...this.#state.settings, [key]: value },
+		});
+		this.#queueReady({ [key]: value });
 	}
 
 	retire(): void {
@@ -117,8 +133,12 @@ export class ClientCharacterSettingsOwner {
 	}
 
 	async #hydrate(characterGuid: number, generation: number): Promise<void> {
-		// A failed old-character save is already visible and must not block the next profile load.
-		await this.#persistence.flush().catch(() => undefined);
+		// The failed old-character patch cannot be merged with the next profile.
+		try {
+			await this.#persistence.flush();
+		} catch {
+			this.#persistence.discardPending();
+		}
 		let loaded: ClientCharacterSettingsLoad;
 		try {
 			loaded = await this.#transport.loadCharacter(characterGuid);
@@ -128,20 +148,18 @@ export class ClientCharacterSettingsOwner {
 			return;
 		}
 		if (!this.#isCurrentLoad(characterGuid, generation)) return;
+		if (loaded.unavailable.length > 0) this.#unavailable(loaded.unavailable);
+		const defaults = createDefaultClientCharacterSettings();
+		const { lastKnownName, ...savedSettings } = loaded.sections;
 		this.#set({
 			kind: "ready",
 			characterGuid,
 			generation,
-			settings:
-				loaded.kind === "loaded"
-					? loaded.settings
-					: createDefaultClientCharacterSettings(),
+			settings: { ...defaults, ...savedSettings },
 			lastKnownName:
 				this.#observedName?.characterGuid === characterGuid
 					? this.#observedName.name
-					: loaded.kind === "loaded"
-						? loaded.lastKnownName
-						: null,
+					: (lastKnownName ?? null),
 		});
 	}
 
@@ -153,12 +171,11 @@ export class ClientCharacterSettingsOwner {
 		);
 	}
 
-	#queueReady(): void {
+	#queueReady(patch: ClientCharacterSettingsPatch): void {
 		if (this.#state.kind !== "ready") return;
 		this.#persistence.publish({
 			characterGuid: this.#state.characterGuid,
-			settings: this.#state.settings,
-			lastKnownName: this.#state.lastKnownName,
+			patch,
 		});
 	}
 

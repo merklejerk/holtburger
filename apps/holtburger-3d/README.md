@@ -244,14 +244,35 @@ Client launch options accept long and one-character spellings:
 | `--account`       | `-a`         | Account name        |
 | `--password`      | `-p`         | Password            |
 | `--ignore-config` | `-i`         | No value            |
+| `--settings-file` |              | JSON file path      |
 
 Valued long and short options accept either `--name=value`/`-x=value` or separated values.
 Connection credentials stay in Electron main and are never copied into the renderer URL.
 
 Pass `--ignore-config` or `-i` to treat persisted user and character settings as absent for that
 run. Native window placement still restores normally. Persistence remains enabled, so the newly
-defaulted user settings and any character settings edited during the session overwrite their
-corresponding saved values.
+defaulted supported user settings and any character settings edited during the session overwrite
+their corresponding saved values. Sections from a newer client remain untouched and are reported
+as unavailable.
+
+Development builds use `client-settings.json` in their shared development user-data directory by
+default. The packaged app uses the same filename in its separate user-data directory. The app
+does not convert a legacy file during startup; it rejects that file without changing it. Use
+`--settings-file` to select a worktree-local collection while the shared file is still legacy. A
+missing collection starts with defaults. To launch with a converted local collection:
+
+```bash
+npm run dev:client -- --settings-file=../../.holtburger-local/client-settings-sections.json --account YOUR_ACCOUNT
+```
+
+The example assumes you invoke npm from this app directory. Relative `--settings-file` paths
+resolve from the directory where you invoked `npm run dev:client`; absolute paths also work.
+
+This worktree's local collection was created by a one-time conversion; no migration command ships
+with the app. Its neighboring `.legacy-source.sha256` file records the source hash. Compare that
+hash with the legacy source before replacing the global file, since another worktree may have
+changed the source since conversion. Replacing that shared file with the collection format means
+older worktrees can no longer load it; continue using the override until those worktrees are done.
 
 The sidecar has one explicit composition root and mode-owned capabilities. Shared content lives in
 `host/src/shared_host_content.rs`; Explorer authority and client authority live in

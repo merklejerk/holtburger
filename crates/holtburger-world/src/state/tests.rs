@@ -4863,10 +4863,11 @@ fn test_book_data_response_updates_entity_book_state() {
 
     assert!(matches!(
         events.first(),
-        Some(WorldEvent::EntityBookUpdated {
+        Some(WorldEvent::EntityBookOpened {
             guid: event_guid,
             book,
-        }) if *event_guid == guid && book.inscription.as_deref() == Some("Signed and sealed")
+            name,
+        }) if *event_guid == guid && name == "Book" && book.inscription.as_deref() == Some("Signed and sealed")
     ));
 
     let entity = state.entities.get(guid).expect("entity should still exist");

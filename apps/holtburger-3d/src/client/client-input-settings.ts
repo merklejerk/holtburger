@@ -32,8 +32,8 @@ const digitBindingsSchema = z
 	.record(z.enum(INPUT_DIGIT_KEYS), bindingListSchema)
 	.readonly();
 
-/** Historical keyboard map before the wielded-caster shortcut. */
-export const clientKeyboardSettingsV8Schema = z
+/** Shared keyboard fields before the spell-bar caster shortcut is added. */
+const keyboardSettingsBaseSchema = z
 	.object({
 		character: z
 			.record(z.enum(CHARACTER_ACTIONS), bindingListSchema)
@@ -71,46 +71,11 @@ export const clientKeyboardSettingsV8Schema = z
 	.strict()
 	.readonly();
 
-/** Historical v7 map included a configurable character-picker confirmation key. */
-export const clientKeyboardSettingsV7Schema = clientKeyboardSettingsV8Schema
-	.unwrap()
-	.extend({
-		client: z
-			.record(
-				z.enum([...CLIENT_SHORTCUT_ACTIONS, "enterWorld"] as const),
-				bindingListSchema,
-			)
-			.readonly(),
-	})
-	.strict()
-	.readonly();
-
-/** Historical v6 map also included a separate focused-bar cancellation binding. */
-export const clientKeyboardSettingsV6Schema = clientKeyboardSettingsV7Schema
-	.unwrap()
-	.extend({
-		actionBars: clientKeyboardSettingsV7Schema
-			.unwrap()
-			.shape.actionBars.unwrap()
-			.extend({
-				commands: z
-					.record(
-						z.enum([...ACTION_BAR_COMMANDS, "cancel"] as const),
-						bindingListSchema,
-					)
-					.readonly(),
-			})
-			.strict()
-			.readonly(),
-	})
-	.strict()
-	.readonly();
-
 /** Strict, user-scoped keyboard map; Explorer camera and pointer fields are excluded. */
-export const clientKeyboardSettingsSchema = clientKeyboardSettingsV8Schema
+export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
 	.unwrap()
 	.extend({
-		spellBar: clientKeyboardSettingsV8Schema
+		spellBar: keyboardSettingsBaseSchema
 			.unwrap()
 			.shape.spellBar.unwrap()
 			.extend({ caster: bindingListSchema })
@@ -127,26 +92,6 @@ export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	spellBar: INPUT_DEFAULTS.spellBar,
 	combatBar: INPUT_DEFAULTS.combatBar,
 	actionBars: INPUT_DEFAULTS.actionBars,
-};
-
-/** Last v6 default shape, retained for migration of v5 documents. */
-export const CLIENT_KEYBOARD_V6_DEFAULTS = {
-	...CLIENT_KEYBOARD_DEFAULTS,
-	spellBar: {
-		tabs: CLIENT_KEYBOARD_DEFAULTS.spellBar.tabs,
-		cells: CLIENT_KEYBOARD_DEFAULTS.spellBar.cells,
-	},
-	client: {
-		...CLIENT_KEYBOARD_DEFAULTS.client,
-		enterWorld: [{ key: "Enter" }],
-	},
-	actionBars: {
-		...CLIENT_KEYBOARD_DEFAULTS.actionBars,
-		commands: {
-			...CLIENT_KEYBOARD_DEFAULTS.actionBars.commands,
-			cancel: [{ key: "Escape" }],
-		},
-	},
 };
 
 /** Build one client-owned resolved policy while retaining fixed pointer and Explorer fly maps. */

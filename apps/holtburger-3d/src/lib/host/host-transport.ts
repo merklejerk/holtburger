@@ -15,6 +15,10 @@ import type {
 import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 import type { ClientEntityDelta } from "../../client/client-entity-mirror";
 import type { ObjectInspectionResult } from "../../client/client-object-inspection-contract";
+import type {
+	ClientBook,
+	ClientBookOpened,
+} from "../../client/client-book-contract";
 import type { ObjectPreviewResult } from "../../client/client-object-preview-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
 import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
@@ -100,6 +104,7 @@ const EXPLORER_HOST_COMMAND_NAMES = [
 /** Client lifecycle and movement commands; startup remains private to Electron main. */
 const CLIENT_HOST_COMMAND_NAMES = [
 	"examine_client_entity",
+	"read_client_book_page",
 	"request_client_current_state",
 	"select_client_character",
 	"replace_client_drive",
@@ -172,6 +177,8 @@ const EXPLORER_HOST_EVENT_NAMES = [
 /** Client lifecycle, focused presentation, and terminal events. */
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-object-inspection-result",
+	"client-book-opened",
+	"client-book-updated",
 	"client-object-preview-result",
 	"client-current-state",
 	"client-inventory-preview",
@@ -257,6 +264,8 @@ export function hostEventNamesForMode(
 
 /** Payload map kept at the shell boundary so listeners cannot silently accept arbitrary events. */
 export interface HostEventPayloadMap {
+	"client-book-opened": ClientBookOpened;
+	"client-book-updated": ClientBook;
 	"client-object-inspection-result": ObjectInspectionResult;
 	"client-object-preview-result": ObjectPreviewResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;

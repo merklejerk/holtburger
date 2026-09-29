@@ -990,6 +990,15 @@ impl ClientRuntime {
                         health_fraction: *health_fraction,
                     });
             }
+            WorldEvent::EntityBookOpened { guid, name, book } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityBookOpened {
+                        guid: *guid,
+                        name: name.clone(),
+                        book: book.clone(),
+                    });
+            }
             WorldEvent::EntityBookUpdated { guid, book } => {
                 let _ = self
                     .client_view_event_tx

@@ -19,8 +19,64 @@ use holtburger_core::{
 };
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
+use holtburger_world::book::BookData;
 use holtburger_world::stats::Vital;
 use serde::Serialize;
+
+/// Reader facts projected from retained world book data; editing metadata stays server-side.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientBookWire {
+    /// Server object whose page state this snapshot describes.
+    pub guid: Guid,
+    /// Actual page entries in server order; capacity is intentionally absent.
+    pub pages: Vec<ClientBookPageWire>,
+    /// Book-level inscription, separate from individual page text.
+    pub inscription: Option<String>,
+    /// Book-level scribe signature.
+    pub author_name: Option<String>,
+}
+
+/// One page, with absent text distinguished from a loaded empty page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientBookPageWire {
+    /// Zero-based page request identity.
+    pub index: u32,
+    /// Page author as disclosed by the server.
+    pub author_name: String,
+    /// None means the page needs an explicit text request.
+    pub text: Option<String>,
+}
+
+impl ClientBookWire {
+    fn from_world(guid: Guid, book: &BookData) -> Self {
+        Self {
+            guid,
+            pages: book
+                .pages
+                .iter()
+                .map(|page| ClientBookPageWire {
+                    index: page.index,
+                    author_name: page.author_name.clone(),
+                    text: page.page_text.clone(),
+                })
+                .collect(),
+            inscription: book.inscription.clone(),
+            author_name: book.author_name.clone(),
+        }
+    }
+}
+
+/// Full response opens a book; page updates only refresh the open reader.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientBookOpenedWire {
+    /// Display title captured from the accepted entity.
+    pub name: String,
+    /// Complete initial page state for the opened book.
+    pub book: ClientBookWire,
+}
 
 /// Cold UI stance; unknown is preserved until character facts arrive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -755,6 +811,8 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    BookOpened(ClientBookOpenedWire),
+    BookUpdated(ClientBookWire),
     /// Complete vendor stock and terms needed by the app-local catalog.
     VendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
     /// Correlated shared draft quote.
@@ -1011,6 +1069,15 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::EntityBookOpened { guid, name, book } => {
+            Some(ClientHostEvent::BookOpened(ClientBookOpenedWire {
+                name,
+                book: ClientBookWire::from_world(guid, &book),
+            }))
+        }
+        ClientViewEvent::EntityBookUpdated { guid, book } => Some(ClientHostEvent::BookUpdated(
+            ClientBookWire::from_world(guid, &book),
+        )),
         ClientViewEvent::VendorStateUpdated { vendor } => {
             Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))
         }
@@ -1315,6 +1382,48 @@ mod tests {
         ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionContext,
         InspectionSupplement, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
     };
+
+    #[test]
+    fn book_receipts_project_only_reader_facts_and_keep_open_provenance() {
+        let guid = Guid(0x6000_0042);
+        let book = holtburger_world::book::BookData {
+            pages: vec![holtburger_world::book::BookPage {
+                index: 0,
+                author_id: 7,
+                author_name: "Writer".into(),
+                author_account: "private-account".into(),
+                flags: 0xffff_0002,
+                text_included: false,
+                ignore_author: false,
+                page_text: None,
+            }],
+            inscription: Some("Signed".into()),
+            author_name: Some("Writer".into()),
+            ..Default::default()
+        };
+        let opened = project_client_event(ClientViewEvent::EntityBookOpened {
+            guid,
+            name: "Journal".into(),
+            book: Box::new(book.clone()),
+        });
+        let Some(ClientHostEvent::BookOpened(opened)) = opened else {
+            panic!("full response must open the reader");
+        };
+        let value = serde_json::to_value(opened).unwrap();
+        assert_eq!(value["name"], "Journal");
+        assert_eq!(value["book"]["guid"], guid.0);
+        assert!(value["book"]["pages"][0]["text"].is_null());
+        assert!(value.to_string().find("private-account").is_none());
+        assert!(value.to_string().find("flags").is_none());
+
+        assert!(matches!(
+            project_client_event(ClientViewEvent::EntityBookUpdated {
+                guid,
+                book: Box::new(book),
+            }),
+            Some(ClientHostEvent::BookUpdated(_))
+        ));
+    }
 
     #[test]
     fn appearance_projection_exposes_only_helmet_and_cloak() {

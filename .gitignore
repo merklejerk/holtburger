@@ -33,6 +33,7 @@ dist-manifest.json
 
 # Local Git worktrees
 /.worktrees/
+/.holtburger-local/
 
 /acclient-eor-source
 

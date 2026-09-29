@@ -511,7 +511,14 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::ReadBookPage { book, page_index } => {
+            ClientCommand::ReadBookPage {
+                player,
+                book,
+                page_index,
+            } => {
+                if player != self.world.player.guid {
+                    return Err(anyhow!("book page request belongs to another character"));
+                }
                 log::info!(">>> Reading book page {} from 0x{:08X}", page_index, book);
                 let page_index = i32::try_from(page_index).map_err(|_| {
                     anyhow!("book page index {} exceeds i32 wire range", page_index)
@@ -1248,6 +1255,21 @@ mod tests {
             )]),
         });
         client
+    }
+
+    #[tokio::test]
+    async fn book_page_request_rejects_a_replaced_character() {
+        let mut client = build_test_client();
+        client.world.player.guid = Guid(0x5000_0002);
+        let error = client
+            .handle_interaction_command(ClientCommand::ReadBookPage {
+                player: Guid(0x5000_0001),
+                book: Guid(0x6000_0042),
+                page_index: 0,
+            })
+            .await
+            .expect_err("stale character request must be rejected");
+        assert!(error.to_string().contains("another character"));
     }
 
     fn seed_action_capable_player(client: &mut ClientRuntime, guid: Guid) {

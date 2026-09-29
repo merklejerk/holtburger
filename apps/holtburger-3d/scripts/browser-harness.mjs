@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { probeClientHud } from "./client-hud-probe.mjs";
+import { probeClientBook } from "./client-book-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
@@ -88,6 +89,11 @@ try {
 			uiTheme: result.uiTheme.evidence,
 			glRenderer: result.glRenderer,
 			viewport: result.state.viewport,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientBook) {
+		report = {
+			clientBook: result.clientBook,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientHud) {
@@ -288,6 +294,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		clientHud: false,
+		clientBook: false,
 		uiTheme: false,
 		reportMode: null,
 		landblockId: DEFAULT_LANDBLOCK_ID,
@@ -400,6 +407,10 @@ function parseArgs(args) {
 		switch (arg) {
 			case "--client-hud":
 				parsed.clientHud = true;
+				break;
+			case "--client-book":
+				parsed.clientHud = true;
+				parsed.clientBook = true;
 				break;
 			case "--ui-theme":
 				parsed.uiTheme = true;
@@ -1397,6 +1408,7 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print summary evidence (the default for --client-hud).
+  --client-book         Exercise the book reader through the client HUD fixture.
   --full-report         Print complete diagnostic evidence, including HUD snapshots.
   --particle-sao-report-only
                         Print only workload identity, particle/SAO metrics, timings, and errors.
@@ -4086,6 +4098,13 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientBook) {
+			return {
+				clientBook: await probeClientBook(client, evaluateExpression, delay),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		return {
 			...(await probeClientHud(client, {
 				options,

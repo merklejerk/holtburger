@@ -46,6 +46,14 @@ import {
 	type ObjectInspectionResult,
 } from "./client-object-inspection-contract";
 import {
+	clientBookSchema,
+	clientBookOpenedSchema,
+	clientBookPageRequestSchema,
+	type ClientBook,
+	type ClientBookOpened,
+	type ClientBookPageRequest,
+} from "./client-book-contract";
+import {
 	decodeObjectPreviewResult,
 	type ObjectPreviewResult,
 } from "./client-object-preview-contract";
@@ -143,6 +151,7 @@ import type { ClientSpellCastAim } from "./client-spell-casting";
 type ClientCommandName = Extract<
 	HostCommandName,
 	| "examine_client_entity"
+	| "read_client_book_page"
 	| "request_client_current_state"
 	| "select_client_character"
 	| "replace_client_drive"
@@ -180,6 +189,8 @@ type ClientCommandName = Extract<
 type ClientEventName = Extract<
 	HostEventName,
 	| "client-object-inspection-result"
+	| "client-book-opened"
+	| "client-book-updated"
 	| "client-object-preview-result"
 	| "client-current-state"
 	| "client-inventory-preview"
@@ -271,6 +282,8 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "book-opened"; readonly receipt: ClientBookOpened }
+	| { readonly type: "book-updated"; readonly book: ClientBook }
 	| { readonly type: "vendor-snapshot"; readonly vendor: VendorSnapshot }
 	| { readonly type: "vendor-preview"; readonly result: VendorPreview }
 	| { readonly type: "vendor-result"; readonly result: VendorResult }
@@ -590,6 +603,14 @@ export class ClientLifecycleSession {
 		);
 	}
 
+	/** Request text for one listed page of the active character's book. */
+	async readBookPage(request: ClientBookPageRequest): Promise<void> {
+		await this.#transport.invoke(
+			"read_client_book_page",
+			clientBookPageRequestSchema.parse(request),
+		);
+	}
+
 	/** Evaluate a considered target without executing use. */
 	async queryItemUseTarget(query: ClientItemUseTargetQuery): Promise<void> {
 		await this.#transport.invoke("query_client_item_use_target", {
@@ -737,6 +758,22 @@ export class ClientLifecycleSession {
 	async #listenToSiblingEvents(): Promise<(() => void)[]> {
 		const unlisteners: (() => void)[] = [];
 		try {
+			unlisteners.push(
+				await this.#transport.listen("client-book-opened", (payload) =>
+					this.#emit({
+						type: "book-opened",
+						receipt: clientBookOpenedSchema.parse(payload),
+					}),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-book-updated", (payload) =>
+					this.#emit({
+						type: "book-updated",
+						book: clientBookSchema.parse(payload),
+					}),
+				),
+			);
 			unlisteners.push(
 				await this.#transport.listen(
 					"client-object-inspection-result",

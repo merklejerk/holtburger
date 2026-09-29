@@ -30,7 +30,10 @@ try {
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
 	const partitioned =
 		entryName === "client"
-			? partitionClientLaunchArguments(entryArgs)
+			? partitionClientLaunchArguments(
+					entryArgs,
+					process.env.INIT_CWD ?? process.cwd(),
+				)
 			: { launchArguments: [], rendererArguments: entryArgs };
 	const rendererArgs = partitioned.rendererArguments;
 	entryPath = buildEntryPath(entry.path, rendererArgs);

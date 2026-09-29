@@ -65,6 +65,8 @@ export interface ClientUiDefaults {
 	readonly vendor: Omit<ClientUiPanel, "resizable">;
 	/** Independent server-confirmed object inspection window. */
 	readonly inspection: Omit<ClientUiPanel, "resizable">;
+	/** One retained reader window for the most recently opened book. */
+	readonly book: Omit<ClientUiPanel, "resizable">;
 	/** Diagnostics window with independently retained geometry; borders always resize. */
 	readonly debug: Omit<ClientUiPanel, "resizable">;
 	/** Floating client preferences window. */

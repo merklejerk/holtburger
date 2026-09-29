@@ -15,12 +15,16 @@ export type ClientLaunchArgumentName =
 	| "account"
 	| "password"
 	| "melee-max-chase-distance"
-	| "ignore-config";
+	| "ignore-config"
+	| "settings-file";
 export function parseClientLaunchArgument(argument: string): {
 	readonly name: ClientLaunchArgumentName;
 	readonly value: string | undefined;
 } | null;
-export function partitionClientLaunchArguments(args: readonly string[]): {
+export function partitionClientLaunchArguments(
+	args: readonly string[],
+	settingsDirectory?: string,
+): {
 	launchArguments: string[];
 	rendererArguments: string[];
 };

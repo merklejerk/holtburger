@@ -250,14 +250,27 @@ const clientUserSettingsV11Schema = clientUserSettingsV10Schema
 	.strict()
 	.readonly();
 
-/** Current settings retain the enchantments window's independent HUD placement. */
-export const clientUserSettingsSchema = clientUserSettingsV11Schema
+/** Historical v12 settings added independent enchantments geometry. */
+const clientUserSettingsV12Schema = clientUserSettingsV11Schema
 	.unwrap()
 	.extend({
 		hudLayout: clientUserSettingsV11Schema
 			.unwrap()
 			.shape.hudLayout.unwrap()
 			.extend({ enchantments: hudPlacementSchema })
+			.strict()
+			.readonly(),
+	})
+	.strict()
+	.readonly();
+/** Current settings retain character-sheet geometry independently of the HUD. */
+export const clientUserSettingsSchema = clientUserSettingsV12Schema
+	.unwrap()
+	.extend({
+		hudLayout: clientUserSettingsV12Schema
+			.unwrap()
+			.shape.hudLayout.unwrap()
+			.extend({ characterSheet: hudPlacementSchema })
 			.strict()
 			.readonly(),
 	})
@@ -624,12 +637,28 @@ type ClientLocalSettingsDocumentV11 = z.infer<
 	typeof clientLocalSettingsDocumentV11Schema
 >;
 
-/** Current durable document adds independent enchantments window geometry. */
+/** Historical v12 document adds independent enchantments window geometry. */
 export const clientLocalSettingsDocumentV12Schema =
 	clientLocalSettingsDocumentV11Schema
 		.unwrap()
 		.extend({
 			schemaVersion: z.literal(12),
+			user: z
+				.object({
+					window: clientWindowSettingsSchema,
+					client: clientUserSettingsV12Schema,
+				})
+				.strict()
+				.readonly(),
+		})
+		.strict()
+		.readonly();
+/** Current durable document adds character-sheet geometry. */
+export const clientLocalSettingsDocumentV13Schema =
+	clientLocalSettingsDocumentV12Schema
+		.unwrap()
+		.extend({
+			schemaVersion: z.literal(13),
 			user: z
 				.object({
 					window: clientWindowSettingsSchema,
@@ -641,7 +670,7 @@ export const clientLocalSettingsDocumentV12Schema =
 		.strict()
 		.readonly();
 export type ClientLocalSettingsDocument = z.infer<
-	typeof clientLocalSettingsDocumentV12Schema
+	typeof clientLocalSettingsDocumentV13Schema
 >;
 
 /**
@@ -1096,9 +1125,9 @@ function parseClientLocalSettingsDocumentV11(
 }
 
 /** Upgrade every supported settings document without changing existing HUD placements. */
-export function parseClientLocalSettingsDocument(
+function parseClientLocalSettingsDocumentV12(
 	value: unknown,
-): ClientLocalSettingsDocument {
+): z.infer<typeof clientLocalSettingsDocumentV12Schema> {
 	if (
 		typeof value === "object" &&
 		value !== null &&
@@ -1121,6 +1150,39 @@ export function parseClientLocalSettingsDocument(
 						vertical: { alignment: "center", offset: 0 },
 						preferredWidth: 390,
 						preferredHeight: 460,
+					},
+				},
+			},
+		},
+	});
+}
+
+/** Upgrade saved layouts while preserving every existing panel placement. */
+export function parseClientLocalSettingsDocument(
+	value: unknown,
+): ClientLocalSettingsDocument {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"schemaVersion" in value &&
+		value.schemaVersion === 13
+	)
+		return clientLocalSettingsDocumentV13Schema.parse(value);
+	const previous = parseClientLocalSettingsDocumentV12(value);
+	return clientLocalSettingsDocumentV13Schema.parse({
+		...previous,
+		schemaVersion: 13,
+		user: {
+			...previous.user,
+			client: {
+				...previous.user.client,
+				hudLayout: {
+					...previous.user.client.hudLayout,
+					characterSheet: {
+						horizontal: { alignment: "end", offset: 16 },
+						vertical: { alignment: "start", offset: 220 },
+						preferredWidth: 480,
+						preferredHeight: 570,
 					},
 				},
 			},

@@ -58,6 +58,7 @@
 		| "settings"
 		| "spells"
 		| "enchantments"
+		| "characterSheet"
 		| "spellBar"
 		| "combatBar"
 	>;

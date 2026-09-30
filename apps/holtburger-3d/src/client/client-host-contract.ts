@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
+import { characterSheetSchema } from "./client-character-sheet-contract";
 import { clientEntitySnapshotSchema } from "./client-entity-mirror";
 import {
 	decodeDynamicEntitySnapshot,
@@ -327,6 +328,7 @@ const currentStateSchema = z
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,
 		vitals: z.array(vitalSchema),
+		characterSheet: characterSheetSchema.nullable(),
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),
 		dynamic: z.unknown(),

@@ -29,10 +29,9 @@ use holtburger_world::SelfMovementKinematics;
 use holtburger_world::book::BookData;
 use holtburger_world::entity::{Entity, EntityNetworkMotion};
 use holtburger_world::player::PlayerCharacterOptions;
+use holtburger_world::progression::StatTarget;
 use holtburger_world::state::{FellowshipState, TradeState};
-use holtburger_world::stats::{
-    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
-};
+use holtburger_world::stats::{Vital, VitalType};
 use holtburger_world::vendor::VendorState;
 use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
 use serde::{Deserialize, Serialize};
@@ -351,6 +350,15 @@ pub enum ClientPresentationDiscontinuityKind {
     Reset,
 }
 
+/// Original player effects and their shared interpretation, replaced together after event loss.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientPlayerEnchantmentsSnapshot {
+    /// Original server records needed for TUI spell details and debug inspection.
+    pub records: Vec<holtburger_protocol::messages::magic::Enchantment>,
+    /// Shared winner and overridden interpretation used by character presentation.
+    pub resolved: holtburger_world::enchantments::ResolvedEnchantments,
+}
+
 /// One atomic, core-owned replacement level for client shells.
 ///
 /// Runtime bodies stay in the core value for the existing TUI and authority tests. Desktop
@@ -360,8 +368,8 @@ pub enum ClientPresentationDiscontinuityKind {
 pub struct ClientApplicationSnapshot {
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
-    /// Shared enchantment semantics, absent until the complete player description.
-    pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
+    /// Complete effect records and shared interpretation, absent until player description.
+    pub enchantments: Option<ClientPlayerEnchantmentsSnapshot>,
     /// None until PlayerDescription establishes the active character's complete option masks.
     pub character_options: Option<PlayerCharacterOptions>,
     /// Server-confirmed stance, undefined before the local player is established.
@@ -384,6 +392,8 @@ pub struct ClientApplicationSnapshot {
     pub player_name: Option<String>,
     /// Complete current/max local-player vitals used by client HUDs.
     pub vitals: HashMap<VitalType, Vital>,
+    /// Complete progression facts, absent before this character's description.
+    pub character_sheet: Option<Box<super::ClientCharacterSheet>>,
     /// Current renderer-consumed jump timing, absent until authoritative capability is complete.
     pub character_motion: Option<ClientCharacterMotionCapabilities>,
     /// Pending server interaction; recoverable independently of world presentation.
@@ -663,6 +673,19 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Complete current character facts after a relevant authoritative mutation.
+    CharacterSheetUpdated(Option<Box<super::ClientCharacterSheet>>),
+    /// Batched read-only advancement quotes for one frontend request.
+    ProgressionEvaluated {
+        request_id: u32,
+        evaluations: Vec<super::progression::ClientProgressionEvaluation>,
+    },
+    /// A local advancement send or rejection; never a server purchase receipt.
+    ProgressionFeedback(super::progression::ClientProgressionFeedback),
+    /// Current row-local duplicate guards after submission or authoritative updates.
+    ProgressionGuardsUpdated {
+        targets: Vec<StatTarget>,
+    },
     /// Character input invalidation for independent spell inspectors.
     SpellInspectionContext(super::spell_inspection::SpellInspectionContext),
     /// Correlated read-only spell inspection result.
@@ -699,16 +722,6 @@ pub enum ClientViewEvent {
     },
     StatusUpdate {
         state: ClientState,
-    },
-    PlayerStatsSkillsUpdated {
-        attributes: HashMap<AttributeType, Attribute>,
-        skills: HashMap<SkillType, Skill>,
-        resistances: Resistances,
-        armor: i32,
-        vitae: f32,
-    },
-    PlayerLevelInfoUpdated {
-        level_info: CharacterLevelInfo,
     },
     PlayerVitalsUpdated {
         vitals: HashMap<VitalType, Vital>,
@@ -1039,22 +1052,13 @@ pub enum ClientCommand {
     SetClientCameraIntent(ClientCameraIntentRequest),
     SetClientCameraClearance(ClientCameraClearanceRequest),
     StopClientCamera(ClientCameraIdentity),
-    RaiseAttribute {
-        attribute: AttributeType,
-        xp_spent: u32,
+    /// Evaluate multiple advancement intents against one current runtime scope.
+    EvaluateProgression {
+        request_id: u32,
+        intents: Vec<holtburger_world::progression::ProgressionIntent>,
     },
-    RaiseVital {
-        vital: VitalType,
-        xp_spent: u32,
-    },
-    RaiseSkill {
-        skill: SkillType,
-        xp_spent: u32,
-    },
-    TrainSkill {
-        skill: SkillType,
-        credits: u32,
-    },
+    /// Submit the exact consequence shown by a shared progression evaluation.
+    SubmitProgression(super::progression::ClientProgressionQuote),
     GiveObjectRequest {
         target: Guid,
         item: Guid,

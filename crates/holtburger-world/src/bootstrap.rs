@@ -1,6 +1,6 @@
 use crate::spell::SpellCatalog;
 use holtburger_content::{CharacterTitleCatalog, MotionSequenceCatalog, SoulEmoteCatalog};
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -8,6 +8,8 @@ pub struct WorldBootstrap {
     /// Optional parsed static template classifications; never a source of live useability.
     pub weenie_types: Option<Arc<holtburger_content::WeenieTypeIndex>>,
     pub skill_table: Arc<SkillTable>,
+    /// Authored formulas for the three maximum vitals.
+    pub secondary_attribute_table: Arc<SecondaryAttributeTable>,
     pub spell_table: Arc<SpellTable>,
     pub xp_table: Arc<XpTable>,
     /// Localized static character titles used by shared inspection semantics.
@@ -19,6 +21,7 @@ pub struct WorldBootstrap {
 impl WorldBootstrap {
     pub fn new(
         skill_table: SkillTable,
+        secondary_attribute_table: SecondaryAttributeTable,
         spell_table: SpellTable,
         xp_table: XpTable,
         character_titles: CharacterTitleCatalog,
@@ -28,6 +31,7 @@ impl WorldBootstrap {
         Self {
             weenie_types: None,
             skill_table: Arc::new(skill_table),
+            secondary_attribute_table: Arc::new(secondary_attribute_table),
             spell_table: Arc::new(spell_table),
             xp_table: Arc::new(xp_table),
             character_titles: Arc::new(character_titles),
@@ -44,6 +48,7 @@ impl WorldBootstrap {
     pub fn synthetic() -> Self {
         Self::new(
             SkillTable::default(),
+            SecondaryAttributeTable::synthetic(),
             SpellTable {
                 id: SpellTable::FILE_ID,
                 spells: Default::default(),

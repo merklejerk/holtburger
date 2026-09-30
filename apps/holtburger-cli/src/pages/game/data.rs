@@ -6,6 +6,7 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::{CharacterOption, Guid};
+use holtburger_core::ClientProgressionEvaluation;
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
@@ -15,6 +16,7 @@ use holtburger_world::SelfMovementKinematics;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
+use holtburger_world::progression::{ProgressionIntent, StatTarget};
 use holtburger_world::spell::{SpellCatalog, SpellInfo};
 use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{
@@ -29,6 +31,17 @@ const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
 pub struct TimedResolvedEnchantments {
     pub resolved: holtburger_world::enchantments::ResolvedEnchantments,
     pub received_at: Instant,
+}
+
+/// TUI projection of core-owned quotes and row-local pending submissions.
+#[derive(Debug, Clone, Default)]
+pub struct TuiProgressionState {
+    /// Latest batch request; earlier replies are ignored after any stat/resource change.
+    pub request_id: u32,
+    /// One-rank or training evaluations supplied by core for visible stat rows.
+    pub evaluations: HashMap<ProgressionIntent, ClientProgressionEvaluation>,
+    /// Unchanged target states already submitted by this client runtime.
+    pub guarded_targets: HashSet<StatTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,6 +249,8 @@ pub struct GameData {
     pub vitals: HashMap<VitalType, Vital>,
     /// Skills like Sword, Mace, Magic Defense.
     pub skills: HashMap<SkillType, Skill>,
+    /// Shared progression evaluations retained for the existing one-rank TUI controls.
+    pub progression: TuiProgressionState,
     /// Calculated damage resistance values.
     pub resistances: Resistances,
     /// Total armor value.
@@ -299,6 +314,7 @@ impl Default for GameData {
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             skills: HashMap::new(),
+            progression: TuiProgressionState::default(),
             resistances: Resistances::default(),
             armor: 0,
             vitae: 1.0,
@@ -870,6 +886,7 @@ mod tests {
                     next_rank_xp: None,
                     base: 100,
                     current: 100,
+                    breakdown: Default::default(),
                 },
             )]),
             entities: std::collections::HashMap::from([(player_guid, player), (item_guid, item)]),

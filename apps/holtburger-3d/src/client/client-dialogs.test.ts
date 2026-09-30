@@ -49,6 +49,7 @@ async function fixture() {
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
+			characterSheet: null,
 			characterMotion: null,
 			activeConfirmation: requestId === null ? null : confirmation(requestId),
 			dynamic: { hostTime: { seconds: 1 }, entities: [] },

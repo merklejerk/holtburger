@@ -78,6 +78,7 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
             next_rank_xp: None,
             base: 100,
             current: 100,
+            breakdown: Default::default(),
         },
     );
     world.player.skills.insert(
@@ -93,6 +94,7 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         },
     );
 

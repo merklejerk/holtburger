@@ -684,13 +684,9 @@ pub enum AppAction {
     SetCombatMode {
         on: bool,
     },
-    LevelUpStat {
-        stat: StatType,
-        amount: u32,
-    },
-    TrainSkill {
-        skill: SkillType,
-        amount: u32,
+    /// Submit the exact shared progression quote shown by the character tab.
+    SubmitProgression {
+        quote: holtburger_core::ClientProgressionQuote,
     },
     // TODO: Move to AppUiAction if purely client-side.
     ViewDetails {

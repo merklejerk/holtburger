@@ -410,6 +410,8 @@ pub struct ClientCurrentState {
     pub player_name: Option<String>,
     /// Complete local-player vital replacement level.
     pub vitals: Vec<ClientVitalWire>,
+    /// Complete character facts, absent until the active description arrives.
+    pub character_sheet: Option<ClientCharacterSheetWire>,
     /// Current jump charge timing, absent until core has complete authority facts.
     pub character_motion: Option<ClientCharacterMotionCapabilitiesWire>,
     /// Pending interaction, recovered with the application snapshot.
@@ -418,6 +420,92 @@ pub struct ClientCurrentState {
     pub dynamic: holtburger_core::DynamicEntitySnapshot,
     /// Complete retained entity/storage baseline for inventory and selection.
     pub entities: holtburger_core::ClientEntitySnapshot,
+}
+
+/// XP totals are decimal strings because character lifetime totals exceed JS safe integers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterLevelWire {
+    pub level: u32,
+    pub current_xp: String,
+    pub unspent_xp: String,
+    pub unspent_skill_points: u32,
+    pub available_luminance: String,
+    pub next_level_xp: String,
+    pub xp_into_level: String,
+    pub xp_for_next_level: String,
+}
+
+impl From<&holtburger_world::stats::CharacterLevelInfo> for ClientCharacterLevelWire {
+    fn from(level: &holtburger_world::stats::CharacterLevelInfo) -> Self {
+        Self {
+            level: level.level,
+            current_xp: level.current_xp.to_string(),
+            unspent_xp: level.unspent_xp.to_string(),
+            unspent_skill_points: level.unspent_skill_points,
+            available_luminance: level.available_luminance.to_string(),
+            next_level_xp: level.next_level_xp.to_string(),
+            xp_into_level: level.xp_into_level.to_string(),
+            xp_for_next_level: level.xp_for_next_level.to_string(),
+        }
+    }
+}
+
+/// Authored skill description paired with shared calculated values.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterSkillWire {
+    pub stat: holtburger_world::stats::Skill,
+    pub description: Option<String>,
+    pub available_in_eor: bool,
+}
+
+/// Atomic current character sheet across snapshots and update events.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterSheetWire {
+    pub character: Guid,
+    /// Server identity and localized selected title for the progression summary.
+    pub name: Option<String>,
+    pub title: Option<String>,
+    /// Exact decimal capacity, absent when the server has not provided it.
+    pub maximum_luminance: Option<String>,
+    pub level: ClientCharacterLevelWire,
+    pub attributes: Vec<holtburger_world::stats::Attribute>,
+    pub vitals: Vec<holtburger_world::stats::Vital>,
+    pub skills: Vec<ClientCharacterSkillWire>,
+    /// World-owned current defense and vitae facts for the complete character view.
+    pub armor: i32,
+    pub resistances: holtburger_world::stats::Resistances,
+    pub vitae: f32,
+    pub guarded_targets: Vec<holtburger_world::progression::StatTarget>,
+}
+
+impl From<&holtburger_core::ClientCharacterSheet> for ClientCharacterSheetWire {
+    fn from(sheet: &holtburger_core::ClientCharacterSheet) -> Self {
+        Self {
+            character: sheet.character,
+            name: sheet.name.clone(),
+            title: sheet.title.clone(),
+            maximum_luminance: sheet.maximum_luminance.map(|value| value.to_string()),
+            level: (&sheet.level).into(),
+            attributes: sheet.attributes.clone(),
+            vitals: sheet.vitals.clone(),
+            skills: sheet
+                .skills
+                .iter()
+                .map(|row| ClientCharacterSkillWire {
+                    stat: row.stat.clone(),
+                    description: row.description.clone(),
+                    available_in_eor: row.available_in_eor,
+                })
+                .collect(),
+            armor: sheet.armor,
+            resistances: sheet.resistances.clone(),
+            vitae: sheet.vitae,
+            guarded_targets: sheet.guarded_targets.clone(),
+        }
+    }
 }
 
 /// Server-backed appearance preferences exposed to the client HUD.
@@ -755,6 +843,15 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Coherent character facts after a relevant authoritative mutation.
+    CharacterSheetUpdated(Option<Box<ClientCharacterSheetWire>>),
+    /// Correlated quotes for the active character scope.
+    ProgressionEvaluated {
+        request_id: u32,
+        evaluations: Vec<holtburger_core::ClientProgressionEvaluation>,
+    },
+    /// Send or local validation feedback; submission is never server success.
+    ProgressionFeedback(holtburger_core::ClientProgressionFeedback),
     /// Complete vendor stock and terms needed by the app-local catalog.
     VendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
     /// Correlated shared draft quote.
@@ -777,7 +874,7 @@ pub enum ClientHostEvent {
     /// Core-derived inventory preview, correlated with the active gesture.
     InventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     EntityCollisionDisabled(bool),
-    CurrentState(ClientCurrentState),
+    CurrentState(Box<ClientCurrentState>),
     /// The receiver lost events and is awaiting the existing application replacement.
     StateResyncing,
     /// Narrow accepted entity/storage changes.
@@ -988,7 +1085,10 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             known_spells: snapshot.known_spells.clone(),
-            enchantments: snapshot.enchantments.clone(),
+            enchantments: snapshot
+                .enchantments
+                .as_ref()
+                .map(|effects| effects.resolved.clone()),
             appearance_options: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
             combat: snapshot.combat.into(),
@@ -1000,6 +1100,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             world_name: snapshot.world_name.clone(),
             player_name: snapshot.player_name.clone(),
             vitals: project_vitals(&snapshot.vitals),
+            character_sheet: snapshot.character_sheet.as_deref().map(Into::into),
             character_motion: snapshot.character_motion.map(Into::into),
             active_confirmation: snapshot.active_confirmation.as_ref().map(Into::into),
             dynamic: snapshot.dynamic.clone(),
@@ -1011,6 +1112,23 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::ProgressionEvaluated {
+            request_id,
+            evaluations,
+        } => Some(ClientHostEvent::ProgressionEvaluated {
+            request_id,
+            evaluations,
+        }),
+        ClientViewEvent::ProgressionFeedback(feedback) => {
+            Some(ClientHostEvent::ProgressionFeedback(feedback))
+        }
+        ClientViewEvent::CharacterSheetUpdated(sheet) => {
+            Some(ClientHostEvent::CharacterSheetUpdated(
+                sheet
+                    .as_deref()
+                    .map(|sheet| Box::new(ClientCharacterSheetWire::from(sheet))),
+            ))
+        }
         ClientViewEvent::VendorStateUpdated { vendor } => {
             Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))
         }
@@ -1052,9 +1170,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::EntityCollisionDisabled(disabled) => {
             Some(ClientHostEvent::EntityCollisionDisabled(disabled))
         }
-        ClientViewEvent::ApplicationSnapshot(snapshot) => {
-            Some(ClientHostEvent::CurrentState(snapshot.as_ref().into()))
-        }
+        ClientViewEvent::ApplicationSnapshot(snapshot) => Some(ClientHostEvent::CurrentState(
+            Box::new(snapshot.as_ref().into()),
+        )),
         ClientViewEvent::LifecycleChanged(lifecycle) => {
             Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
         }
@@ -1315,6 +1433,68 @@ mod tests {
         ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionContext,
         InspectionSupplement, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
     };
+
+    #[test]
+    fn progression_wire_preserves_large_xp_totals_as_decimal_strings() {
+        use holtburger_world::progression::{
+            ProgressionIntent, ProgressionQuote, ProgressionTargetState, StatTarget,
+        };
+        use holtburger_world::stats::{AttributeType, CharacterLevelInfo};
+
+        let character = Guid(0x5000_0001);
+        let large_xp = 9_007_199_254_740_993_u64;
+        let sheet = holtburger_core::ClientCharacterSheet {
+            character,
+            name: Some("Test Character".into()),
+            title: Some("Adventurer".into()),
+            maximum_luminance: Some(large_xp),
+            level: CharacterLevelInfo {
+                current_xp: large_xp,
+                unspent_xp: large_xp,
+                ..CharacterLevelInfo::default()
+            },
+            attributes: Vec::new(),
+            vitals: Vec::new(),
+            skills: Vec::new(),
+            armor: 0,
+            resistances: Default::default(),
+            vitae: 1.0,
+            guarded_targets: Vec::new(),
+        };
+        let projected = serde_json::to_value(ClientCharacterSheetWire::from(&sheet)).unwrap();
+        assert_eq!(projected["name"], "Test Character");
+        assert_eq!(projected["title"], "Adventurer");
+        assert_eq!(projected["maximumLuminance"], large_xp.to_string());
+        assert_eq!(projected["level"]["currentXp"], large_xp.to_string());
+        assert_eq!(projected["level"]["unspentXp"], large_xp.to_string());
+
+        let quote = holtburger_core::ClientProgressionQuote {
+            scope_id: 4,
+            quote: ProgressionQuote {
+                character,
+                intent: ProgressionIntent::Raise {
+                    target: StatTarget::Attribute(AttributeType::StrengthAttr),
+                    ranks: 1,
+                },
+                target_state: ProgressionTargetState {
+                    training: None,
+                    ranks: 1,
+                    spent_xp: 100,
+                },
+                resulting_ranks: 2,
+                xp_spent: 200,
+                credits_spent: 0,
+                available_xp: large_xp,
+                available_credits: 2,
+            },
+        };
+        let serialized = serde_json::to_value(quote).unwrap();
+        assert_eq!(serialized["quote"]["available_xp"], large_xp.to_string());
+        assert_eq!(
+            serde_json::from_value::<holtburger_core::ClientProgressionQuote>(serialized).unwrap(),
+            quote
+        );
+    }
 
     #[test]
     fn appearance_projection_exposes_only_helmet_and_cloak() {

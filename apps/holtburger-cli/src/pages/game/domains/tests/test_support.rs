@@ -143,6 +143,7 @@ pub(super) fn seed_navigation_motion_model(state: &mut GameState) {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         },
     );
 }

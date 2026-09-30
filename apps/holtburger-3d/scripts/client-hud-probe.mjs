@@ -1687,6 +1687,12 @@ export async function probeClientHud(
 				},
 		viteUrl,
 	);
+	const characterSheet = await probeCharacterSheet(
+		client,
+		evaluateExpression,
+		delay,
+		2,
+	);
 
 	const clientHud = {
 		settingsWindow,
@@ -1734,6 +1740,7 @@ export async function probeClientHud(
 	};
 	assertClientHudHarness(clientHud);
 	return {
+		characterSheet,
 		clientTheme: theme,
 		clientInspection,
 		clientTargeting: targeting,
@@ -1754,6 +1761,338 @@ export async function probeClientHud(
 			viewport: runtime.viewport,
 		},
 	};
+}
+
+/** Focused browser check for the production Character panel and session quote path. */
+export async function probeCharacterSheet(
+	client,
+	evaluateExpression,
+	delay,
+	characterGuid = 1,
+) {
+	await evaluateExpression(
+		client,
+		`(() => {
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const target = { Attribute: 'StrengthAttr' };
+		const otherTarget = { Attribute: 'EnduranceAttr' };
+		const formula = { modifiers: { contributions: [{ operation: 'additive', channel: 'ordinary', effective: { spellId: 123, layer: 0 }, overridden: [{ spellId: 456, layer: 0 }], value: 2 }], multiplier: 1, additive: 2 }, finalization: { before_rounding: 13, rounded: 13, minimum: 1, result: 13 } };
+		const inheritedFormula = { first: { attribute: 'StrengthAttr', base: 11, effective: 13, modifiers: formula.modifiers.contributions }, second: { attribute: 'EnduranceAttr', base: 11, effective: 11, modifiers: [] }, divisor: 3, base_before_rounding: 22 / 3, effective_before_rounding: 24 / 3, base_result: 7, effective_result: 8 };
+		const plain = { modifiers: { contributions: [], multiplier: 1, additive: 0 }, finalization: { before_rounding: 11, rounded: 11, minimum: 1, result: 11 } };
+		const contribution = (spellId, value) => ({ contributions: [{ operation: 'additive', channel: 'ordinary', effective: { spellId, layer: 1 }, overridden: [], value }], multiplier: 1, additive: value });
+		const sheet = {
+			character: ${characterGuid},
+			name: 'Delulu', title: 'Adventurer', maximumLuminance: '1000000',
+			level: { level: 200, currentXp: '9007199254740993', unspentXp: '9007199254740993', unspentSkillPoints: 2, availableLuminance: '250000', nextLevelXp: '9007199254741993', xpIntoLevel: '100', xpForNextLevel: '1000' },
+			attributes: [
+				{ attr_type: 'StrengthAttr', ranks: 1, start: 10, spent_xp: 100, next_rank_xp: 300, base: 11, current: 13, breakdown: formula },
+				{ attr_type: 'EnduranceAttr', ranks: 1, start: 10, spent_xp: 100, next_rank_xp: 300, base: 11, current: 11, breakdown: plain },
+				{ attr_type: 'QuicknessAttr', ranks: 1, start: 10, spent_xp: 100, next_rank_xp: 300, base: 11, current: 11, breakdown: plain },
+			],
+			vitals: [
+				{ vital_type: 'Health', ranks: 4, start: 100, spent_xp: 1000, next_rank_xp: null, base: 100, buffed_max: 102, current: 70, breakdown: { formula: null, modifiers: contribution(2305, 2), finalization: { before_rounding: 102, rounded: 102, minimum: 0, result: 102 } } },
+				{ vital_type: 'Stamina', ranks: 0, start: 90, spent_xp: 0, next_rank_xp: null, base: 90, buffed_max: 90, current: 40, breakdown: { formula: null, modifiers: plain.modifiers, finalization: { before_rounding: 90, rounded: 90, minimum: 0, result: 90 } } },
+				{ vital_type: 'Mana', ranks: 0, start: 80, spent_xp: 0, next_rank_xp: null, base: 80, buffed_max: 70, current: 30, breakdown: { formula: null, modifiers: contribution(2307, -10), finalization: { before_rounding: 70, rounded: 70, minimum: 0, result: 70 } } },
+			],
+			skills: [{ stat: { skill_type: 'HeavyWeapons', ranks: 1, init: 0, spent_xp: 100, next_rank_xp: 200, base: 10, current: 13, training: 'Specialized', trained_cost: 2, specialized_cost: 4, breakdown: { formula: { Applied: inheritedFormula }, base_bonuses: [], current_bonuses: [], vitae: 0.9, modifiers: contribution(2306, 4), wide_modifiers: [], wide_additive_rounded: 0, finalization: { before_rounding: 13, rounded: 13, minimum: 0, result: 13 } } }, description: 'A specialized skill', availableInEor: true }], armor: 1, vitae: 0.9,
+			resistances: { slash: 0.9, pierce: 1, bludgeon: 1, fire: 1, cold: 1.2, acid: 1, electric: 1, nether: 1 },
+			guardedTargets: [],
+		};
+		globalThis.__CHARACTER_SHEET_PROBE_BASE__ = sheet;
+		harness.setCharacterSheet(sheet);
+		const effect = (spellId, kind, statModValue, remainingSeconds = null, layer = 1) => ({ key: { spellId, layer }, spellCategory: 7, powerLevel: 5, kind, remainingSeconds, statModType: 1, statModKey: 1, statModValue });
+		harness.setEnchantments({
+			instances: [effect(123, 'beneficial', 2, 90, 0), effect(456, 'beneficial', 1, 120, 0), effect(2303, 'beneficial', 0.9), effect(2304, 'beneficial', 0.9), effect(2305, 'beneficial', 2), effect(2306, 'beneficial', 4), effect(2307, 'harmful', -10), effect(666, 'vitae', 0.9)],
+			groups: [
+				{ affectedStat: { kind: 'attribute', key: 1 }, statName: 'Strength', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 123, layer: 0 }, overridden: [{ spellId: 456, layer: 0 }] },
+				{ affectedStat: { kind: 'armor' }, operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2303, layer: 1 }, overridden: [] },
+				{ affectedStat: { kind: 'floatProperty', key: 64 }, statName: 'ResistSlash', operation: 'multiplicative', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2304, layer: 1 }, overridden: [] },
+				{ affectedStat: { kind: 'vital', key: 1 }, statName: 'MaxHealth', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2305, layer: 1 }, overridden: [] },
+				{ affectedStat: { kind: 'vital', key: 3 }, statName: 'MaxMana', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2307, layer: 1 }, overridden: [] },
+				{ affectedStat: { kind: 'skill', key: 44 }, statName: 'HeavyWeapons', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2306, layer: 1 }, overridden: [] },
+			],
+		});
+		const request = harness.inventoryDragCommands().filter((entry) => entry.command === 'evaluate_client_progression').at(-1);
+		if (!request) throw new Error('Character sheet did not request shared quotes.');
+		harness.replyProgression({ requestId: request.args.requestId, evaluations: [{
+			intent: { Raise: { target, ranks: 1 } },
+			result: { Ok: { scope_id: 9, quote: { character: ${characterGuid}, intent: { Raise: { target, ranks: 1 } }, target_state: { training: null, ranks: 1, spent_xp: 100 }, resulting_ranks: 2, xp_spent: 200, credits_spent: 0, available_xp: '9007199254740993', available_credits: 2 } } },
+		}, {
+			intent: { Raise: { target: otherTarget, ranks: 10 } },
+			result: { Ok: { scope_id: 9, quote: { character: ${characterGuid}, intent: { Raise: { target: otherTarget, ranks: 10 } }, target_state: { training: null, ranks: 1, spent_xp: 100 }, resulting_ranks: 11, xp_spent: 1000, credits_spent: 0, available_xp: '9007199254740993', available_credits: 2 } } },
+		}].flatMap((evaluation) => {
+			const intent = { RaiseMax: { target: evaluation.intent.Raise.target } };
+			return [evaluation, { intent, result: { Ok: { ...evaluation.result.Ok, quote: { ...evaluation.result.Ok.quote, intent } } } }];
+		}) });
+		document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Character"]').click();
+	})()`,
+	);
+	await delay(250);
+	const first = await evaluateExpression(
+		client,
+		`(async () => {
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
+		if (!panel || !panel.textContent.includes('9,007,199,254,740,993')) throw new Error('Character panel lost exact XP.');
+		if (panel.querySelector('.character-name')?.textContent !== 'Delulu' || panel.querySelector('.character-title')?.textContent !== 'Adventurer') throw new Error('Character identity is missing.');
+		if (panel.querySelector('progress[aria-label="Level experience"]')?.value !== 10 || panel.querySelector('progress[aria-label="Luminance capacity"]')?.value !== 25) throw new Error('Character progress bars did not reflect authoritative balances.');
+		const headings = [...panel.querySelectorAll(':scope > h2')].map((heading) => heading.textContent.trim());
+		if (!headings.includes('Specialized') || headings.includes('Trained') || headings.includes('Skills')) throw new Error('Specialized skills did not have their own major section.');
+		if (!panel.textContent.includes('Armor') || !panel.textContent.includes('Slash resistance') || !panel.textContent.includes('Vitae penalty')) throw new Error('Character defenses or vitae are missing.');
+		const effectRow = (label) => [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes(label));
+		for (const [label, value] of [['Slash resistance', '10%'], ['Pierce resistance', '0%'], ['Cold resistance', '-20%']]) {
+			const resistance = effectRow(label)?.querySelector('summary strong');
+			if (resistance?.textContent !== value || !resistance.title.includes('Excludes armor')) throw new Error(label + ' did not explain its resistance percentage.');
+		}
+		const strength = effectRow('Strength');
+		if (!strength?.querySelector('summary > span .upgrade-indicator') || !effectRow('Endurance')?.querySelector('summary > span .upgrade-indicator') || effectRow('Quickness')?.querySelector('.upgrade-indicator')) throw new Error('Upgrade triangles did not match affordable quotes.');
+		const tinted = (label, tone) => {
+			const effect = effectRow(label)?.querySelector('.stat-effect');
+			return effect?.classList.contains(tone) && getComputedStyle(effect).color !== getComputedStyle(effect.parentElement).color;
+		};
+		if (!tinted('Strength', 'increased') || !tinted('Max Health', 'increased') || !tinted('Heavy Weapons', 'increased') || !tinted('Max Mana', 'decreased')) throw new Error('Effective stat values did not receive their theme tints.');
+		if (effectRow('Max Stamina')?.querySelector('.stat-effect')) throw new Error('Unchanged maximum vital was tinted.');
+		for (const [label, base, effective, current] of [['Max Health', 100, 102, 70], ['Max Stamina', 90, 90, 40], ['Max Mana', 80, 70, 30]]) {
+			const summary = effectRow(label)?.querySelector('summary')?.textContent;
+			if (!summary?.includes(String(base)) || (base !== effective && !summary.includes('→ ' + effective)) || summary.includes(String(current))) throw new Error(label + ' did not show its maximum instead of the current pool.');
+		}
+		const disclosure = (label) => getComputedStyle(effectRow(label).querySelector('summary'), '::after').content;
+		if (!['Strength', 'Quickness', 'Armor'].every((label) => disclosure(label).includes('⌄'))) throw new Error('Character rows did not share the chevron indicator.');
+		const upgradeChevron = getComputedStyle(strength.querySelector('summary'), '::after');
+		const plainChevron = getComputedStyle(effectRow('Quickness').querySelector('summary'), '::after');
+		if (upgradeChevron.color !== plainChevron.color || upgradeChevron.textShadow !== plainChevron.textShadow) throw new Error('Upgradeable rows did not keep the plain chevron.');
+		const triangle = strength.querySelector('.upgrade-indicator');
+		if (triangle.textContent !== '▲' || getComputedStyle(triangle).color === getComputedStyle(triangle.parentElement).color || getComputedStyle(triangle).textShadow === 'none') throw new Error('Upgrade triangle did not glow beside the stat name.');
+		if (strength.open || getComputedStyle(strength, '::details-content').blockSize !== '0px') throw new Error('Collapsed Character actions remain visible.');
+		if (!CSS.supports('interpolate-size: allow-keywords') || !getComputedStyle(strength, '::details-content').transitionProperty.includes('block-size')) throw new Error('Character drawer does not have a supported expansion transition.');
+		for (const label of ['Strength', 'Health', 'Heavy Weapons', 'Armor', 'Slash resistance', 'Vitae penalty']) {
+			const effect = effectRow(label);
+			if (!effect) throw new Error(label + ' row is missing.');
+			effect.open = true;
+			if (panel.querySelectorAll('details.stat-row[open]').length !== 1) throw new Error('Character rows did not behave as a single-selection accordion.');
+		}
+		if (!effectRow('Strength').textContent.includes(': +2') || effectRow('Strength').textContent.includes('Overridden:') || effectRow('Strength').textContent.includes('1:30')) throw new Error('Stat row did not show only its applied enchantment and bonus.');
+		if (!effectRow('Heavy Weapons').textContent.includes('Formula: (Strength + Endurance) ÷ 3') || !effectRow('Heavy Weapons').textContent.includes('(via Strength): +2') || !effectRow('Heavy Weapons').textContent.includes('Vitae penalty: ×0.9') || effectRow('Heavy Weapons').textContent.includes('Starting value: 0') || effectRow('Heavy Weapons').querySelector('summary').textContent.includes('Specialized') || effectRow('Heavy Weapons').textContent.includes('A specialized skill')) throw new Error('Specialized skill row repeated its section label or showed excess detail.');
+		if (!effectRow('Health').textContent.includes('+2') || !effectRow('Heavy Weapons').textContent.includes('+4')) throw new Error('Vital or skill effect values are missing from their rows.');
+		if (!effectRow('Armor').textContent.includes('+0.9') || !effectRow('Slash resistance').textContent.includes('×0.9')) throw new Error('Applied effect values are missing from defense rows.');
+		const plainDefense = effectRow('Pierce resistance');
+		plainDefense.open = true;
+		if (!plainDefense.textContent.includes('No active effects')) throw new Error('A plain resistance row has no clear empty state.');
+		const row = strength;
+		row.querySelector('summary').click();
+		if (!row.open || plainDefense.open) throw new Error('Selecting a stat did not reveal its drawer and close the previous one.');
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		if (getComputedStyle(row.querySelector('summary'), '::after').transform === 'none') throw new Error('Expanded chevron did not rotate.');
+		row.querySelector('summary').click();
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		if (getComputedStyle(row.querySelector('summary'), '::after').transform !== 'none') throw new Error('Collapsed chevron did not return to its resting position.');
+		row.querySelector('summary').click();
+		const controls = [...row.querySelectorAll('.actions button')];
+		const controlRects = controls.map((control) => control.getBoundingClientRect());
+		if (controlRects.length !== 1 || controls[0].title.includes('Raise maximum') || controlRects.some((rect) => rect.top !== controlRects[0].top || rect.right > row.getBoundingClientRect().right)) throw new Error('Unavailable or duplicate one-rank controls remained visible.');
+		const button = [...row.querySelectorAll('button')].find((candidate) => candidate.textContent.includes('+1'));
+		if (!button || button.disabled) throw new Error('The one-rank quote is unavailable.');
+		// Exercise live inherited palette changes and independent panel overrides on production DOM.
+		const originalStyle = panel.getAttribute('style');
+		const xpBar = panel.querySelector('progress[aria-label="Level experience"]');
+		const lumBar = panel.querySelector('progress[aria-label="Luminance capacity"]');
+		const readPaint = () => [
+			getComputedStyle(panel.querySelector('.level-emblem')).color,
+			getComputedStyle(xpBar).color,
+			getComputedStyle(lumBar).color,
+			getComputedStyle(xpBar, '::-webkit-progress-bar').backgroundColor,
+			getComputedStyle(strength.querySelector('summary')).backgroundColor,
+			getComputedStyle(button).backgroundColor,
+			getComputedStyle(effectRow('Strength').querySelector('.stat-effect')).color,
+			getComputedStyle(effectRow('Max Mana').querySelector('.stat-effect')).color,
+			getComputedStyle(triangle).color,
+		];
+		try {
+			const before = readPaint();
+			for (const [token, value] of [['accent', '#123456'], ['success', '#234567'], ['danger', '#345678'], ['well', '#456789'], ['text', '#56789a']]) panel.style.setProperty('--ui-color-' + token, value);
+			// Remove the standard theme's intentional green to verify the generic success default.
+			panel.style.setProperty('--ui-character-upgrade-color', 'initial');
+			const after = readPaint();
+			if (after.some((value, index) => value === before[index]) || after[8] !== after[2]) throw new Error('Character paint did not follow its inherited palette.');
+			for (const token of ['xp', 'luminance', 'buff', 'debuff', 'upgrade']) panel.style.setProperty('--ui-character-' + token + '-color', '#ab12cd');
+			const overridden = readPaint();
+			if (![1, 2, 6, 7, 8].every((index) => overridden[index] === 'rgb(171, 18, 205)') || getComputedStyle(button.querySelector('.action-triangle')).color !== overridden[8]) throw new Error('Independent character color overrides were ignored.');
+		} finally {
+			if (originalStyle === null) panel.removeAttribute('style'); else panel.setAttribute('style', originalStyle);
+		}
+		button.click(); button.click();
+		const other = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.textContent.includes('Endurance'));
+		other.querySelector('summary').click();
+		const otherTen = [...other.querySelectorAll('button')].find((candidate) => candidate.textContent.includes('+10'));
+		if (other.querySelectorAll('.actions button').length !== 1 || otherTen?.title.includes('Raise maximum')) throw new Error('Duplicate ten-rank maximum control remained visible.');
+		if (!otherTen || otherTen.disabled) throw new Error('Another target was locked or its ten-rank quote was lost.');
+		otherTen.focus();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		if (other.querySelector('.action-cost')?.textContent !== '1,000 XP') throw new Error('Focused action did not show its quoted cost.');
+		otherTen.click();
+		const submissions = harness.inventoryDragCommands().filter((entry) => entry.command === 'submit_client_progression');
+		if (submissions.length !== 2 || submissions[0].args.quote.quote.xp_spent !== 200 || submissions[1].args.quote.quote.xp_spent !== 1000) throw new Error('Repeat click or quoted spend was incorrect.');
+		document.querySelector('[aria-label="Close Character"]').click();
+		document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Character"]').click();
+		return { exactXp: true, immediateSubmissions: submissions.length };
+	})()`,
+	);
+	await delay(250);
+	const reopened = await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
+		const row = panel?.querySelector('details.stat-row');
+		if (row?.querySelector('.upgrade-indicator')) throw new Error('Pending stat still advertises an available upgrade.');
+		if (row?.querySelector('.actions') || row?.querySelector('.action-status')) throw new Error('Pending stat retained its leveling control group.');
+		row.open = true;
+		if (!row.textContent.includes('Starting value: 10') || !row.textContent.includes(': +2') || row.textContent.includes('Final rounding:') || row.textContent.includes('Overridden:') || row.textContent.includes('Purchased ranks:')) throw new Error('Expanded details did not stay focused on starting value and applied enchantments.');
+		return { ...${JSON.stringify(first)}, pendingAfterReopen: true, expanded: true };
+	})()`,
+	);
+	await evaluateExpression(
+		client,
+		`(() => {
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const previous = globalThis.__CHARACTER_SHEET_PROBE_BASE__;
+		const modifiers = { contributions: [], multiplier: 1, additive: 0 };
+		const contribution = (spellId, value) => ({ contributions: [{ operation: 'additive', channel: 'ordinary', effective: { spellId, layer: 1 }, overridden: [], value }], multiplier: 1, additive: value });
+		const finalization = (result) => ({ before_rounding: result, rounded: result, minimum: 0, result });
+		const skillBreakdown = { formula: 'NoFormula', base_bonuses: [], current_bonuses: [], vitae: 0.8, modifiers, wide_modifiers: [], wide_additive_rounded: 0, finalization: finalization(9) };
+		const sheet = {
+			...previous,
+			level: { ...previous.level, unspentXp: '100' },
+			attributes: previous.attributes.map((stat) => stat.attr_type === 'StrengthAttr' ? { ...stat, current: 11, breakdown: { modifiers, finalization: { ...finalization(11), minimum: 1 } } } : stat.attr_type === 'QuicknessAttr' ? { ...stat, current: 9, breakdown: { modifiers: contribution(2308, -2), finalization: { ...finalization(9), minimum: 1 } } } : stat),
+			armor: 321,
+			resistances: { ...previous.resistances, slash: 0.75 },
+			vitae: 0.8,
+			vitals: [{ vital_type: 'Health', ranks: 4, start: 100, spent_xp: 1000, next_rank_xp: null, base: 104, buffed_max: 104, current: 70, breakdown: { formula: null, modifiers, finalization: finalization(104) } }],
+			skills: [{
+				stat: { skill_type: 'HeavyWeapons', ranks: 1, init: 0, spent_xp: 100, next_rank_xp: 200, base: 11, current: 9, training: 'Trained', trained_cost: 2, specialized_cost: 4, breakdown: skillBreakdown },
+				description: 'A trained skill', availableInEor: true,
+			}, {
+				stat: { skill_type: 'MeleeDefense', ranks: 0, init: 0, spent_xp: 0, next_rank_xp: null, base: 0, current: 0, training: 'Untrained', trained_cost: 2, specialized_cost: 4, breakdown: { ...skillBreakdown, formula: 'Unusable', finalization: finalization(0) } },
+				description: 'An untrained skill', availableInEor: true,
+			}],
+		};
+		harness.setCharacterSheet(sheet);
+		harness.setEnchantments({ instances: [{ key: { spellId: 666, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'vitae', remainingSeconds: null, statModType: 1, statModKey: 1, statModValue: 0.8 }, { key: { spellId: 2308, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'harmful', remainingSeconds: null, statModType: 1, statModKey: 3, statModValue: -2 }], groups: [{ affectedStat: { kind: 'attribute', key: 3 }, statName: 'Quickness', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2308, layer: 1 }, overridden: [] }] });
+		const request = harness.inventoryDragCommands().filter((entry) => entry.command === 'evaluate_client_progression').at(-1);
+		if (!request) throw new Error('Resource change did not request fresh quotes.');
+		const quickness = { Attribute: 'QuicknessAttr' };
+		const health = { Vital: 'Health' };
+		const heavy = { Skill: 'HeavyWeapons' };
+		const rankCap = (intent) => ({ intent, result: { Err: { World: 'RankCap' } } });
+		harness.replyProgression({ requestId: request.args.requestId, evaluations: [
+			{ intent: { Raise: { target: quickness, ranks: 1 } }, result: { Err: { World: { InsufficientXp: { required: 200, available: '100' } } } } },
+			rankCap({ Raise: { target: health, ranks: 1 } }),
+			rankCap({ Raise: { target: health, ranks: 10 } }),
+			rankCap({ RaiseMax: { target: health } }),
+			{ intent: { Train: { skill: 'MeleeDefense' } }, result: { Ok: { scope_id: 9, quote: { character: ${characterGuid}, intent: { Train: { skill: 'MeleeDefense' } }, target_state: { training: 'Untrained', ranks: 0, spent_xp: 0 }, resulting_ranks: 0, xp_spent: 0, credits_spent: 2, available_xp: '100', available_credits: 2 } } } },
+			{ intent: { RaiseMax: { target: heavy } }, result: { Ok: { scope_id: 9, quote: { character: ${characterGuid}, intent: { RaiseMax: { target: heavy } }, target_state: { training: 'Trained', ranks: 1, spent_xp: 100 }, resulting_ranks: 5, xp_spent: 100, credits_spent: 0, available_xp: '100', available_credits: 2 } } } },
+		] });
+	})()`,
+	);
+	await delay(250);
+	const actions = await evaluateExpression(
+		client,
+		`(async () => {
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
+		const slash = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes('Slash resistance'));
+		if (!panel.textContent.includes('321') || slash?.querySelector('summary strong')?.textContent !== '25%' || !panel.textContent.includes('20%')) throw new Error('External defense or vitae changes did not refresh the open Character panel.');
+		const headings = [...panel.querySelectorAll(':scope > h2')].map((heading) => heading.textContent.trim());
+		if (!headings.includes('Trained') || headings.includes('Specialized') || headings.includes('Skills')) throw new Error('Trained skills did not have their own major section.');
+		const armor = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes('Armor'));
+		armor.open = true;
+		if (!armor.textContent.includes('No active effects')) throw new Error('Removed enchantments remained in the Character panel.');
+		const untrained = panel.querySelector('details.skill-group');
+		if (!untrained || untrained.open || !untrained.querySelector('summary > h2')?.textContent.includes('Untrained')) throw new Error('Untrained skills did not have a collapsed major section header.');
+		untrained.open = true;
+		const row = (name) => [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.textContent.includes(name));
+		if (row('Health').querySelector('.rank-cap')?.textContent !== 'Max' || row('Quickness').querySelector('.rank-cap') || row('Melee Defense').querySelector('.rank-cap') || row('Heavy Weapons').querySelector('.rank-cap')) throw new Error('Rank-cap marker confused capped vitals with unaffordable or untrained stats.');
+		if (row('Heavy Weapons').querySelector('summary').textContent.includes('Trained') || row('Melee Defense').querySelector('summary').textContent.includes('Untrained')) throw new Error('Skill row repeated its section label.');
+		const button = (stat, label) => [...row(stat).querySelectorAll('button')].find((candidate) => candidate.textContent.includes(label));
+		for (const label of ['Quickness', 'Heavy Weapons']) {
+			const effect = row(label).querySelector('.stat-effect');
+			if (!effect?.classList.contains('decreased') || getComputedStyle(effect).color === getComputedStyle(effect.parentElement).color) throw new Error(label + ' lost its decreased-value theme tint.');
+		}
+		if (row('Strength').querySelector('.stat-effect') || row('Max Health').querySelector('.stat-effect') || row('Melee Defense').querySelector('.stat-effect')) throw new Error('Unchanged stat values were tinted.');
+		if (row('Quickness').querySelector('.upgrade-indicator') || row('Health').querySelector('.upgrade-indicator') || !row('Melee Defense').querySelector('.upgrade-indicator') || !row('Heavy Weapons').querySelector('.upgrade-indicator')) throw new Error('Upgrade triangles did not follow refreshed quotes.');
+		row('Quickness').open = true;
+		if (row('Quickness').querySelector('.actions') || row('Quickness').querySelector('.action-status')) throw new Error('Unaffordable stat retained its leveling control group.');
+		row('Health').open = true;
+		if (row('Health').querySelector('.actions') || row('Health').querySelector('.action-status')) throw new Error('Capped vital retained its leveling control group.');
+		row('Melee Defense').open = true;
+		const train = button('Melee Defense', 'Train');
+		if (train?.getClientRects().length === 0) throw new Error('Selected skill did not reveal its Train action.');
+		if (!train || train.disabled || row('Melee Defense').querySelector('.action-cost')?.textContent !== '2 credits') throw new Error('Train did not show its quoted credit cost.');
+		row('Heavy Weapons').open = true;
+		const max = [...row('Heavy Weapons').querySelectorAll('button')].find((candidate) => candidate.title.includes('Raise maximum'));
+		if (!max || max.disabled || !max.textContent.includes('+4') || !max.querySelector('.action-triangle')) throw new Error('Max quote did not show its rank gain and triangle.');
+		max.dispatchEvent(new PointerEvent('pointerenter'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		if (row('Heavy Weapons').querySelector('.action-cost')?.textContent !== '100 XP') throw new Error('Hovered action did not show its quoted XP cost.');
+		train.click(); max.click();
+		const submissions = harness.inventoryDragCommands().filter((entry) => entry.command === 'submit_client_progression');
+		if (submissions.length !== 4 || submissions[2].args.quote.quote.credits_spent !== 2 || submissions[3].args.quote.quote.xp_spent !== 100) throw new Error('Train or Max did not submit the displayed quote once.');
+		harness.replyProgressionFeedback({ DispatchFailed: { intent: { Train: { skill: 'MeleeDefense' } }, message: 'synthetic send failure' } });
+		return { ...${JSON.stringify(reopened)}, lowXp: true, rankCap: true, trainAndMax: true };
+	})()`,
+	);
+	await delay(250);
+	const failed = await evaluateExpression(
+		client,
+		`(() => {
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
+		const train = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.textContent.includes('Melee Defense'))?.querySelector('.action-status');
+		if (!panel.textContent.includes('synthetic send failure') || !train?.textContent.includes('Awaiting')) throw new Error('Ambiguous send failure did not retain its row guard and feedback.');
+		const feedback = panel.querySelector('.feedback');
+		panel.style.setProperty('--ui-color-warning', '#ab12cd');
+		if (getComputedStyle(feedback).color !== 'rgb(171, 18, 205)') throw new Error('Character feedback ignored the warning palette.');
+		panel.style.removeProperty('--ui-color-warning');
+		const neutral = globalThis.__CHARACTER_SHEET_PROBE_BASE__;
+		harness.setCharacterSheet({ ...neutral, name: "Renamed", title: null, maximumLuminance: null, level: { ...neutral.level, xpForNextLevel: "0", xpIntoLevel: "0" }, vitae: 1, attributes: neutral.attributes.map((stat) => stat.attr_type === 'StrengthAttr' ? { ...stat, next_rank_xp: null } : stat), skills: neutral.skills.map((row) => ({ ...row, stat: { ...row.stat, next_rank_xp: null, breakdown: { ...row.stat.breakdown, vitae: 1 } } })) });
+		return { ...${JSON.stringify(actions)}, sendFailure: true };
+	})()`,
+	);
+	await delay(250);
+	const neutral = await evaluateExpression(
+		client,
+		`(async () => {
+		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
+		if (panel.querySelector('.character-name')?.textContent !== 'Renamed' || panel.querySelector('.character-title')) throw new Error('Character identity did not refresh.');
+		if (panel.querySelector('progress[aria-label="Level experience"]') || panel.querySelector('progress[aria-label="Luminance capacity"]')) throw new Error('Capped experience or unknown luminance capacity is misleading.');
+		for (const label of ['Strength', 'Max Health', 'Heavy Weapons']) {
+			const row = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes(label));
+			if (row?.querySelector('.rank-cap')?.textContent !== 'Max' || row.querySelector('.upgrade-indicator')) throw new Error(label + ' did not indicate its rank cap after an external update.');
+		}
+		if ([...panel.querySelectorAll('details.stat-row > summary')].some((summary) => summary.textContent.includes('Vitae penalty'))) throw new Error('Zero vitae penalty still has a defense row.');
+		const skill = [...panel.querySelectorAll('details.stat-row')].find((row) => row.querySelector('summary')?.textContent.includes('Heavy Weapons'));
+		if (skill?.textContent.includes('Vitae penalty:')) throw new Error('Neutral vitae multiplier still appears in skill details.');
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const base = globalThis.__CHARACTER_SHEET_PROBE_BASE__;
+		for (const [level, capacity, visible] of [[199, '1000000', false], [200, null, false], [200, '0', false], [200, '1000000', true]]) {
+			harness.setCharacterSheet({ ...base, maximumLuminance: capacity, level: { ...base.level, level, xpForNextLevel: '0', xpIntoLevel: '0' } });
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			const summary = panel.querySelector('.progression-summary');
+			if (summary.textContent.includes('Luminance') !== visible || Boolean(summary.querySelector('progress[aria-label="Luminance capacity"]')) !== visible) throw new Error('Luminance visibility did not follow level and capacity.');
+			if (summary.querySelector('progress[aria-label="Level experience"]') || !summary.textContent.includes('9,007,199,254,740,993')) throw new Error('Capped summary did not retain spendable XP without level progress.');
+		}
+		if (!globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.retireCharacterSheet(globalThis.__CHARACTER_SHEET_PROBE_BASE__)) throw new Error('Retired character details survived the exit boundary.');
+		return { ...${JSON.stringify(failed)}, zeroVitaeHidden: true };
+	})()`,
+	);
+	await delay(250);
+	return await evaluateExpression(
+		client,
+		`(() => {
+		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
+		if (panel && !panel.textContent.includes('Waiting for character details')) throw new Error('Retired character details remained visible in the panel.');
+		return { ...${JSON.stringify(neutral)}, retired: true };
+	})()`,
+	);
 }
 
 function assertClientHudHarness(evidence) {

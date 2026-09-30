@@ -44,6 +44,10 @@ export const CLIENT_TUNING = {
 	},
 	/** Maximum publication cadence for asynchronously prepared spell artwork. */
 	spells: { iconDisplayIntervalMs: 100 },
+	characterSheet: {
+		/** Mounted sheet sampling cadence, independent of host stat publication. */
+		displayIntervalMs: 150,
+	},
 	/** Shared audio policy selected explicitly by the client composition root. */
 	audio: SHARED_FRONTEND_TUNING.audio,
 	diagnostics: CLIENT_DIAGNOSTICS,

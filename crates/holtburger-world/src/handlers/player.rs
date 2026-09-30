@@ -110,6 +110,8 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
+            let augmentations = state.player_skill_augmentations();
+            let vitae = state.player_vitae();
             state.player.update_skill(
                 SkillUpdateParams {
                     skill_id: *skill,
@@ -118,7 +120,11 @@ pub(crate) fn handle_message(
                     init: *init,
                     xp: *xp,
                     xp_table: &state.xp_table,
-                    skill_table: &state.skill_table,
+                    calculation: crate::player::stats_calc::SkillCalculationContext {
+                        table: &state.skill_table,
+                        augmentations,
+                        vitae,
+                    },
                 },
                 events,
             );
@@ -134,6 +140,8 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
+            let augmentations = state.player_skill_augmentations();
+            let vitae = state.player_vitae();
             state.player.update_skill(
                 SkillUpdateParams {
                     skill_id: *skill,
@@ -142,7 +150,11 @@ pub(crate) fn handle_message(
                     init: *init,
                     xp: *xp,
                     xp_table: &state.xp_table,
-                    skill_table: &state.skill_table,
+                    calculation: crate::player::stats_calc::SkillCalculationContext {
+                        table: &state.skill_table,
+                        augmentations,
+                        vitae,
+                    },
                 },
                 events,
             );
@@ -166,6 +178,7 @@ pub(crate) fn handle_message(
                     current: *current,
                     xp: *xp,
                     xp_table: &state.xp_table,
+                    secondary_attribute_table: &state.secondary_attribute_table,
                 },
                 events,
             );
@@ -189,6 +202,7 @@ pub(crate) fn handle_message(
                     current: *current,
                     xp: *xp,
                     xp_table: &state.xp_table,
+                    secondary_attribute_table: &state.secondary_attribute_table,
                 },
                 events,
             );
@@ -219,10 +233,16 @@ pub(crate) fn handle_event(
                 data,
                 &state.xp_table,
                 &state.skill_table,
+                &state.secondary_attribute_table,
                 events,
             );
+            // The entity's properties carry augmentation inputs. Install them before the
+            // first derived-stat publication so the initial sheet matches later refreshes.
+            state.apply_player_description_world_state(data);
             state.emit_player_derived_stats(events);
-            false
+            state.emit_player_info(events);
+            state.emit_level_info(events);
+            true
         }
         GameEvent::MagicUpdateEnchantment(data) => {
             let handled = state

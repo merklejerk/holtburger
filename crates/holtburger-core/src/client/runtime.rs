@@ -130,13 +130,15 @@ impl ClientRuntime {
     }
 
     pub(super) fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
-        self.handle_runtime_world_event_with_context(event, false);
+        self.handle_runtime_world_event_with_context(event, false, false);
+        self.finish_character_world_events(self.world_event_changes_character_sheet(event));
     }
 
     pub(super) fn handle_runtime_world_event_with_context(
         &mut self,
         event: &WorldEvent,
         teleport_batch: bool,
+        suppress_vital_projection: bool,
     ) {
         match event {
             WorldEvent::EntityDespawned { guid, .. } => self.entity_cue_inbox.remove(*guid),
@@ -184,7 +186,7 @@ impl ClientRuntime {
             }
             _ => {}
         }
-        self.emit_world_view_projection(event);
+        self.project_world_event(event, suppress_vital_projection);
     }
 
     pub async fn run(&mut self) -> Result<()> {

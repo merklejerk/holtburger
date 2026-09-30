@@ -13,6 +13,7 @@ import {
 	clientLocalSettingsDocumentV10Schema,
 	clientLocalSettingsDocumentV11Schema,
 	clientLocalSettingsDocumentV12Schema,
+	clientLocalSettingsDocumentV13Schema,
 	clientUserSettingsSchema,
 	parseClientCharacterSettings,
 	parseClientLocalSettingsDocument,
@@ -36,7 +37,7 @@ const migratedStatusTray = {
 
 function document() {
 	return {
-		schemaVersion: 12 as const,
+		schemaVersion: 13 as const,
 		user: {
 			window: {
 				normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -55,11 +56,24 @@ function document() {
 
 function versionElevenDocument() {
 	const current = document();
-	const { enchantments, ...hudLayout } = current.user.client.hudLayout;
+	const { characterSheet, enchantments, ...hudLayout } =
+		current.user.client.hudLayout;
+	void characterSheet;
 	void enchantments;
 	return {
 		...current,
 		schemaVersion: 11 as const,
+		user: { ...current.user, client: { ...current.user.client, hudLayout } },
+	};
+}
+
+function versionTwelveDocument() {
+	const current = document();
+	const { characterSheet, ...hudLayout } = current.user.client.hudLayout;
+	void characterSheet;
+	return {
+		...current,
+		schemaVersion: 12 as const,
 		user: { ...current.user, client: { ...current.user.client, hudLayout } },
 	};
 }
@@ -245,7 +259,7 @@ describe("client settings contract", () => {
 	it("accepts and round-trips runtime defaults", () => {
 		const value = document();
 		expect(parseClientLocalSettingsDocument(value)).toEqual(value);
-		expect(clientLocalSettingsDocumentV12Schema.parse(value)).toEqual(value);
+		expect(clientLocalSettingsDocumentV13Schema.parse(value)).toEqual(value);
 	});
 
 	it("persists a rotated status tray and restores its original geometry", () => {
@@ -413,8 +427,9 @@ describe("client settings contract", () => {
 		};
 		expect(clientLocalSettingsDocumentV9Schema.parse(value)).toEqual(value);
 		const migrated = parseClientLocalSettingsDocument(value);
-		const { vendor, statusTray, enchantments, ...preserved } =
+		const { vendor, statusTray, enchantments, characterSheet, ...preserved } =
 			migrated.user.client.hudLayout;
+		void characterSheet;
 		expect(preserved).toEqual(value.user.client.hudLayout);
 		expect(vendor.preferredWidth).toBeGreaterThan(0);
 		expect(vendor.preferredHeight).toBeGreaterThan(0);
@@ -442,8 +457,9 @@ describe("client settings contract", () => {
 		};
 		expect(clientLocalSettingsDocumentV10Schema.parse(value)).toEqual(value);
 		const migrated = parseClientLocalSettingsDocument(value);
-		const { statusTray, enchantments, ...preserved } =
+		const { statusTray, enchantments, characterSheet, ...preserved } =
 			migrated.user.client.hudLayout;
+		void characterSheet;
 		expect(preserved).toEqual(value.user.client.hudLayout);
 		expect(statusTray).toEqual(migratedStatusTray);
 		expect(enchantments).toEqual(document().user.client.hudLayout.enchantments);
@@ -469,9 +485,24 @@ describe("client settings contract", () => {
 		};
 		expect(clientLocalSettingsDocumentV11Schema.parse(value)).toEqual(value);
 		const migrated = parseClientLocalSettingsDocument(value);
-		const { enchantments, ...preserved } = migrated.user.client.hudLayout;
+		const { enchantments, characterSheet, ...preserved } =
+			migrated.user.client.hudLayout;
+		void characterSheet;
 		expect(preserved).toEqual(value.user.client.hudLayout);
 		expect(enchantments).toEqual(document().user.client.hudLayout.enchantments);
+	});
+
+	it("adds character placement to v12 without disturbing edited windows", () => {
+		const previous = versionTwelveDocument();
+		expect(clientLocalSettingsDocumentV12Schema.parse(previous)).toEqual(
+			previous,
+		);
+		const migrated = parseClientLocalSettingsDocument(previous);
+		const { characterSheet, ...preserved } = migrated.user.client.hudLayout;
+		expect(preserved).toEqual(previous.user.client.hudLayout);
+		expect(characterSheet).toEqual(
+			document().user.client.hudLayout.characterSheet,
+		);
 	});
 
 	it("shrinks the historical default character height after moving its icons", () => {
@@ -521,8 +552,8 @@ describe("client settings contract", () => {
 			parseClientLocalSettingsDocument({ ...document(), extra: true }),
 		).toThrow();
 		expect(() =>
-			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 13 }),
-		).toThrow("Unsupported client settings schema version 13");
+			parseClientLocalSettingsDocument({ ...document(), schemaVersion: 14 }),
+		).toThrow("Unsupported client settings schema version 14");
 	});
 
 	it("rejects malformed fixed collections and duplicate action bar identities", () => {

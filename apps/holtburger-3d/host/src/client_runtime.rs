@@ -193,6 +193,16 @@ pub enum ClientHostCommand {
     QueryClientSpellInspection {
         query: holtburger_core::client::spell_inspection::SpellInspectionQuery,
     },
+    /// Evaluate a current batch of character advancement intents.
+    EvaluateClientProgression {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        intents: Vec<holtburger_world::progression::ProgressionIntent>,
+    },
+    /// Submit one exact core quote through its character-scoped guard.
+    SubmitClientProgression {
+        quote: holtburger_core::ClientProgressionQuote,
+    },
     /// Query compatibility without executing item use.
     QueryClientItemUseTarget {
         query: holtburger_core::client::item_use::ItemUseTargetQuery,
@@ -323,6 +333,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_item_use",
     "query_client_item_use_target",
     "query_client_spell_inspection",
+    "evaluate_client_progression",
+    "submit_client_progression",
     "start_client",
     "request_client_current_state",
     "select_client_character",
@@ -739,6 +751,22 @@ pub async fn dispatch_client(
             .map_err(application_error),
         QueryClientSpellInspection { query } => runtime
             .send_command(ClientCommand::QuerySpellInspection(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        EvaluateClientProgression {
+            request_id,
+            intents,
+        } => runtime
+            .send_command(ClientCommand::EvaluateProgression {
+                request_id,
+                intents,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientProgression { quote } => runtime
+            .send_command(ClientCommand::SubmitProgression(quote))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

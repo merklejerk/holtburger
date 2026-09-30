@@ -32,6 +32,8 @@
 	import type { FrameRates } from "../app/frame-rate-sampler";
 	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
+	import ClientCharacterSheetPanel from "./ClientCharacterSheetPanel.svelte";
+	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
 	import ClientStatusTray from "./ClientStatusTray.svelte";
 	import ClientEnchantmentsPanel from "./ClientEnchantmentsPanel.svelte";
 	import { effectiveEnchantmentKinds } from "./client-enchantments-view";
@@ -166,6 +168,8 @@
 		readonly readFrameRates: () => FrameRates | null;
 		/** Lazily retained spell artwork, independent of floating-panel mounts. */
 		readonly spells: ClientSpellServices | null;
+		/** Session-owned character facts and quotes, independent of this panel mount. */
+		readonly characterSheet: ClientCharacterSheetState | null;
 		/** World-resolved active effects with a browser-local countdown anchor. */
 		readonly enchantments:
 			import("./client-lifecycle-session").ClientTimedEnchantments | null;
@@ -278,6 +282,7 @@
 		readFrameRates,
 		readSelectedEntityDisplay,
 		spells,
+		characterSheet,
 		enchantments,
 		inventory,
 		itemSession,
@@ -1002,14 +1007,16 @@
 		{@const panel = activePanel}
 		{#key panel}
 			<ClientHudWindow
-				icon={panel}
+				icon={panel === "characterSheet" ? "training" : panel}
 				title={panel === "inventory"
 					? "Inventory"
 					: panel === "spells"
 						? "Spells"
-						: panel === "settings"
-							? "Settings"
-							: "Client diagnostics"}
+						: panel === "characterSheet"
+							? "Character"
+							: panel === "settings"
+								? "Settings"
+								: "Client diagnostics"}
 				placement={hudLayout[panel]}
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
@@ -1023,6 +1030,12 @@
 								castEnabled={combatEnabled && combatMode === "magic"}
 								{onCastSpell}
 							/>{/key}{/if}
+				{:else if panel === "characterSheet"}
+					{#if characterSheet !== null}<ClientCharacterSheetPanel
+							owner={characterSheet}
+							{spells}
+							{enchantments}
+						/>{/if}
 				{:else if panel === "inventory"}
 					{#if inventory !== null && itemInteractions !== null}
 						{#key inventory}

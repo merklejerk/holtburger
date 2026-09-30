@@ -243,6 +243,7 @@ mod tests {
                 training: TrainingLevel::Untrained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
             Skill {
                 skill_type: SkillType::WeaponTinkering,
@@ -255,6 +256,7 @@ mod tests {
                 training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         ];
 

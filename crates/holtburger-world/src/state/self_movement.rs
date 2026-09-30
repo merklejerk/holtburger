@@ -404,6 +404,7 @@ mod jump_tests {
                 next_rank_xp: None,
                 base: 100,
                 current: 100,
+                breakdown: Default::default(),
             },
         );
         world.player.skills.insert(
@@ -419,6 +420,7 @@ mod jump_tests {
                 training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
         world.player.vitals.insert(
@@ -432,6 +434,7 @@ mod jump_tests {
                 base: 100,
                 buffed_max: 100,
                 current: stamina,
+                breakdown: Default::default(),
             },
         );
         world

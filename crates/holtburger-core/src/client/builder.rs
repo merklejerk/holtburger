@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use holtburger_content::ContentRepository;
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
 use holtburger_world::{WorldBootstrap, WorldState};
 use std::path::PathBuf;
@@ -68,6 +68,9 @@ impl ClientRuntimeBuilder {
         let skill_table = content
             .read_asset::<SkillTable>("skill table")
             .context("failed to load skill table for client runtime")?;
+        let secondary_attribute_table = content
+            .read_asset::<SecondaryAttributeTable>("secondary attribute table")
+            .context("failed to load secondary attribute table for client runtime")?;
         let spell_table = content
             .read_asset::<SpellTable>("spell table")
             .context("failed to load spell table for client runtime")?;
@@ -86,6 +89,7 @@ impl ClientRuntimeBuilder {
 
         self.world_bootstrap = Some(Arc::new(WorldBootstrap::new(
             skill_table,
+            secondary_attribute_table,
             spell_table,
             xp_table,
             character_titles,
@@ -193,6 +197,7 @@ impl ClientRuntimeBuilder {
         Ok(ClientRuntime {
             session,
             world: WorldState::new(world_bootstrap),
+            progression: Default::default(),
             active_confirmation: None,
             entity_facts: super::entity_facts::EntityFactsPublication::default(),
             projectile_appraisal: None,
@@ -247,6 +252,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let mut client = ClientRuntime {
         session: Session::new_test(),
         world: WorldState::synthetic(),
+        progression: Default::default(),
         active_confirmation: None,
         entity_facts: super::entity_facts::EntityFactsPublication::default(),
         projectile_appraisal: None,
@@ -293,7 +299,8 @@ mod tests {
     use super::*;
     use holtburger_content::ContentRepository;
     use holtburger_dat::file_type::{
-        ChatPoseTable, EnumMapper, MotionTable, SkillTable, SpellTable, StringTable, XpTable,
+        ChatPoseTable, EnumMapper, MotionTable, SecondaryAttributeTable, SkillTable, SpellTable,
+        StringTable, XpTable,
     };
     use holtburger_dat::{
         DatFileType, EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
@@ -363,6 +370,17 @@ mod tests {
         push_pstring_aligned(&mut bytes, "Wave");
         push_pstring_aligned(&mut bytes, "wave.");
         push_pstring_aligned(&mut bytes, "waves.");
+        bytes
+    }
+
+    fn test_secondary_attribute_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&SecondaryAttributeTable::FILE_ID.to_le_bytes());
+        for (attribute, divisor) in [(2_u32, 2_u32), (2, 1), (6, 1)] {
+            for field in [0, 1, 0, divisor, attribute, 0] {
+                bytes.extend_from_slice(&field.to_le_bytes());
+            }
+        }
         bytes
     }
 
@@ -447,6 +465,15 @@ mod tests {
                 test_chat_pose_table_bytes(),
             )
             .expect("chat pose table test HBA entry should be added");
+
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                SecondaryAttributeTable::FILE_ID,
+                DatFileType::from_id(SecondaryAttributeTable::FILE_ID) as u32,
+                test_secondary_attribute_table_bytes(),
+            )
+            .expect("secondary attribute table test HBA entry should be added");
 
         writer.write(path).expect("test HBA should be written");
 

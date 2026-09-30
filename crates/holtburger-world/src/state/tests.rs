@@ -179,6 +179,7 @@ fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         },
     );
 }
@@ -1288,6 +1289,50 @@ fn test_empty_world_uses_synthetic_reference_data() {
 }
 
 #[test]
+fn derived_skill_refresh_reads_current_player_augmentation_properties() {
+    let mut state = WorldState::synthetic();
+    state.seed_local_player_entity(Guid(0x5000_0001), "Player", WorldPosition::default());
+    state.player.skill_bases.insert(
+        SkillType::HeavyWeapons,
+        crate::player::SkillBase { ranks: 10, init: 0 },
+    );
+    state.player.skills.insert(
+        SkillType::HeavyWeapons,
+        Skill {
+            skill_type: SkillType::HeavyWeapons,
+            ranks: 10,
+            init: 0,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: 10,
+            current: 10,
+            training: TrainingLevel::Trained,
+            trained_cost: 0,
+            specialized_cost: 0,
+            breakdown: Default::default(),
+        },
+    );
+
+    let mut events = Vec::new();
+    state.emit_player_derived_stats(&mut events);
+    assert_eq!(state.player.skills[&SkillType::HeavyWeapons].base, 10);
+
+    state
+        .player_entity_mut()
+        .unwrap()
+        .properties
+        .set_int_prop(PropertyInt::AugmentationSkilledMelee, 2);
+    state.emit_player_derived_stats(&mut events);
+    let skill = &state.player.skills[&SkillType::HeavyWeapons];
+    assert_eq!((skill.base, skill.current), (30, 30));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::DerivedStatsUpdated(stats)
+            if stats.skills.iter().any(|skill| skill.skill_type == SkillType::HeavyWeapons && skill.base == 30)
+    )));
+}
+
+#[test]
 fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let dir = tempdir().expect("tempdir should be created");
     let portal_path = dir.path().join("bundle.hba");
@@ -1317,6 +1362,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
     let mut state = WorldState::new(Arc::new(WorldBootstrap::new(
         skill_table,
+        holtburger_dat::file_type::SecondaryAttributeTable::synthetic(),
         spell_table,
         xp_table,
         holtburger_content::CharacterTitleCatalog::default(),
@@ -1406,7 +1452,11 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
             init: 10,
             xp: 0,
             xp_table: &state.xp_table,
-            skill_table: &state.skill_table,
+            calculation: crate::player::stats_calc::SkillCalculationContext {
+                table: &state.skill_table,
+                augmentations: state.player_skill_augmentations(),
+                vitae: state.player_vitae(),
+            },
         },
         &mut events,
     );

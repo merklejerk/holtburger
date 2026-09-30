@@ -1789,6 +1789,7 @@ function activeRegion(
 function currentState(playerGuid: number): ClientCurrentState {
 	const landblockId = playerGuid === 0x0101_0001 ? 0x0101_0100 : 0x0100_0001;
 	return {
+		characterSheet: null,
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: playerGuid,

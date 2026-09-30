@@ -57,6 +57,8 @@ export interface ClientUiDefaults {
 	readonly spells: Omit<ClientUiPanel, "resizable">;
 	/** Independent active-enchantments floating window. */
 	readonly enchantments: Omit<ClientUiPanel, "resizable">;
+	/** Character progression window, distinct from the always-visible HUD. */
+	readonly characterSheet: Omit<ClientUiPanel, "resizable">;
 	/** Inventory window with independently retained geometry; borders always resize. */
 	readonly inventory: Omit<ClientUiPanel, "resizable">;
 	/** Independent, server-confirmed external storage window. */

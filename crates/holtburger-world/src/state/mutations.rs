@@ -678,7 +678,6 @@ impl WorldState {
     pub(crate) fn apply_player_description_world_state(
         &mut self,
         data: &PlayerDescriptionEventData,
-        events: &mut Vec<WorldEvent>,
     ) {
         self.storage.reset();
         self.storage.replace_contents(data.guid, &data.inventory);
@@ -690,9 +689,6 @@ impl WorldState {
             );
         }
         self.bootstrap_player_entity_from_description(data);
-
-        self.emit_player_info(events);
-        self.emit_level_info(events);
     }
 
     pub(crate) fn apply_entity_position_pack(

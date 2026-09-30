@@ -284,6 +284,7 @@ mod inspection_tests {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         }
     }
 

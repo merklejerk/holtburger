@@ -159,6 +159,9 @@
 		--ui-spell-component-icon-size: 20px;
 		--ui-spell-component-row-gap: 2px;
 		--ui-spell-component-label-gap: 6px;
+		/* Character-sheet color overrides resolve against the palette at the consumer:
+		   --ui-character-xp-color defaults to accent; luminance, buff, and upgrade
+		   colors default to success; --ui-character-debuff-color defaults to danger. */
 		/* Enchantment stat headings and overridden-spell tree geometry. */
 		--ui-enchantments-heading-margin: 10px 0 4px;
 		--ui-enchantments-heading-font-size: 0.9em;

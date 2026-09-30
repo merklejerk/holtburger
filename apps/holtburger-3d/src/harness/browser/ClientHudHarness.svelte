@@ -877,6 +877,11 @@
 		readonly probeSpells: () => Promise<unknown>;
 		/** Deliver a shared resolved snapshot through the real browser session event path. */
 		readonly setEnchantments: (resolved: ResolvedEnchantments) => void;
+		/** Inject coherent character facts and correlated quotes through session listeners. */
+		readonly setCharacterSheet: (sheet: unknown) => void;
+		readonly replyProgression: (evaluation: unknown) => void;
+		readonly replyProgressionFeedback: (feedback: unknown) => void;
+		readonly retireCharacterSheet: (lateSheet: unknown) => boolean;
 		/** Hold one enchantment metadata response across session retirement. */
 		readonly deferEnchantmentReferences: () => void;
 		readonly releaseEnchantmentReferences: () => void;
@@ -1039,6 +1044,7 @@
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
+			characterSheet: null,
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
@@ -3026,6 +3032,23 @@
 						"Enchantment update was not accepted by the browser session.",
 					);
 			},
+			setCharacterSheet: (sheet) => {
+				emitInteractionEvent("client-character-sheet-updated", sheet);
+			},
+			replyProgression: (evaluation) => {
+				emitInteractionEvent("client-progression-evaluated", evaluation);
+			},
+			replyProgressionFeedback: (feedback) => {
+				emitInteractionEvent("client-progression-feedback", feedback);
+			},
+			retireCharacterSheet: (lateSheet) => {
+				emitInteractionEvent("client-lifecycle-changed", {
+					kind: "exiting",
+					cause: "server-disconnect",
+				});
+				emitInteractionEvent("client-character-sheet-updated", lateSheet);
+				return interactionLifecycle.characterSheet.read().sheet === null;
+			},
 			deferEnchantmentReferences: () => {
 				if (releaseEnchantmentReferences !== null)
 					throw new Error("Enchantment references are already deferred.");
@@ -3131,6 +3154,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		characterSheet={interactionLifecycle.characterSheet}
 		{appearanceOptions}
 		onAppearanceOptionChange={async (option, enabled) => {
 			appearanceOptions = {

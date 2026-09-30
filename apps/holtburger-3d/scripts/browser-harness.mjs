@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { probeClientHud } from "./client-hud-probe.mjs";
+import { probeCharacterSheet, probeClientHud } from "./client-hud-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
@@ -55,11 +55,15 @@ const children = [];
 const tempDirectories = [];
 
 try {
-	const contentHostUrl = options.clientHud ? null : await startContentHost();
+	const contentHostUrl =
+		options.clientHud || options.characterSheet
+			? null
+			: await startContentHost();
 	const viteUrl = await startViteServer(options.vitePort);
-	const result = options.clientHud
-		? await runClientHudHarness({ viteUrl })
-		: await runHarness({ contentHostUrl, viteUrl });
+	const result =
+		options.clientHud || options.characterSheet
+			? await runClientHudHarness({ viteUrl })
+			: await runHarness({ contentHostUrl, viteUrl });
 	const browserErrors = result.consoleMessages.filter(
 		({ level }) => level === "error" || level === "exception",
 	);
@@ -88,6 +92,13 @@ try {
 			uiTheme: result.uiTheme.evidence,
 			glRenderer: result.glRenderer,
 			viewport: result.state.viewport,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.characterSheet) {
+		report = {
+			suite: "character-sheet",
+			passed: true,
+			characterSheet: result.characterSheet,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientHud) {
@@ -288,6 +299,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		clientHud: false,
+		characterSheet: false,
 		uiTheme: false,
 		reportMode: null,
 		landblockId: DEFAULT_LANDBLOCK_ID,
@@ -400,6 +412,9 @@ function parseArgs(args) {
 		switch (arg) {
 			case "--client-hud":
 				parsed.clientHud = true;
+				break;
+			case "--character-sheet":
+				parsed.characterSheet = true;
 				break;
 			case "--ui-theme":
 				parsed.uiTheme = true;
@@ -1198,8 +1213,13 @@ function parseArgs(args) {
 			"--isolate-authored-dynamics and --exclude-authored-dynamics cannot be combined.",
 		);
 	}
-	if ([parsed.uiTheme, parsed.clientHud].filter(Boolean).length > 1)
-		throw new Error("Choose one of --ui-theme or --client-hud.");
+	if (
+		[parsed.uiTheme, parsed.clientHud, parsed.characterSheet].filter(Boolean)
+			.length > 1
+	)
+		throw new Error(
+			"Choose one of --ui-theme, --client-hud, or --character-sheet.",
+		);
 	if (
 		parsed.cameraLandblockId &&
 		(parsed.relocateLandblockId || parsed.relocateSequence.length > 0)
@@ -1598,6 +1618,7 @@ Options:
                        removal, filter fallback, and a replacement fixture; verify contrast and input.
                        With --screenshot, also writes <path>.<variant>.png.
   --screenshot <path>   Persist the captured PNG after the harness exits.
+  --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4086,6 +4107,22 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.characterSheet) {
+			return {
+				characterSheet: await probeCharacterSheet(
+					client,
+					evaluateExpression,
+					delay,
+				),
+				state: {
+					viewport: {
+						width: options.viewportWidth,
+						height: options.viewportHeight,
+					},
+				},
+				consoleMessages,
+			};
+		}
 		return {
 			...(await probeClientHud(client, {
 				options,

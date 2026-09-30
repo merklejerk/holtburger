@@ -6,11 +6,13 @@ use ratatui::widgets::{List, ListItem, Paragraph};
 use std::collections::{BTreeMap, HashMap};
 
 use holtburger_common::properties::PropertyFloat;
-use holtburger_dat::file_type::skill_table::{SkillFormula, SkillTable};
+use holtburger_core::{ClientProgressionEvaluation, ClientProgressionUnavailable};
 use holtburger_world::enchantments::{
     AffectedStat, EnchantmentKind, EnchantmentOperation, ResolvedEnchantment,
 };
-use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel};
+use holtburger_world::progression::{ProgressionIntent, ProgressionUnavailable, StatTarget};
+use holtburger_world::stat_breakdown::{AttributeFormulaBreakdown, SkillFormulaBreakdown};
+use holtburger_world::stats::{AttributeType, TrainingLevel};
 
 use super::tab::CharacterTab;
 use crate::pages::game::{GameData, ViewState};
@@ -24,10 +26,7 @@ pub enum CharTabLine {
         label: String,
         value: String,
         formula: Option<String>,
-        xp_cost: Option<u64>,
-        sp_cost: Option<u32>,
-        has_xp: bool,
-        has_sp: bool,
+        progression: Option<ClientProgressionEvaluation>,
         stat_type: Option<StatType>,
         training: Option<TrainingLevel>,
     },
@@ -158,10 +157,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 label,
                 value,
                 formula,
-                xp_cost,
-                sp_cost,
-                has_xp,
-                has_sp,
+                progression,
                 stat_type: _,
                 training,
             } => {
@@ -197,18 +193,27 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                     ),
                 ];
 
+                let (xp_cost, sp_cost, affordable) = progression_cost(*progression);
                 if let Some(c) = xp_cost {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
-                        format_cost(*c),
-                        Style::default().fg(if *has_xp { Color::Green } else { Color::Yellow }),
+                        format_cost(c),
+                        Style::default().fg(if affordable {
+                            Color::Green
+                        } else {
+                            Color::Yellow
+                        }),
                     ));
                     spans.push(Span::raw(" XP)"));
                 } else if let Some(c) = sp_cost {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
                         c.to_string(),
-                        Style::default().fg(if *has_sp { Color::Green } else { Color::Yellow }),
+                        Style::default().fg(if affordable {
+                            Color::Green
+                        } else {
+                            Color::Yellow
+                        }),
                     ));
                     spans.push(Span::raw(" SP)"));
                 }
@@ -310,6 +315,24 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
     list_items
 }
 
+fn progression_cost(
+    evaluation: Option<ClientProgressionEvaluation>,
+) -> (Option<u64>, Option<u32>, bool) {
+    match evaluation.map(|evaluation| evaluation.result) {
+        Some(Ok(quote)) if matches!(quote.quote.intent, ProgressionIntent::Train { .. }) => {
+            (None, Some(quote.quote.credits_spent), true)
+        }
+        Some(Ok(quote)) => (Some(u64::from(quote.quote.xp_spent)), None, true),
+        Some(Err(ClientProgressionUnavailable::World(
+            ProgressionUnavailable::InsufficientXp { required, .. },
+        ))) => (Some(u64::from(required)), None, false),
+        Some(Err(ClientProgressionUnavailable::World(
+            ProgressionUnavailable::InsufficientCredits { required, .. },
+        ))) => (None, Some(required), false),
+        _ => (None, None, false),
+    }
+}
+
 pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     let mut lines = Vec::new();
 
@@ -374,10 +397,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             label: "Vitae Penalty".to_string(),
             value: format!("{:.0}%", penalty_pct),
             formula: None,
-            xp_cost: None,
-            sp_cost: None,
-            has_xp: false,
-            has_sp: false,
+            progression: None,
             stat_type: None,
             training: None,
         });
@@ -390,24 +410,17 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     vitals.sort_by_key(|a| a.vital_type.to_string());
     for v in vitals {
         let val = format!("{} / {}", v.current, v.buffed_max);
-        let xp_cost = v
-            .next_rank_xp
-            .map(|next| next.saturating_sub(v.spent_xp) as u64);
-
-        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
-            info.unspent_xp >= cost
-        } else {
-            false
-        };
-
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
             value: val,
             formula: None,
-            xp_cost,
-            sp_cost: None,
-            has_xp,
-            has_sp: false,
+            progression: progression_evaluation(
+                data,
+                ProgressionIntent::Raise {
+                    target: StatTarget::Vital(v.vital_type),
+                    ranks: 1,
+                },
+            ),
             stat_type: Some(StatType::Vital(v.vital_type)),
             training: None,
         });
@@ -429,24 +442,17 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         } else {
             a.base.to_string()
         };
-        let xp_cost = a
-            .next_rank_xp
-            .map(|next| next.saturating_sub(a.spent_xp) as u64);
-
-        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
-            info.unspent_xp >= cost
-        } else {
-            false
-        };
-
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
             value: val,
             formula: None,
-            xp_cost,
-            sp_cost: None,
-            has_xp,
-            has_sp: false,
+            progression: progression_evaluation(
+                data,
+                ProgressionIntent::Raise {
+                    target: StatTarget::Attribute(a.attr_type),
+                    ranks: 1,
+                },
+            ),
             stat_type: Some(StatType::Attribute(a.attr_type)),
             training: None,
         });
@@ -465,7 +471,6 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         .values()
         .filter(|s| s.skill_type.is_eor())
         .collect();
-    let skill_table = data.skill_table();
 
     // Sort: (Specialized | Trained) > Untrained, then alphabetically within those two groups
     skills.sort_by(|a, b| {
@@ -490,41 +495,22 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             s.current.to_string()
         };
 
-        let mut xp_cost = None;
-        let mut sp_cost = None;
-
-        if s.training as u32 >= TrainingLevel::Trained as u32 {
-            xp_cost = s
-                .next_rank_xp
-                .map(|next| next.saturating_sub(s.spent_xp) as u64);
-        } else if s.training == TrainingLevel::Untrained {
-            // Check if we can train it
-            let cost = s.trained_cost;
-            if cost > 0 {
-                sp_cost = Some(cost);
-            }
-        }
-
-        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
-            info.unspent_xp >= cost
-        } else {
-            false
-        };
-
-        let has_sp = if let (Some(info), Some(cost)) = (&data.level_info, sp_cost) {
-            info.unspent_skill_points >= cost
-        } else {
-            false
+        let intent = match s.training {
+            TrainingLevel::Untrained => Some(ProgressionIntent::Train {
+                skill: s.skill_type,
+            }),
+            TrainingLevel::Trained | TrainingLevel::Specialized => Some(ProgressionIntent::Raise {
+                target: StatTarget::Skill(s.skill_type),
+                ranks: 1,
+            }),
+            TrainingLevel::Unusable => None,
         };
 
         lines.push(CharTabLine::Stat {
             label: s.skill_type.to_string(),
             value: val,
-            formula: skill_formula_text(skill_table.as_deref(), s.skill_type),
-            xp_cost,
-            sp_cost,
-            has_xp,
-            has_sp,
+            formula: skill_formula_text(&s.breakdown.formula),
+            progression: intent.and_then(|intent| progression_evaluation(data, intent)),
             stat_type: Some(StatType::Skill(s.skill_type)),
             training: Some(s.training),
         });
@@ -538,16 +524,13 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
 
     // 4. Resistances
     lines.push(CharTabLine::Header("RESISTANCES"));
-    if data.player_guid.is_some() {
+    if data.level_info.is_some() {
         // Armor always first in Resistances
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
             value: data.armor.to_string(),
             formula: None,
-            xp_cost: None,
-            sp_cost: None,
-            has_xp: false,
-            has_sp: false,
+            progression: None,
             stat_type: None,
             training: None,
         });
@@ -570,10 +553,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
                 label: format!("{:?}", prop),
                 value: format!("{:.2}", val),
                 formula: None,
-                xp_cost: None,
-                sp_cost: None,
-                has_xp: false,
-                has_sp: false,
+                progression: None,
                 stat_type: None,
                 training: None,
             });
@@ -595,10 +575,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
                 label: affected_stat_label(affected_stat, section.name.as_deref()),
                 value: String::new(),
                 formula: None,
-                xp_cost: None,
-                sp_cost: None,
-                has_xp: false,
-                has_sp: false,
+                progression: None,
                 stat_type: None,
                 training: None,
             });
@@ -610,6 +587,13 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     }
 
     lines
+}
+
+fn progression_evaluation(
+    data: &GameData,
+    intent: ProgressionIntent,
+) -> Option<ClientProgressionEvaluation> {
+    data.progression.evaluations.get(&intent).copied()
 }
 
 fn append_stat_enchantments(
@@ -639,25 +623,26 @@ fn affected_stat_label(stat: AffectedStat, name: Option<&str>) -> String {
     }
 }
 
-fn skill_formula_text(skill_table: Option<&SkillTable>, skill_type: SkillType) -> Option<String> {
-    let skill_table = skill_table?;
-    let skill_base = skill_table.skill_base_hash.get(&(skill_type as u32))?;
-    format_skill_formula(&skill_base.formula)
+fn skill_formula_text(formula: &SkillFormulaBreakdown) -> Option<String> {
+    match formula {
+        SkillFormulaBreakdown::Applied(formula) => format_skill_formula(formula),
+        SkillFormulaBreakdown::NoFormula | SkillFormulaBreakdown::Unusable => None,
+    }
 }
 
-fn format_skill_formula(formula: &SkillFormula) -> Option<String> {
-    if formula.x == 0 {
-        return None;
-    }
-
-    let first = attribute_abbreviation(formula.attr1)?;
-    let expression = match attribute_abbreviation(formula.attr2) {
+fn format_skill_formula(formula: &AttributeFormulaBreakdown) -> Option<String> {
+    let first = attribute_abbreviation(formula.first.attribute as u32)?;
+    let expression = match formula
+        .second
+        .as_ref()
+        .and_then(|input| attribute_abbreviation(input.attribute as u32))
+    {
         Some(second) => format!("({}+{})", first, second),
         None => first.to_string(),
     };
 
-    if formula.z != 1 {
-        Some(format!("{}/{}", expression, formula.z))
+    if formula.divisor != 1 {
+        Some(format!("{}/{}", expression, formula.divisor))
     } else {
         Some(expression)
     }
@@ -692,49 +677,34 @@ fn format_duration(remaining: Option<f64>) -> String {
 mod tests {
     use super::*;
     use holtburger_common::Guid;
-    use holtburger_dat::file_type::skill_table::{SkillBase, SkillFormula, SkillTable};
+    use holtburger_world::stat_breakdown::{FormulaAttributeInput, SkillBreakdown};
     use holtburger_world::stats::{AttributeType, Skill, SkillType, TrainingLevel};
-    use std::collections::HashMap;
-    use std::sync::Arc;
 
-    fn sample_skill_table() -> SkillTable {
-        SkillTable {
-            id: SkillTable::FILE_ID,
-            skill_base_hash: HashMap::from([(
-                SkillType::MeleeDefense as u32,
-                SkillBase {
-                    description: String::new(),
-                    _align1: (),
-                    name: "Melee Defense".to_string(),
-                    _align2: (),
-                    icon_id: 0,
-                    trained_cost: 0,
-                    specialized_cost: 0,
-                    category: 0,
-                    chargen_use: 1,
-                    min_level: 1,
-                    formula: SkillFormula {
-                        w: 0,
-                        x: 1,
-                        y: 0,
-                        z: 3,
-                        attr1: AttributeType::QuicknessAttr as u32,
-                        attr2: AttributeType::CoordinationAttr as u32,
-                    },
-                    upper_bound: 0.0,
-                    lower_bound: 0.0,
-                    learn_mod: 0.0,
-                },
-            )]),
+    fn formula_input(attribute: AttributeType) -> FormulaAttributeInput {
+        FormulaAttributeInput {
+            attribute,
+            base: 10,
+            effective: 10,
+            modifiers: Vec::new(),
         }
+    }
+
+    fn sample_formula() -> SkillFormulaBreakdown {
+        SkillFormulaBreakdown::Applied(AttributeFormulaBreakdown {
+            first: formula_input(AttributeType::QuicknessAttr),
+            second: Some(formula_input(AttributeType::CoordinationAttr)),
+            divisor: 3,
+            base_before_rounding: 20.0 / 3.0,
+            effective_before_rounding: 20.0 / 3.0,
+            base_result: 7,
+            effective_result: 7,
+        })
     }
 
     #[test]
     fn skill_formula_text_formats_attribute_shorthands() {
-        let table = sample_skill_table();
-
         assert_eq!(
-            skill_formula_text(Some(&table), SkillType::MeleeDefense),
+            skill_formula_text(&sample_formula()),
             Some("(Qu+Co)/3".to_string())
         );
     }
@@ -743,7 +713,6 @@ mod tests {
     fn get_char_tab_lines_includes_skill_formula_text() {
         let mut data = GameData::default();
         data.player_guid = Some(Guid(1));
-        data.skill_table = Some(Arc::new(sample_skill_table()));
         data.skills.insert(
             SkillType::MeleeDefense,
             Skill {
@@ -754,9 +723,13 @@ mod tests {
                 next_rank_xp: None,
                 base: 10,
                 current: 10,
-                training: TrainingLevel::Untrained,
+                training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: SkillBreakdown {
+                    formula: sample_formula(),
+                    ..Default::default()
+                },
             },
         );
 

@@ -83,6 +83,13 @@ impl<'de> Deserialize<'de> for HostCommand {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 pub enum HostEvent {
+    ClientCharacterSheetUpdated(Option<Box<crate::client_projection::ClientCharacterSheetWire>>),
+    ClientProgressionEvaluated {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        evaluations: Vec<holtburger_core::ClientProgressionEvaluation>,
+    },
+    ClientProgressionFeedback(holtburger_core::ClientProgressionFeedback),
     ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
     // The infrequent full snapshot is boxed so ordinary protocol frames do not
     // reserve space for all of its collections.
@@ -404,7 +411,7 @@ impl ClientEventSink for StdioEventSink {
                 HostEvent::ClientEntityCollisionDisabled(disabled)
             }
             crate::client_projection::ClientHostEvent::CurrentState(state) => {
-                HostEvent::ClientCurrentState(Box::new(state))
+                HostEvent::ClientCurrentState(state)
             }
             crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
                 HostEvent::ClientLifecycleChanged(lifecycle)
@@ -490,6 +497,19 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::PlayerVitalsUpdated { vitals } => {
                 HostEvent::ClientPlayerVitalsUpdated { vitals }
+            }
+            crate::client_projection::ClientHostEvent::CharacterSheetUpdated(sheet) => {
+                HostEvent::ClientCharacterSheetUpdated(sheet)
+            }
+            crate::client_projection::ClientHostEvent::ProgressionEvaluated {
+                request_id,
+                evaluations,
+            } => HostEvent::ClientProgressionEvaluated {
+                request_id,
+                evaluations,
+            },
+            crate::client_projection::ClientHostEvent::ProgressionFeedback(feedback) => {
+                HostEvent::ClientProgressionFeedback(feedback)
             }
             crate::client_projection::ClientHostEvent::TransientString { message } => {
                 HostEvent::ClientTransientString { message }

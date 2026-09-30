@@ -310,6 +310,7 @@ describe("ClientCameraSession", () => {
 
 function currentState(): ClientCurrentState {
 	return {
+		characterSheet: null,
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: PLAYER_GUID,

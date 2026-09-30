@@ -825,6 +825,7 @@ mod tests {
             next_rank_xp: None,
             base: 100,
             current: 100,
+            breakdown: Default::default(),
         };
         world
             .player

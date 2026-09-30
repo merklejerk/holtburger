@@ -86,6 +86,11 @@ pub use client::{
     PreciseJumpTargetView, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
     PreciseJumpTransactionRejection,
 };
+pub use client::{
+    ClientCharacterSheet, ClientCharacterSkill, ClientProgressionEvaluation,
+    ClientProgressionFeedback, ClientProgressionQuote, ClientProgressionRejection,
+    ClientProgressionUnavailable,
+};
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
 pub use client::{
     EntitySelectionQueryOutcome, EntitySelectionQueryRequest, EntitySelectionQueryResult,

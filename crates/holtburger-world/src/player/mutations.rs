@@ -15,7 +15,7 @@ pub struct SkillUpdateParams<'a> {
     pub init: u32,
     pub xp: u32,
     pub xp_table: &'a holtburger_dat::file_type::XpTable,
-    pub skill_table: &'a holtburger_dat::file_type::SkillTable,
+    pub calculation: super::stats_calc::SkillCalculationContext<'a>,
 }
 
 pub struct VitalUpdateParams<'a> {
@@ -25,6 +25,7 @@ pub struct VitalUpdateParams<'a> {
     pub current: u32,
     pub xp: u32,
     pub xp_table: &'a holtburger_dat::file_type::XpTable,
+    pub secondary_attribute_table: &'a holtburger_dat::file_type::SecondaryAttributeTable,
 }
 
 impl PlayerState {
@@ -46,9 +47,8 @@ impl PlayerState {
     ) {
         if let Some(attr_type) = stats::AttributeType::from_repr(attr_id) {
             let base = start + ranks;
-            let mult = self.get_attribute_multiplier(attr_type);
-            let add = self.get_attribute_additive(attr_type);
-            let current = ((base as f32 * mult) + add).round() as u32;
+            let breakdown = self.evaluate_attribute(attr_type, base);
+            let current = breakdown.finalization.result;
 
             let attr_obj = stats::Attribute {
                 attr_type,
@@ -58,6 +58,7 @@ impl PlayerState {
                 next_rank_xp: xp_table.get_next_attribute_rank_xp(ranks),
                 base,
                 current,
+                breakdown,
             };
 
             self.attributes.insert(attr_type, attr_obj.clone());
@@ -74,7 +75,7 @@ impl PlayerState {
             init,
             xp,
             xp_table,
-            skill_table,
+            calculation,
         } = params;
 
         if let Some(skill_type) = stats::SkillType::from_repr(skill_id) {
@@ -88,10 +89,11 @@ impl PlayerState {
             self.skill_bases
                 .insert(skill_type, SkillBase { ranks, init });
 
-            let base_val = self.derive_skill_value(skill_type, ranks, init, false);
-            let current_val = self.derive_skill_value(skill_type, ranks, init, true);
+            let (base_val, current_val, breakdown) =
+                self.evaluate_skill(skill_type, ranks, init, training, calculation);
 
-            let (trained_cost, specialized_cost) = skill_table
+            let (trained_cost, specialized_cost) = calculation
+                .table
                 .skill_base_hash
                 .get(&(skill_type as u32))
                 .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
@@ -109,6 +111,7 @@ impl PlayerState {
                 training,
                 trained_cost,
                 specialized_cost,
+                breakdown,
             };
 
             self.skills.insert(skill_type, skill_obj.clone());
@@ -125,14 +128,15 @@ impl PlayerState {
             current,
             xp,
             xp_table,
+            secondary_attribute_table,
         } = params;
 
         if let Some(vital_type) = stats::VitalType::from_id(vital_id) {
             self.vital_bases
                 .insert(vital_type, VitalBase { ranks, start });
 
-            let base = self.calculate_vital_base(vital_type);
-            let buffed_max = self.calculate_vital_current(vital_type);
+            let (base, buffed_max, breakdown) =
+                self.evaluate_vital(vital_type, secondary_attribute_table);
             let final_base = if base == 0 { current } else { base };
 
             let vital_obj = stats::Vital {
@@ -144,6 +148,7 @@ impl PlayerState {
                 base: final_base,
                 buffed_max,
                 current,
+                breakdown,
             };
             self.vitals.insert(vital_type, vital_obj.clone());
             events.push(WorldEvent::VitalUpdated(vital_obj));
@@ -306,6 +311,7 @@ impl PlayerState {
         data: &PlayerDescriptionEventData,
         xp_table: &holtburger_dat::file_type::XpTable,
         skill_table: &holtburger_dat::file_type::SkillTable,
+        secondary_attribute_table: &holtburger_dat::file_type::SecondaryAttributeTable,
         _events: &mut Vec<WorldEvent>,
     ) {
         self.guid = data.guid;
@@ -341,6 +347,7 @@ impl PlayerState {
                         next_rank_xp: xp_table.get_next_attribute_rank_xp(ranks),
                         base,
                         current: base,
+                        breakdown: Default::default(),
                     };
                     self.attributes.insert(attr_type, attr_obj);
                 }
@@ -355,7 +362,7 @@ impl PlayerState {
                 self.vital_bases
                     .insert(vital_type, VitalBase { ranks, start });
 
-                let base = self.calculate_vital_base(vital_type);
+                let base = self.calculate_vital_base(vital_type, secondary_attribute_table);
                 let current = attr.current.unwrap_or(0);
                 let final_base = if base == 0 { current } else { base };
 
@@ -368,6 +375,7 @@ impl PlayerState {
                     base: final_base,
                     buffed_max: final_base,
                     current,
+                    breakdown: Default::default(),
                 };
                 self.vitals.insert(vital_type, vital);
             }
@@ -388,7 +396,18 @@ impl PlayerState {
                     },
                 );
 
-                let base_val = self.derive_skill_value(skill_type, skill.ranks, skill.init, false);
+                let base_val = self.derive_skill_value(
+                    skill_type,
+                    skill.ranks,
+                    skill.init,
+                    training,
+                    false,
+                    super::stats_calc::SkillCalculationContext {
+                        table: skill_table,
+                        augmentations: super::stats_calc::SkillAugmentations::default(),
+                        vitae: 1.0,
+                    },
+                );
 
                 let (trained_cost, specialized_cost) = skill_table
                     .skill_base_hash
@@ -410,6 +429,7 @@ impl PlayerState {
                     training,
                     trained_cost,
                     specialized_cost,
+                    breakdown: Default::default(),
                 };
                 self.skills.insert(skill_type, skill_obj);
             }

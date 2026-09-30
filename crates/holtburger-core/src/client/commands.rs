@@ -1,3 +1,7 @@
+use crate::client::progression::{
+    ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,
+    ClientProgressionRejection,
+};
 use crate::client::types::{
     ActionResultReason, ActionResultSource, ClientCommand, ClientExitCause, ClientViewEvent,
 };
@@ -11,6 +15,7 @@ use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::interaction::EntityUseRejection;
+use holtburger_world::progression::{ProgressionIntent, StatTarget};
 use std::time::Instant;
 
 fn render_soul_emote_text(text: &str) -> String {
@@ -259,10 +264,26 @@ impl ClientRuntime {
             | ClientCommand::SetClientCameraClearance(_)
             | ClientCommand::StopClientCamera(_) => self.handle_camera_command(cmd).await,
 
-            ClientCommand::RaiseAttribute { .. }
-            | ClientCommand::RaiseVital { .. }
-            | ClientCommand::RaiseSkill { .. }
-            | ClientCommand::TrainSkill { .. } => self.handle_progression_command(cmd).await,
+            ClientCommand::EvaluateProgression {
+                request_id,
+                intents,
+            } => {
+                let evaluations = intents
+                    .into_iter()
+                    .map(|intent| ClientProgressionEvaluation {
+                        intent,
+                        result: self.quote_progression(intent),
+                    })
+                    .collect();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionEvaluated {
+                        request_id,
+                        evaluations,
+                    });
+                Ok(())
+            }
+            ClientCommand::SubmitProgression(_) => self.handle_progression_command(cmd).await,
 
             ClientCommand::ToggleCombatMode
             | ClientCommand::SetCombatMode(_)
@@ -856,44 +877,97 @@ impl ClientRuntime {
 
     async fn handle_progression_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::RaiseAttribute {
-                attribute,
-                xp_spent,
-            } => {
-                log::info!(">>> Raising Attribute: {:?} (XP: {})", attribute, xp_spent);
-                self.send_game_action(GameAction::RaiseAttribute(Box::new(
-                    RaiseAttributeActionData {
-                        attribute_type: attribute as u32,
-                        xp_spent,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::RaiseVital { vital, xp_spent } => {
-                log::info!(">>> Raising Vital: {:?} (XP: {})", vital, xp_spent);
-                self.send_game_action(GameAction::RaiseVital(Box::new(RaiseVitalActionData {
-                    vital_type: vital as u32,
-                    xp_spent,
-                })))
-                .await
-            }
-            ClientCommand::RaiseSkill { skill, xp_spent } => {
-                log::info!(">>> Raising Skill: {:?} (XP: {})", skill, xp_spent);
-                self.send_game_action(GameAction::RaiseSkill(Box::new(RaiseSkillActionData {
-                    skill_type: skill as u32,
-                    xp_spent,
-                })))
-                .await
-            }
-            ClientCommand::TrainSkill { skill, credits } => {
-                log::info!(">>> Training Skill: {:?} (Credits: {})", skill, credits);
-                self.send_game_action(GameAction::TrainSkill(Box::new(TrainSkillActionData {
-                    skill_type: skill as u32,
-                    credits_spent: credits as i32,
-                })))
-                .await
-            }
+            ClientCommand::SubmitProgression(submitted) => self.submit_progression(submitted).await,
             _ => unreachable!(),
+        }
+    }
+
+    async fn submit_progression(&mut self, submitted: ClientProgressionQuote) -> Result<()> {
+        let intent = submitted.quote.intent;
+        let reject = if !matches!(self.state, ClientState::InWorld)
+            || self.activation.is_some()
+            || self.described_character != Some(self.world.player.guid)
+        {
+            Some(ClientProgressionRejection::CharacterNotReady)
+        } else {
+            None
+        };
+        let quote =
+            match reject.map_or_else(|| self.progression.validate(&self.world, submitted), Err) {
+                Ok(quote) => quote,
+                Err(reason) => {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ProgressionFeedback(
+                            ClientProgressionFeedback::Rejected { intent, reason },
+                        ));
+                    return Ok(());
+                }
+            };
+
+        let action = match intent {
+            ProgressionIntent::Raise {
+                target: StatTarget::Attribute(attribute),
+                ..
+            }
+            | ProgressionIntent::RaiseMax {
+                target: StatTarget::Attribute(attribute),
+            } => GameAction::RaiseAttribute(Box::new(RaiseAttributeActionData {
+                attribute_type: attribute as u32,
+                xp_spent: quote.xp_spent,
+            })),
+            ProgressionIntent::Raise {
+                target: StatTarget::Vital(vital),
+                ..
+            }
+            | ProgressionIntent::RaiseMax {
+                target: StatTarget::Vital(vital),
+            } => GameAction::RaiseVital(Box::new(RaiseVitalActionData {
+                vital_type: vital as u32,
+                xp_spent: quote.xp_spent,
+            })),
+            ProgressionIntent::Raise {
+                target: StatTarget::Skill(skill),
+                ..
+            }
+            | ProgressionIntent::RaiseMax {
+                target: StatTarget::Skill(skill),
+            } => GameAction::RaiseSkill(Box::new(RaiseSkillActionData {
+                skill_type: skill as u32,
+                xp_spent: quote.xp_spent,
+            })),
+            ProgressionIntent::Train { skill } => {
+                GameAction::TrainSkill(Box::new(TrainSkillActionData {
+                    skill_type: skill as u32,
+                    credits_spent: i32::try_from(quote.credits_spent)
+                        .expect("validated DAT training cost must fit the wire type"),
+                }))
+            }
+        };
+        self.progression.guard(quote);
+        self.emit_progression_guards();
+        match self.send_game_action(action).await {
+            Ok(()) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionFeedback(
+                        ClientProgressionFeedback::Submitted {
+                            target: intent.target(),
+                        },
+                    ));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionFeedback(
+                        ClientProgressionFeedback::DispatchFailed {
+                            intent,
+                            message: error.to_string(),
+                        },
+                    ));
+                Err(error)
+            }
         }
     }
 

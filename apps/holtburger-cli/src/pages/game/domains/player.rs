@@ -1,4 +1,83 @@
 use super::*;
+use holtburger_core::ClientCharacterSheet;
+
+fn quote_basis_changed(state: &GameState, sheet: &ClientCharacterSheet) -> bool {
+    let data = &state.data;
+    data.level_info.as_ref().is_none_or(|level| {
+        level.unspent_xp != sheet.level.unspent_xp
+            || level.unspent_skill_points != sheet.level.unspent_skill_points
+    }) || data.attributes.len() != sheet.attributes.len()
+        || sheet.attributes.iter().any(|stat| {
+            data.attributes
+                .get(&stat.attr_type)
+                .is_none_or(|old| old.ranks != stat.ranks || old.spent_xp != stat.spent_xp)
+        })
+        || data.vitals.len() != sheet.vitals.len()
+        || sheet.vitals.iter().any(|stat| {
+            data.vitals
+                .get(&stat.vital_type)
+                .is_none_or(|old| old.ranks != stat.ranks || old.spent_xp != stat.spent_xp)
+        })
+        || data.skills.len() != sheet.skills.len()
+        || sheet.skills.iter().any(|row| {
+            data.skills.get(&row.stat.skill_type).is_none_or(|old| {
+                old.ranks != row.stat.ranks
+                    || old.spent_xp != row.stat.spent_xp
+                    || old.training != row.stat.training
+            })
+        })
+}
+
+fn apply_character_sheet(
+    state: &mut GameState,
+    sheet: Option<&ClientCharacterSheet>,
+) -> UpdateResult {
+    if sheet.is_some_and(|sheet| Some(sheet.character) != state.data.player_guid) {
+        return UpdateResult::new();
+    }
+    let Some(sheet) = sheet else {
+        state.data.level_info = None;
+        state.data.attributes.clear();
+        state.data.vitals.clear();
+        state.data.skills.clear();
+        state.data.resistances = Default::default();
+        state.data.armor = 0;
+        state.data.vitae = 1.0;
+        state.data.player_enchantments.clear();
+        state.data.resolved_enchantments = None;
+        state.data.progression = Default::default();
+        return UpdateResult::redraw();
+    };
+    let requote = quote_basis_changed(state, sheet);
+    let data = &mut state.data;
+    data.level_info = Some(sheet.level.clone());
+    data.attributes = sheet
+        .attributes
+        .iter()
+        .cloned()
+        .map(|stat| (stat.attr_type, stat))
+        .collect();
+    data.vitals = sheet
+        .vitals
+        .iter()
+        .cloned()
+        .map(|stat| (stat.vital_type, stat))
+        .collect();
+    data.skills = sheet
+        .skills
+        .iter()
+        .map(|row| (row.stat.skill_type, row.stat.clone()))
+        .collect();
+    data.resistances = sheet.resistances.clone();
+    data.armor = sheet.armor;
+    data.vitae = sheet.vitae;
+    data.progression.guarded_targets = sheet.guarded_targets.iter().copied().collect();
+    let mut result = UpdateResult::redraw();
+    if requote {
+        result.merge(super::progression::request_quotes(state));
+    }
+    result
+}
 
 fn log_busy_operation_result(
     operation: holtburger_core::BusyOperationKind,
@@ -42,6 +121,29 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     let mut handled = false;
 
     match event {
+        ClientViewEvent::CharacterSheetUpdated(sheet) => {
+            return apply_character_sheet(state, sheet.as_deref());
+        }
+        ClientViewEvent::ApplicationSnapshot(snapshot) => {
+            if snapshot
+                .character_sheet
+                .as_ref()
+                .is_some_and(|sheet| Some(sheet.character) != state.data.player_guid)
+            {
+                return UpdateResult::new();
+            }
+            state.data.resolved_enchantments = snapshot.enchantments.as_ref().map(|effects| {
+                crate::pages::game::data::TimedResolvedEnchantments {
+                    resolved: effects.resolved.clone(),
+                    received_at: std::time::Instant::now(),
+                }
+            });
+            state.data.player_enchantments = snapshot
+                .enchantments
+                .as_ref()
+                .map_or_else(Vec::new, |effects| effects.records.clone());
+            return apply_character_sheet(state, snapshot.character_sheet.as_deref());
+        }
         ClientViewEvent::BusyStateUpdated { busy } => {
             state.view.active_busy_operation = *busy;
             handled = true;
@@ -64,30 +166,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                     resolved: resolved.clone(),
                     received_at: std::time::Instant::now(),
                 });
-            handled = true;
-        }
-        ClientViewEvent::PlayerStatsSkillsUpdated {
-            attributes,
-            skills,
-            resistances,
-            armor,
-            vitae,
-        } => {
-            state.data.attributes = attributes.clone();
-            state.data.skills = skills.clone();
-            state.data.resistances = resistances.clone();
-            state.data.armor = *armor;
-            state.data.vitae = *vitae;
-            handled = true;
-        }
-        ClientViewEvent::PlayerLevelInfoUpdated { level_info } => {
-            state.data.level_info = Some(level_info.clone());
-            handled = true;
-        }
-        ClientViewEvent::PlayerVitalsUpdated { vitals } => {
-            for (vt, value) in vitals.iter() {
-                state.data.vitals.insert(*vt, value.clone());
-            }
             handled = true;
         }
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {

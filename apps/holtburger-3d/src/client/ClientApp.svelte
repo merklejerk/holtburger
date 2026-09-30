@@ -1528,6 +1528,7 @@
 	{#if usesWorldPresentation && startupError === null && commandFailure === null}
 		<ClientWorldView
 			itemSession={session}
+			characterSheet={session?.characterSheet ?? null}
 			hudLayout={userSettings.hudLayout}
 			onHudLayoutChange={(hudLayout) =>
 				changeUserSettings({ ...userSettings, hudLayout })}

@@ -21,6 +21,8 @@
 		--ui-color-danger: #ffac9c;
 		--ui-color-warning: #efc46f;
 		--ui-color-success: #bfd398;
+		/* Keep available character upgrades vivid independently of buffed stat values. */
+		--ui-character-upgrade-color: #7dffa3;
 		/* Independent chat colors, initially matching this theme’s existing appearance. */
 		--ui-chat-system-text: #66aaff;
 		--ui-chat-npc-text: #e6cd8b;

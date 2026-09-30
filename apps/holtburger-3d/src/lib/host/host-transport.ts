@@ -14,6 +14,11 @@ import type {
 } from "../../client/client-item-use-contract";
 import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 import type { ClientEntityDelta } from "../../client/client-entity-mirror";
+import type {
+	CharacterSheet,
+	ProgressionEvaluation,
+	ProgressionFeedback,
+} from "../../client/client-character-sheet-contract";
 import type { ObjectInspectionResult } from "../../client/client-object-inspection-contract";
 import type { ObjectPreviewResult } from "../../client/client-object-preview-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
@@ -121,6 +126,8 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_item_use",
 	"query_client_item_use_target",
 	"query_client_spell_inspection",
+	"evaluate_client_progression",
+	"submit_client_progression",
 	"respond_to_client_confirmation",
 	"start_client_camera",
 	"set_client_camera_intent",
@@ -198,6 +205,9 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-world-name-updated",
 	"client-player-entered",
 	"client-player-vitals-updated",
+	"client-character-sheet-updated",
+	"client-progression-evaluated",
+	"client-progression-feedback",
 	"client-player-spells-updated",
 	"client-player-enchantments-updated",
 	"client-appearance-options-updated",
@@ -296,6 +306,12 @@ export interface HostEventPayloadMap {
 	"client-player-vitals-updated": {
 		vitals: ClientVital[];
 	};
+	"client-character-sheet-updated": CharacterSheet | null;
+	"client-progression-evaluated": {
+		requestId: number;
+		evaluations: ProgressionEvaluation[];
+	};
+	"client-progression-feedback": ProgressionFeedback;
 	"client-chat-message": ClientChatMessage;
 	"client-action-feedback": ClientActionFeedback;
 	"client-transient-string": ClientServerText;

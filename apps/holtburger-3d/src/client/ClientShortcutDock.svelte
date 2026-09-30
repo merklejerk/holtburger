@@ -2,15 +2,18 @@
 	import type { ClientHudIconName } from "./ClientHudIcon.svelte";
 
 	/** Implemented floating system windows; the combat action does not open a panel. */
-	export type ClientSystemPanel = "inventory" | "debug" | "spells" | "settings";
+	export type ClientSystemPanel =
+		"inventory" | "debug" | "spells" | "settings" | "characterSheet";
 
 	function systemPanel(icon: ClientHudIconName): ClientSystemPanel | null {
-		return icon === "inventory" ||
-			icon === "debug" ||
-			icon === "spells" ||
-			icon === "settings"
-			? icon
-			: null;
+		return icon === "training"
+			? "characterSheet"
+			: icon === "inventory" ||
+				  icon === "debug" ||
+				  icon === "spells" ||
+				  icon === "settings"
+				? icon
+				: null;
 	}
 
 	/** One displayed system shortcut, shared by sizing and rendering. */
@@ -24,7 +27,7 @@
 	const standardShortcuts: readonly ClientShortcut[] = [
 		{ icon: "combat", label: "Combat stance" },
 		{ icon: "inventory", label: "Inventory" },
-		{ icon: "training", label: "Training" },
+		{ icon: "training", label: "Character" },
 		{ icon: "spells", label: "Spells" },
 		{ icon: "party", label: "Party" },
 		{ icon: "map", label: "Map" },

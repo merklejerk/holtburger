@@ -113,6 +113,7 @@ fn main() -> Result<()> {
     let content = ContentRepository::discover(args.content)?;
     let bootstrap = WorldBootstrap::new(
         content.read_asset("skills")?,
+        content.read_asset("secondary attributes")?,
         content.read_asset("spells")?,
         content.read_asset("xp")?,
         content.read_character_title_catalog()?,

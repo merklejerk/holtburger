@@ -15,6 +15,16 @@ import {
 	type ResolvedEnchantments,
 } from "./client-enchantments-contract";
 import {
+	characterSheetSchema,
+	progressionEvaluatedSchema,
+	progressionFeedbackSchema,
+	progressionIntentSchema,
+	progressionQuoteSchema,
+	type ProgressionIntent,
+	type ProgressionQuote,
+} from "./client-character-sheet-contract";
+import { ClientCharacterSheetState } from "./client-character-sheet-state";
+import {
 	spellInspectionQuerySchema,
 	spellInspectionContextSchema,
 	spellInspectionResultSchema,
@@ -163,6 +173,8 @@ type ClientCommandName = Extract<
 	| "equip_client_item"
 	| "query_client_item_use_target"
 	| "query_client_spell_inspection"
+	| "evaluate_client_progression"
+	| "submit_client_progression"
 	| "submit_client_item_use"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
@@ -206,6 +218,9 @@ type ClientEventName = Extract<
 	| "client-world-name-updated"
 	| "client-player-entered"
 	| "client-player-vitals-updated"
+	| "client-character-sheet-updated"
+	| "client-progression-evaluated"
+	| "client-progression-feedback"
 	| "client-player-spells-updated"
 	| "client-player-enchantments-updated"
 	| "client-appearance-options-updated"
@@ -390,6 +405,8 @@ export type ClientLifecycleSessionEvent =
  * leave a plausible but incomplete client scene.
  */
 export class ClientLifecycleSession {
+	/** Imperative progression owner retained across character-panel mounts. */
+	readonly characterSheet: ClientCharacterSheetState;
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ClientLifecycleTransport;
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -406,6 +423,10 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.characterSheet = new ClientCharacterSheetState(
+			(requestId, intents) => this.evaluateProgression(requestId, intents),
+			(quote) => this.submitProgression(quote),
+		);
 		this.mirror = mirror;
 		this.#dynamicSession = new DynamicEntitySession(
 			{
@@ -426,6 +447,7 @@ export class ClientLifecycleSession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
+		this.characterSheet.reset(null);
 		this.#vendor = null;
 		let siblingUnlisteners: readonly (() => void)[] = [];
 		try {
@@ -456,6 +478,7 @@ export class ClientLifecycleSession {
 			enchantments: null,
 			appearanceOptions: null,
 		};
+		this.characterSheet.reset(null);
 		this.#emit({ type: "resyncing" });
 	}
 
@@ -579,6 +602,24 @@ export class ClientLifecycleSession {
 	async querySpellInspection(query: SpellInspectionQuery): Promise<void> {
 		await this.#transport.invoke("query_client_spell_inspection", {
 			query: spellInspectionQuerySchema.parse(query),
+		});
+	}
+
+	/** Price visible character actions in one current core scope. */
+	async evaluateProgression(
+		requestId: number,
+		intents: readonly ProgressionIntent[],
+	): Promise<void> {
+		await this.#transport.invoke("evaluate_client_progression", {
+			requestId,
+			intents: intents.map((intent) => progressionIntentSchema.parse(intent)),
+		});
+	}
+
+	/** The quote is revalidated and guarded in core before any wire action. */
+	async submitProgression(quote: ProgressionQuote): Promise<void> {
+		await this.#transport.invoke("submit_client_progression", {
+			quote: progressionQuoteSchema.parse(quote),
 		});
 	}
 
@@ -779,6 +820,7 @@ export class ClientLifecycleSession {
 					};
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
+					this.characterSheet.reset(null);
 					this.#emit({ type: "resyncing" });
 				}),
 			);
@@ -851,6 +893,37 @@ export class ClientLifecycleSession {
 			unlisteners.push(
 				await this.#transport.listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-character-sheet-updated",
+					(payload) => {
+						const sheet = characterSheetSchema.nullable().parse(payload);
+						// Character-entry status always republishes the complete sheet. Ignore
+						// delayed updates from a retired entry while no character is active.
+						if (
+							this.#state.lifecycle?.kind !== "in-world" ||
+							(sheet !== null && sheet.character !== this.#state.playerGuid)
+						)
+							return;
+						this.characterSheet.replace(sheet);
+					},
+				),
+				await this.#transport.listen(
+					"client-progression-evaluated",
+					(payload) => {
+						const result = progressionEvaluatedSchema.parse(payload);
+						this.characterSheet.acceptEvaluations(
+							result.requestId,
+							result.evaluations,
+						);
+					},
+				),
+				await this.#transport.listen("client-progression-feedback", (payload) =>
+					this.characterSheet.acceptFeedback(
+						progressionFeedbackSchema.parse(payload),
+					),
 				),
 			);
 			unlisteners.push(
@@ -1091,6 +1164,7 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		this.characterSheet.reset(state.characterSheet);
 		const semantic = this.entities.prepareSnapshot(
 			state.entities,
 			state.localPlayerGuid,
@@ -1169,6 +1243,7 @@ export class ClientLifecycleSession {
 					? lifecycle.worldGeneration
 					: this.#state.worldGeneration,
 		};
+		if (retiresCharacterDescription) this.characterSheet.reset(null);
 		// Initial activation may arrive as portal-space without a separate entering-world event.
 		// Its completion supplies the new character baseline; teleports retain the current one.
 		if (

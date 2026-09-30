@@ -1,6 +1,8 @@
 use crate::DynamicEntitySnapshot;
 use holtburger_common::Guid;
-use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::{
+    PropertyInt, PropertyInt64, PropertyString, PropertyUpdate, WorldObjectExt as _,
+};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_session::Session;
@@ -18,6 +20,7 @@ pub mod character_jump;
 pub mod character_kinematics;
 pub mod character_motion;
 mod character_selection;
+mod character_sheet;
 pub mod collision;
 mod combat_engagement;
 pub mod combat_feedback;
@@ -42,6 +45,7 @@ pub mod object_preview;
 pub mod precise_jump;
 pub mod precise_jump_prediction;
 mod precise_jump_runtime;
+pub mod progression;
 mod runtime;
 pub mod runtime_body_view_cache;
 pub mod selection_envelope;
@@ -63,12 +67,17 @@ pub use camera::{
 pub use camera_service::ClientCameraInputHandle;
 use camera_service::ClientCameraService;
 use character_selection::CharacterSelectionState;
+pub use character_sheet::{ClientCharacterSheet, ClientCharacterSkill};
 use movement::MovementSystem;
 pub use precise_jump_runtime::{
     PreciseJumpActionSequence, PreciseJumpAimRequest, PreciseJumpAimSequence,
     PreciseJumpCancelRequest, PreciseJumpCommitRequest, PreciseJumpEvaluation,
     PreciseJumpEvaluationId, PreciseJumpEvaluationStatus, PreciseJumpTargetView,
     PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+};
+pub use progression::{
+    ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,
+    ClientProgressionRejection, ClientProgressionUnavailable,
 };
 pub use selection_query::{
     EntitySelectionQueryOutcome, EntitySelectionQueryRequest, EntitySelectionQueryResult,
@@ -123,6 +132,8 @@ enum PublishedCharacterMotionCapabilities {
 pub struct ClientRuntime {
     pub session: Session,
     pub world: WorldState,
+    /// Character advancement admission and duplicate suppression for this runtime.
+    progression: progression::ProgressionState,
     active_confirmation: Option<ActiveCharacterConfirmation>,
     /// Cached narrow entity records and pending semantic invalidation.
     entity_facts: entity_facts::EntityFactsPublication,
@@ -228,6 +239,28 @@ pub(super) enum ClientWorldActivationState {
 }
 
 impl ClientRuntime {
+    /// Evaluate a semantic advancement against current world facts.
+    pub fn quote_progression(
+        &mut self,
+        intent: holtburger_world::progression::ProgressionIntent,
+    ) -> Result<ClientProgressionQuote, ClientProgressionUnavailable> {
+        if !matches!(self.state, ClientState::InWorld)
+            || self.activation.is_some()
+            || self.described_character != Some(self.world.player.guid)
+        {
+            return Err(ClientProgressionUnavailable::CharacterNotReady);
+        }
+        if self.progression.reconcile(&self.world) {
+            self.emit_progression_guards();
+        }
+        self.progression.quote(&self.world, intent)
+    }
+
+    /// Targets whose unchanged authoritative state already had one send attempt.
+    pub fn guarded_progression_targets(&self) -> Vec<holtburger_world::progression::StatTarget> {
+        self.progression.guarded_targets(&self.world)
+    }
+
     /// Returns the complete lifecycle projection without exposing the internal world state.
     pub fn lifecycle(&self) -> ClientLifecycleState {
         match &self.state {
@@ -277,6 +310,26 @@ impl ClientRuntime {
             .map(|_| self.world.player.spells.keys().copied().collect())
     }
 
+    /// One coherent character level, stats, explanations, and guarded targets.
+    fn character_sheet(&self) -> Option<Box<ClientCharacterSheet>> {
+        self.described_character
+            .filter(|&guid| guid == self.world.player.guid)
+            .map(|_| {
+                Box::new(ClientCharacterSheet::from_world(
+                    &self.world,
+                    self.guarded_progression_targets(),
+                ))
+            })
+    }
+
+    fn emit_character_sheet(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::CharacterSheetUpdated(
+                self.character_sheet(),
+            ));
+    }
+
     /// Builds one atomic replacement level for shells that lost their event baseline.
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
@@ -302,11 +355,13 @@ impl ClientRuntime {
             enchantments: self
                 .described_character
                 .filter(|&guid| guid == self.world.player.guid)
-                .map(|_| {
-                    self.world
+                .map(|_| ClientPlayerEnchantmentsSnapshot {
+                    records: self.world.player.enchantments.wire(),
+                    resolved: self
+                        .world
                         .player
                         .enchantments
-                        .resolved(std::time::Instant::now())
+                        .resolved(std::time::Instant::now()),
                 }),
             character_options: self
                 .described_character
@@ -319,6 +374,7 @@ impl ClientRuntime {
             },
             combat: self.combat_engagement.status(),
             vitals: self.world.player.vitals.clone(),
+            character_sheet: self.character_sheet(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),
             dynamic: DynamicEntitySnapshot::new(
@@ -432,7 +488,7 @@ impl ClientRuntime {
             .world
             .suspend_runtime_bodies(holtburger_world::RuntimeBodyResetCause::TeleportOrWorldReset);
         for event in &reset_events {
-            self.handle_runtime_world_event_with_context(event, true);
+            self.handle_runtime_world_event_with_context(event, true, false);
         }
     }
 
@@ -767,6 +823,9 @@ impl ClientRuntime {
             self.state,
             ClientState::Disconnected | ClientState::CharacterSelection(_)
         ) {
+            if self.progression.clear() {
+                self.emit_progression_guards();
+            }
             self.reset_container_access();
             self.entity_cue_inbox.clear();
             if let Some(coordinator) = self.collision_coordinator.as_mut() {
@@ -787,9 +846,17 @@ impl ClientRuntime {
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
+        self.emit_character_sheet();
     }
 
     pub fn handle_world_event(&mut self, event: &WorldEvent) {
+        self.project_world_event(event, false);
+        self.finish_character_world_events(self.world_event_changes_character_sheet(event));
+        self.publish_entity_facts();
+    }
+
+    /// Project one event without finalizing a packet's character replacement yet.
+    fn project_world_event(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
         if matches!(
             event,
             WorldEvent::PlayerInfo(_)
@@ -798,11 +865,58 @@ impl ClientRuntime {
         ) {
             self.refresh_spell_inspection_context();
         }
-        self.emit_world_view_projection(event);
-        self.publish_entity_facts();
+        self.emit_world_view_projection(event, suppress_vital_projection);
     }
 
-    fn emit_world_view_projection(&mut self, event: &WorldEvent) {
+    fn world_event_changes_character_sheet(&self, event: &WorldEvent) -> bool {
+        match event {
+            WorldEvent::PropertiesUpdated { guid, updates } if *guid == self.world.player.guid => {
+                return updates.iter().any(|update| {
+                    matches!(
+                        update,
+                        PropertyUpdate::String(PropertyString::Name | PropertyString::Template, _)
+                            | PropertyUpdate::Int(PropertyInt::CharacterTitleId, _)
+                            | PropertyUpdate::Int64(PropertyInt64::MaximumLuminance, _)
+                    )
+                });
+            }
+            WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity)
+                if entity.guid == self.world.player.guid =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        matches!(
+            event,
+            WorldEvent::PlayerInfo(_)
+                | WorldEvent::DerivedStatsUpdated(_)
+                | WorldEvent::LevelInfoUpdated(_)
+                | WorldEvent::AttributeUpdated(_)
+                | WorldEvent::VitalUpdated(_)
+                | WorldEvent::SkillUpdated(_)
+        )
+    }
+
+    /// Reconcile once against final world facts after all events from one packet.
+    fn finish_character_world_events(&mut self, sheet_changed: bool) {
+        if self.progression.reconcile(&self.world) {
+            self.emit_progression_guards();
+        } else if sheet_changed {
+            self.emit_character_sheet();
+        }
+    }
+
+    fn emit_progression_guards(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::ProgressionGuardsUpdated {
+                targets: self.guarded_progression_targets(),
+            });
+        self.emit_character_sheet();
+    }
+
+    fn emit_world_view_projection(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
         // A fresh description retires any outstanding request for the old instance.
         if let WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) = event
             && self.projectile_appraisal == Some(entity.guid)
@@ -824,18 +938,6 @@ impl ClientRuntime {
                         });
             }
             WorldEvent::DerivedStatsUpdated(data) => {
-                let attributes = data
-                    .attributes
-                    .iter()
-                    .cloned()
-                    .map(|attribute| (attribute.attr_type, attribute))
-                    .collect();
-                let skills = data
-                    .skills
-                    .iter()
-                    .cloned()
-                    .map(|skill| (skill.skill_type, skill))
-                    .collect();
                 let vitals = data
                     .vitals
                     .iter()
@@ -845,26 +947,11 @@ impl ClientRuntime {
 
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
-                        attributes,
-                        skills,
-                        resistances: data.resistances.clone(),
-                        armor: data.armor,
-                        vitae: data.vitae,
-                    });
-                let _ = self
-                    .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
             WorldEvent::AttributeUpdated(_) | WorldEvent::SkillUpdated(_) => {}
-            WorldEvent::LevelInfoUpdated(level_info) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerLevelInfoUpdated {
-                        level_info: level_info.clone(),
-                    });
-            }
-            WorldEvent::VitalUpdated(vital) => {
+            WorldEvent::LevelInfoUpdated(_) => {}
+            WorldEvent::VitalUpdated(vital) if !suppress_vital_projection => {
                 let mut vitals = HashMap::new();
                 vitals.insert(vital.vital_type, vital.clone());
                 let _ = self
@@ -894,41 +981,17 @@ impl ClientRuntime {
                                 .resolved(std::time::Instant::now()),
                         });
 
-                let attributes = data
-                    .attributes
-                    .iter()
-                    .cloned()
-                    .map(|attribute| (attribute.attr_type, attribute))
-                    .collect();
-                let skills = data
-                    .skills
-                    .iter()
-                    .cloned()
-                    .map(|skill| (skill.skill_type, skill))
-                    .collect();
                 let vitals = data
                     .vitals
                     .iter()
                     .cloned()
                     .map(|vital| (vital.vital_type, vital))
                     .collect();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
-                        attributes,
-                        skills,
-                        resistances: data.resistances.clone(),
-                        armor: data.armor,
-                        vitae: data.vitae,
-                    });
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerLevelInfoUpdated {
-                        level_info: data.level_info.clone(),
-                    });
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
+                if !suppress_vital_projection {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
+                }
 
                 if let Some(spell_ids) = self.known_spell_ids() {
                     let _ = self
@@ -2201,6 +2264,7 @@ mod tests {
                 next_rank_xp: None,
                 base: 100,
                 current: 100,
+                breakdown: Default::default(),
             },
         );
         client.world.player.skills.insert(
@@ -2216,6 +2280,7 @@ mod tests {
                 training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
         client.world.player.skills.insert(
@@ -2231,6 +2296,7 @@ mod tests {
                 training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
         client.world.player.vitals.insert(
@@ -2244,6 +2310,7 @@ mod tests {
                 base: 100,
                 buffed_max: 100,
                 current: 100,
+                breakdown: Default::default(),
             },
         );
     }

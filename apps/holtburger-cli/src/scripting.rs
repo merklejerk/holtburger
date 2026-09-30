@@ -1404,6 +1404,7 @@ mod tests {
                 base: 111,
                 buffed_max: 222,
                 current: 99,
+                breakdown: Default::default(),
             },
         );
         data.vitals.insert(
@@ -1417,6 +1418,7 @@ mod tests {
                 base: 333,
                 buffed_max: 444,
                 current: 333,
+                breakdown: Default::default(),
             },
         );
         data.vitals.insert(
@@ -1430,6 +1432,7 @@ mod tests {
                 base: 555,
                 buffed_max: 666,
                 current: 444,
+                breakdown: Default::default(),
             },
         );
         data.attributes.insert(
@@ -1442,6 +1445,7 @@ mod tests {
                 next_rank_xp: None,
                 base: 100,
                 current: 100,
+                breakdown: Default::default(),
             },
         );
 
@@ -1500,6 +1504,7 @@ mod tests {
                 next_rank_xp: None,
                 base: 100,
                 current: 110,
+                breakdown: Default::default(),
             },
         );
         data.vitals.insert(
@@ -1513,6 +1518,7 @@ mod tests {
                 base: 150,
                 buffed_max: 175,
                 current: 160,
+                breakdown: Default::default(),
             },
         );
         data.skills.insert(
@@ -1528,6 +1534,7 @@ mod tests {
                 training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
         data.skills.insert(
@@ -1543,6 +1550,7 @@ mod tests {
                 training: TrainingLevel::Specialized,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
 

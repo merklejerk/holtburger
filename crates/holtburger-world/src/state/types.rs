@@ -5,7 +5,7 @@ use holtburger_common::properties::{
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_content::{CharacterTitleCatalog, MotionSequenceCatalog, SoulEmoteCatalog};
-use holtburger_dat::file_type::{SkillTable, XpTable};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use holtburger_protocol::messages::combat::CombatMode;
 use std::sync::Arc;
@@ -55,6 +55,8 @@ pub struct WorldState {
     pub server_time: Option<ServerTimeSync>,
     pub xp_table: Arc<XpTable>,
     pub skill_table: Arc<SkillTable>,
+    /// Static authored inputs for calculating local-player vital maximums.
+    pub secondary_attribute_table: Arc<SecondaryAttributeTable>,
     pub spell_catalog: Arc<SpellCatalog>,
     /// Localized static character titles consumed by inspection construction.
     pub character_titles: Arc<CharacterTitleCatalog>,
@@ -193,6 +195,24 @@ impl WorldState {
         self.player.vitae()
     }
 
+    /// Read bonuses from the same authoritative player entity used for all other properties.
+    pub(crate) fn player_skill_augmentations(
+        &self,
+    ) -> crate::player::stats_calc::SkillAugmentations {
+        use crate::player::stats_calc::SkillAugmentations;
+
+        let value = |property| self.player_int_property(property).unwrap_or(0).max(0) as u32;
+        SkillAugmentations {
+            all_skills: value(PropertyInt::LumAugAllSkills),
+            skilled_melee: value(PropertyInt::AugmentationSkilledMelee),
+            skilled_missile: value(PropertyInt::AugmentationSkilledMissile),
+            skilled_magic: value(PropertyInt::AugmentationSkilledMagic),
+            enlightenment: value(PropertyInt::Enlightenment),
+            jack_of_all_trades: value(PropertyInt::AugmentationJackOfAllTrades),
+            specialized_luminance: value(PropertyInt::LumAugSkilledSpec),
+        }
+    }
+
     fn player_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {
         let augmentation_prop = match prop {
             PropertyFloat::ResistSlash => PropertyInt::AugmentationResistanceSlash,
@@ -243,7 +263,16 @@ impl WorldState {
     }
 
     pub(crate) fn emit_player_derived_stats(&mut self, events: &mut Vec<WorldEvent>) {
-        self.player.refresh_cached_derived_stat_inputs();
+        let augmentations = self.player_skill_augmentations();
+        let vitae = self.player_vitae();
+        self.player.refresh_cached_derived_stat_inputs(
+            crate::player::stats_calc::SkillCalculationContext {
+                table: &self.skill_table,
+                augmentations,
+                vitae,
+            },
+            &self.secondary_attribute_table,
+        );
 
         let current = crate::player::types::LastSentStats {
             attributes: self.player.attribute_snapshot(),
@@ -413,6 +442,7 @@ impl WorldState {
             server_time: None,
             xp_table: Arc::clone(&bootstrap.xp_table),
             skill_table: Arc::clone(&bootstrap.skill_table),
+            secondary_attribute_table: Arc::clone(&bootstrap.secondary_attribute_table),
             spell_catalog: bootstrap.spell_catalog(),
             character_titles: Arc::clone(&bootstrap.character_titles),
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),

@@ -1557,13 +1557,13 @@ fn get_nonzero_modifier(object: &InspectionSource<'_>, prop: PropertyFloat) -> O
     object.get_float_prop(prop).filter(|&v| v != 0.0)
 }
 
-fn creature_identity(
-    object: &InspectionSource<'_>,
+/// Localized selected title, with the server-authored character template as fallback.
+pub fn character_title(
+    object: &impl WorldObjectPropertyAccessors,
     character_titles: &CharacterTitleCatalog,
-) -> CreatureIdentity {
-    let lineage = creature_lineage(object);
+) -> Option<String> {
     let title_id = object.get_int_prop(PropertyInt::CharacterTitleId);
-    let role = title_id
+    title_id
         .and_then(|value| u32::try_from(value).ok())
         .and_then(|value| character_titles.title(value))
         .map(str::to_owned)
@@ -1571,7 +1571,16 @@ fn creature_identity(
             object
                 .get_string_prop(PropertyString::Template)
                 .map(str::to_owned)
-        });
+        })
+}
+
+fn creature_identity(
+    object: &InspectionSource<'_>,
+    character_titles: &CharacterTitleCatalog,
+) -> CreatureIdentity {
+    let lineage = creature_lineage(object);
+    let title_id = object.get_int_prop(PropertyInt::CharacterTitleId);
+    let role = character_title(object, character_titles);
 
     // gmExaminationUI::SetAppraiseInfo selects the character inspector when either property is
     // present (acclient.c:218648-218662). Role text independently follows retail title resolution

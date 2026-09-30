@@ -110,6 +110,9 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        if self.progression.clear() {
+            self.emit_progression_guards();
+        }
         self.reset_container_access();
         self.clear_busy_operation();
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
@@ -147,6 +150,7 @@ impl ClientRuntime {
         initial_events: Vec<WorldEvent>,
     ) -> Result<()> {
         let mut pending_events = initial_events;
+        let mut sheet_changed = false;
 
         while !pending_events.is_empty() {
             let teleport_batch = pending_events
@@ -156,6 +160,9 @@ impl ClientRuntime {
                 matches!(event, WorldEvent::RuntimeBodiesReset { .. } | WorldEvent::TeleportStarted { .. })
                     || matches!(event, WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid)
             });
+            let derived_vitals_in_batch = pending_events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated(_)));
             let mut follow_up_events = Vec::new();
             // Packet-scoped authority/control effects must finish mutating the canonical runtime
             // before any event in this batch projects a dynamic entity view. Otherwise an
@@ -229,7 +236,12 @@ impl ClientRuntime {
             }
 
             for event in &pending_events {
-                self.handle_runtime_world_event_with_context(event, teleport_batch);
+                sheet_changed |= self.world_event_changes_character_sheet(event);
+                self.handle_runtime_world_event_with_context(
+                    event,
+                    teleport_batch,
+                    derived_vitals_in_batch,
+                );
                 let admitted_guid = match event {
                     WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
                         Some(entity.guid)
@@ -254,6 +266,7 @@ impl ClientRuntime {
             pending_events = follow_up_events;
         }
 
+        self.finish_character_world_events(sheet_changed);
         self.try_complete_world_activation().await?;
         Ok(())
     }
@@ -878,7 +891,9 @@ mod tests {
     use crate::DynamicEntityEvent;
     use crate::client::{ClientState, PHYSICS_TICK_MS, PendingOperation, builder};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
+    use holtburger_common::properties::{
+        PropertyInt64, PropertyString, PropertyUpdate, WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::{
@@ -1509,35 +1524,216 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_level_info_world_event_projects_directly() {
+    async fn external_stat_packets_publish_one_final_sheet_and_release_target_guard() {
+        use holtburger_common::properties::{PropertyFloat, PropertyInt, PropertyInt64};
+        use holtburger_world::progression::{
+            ProgressionIntent, ProgressionQuote, ProgressionTargetState, StatTarget,
+        };
+        use holtburger_world::stats::{AttributeType, SkillType, VitalType};
+
         let mut client = build_test_client();
+        let character = Guid(0x5000_0001);
+        client
+            .world
+            .seed_local_player_entity(character, "Player", WorldPosition::default());
+        // The completed description makes the sheet available during ordinary play.
+        client.described_character = Some(character);
+        client.state = ClientState::InWorld;
         let mut events = client.subscribe_client_view_events();
 
-        client.handle_world_event(&WorldEvent::LevelInfoUpdated(CharacterLevelInfo {
-            level: 23,
-            current_xp: 1234,
-            unspent_xp: 456,
-            unspent_skill_points: 7,
-            available_luminance: 89,
-            next_level_xp: 9999,
-            xp_into_level: 111,
-            xp_for_next_level: 222,
-        }));
+        let attribute = |ranks, xp| {
+            GameMessage::PrivateUpdateAttribute(Box::new(PrivateUpdateAttributeData {
+                sequence: 1,
+                object_guid: None,
+                attribute: AttributeType::StrengthAttr as u32,
+                ranks,
+                start: 9809,
+                xp,
+            }))
+        };
+        client
+            .handle_message(&encode_message(&attribute(1, 100)))
+            .await
+            .unwrap();
+        while events.try_recv().is_ok() {}
 
-        let mut saw_level_info = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(
-                event,
-                ClientViewEvent::PlayerLevelInfoUpdated {
-                    level_info: CharacterLevelInfo { level: 23, .. }
-                }
-            ) {
-                saw_level_info = true;
-                break;
+        client.progression.guard(ProgressionQuote {
+            character,
+            intent: ProgressionIntent::Raise {
+                target: StatTarget::Attribute(AttributeType::StrengthAttr),
+                ranks: 1,
+            },
+            target_state: ProgressionTargetState {
+                training: None,
+                ranks: 1,
+                spent_xp: 100,
+            },
+            resulting_ranks: 2,
+            xp_spent: 1,
+            credits_spent: 0,
+            available_xp: 0,
+            available_credits: 0,
+        });
+        client
+            .handle_message(&encode_message(&attribute(190, 4_019_438_644)))
+            .await
+            .unwrap();
+        let projected: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+        let sheets: Vec<_> = projected
+            .iter()
+            .filter_map(|event| match event {
+                ClientViewEvent::CharacterSheetUpdated(Some(sheet)) => Some(sheet.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sheets.len(), 1, "direct and derived events share one sheet");
+        let strength = &sheets[0].attributes[0];
+        assert_eq!(strength.ranks, 190);
+        assert_eq!(strength.spent_xp, 4_019_438_644);
+        assert!(sheets[0].guarded_targets.is_empty());
+        assert!(projected.iter().any(|event| matches!(
+            event,
+            ClientViewEvent::ProgressionGuardsUpdated { targets } if targets.is_empty()
+        )));
+
+        let messages = [
+            GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt::Level as u32,
+                value: 999,
+            })),
+            GameMessage::PrivateUpdatePropertyInt64(Box::new(PrivateUpdatePropertyInt64Data {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt64::TotalExperience as u32,
+                value: 191_226_310_247,
+            })),
+            GameMessage::PrivateUpdateSkill(Box::new(PrivateUpdateSkillData {
+                sequence: 1,
+                object_guid: None,
+                skill: SkillType::Jump as u32,
+                ranks: 226,
+                adjust_pp: 0,
+                status: 3,
+                xp: 4_100_490_438,
+                init: 5000,
+                resistance: 0,
+                last_used: 0.0,
+            })),
+            GameMessage::PrivateUpdateVital(Box::new(PrivateUpdateVitalData {
+                sequence: 1,
+                object_guid: None,
+                vital: VitalType::Health as u32,
+                ranks: 196,
+                start: 94_803,
+                xp: 4_285_430_197,
+                current: 95_000,
+            })),
+            GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt::ArmorLevel as u32,
+                value: 75,
+            })),
+            GameMessage::PrivateUpdatePropertyFloat(Box::new(PrivateUpdatePropertyFloatData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyFloat::ResistFire as u32,
+                value: 0.8,
+            })),
+        ];
+        for message in messages {
+            while events.try_recv().is_ok() {}
+            client
+                .handle_message(&encode_message(&message))
+                .await
+                .unwrap();
+            let projected: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+            assert_eq!(
+                projected
+                    .iter()
+                    .filter(|event| matches!(event, ClientViewEvent::CharacterSheetUpdated(_)))
+                    .count(),
+                1,
+                "each authoritative packet publishes one sheet"
+            );
+            if matches!(message, GameMessage::PrivateUpdateVital(_)) {
+                assert_eq!(
+                    projected
+                        .iter()
+                        .filter(|event| matches!(
+                            event,
+                            ClientViewEvent::PlayerVitalsUpdated { .. }
+                        ))
+                        .count(),
+                    1,
+                    "a vital packet's direct and derived events share one HUD update"
+                );
             }
         }
+        let sheet = client.application_snapshot().character_sheet.unwrap();
+        assert_eq!(sheet.level.level, 999);
+        assert_eq!(sheet.level.current_xp, 191_226_310_247);
+        assert_eq!(sheet.skills[0].stat.spent_xp, 4_100_490_438);
+        assert_eq!(sheet.vitals[0].spent_xp, 4_285_430_197);
+        assert_eq!(sheet.armor, client.world.player_armor());
+        assert_eq!(sheet.resistances, client.world.player_resistances());
+        assert_eq!(sheet.vitae, client.world.player_vitae());
+    }
 
-        assert!(saw_level_info);
+    #[tokio::test]
+    async fn character_identity_and_luminance_capacity_packets_refresh_the_sheet() {
+        let mut client = build_test_client();
+        let character = Guid(0x5000_0001);
+        client
+            .world
+            .seed_local_player_entity(character, "Player", WorldPosition::default());
+        client.described_character = Some(character);
+        client.state = ClientState::InWorld;
+        let mut events = client.subscribe_client_view_events();
+        let messages = [
+            GameMessage::PrivateUpdatePropertyString(Box::new(PrivateUpdatePropertyStringData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyString::Name as u32,
+                value: "Renamed Character".into(),
+            })),
+            GameMessage::PrivateUpdatePropertyString(Box::new(PrivateUpdatePropertyStringData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyString::Template as u32,
+                value: "Adventurer".into(),
+            })),
+            GameMessage::PrivateUpdatePropertyInt64(Box::new(PrivateUpdatePropertyInt64Data {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt64::MaximumLuminance as u32,
+                value: 1_000_000,
+            })),
+        ];
+        for message in messages {
+            client
+                .handle_message(&encode_message(&message))
+                .await
+                .unwrap();
+            assert_eq!(
+                std::iter::from_fn(|| events.try_recv().ok())
+                    .filter(|event| matches!(event, ClientViewEvent::CharacterSheetUpdated(_)))
+                    .count(),
+                1,
+            );
+        }
+        let sheet = client.application_snapshot().character_sheet.unwrap();
+        assert_eq!(sheet.name.as_deref(), Some("Renamed Character"));
+        assert_eq!(sheet.title.as_deref(), Some("Adventurer"));
+        assert_eq!(sheet.maximum_luminance, Some(1_000_000));
+        assert!(
+            !client.world_event_changes_character_sheet(&WorldEvent::PropertiesUpdated {
+                guid: Guid(character.0 + 1),
+                updates: vec![PropertyUpdate::String(PropertyString::Name, "Other".into())],
+            })
+        );
     }
 
     #[tokio::test]
@@ -1591,10 +1787,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.application_snapshot().known_spells, Some(vec![]));
+        assert!(
+            client
+                .application_snapshot()
+                .enchantments
+                .unwrap()
+                .records
+                .is_empty()
+        );
         assert_eq!(
             client.application_snapshot().character_options,
             Some(PlayerCharacterOptions::default())
         );
+        let flags = (holtburger_common::properties::EnchantmentTypeFlags::BODY_ARMOR_VALUE
+            | holtburger_common::properties::EnchantmentTypeFlags::ADDITIVE
+            | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
+            .bits();
+        let effect = holtburger_protocol::messages::magic::Enchantment {
+            spell_id: 123,
+            spell_category: 7,
+            power_level: 5,
+            duration: -1.0,
+            stat_mod_type: flags,
+            stat_mod_value: 2.0,
+            ..Default::default()
+        };
+        client.world.player.enchantments.upsert(effect);
+        let snapshot_effects = client.application_snapshot().enchantments.unwrap();
+        assert_eq!(snapshot_effects.records, vec![effect]);
+        assert_eq!(snapshot_effects.resolved.instances[0].key.spell_id, 123);
         let mut changes = Vec::new();
         client.world.player.add_spell(3, &mut changes);
         client.world.player.add_spell(1, &mut changes);
@@ -1612,6 +1833,7 @@ mod tests {
         client.character_selection.character_id = Some(Guid(0x50000002));
         client.begin_world_entry_transition().await.unwrap();
         assert_eq!(client.application_snapshot().known_spells, None);
+        assert!(client.application_snapshot().enchantments.is_none());
         assert_eq!(client.application_snapshot().character_options, None);
     }
 

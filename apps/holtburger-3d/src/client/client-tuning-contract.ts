@@ -45,6 +45,8 @@ export interface ClientTuning {
 	readonly chat: { readonly sentHistoryLimit: number };
 	/** Mounted spell-list artwork sampling; membership itself is event-driven. */
 	readonly spells: { readonly iconDisplayIntervalMs: number };
+	/** Mounted Character panel sampling; world stat publication remains host-owned. */
+	readonly characterSheet: { readonly displayIntervalMs: number };
 	/** Shared audio policy selected by the client composition. */
 	readonly audio: FrontendAudioTuning;
 	/** Client diagnostic publication and display policy. */

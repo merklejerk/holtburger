@@ -302,6 +302,7 @@ mod tests {
             world_name: None,
             player_name: None,
             vitals: Default::default(),
+            character_sheet: None,
             character_motion: None,
             active_confirmation: None,
             dynamic: DynamicEntitySnapshot::new(
@@ -422,11 +423,85 @@ mod tests {
             Some(ClientHostEvent::StateResyncing)
         ));
         assert!(forwarded.try_recv().is_err());
-        event_tx.send(snapshot_event()).unwrap();
-        assert!(matches!(
-            forwarded.recv().await,
-            Some(ClientHostEvent::CurrentState(_))
-        ));
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        let effect_flags = (holtburger_common::properties::EnchantmentTypeFlags::BODY_ARMOR_VALUE
+            | holtburger_common::properties::EnchantmentTypeFlags::ADDITIVE
+            | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
+            .bits();
+        snapshot.enchantments = Some(
+            holtburger_core::client::types::ClientPlayerEnchantmentsSnapshot {
+                records: vec![holtburger_protocol::messages::magic::Enchantment {
+                    spell_id: 123,
+                    spell_category: 7,
+                    power_level: 5,
+                    duration: -1.0,
+                    stat_mod_type: effect_flags,
+                    stat_mod_value: 2.0,
+                    ..Default::default()
+                }],
+                resolved: holtburger_world::enchantments::ResolvedEnchantments {
+                    instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
+                        key: holtburger_world::enchantments::EnchantmentKey {
+                            spell_id: 123,
+                            layer: 0,
+                        },
+                        spell_category: 7,
+                        power_level: 5,
+                        kind: holtburger_world::enchantments::EnchantmentKind::Beneficial,
+                        remaining_seconds: None,
+                        stat_mod_type: effect_flags,
+                        stat_mod_key: 0,
+                        stat_mod_value: 2.0,
+                    }],
+                    groups: vec![holtburger_world::enchantments::EnchantmentLayerGroup {
+                        affected_stat: holtburger_world::enchantments::AffectedStat::Armor,
+                        stat_name: None,
+                        operation: holtburger_world::enchantments::EnchantmentOperation::Additive,
+                        channel: holtburger_world::enchantments::EnchantmentChannel::Ordinary,
+                        spell_category: 7,
+                        effective: holtburger_world::enchantments::EnchantmentKey {
+                            spell_id: 123,
+                            layer: 0,
+                        },
+                        overridden: Vec::new(),
+                    }],
+                },
+            },
+        );
+        snapshot.character_sheet = Some(Box::new(holtburger_core::ClientCharacterSheet {
+            character: Guid(1),
+            name: Some("Test Character".into()),
+            title: None,
+            maximum_luminance: None,
+            level: holtburger_world::stats::CharacterLevelInfo {
+                level: 999,
+                unspent_xp: u64::MAX,
+                ..Default::default()
+            },
+            attributes: Vec::new(),
+            vitals: Vec::new(),
+            skills: Vec::new(),
+            armor: 123,
+            resistances: Default::default(),
+            vitae: 0.75,
+            guarded_targets: Vec::new(),
+        }));
+        event_tx
+            .send(ClientViewEvent::ApplicationSnapshot(snapshot))
+            .unwrap();
+        let Some(ClientHostEvent::CurrentState(current)) = forwarded.recv().await else {
+            panic!("missing lag replacement");
+        };
+        let sheet = current
+            .character_sheet
+            .expect("lag replacement lost character sheet");
+        assert_eq!(sheet.level.level, 999);
+        assert_eq!(sheet.level.unspent_xp, u64::MAX.to_string());
+        assert_eq!(sheet.armor, 123);
+        assert_eq!(sheet.vitae, 0.75);
+        assert_eq!(current.enchantments.unwrap().instances[0].key.spell_id, 123);
         event_tx
             .send(ClientViewEvent::LocalPlayerEstablished {
                 player_guid: Guid(2),
@@ -708,6 +783,7 @@ mod tests {
             world_name: Some("Leafcull".to_string()),
             player_name: Some("Mira".to_string()),
             vitals: std::collections::HashMap::new(),
+            character_sheet: None,
             character_motion: None,
             active_confirmation: None,
             dynamic: DynamicEntitySnapshot::new(

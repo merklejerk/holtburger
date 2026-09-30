@@ -464,6 +464,40 @@ describe("ClientLifecycleSession", () => {
 		).toEqual([0x5000_0001]);
 	});
 
+	it("restores a sheet from the snapshot and ignores retired character updates", async () => {
+		const transport = new FakeClientTransport();
+		const first = characterSheet(7);
+		transport.setCurrentState({ ...currentState(7), characterSheet: first });
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.characterSheet.read().sheet?.character).toBe(7);
+
+		transport.emit("client-character-sheet-updated", {
+			...first,
+			level: { ...first.level, unspentXp: "42" },
+		});
+		expect(session.characterSheet.read().sheet?.level.unspentXp).toBe("42");
+
+		transport.emit("client-lifecycle-changed", {
+			kind: "exiting",
+			cause: "server-disconnect",
+		});
+		expect(session.characterSheet.read().sheet).toBeNull();
+		transport.emit("client-character-sheet-updated", first);
+		expect(session.characterSheet.read().sheet).toBeNull();
+
+		const second = characterSheet(8);
+		transport.emit("client-current-state", {
+			...currentState(8),
+			characterSheet: second,
+		});
+		expect(session.characterSheet.read().sheet?.character).toBe(8);
+		transport.emit("client-character-sheet-updated", first);
+		expect(session.characterSheet.read().sheet?.character).toBe(8);
+		session.stop();
+		expect(session.characterSheet.read().sheet).toBeNull();
+	});
+
 	it("accepts the completed character-entry baseline and subsequent inventory deltas", async () => {
 		const transport = new FakeClientTransport();
 		const startup = currentState(9);
@@ -1122,8 +1156,46 @@ describe("ClientLifecycleSession", () => {
 	});
 });
 
+function characterSheet(
+	character: number,
+): NonNullable<ClientCurrentState["characterSheet"]> {
+	return {
+		character,
+		name: "Test Character",
+		title: null,
+		maximumLuminance: null,
+		level: {
+			level: 10,
+			currentXp: "1000",
+			unspentXp: "200",
+			unspentSkillPoints: 2,
+			availableLuminance: "0",
+			nextLevelXp: "2000",
+			xpIntoLevel: "0",
+			xpForNextLevel: "1000",
+		},
+		attributes: [],
+		vitals: [],
+		skills: [],
+		armor: 0,
+		resistances: {
+			slash: 1,
+			pierce: 1,
+			bludgeon: 1,
+			fire: 1,
+			cold: 1,
+			acid: 1,
+			electric: 1,
+			nether: 1,
+		},
+		vitae: 1,
+		guardedTargets: [],
+	};
+}
+
 function currentState(playerGuid: number): ClientCurrentState {
 	return {
+		characterSheet: null,
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: playerGuid,

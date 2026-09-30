@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use holtburger_content::{ContentDecodeCache, ContentRepository, WeenieCatalogContent};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_world::WorldBootstrap;
 use serde::Deserialize;
 
@@ -103,6 +103,10 @@ impl SharedHostContent {
             .repository
             .read_asset::<SkillTable>("skill table")
             .context("failed to load skill table for client bootstrap")?;
+        let secondary_attribute_table = self
+            .repository
+            .read_asset::<SecondaryAttributeTable>("secondary attribute table")
+            .context("failed to load secondary attribute table for client bootstrap")?;
         let spell_table = self.spell_table()?.as_ref().clone();
         let xp_table = self
             .repository
@@ -119,6 +123,7 @@ impl SharedHostContent {
             .context("failed to load soul emote catalog for client bootstrap")?;
         let mut bootstrap = WorldBootstrap::new(
             skill_table,
+            secondary_attribute_table,
             spell_table,
             xp_table,
             character_titles,

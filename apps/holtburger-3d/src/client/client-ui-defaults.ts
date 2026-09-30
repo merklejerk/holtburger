@@ -85,6 +85,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 390, height: 460 },
 		minSize: { width: 300, height: 250 },
 	},
+	characterSheet: {
+		anchor: "top-right",
+		offset: { x: 16, y: 220 },
+		size: { width: 480, height: 570 },
+		minSize: { width: 350, height: 310 },
+	},
 	debug: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },

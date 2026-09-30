@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use holtburger_common::properties::{EnchantmentTypeFlags as Flags, PropertyFloat, PropertyInt};
 use holtburger_protocol::messages::magic::Enchantment;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::inspection::VitalType as VitalPropertyType;
 use crate::spell::SpellCatalog;
@@ -25,7 +25,7 @@ const FIRST_SET_SPELL_ID: u32 = 4730;
 const PREFERRED_SELF_AURAS: [u16; 6] = [4395, 4400, 4405, 4414, 4417, 4418];
 
 /// Identity used by update and removal packets; layer is not stacking priority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnchantmentKey {
     pub spell_id: u16,
@@ -53,6 +53,14 @@ pub struct EnchantmentObservation {
 pub struct PlayerEnchantments {
     observations: Vec<EnchantmentObservation>,
     rules: Arc<EnchantmentRules>,
+}
+
+/// One category's applied modifier and the records it overrides for this query.
+pub struct EnchantmentSelection<'a> {
+    /// Category winner used by gameplay arithmetic.
+    pub effective: &'a Enchantment,
+    /// Lower-priority records in the same query and category.
+    pub overridden: Vec<&'a Enchantment>,
 }
 
 impl PlayerEnchantments {
@@ -117,6 +125,21 @@ impl PlayerEnchantments {
         handle_multiple: bool,
         keyless: bool,
     ) -> Vec<&Enchantment> {
+        self.selections_for(required_flags, key, handle_multiple, keyless)
+            .into_iter()
+            .map(|selection| selection.effective)
+            .collect()
+    }
+
+    /// Resolve a gameplay modifier query with the same effective and overridden
+    /// records used by stat breakdowns.
+    pub fn selections_for(
+        &self,
+        required_flags: u32,
+        key: u32,
+        handle_multiple: bool,
+        keyless: bool,
+    ) -> Vec<EnchantmentSelection<'_>> {
         let now = Instant::now();
         let query = EnchantmentQuery {
             required_flags,
@@ -124,51 +147,68 @@ impl PlayerEnchantments {
             handle_multiple,
             keyless,
         };
-        let mut winners: BTreeMap<u16, usize> = BTreeMap::new();
+        let mut categories: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
         for (index, observation) in self.observations.iter().enumerate() {
             let enchantment = &observation.enchantment;
             if !query.matches(enchantment) {
                 continue;
             }
-            winners
+            categories
                 .entry(enchantment.spell_category)
-                .and_modify(|current| {
-                    if self
-                        .rules
-                        .challenger_wins(self.observations[*current], *observation, now)
-                    {
-                        *current = index;
-                    }
-                })
-                .or_insert(index);
+                .or_default()
+                .push(index);
         }
-        winners
+        categories
             .into_values()
-            .map(|index| &self.observations[index].enchantment)
+            .map(|indices| {
+                let winner = select_winner(&self.observations, &self.rules, now, &indices);
+                EnchantmentSelection {
+                    effective: &self.observations[winner].enchantment,
+                    overridden: indices
+                        .into_iter()
+                        .filter(|index| *index != winner)
+                        .map(|index| &self.observations[index].enchantment)
+                        .collect(),
+                }
+            })
             .collect()
     }
 
     /// ACE adds attack/defense-wide additive queries after the ordinary skill query.
     /// ACE Server/WorldObjects/Managers/EnchantmentManager.cs:759-772,1104-1122.
     pub fn skill_wide_additive(&self, skill: SkillType) -> f32 {
+        self.skill_wide_selections(skill)
+            .map_or(0.0, |(_, selections)| {
+                selections
+                    .into_iter()
+                    .map(|selection| selection.effective.stat_mod_value)
+                    .sum::<f32>()
+                    .round_ties_even()
+            })
+    }
+
+    /// The one ACE skill-wide query channel, with its selected and overridden spells.
+    pub fn skill_wide_selections(
+        &self,
+        skill: SkillType,
+    ) -> Option<(EnchantmentChannel, Vec<EnchantmentSelection<'_>>)> {
         let channel = if ATTACK_SKILLS.contains(&skill) {
-            Some(Flags::ATTACK_SKILLS)
+            Some((Flags::ATTACK_SKILLS, EnchantmentChannel::AttackSkills))
         } else if DEFENSE_SKILLS.contains(&skill) {
-            Some(Flags::DEFENSE_SKILLS)
+            Some((Flags::DEFENSE_SKILLS, EnchantmentChannel::DefenseSkills))
         } else {
             None
         };
-        channel.map_or(0.0, |flag| {
-            self.top_for(
-                (Flags::SKILL | Flags::ADDITIVE | flag).bits(),
-                0,
-                false,
-                false,
+        channel.map(|(flag, channel)| {
+            (
+                channel,
+                self.selections_for(
+                    (Flags::SKILL | Flags::ADDITIVE | flag).bits(),
+                    0,
+                    false,
+                    false,
+                ),
             )
-            .into_iter()
-            .map(|enchantment| enchantment.stat_mod_value)
-            .sum::<f32>()
-            .round_ties_even()
         })
     }
 
@@ -224,7 +264,7 @@ impl EnchantmentObservation {
 }
 
 /// The direct stat/property heading affected by a modifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "key", rename_all = "camelCase")]
 pub enum AffectedStat {
     Attribute(u32),
@@ -240,7 +280,7 @@ pub enum AffectedStat {
 }
 
 /// ACE resolves additive and multiplicative modifiers in separate query contexts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EnchantmentOperation {
     Additive,
@@ -250,7 +290,7 @@ pub enum EnchantmentOperation {
 
 /// Independent ACE query that contributes beneath an affected-stat heading.
 /// Attack/defense-wide skill effects are added after the ordinary skill query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EnchantmentChannel {
     Ordinary,
@@ -433,12 +473,7 @@ pub fn resolve_enchantments(
         .into_iter()
         .map(
             |((affected_stat, operation, channel, spell_category), indices)| {
-                let mut winner = indices[0];
-                for &index in indices.iter().skip(1) {
-                    if rules.challenger_wins(observations[winner], observations[index], now) {
-                        winner = index;
-                    }
-                }
+                let winner = select_winner(observations, rules, now, &indices);
                 EnchantmentLayerGroup {
                     affected_stat,
                     stat_name: stat_name(affected_stat),
@@ -456,6 +491,22 @@ pub fn resolve_enchantments(
         )
         .collect();
     ResolvedEnchantments { instances, groups }
+}
+
+/// Choose a category winner identically for gameplay queries and display groups.
+fn select_winner(
+    observations: &[EnchantmentObservation],
+    rules: &EnchantmentRules,
+    now: Instant,
+    indices: &[usize],
+) -> usize {
+    let mut winner = indices[0];
+    for &index in indices.iter().skip(1) {
+        if rules.challenger_wins(observations[winner], observations[index], now) {
+            winner = index;
+        }
+    }
+    winner
 }
 
 fn stat_name(stat: AffectedStat) -> Option<String> {

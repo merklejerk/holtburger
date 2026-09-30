@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_core::ClientProgressionQuote;
 use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -6,13 +7,13 @@ use ratatui::layout::Rect;
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ContextView, Interaction, StatType, TabController, UpdateResult, Verb,
+    AppAction, AppUiAction, ContextView, Interaction, TabController, UpdateResult, Verb,
 };
 
 #[derive(Debug, Clone)]
 enum CharacterSelection {
     Enchantment(Enchantment),
-    Stat(StatType, Option<u64>, Option<u32>),
+    Progression(ClientProgressionQuote),
     None,
 }
 
@@ -65,43 +66,18 @@ impl TabController for CharacterTab {
                     "Debug",
                 ));
             }
-            CharacterSelection::Stat(st, Some(xp_cost), _sp_cost) => {
-                let xp_spent = xp_cost as u32;
-                let is_unassigned_xp_enough = data
-                    .level_info
-                    .as_ref()
-                    .map(|info| info.unspent_xp)
-                    .unwrap_or(0)
-                    >= xp_cost;
-
-                if is_unassigned_xp_enough {
-                    verbs.push(Verb::new(
-                        vec![AppAction::LevelUpStat {
-                            stat: st.clone(),
-                            amount: xp_spent,
-                        }],
-                        'l',
-                        "Level Up",
-                    ));
-                }
-            }
-            CharacterSelection::Stat(StatType::Skill(skill), None, Some(credits_cost)) => {
-                let is_skill_credits_enough = data
-                    .level_info
-                    .as_ref()
-                    .map(|info| info.unspent_skill_points)
-                    .unwrap_or(0)
-                    >= credits_cost;
-                if is_skill_credits_enough {
-                    verbs.push(Verb::new(
-                        vec![AppAction::TrainSkill {
-                            skill,
-                            amount: credits_cost,
-                        }],
-                        't',
-                        "Train",
-                    ));
-                }
+            CharacterSelection::Progression(quote) => {
+                let (shortcut, label) = match quote.quote.intent {
+                    holtburger_world::progression::ProgressionIntent::Train { .. } => {
+                        ('t', "Train")
+                    }
+                    _ => ('l', "Level Up"),
+                };
+                verbs.push(Verb::new(
+                    vec![AppAction::SubmitProgression { quote }],
+                    shortcut,
+                    label,
+                ));
             }
             _ => {}
         }
@@ -176,11 +152,11 @@ fn get_selection_at_index(data: &GameData, index: usize) -> Option<CharacterSele
             CharacterSelection::Enchantment(*enchantment)
         }
         CharTabLine::Stat {
-            stat_type: Some(st),
-            xp_cost,
-            sp_cost,
+            progression: Some(evaluation),
             ..
-        } => CharacterSelection::Stat(st.clone(), *xp_cost, *sp_cost),
+        } => evaluation
+            .result
+            .map_or(CharacterSelection::None, CharacterSelection::Progression),
         _ => CharacterSelection::None,
     })
 }

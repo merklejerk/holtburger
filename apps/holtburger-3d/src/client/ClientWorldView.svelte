@@ -4,6 +4,8 @@
 	import type { ItemDragSession } from "./client-item-drag";
 	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
 	import ClientInspectionWindow from "./ClientInspectionWindow.svelte";
+	import ClientBookWindow from "./ClientBookWindow.svelte";
+	import type { ClientBookReaderState } from "./client-book-reader";
 	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import { ClientSpellDrag } from "./client-spell-drag";
 	import type { ClientItemDrag } from "./client-item-drag";
@@ -89,6 +91,7 @@
 		createClientHudLayout,
 		resolveClientHudSquarePlacement,
 		type ClientHudLayout,
+		type ClientHudPlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
 	import type { ClientChatFilterTag } from "./client-chat-policy";
@@ -104,7 +107,11 @@
 	interface Props {
 		/** User-scoped fixed HUD geometry, independent of open-panel state. */
 		readonly hudLayout: ClientHudLayout;
-		readonly onHudLayoutChange: (layout: ClientHudLayout) => void;
+		readonly onHudPlacementChange: (
+			surface: keyof ClientHudLayout,
+			placement: ClientHudPlacement,
+		) => void;
+		readonly onHudReset: (layout: ClientHudLayout) => void;
 		readonly spellBarShape: "single" | "double";
 		readonly onSpellBarShapeChange: (shape: "single" | "double") => void;
 		readonly minimapViewDiameters: MinimapState["viewDiameters"];
@@ -192,6 +199,9 @@
 		readonly onInteractEntity: () => void;
 		/** Latest captured examination request, independent of current selection. */
 		readonly objectInspection: ClientObjectInspectionState;
+		readonly bookReader: ClientBookReaderState;
+		readonly onCloseBook: () => void;
+		readonly onRetryBook: () => void;
 		readonly objectPreviewService: ClientObjectPreviewService;
 		readonly onExamineEntity: () => void;
 		/** Select and examine an entity represented by an item-backed HUD cell. */
@@ -239,7 +249,8 @@
 
 	let {
 		hudLayout,
-		onHudLayoutChange,
+		onHudPlacementChange,
+		onHudReset,
 		spellBarShape,
 		onSpellBarShapeChange,
 		minimapViewDiameters,
@@ -294,6 +305,9 @@
 		onInventoryNotice,
 		onInteractEntity,
 		objectInspection,
+		bookReader,
+		onCloseBook,
+		onRetryBook,
 		objectPreviewService,
 		onExamineEntity,
 		onExamineItem,
@@ -449,7 +463,7 @@
 	let resetActionBars = $state<(() => boolean) | null>(null);
 	function resetHudPlacements(): void {
 		if (resetActionBars === null || !resetActionBars()) return;
-		onHudLayoutChange(
+		onHudReset(
 			createClientHudLayout(CLIENT_UI_DEFAULTS, viewport, shortcuts.length),
 		);
 	}
@@ -555,7 +569,7 @@
 		surface: Surface,
 		placement: ClientHudLayout[Surface],
 	): void {
-		onHudLayoutChange({ ...hudLayout, [surface]: placement });
+		onHudPlacementChange(surface, placement);
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
@@ -999,6 +1013,18 @@
 				onPlacementChange={(placement) =>
 					changeHudPlacement("inspection", placement)}
 				onPreviewHeightChange={onInspectionPreviewHeightChange}
+			/>
+		{/key}
+	{/if}
+	{#if bookReader.kind !== "idle"}
+		{#key bookReader.revision}
+			<ClientBookWindow
+				reader={bookReader}
+				placement={hudLayout.book}
+				{viewport}
+				onClose={onCloseBook}
+				onRetry={onRetryBook}
+				onPlacementChange={(placement) => changeHudPlacement("book", placement)}
 			/>
 		{/key}
 	{/if}

@@ -5,6 +5,7 @@ import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeVendor } from "./client-vendor-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
+import { probeClientBook } from "./client-book-probe.mjs";
 import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
 import { probeClientTheme } from "./client-theme-probe.mjs";
 import { writeFile } from "node:fs/promises";
@@ -1289,6 +1290,7 @@ export async function probeClientHud(
 					)
 			: null,
 	);
+	const clientBook = await probeClientBook(client, evaluateExpression, delay);
 	inventory.vendor = await probeVendor(
 		client,
 		evaluateExpression,
@@ -1743,6 +1745,7 @@ export async function probeClientHud(
 		characterSheet,
 		clientTheme: theme,
 		clientInspection,
+		clientBook,
 		clientTargeting: targeting,
 		clientInventory: inventory,
 		keyboardPolicy,

@@ -189,6 +189,16 @@ pub enum ClientHostCommand {
     ExamineClientEntity {
         guid: holtburger_common::Guid,
     },
+    /// Request one missing page for the character that opened the reader.
+    ReadClientBookPage {
+        /// Character identity checked by core before sending.
+        player: holtburger_common::Guid,
+        /// Book containing the page.
+        book: holtburger_common::Guid,
+        /// Zero-based page identity from the full response.
+        #[serde(rename = "pageIndex")]
+        page_index: u32,
+    },
     /// Read-only spell examination against current character facts.
     QueryClientSpellInspection {
         query: holtburger_core::client::spell_inspection::SpellInspectionQuery,
@@ -324,6 +334,7 @@ pub enum ClientHostCommand {
 /// Exact wire names owned by the client dispatcher.
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "examine_client_entity",
+    "read_client_book_page",
     "close_client_container",
     "preview_client_inventory",
     "preview_client_vendor",
@@ -729,6 +740,19 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        ReadClientBookPage {
+            player,
+            book,
+            page_index,
+        } => runtime
+            .send_command(ClientCommand::ReadBookPage {
+                player,
+                book,
+                page_index,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         RequestClientCurrentState => runtime
             .request_current_state()
             .await
@@ -949,6 +973,25 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn book_page_request_uses_the_browser_field_name() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "read_client_book_page",
+            "player": 0x5000_0001_u32,
+            "book": 0x6000_0042_u32,
+            "pageIndex": 2,
+        }))
+        .expect("valid page request");
+        assert!(matches!(
+            command,
+            ClientHostCommand::ReadClientBookPage {
+                player: holtburger_common::Guid(0x5000_0001),
+                book: holtburger_common::Guid(0x6000_0042),
+                page_index: 2,
+            }
+        ));
     }
 
     fn aim_json() -> serde_json::Value {

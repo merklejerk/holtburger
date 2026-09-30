@@ -1,27 +1,58 @@
 import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
 import {
 	electronApplicationArguments,
 	parseClientLaunchArguments,
 } from "./client-launch";
 
 describe("Electron application arguments", () => {
-	it("removes the development app path but retains the first packaged argument", () => {
+	it("removes the development app path and leading Electron switches", () => {
 		expect(
 			electronApplicationArguments(
-				["/electron", "/app", "client", "--account=ash"],
+				[
+					"/electron",
+					"--remote-debugging-port=0",
+					"/app",
+					"client",
+					"--account=ash",
+				],
 				true,
+				"/app",
 			),
 		).toEqual(["client", "--account=ash"]);
 		expect(
 			electronApplicationArguments(
 				["/holtburger-3d", "client", "--account=ash"],
 				false,
+				"/app",
 			),
 		).toEqual(["client", "--account=ash"]);
+		expect(() =>
+			electronApplicationArguments(["/electron", "client"], true, "/app"),
+		).toThrow("development application path is missing");
 	});
 });
 
 describe("parseClientLaunchArguments", () => {
+	it("resolves direct-launch settings paths from Electron's working directory", () => {
+		const settingsFile = resolve("settings.json");
+		expect(
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--settings-file",
+				settingsFile,
+			]),
+		).toMatchObject({ settingsFile, rendererArguments: [] });
+		expect(
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--settings-file=relative.json",
+			]),
+		).toMatchObject({ settingsFile: resolve("relative.json") });
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--settings-file="]),
+		).toThrow("cannot be empty");
+	});
 	it("resolves a server endpoint and keeps only non-credential args for the entry", () => {
 		expect(
 			parseClientLaunchArguments([
@@ -40,6 +71,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "secret",
 			},
 			ignorePersistedConfig: false,
+			settingsFile: null,
 			rendererArguments: ["--query=landblock=0x7fffff"],
 		});
 	});
@@ -62,6 +94,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "",
 			},
 			ignorePersistedConfig: false,
+			settingsFile: null,
 			rendererArguments: [],
 		});
 	});
@@ -138,6 +171,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "secret",
 			},
 			ignorePersistedConfig: true,
+			settingsFile: null,
 			rendererArguments: [],
 		});
 		expect(

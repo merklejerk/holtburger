@@ -11,3 +11,8 @@ export function clientUserDataPath(
 		packaged ? applicationName : `${applicationName}-dev`,
 	);
 }
+
+/** Settings filename in the selected Electron user-data profile. */
+export function clientSettingsFilePath(userDataPath: string): string {
+	return join(userDataPath, "client-settings.json");
+}

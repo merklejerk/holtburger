@@ -54,6 +54,7 @@
 		| "worldContainer"
 		| "vendor"
 		| "inspection"
+		| "book"
 		| "debug"
 		| "settings"
 		| "spells"

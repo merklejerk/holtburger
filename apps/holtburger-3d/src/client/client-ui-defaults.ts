@@ -67,6 +67,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 410, height: 500 },
 		minSize: { width: 300, height: 240 },
 	},
+	book: {
+		anchor: "center",
+		offset: { x: 0, y: 0 },
+		size: { width: 480, height: 560 },
+		minSize: { width: 300, height: 240 },
+	},
 	inventory: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },

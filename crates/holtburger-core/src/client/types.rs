@@ -760,6 +760,16 @@ pub enum ClientViewEvent {
         guid: Guid,
         health_fraction: f32,
     },
+    /// Full book receipt; a frontend may open its reader.
+    EntityBookOpened {
+        /// Book object that supplied the full response.
+        guid: Guid,
+        /// Name captured when world accepted the response.
+        name: String,
+        /// Full page state for this opening.
+        book: Box<BookData>,
+    },
+    /// Subsequent page text merged into an existing book.
     EntityBookUpdated {
         guid: Guid,
         book: Box<BookData>,
@@ -1000,8 +1010,13 @@ pub enum ClientCommand {
         enabled: bool,
     },
     Identify(Guid),
+    /// Request one page for the character that opened the reader.
     ReadBookPage {
+        /// Character identity checked before sending the wire action.
+        player: Guid,
+        /// Book containing the page.
         book: Guid,
+        /// Zero-based page identity from the full response.
         page_index: u32,
     },
     QueryHealth(Guid),

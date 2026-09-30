@@ -22,6 +22,10 @@
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientItemInteractions } from "./client-item-interactions";
 	import { ClientInventoryState } from "./client-inventory-state";
+	import {
+		ClientBookReader,
+		type ClientBookReaderState,
+	} from "./client-book-reader";
 	import { findWieldedCasterSpell } from "./client-inventory-equipment";
 	import { browserUiIconRepository } from "../app/ui-icon-repository";
 	import { prepareUiIcons } from "../app/ui-icon-source";
@@ -119,6 +123,11 @@
 		clientGraphicsSettingsSchema,
 		clientUiSettingsSchema,
 	} from "./client-settings-contract";
+	import type { ClientUserSettingsPatch } from "./client-settings-sections";
+	import type {
+		ClientHudLayout,
+		ClientHudPlacement,
+	} from "./client-hud-layout";
 	import {
 		CLIENT_FONT_FAMILY_CSS,
 		type ClientFontFamily,
@@ -163,19 +172,19 @@
 
 	interface Props {
 		readonly initialUserSettings: ClientUserSettings;
-		/** Bootstrap write failure captured before the app's toast owner exists. */
-		readonly initialSettingsSaveFailure: string | null;
+		/** Bootstrap settings issue captured before the app's toast owner exists. */
+		readonly initialSettingsIssue: string | null;
 		readonly settingsTransport: ClientSettingsTransport;
 	}
 
 	const {
 		initialUserSettings,
-		initialSettingsSaveFailure,
+		initialSettingsIssue,
 		settingsTransport,
 	}: Props = $props();
 	// Bootstrap completes before mount; later prop replacement cannot own live settings lifetime.
 	const startupUserSettings = untrack(() => initialUserSettings);
-	const startupSettingsSaveFailure = untrack(() => initialSettingsSaveFailure);
+	const startupSettingsIssue = untrack(() => initialSettingsIssue);
 	const startupSettingsTransport = untrack(() => settingsTransport);
 	let userSettings = $state.raw<ClientUserSettings>(startupUserSettings);
 	const clientInput = provideClientInput(
@@ -211,10 +220,7 @@
 			characterSettings.kind === "ready" &&
 			value.tabs !== characterSettings.settings.spellBarBindings.tabs
 		)
-			changeCharacterSettings({
-				...characterSettings.settings,
-				spellBarBindings: { tabs: value.tabs },
-			});
+			changeCharacterSettings("spellBarBindings", { tabs: value.tabs });
 	}
 	function activateSpellCell(slot: number): void {
 		if (!spellBarEnabled) return;
@@ -260,10 +266,7 @@
 						...combatControls,
 						missile: { height: profile.height, accuracy: profile.accuracy },
 					};
-		changeCharacterSettings({
-			...characterSettings.settings,
-			combatControls: controls,
-		});
+		changeCharacterSettings("combatControls", controls);
 		return true;
 	}
 	function selectCombatProfile(profile: ClientAttackProfile): void {
@@ -410,21 +413,25 @@
 			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
 		},
 	});
-	if (startupSettingsSaveFailure !== null)
+	if (startupSettingsIssue !== null)
 		toastCenter.publish({
-			message: `Settings could not be saved: ${startupSettingsSaveFailure}`,
+			message: `Settings issue: ${startupSettingsIssue}`,
 			tone: "warning",
 		});
-	const userSettingsPersistence = new ClientSettingsPersistence({
-		delayMs: 250,
-		save: (settings: ClientUserSettings) =>
-			startupSettingsTransport.saveUser(settings),
-		report: (error) =>
-			toastCenter.publish({
-				message: `Settings could not be saved: ${diagnostic(error)}`,
-				tone: "warning",
+	const userSettingsPersistence =
+		new ClientSettingsPersistence<ClientUserSettingsPatch>({
+			delayMs: 250,
+			save: (patch) => startupSettingsTransport.saveUserPatch(patch),
+			merge: (pending, next) => ({
+				sections: { ...pending.sections, ...next.sections },
+				hudPlacements: { ...pending.hudPlacements, ...next.hudPlacements },
 			}),
-	});
+			report: (error) =>
+				toastCenter.publish({
+					message: `Settings could not be saved: ${diagnostic(error)}`,
+					tone: "warning",
+				}),
+		});
 	const characterSettingsOwner = new ClientCharacterSettingsOwner({
 		transport: startupSettingsTransport,
 		publish: (state) => {
@@ -433,6 +440,11 @@
 		},
 		loadFailed: (error) =>
 			(commandFailure = `Character settings could not be loaded: ${diagnostic(error)}`),
+		unavailable: (reasons) =>
+			toastCenter.publish({
+				message: `Character settings unavailable: ${reasons.join("; ")}`,
+				tone: "warning",
+			}),
 		saveFailed: (error) =>
 			toastCenter.publish({
 				message: `Character settings could not be saved: ${diagnostic(error)}`,
@@ -440,28 +452,46 @@
 			}),
 		saveDelayMs: 250,
 	});
-	function changeUserSettings(settings: ClientUserSettings): void {
-		userSettings = settings;
-		userSettingsPersistence.publish(settings);
+	function changeUserSection<
+		Key extends keyof Omit<ClientUserSettings, "hudLayout">,
+	>(key: Key, value: ClientUserSettings[Key]): void {
+		userSettings = { ...userSettings, [key]: value };
+		userSettingsPersistence.publish({ sections: { [key]: value } });
+	}
+	function changeHudPlacement(
+		surface: keyof ClientHudLayout,
+		placement: ClientHudPlacement,
+	): void {
+		userSettings = {
+			...userSettings,
+			hudLayout: { ...userSettings.hudLayout, [surface]: placement },
+		};
+		userSettingsPersistence.publish({
+			hudPlacements: { [surface]: placement },
+		});
+	}
+	function resetHudLayout(layout: ClientHudLayout): void {
+		userSettings = { ...userSettings, hudLayout: layout };
+		userSettingsPersistence.publish({ hudPlacements: layout });
 	}
 	function changeUi(ui: ClientUiSettings): void {
-		changeUserSettings({
-			...userSettings,
-			ui: clientUiSettingsSchema.parse(ui),
-		});
+		changeUserSection("ui", clientUiSettingsSchema.parse(ui));
 	}
 	function changeInput(input: ClientKeyboardConfiguration): void {
 		const accepted = clientKeyboardSettingsSchema.parse(input);
 		keyboard.cancel();
 		characterInput.replaceBindings(accepted.character);
 		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
-		changeUserSettings({ ...userSettings, input: accepted });
+		changeUserSection("input", accepted);
 	}
 	function fontCss(family: ClientFontFamily): string | undefined {
 		return family === "theme" ? undefined : CLIENT_FONT_FAMILY_CSS[family];
 	}
-	function changeCharacterSettings(settings: ClientCharacterSettings): void {
-		characterSettingsOwner.change(settings);
+	function changeCharacterSettings<Key extends keyof ClientCharacterSettings>(
+		key: Key,
+		value: ClientCharacterSettings[Key],
+	): void {
+		characterSettingsOwner.change(key, value);
 	}
 	function acceptCharacterName(characterGuid: number, name: string): void {
 		characterSettingsOwner.acceptName(characterGuid, name);
@@ -519,7 +549,7 @@
 			)
 		)
 			return;
-		changeUserSettings({ ...userSettings, graphics: accepted });
+		changeUserSection("graphics", accepted);
 		if (accepted.viewDistance !== previous.viewDistance)
 			presentationSession?.setSceneInterestRadii(
 				clientSceneInterestRadii(accepted.viewDistance),
@@ -573,6 +603,8 @@
 	let selectedEntityGuid = $state<number | null>(null);
 	let objectInspectionOwner: ClientObjectInspection | null = null;
 	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
+	let bookReaderOwner: ClientBookReader | null = null;
+	let bookReader = $state<ClientBookReaderState>({ kind: "idle" });
 	/** Session-local diagnostic policy; each use captures the current value. */
 	let unrestrictedUse = $state(false);
 	let hoveredEntityGuid = $state<number | null>(null);
@@ -1343,6 +1375,11 @@
 			toastCenter.publish({ message, tone: "warning" }),
 		);
 		objectInspectionOwner = inspectionOwner;
+		const readerOwner = new ClientBookReader(owner);
+		bookReaderOwner = readerOwner;
+		const unsubscribeReader = readerOwner.subscribe(
+			(value) => (bookReader = value),
+		);
 		const unsubscribeInspection = inspectionOwner.subscribe(
 			(value) => (objectInspection = value),
 		);
@@ -1476,6 +1513,10 @@
 			dialogs = null;
 			unsubscribeToast();
 			unsubscribeInspection();
+			unsubscribeReader();
+			readerOwner.destroy();
+			if (bookReaderOwner === readerOwner) bookReaderOwner = null;
+			bookReader = { kind: "idle" };
 			inspectionOwner.destroy();
 			if (objectInspectionOwner === inspectionOwner)
 				objectInspectionOwner = null;
@@ -1530,17 +1571,17 @@
 			itemSession={session}
 			characterSheet={session?.characterSheet ?? null}
 			hudLayout={userSettings.hudLayout}
-			onHudLayoutChange={(hudLayout) =>
-				changeUserSettings({ ...userSettings, hudLayout })}
+			onHudPlacementChange={changeHudPlacement}
+			onHudReset={resetHudLayout}
 			spellBarShape={userSettings.spellBarShape}
 			onSpellBarShapeChange={(spellBarShape) =>
-				changeUserSettings({ ...userSettings, spellBarShape })}
+				changeUserSection("spellBarShape", spellBarShape)}
 			minimapViewDiameters={userSettings.minimapViewDiameters}
 			onMinimapViewDiametersChange={(minimapViewDiameters) =>
-				changeUserSettings({ ...userSettings, minimapViewDiameters })}
+				changeUserSection("minimapViewDiameters", minimapViewDiameters)}
 			chatFilters={userSettings.chatFilters}
 			onChatFiltersChange={(chatFilters) =>
-				changeUserSettings({ ...userSettings, chatFilters })}
+				changeUserSection("chatFilters", chatFilters)}
 			inspectionPreviewHeight={userSettings.inspection.previewHeight}
 			graphics={userSettings.graphics}
 			ui={userSettings.ui}
@@ -1550,10 +1591,7 @@
 			onUiChange={changeUi}
 			onInputChange={changeInput}
 			onInspectionPreviewHeightChange={(previewHeight) =>
-				changeUserSettings({
-					...userSettings,
-					inspection: { previewHeight },
-				})}
+				changeUserSection("inspection", { previewHeight })}
 			{hudMode}
 			onHudModeChange={(mode) => (hudMode = mode)}
 			{spellBar}
@@ -1563,10 +1601,7 @@
 				: null}
 			onActionBarsChange={(actionBars) => {
 				if (characterSettings.kind === "ready")
-					changeCharacterSettings({
-						...characterSettings.settings,
-						actionBars,
-					});
+					changeCharacterSettings("actionBars", actionBars);
 			}}
 			{spellBarEnabled}
 			onSelectSpellTab={selectSpellTab}
@@ -1596,6 +1631,9 @@
 			{vendor}
 			{itemInteractions}
 			{objectInspection}
+			{bookReader}
+			onCloseBook={() => bookReaderOwner?.close()}
+			onRetryBook={() => bookReaderOwner?.retry()}
 			{objectPreviewService}
 			onSelectContentsItem={(guid, mode) =>
 				entitySelection?.selectContentsItem(guid, mode)}

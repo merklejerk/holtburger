@@ -72,6 +72,55 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("retains connection samples independently of portal lifecycle and replaces them after loss", async () => {
+		const transport = new FakeClientTransport();
+		const baseline = {
+			health: "connected",
+			quality: "good",
+			reliability: {
+				receiveRepairShare: 0,
+				sendRepairShare: null,
+				receiveGap: false,
+			},
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 0.2,
+			receiveBytesPerSecond: 120,
+			sendBytesPerSecond: 60,
+		} as const;
+		transport.setCurrentState({ ...currentState(1), connection: baseline });
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.connectionSample()?.sample).toEqual(baseline);
+		const waiting = {
+			...baseline,
+			health: "waiting",
+			quality: "poor",
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 10,
+			receiveBytesPerSecond: 0,
+		} as const;
+		transport.emit("client-connection-updated", waiting);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "teleport",
+		});
+		expect(session.connectionSample()?.sample).toEqual(waiting);
+		transport.emit("client-state-resyncing", null);
+		expect(session.connectionSample()).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			connection: baseline,
+		});
+		expect(session.connectionSample()?.sample).toEqual(baseline);
+		session.stop();
+		expect(session.connectionSample()).toBeNull();
+		transport.setCurrentState(currentState(2));
+		await session.start();
+		expect(session.connectionSample()).toBeNull();
+		session.stop();
+	});
+
 	it("dispatches examination and emits the validated cold result", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1203,6 +1252,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 10,
 		worldGeneration: 2,
+		connection: null,
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,

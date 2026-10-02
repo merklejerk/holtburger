@@ -33,6 +33,13 @@ export async function probeClientHud(
 	);
 	if (!targeting?.passed)
 		throw new Error("Client targeting probe did not pass.");
+	const connectionBadge = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeConnectionBadge",
+		[],
+	);
+	if (!connectionBadge?.passed)
+		throw new Error("Client connection badge probe did not pass.");
 	const keyboardPolicy = await probeKeyboardPolicy(client, evaluateExpression);
 	const capture = () =>
 		evaluate(
@@ -1750,6 +1757,7 @@ export async function probeClientHud(
 		clientInspection,
 		clientBook,
 		clientTargeting: targeting,
+		connectionBadge,
 		clientInventory: inventory,
 		keyboardPolicy,
 		cameraSweepScreenshots:

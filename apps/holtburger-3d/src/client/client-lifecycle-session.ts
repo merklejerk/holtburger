@@ -79,6 +79,8 @@ import {
 } from "./client-entity-mirror";
 import {
 	decodeClientCurrentState,
+	connectionSampleSchema,
+	type ClientConnectionSample,
 	decodeClientCombatMode,
 	type ClientCombatMode,
 	decodeClientCombatStatus,
@@ -212,6 +214,7 @@ type ClientEventName = Extract<
 	| "client-book-updated"
 	| "client-object-preview-result"
 	| "client-current-state"
+	| "client-connection-updated"
 	| "client-inventory-preview"
 	| "client-vendor-snapshot"
 	| "client-trade-snapshot"
@@ -277,6 +280,14 @@ export interface ClientLifecycleTransport {
 export interface ClientTimedEnchantments {
 	readonly resolved: ResolvedEnchantments;
 	/** Browser clock at snapshot receipt, used only for local countdown display. */
+	readonly receivedAtMs: number;
+}
+
+/** A core observation anchored to the browser clock for activity expiry. */
+export interface ClientConnectionObservation {
+	/** Shared transport rates, sample age, and health classification. */
+	readonly sample: ClientConnectionSample;
+	/** Browser monotonic time when this observation arrived. */
 	readonly receivedAtMs: number;
 }
 
@@ -437,6 +448,8 @@ export class ClientLifecycleSession {
 	readonly #dynamicSession: DynamicEntitySession;
 	#unlisten: readonly (() => void)[] | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
+	/** Transport samples stay imperative; only the mounted badge polls them. */
+	#connection: ClientConnectionObservation | null = null;
 	#vendor: VendorSnapshot = null;
 	#trade: TradeSnapshot = { trade: null, pending_items: [] };
 	#entryRequestGuid: number | null = null;
@@ -470,6 +483,7 @@ export class ClientLifecycleSession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
+		this.#connection = null;
 		this.characterSheet.reset(null);
 		this.#vendor = null;
 		this.#trade = { trade: null, pending_items: [] };
@@ -503,7 +517,13 @@ export class ClientLifecycleSession {
 			appearanceOptions: null,
 		};
 		this.characterSheet.reset(null);
+		this.#connection = null;
 		this.#emit({ type: "resyncing" });
+	}
+
+	/** Read the retained transport observation without subscribing the UI to network events. */
+	connectionSample(): ClientConnectionObservation | null {
+		return this.#connection;
 	}
 
 	/** Read the latest lifecycle facts without exposing the host transport or protocol types. */
@@ -880,6 +900,7 @@ export class ClientLifecycleSession {
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
 					this.characterSheet.reset(null);
+					this.#connection = null;
 					this.#emit({ type: "resyncing" });
 				}),
 			);
@@ -950,6 +971,12 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-connection-updated", (payload) => {
+					this.#connection = {
+						sample: connectionSampleSchema.parse(payload),
+						receivedAtMs: performance.now(),
+					};
+				}),
 				await this.#transport.listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
 				),
@@ -1265,6 +1292,10 @@ export class ClientLifecycleSession {
 			kind: "snapshot",
 			snapshot: state.dynamic,
 		};
+		this.#connection =
+			state.connection === null
+				? null
+				: { sample: state.connection, receivedAtMs: performance.now() };
 		this.entities.commit(semantic);
 		commitDynamic();
 		this.#emit({ type: "current-state", state });

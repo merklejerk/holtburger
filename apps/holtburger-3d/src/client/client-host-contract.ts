@@ -314,8 +314,29 @@ export function decodeClientAppearanceOptions(
 	return clientAppearanceOptionsSchema.parse(value);
 }
 
+/** Shared owner-produced rates, repair evidence, and connection classifications. */
+export const connectionSampleSchema = z
+	.object({
+		quality: z.enum(["good", "fair", "poor", "unavailable"]),
+		reliability: z
+			.object({
+				receiveRepairShare: finiteNumber.min(0).max(1).nullable(),
+				sendRepairShare: finiteNumber.min(0).max(1).nullable(),
+				receiveGap: z.boolean(),
+			})
+			.strict(),
+		health: z.enum(["connected", "waiting", "disconnected"]),
+		sampleAgeSeconds: finiteNumber.nonnegative(),
+		receiveAgeSeconds: finiteNumber.nonnegative(),
+		receiveBytesPerSecond: finiteNumber.nonnegative(),
+		sendBytesPerSecond: finiteNumber.nonnegative(),
+	})
+	.strict();
+export type ClientConnectionSample = z.infer<typeof connectionSampleSchema>;
+
 const currentStateSchema = z
 	.object({
+		connection: connectionSampleSchema.nullable(),
 		entityCollisionDisabled: z.boolean(),
 		lifecycle: lifecycleSchema,
 		localPlayerGuid: guid.nullable(),

@@ -115,9 +115,17 @@ try {
 			clientBook: result.clientBook,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientConnection) {
+		report = {
+			suite: "client-connection",
+			passed: true,
+			connectionBadge: result.connectionBadge,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
+			connectionBadge: result.connectionBadge,
 			clientInspection: result.clientInspection,
 			clientTargeting: result.clientTargeting,
 			clientTheme: result.clientTheme,
@@ -313,6 +321,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		clientHud: false,
+		clientConnection: false,
 		characterSheet: false,
 		clientBook: false,
 		clientTrade: false,
@@ -426,6 +435,10 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--client-connection":
+				parsed.clientHud = true;
+				parsed.clientConnection = true;
+				break;
 			case "--client-hud":
 				parsed.clientHud = true;
 				break;
@@ -1645,6 +1658,7 @@ Options:
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
+  --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4147,6 +4161,17 @@ async function runClientHudHarness({ viteUrl }) {
 					},
 				},
 				consoleMessages,
+			};
+		}
+		if (options.clientConnection) {
+			return {
+				connectionBadge: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeConnectionBadge",
+					[],
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
 			};
 		}
 		if (options.clientTrade) {

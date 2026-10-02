@@ -99,6 +99,8 @@ pub enum HostEvent {
     /// Semantic entity records, independent of dynamic renderer events.
     ClientEntityFactsChanged(holtburger_core::ClientEntityDelta),
     ClientEntityCollisionDisabled(bool),
+    /// Shared transport rates, reliability, and health for client HUD consumers.
+    ClientConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
     ClientCharacterMotionCapabilitiesUpdated(
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
@@ -422,6 +424,9 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::CurrentState(state) => {
                 HostEvent::ClientCurrentState(state)
             }
+            crate::client_projection::ClientHostEvent::ConnectionUpdated(sample) => {
+                HostEvent::ClientConnectionUpdated(sample)
+            }
             crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
                 HostEvent::ClientLifecycleChanged(lifecycle)
             }
@@ -731,6 +736,9 @@ pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::host_mode::ClientLaunchConfiguration;
+    use holtburger_core::client::connection::{
+        ConnectionHealth, ConnectionQuality, ConnectionReliability, ConnectionSample,
+    };
     use std::io::Cursor;
 
     #[test]
@@ -788,6 +796,55 @@ mod tests {
                 result: Ok(DecodedResponse::Binary(payload))
             } if payload == vec![0, 1, 255, 254]
         ));
+    }
+
+    #[test]
+    fn connection_projection_and_stdio_encoding_preserve_reliability_and_sample_age() {
+        let sample = ConnectionSample {
+            quality: ConnectionQuality::Fair,
+            reliability: ConnectionReliability {
+                receive_repair_share: Some(0.05),
+                send_repair_share: None,
+                receive_gap: false,
+            },
+            health: ConnectionHealth::Connected,
+            sample_age_seconds: 3.0,
+            receive_age_seconds: 0.25,
+            receive_bytes_per_second: 120.0,
+            send_bytes_per_second: 60.0,
+        };
+        let projected = crate::client_projection::project_client_event(
+            holtburger_core::ClientViewEvent::ConnectionUpdated(sample),
+        )
+        .unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let encoded = encode_frame(&receiver.recv().unwrap()).unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "client-connection-updated",
+                    "payload": {
+                        "quality": "fair",
+                        "reliability": {
+                            "receiveRepairShare": 0.05,
+                            "sendRepairShare": null,
+                            "receiveGap": false,
+                        },
+                        "health": "connected",
+                        "sampleAgeSeconds": 3.0,
+                        "receiveAgeSeconds": 0.25,
+                        "receiveBytesPerSecond": 120.0,
+                        "sendBytesPerSecond": 60.0,
+                    },
+                },
+            })
+        );
     }
 
     #[test]

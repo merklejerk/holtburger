@@ -139,6 +139,7 @@ export async function probeWorldContainer(options: {
 			localPlayerGuid: 1,
 			serverTime: 10,
 			worldGeneration: 1,
+			connection: null,
 			worldName: "Fixture",
 			playerName: "Wayfarer",
 			knownSpells: null,

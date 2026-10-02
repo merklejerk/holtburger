@@ -36,11 +36,25 @@ impl Session {
             cached_packets: BTreeMap::new(),
             capture: None,
             game_action_sequence: 0,
+            received_packets: Default::default(),
+            sent_packets: Default::default(),
             bytes_in: 0,
             bytes_out: 0,
             last_recv_time: std::time::Instant::now(),
             last_send_time: std::time::Instant::now(),
         })
+    }
+
+    /// Read delivery observations; pending packets expose an unresolved ordered receive gap.
+    pub fn reliability(&self) -> super::TransportReliability {
+        super::TransportReliability {
+            received: self.received_packets,
+            sent: self.sent_packets,
+            receive_gap: !self.pending_server_packets.is_empty()
+                && !self
+                    .pending_server_packets
+                    .contains_key(&self.next_expected_server_sequence()),
+        }
     }
 
     pub fn set_capture(&mut self, path: &str) -> Result<()> {
@@ -70,6 +84,8 @@ impl Session {
             cached_packets: BTreeMap::new(),
             capture: None,
             game_action_sequence: 0,
+            received_packets: Default::default(),
+            sent_packets: Default::default(),
             bytes_in: 0,
             bytes_out: 0,
             last_recv_time: std::time::Instant::now(),

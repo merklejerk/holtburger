@@ -155,3 +155,28 @@ export const CLIENT_ACTION_BAR_TUNING = {
 	/** Minimum spacing between a new clone and existing action bars. */
 	cloneGap: 4,
 } as const;
+
+/** Small connection badge presentation policy; transport health belongs to core. */
+export const CLIENT_CONNECTION_BADGE_TUNING = {
+	/** Text-relative footprint preserves proportions from the 13px HUD name row. */
+	widthEm: 20 / 13,
+	heightEm: 18 / 13,
+	/** Saturated quality bars and white activity dots against the world. */
+	colors: {
+		good: "#32e875",
+		fair: "#ffc13b",
+		poor: "#ff5252",
+		receive: "#ffffff",
+		send: "#ffffff",
+	},
+	/** Bound UI publication independently of incoming samples. */
+	displayIntervalMs: 250,
+	/** Allow consecutive one-second samples to read as sustained activity. */
+	activityHoldMs: 1_200,
+	/** Quiet dots disappear without changing the layout. */
+	activityIdleOpacity: 0,
+	/** Activity dots are fully visible while traffic is recent. */
+	activityActiveOpacity: 1,
+	/** Gentle dimming without blinking at packet cadence. */
+	activityFadeMs: 180,
+} as const;

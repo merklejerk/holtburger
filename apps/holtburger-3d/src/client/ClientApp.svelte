@@ -1661,6 +1661,7 @@
 			{playerName}
 			{worldName}
 			{vitals}
+			readConnection={() => session?.connectionSample() ?? null}
 			{appearanceOptions}
 			onAppearanceOptionChange={setAppearanceOption}
 			jumpChargeActive={activeJumpBeginSequence !== null}

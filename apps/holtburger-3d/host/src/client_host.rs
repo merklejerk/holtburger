@@ -288,6 +288,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            connection: None,
             trade: Default::default(),
             character_options: None,
             known_spells: None,
@@ -805,6 +806,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            connection: None,
             trade: Default::default(),
             character_options: None,
             known_spells: None,

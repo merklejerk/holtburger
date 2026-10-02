@@ -41,6 +41,7 @@ async function fixture() {
 			entities: playerEntitySnapshot(7),
 			serverTime: 1,
 			worldGeneration: 1,
+			connection: null,
 			worldName: null,
 			playerName: null,
 			knownSpells: null,

@@ -281,9 +281,12 @@ impl Session {
             let _ = capture.write_entry(Direction::Outbound, addr, packet);
         }
 
+        self.transport.send_to(packet, addr).await?;
         self.bytes_out = self.bytes_out.wrapping_add(packet.len() as u64);
         self.last_send_time = std::time::Instant::now();
-        self.transport.send_to(packet, addr).await?;
+        if let Some(header) = header {
+            self.sent_packets.record(&header);
+        }
         Ok(())
     }
 

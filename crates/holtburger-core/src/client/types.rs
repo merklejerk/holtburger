@@ -366,6 +366,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Latest transport rates and live health; absent before the first interval.
+    pub connection: Option<super::connection::ConnectionSample>,
     /// Complete P2P negotiation level recovered with its semantic item records.
     pub trade: super::trade::TradeSnapshot,
     /// None until initial description; an empty collection is a complete empty spellbook.
@@ -947,10 +949,8 @@ pub enum ClientViewEvent {
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,
     },
-    NetPulse {
-        bytes_in: u64,
-        bytes_out: u64,
-    },
+    /// Completed shared transport observation.
+    ConnectionUpdated(super::connection::ConnectionSample),
     Disconnected,
 }
 

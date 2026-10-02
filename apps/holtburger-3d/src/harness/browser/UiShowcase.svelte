@@ -363,6 +363,22 @@
 			{/snippet}
 			{#snippet character()}<ClientCharacterHud
 					playerName="Wayfarer"
+					readConnection={() => ({
+						sample: {
+							health: "connected",
+							quality: "good",
+							reliability: {
+								receiveRepairShare: 0,
+								sendRepairShare: null,
+								receiveGap: false,
+							},
+							sampleAgeSeconds: 0,
+							receiveAgeSeconds: 0.2,
+							receiveBytesPerSecond: 128,
+							sendBytesPerSecond: 64,
+						},
+						receivedAtMs: performance.now(),
+					})}
 					worldName="Dereth"
 					vitals={[
 						{ kind: "health", current: 328, maximum: 400 },

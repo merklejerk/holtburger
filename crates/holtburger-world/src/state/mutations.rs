@@ -1470,16 +1470,19 @@ impl WorldState {
     }
 
     pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<WorldEvent>) {
-        let trade_item_guids = self.current_trade_item_guids();
-        self.mark_trade_preview_entities_for_prune(&trade_item_guids);
+        self.reset_trade(events);
+    }
 
-        if let Some(trade) = self.trade.as_mut() {
-            trade.self_side.accepted = false;
-            trade.partner_side.accepted = false;
-            trade.self_side.items.clear();
-            trade.partner_side.items.clear();
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+    /// Publish one coherent trade level; consumers never infer revisions from item counts.
+    fn publish_trade(&mut self, events: &mut Vec<WorldEvent>) {
+        self.trade_revision = self
+            .trade_revision
+            .checked_add(1)
+            .expect("trade revision exhausted");
+        if let Some(trade) = &mut self.trade {
+            trade.revision = self.trade_revision;
         }
+        events.push(WorldEvent::TradeStateUpdated(self.trade.clone()));
     }
 
     pub(crate) fn register_trade(
@@ -1493,8 +1496,8 @@ impl WorldState {
         } else {
             initiator
         };
-
-        let trade_state = TradeState {
+        self.trade = Some(TradeState {
+            revision: self.trade_revision,
             partner_guid,
             initiator_guid: initiator,
             trade_stamp: 0.0,
@@ -1508,10 +1511,8 @@ impl WorldState {
                 accepted: false,
                 items: Vec::new(),
             },
-        };
-
-        self.trade = Some(trade_state.clone());
-        events.push(WorldEvent::TradeStateUpdated(Some(trade_state)));
+        });
+        self.publish_trade(events);
     }
 
     pub(crate) fn add_trade_item(
@@ -1520,55 +1521,73 @@ impl WorldState {
         object_guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) {
-        let should_mark_preview = self
-            .retention_snapshot(object_guid, self.current_server_time())
-            .is_none_or(|snapshot| !snapshot.has_authoritative_retention());
-
-        if let Some(trade) = self.trade.as_mut() {
-            if trade_side == 0x01 {
-                trade.self_side.items.push(object_guid);
-            } else {
-                trade.partner_side.items.push(object_guid);
-            }
-            trade.self_side.accepted = false;
-            trade.partner_side.accepted = false;
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+        let Some(trade) = &mut self.trade else {
+            return;
+        };
+        let items = match trade_side {
+            1 => &mut trade.self_side.items,
+            2 => &mut trade.partner_side.items,
+            _ => return,
+        };
+        if items.contains(&object_guid) {
+            return;
         }
-
-        if should_mark_preview {
+        items.push(object_guid);
+        trade.self_side.accepted = false;
+        trade.partner_side.accepted = false;
+        if self
+            .retention_snapshot(object_guid, self.current_server_time())
+            .is_none_or(|snapshot| !snapshot.has_authoritative_retention())
+        {
             self.mark_trade_preview(object_guid);
         }
+        self.publish_trade(events);
     }
 
     pub(crate) fn accept_trade(&mut self, who_accepted: Guid, events: &mut Vec<WorldEvent>) {
-        if let Some(trade) = self.trade.as_mut() {
-            if who_accepted == self.player.guid {
-                trade.self_side.accepted = true;
-            } else {
-                trade.partner_side.accepted = true;
-            }
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
-        }
+        self.set_trade_acceptance(who_accepted, true, events);
+    }
+
+    pub(crate) fn decline_trade(&mut self, who_declined: Guid, events: &mut Vec<WorldEvent>) {
+        // ACE Player_Trade.cs:HandleActionDeclineTrade and acclient.c:240647 change only this side.
+        self.set_trade_acceptance(who_declined, false, events);
+    }
+
+    fn set_trade_acceptance(&mut self, who: Guid, accepted: bool, events: &mut Vec<WorldEvent>) {
+        let Some(trade) = &mut self.trade else {
+            return;
+        };
+        let side = if who == trade.self_side.guid {
+            &mut trade.self_side
+        } else if who == trade.partner_side.guid {
+            &mut trade.partner_side
+        } else {
+            return;
+        };
+        side.accepted = accepted;
+        events.push(WorldEvent::TradeStateUpdated(self.trade.clone()));
     }
 
     pub(crate) fn reset_trade(&mut self, events: &mut Vec<WorldEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
-
-        if let Some(trade) = self.trade.as_mut() {
+        if let Some(trade) = &mut self.trade {
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
             trade.self_side.items.clear();
             trade.partner_side.items.clear();
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+            self.publish_trade(events);
         }
     }
 
-    pub(crate) fn clear_trade_acceptance(&mut self, events: &mut Vec<WorldEvent>) {
-        if let Some(trade) = self.trade.as_mut() {
+    pub(crate) fn reject_trade_item(&mut self, item: Guid, events: &mut Vec<WorldEvent>) {
+        if let Some(trade) = &mut self.trade {
+            // ACE revokes acceptance before evaluating an addition; failure does not reset other items.
+            trade.self_side.items.retain(|guid| *guid != item);
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+            self.mark_trade_preview_entities_for_prune(&[item]);
+            self.publish_trade(events);
         }
     }
 
@@ -1576,7 +1595,7 @@ impl WorldState {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
         self.trade = None;
-        events.push(WorldEvent::TradeStateUpdated(None));
+        self.publish_trade(events);
     }
 
     pub(crate) fn current_trade_item_guids(&self) -> Vec<Guid> {

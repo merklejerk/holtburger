@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ClientTradeState } from "../../client/client-trade-state";
+	import { createTradeFixture } from "./client-trade-fixture";
 	import { createVendorFixture } from "./client-vendor-fixture";
 	import { ClientVendorState } from "../../client/client-vendor-state";
 	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
@@ -880,6 +882,7 @@
 		readonly probeInventory: typeof probeInventory;
 		/** Synthetic replies through the real vendor session and HUD. */
 		readonly vendorProbe: ReturnType<typeof createVendorFixture>;
+		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
@@ -1030,6 +1033,7 @@
 	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
+	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	function readInventoryEntities() {
 		inventorySampleCount += 1;
@@ -1063,6 +1067,7 @@
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterSheet: null,
+			trade: { trade: null, pending_items: [] },
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
@@ -1096,6 +1101,8 @@
 					canPickUp: false,
 					worldContainerContent: false,
 					canReceiveGive: false,
+					canTrade: false,
+					canOfferTrade: false,
 					targeting: "non-creature",
 					corpse: null,
 					scenePlacement: "available",
@@ -1187,6 +1194,7 @@
 		},
 	});
 	const itemInteractions = new ClientItemInteractions({
+		beginTrade: (partner) => trade?.open(partner),
 		reportNotice: (message) => {
 			toast = { id: 1, message, tone: "status" };
 		},
@@ -1219,6 +1227,8 @@
 						...recipient,
 						guid: 7,
 						canReceiveGive: true,
+						canTrade: false,
+						canOfferTrade: false,
 						ownedByPlayer: false,
 						location: { kind: "none" },
 						scenePlacement: "available",
@@ -2898,6 +2908,12 @@
 			() => 0,
 		);
 		vendor = vendorOwner;
+		const tradeOwner = new ClientTradeState(
+			interactionLifecycle,
+			icons,
+			(message) => interactionFailures.push(message),
+		);
+		trade = tradeOwner;
 		let spellReferenceRequests = 0;
 		const references = new SpellReferences({
 			invoke: async (command, args) => {
@@ -3014,6 +3030,12 @@
 				return keyboardFixture;
 			},
 			probeInventory,
+			tradeProbe: createTradeFixture({
+				emit: emitInteractionEvent,
+				baseline: emitInteractionBaseline,
+				select: (guid) => selection.select(guid),
+				commands: interactionCommands,
+			}),
 			vendorProbe: createVendorFixture({
 				emit: emitInteractionEvent,
 				baseline: emitInteractionBaseline,
@@ -3164,6 +3186,8 @@
 			spells = null;
 			inventoryOwner.destroy();
 			containerOwner.destroy();
+			tradeOwner.destroy();
+			trade = null;
 			vendorOwner.destroy();
 			vendor = null;
 			worldContainer = null;
@@ -3328,6 +3352,7 @@
 		{inventory}
 		{worldContainer}
 		{vendor}
+		{trade}
 		onSelectContentsItem={(guid, mode) =>
 			selection.selectContentsItem(guid, mode)}
 		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}

@@ -288,6 +288,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            trade: Default::default(),
             character_options: None,
             known_spells: None,
             enchantments: None,
@@ -311,6 +312,41 @@ mod tests {
             ),
             runtime_bodies: Vec::new().into(),
         }))
+    }
+
+    #[test]
+    fn trade_offers_and_acknowledgment_waits_cross_baseline_and_delta_together() {
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        snapshot.trade = holtburger_core::client::trade::TradeSnapshot {
+            trade: Some(holtburger_world::state::TradeState {
+                revision: 7,
+                partner_guid: Guid(2),
+                initiator_guid: Guid(1),
+                trade_stamp: 0.0,
+                self_side: holtburger_world::state::TradeSide {
+                    guid: Guid(1),
+                    accepted: false,
+                    items: vec![Guid(3)],
+                },
+                partner_side: holtburger_world::state::TradeSide {
+                    guid: Guid(2),
+                    accepted: true,
+                    items: vec![Guid(4)],
+                },
+            }),
+            pending_items: vec![Guid(5)],
+        };
+        let current = serde_json::to_value(ClientCurrentState::from(snapshot.as_ref())).unwrap();
+        let event =
+            project_client_event(ClientViewEvent::TradeStateUpdated(snapshot.trade.clone()))
+                .unwrap();
+        let ClientHostEvent::TradeSnapshot(trade) = event else {
+            panic!("trade publication");
+        };
+        assert_eq!(current["trade"], serde_json::to_value(trade).unwrap());
+        assert_eq!(current["trade"]["pending_items"], serde_json::json!([5]));
     }
 
     #[test]
@@ -769,6 +805,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            trade: Default::default(),
             character_options: None,
             known_spells: None,
             enchantments: None,

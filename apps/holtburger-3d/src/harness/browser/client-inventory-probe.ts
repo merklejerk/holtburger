@@ -17,6 +17,8 @@ function item(
 		canPickUp: false,
 		worldContainerContent: false,
 		canReceiveGive: false,
+		canTrade: false,
+		canOfferTrade: false,
 		description: {
 			kind: "known",
 			name: `Inventory item ${guid}`,
@@ -232,6 +234,7 @@ export async function probeClientInventory(options: {
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterSheet: null,
+			trade: { trade: null, pending_items: [] },
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },

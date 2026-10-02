@@ -1,4 +1,10 @@
 import {
+	tradeRequestSchema,
+	tradeSnapshotSchema,
+	type TradeSnapshot,
+	type TradeRequest,
+} from "./client-trade-contract";
+import {
 	vendorRequestSchema,
 	vendorSnapshotSchema,
 	vendorPreviewSchema,
@@ -177,6 +183,7 @@ type ClientCommandName = Extract<
 	| "preview_client_inventory"
 	| "preview_client_vendor"
 	| "submit_client_vendor"
+	| "submit_client_trade"
 	| "submit_client_inventory"
 	| "close_client_container"
 	| "equip_client_item"
@@ -207,6 +214,7 @@ type ClientEventName = Extract<
 	| "client-current-state"
 	| "client-inventory-preview"
 	| "client-vendor-snapshot"
+	| "client-trade-snapshot"
 	| "client-vendor-preview"
 	| "client-vendor-result"
 	| "client-vendor-phase"
@@ -300,6 +308,7 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "book-opened"; readonly receipt: ClientBookOpened }
 	| { readonly type: "book-updated"; readonly book: ClientBook }
 	| { readonly type: "vendor-snapshot"; readonly vendor: VendorSnapshot }
+	| { readonly type: "trade-snapshot"; readonly trade: TradeSnapshot }
 	| { readonly type: "vendor-preview"; readonly result: VendorPreview }
 	| { readonly type: "vendor-result"; readonly result: VendorResult }
 	| { readonly type: "vendor-phase"; readonly phase: VendorPhase }
@@ -429,6 +438,7 @@ export class ClientLifecycleSession {
 	#unlisten: readonly (() => void)[] | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
 	#vendor: VendorSnapshot = null;
+	#trade: TradeSnapshot = { trade: null, pending_items: [] };
 	#entryRequestGuid: number | null = null;
 
 	constructor(
@@ -462,6 +472,7 @@ export class ClientLifecycleSession {
 		this.#state = emptyState();
 		this.characterSheet.reset(null);
 		this.#vendor = null;
+		this.#trade = { trade: null, pending_items: [] };
 		let siblingUnlisteners: readonly (() => void)[] = [];
 		try {
 			await this.#dynamicSession.start({
@@ -570,6 +581,17 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("respond_to_client_confirmation", {
 			request_id: requestId,
 			accepted,
+		});
+	}
+
+	/** Shared offers and acknowledgment waits survive HUD window mounts. */
+	tradeSnapshot(): TradeSnapshot {
+		return this.#trade;
+	}
+
+	async submitTrade(request: TradeRequest): Promise<void> {
+		await this.#transport.invoke("submit_client_trade", {
+			request: tradeRequestSchema.parse(request),
 		});
 	}
 
@@ -1036,6 +1058,10 @@ export class ClientLifecycleSession {
 						result: itemUseResultSchema.parse(payload),
 					});
 				}),
+				await this.#transport.listen("client-trade-snapshot", (payload) => {
+					this.#trade = tradeSnapshotSchema.parse(payload);
+					this.#emit({ type: "trade-snapshot", trade: this.#trade });
+				}),
 				await this.#transport.listen("client-vendor-snapshot", (payload) => {
 					this.#vendor = vendorSnapshotSchema.parse(payload);
 					this.#emit({ type: "vendor-snapshot", vendor: this.#vendor });
@@ -1202,6 +1228,7 @@ export class ClientLifecycleSession {
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
 		this.characterSheet.reset(state.characterSheet);
+		this.#trade = state.trade;
 		const semantic = this.entities.prepareSnapshot(
 			state.entities,
 			state.localPlayerGuid,

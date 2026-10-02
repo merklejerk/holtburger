@@ -233,6 +233,10 @@ pub struct ClientEntityFacts {
     pub world_container_content: bool,
     /// Coarse recipient admission consumed by give gestures; server acceptance may differ.
     pub can_receive_give: bool,
+    /// Other-player interaction admission consumed by the selected HUD.
+    pub can_trade: bool,
+    /// Whole-item trade admission consumed by inventory drops.
+    pub can_offer_trade: bool,
     /// Scene capability independent of loaded renderer assets.
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
@@ -252,6 +256,7 @@ impl WorldState {
             .collect();
         guids.extend(self.storage.owned_items(self.player.guid));
         guids.extend(self.world_container_contents());
+        guids.extend(self.current_trade_item_guids());
         if self.player.guid != Guid::NULL {
             guids.insert(self.player.guid);
         }
@@ -283,6 +288,7 @@ impl WorldState {
             || (entity.is_none()
                 && !owned_by_player
                 && !external
+                && !self.trade_contains_item(guid)
                 && (guid == Guid::NULL || guid != self.player.guid))
         {
             return Ok(None);
@@ -414,6 +420,8 @@ impl WorldState {
             can_pick_up: crate::interaction::pickup_candidate(self, guid).is_some(),
             world_container_content: external,
             can_receive_give: crate::interaction::give_recipient_candidate(self, guid),
+            can_trade: self.trade_partner_candidate(guid),
+            can_offer_trade: self.can_offer_trade_item(guid),
             scene_placement,
             targeting,
             corpse: entity.and_then(|entity| {

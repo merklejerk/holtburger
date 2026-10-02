@@ -106,9 +106,9 @@ impl ClientRuntime {
                     | ClientCommand::VendorTrade(_)
                     | ClientCommand::Buy { .. }
                     | ClientCommand::Sell { .. }
-                    | ClientCommand::OpenTrade(_)
-                    | ClientCommand::AcceptTrade
-                    | ClientCommand::AddToTrade { .. }
+                    | ClientCommand::Trade(crate::client::trade::TradeRequest::Open { .. }
+                        | crate::client::trade::TradeRequest::Accept { .. }
+                        | crate::client::trade::TradeRequest::Add { .. })
                     // ACE missile attacks consume ammo; spellcasting consumes components.
                     // Combat actions also compete with equipment peace/wield transitions.
                     | ClientCommand::CastSpell { .. }
@@ -116,6 +116,10 @@ impl ClientRuntime {
                     | ClientCommand::TargetedMissileAttack { .. }
             )
         {
+            if let ClientCommand::Trade(_) = &cmd {
+                self.report_trade_failure("An inventory change is still pending".into());
+                return Ok(());
+            }
             if let ClientCommand::VendorTrade(request) = &cmd {
                 self.reject_vendor_request(request, "An inventory change is still pending".into());
                 return Ok(());
@@ -127,6 +131,7 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::Trade(request) => self.submit_trade(request).await,
             ClientCommand::PreviewVendorTrade(request) => {
                 self.preview_vendor_trade(request);
                 Ok(())
@@ -179,12 +184,6 @@ impl ClientRuntime {
             | ClientCommand::VendorTrade(_)
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
-            | ClientCommand::OpenTrade(_)
-            | ClientCommand::CloseTrade
-            | ClientCommand::AcceptTrade
-            | ClientCommand::DeclineTrade
-            | ClientCommand::ResetTrade
-            | ClientCommand::AddToTrade { .. }
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterOption { .. }
             | ClientCommand::RecallLifestone
@@ -628,53 +627,6 @@ impl ClientRuntime {
             ClientCommand::Sell { vendor, items } => {
                 self.start_vendor_trade(None, vendor, Vec::new(), items)
                     .await
-            }
-            ClientCommand::OpenTrade(target) => {
-                self.send_game_action(GameAction::OpenTradeNegotiations(Box::new(
-                    OpenTradeNegotiationsActionData {
-                        trade_partner_guid: target,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::CloseTrade => {
-                self.send_game_action(GameAction::CloseTradeNegotiations(Box::new(
-                    CloseTradeNegotiationsActionData {},
-                )))
-                .await
-            }
-            ClientCommand::AcceptTrade => {
-                let data = if let Some(trade) = self.world.trade.as_ref() {
-                    AcceptTradeActionData {
-                        partner_guid: trade.partner_guid,
-                        trade_stamp: trade.trade_stamp,
-                        trade_status: 1,
-                        initiator_guid: trade.initiator_guid,
-                        initiator_accepts: 1,
-                        partner_accepts: if trade.partner_side.accepted { 1 } else { 0 },
-                    }
-                } else {
-                    AcceptTradeActionData::default()
-                };
-                self.send_game_action(GameAction::AcceptTrade(Box::new(data)))
-                    .await
-            }
-            ClientCommand::DeclineTrade => {
-                self.send_game_action(GameAction::DeclineTrade(Box::new(
-                    DeclineTradeActionData {},
-                )))
-                .await
-            }
-            ClientCommand::ResetTrade => {
-                self.send_game_action(GameAction::ResetTrade(Box::new(ResetTradeActionData {})))
-                    .await
-            }
-            ClientCommand::AddToTrade { item } => {
-                self.send_game_action(GameAction::AddToTrade(Box::new(AddToTradeActionData {
-                    item_guid: item,
-                    trade_slot: 0,
-                })))
-                .await
             }
             ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
             ClientCommand::SetCharacterOption { option, value } => {
@@ -1599,6 +1551,7 @@ mod tests {
             alternate_currency_name: String::from("Pyreals"),
         });
         client.world.trade = Some(TradeState {
+            revision: 1,
             partner_guid: vendor_guid,
             initiator_guid: player_guid,
             trade_stamp: 0.0,
@@ -1628,7 +1581,7 @@ mod tests {
                 ClientViewEvent::VendorStateUpdated { vendor } if vendor.is_some() => {
                     saw_vendor = true;
                 }
-                ClientViewEvent::TradeStateUpdated { trade } if trade.is_some() => {
+                ClientViewEvent::TradeStateUpdated(snapshot) if snapshot.trade.is_some() => {
                     saw_trade = true;
                 }
                 _ => {}

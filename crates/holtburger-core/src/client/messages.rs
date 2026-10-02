@@ -320,6 +320,9 @@ impl ClientRuntime {
             self.clear_busy_operation();
             self.reset_container_access();
         }
+        if let GameMessage::GameEvent(event) = &message {
+            self.observe_trade_reply(&event.event);
+        }
         let previous_container_root = self.world.world_container().root();
 
         // Pass to world state for tracking positioning and spawning
@@ -632,6 +635,17 @@ impl ClientRuntime {
                             ActionResultSource::Wire,
                             ActionResultReason::Weenie(data.error, None),
                         );
+                    }
+                    Ok(())
+                }
+                GameEvent::TradeFailure(data) => {
+                    if self.world.trade.is_some() {
+                        let message = if data.reason == WeenieError::None {
+                            "The server refused that trade item.".into()
+                        } else {
+                            crate::errors::format_weenie_error(data.reason, None)
+                        };
+                        self.report_trade_failure(message);
                     }
                     Ok(())
                 }

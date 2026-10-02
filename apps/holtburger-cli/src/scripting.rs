@@ -1805,6 +1805,7 @@ mod tests {
             Entity::new(partner_guid, "Buddy".to_string(), WorldPosition::default()),
         );
         data.trade = Some(TradeState {
+            revision: 1,
             partner_guid,
             initiator_guid: partner_guid,
             trade_stamp: 123.0,

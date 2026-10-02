@@ -119,6 +119,7 @@ pub enum HostEvent {
     ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     ClientVendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
+    ClientTradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
     ClientVendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
     ClientVendorResult(holtburger_core::client::vendor_transaction::VendorTradeResult),
     ClientVendorPhase(holtburger_core::client::vendor_transaction::VendorTradePhase),
@@ -450,6 +451,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::ItemUseResult(result) => {
                 HostEvent::ClientItemUseResult(result)
+            }
+            crate::client_projection::ClientHostEvent::TradeSnapshot(snapshot) => {
+                HostEvent::ClientTradeSnapshot(snapshot)
             }
             crate::client_projection::ClientHostEvent::VendorSnapshot(snapshot) => {
                 HostEvent::ClientVendorSnapshot(snapshot)

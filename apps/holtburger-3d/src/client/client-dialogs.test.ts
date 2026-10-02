@@ -50,6 +50,7 @@ async function fixture() {
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterSheet: null,
+			trade: { trade: null, pending_items: [] },
 			characterMotion: null,
 			activeConfirmation: requestId === null ? null : confirmation(requestId),
 			dynamic: { hostTime: { seconds: 1 }, entities: [] },

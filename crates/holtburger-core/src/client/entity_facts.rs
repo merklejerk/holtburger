@@ -87,6 +87,8 @@ pub(super) struct EntityFactsPublication {
     records: BTreeMap<Guid, ClientEntityFacts>,
     dirty: BTreeSet<Guid>,
     owner: Option<Guid>,
+    /// Last trade publication used to invalidate preview-only semantic records.
+    trade_revision: Option<u32>,
     /// Access changes invalidate eligibility even when no item changes parent.
     container: WorldContainerState,
 }
@@ -134,6 +136,12 @@ impl EntityFactsPublication {
         world: &mut WorldState,
         opened_corpses: &BTreeSet<Guid>,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
+        let revision = world.trade.as_ref().map(|trade| trade.revision);
+        if self.trade_revision != revision {
+            self.dirty.extend(self.records.keys().copied());
+            self.dirty.extend(world.client_entity_guids());
+            self.trade_revision = revision;
+        }
         let storage_changes = world.take_storage_changes();
         let projectile_supply = world.projectile_supply();
         let mut delta = ClientEntityDelta {

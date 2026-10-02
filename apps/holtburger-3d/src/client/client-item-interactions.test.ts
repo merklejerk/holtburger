@@ -19,7 +19,9 @@ async function fixture() {
 	let previous: number | null = null;
 	const failure = vi.fn();
 	const beginAcquisition = vi.fn();
+	const beginTrade = vi.fn();
 	const interactions = new ClientItemInteractions({
+		beginTrade,
 		session: lifecycle,
 		selection: { selectedGuid: () => selected, previousGuid: () => previous },
 		reportFailure: failure,
@@ -61,6 +63,7 @@ async function fixture() {
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],
 		characterSheet: null,
+		trade: { trade: null, pending_items: [] },
 		characterMotion: null,
 		activeConfirmation: null,
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
@@ -99,6 +102,7 @@ async function fixture() {
 		lifecycle,
 		failure,
 		beginAcquisition,
+		beginTrade,
 		submit,
 		query,
 		request,
@@ -525,4 +529,20 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		f.destroy();
 	});
+});
+
+it("player interaction initiates trade through the ordinary Interact flow", async () => {
+	const f = await fixture();
+	f.emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		worldContainer: null,
+		removed: [],
+		upserts: [entityFacts(7, { canTrade: true })],
+	});
+	f.select(7);
+	f.interactions.interactSelected(false);
+	expect(f.beginTrade).toHaveBeenCalledWith(7);
+	expect(f.submit).not.toHaveBeenCalled();
+	expect(f.interactions.snapshot().kind).toBe("idle");
+	f.destroy();
 });

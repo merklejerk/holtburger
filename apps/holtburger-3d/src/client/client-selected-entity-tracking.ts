@@ -25,6 +25,8 @@ export interface ClientSelectedEntityDisplay {
 	readonly health: ClientSelectedHealth;
 	/** Whether selected use is available under the current frontend diagnostic policy. */
 	readonly canInteract: boolean;
+	/** Player targets advertise Trade through the ordinary interaction control. */
+	readonly interactionLabel: "Interact" | "Trade";
 }
 
 /** Initial/pending HUD display without a synthetic name or unknown-health meter. */
@@ -35,6 +37,7 @@ export const EMPTY_CLIENT_SELECTED_DISPLAY: ClientSelectedEntityDisplay = {
 	structure: { current: null, max: null },
 	health: { kind: "unavailable" },
 	canInteract: false,
+	interactionLabel: "Interact",
 };
 
 type TrackingLifecycle = Pick<
@@ -110,8 +113,10 @@ export class ClientSelectedEntityTracking {
 			),
 			stackCount: record.description.stackCount,
 			structure: record.description.structure,
+			interactionLabel: record.canTrade ? "Trade" : "Interact",
 			canInteract:
-				(record.canPickUp ||
+				(record.canTrade ||
+					record.canPickUp ||
 					record.description.useCapability === "direct" ||
 					record.description.useCapability === "targeted" ||
 					(unrestrictedUse &&

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { probeCharacterSheet, probeClientHud } from "./client-hud-probe.mjs";
+import { probeTrade } from "./client-trade-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -100,6 +101,13 @@ try {
 			suite: "character-sheet",
 			passed: true,
 			characterSheet: result.characterSheet,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientTrade) {
+		report = {
+			suite: "client-trade",
+			passed: true,
+			trade: result.clientTrade,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientBook) {
@@ -307,6 +315,7 @@ function parseArgs(args) {
 		clientHud: false,
 		characterSheet: false,
 		clientBook: false,
+		clientTrade: false,
 		uiTheme: false,
 		reportMode: null,
 		landblockId: DEFAULT_LANDBLOCK_ID,
@@ -422,6 +431,10 @@ function parseArgs(args) {
 				break;
 			case "--character-sheet":
 				parsed.characterSheet = true;
+				break;
+			case "--client-trade":
+				parsed.clientHud = true;
+				parsed.clientTrade = true;
 				break;
 			case "--client-book":
 				parsed.clientHud = true;
@@ -1631,6 +1644,7 @@ Options:
                        With --screenshot, also writes <path>.<variant>.png.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
+  --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4133,6 +4147,13 @@ async function runClientHudHarness({ viteUrl }) {
 					},
 				},
 				consoleMessages,
+			};
+		}
+		if (options.clientTrade) {
+			return {
+				clientTrade: await probeTrade(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
 			};
 		}
 		if (options.clientBook) {

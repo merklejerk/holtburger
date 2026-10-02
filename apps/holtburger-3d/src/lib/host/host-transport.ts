@@ -1,3 +1,4 @@
+import type { TradeSnapshot } from "../../client/client-trade-contract";
 import type {
 	VendorSnapshot,
 	VendorPreview,
@@ -125,6 +126,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"preview_client_inventory",
 	"preview_client_vendor",
 	"submit_client_vendor",
+	"submit_client_trade",
 	"submit_client_inventory",
 	"close_client_container",
 	"equip_client_item",
@@ -190,6 +192,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
 	"client-inventory-preview",
 	"client-vendor-snapshot",
+	"client-trade-snapshot",
 	"client-vendor-preview",
 	"client-vendor-result",
 	"client-vendor-phase",
@@ -280,6 +283,7 @@ export interface HostEventPayloadMap {
 	"client-object-preview-result": ObjectPreviewResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;
 	"client-vendor-snapshot": VendorSnapshot;
+	"client-trade-snapshot": TradeSnapshot;
 	"client-vendor-preview": VendorPreview;
 	"client-vendor-result": VendorResult;
 	"client-vendor-phase": VendorPhase;

@@ -30,7 +30,7 @@ use holtburger_world::book::BookData;
 use holtburger_world::entity::{Entity, EntityNetworkMotion};
 use holtburger_world::player::PlayerCharacterOptions;
 use holtburger_world::progression::StatTarget;
-use holtburger_world::state::{FellowshipState, TradeState};
+use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{Vital, VitalType};
 use holtburger_world::vendor::VendorState;
 use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
@@ -366,6 +366,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Complete P2P negotiation level recovered with its semantic item records.
+    pub trade: super::trade::TradeSnapshot,
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
     /// Complete effect records and shared interpretation, absent until player description.
@@ -879,9 +881,8 @@ pub enum ClientViewEvent {
     FellowshipActivity {
         activity: FellowshipActivity,
     },
-    TradeStateUpdated {
-        trade: Option<TradeState>,
-    },
+    /// Confirmed P2P offers plus the shared pending-addition level.
+    TradeStateUpdated(super::trade::TradeSnapshot),
     ItemManaResponse {
         target: Guid,
         mana: f32,
@@ -1091,14 +1092,8 @@ pub enum ClientCommand {
         vendor: Guid,
         items: Vec<ItemProfileActionData>,
     },
-    OpenTrade(Guid),
-    CloseTrade,
-    AcceptTrade,
-    DeclineTrade,
-    ResetTrade,
-    AddToTrade {
-        item: Guid,
-    },
+    /// Shared P2P negotiation command with explicit session/offer guards.
+    Trade(super::trade::TradeRequest),
     CreateParty {
         name: String,
     },

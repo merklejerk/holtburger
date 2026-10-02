@@ -1,3 +1,4 @@
+import { tradeSnapshotSchema } from "./client-trade-contract";
 import { z } from "zod";
 import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
 import { characterSheetSchema } from "./client-character-sheet-contract";
@@ -329,6 +330,7 @@ const currentStateSchema = z
 		combat: combatStatusSchema,
 		vitals: z.array(vitalSchema),
 		characterSheet: characterSheetSchema.nullable(),
+		trade: tradeSnapshotSchema,
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),
 		dynamic: z.unknown(),

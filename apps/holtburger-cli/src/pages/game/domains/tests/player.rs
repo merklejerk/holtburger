@@ -103,6 +103,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
         .bits();
     let snapshot = ClientApplicationSnapshot {
+        trade: Default::default(),
         known_spells: None,
         enchantments: Some(
             holtburger_core::client::types::ClientPlayerEnchantmentsSnapshot {

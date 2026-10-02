@@ -71,6 +71,8 @@ pub struct WorldState {
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
+    /// Last published trade revision, retained across negotiations with the same partner.
+    pub(crate) trade_revision: u32,
     /// Confirmed external storage access; roster receipt does not mutate this state.
     pub(crate) world_container: super::WorldContainerState,
     /// Attachment admission, pending dependencies and scene transition history.
@@ -452,6 +454,7 @@ impl WorldState {
             vendor: None,
             fellowship: None,
             trade: None,
+            trade_revision: 0,
             world_container: super::WorldContainerState::Closed,
             attachments: super::attachment_lifecycle::AttachmentLifecycle::default(),
             entity_lifecycle: EntityLifecycleStore::default(),

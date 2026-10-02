@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientTradeWindow from "./ClientTradeWindow.svelte";
+	import type { ClientTradeState } from "./client-trade-state";
 	import ClientVendorWindow from "./ClientVendorWindow.svelte";
 	import type { ClientVendorState } from "./client-vendor-state";
 	import type { ItemDragSession } from "./client-item-drag";
@@ -186,6 +188,8 @@
 		readonly itemSession: ItemDragSession | null;
 		/** Session-owned vendor draft and catalog presentation. */
 		readonly vendor: ClientVendorState | null;
+		/** Session-owned P2P gestures and confirmed offer presentation. */
+		readonly trade: ClientTradeState | null;
 		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
 		readonly worldContainer: ClientWorldContainerPanelState | null;
 		/** Shared use/combining owner for all mounted entry points. */
@@ -299,6 +303,7 @@
 		itemSession,
 		worldContainer,
 		vendor,
+		trade,
 		itemInteractions,
 		onSelectContentsItem,
 		onPickInventoryTarget,
@@ -766,6 +771,7 @@
 				session={itemSession}
 				{worldContainer}
 				{vendor}
+				{trade}
 				onDragOwner={(owner) => (itemDrag = owner)}
 				{onPickInventoryTarget}
 				{onInventoryNotice}
@@ -945,7 +951,7 @@
 					const display = readSelectedEntityDisplay();
 					return itemInteraction.kind === "acquiring" &&
 						selectedEntityGuid !== null
-						? { ...display, canInteract: true }
+						? { ...display, canInteract: true, interactionLabel: "Interact" }
 						: display;
 				}}
 				onInteract={onInteractEntity}
@@ -982,6 +988,20 @@
 				{viewport}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("worldContainer", placement)}
+			/>
+		{/key}
+	{/if}
+	{#if trade !== null}
+		{#key trade}
+			<ClientTradeWindow
+				model={trade}
+				selectedGuid={selectedEntityGuid}
+				placement={hudLayout.trade}
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("trade", placement)}
+				onSelectItem={onSelectEntity}
+				{onExamineItem}
 			/>
 		{/key}
 	{/if}

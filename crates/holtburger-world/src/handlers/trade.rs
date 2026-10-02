@@ -24,10 +24,17 @@ pub(crate) fn handle_event(
             state.reset_trade(events);
             true
         }
-        GameEvent::DeclineTrade(_)
-        | GameEvent::ClearTradeAcceptance
-        | GameEvent::TradeFailure(_) => {
-            state.clear_trade_acceptance(events);
+        GameEvent::DeclineTrade(data) => {
+            state.decline_trade(data.who_declined, events);
+            true
+        }
+        GameEvent::ClearTradeAcceptance => {
+            // ACE clears both offer sets; retail flushes both lists (acclient.c:241133, 240861).
+            state.reset_trade(events);
+            true
+        }
+        GameEvent::TradeFailure(data) => {
+            state.reject_trade_item(data.object_guid, events);
             true
         }
         GameEvent::CloseTrade(_) => {

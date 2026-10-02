@@ -262,6 +262,7 @@ export function createClientHudLayout(
 		inventory: place(defaults.inventory),
 		worldContainer: place(defaults.worldContainer),
 		vendor: place(defaults.vendor),
+		trade: place(defaults.trade),
 		inspection: place(defaults.inspection),
 		book: place(defaults.book),
 		spells: place(defaults.spells),

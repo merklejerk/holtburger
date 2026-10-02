@@ -95,7 +95,7 @@ export async function probeTrade(client, evaluateExpression) {
 		);
 	}
 
-	const confirmPoint = await point('[data-trade-side="self"] .trade-confirm');
+	const confirmPoint = await point(".trade-rail .trade-confirm");
 	for (const type of ["mousePressed", "mouseReleased"]) {
 		await client.send("Input.dispatchMouseEvent", {
 			type,
@@ -127,7 +127,6 @@ export async function probeTrade(client, evaluateExpression) {
             '--ui-trade-accepted-color': 'rgb(70, 200, 100)',
             '--ui-trade-reset-size': '38px',
             '--ui-trade-reset-inset': '5px',
-            '--ui-trade-reset-background': 'rgb(61, 62, 63)',
             '--ui-button-color': 'rgb(180, 160, 220)',
             '--ui-button-border-color': 'rgb(140, 120, 200)',
         };
@@ -141,10 +140,10 @@ export async function probeTrade(client, evaluateExpression) {
             partnerBackground: getComputedStyle(partner).backgroundColor,
             selfHeader: getComputedStyle(self.querySelector('header')).backgroundColor,
             partnerHeader: getComputedStyle(partner.querySelector('header')).backgroundColor,
-            acceptedColor: getComputedStyle(partner.querySelector('[role="status"]')).color,
+            acceptedColor: getComputedStyle(panel.querySelector('[role="status"]')).color,
             resetSize: getComputedStyle(panel.querySelector('.trade-reset')).width,
-            resetBackingSize: getComputedStyle(panel.querySelector('.trade-reset-notch')).width,
-            resetBackground: getComputedStyle(panel.querySelector('.trade-reset-notch')).backgroundColor,
+            resetSurroundSize: getComputedStyle(panel.querySelector('.trade-reset-control')).width,
+            resetBackground: getComputedStyle(panel.querySelector('.trade-reset-control')).backgroundColor,
             buttonColor: getComputedStyle(panel.querySelector('.trade-confirm')).color,
             buttonBorder: getComputedStyle(panel.querySelector('.trade-confirm')).borderColor,
         };
@@ -161,8 +160,8 @@ export async function probeTrade(client, evaluateExpression) {
 		partnerHeader: "rgb(51, 52, 53)",
 		acceptedColor: "rgb(70, 200, 100)",
 		resetSize: "38px",
-		resetBackingSize: "48px",
-		resetBackground: "rgb(61, 62, 63)",
+		resetSurroundSize: "48px",
+		resetBackground: "rgba(0, 0, 0, 0)",
 		buttonColor: "rgb(180, 160, 220)",
 		buttonBorder: "rgb(140, 120, 200)",
 	};
@@ -201,7 +200,7 @@ export async function probeTrade(client, evaluateExpression) {
 	if ((await read(`${fixture}.request()`)).kind !== "withdraw")
 		throw new Error("Ready control did not withdraw acceptance");
 	await read(`${fixture}.accepted("self", false)`);
-	const resetPoint = await point(".trade-reset-notch .trade-reset");
+	const resetPoint = await point(".trade-reset-control .trade-reset");
 	for (const type of ["mousePressed", "mouseReleased"]) {
 		await client.send("Input.dispatchMouseEvent", {
 			type,

@@ -106,64 +106,6 @@
 					>
 						<header class="trade-side-heading">
 							<h3 title={side.name}>{side.name}</h3>
-							{#if side.own}
-								<button
-									type="button"
-									class="trade-confirm ui-button"
-									class:confirmed={current.trade.self_side.accepted}
-									aria-label={current.trade.self_side.accepted
-										? "Withdraw acceptance"
-										: "Confirm trade"}
-									aria-pressed={current.trade.self_side.accepted}
-									title={current.trade.self_side.accepted
-										? "Withdraw acceptance"
-										: "Confirm trade"}
-									disabled={current.trade.self_side.accepted
-										? !current.ready || transferring
-										: !current.canAccept}
-									onclick={() =>
-										act(() =>
-											current.trade.self_side.accepted
-												? model.withdraw()
-												: model.accept(current.trade.revision),
-										)}
-								>
-									<svg viewBox="0 0 32 32" aria-hidden="true">
-										{#if !current.ready || transferring || current.pendingItems > 0}
-											<circle class="trade-spinner" cx="16" cy="16" r="10" />
-										{:else if current.trade.self_side.accepted}
-											<path d="m7 16 6 6L25 10" />
-										{:else}
-											<path d="M27 16H5M14 7l-9 9 9 9" />
-										{/if}
-									</svg>
-									{!current.ready
-										? "Updating"
-										: transferring
-											? "Trading"
-											: current.pendingItems > 0
-												? "Adding"
-												: current.trade.self_side.accepted
-													? "Ready"
-													: "Confirm"}
-								</button>
-							{:else}
-								<span
-									class="trade-acceptance"
-									role="status"
-									aria-label={side.accepted
-										? "Offer confirmed"
-										: "Offer not confirmed"}
-									title={side.accepted
-										? "Offer confirmed"
-										: "Offer not confirmed"}
-								>
-									{side.accepted ? "Accepted" : "Reviewing"}
-									<svg viewBox="0 0 32 32" aria-hidden="true">
-										<path d="M5 16h22M18 7l9 9-9 9" />
-									</svg>
-								</span>
-							{/if}
 						</header>
 						<div class="trade-grid" class:empty={side.items.length === 0}>
 							{#if side.items.length === 0}
@@ -208,19 +150,95 @@
 					</section>
 				{/each}
 			</div>
-			<div class="trade-reset-notch">
-				<button
-					type="button"
-					class="trade-reset ui-button"
-					aria-label="Reset offers"
-					title="Reset both offers"
-					disabled={!current.ready || transferring}
-					onclick={() => act(() => model.reset())}
+			<div class="trade-rail">
+				<div
+					class="trade-readiness"
+					class:accepted={current.trade.partner_side.accepted}
 				>
-					<svg viewBox="0 0 24 24" aria-hidden="true"
-						><path d="M5 8a8 8 0 1 1-1 7M5 3v5h5" /></svg
+					<span
+						class="trade-acceptance trade-status-control"
+						role="status"
+						aria-label={current.trade.partner_side.accepted
+							? "Partner offer confirmed"
+							: "Partner offer not confirmed"}
 					>
-				</button>
+						<svg viewBox="0 0 32 32" aria-hidden="true">
+							{#if current.trade.partner_side.accepted}<path
+									d="m7 16 6 6L25 10"
+								/>{:else}<circle cx="16" cy="16" r="10" />{/if}
+						</svg>
+						<span
+							>{current.trade.partner_side.accepted
+								? "Accepted"
+								: "Reviewing"}</span
+						>
+					</span>
+					<span class="trade-connection" aria-hidden="true"
+						><svg viewBox="0 0 16 16"><path d="m5 3 5 5-5 5" /></svg></span
+					>
+				</div>
+				<div class="trade-reset-control">
+					<button
+						type="button"
+						class="trade-reset ui-button"
+						aria-label="Reset offers"
+						title="Reset both offers"
+						disabled={!current.ready || transferring}
+						onclick={() => act(() => model.reset())}
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true"
+							><path d="M5 8a8 8 0 1 1-1 7M5 3v5h5" /></svg
+						>
+					</button>
+				</div>
+				<div
+					class="trade-confirm-track"
+					class:accepted={current.trade.self_side.accepted}
+				>
+					<span class="trade-connection inward-left" aria-hidden="true"
+						><svg viewBox="0 0 16 16"><path d="m5 3 5 5-5 5" /></svg></span
+					>
+					<button
+						type="button"
+						class="trade-confirm trade-status-control ui-button"
+						class:confirmed={current.trade.self_side.accepted}
+						aria-label={current.trade.self_side.accepted
+							? "Withdraw acceptance"
+							: "Confirm trade"}
+						aria-pressed={current.trade.self_side.accepted}
+						title={current.trade.self_side.accepted
+							? "Withdraw acceptance"
+							: "Confirm trade"}
+						disabled={current.trade.self_side.accepted
+							? !current.ready || transferring
+							: !current.canAccept}
+						onclick={() =>
+							act(() =>
+								current.trade.self_side.accepted
+									? model.withdraw()
+									: model.accept(current.trade.revision),
+							)}
+					>
+						<svg viewBox="0 0 32 32" aria-hidden="true">
+							{#if !current.ready || transferring || current.pendingItems > 0}
+								<circle class="trade-spinner" cx="16" cy="16" r="10" />
+							{:else if current.trade.self_side.accepted}
+								<path d="m7 16 6 6L25 10" />
+							{:else}
+								<circle cx="16" cy="16" r="10" />
+							{/if}
+						</svg>
+						{!current.ready
+							? "Updating"
+							: transferring
+								? "Trading"
+								: current.pendingItems > 0
+									? "Adding"
+									: current.trade.self_side.accepted
+										? "Ready"
+										: "Confirm"}
+					</button>
+				</div>
 			</div>
 		</div>
 	</ClientHudWindow>
@@ -229,7 +247,9 @@
 <style>
 	@layer components {
 		.trade-panel {
-			position: relative;
+			display: flex;
+			flex-direction: column;
+			gap: var(--ui-trade-side-gap);
 			height: 100%;
 			min-height: 0;
 			padding: var(--ui-trade-inset);
@@ -238,7 +258,7 @@
 			display: grid;
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: var(--ui-trade-side-gap);
-			height: 100%;
+			flex: 1;
 			min-height: 0;
 		}
 		.trade-side {
@@ -269,12 +289,6 @@
 			background: var(--offer-header-background);
 			color: var(--offer-color);
 		}
-		.own-offer .trade-side-heading {
-			flex-direction: row-reverse;
-		}
-		.own-offer h3 {
-			text-align: right;
-		}
 		h3 {
 			margin: 0;
 			font-size: inherit;
@@ -292,19 +306,66 @@
 			stroke-linecap: round;
 			stroke-linejoin: round;
 		}
-		.trade-acceptance {
-			display: flex;
+		/* One shared rail aligns each readiness track with its offer above. */
+		.trade-rail {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 			align-items: center;
 			gap: var(--ui-trade-control-gap);
-			font-size: var(--ui-trade-status-font-size);
+			flex-shrink: 0;
+		}
+		.trade-readiness,
+		.trade-confirm-track {
+			--trade-track-width: var(--ui-trade-border-width);
+			display: flex;
+			align-items: center;
+			gap: var(--ui-trade-content-inset);
+			min-width: 0;
 			color: var(--ui-trade-reviewing-color);
 		}
-		.trade-acceptance svg {
+		.trade-readiness.accepted,
+		.trade-confirm-track.accepted {
+			--trade-track-width: var(--ui-trade-accepted-track-width);
+			color: var(--ui-trade-accepted-color);
+		}
+		.trade-connection {
+			display: flex;
+			align-items: center;
+			flex: 1;
+			min-width: 0;
+		}
+		.trade-connection::before {
+			content: "";
+			flex: 1;
+			border-top: var(--trade-track-width) solid currentColor;
+		}
+		.trade-connection svg {
 			width: var(--ui-trade-icon-size);
 			height: var(--ui-trade-icon-size);
+			flex-shrink: 0;
 		}
-		.trade-side:global([data-trade-accepted="true"]) .trade-acceptance {
+		.trade-connection.inward-left {
+			transform: rotate(180deg);
+		}
+		/* A heavier line and solid arrowhead distinguish acceptance without relying on color. */
+		.accepted .trade-connection {
+			filter: drop-shadow(0 0 var(--ui-trade-accepted-track-glow) currentColor);
+		}
+		.accepted .trade-connection svg {
+			fill: currentColor;
+			stroke-width: var(--trade-track-width);
+		}
+		/* Partner readiness borrows control geometry, with no hover, focus, or click affordance. */
+		.trade-acceptance {
+			border: var(--ui-trade-border-width) solid var(--ui-color-border);
+			border-radius: var(--ui-radius-control);
+			background: var(--ui-color-well);
+			color: var(--ui-trade-reviewing-color);
+			cursor: default;
+		}
+		.trade-readiness.accepted .trade-acceptance {
 			color: var(--ui-trade-accepted-color);
+			border-color: currentColor;
 		}
 
 		.trade-grid {
@@ -319,13 +380,6 @@
 			overflow: auto;
 			min-height: 0;
 			padding: var(--ui-trade-content-inset);
-			margin-bottom: max(
-				0px,
-				calc(
-					var(--ui-trade-reset-size) + var(--ui-trade-reset-inset) -
-						var(--ui-trade-inset)
-				)
-			);
 		}
 		.trade-grid.empty {
 			grid-template-columns: minmax(0, 1fr);
@@ -344,17 +398,22 @@
 			text-align: center;
 			margin: 0;
 		}
-		.trade-confirm {
+		.trade-status-control {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
 			gap: var(--ui-trade-control-gap);
-			padding: 4px 6px;
-			min-height: 30px;
+			padding: var(--ui-trade-content-inset);
+			min-height: var(--ui-trade-reset-size);
+			flex: 0 1 auto;
+			min-width: calc(
+				8ch + var(--ui-trade-icon-size) + var(--ui-trade-control-gap) + 2 *
+					var(--ui-trade-content-inset)
+			);
 			font-size: var(--ui-trade-status-font-size);
 			white-space: nowrap;
 		}
-		.trade-confirm svg {
+		.trade-status-control svg {
 			width: var(--ui-trade-icon-size);
 			height: var(--ui-trade-icon-size);
 		}
@@ -365,19 +424,12 @@
 				var(--ui-trade-accepted-color)
 			);
 		}
-		/* Shared Reset overlaps both wells; reserved grid space keeps offered items reachable. */
-		.trade-reset-notch {
-			position: absolute;
-			bottom: 0;
-			left: 50%;
-			transform: translateX(-50%);
+		.trade-reset-control {
 			width: calc(var(--ui-trade-reset-size) + 2 * var(--ui-trade-reset-inset));
 			height: calc(
 				var(--ui-trade-reset-size) + 2 * var(--ui-trade-reset-inset)
 			);
 			padding: var(--ui-trade-reset-inset);
-			background: var(--ui-trade-reset-background);
-			border-radius: 50%;
 		}
 		.trade-reset {
 			display: grid;

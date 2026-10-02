@@ -59,7 +59,7 @@ export const CLIENT_UI_DEFAULTS = {
 		anchor: "top-left",
 		offset: { x: 370, y: 170 },
 		size: { width: 440, height: 330 },
-		minSize: { width: 340, height: 220 },
+		minSize: { width: 340, height: 192 },
 	},
 	vendor: {
 		anchor: "top-left",

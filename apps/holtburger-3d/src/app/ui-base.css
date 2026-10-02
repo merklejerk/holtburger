@@ -252,6 +252,8 @@
 		);
 		--ui-trade-reviewing-color: var(--ui-color-muted);
 		--ui-trade-accepted-color: var(--ui-color-success);
+		--ui-trade-accepted-track-width: 3px;
+		--ui-trade-accepted-track-glow: 6px;
 		--ui-trade-inset: 8px;
 		--ui-trade-side-gap: 6px;
 		--ui-trade-content-inset: 6px;
@@ -259,14 +261,13 @@
 		--ui-trade-grid-gap: 4px;
 		--ui-trade-border-width: 1px;
 		--ui-trade-header-border-width: 4px;
-		--ui-trade-header-min-height: 48px;
+		--ui-trade-header-min-height: 32px;
 		--ui-trade-name-weight: bold;
 		--ui-trade-status-font-size: 0.9em;
 		--ui-trade-icon-size: 20px;
-		/* Reset backing and grid clearance derive from one control size and its surround. */
+		/* Rail readiness and Reset share a control size; the surround provides breathing room. */
 		--ui-trade-reset-size: 32px;
 		--ui-trade-reset-inset: 4px;
-		--ui-trade-reset-background: var(--ui-color-surface);
 	}
 	@supports (backdrop-filter: blur(1px)) {
 		.ui-theme .ui-panel {

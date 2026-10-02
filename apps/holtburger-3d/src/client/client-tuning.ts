@@ -161,14 +161,6 @@ export const CLIENT_CONNECTION_BADGE_TUNING = {
 	/** Text-relative footprint preserves proportions from the 13px HUD name row. */
 	widthEm: 20 / 13,
 	heightEm: 18 / 13,
-	/** Saturated quality bars and white activity dots against the world. */
-	colors: {
-		good: "#32e875",
-		fair: "#ffc13b",
-		poor: "#ff5252",
-		receive: "#ffffff",
-		send: "#ffffff",
-	},
 	/** Bound UI publication independently of incoming samples. */
 	displayIntervalMs: 250,
 	/** Allow consecutive one-second samples to read as sustained activity. */

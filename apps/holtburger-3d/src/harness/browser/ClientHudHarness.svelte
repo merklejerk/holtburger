@@ -2090,6 +2090,42 @@
 
 		const nameRow = badge().parentElement;
 		if (nameRow === null) throw new Error("Connection name row is absent.");
+
+		const themeColors = [
+			["--ui-connection-good-color", "rgb(20, 40, 60)"],
+			["--ui-connection-fair-color", "rgb(60, 80, 100)"],
+			["--ui-connection-poor-color", "rgb(100, 120, 140)"],
+			["--ui-connection-activity-color", "rgb(140, 160, 180)"],
+		] as const;
+		const originalColors = themeColors.map(([token]) =>
+			nameRow.style.getPropertyValue(token),
+		);
+		try {
+			for (const [token, color] of themeColors)
+				nameRow.style.setProperty(token, color);
+			for (const [index, quality] of (
+				["good", "fair", "poor"] as const
+			).entries()) {
+				emitInteractionEvent("client-connection-updated", {
+					...sample,
+					quality,
+				});
+				await settle();
+				if (getComputedStyle(bars[0]).backgroundColor !== themeColors[index][1])
+					throw new Error(
+						`Theme override did not reach ${quality} connection bars.`,
+					);
+			}
+			for (const dot of badge().querySelectorAll<HTMLElement>(".activity")) {
+				if (getComputedStyle(dot).backgroundColor !== themeColors[3][1])
+					throw new Error(
+						"Theme override did not reach both connection activity dots.",
+					);
+			}
+		} finally {
+			for (const [index, [token]] of themeColors.entries())
+				nameRow.style.setProperty(token, originalColors[index]);
+		}
 		const originalFontSize = nameRow.style.fontSize;
 		const originalSegments = [
 			badge(),

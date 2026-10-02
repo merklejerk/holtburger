@@ -89,11 +89,6 @@
 	use:keyboard.scope={{ nativeControls: true, keydown }}
 	style:--badge-width={`${CLIENT_CONNECTION_BADGE_TUNING.widthEm}em`}
 	style:--badge-height={`${CLIENT_CONNECTION_BADGE_TUNING.heightEm}em`}
-	style:--badge-good={CLIENT_CONNECTION_BADGE_TUNING.colors.good}
-	style:--badge-fair={CLIENT_CONNECTION_BADGE_TUNING.colors.fair}
-	style:--badge-poor={CLIENT_CONNECTION_BADGE_TUNING.colors.poor}
-	style:--badge-receive={CLIENT_CONNECTION_BADGE_TUNING.colors.receive}
-	style:--badge-send={CLIENT_CONNECTION_BADGE_TUNING.colors.send}
 	style:--activity-idle-opacity={CLIENT_CONNECTION_BADGE_TUNING.activityIdleOpacity}
 	style:--activity-active-opacity={CLIENT_CONNECTION_BADGE_TUNING.activityActiveOpacity}
 	style:--activity-fade={`${CLIENT_CONNECTION_BADGE_TUNING.activityFadeMs}ms`}
@@ -148,14 +143,14 @@
 			opacity: 1;
 		}
 		[data-quality="good"] {
-			color: var(--badge-good);
+			color: var(--ui-connection-good-color);
 		}
 		[data-quality="fair"] {
-			color: var(--badge-fair);
+			color: var(--ui-connection-fair-color);
 		}
 		[data-quality="poor"],
 		[data-health="disconnected"] {
-			color: var(--badge-poor);
+			color: var(--ui-connection-poor-color);
 		}
 		.activity-dots {
 			display: flex;
@@ -165,14 +160,9 @@
 			width: calc(4em / 13);
 			height: calc(4em / 13);
 			border-radius: 50%;
+			background: var(--ui-connection-activity-color);
 			opacity: var(--activity-idle-opacity);
 			transition: opacity var(--activity-fade) linear;
-		}
-		.receive {
-			background: var(--badge-receive);
-		}
-		.send {
-			background: var(--badge-send);
 		}
 		.activity.active {
 			opacity: var(--activity-active-opacity);

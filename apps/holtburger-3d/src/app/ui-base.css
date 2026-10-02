@@ -19,6 +19,11 @@
 		--ui-color-danger: #ffac9c;
 		--ui-color-warning: #efc46f;
 		--ui-color-success: #bfd398;
+		/* Connection quality stays saturated against the world; traffic dots share one tint. */
+		--ui-connection-good-color: #32e875;
+		--ui-connection-fair-color: #ffc13b;
+		--ui-connection-poor-color: #ff5252;
+		--ui-connection-activity-color: #ffffff;
 		/* Chat category colors are independent of vital bars and status feedback. */
 		--ui-chat-system-text: #87bddd;
 		--ui-chat-npc-text: #c8d8ef;

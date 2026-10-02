@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	decodeClientChatMessage,
+	connectionSampleSchema,
 	decodeClientCameraTick,
 	decodeClientLifecycle,
 	decodeClientLocalPlayerEstablished,
@@ -14,6 +15,52 @@ import {
 } from "./client-host-contract";
 
 describe("client host wire contract", () => {
+	it("validates finite nonnegative transport observations", () => {
+		const sample = {
+			health: "connected",
+			quality: "good",
+			reliability: {
+				receiveRepairShare: 0,
+				sendRepairShare: null,
+				receiveGap: false,
+			},
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 0,
+			receiveBytesPerSecond: 120,
+			sendBytesPerSecond: 0,
+		};
+		expect(connectionSampleSchema.parse(sample)).toEqual(sample);
+		expect(() =>
+			connectionSampleSchema.parse({ ...sample, health: "laggy" }),
+		).toThrow();
+		expect(() =>
+			connectionSampleSchema.parse({ ...sample, quality: "excellent" }),
+		).toThrow();
+		for (const field of ["receiveRepairShare", "sendRepairShare"] as const) {
+			for (const invalid of [-1, 1.1, Infinity, NaN]) {
+				expect(() =>
+					connectionSampleSchema.parse({
+						...sample,
+						reliability: { ...sample.reliability, [field]: invalid },
+					}),
+				).toThrow();
+			}
+		}
+
+		for (const field of [
+			"sampleAgeSeconds",
+			"receiveAgeSeconds",
+			"receiveBytesPerSecond",
+			"sendBytesPerSecond",
+		]) {
+			for (const invalid of [-1, Infinity, NaN]) {
+				expect(() =>
+					connectionSampleSchema.parse({ ...sample, [field]: invalid }),
+				).toThrow();
+			}
+		}
+	});
+
 	it("keeps selection availability, emptiness, and strict request shape distinct", () => {
 		const camera = {
 			cameraGeneration: 2,

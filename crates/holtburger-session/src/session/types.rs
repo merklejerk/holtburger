@@ -107,6 +107,10 @@ pub struct Session {
     pub(crate) cached_packets: BTreeMap<u32, CachedPacket>,
     pub capture: Option<CaptureWriter>,
     pub game_action_sequence: u32,
+    /// Accepted incoming sequenced traffic used by shared connection observations.
+    pub(crate) received_packets: super::PacketDeliveryCounters,
+    /// Successfully sent sequenced traffic used by shared connection observations.
+    pub(crate) sent_packets: super::PacketDeliveryCounters,
     pub bytes_in: u64,
     pub bytes_out: u64,
     pub last_recv_time: Instant,

@@ -41,7 +41,7 @@ pub fn render_pulse_panel(
     let window_out = history_out.iter().rev().take(5).max().cloned().unwrap_or(0);
 
     // Smooth the peak max slightly so bars don't jitter too much (simple thresholding)
-    let threshold_in = window_in.max(1024); // floor at 1KB
+    let threshold_in = window_in.max(1024); // floor at 1KB/s
     let threshold_out = window_out.max(1024);
 
     let current_in = history_in.last().cloned().unwrap_or(0);

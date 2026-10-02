@@ -440,6 +440,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Shared transport observation, absent before the first completed interval.
+    pub connection: Option<holtburger_core::client::connection::ConnectionSample>,
     /// Server-confirmed P2P offers, atomically recovered with their item descriptions.
     pub trade: holtburger_core::client::trade::TradeSnapshot,
     /// Complete knowledge, absent until the initial character description.
@@ -943,6 +945,8 @@ pub enum ClientHostEvent {
     StateResyncing,
     /// Narrow accepted entity/storage changes.
     EntityFactsChanged(holtburger_core::ClientEntityDelta),
+    /// Bounded-cadence shared transport observation.
+    ConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
     LifecycleChanged(ClientLifecycleWire),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
@@ -1158,6 +1162,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             combat_mode: snapshot.combat_mode.into(),
             combat: snapshot.combat.into(),
             lifecycle: (&snapshot.lifecycle).into(),
+            connection: snapshot.connection,
             entity_collision_disabled: snapshot.entity_collision_disabled,
             local_player_guid: snapshot.local_player_guid,
             server_time: snapshot.server_time,
@@ -1250,6 +1255,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::ApplicationSnapshot(snapshot) => Some(ClientHostEvent::CurrentState(
             Box::new(snapshot.as_ref().into()),
         )),
+        ClientViewEvent::ConnectionUpdated(sample) => {
+            Some(ClientHostEvent::ConnectionUpdated(sample))
+        }
         ClientViewEvent::LifecycleChanged(lifecycle) => {
             Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
         }

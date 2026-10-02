@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import ClientTradeWindow from "./ClientTradeWindow.svelte";
 	import type { ClientTradeState } from "./client-trade-state";
 	import ClientVendorWindow from "./ClientVendorWindow.svelte";
@@ -224,6 +225,8 @@
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
+		/** Imperative transport display reader, independent of world presentation. */
+		readonly readConnection: () => ClientConnectionObservation | null;
 		readonly vitals: readonly ClientVital[];
 		readonly appearanceOptions: ClientAppearanceOptions | null;
 		readonly onAppearanceOptionChange: (
@@ -329,6 +332,7 @@
 		playerName,
 		worldName,
 		vitals,
+		readConnection,
 		appearanceOptions,
 		onAppearanceOptionChange,
 		jumpChargeActive,
@@ -838,7 +842,7 @@
 		onPlacementChange={(placement) =>
 			changeHudPlacement("character", placement)}
 	>
-		<ClientCharacterHud {playerName} {worldName} {vitals} />
+		<ClientCharacterHud {playerName} {worldName} {vitals} {readConnection} />
 	</ClientHudPanel>
 	{#if hudMode === "layout" || enchantmentKinds.beneficial || enchantmentKinds.harmful}
 		<ClientStatusTray

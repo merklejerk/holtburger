@@ -1,14 +1,18 @@
 <script lang="ts">
+	import ClientConnectionBadge from "./ClientConnectionBadge.svelte";
+	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import type { ClientVital } from "./client-host-contract";
 	import { formatQuantity } from "../app/quantity-format";
 
 	interface Props {
+		/** Reader for the browser session-owned transport observation. */
+		readonly readConnection: () => ClientConnectionObservation | null;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		readonly vitals: readonly ClientVital[];
 	}
 
-	const { playerName, worldName, vitals }: Props = $props();
+	const { playerName, worldName, vitals, readConnection }: Props = $props();
 	const bars = [
 		{ kind: "health", label: "Health" },
 		{ kind: "mana", label: "Mana" },
@@ -34,8 +38,11 @@
 
 <section class="character-hud">
 	<header class="ui-readout">
-		{playerName ?? "Awaiting character"}
-		<span>({worldName ?? "Unknown world"})</span>
+		<span class="identity"
+			>{playerName ?? "Awaiting character"}
+			<span class="world-name">({worldName ?? "Unknown world"})</span></span
+		>
+		<ClientConnectionBadge {readConnection} />
 	</header>
 	<div
 		class="vitals"
@@ -75,10 +82,19 @@
 			gap: 4px;
 		}
 		header {
-			width: fit-content;
+			display: flex;
+			align-items: center;
+			gap: calc(6em / 13);
+			min-width: 0;
 			font-weight: 700;
 		}
-		header span {
+		.identity {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		.world-name {
 			color: var(--ui-color-muted);
 			font-weight: 500;
 		}

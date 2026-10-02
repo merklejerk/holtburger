@@ -33,6 +33,7 @@ import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session
 import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
 import type {
 	ClientCurrentState,
+	ClientConnectionSample,
 	ClientCombatMode,
 	ClientCombatStatus,
 	ClientDynamicScriptCue,
@@ -204,6 +205,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-entity-facts-changed",
 	"client-entity-collision-disabled",
 	"client-lifecycle-changed",
+	"client-connection-updated",
 	"client-character-motion-capabilities-updated",
 	"client-character-motion-feedback",
 	"client-server-controlled-motion",
@@ -301,6 +303,7 @@ export interface HostEventPayloadMap {
 	"client-entity-facts-changed": ClientEntityDelta;
 	"client-entity-collision-disabled": boolean;
 	"client-lifecycle-changed": ClientLifecycle;
+	"client-connection-updated": ClientConnectionSample;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
 	"client-character-motion-feedback": ClientCharacterMotionFeedback;
 	"client-server-controlled-motion": null;

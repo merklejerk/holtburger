@@ -180,7 +180,7 @@ impl ChatState {
                 self.log_combat_feedback(feedback);
             }
             ClientViewEvent::PingResponse
-            | ClientViewEvent::NetPulse { .. }
+            | ClientViewEvent::ConnectionUpdated(_)
             | ClientViewEvent::Disconnected => {}
             ClientViewEvent::BootAccount(reason) => {
                 let message = if reason.trim().is_empty() {

@@ -123,6 +123,7 @@ impl Session {
         header: &PacketHeader,
         data: &[u8],
     ) -> Result<()> {
+        self.received_packets.record(header);
         if (header.flags & packet_flags::ACK_SEQUENCE) != 0
             && let Some(sequence) = self.read_ack_sequence(header.flags, data)
         {
@@ -209,7 +210,7 @@ impl Session {
             && (header.sequence != 0 || (header.flags & packet_flags::BLOB_FRAGMENTS) != 0)
     }
 
-    fn next_expected_server_sequence(&self) -> u32 {
+    pub(super) fn next_expected_server_sequence(&self) -> u32 {
         self.last_server_seq.wrapping_add(1)
     }
 

@@ -42,6 +42,7 @@ async function fixture() {
 		entityCollisionDisabled: false,
 		serverTime: 10,
 		worldGeneration: 2,
+		connection: null,
 		worldName: "Leafcull",
 		playerName: "Player",
 		knownSpells: null,

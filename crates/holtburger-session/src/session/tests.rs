@@ -506,6 +506,13 @@ async fn test_request_retransmit_sends_cached_packet() {
 
     let sent_packets = sent_handle.sent_packets().await;
     assert_eq!(sent_packets.len(), 2);
+    assert_eq!(
+        session.reliability().sent,
+        super::PacketDeliveryCounters {
+            packets: 2,
+            retransmissions: 1
+        }
+    );
 
     let original_header = unpack_header(&original_packet);
     let retransmit_header = unpack_header(&sent_packets[1]);
@@ -750,6 +757,10 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
         *addr == session.server_addr
             && (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0
     }));
+
+    assert!(session.reliability().receive_gap);
+    assert_eq!(session.reliability().received.packets, 2);
+    assert_eq!(session.reliability().sent.packets, 0);
 
     let payload = &retransmit_packet[transport::HEADER_SIZE..];
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 2);
@@ -1103,4 +1114,102 @@ async fn fragmented_vendor_refresh_preserves_sale_receipts_before_completion() {
         }
     }
     assert_eq!(actual, expected);
+}
+
+#[tokio::test]
+async fn delivery_observations_count_valid_repairs_once_across_ordered_queue_release() {
+    let header = |sequence, flags| PacketHeader {
+        sequence,
+        flags,
+        ..Default::default()
+    };
+    let transport = ScriptedTransport::new(
+        vec![
+            build_transport_packet(header(4, 0), &[]),
+            build_transport_packet(header(2, packet_flags::RETRANSMISSION), &[]),
+            build_transport_packet(header(3, packet_flags::RETRANSMISSION), &[]),
+        ],
+        "127.0.0.1:9000".parse().unwrap(),
+    );
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.last_server_seq = 1;
+    session.has_server_seq = true;
+    session.recv_message().await.unwrap();
+    assert!(session.reliability().receive_gap);
+    session.recv_message().await.unwrap();
+    assert!(!session.reliability().receive_gap);
+    session.recv_message().await.unwrap();
+    assert_eq!(session.last_server_seq, 4);
+    assert_eq!(
+        session.reliability().received,
+        super::PacketDeliveryCounters {
+            packets: 3,
+            retransmissions: 2
+        }
+    );
+}
+
+#[tokio::test]
+async fn delivery_observations_ignore_invalid_checksums() {
+    let header = PacketHeader {
+        sequence: 2,
+        ..Default::default()
+    };
+    let mut corrupt = build_transport_packet(header.clone(), &[]);
+    // Header checksum starts at byte 8; retain a well-formed header with a wrong checksum.
+    corrupt[8] ^= 1;
+    let transport = ScriptedTransport::new(
+        vec![corrupt, build_transport_packet(header, &[])],
+        "127.0.0.1:9000".parse().unwrap(),
+    );
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.last_server_seq = 1;
+    session.has_server_seq = true;
+    session.recv_message().await.unwrap();
+    assert_eq!(
+        session.reliability().received,
+        super::PacketDeliveryCounters {
+            packets: 1,
+            retransmissions: 0
+        }
+    );
+}
+
+struct FailingSendTransport;
+
+#[async_trait]
+impl Transport for FailingSendTransport {
+    async fn send_to(&self, _: &[u8], _: SocketAddr) -> Result<usize> {
+        Err(anyhow!("Synthetic send failure"))
+    }
+    async fn recv_from(&self, _: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        Err(anyhow!("Synthetic receive failure"))
+    }
+}
+
+#[tokio::test]
+async fn delivery_observations_ignore_failed_sends() {
+    let mut session = Session::new_test();
+    session.transport = Box::new(FailingSendTransport);
+    let previous_send = session.last_send_time;
+    assert!(
+        session
+            .send_packet(
+                PacketHeader {
+                    sequence: 2,
+                    ..Default::default()
+                },
+                &[]
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        session.reliability().sent,
+        super::PacketDeliveryCounters::default()
+    );
+    assert_eq!(session.bytes_out, 0);
+    assert_eq!(session.last_send_time, previous_send);
 }

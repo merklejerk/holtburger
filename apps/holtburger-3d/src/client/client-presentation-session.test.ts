@@ -1797,6 +1797,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 75,
 		worldGeneration: 1,
+		connection: null,
 		worldName: "Leafcull",
 		playerName: "Player",
 		knownSpells: null,

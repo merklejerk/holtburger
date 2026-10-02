@@ -91,7 +91,10 @@
 		decodeObjectInspectionResult,
 		type ObjectInspectionResult,
 	} from "../../client/client-object-inspection-contract";
-	import { CLIENT_TUNING } from "../../client/client-tuning";
+	import {
+		CLIENT_CONNECTION_BADGE_TUNING,
+		CLIENT_TUNING,
+	} from "../../client/client-tuning";
 	import { recordSentChat } from "../../client/client-chat-input-history";
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
@@ -941,6 +944,7 @@
 		readonly probeSelectedInteractions: typeof probeSelectedInteractions;
 		/** Verify default and pointer focus across production vital bars. */
 		readonly probeCharacterVitals: typeof probeCharacterVitals;
+		readonly probeConnectionBadge: typeof probeConnectionBadge;
 		/** Show production character selection for the theme probe. */
 		readonly previewCharacterSelection: () => void;
 		/** Exercise overlapping modal/chat ownership while a viewport gesture is pending. */
@@ -1058,6 +1062,7 @@
 			localPlayerGuid: playerGuid,
 			serverTime: 10,
 			worldGeneration: 1,
+			connection: null,
 			worldName: "Fixture",
 			playerName,
 			knownSpells: null,
@@ -2025,6 +2030,208 @@
 			use,
 			commands: [...interactionCommands],
 		};
+	}
+
+	async function probeConnectionBadge() {
+		const settle = () =>
+			new Promise<void>((resolve) =>
+				setTimeout(
+					resolve,
+					CLIENT_CONNECTION_BADGE_TUNING.displayIntervalMs * 2,
+				),
+			);
+		const badge = () => {
+			const element =
+				document.querySelector<HTMLButtonElement>(".connection-badge");
+			if (element === null) throw new Error("Connection badge is absent.");
+			return element;
+		};
+		const sample = {
+			health: "connected",
+			quality: "good",
+			reliability: {
+				receiveRepairShare: 0,
+				sendRepairShare: null,
+				receiveGap: false,
+			},
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 0.1,
+			receiveBytesPerSecond: 256,
+			sendBytesPerSecond: 0,
+		} as const;
+		emitInteractionEvent("client-connection-updated", sample);
+		await settle();
+		const initial = badge().getBoundingClientRect();
+		if (
+			badge().dataset.health !== "connected" ||
+			badge().querySelector(".receive.active") === null ||
+			badge().querySelector(".send.active") !== null
+		)
+			throw new Error("Receive-only activity was not displayed.");
+		const segment = (selector: string) => {
+			const element = badge().querySelector<HTMLElement>(selector);
+			if (element === null)
+				throw new Error(`Missing connection segment ${selector}.`);
+			return element.getBoundingClientRect();
+		};
+		const receive = segment(".receive");
+		const send = segment(".send");
+		const bars = [...badge().querySelectorAll<HTMLElement>(".quality-bar")];
+		if (
+			bars.length !== 3 ||
+			badge().querySelectorAll(".quality-bar.lit").length !== 3 ||
+			send.left >= receive.left ||
+			send.top <= bars[2].getBoundingClientRect().top ||
+			receive.width !== receive.height
+		)
+			throw new Error(
+				"Quality bars and TX/RX circles were not arranged correctly.",
+			);
+
+		const nameRow = badge().parentElement;
+		if (nameRow === null) throw new Error("Connection name row is absent.");
+		const originalFontSize = nameRow.style.fontSize;
+		const originalSegments = [
+			badge(),
+			...bars,
+			...badge().querySelectorAll<HTMLElement>(".activity"),
+		].map((element) => element.getBoundingClientRect());
+		try {
+			nameRow.style.fontSize = `${parseFloat(getComputedStyle(nameRow).fontSize) * 2}px`;
+			const scaledSegments = [
+				badge(),
+				...bars,
+				...badge().querySelectorAll<HTMLElement>(".activity"),
+			].map((element) => element.getBoundingClientRect());
+			for (let index = 0; index < originalSegments.length; index++) {
+				const before = originalSegments[index];
+				const after = scaledSegments[index];
+				// Fractional CSS dimensions are rounded to browser layout units.
+				if (
+					Math.abs(after.width - before.width * 2) > 0.1 ||
+					Math.abs(after.height - before.height * 2) > 0.1
+				)
+					throw new Error(
+						"Connection geometry did not scale with the name row text.",
+					);
+			}
+		} finally {
+			nameRow.style.fontSize = originalFontSize;
+		}
+		emitInteractionEvent("client-connection-updated", {
+			...sample,
+			quality: "fair",
+		});
+		await settle();
+		if (badge().querySelectorAll(".quality-bar.lit").length !== 2)
+			throw new Error("Fair reliability did not illuminate two bars.");
+		badge().dispatchEvent(new PointerEvent("pointerenter"));
+		badge().focus();
+		await tick();
+		if (
+			document.activeElement !== badge() ||
+			!badge().title.includes("256 B/s") ||
+			badge().getAttribute("aria-label") !== badge().title
+		)
+			throw new Error(
+				"Connection details are unavailable through native tooltip and accessible label.",
+			);
+		const heldTitle = badge().title;
+		let titleMutations = 0;
+		const titleObserver = new MutationObserver((changes) => {
+			titleMutations += changes.length;
+		});
+		titleObserver.observe(badge(), {
+			attributes: true,
+			attributeFilter: ["title"],
+		});
+		emitInteractionEvent("client-connection-updated", {
+			...sample,
+			health: "waiting",
+			quality: "poor",
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 10,
+			receiveBytesPerSecond: 0,
+			sendBytesPerSecond: 64,
+		});
+		await settle();
+		if (
+			badge().dataset.health !== "waiting" ||
+			badge().querySelectorAll(".quality-bar.lit").length !== 1 ||
+			badge().querySelector(".send.active") === null ||
+			badge().querySelector(".receive.active") !== null
+		)
+			throw new Error("Waiting/send-only activity was not displayed.");
+		emitInteractionEvent("client-connection-updated", sample);
+		await settle();
+		if (badge().dataset.health !== "connected")
+			throw new Error("Connection recovery was not displayed.");
+		await new Promise<void>((resolve) =>
+			setTimeout(
+				resolve,
+				CLIENT_CONNECTION_BADGE_TUNING.activityHoldMs +
+					CLIENT_CONNECTION_BADGE_TUNING.displayIntervalMs * 2,
+			),
+		);
+		if (badge().querySelector(".activity.active") !== null)
+			throw new Error("Old activity remained illuminated.");
+		emitInteractionEvent("client-connection-updated", {
+			...sample,
+			sampleAgeSeconds:
+				CLIENT_CONNECTION_BADGE_TUNING.activityHoldMs / 1_000 + 1,
+		});
+		await settle();
+		if (badge().querySelector(".activity.active") !== null)
+			throw new Error("Recovered old rates replayed activity.");
+		emitInteractionEvent("client-connection-updated", {
+			...sample,
+			health: "disconnected",
+			quality: "unavailable",
+		});
+		await settle();
+		const terminal = badge().getBoundingClientRect();
+		if (
+			badge().dataset.health !== "disconnected" ||
+			badge().querySelectorAll(".quality-bar.lit").length !== 0 ||
+			terminal.width !== initial.width ||
+			terminal.height !== initial.height
+		)
+			throw new Error(
+				"Disconnect changed the badge footprint or kept quality bars lit.",
+			);
+		badge().dispatchEvent(new PointerEvent("pointerleave"));
+		await tick();
+		if (badge().title !== heldTitle || titleMutations !== 0)
+			throw new Error(
+				"Native tooltip text changed during pointer/focus engagement.",
+			);
+		titleObserver.disconnect();
+		badge().dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "Escape",
+				code: "Escape",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		badge().dispatchEvent(
+			new KeyboardEvent("keyup", {
+				key: "Escape",
+				code: "Escape",
+				bubbles: true,
+			}),
+		);
+		await tick();
+		if (!keyboard.gameActive || document.activeElement === badge())
+			throw new Error(
+				"Connection details did not release keyboard ownership on Escape.",
+			);
+		if (!badge().title.startsWith("Disconnected"))
+			throw new Error(
+				"Tooltip snapshot did not refresh after engagement ended.",
+			);
+		emitInteractionEvent("client-connection-updated", sample);
+		return { passed: true, width: terminal.width, height: terminal.height };
 	}
 
 	async function probeCharacterVitals() {
@@ -3155,6 +3362,7 @@
 			measureDoorBar,
 			probeSelectedInteractions,
 			probeCharacterVitals,
+			probeConnectionBadge,
 			previewCharacterSelection: () => {
 				previewCharacters = true;
 			},
@@ -3219,6 +3427,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		readConnection={() => interactionLifecycle.connectionSample()}
 		characterSheet={interactionLifecycle.characterSheet}
 		{appearanceOptions}
 		onAppearanceOptionChange={async (option, enabled) => {

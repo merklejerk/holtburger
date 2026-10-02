@@ -43,6 +43,7 @@ async function fixture() {
 		localPlayerGuid: PLAYER,
 		serverTime: 1,
 		worldGeneration: 1,
+		connection: null,
 		worldName: "Fixture",
 		playerName: "Player",
 		knownSpells: null,

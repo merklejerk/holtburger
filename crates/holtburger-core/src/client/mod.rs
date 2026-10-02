@@ -27,6 +27,7 @@ pub mod combat_feedback;
 mod combat_runtime;
 pub mod combat_tuning;
 mod commands;
+pub mod connection;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
@@ -132,6 +133,8 @@ enum PublishedCharacterMotionCapabilities {
 
 pub struct ClientRuntime {
     pub session: Session,
+    /// Shared traffic baseline and rates, independent of world replacement.
+    connection: connection::ConnectionSampler,
     pub world: WorldState,
     /// Character advancement admission and duplicate suppression for this runtime.
     progression: progression::ProgressionState,
@@ -337,6 +340,12 @@ impl ClientRuntime {
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
             lifecycle: self.lifecycle(),
+            connection: self.connection.snapshot(
+                Instant::now(),
+                self.session.last_recv_time,
+                matches!(self.state, ClientState::Disconnected),
+                self.session.reliability().receive_gap,
+            ),
             entity_collision_disabled: self
                 .collision_coordinator
                 .as_ref()
@@ -820,6 +829,18 @@ impl ClientRuntime {
     }
 
     fn send_status_event(&mut self) {
+        if matches!(self.state, ClientState::Disconnected)
+            && let Some(sample) = self.connection.snapshot(
+                Instant::now(),
+                self.session.last_recv_time,
+                true,
+                self.session.reliability().receive_gap,
+            )
+        {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::ConnectionUpdated(sample));
+        }
         // Portal transitions retain answerable requests; leaving the character/session retires them.
         if matches!(
             self.state,

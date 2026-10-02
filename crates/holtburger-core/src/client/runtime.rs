@@ -194,7 +194,17 @@ impl ClientRuntime {
         let _camera_scope = self.camera.run_scope();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
+        self.connection.observe(
+            Instant::now(),
+            self.session.bytes_in,
+            self.session.bytes_out,
+            self.session.reliability(),
+        );
+        let mut net_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        net_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         // Overdue slots are not extra simulation work. Advance once using actual elapsed time.
         physics_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut last_physics_time = Instant::now();
@@ -208,13 +218,14 @@ impl ClientRuntime {
                 _ = net_tick.tick() => {
                     let now = Instant::now();
 
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
-                        bytes_in: self.session.bytes_in,
-                        bytes_out: self.session.bytes_out,
-                    });
+                    let reliability = self.session.reliability();
+                    self.connection.observe(now, self.session.bytes_in, self.session.bytes_out, reliability);
+                    if let Some(sample) = self.connection.snapshot(now, self.session.last_recv_time, false, reliability.receive_gap) {
+                        let _ = self.client_view_event_tx.send(ClientViewEvent::ConnectionUpdated(sample));
+                    }
 
-                    if now.duration_since(self.session.last_recv_time) > Duration::from_secs(15) {
-                        log::warn!("Connection timed out (no data for 15s)");
+                    if now.duration_since(self.session.last_recv_time) > super::connection::CONNECTION_TIMEOUT {
+                        log::warn!("Connection timed out (no data for {}s)", super::connection::CONNECTION_TIMEOUT.as_secs());
                         self.set_exit_cause(ClientExitCause::ServerDisconnect);
                         self.state = ClientState::Disconnected;
                         let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);

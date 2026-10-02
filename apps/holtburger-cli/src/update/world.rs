@@ -152,7 +152,7 @@ impl AppState {
                 | ClientViewEvent::ItemManaResponse { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)
-                | ClientViewEvent::NetPulse { .. }
+                | ClientViewEvent::ConnectionUpdated(_)
                 | ClientViewEvent::Disconnected
         ) && self.game_option().is_none()
         {
@@ -164,36 +164,19 @@ impl AppState {
         };
 
         match event {
-            ClientViewEvent::NetPulse {
-                bytes_in,
-                bytes_out,
-            } => {
-                let now = std::time::Instant::now();
-                let delta_in = bytes_in.saturating_sub(self.net_stats.bytes_in);
-                let delta_out = bytes_out.saturating_sub(self.net_stats.bytes_out);
-
-                self.net_stats.bytes_in = bytes_in;
-                self.net_stats.bytes_out = bytes_out;
-                self.net_stats.last_update = Some(now);
-
+            ClientViewEvent::ConnectionUpdated(sample) => {
                 self.net_stats.history_in.rotate_left(1);
                 if let Some(last) = self.net_stats.history_in.last_mut() {
-                    *last = delta_in;
+                    *last = sample.receive_bytes_per_second.round() as u64;
                 }
-
                 self.net_stats.history_out.rotate_left(1);
                 if let Some(last) = self.net_stats.history_out.last_mut() {
-                    *last = delta_out;
+                    *last = sample.send_bytes_per_second.round() as u64;
                 }
-
-                // Bubble down the event so chat/logs can still get network pings if needed
-                result.merge(self.page.handle_view_event(
-                    ClientViewEvent::NetPulse {
-                        bytes_in,
-                        bytes_out,
-                    },
-                    &ctx,
-                ));
+                result.merge(
+                    self.page
+                        .handle_view_event(ClientViewEvent::ConnectionUpdated(sample), &ctx),
+                );
             }
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;

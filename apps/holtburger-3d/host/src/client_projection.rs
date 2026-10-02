@@ -440,6 +440,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Server-confirmed P2P offers, atomically recovered with their item descriptions.
+    pub trade: holtburger_core::client::trade::TradeSnapshot,
     /// Complete knowledge, absent until the initial character description.
     pub known_spells: Option<Vec<u32>>,
     /// Shared player enchantment resolution, absent until character description.
@@ -914,6 +916,8 @@ pub enum ClientHostEvent {
     BookUpdated(ClientBookWire),
     /// Complete vendor stock and terms needed by the app-local catalog.
     VendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
+    /// Confirmed P2P state; all window policy belongs to the frontend.
+    TradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
     /// Correlated shared draft quote.
     VendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
     /// Terminal receipt identifying which sale sources actually transferred.
@@ -1145,6 +1149,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             known_spells: snapshot.known_spells.clone(),
+            trade: snapshot.trade.clone(),
             enchantments: snapshot
                 .enchantments
                 .as_ref()
@@ -1198,6 +1203,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::EntityBookUpdated { guid, book } => Some(ClientHostEvent::BookUpdated(
             ClientBookWire::from_world(guid, &book),
         )),
+        ClientViewEvent::TradeStateUpdated(snapshot) => {
+            Some(ClientHostEvent::TradeSnapshot(snapshot))
+        }
         ClientViewEvent::VendorStateUpdated { vendor } => {
             Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))
         }
@@ -1302,6 +1310,35 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             })
         }
         ClientViewEvent::ActionResult { reason, .. } => {
+            if let ActionResultReason::Weenie(error, _) = &reason
+                && matches!(
+                    error,
+                    WeenieError::TradeIgnoringRequests
+                        | WeenieError::TradeSquelched
+                        | WeenieError::TradeMaxDistanceExceeded
+                        | WeenieError::TradeAlreadyTrading
+                        | WeenieError::TradeBusy
+                        | WeenieError::TradeClosed
+                        | WeenieError::TradeExpired
+                        | WeenieError::TradeItemBeingTraded
+                        | WeenieError::TradeNonEmptyContainer
+                        | WeenieError::TradeNonCombatMode
+                        | WeenieError::TradeIncomplete
+                        | WeenieError::TradeStampMismatch
+                        | WeenieError::TradeUnopened
+                        | WeenieError::TradeEmpty
+                        | WeenieError::TradeAlreadyAccepted
+                        | WeenieError::TradeOutOfSync
+                        | WeenieError::CantDoThatTradeInProgress
+                        | WeenieError::TradeComplete
+                )
+            {
+                return Some(ClientHostEvent::ChatMessage(
+                    ClientChatMessageWire::System {
+                        message: format_action_result_message(&reason),
+                    },
+                ));
+            }
             // ACE uses this packet for ordinary inventory refusals. A reasonless
             // packet also follows separate feedback (Player_Inventory.cs:1371-1399);
             // it is a rollback signal, not an additional player-facing error.
@@ -1931,6 +1968,25 @@ mod tests {
                 "event": "client-confirmation-updated", "payload": { "confirmation": { "requestId": u64::MAX.to_string(), "text": "Proceed?" } }
             })
         );
+    }
+
+    #[test]
+    fn trade_refusals_reach_system_chat() {
+        for error in [
+            WeenieError::TradeIgnoringRequests,
+            WeenieError::TradeNonCombatMode,
+            WeenieError::TradeNonEmptyContainer,
+            WeenieError::TradeAlreadyTrading,
+        ] {
+            let event = project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason: ActionResultReason::Weenie(error, None),
+            })
+            .unwrap();
+            assert!(
+                matches!(event, ClientHostEvent::ChatMessage(ClientChatMessageWire::System { message }) if !message.is_empty())
+            );
+        }
     }
 
     #[test]

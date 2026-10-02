@@ -227,6 +227,46 @@
 		);
 		--ui-vendor-buy-color: var(--ui-color-success);
 		--ui-vendor-sell-color: var(--ui-color-warning);
+		/* P2P offer identity and surfaces are independent from generic warning/active states. */
+		--ui-trade-self-color: var(--ui-color-warning);
+		--ui-trade-partner-color: var(--ui-color-active);
+		--ui-trade-self-background: color-mix(
+			in srgb,
+			var(--ui-trade-self-color) 8%,
+			var(--ui-color-well)
+		);
+		--ui-trade-partner-background: color-mix(
+			in srgb,
+			var(--ui-trade-partner-color) 8%,
+			var(--ui-color-well)
+		);
+		--ui-trade-self-header-background: color-mix(
+			in srgb,
+			var(--ui-trade-self-color) 18%,
+			var(--ui-color-well)
+		);
+		--ui-trade-partner-header-background: color-mix(
+			in srgb,
+			var(--ui-trade-partner-color) 18%,
+			var(--ui-color-well)
+		);
+		--ui-trade-reviewing-color: var(--ui-color-muted);
+		--ui-trade-accepted-color: var(--ui-color-success);
+		--ui-trade-inset: 8px;
+		--ui-trade-side-gap: 6px;
+		--ui-trade-content-inset: 6px;
+		--ui-trade-control-gap: 4px;
+		--ui-trade-grid-gap: 4px;
+		--ui-trade-border-width: 1px;
+		--ui-trade-header-border-width: 4px;
+		--ui-trade-header-min-height: 48px;
+		--ui-trade-name-weight: bold;
+		--ui-trade-status-font-size: 0.9em;
+		--ui-trade-icon-size: 20px;
+		/* Reset backing and grid clearance derive from one control size and its surround. */
+		--ui-trade-reset-size: 32px;
+		--ui-trade-reset-inset: 4px;
+		--ui-trade-reset-background: var(--ui-color-surface);
 	}
 	@supports (backdrop-filter: blur(1px)) {
 		.ui-theme .ui-panel {
@@ -346,7 +386,7 @@
 		border-radius: var(--ui-radius-control);
 		background: var(--ui-button-background-color, var(--ui-color-control));
 		box-shadow: none;
-		color: var(--ui-color-text);
+		color: var(--ui-button-color, var(--ui-color-text));
 		font: inherit;
 		text-shadow: none;
 		cursor: pointer;

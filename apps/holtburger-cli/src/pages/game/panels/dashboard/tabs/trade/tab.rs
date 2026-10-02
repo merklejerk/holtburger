@@ -414,6 +414,7 @@ mod tests {
         data.entities
             .insert(partner_guid, entity_named(partner_guid, "Frost Bow"));
         data.trade = Some(TradeState {
+            revision: 1,
             partner_guid: trade_partner_guid,
             initiator_guid: Guid(0x303),
             trade_stamp: 0.0,

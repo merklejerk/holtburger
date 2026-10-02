@@ -490,7 +490,10 @@ export class ClientVendorState {
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
-		if (event.type === "vendor-snapshot") this.#replaceSnapshot(event.vendor);
+		if (event.type === "trade-snapshot" && event.trade.trade !== null)
+			this.close();
+		else if (event.type === "vendor-snapshot")
+			this.#replaceSnapshot(event.vendor);
 		else if (event.type === "vendor-preview") {
 			const pending = this.#preview;
 			if (

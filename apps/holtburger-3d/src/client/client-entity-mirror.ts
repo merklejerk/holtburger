@@ -165,6 +165,8 @@ const clientEntityFactsSchema = z
 		/** Shared descendant membership; presentation must not reconstruct access. */
 		worldContainerContent: z.boolean(),
 		canReceiveGive: z.boolean(),
+		canTrade: z.boolean(),
+		canOfferTrade: z.boolean(),
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
 		targeting: z.enum(["ineligible", "creature", "non-creature"]),

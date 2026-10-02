@@ -52,6 +52,7 @@ pub mod selection_envelope;
 pub mod selection_query;
 mod simulation;
 pub mod spell_inspection;
+pub mod trade;
 pub mod types;
 pub mod vendor_transaction;
 mod world_container;
@@ -146,6 +147,8 @@ pub struct ClientRuntime {
     opened_corpses: world_container::OpenedCorpseHistory,
     /// Single owner of equipment mutations and their authoritative confirmations.
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
+    /// Outstanding P2P item acknowledgments shared by all frontends.
+    trade_additions: HashMap<Guid, Instant>,
     /// Dependent pack exchange waiting to send its second insertion.
     pack_exchange: Option<inventory_runtime::PackExchange>,
     state: ClientState,
@@ -375,6 +378,7 @@ impl ClientRuntime {
             combat: self.combat_engagement.status(),
             vitals: self.world.player.vitals.clone(),
             character_sheet: self.character_sheet(),
+            trade: self.trade_snapshot(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),
             dynamic: DynamicEntitySnapshot::new(
@@ -783,9 +787,7 @@ impl ClientRuntime {
     fn emit_trade_state_updated(&self) {
         let _ = self
             .client_view_event_tx
-            .send(ClientViewEvent::TradeStateUpdated {
-                trade: self.world.trade.clone(),
-            });
+            .send(ClientViewEvent::TradeStateUpdated(self.trade_snapshot()));
     }
 
     pub(super) fn emit_current_application_snapshot(&mut self) {
@@ -827,6 +829,7 @@ impl ClientRuntime {
                 self.emit_progression_guards();
             }
             self.reset_container_access();
+            self.trade_additions.clear();
             self.entity_cue_inbox.clear();
             if let Some(coordinator) = self.collision_coordinator.as_mut() {
                 coordinator.reset_entity_collision_override(&mut self.world);
@@ -1283,13 +1286,7 @@ impl ClientRuntime {
                         activity: activity.clone(),
                     });
             }
-            WorldEvent::TradeStateUpdated(trade) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::TradeStateUpdated {
-                        trade: trade.clone(),
-                    });
-            }
+            WorldEvent::TradeStateUpdated(_) => self.emit_trade_state_updated(),
             _ => {}
         }
     }

@@ -4620,43 +4620,24 @@ fn test_reset_trade_sweeps_preview_only_entities() {
 }
 
 #[test]
-fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
+fn clear_trade_acceptance_resets_offers_and_releases_previews() {
     let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000142);
-    let preview_guid = Guid(0x60000143);
-
-    state.player.guid = player_guid;
-    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
-
-    let mut preview_entity = Entity::new(
-        preview_guid,
-        "Preview".to_string(),
-        WorldPosition::default(),
-    );
-    preview_entity.position.landblock_id = Guid::NULL;
-    state.entities.insert(preview_entity);
-    state.mark_trade_preview(preview_guid);
-
-    if let Some(trade) = state.trade.as_mut() {
-        trade.self_side.items.push(preview_guid);
-        trade.self_side.accepted = true;
-        trade.partner_side.accepted = true;
-    }
-
-    let mut events = Vec::new();
-    state.clear_trade_acceptance(&mut events);
-
-    assert!(state.entities.get(preview_guid).is_some());
+    state.player.guid = Guid(0x50000142);
+    let item = Guid(0x60000143);
+    state.register_trade(state.player.guid, Guid(0x5000BEEF), &mut Vec::new());
+    state.add_trade_item(2, item, &mut Vec::new());
+    let events = state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: state.player.guid,
+        sequence: 1,
+        event: GameEvent::ClearTradeAcceptance,
+    })));
+    let trade = state.trade.as_ref().unwrap();
+    assert!(trade.self_side.items.is_empty());
+    assert!(trade.partner_side.items.is_empty());
     assert!(
-        state
-            .entity_lifecycle_state(preview_guid)
+        !state
+            .entity_lifecycle_state(item)
             .is_some_and(|state| state.trade_preview)
-    );
-    assert!(
-        state
-            .trade
-            .as_ref()
-            .is_some_and(|trade| trade.self_side.items == vec![preview_guid])
     );
     assert!(
         events
@@ -6001,4 +5982,80 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
             outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
         }) if *result_guid == guid
     )));
+}
+
+#[test]
+fn trade_withdrawal_preserves_partner_acceptance_and_offer_revision() {
+    let mut world = WorldState::synthetic();
+    let player = Guid(0x5000_0001);
+    let partner = Guid(0x5000_0002);
+    world.player.guid = player;
+    world.register_trade(player, partner, &mut Vec::new());
+    world.add_trade_item(1, Guid(0x8000_0001), &mut Vec::new());
+    world.add_trade_item(2, Guid(0x8000_0002), &mut Vec::new());
+    let offered = world.trade.clone().unwrap();
+    world.accept_trade(player, &mut Vec::new());
+    world.accept_trade(partner, &mut Vec::new());
+    world.decline_trade(player, &mut Vec::new());
+    let trade = world.trade.as_ref().unwrap();
+    assert!(!trade.self_side.accepted);
+    assert!(trade.partner_side.accepted);
+    assert_eq!(trade.self_side.items, offered.self_side.items);
+    assert_eq!(trade.partner_side.items, offered.partner_side.items);
+    assert_eq!(trade.revision, offered.revision);
+}
+
+#[test]
+fn trade_additions_are_idempotent_and_reset_invalidates_even_an_empty_offer() {
+    let mut world = WorldState::synthetic();
+    let player = Guid(0x5000_0001);
+    let partner = Guid(0x5000_0002);
+    let item = Guid(0x8000_0001);
+    world.player.guid = player;
+    world.register_trade(player, partner, &mut Vec::new());
+    world.add_trade_item(1, item, &mut Vec::new());
+    let revision = world.trade.as_ref().unwrap().revision;
+    world.accept_trade(player, &mut Vec::new());
+    world.add_trade_item(1, item, &mut Vec::new());
+    let trade = world.trade.as_ref().unwrap();
+    assert_eq!(trade.self_side.items, vec![item]);
+    assert_eq!(trade.revision, revision);
+    assert!(trade.self_side.accepted);
+    world.add_trade_item(2, Guid(0x8000_0002), &mut Vec::new());
+    assert!(!world.trade.as_ref().unwrap().self_side.accepted);
+    world.reset_trade(&mut Vec::new());
+    let empty_revision = world.trade.as_ref().unwrap().revision;
+    world.reset_trade(&mut Vec::new());
+    assert!(world.trade.as_ref().unwrap().revision > empty_revision);
+    world.close_trade(&mut Vec::new());
+    world.register_trade(player, partner, &mut Vec::new());
+    assert!(world.trade.as_ref().unwrap().revision > empty_revision);
+}
+
+#[test]
+fn trade_preview_baseline_retains_pending_and_nonspatial_offer_identities() {
+    use crate::entity_facts::EntityDescription;
+    use holtburger_common::properties::ItemType;
+    let mut world = WorldState::synthetic();
+    let player = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+    world.player.guid = player;
+    world.register_trade(player, Guid(0x5000_0002), &mut Vec::new());
+    world.add_trade_item(2, item, &mut Vec::new());
+    assert!(world.client_entity_guids().contains(&item));
+    assert!(matches!(
+        world
+            .client_entity_facts(item)
+            .unwrap()
+            .unwrap()
+            .description,
+        EntityDescription::Pending
+    ));
+    let mut entity = Entity::new(item, "Partner's sword".into(), WorldPosition::default());
+    entity.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+    world.entities.insert(entity);
+    let facts = world.client_entity_facts(item).unwrap().unwrap();
+    assert!(matches!(facts.description, EntityDescription::Known { .. }));
+    assert!(!facts.owned_by_player);
+    assert!(!facts.can_offer_trade);
 }

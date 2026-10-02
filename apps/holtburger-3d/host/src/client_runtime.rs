@@ -247,6 +247,10 @@ pub enum ClientHostCommand {
     SubmitClientVendor {
         request: holtburger_core::client::vendor_transaction::VendorTradeRequest,
     },
+    /// Submit a guarded P2P negotiation command through the shared client path.
+    SubmitClientTrade {
+        request: holtburger_core::client::trade::TradeRequest,
+    },
     /// Private Electron-main launch command; renderers never receive this inventory entry.
     StartClient {
         startup: ClientLaunchConfiguration,
@@ -339,6 +343,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "preview_client_inventory",
     "preview_client_vendor",
     "submit_client_vendor",
+    "submit_client_trade",
     "submit_client_inventory",
     "equip_client_item",
     "submit_client_item_use",
@@ -824,6 +829,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         PreviewClientVendor { request } => runtime
             .send_command(ClientCommand::PreviewVendorTrade(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientTrade { request } => runtime
+            .send_command(ClientCommand::Trade(request))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

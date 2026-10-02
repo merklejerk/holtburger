@@ -1,3 +1,4 @@
+import type { ClientTradeState } from "./client-trade-state";
 import type {
 	ClientViewportTargetPicker,
 	ClientViewportTargetResult,
@@ -78,6 +79,12 @@ interface ViewportDragTarget {
 	result: ClientViewportTargetResult | null;
 }
 type DragTarget =
+	| {
+			readonly kind: "trade";
+			readonly element: HTMLElement;
+			readonly partner: number;
+			readonly revision: number;
+	  }
 	| ViewportDragTarget
 	| InventoryDragTarget
 	| {
@@ -141,6 +148,11 @@ export class ClientItemDrag {
 		private readonly vendor: Pick<
 			ClientVendorState,
 			"canDragOffer" | "acceptsDrop" | "queueBuy" | "queueSell"
+		> | null,
+		/** Confirmed P2P offers use their own guarded command path. */
+		private readonly trade: Pick<
+			ClientTradeState,
+			"acceptsDrop" | "add" | "reportFailure"
 		> | null,
 	) {
 		this.#root = root;
@@ -425,6 +437,21 @@ export class ClientItemDrag {
 		}
 		const hit = document.elementFromPoint(this.#cursor.x, this.#cursor.y);
 
+		const offer = hit?.closest<HTMLElement>("[data-trade-offer]");
+		if (offer != null && this.#root.contains(offer)) {
+			this.#clearHighlight();
+			const partner = Number(offer.dataset.tradeOffer);
+			const revision = Number(offer.dataset.tradeRevision);
+			gesture.target = { kind: "trade", element: offer, partner, revision };
+			offer.dataset.inventoryDrop = this.#canOffer(
+				gesture.source,
+				partner,
+				revision,
+			)
+				? "accepted"
+				: "rejected";
+			return;
+		}
 		const queue = hit?.closest<HTMLElement>("[data-vendor-queue]");
 		if (queue != null && this.#root.contains(queue)) {
 			this.#clearHighlight();
@@ -554,6 +581,14 @@ export class ClientItemDrag {
 		});
 	}
 
+	/** Only owned inventory gestures can contribute to P2P offers. */
+	#canOffer(source: DragSource, partner: number, revision: number): boolean {
+		return (
+			typeof source.origin === "string" &&
+			source.origin !== "vendor" &&
+			this.trade?.acceptsDrop(partner, revision, source.item) === true
+		);
+	}
 	/** Surface ownership is local; exact price and sale eligibility are quoted by world. */
 	#canQueue(source: DragSource, vendor: number): boolean {
 		if (!this.vendor?.acceptsDrop(vendor)) return false;
@@ -828,6 +863,15 @@ export class ClientItemDrag {
 		this.#target(true);
 		if (this.#gesture !== gesture) return;
 
+		if (gesture.target?.kind === "trade") {
+			const { source, target } = gesture;
+			const accepted = this.#canOffer(source, target.partner, target.revision);
+			this.#finishGesture();
+			if (accepted)
+				this.trade?.add(target.partner, target.revision, source.item);
+			else this.trade?.reportFailure("That item cannot join this trade.");
+			return;
+		}
 		if (gesture.target?.kind === "vendor") {
 			const { source, target } = gesture;
 			const accepted = this.#canQueue(source, target.vendor);

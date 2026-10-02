@@ -2,6 +2,7 @@ import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeActionBars } from "./client-action-bar-probe.mjs";
+import { probeTrade } from "./client-trade-probe.mjs";
 import { probeVendor } from "./client-vendor-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
@@ -1302,6 +1303,8 @@ export async function probeClientHud(
 					)
 			: null,
 	);
+
+	inventory.trade = await probeTrade(client, evaluateExpression);
 
 	await evaluateExpression(
 		client,

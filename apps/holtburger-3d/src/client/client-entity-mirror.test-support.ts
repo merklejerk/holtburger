@@ -22,6 +22,8 @@ export function entityFacts(
 		canPickUp: false,
 		worldContainerContent: false,
 		canReceiveGive: false,
+		canTrade: false,
+		canOfferTrade: false,
 		description: {
 			kind: "known",
 			name: `Item ${guid}`,

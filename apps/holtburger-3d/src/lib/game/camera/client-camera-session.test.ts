@@ -311,6 +311,7 @@ describe("ClientCameraSession", () => {
 function currentState(): ClientCurrentState {
 	return {
 		characterSheet: null,
+		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		localPlayerGuid: PLAYER_GUID,

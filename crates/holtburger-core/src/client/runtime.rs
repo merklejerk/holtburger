@@ -232,6 +232,7 @@ impl ClientRuntime {
                     }
 
                     self.poll_busy_timeout(now);
+                    self.poll_trade_addition_timeout(now);
                     if let Err(error) = self.maintain_container_range().await {
                         self.emit_action_result(
                             super::types::ActionResultSource::Client,

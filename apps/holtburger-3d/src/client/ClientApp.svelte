@@ -20,6 +20,7 @@
 	} from "./client-combat-bar-state";
 	import { SpellReferences } from "../app/spell-references";
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
+	import { ClientTradeState } from "./client-trade-state";
 	import { ClientItemInteractions } from "./client-item-interactions";
 	import { ClientInventoryState } from "./client-inventory-state";
 	import {
@@ -340,6 +341,7 @@
 
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
+	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
@@ -1404,6 +1406,8 @@
 				sampleVendorDistanceMeters(owner.entities, owner.mirror, vendorGuid),
 		);
 		vendor = vendorOwner;
+		const tradeOwner = new ClientTradeState(owner, icons, appendChatError);
+		trade = tradeOwner;
 		const spellReferences = new SpellReferences(transport);
 		const spellState = new ClientSpellState(owner, spellReferences, icons);
 		spells = spellState;
@@ -1455,6 +1459,7 @@
 		});
 		selectedEntityTracking = interactions;
 		const items = new ClientItemInteractions({
+			beginTrade: (partner) => tradeOwner.open(partner),
 			session: owner,
 			selection,
 			reportNotice: (message) =>
@@ -1500,6 +1505,8 @@
 			retireCharacterSettings();
 			inventoryOwner.destroy();
 			containerOwner.destroy();
+			tradeOwner.destroy();
+			trade = null;
 			vendorOwner.destroy();
 			vendor = null;
 			worldContainer = null;
@@ -1629,6 +1636,7 @@
 			{inventory}
 			{worldContainer}
 			{vendor}
+			{trade}
 			{itemInteractions}
 			{objectInspection}
 			{bookReader}

@@ -80,6 +80,7 @@ export class ClientItemInteractions {
 	readonly #failure: (message: string) => void;
 	readonly #notice: (message: string) => void;
 	readonly #beginAcquisition: () => void;
+	readonly #beginTrade: (partner: number) => void;
 	readonly #unsubscribe: () => void;
 	readonly #listeners = new Set<(state: ItemInteractionState) => void>();
 	#state: ItemInteractionState = { kind: "idle" };
@@ -96,12 +97,15 @@ export class ClientItemInteractions {
 		readonly reportNotice: (message: string) => void;
 		/** Retire mutually exclusive frontend modes before acquisition begins. */
 		readonly beginAcquisition: () => void;
+		/** Player interaction initiates negotiations through the session-owned trade flow. */
+		readonly beginTrade: (partner: number) => void;
 	}) {
 		this.#session = options.session;
 		this.#selection = options.selection;
 		this.#failure = options.reportFailure;
 		this.#notice = options.reportNotice;
 		this.#beginAcquisition = options.beginAcquisition;
+		this.#beginTrade = options.beginTrade;
 		this.#unsubscribe = options.session.subscribe((event) =>
 			this.#receive(event),
 		);
@@ -127,7 +131,10 @@ export class ClientItemInteractions {
 		else {
 			const item = this.#item(selected);
 			if (item === null) return;
-			if (item.canPickUp) {
+			if (item.canTrade) {
+				this.cancel();
+				this.#beginTrade(selected);
+			} else if (item.canPickUp) {
 				this.cancel();
 				void this.#session
 					.submitInventory({

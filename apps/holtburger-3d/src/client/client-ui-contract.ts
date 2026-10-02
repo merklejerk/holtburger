@@ -65,6 +65,8 @@ export interface ClientUiDefaults {
 	readonly worldContainer: Omit<ClientUiPanel, "resizable">;
 	/** Vendor catalog, currencies, and combined trade draft. */
 	readonly vendor: Omit<ClientUiPanel, "resizable">;
+	/** Server-confirmed player-to-player offers and acceptance. */
+	readonly trade: Omit<ClientUiPanel, "resizable">;
 	/** Independent server-confirmed object inspection window. */
 	readonly inspection: Omit<ClientUiPanel, "resizable">;
 	/** One retained reader window for the most recently opened book. */

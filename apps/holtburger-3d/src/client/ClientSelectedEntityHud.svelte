@@ -85,12 +85,16 @@
 		<div class="selected-entity__actions">
 			<button
 				class="ui-hud-button"
+				class:trade-interaction={display.interactionLabel === "Trade"}
 				type="button"
 				disabled={!display.canInteract}
 				onclick={onInteract}
-				aria-label="Interact"
+				aria-label={display.interactionLabel}
+				title={display.interactionLabel}
 			>
-				<ClientHudIcon name="interact" />
+				{#if display.interactionLabel === "Trade"}Trade{:else}<ClientHudIcon
+						name="interact"
+					/>{/if}
 			</button>
 			{#if canSplit}<button
 					class="ui-hud-button"
@@ -173,6 +177,9 @@
 			padding: 4px;
 			place-items: center;
 			pointer-events: auto;
+		}
+		.selected-entity__heading button.trade-interaction {
+			width: auto;
 		}
 		.selected-entity__heading button :global(svg) {
 			width: 16px;

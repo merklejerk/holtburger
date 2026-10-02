@@ -53,6 +53,7 @@
 		| "inventory"
 		| "worldContainer"
 		| "vendor"
+		| "trade"
 		| "inspection"
 		| "book"
 		| "debug"
@@ -380,6 +381,7 @@
 						structure: { current: null, max: null },
 						health: { kind: "known", fraction: 0.68 },
 						canInteract: true,
+						interactionLabel: "Interact",
 					})}
 					readCanSplit={() => false}
 					onInteract={() => {}}

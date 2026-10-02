@@ -51,6 +51,7 @@ async function fixture() {
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],
 		characterSheet: null,
+		trade: { trade: null, pending_items: [] },
 		characterMotion: null,
 		activeConfirmation: null,
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
@@ -222,6 +223,7 @@ describe("ClientSelectedEntityTracking", () => {
 			structure: { current: null, max: null },
 			health: { kind: "not-applicable" },
 			canInteract: true,
+			interactionLabel: "Interact",
 		});
 		f.selection.selectContentsItem(10, "toggle");
 		f.selection.select(8);
@@ -309,6 +311,7 @@ describe("ClientSelectedEntityTracking", () => {
 			structure: { current: null, max: null },
 			health: { kind: "known", fraction: 0.5 },
 			canInteract: true,
+			interactionLabel: "Interact",
 		});
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,

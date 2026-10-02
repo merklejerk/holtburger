@@ -148,6 +148,7 @@ export async function probeWorldContainer(options: {
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
 			characterSheet: null,
+			trade: { trade: null, pending_items: [] },
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },

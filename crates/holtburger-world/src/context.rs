@@ -75,6 +75,12 @@ pub fn normalize_name_for_lookup(name: &str) -> String {
 pub trait WorldContext {
     fn get_player_guid(&self) -> Option<Guid>;
     fn get_entity(&self, guid: Guid) -> Option<&Entity>;
+
+    /// Descriptions eligible for interaction; retention caches may also contain retired instances.
+    /// Frontend read models contain only current descriptions and can use their ordinary lookup.
+    fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
+        self.get_entity(guid)
+    }
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
@@ -120,6 +126,10 @@ impl WorldContext for WorldState {
 
     fn get_entity(&self, guid: Guid) -> Option<&Entity> {
         self.entities.get(guid)
+    }
+
+    fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
+        WorldState::get_visible_entity(self, guid)
     }
 
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_ {
@@ -499,23 +509,36 @@ pub trait WorldContextExt: WorldContext {
         !e.has_active_pet()
     }
 
+    /// Whole-item offer admission shared by UI hints and command validation.
     fn can_add_to_trade(&self, guid: Guid) -> bool {
-        let e = match self.get_entity(guid) {
-            Some(e) => e,
-            None => return false,
+        self.trade_item_rejection(guid).is_none()
+    }
+
+    /// Local restrictions supported by both clients; ACE owns unique-item and recipient checks.
+    fn trade_item_rejection(&self, guid: Guid) -> Option<&'static str> {
+        if !self.is_owned_by_player(guid) {
+            return Some("You can only offer items you own.");
+        }
+        let Some(entity) = self.get_visible_entity(guid) else {
+            return Some("Wait for that item's description before offering it.");
         };
-
-        if e.is_attuned_sticky() {
-            return false;
+        if entity.item_type().is_none()
+            || entity
+                .get_string_prop(holtburger_common::properties::PropertyString::Name)
+                .is_none()
+        {
+            return Some("Wait for that item's description before offering it.");
         }
-
-        // If it's a container, it must be empty.
+        if entity.is_attuned_sticky() {
+            return Some("You cannot trade an attuned item.");
+        }
         if !self.is_container_empty(guid) {
-            return false;
+            return Some("Empty that container before offering it.");
         }
-
-        // Check for active pet
-        !e.has_active_pet()
+        if entity.has_active_pet() {
+            return Some("Unsummon the pet before offering this item.");
+        }
+        None
     }
 
     /// Retail's default stance from wielded weapons, then the held/caster slot.

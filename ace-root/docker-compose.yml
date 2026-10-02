@@ -9,7 +9,7 @@ services:
     volumes:
       - ./db-data:/var/lib/mysql
     ports:
-      - "3306:3306/tcp"
+      - "127.0.0.1:3306:3306/tcp"
     restart: "no"
     healthcheck:
         test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -29,6 +29,6 @@ services:
       - ./logs:/ace/Logs
       - ./mods:/ace/Mods
     ports:
-      - "9000-9001:9000-9001/udp"
+      - "127.0.0.1:9000-9001:9000-9001/udp"
     stdin_open: true
     restart: "no"

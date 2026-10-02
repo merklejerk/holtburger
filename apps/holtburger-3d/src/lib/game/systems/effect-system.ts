@@ -305,12 +305,11 @@ export class EffectSystem implements EffectCommandPort {
 		const state = this.#requiredState(
 			requireSceneNodeId(target.targetId, "EffectSystem"),
 		);
-		state.dirty = true;
 		const part = state.parts[values.partIndex];
-		if (part === undefined)
-			throw new Error(
-				`TransparentPart index ${values.partIndex} is out of range for active effect state.`,
-			);
+		// Scripts can address parts absent from their target's setup. Retail ignores these
+		// writes, including timed-ramp samples (acclient.c:313409-313419, 308826-308831).
+		if (part === undefined) return;
+		state.dirty = true;
 		this.#appliedCommandCount += 1;
 		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
 			part.translucency = values.end;

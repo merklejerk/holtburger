@@ -278,18 +278,36 @@ describe("EffectSystem", () => {
 		expect(translucencies(effects)[0]).toBeCloseTo(0.25);
 	});
 
-	it("rejects a part index outside the installed state", () => {
-		const effects = install(1);
-
-		expect(() =>
+	it.each([0, 1])(
+		"ignores absent transparency parts without disturbing resident ramps (duration %s)",
+		(durationSeconds) => {
+			const effects = install(1);
 			effects.applyTransparentPart(TARGET, {
-				durationSeconds: 0,
+				durationSeconds: 1,
 				end: 1,
-				partIndex: 3,
+				partIndex: 0,
 				start: 0,
-			}),
-		).toThrow("out of range");
-	});
+			});
+			translucencies(effects);
+			expect(effects.needsPresentation(NODE_ID)).toBe(false);
+
+			// The first absent slot and the reported failing index both leave state untouched.
+			for (const partIndex of [1, 10]) {
+				effects.applyTransparentPart(TARGET, {
+					durationSeconds,
+					end: 0,
+					partIndex,
+					start: 1,
+				});
+			}
+			expect(effects.needsPresentation(NODE_ID)).toBe(false);
+			expect(translucencies(effects)).toEqual([0]);
+			advance(effects, 0.5);
+			expect(translucencies(effects)[0]).toBeCloseTo(0.5);
+			advance(effects, 0.5);
+			expect(translucencies(effects)[0]).toBeCloseTo(1);
+		},
+	);
 
 	it("refuses to mutate state for a node it does not hold", () => {
 		const effects = new EffectSystem();

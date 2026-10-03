@@ -1324,7 +1324,7 @@ export async function probeClientHud(
 			const window = document.querySelector('.hud-window[aria-label="Settings"]');
 			if (!window) throw new Error('Settings shortcut did not open its HUD window');
 			const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
-			if (tabs.join(',') !== 'Graphics,UI,Input') throw new Error('Settings tabs are incomplete');
+			if (tabs.join(',') !== 'Graphics,Audio,UI,Input') throw new Error('Settings tabs are incomplete');
 			const graphicsTab = window.querySelector('#settings-tab-graphics');
 			graphicsTab.focus();
 			const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true });
@@ -1334,7 +1334,7 @@ export async function probeClientHud(
 			graphicsTab.dispatchEvent(nextEvent);
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const selectedAfterArrow = window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim();
-			if (selectedAfterArrow !== 'UI') throw new Error('Settings tabs ignored keyboard navigation');
+			if (selectedAfterArrow !== 'Audio') throw new Error('Settings tabs ignored keyboard navigation');
 			window.querySelector('#settings-tab-graphics').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			graphicsTab.focus();

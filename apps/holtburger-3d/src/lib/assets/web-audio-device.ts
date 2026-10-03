@@ -48,8 +48,10 @@ export interface AudioAssetSource {
  * matching how retail's mono hook and ambient waves actually shipped.
  */
 export class WebAudioDevice implements AudioDevice {
-	readonly #context: AudioContext;
+	readonly #context: BaseAudioContext;
 	readonly #source: AudioAssetSource;
+	/** Shared final gain; it never participates in spatial placement or voice admission. */
+	readonly #output: GainNode;
 	readonly #placementSmoothingSeconds: number;
 	readonly #loudnessCurveExponent: number;
 	readonly #buffers = new Map<DatAssetId, AudioBuffer>();
@@ -58,9 +60,11 @@ export class WebAudioDevice implements AudioDevice {
 	/** Concurrent callers share decoder completion, not just an in-flight marker. */
 	readonly #pending = new Map<DatAssetId, Promise<void>>();
 	#destroyed = false;
+	/** Initial mix is installed synchronously before any voice can produce output. */
+	#hasStartedPlayback = false;
 
 	constructor(
-		context: AudioContext,
+		context: BaseAudioContext,
 		source: AudioAssetSource,
 		placementSmoothingSeconds: number,
 		loudnessCurveExponent: number,
@@ -73,6 +77,9 @@ export class WebAudioDevice implements AudioDevice {
 		}
 		this.#context = context;
 		this.#source = source;
+		this.#output = context.createGain();
+		this.#output.gain.value = 1;
+		this.#output.connect(context.destination);
 		this.#placementSmoothingSeconds = placementSmoothingSeconds;
 		this.#loudnessCurveExponent = loudnessCurveExponent;
 	}
@@ -85,6 +92,23 @@ export class WebAudioDevice implements AudioDevice {
 	 */
 	#shapeGain(gain: number): number {
 		return gain ** this.#loudnessCurveExponent;
+	}
+
+	/** Change overall loudness after per-voice shaping; zero silences without stopping playback. */
+	setOutputVolume(volume: number): void {
+		if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+			throw new Error("Output volume must be finite and within [0, 1].");
+		}
+		if (this.#destroyed) return;
+		const gain = this.#output.gain;
+		if (!this.#hasStartedPlayback) {
+			gain.value = volume;
+			return;
+		}
+		const now = this.#context.currentTime;
+		// A finite ramp avoids clicks and reaches exact silence when muted.
+		gain.cancelAndHoldAtTime(now);
+		gain.linearRampToValueAtTime(volume, now + this.#placementSmoothingSeconds);
 	}
 
 	playOneShot(
@@ -100,7 +124,7 @@ export class WebAudioDevice implements AudioDevice {
 		const gainNode = this.#context.createGain();
 		gainNode.gain.value = this.#shapeGain(gain);
 		// Retail's pan law needs independent channel gains (see MAXIMUM_PAN_SHADOW_DECIBELS), which
-		// no StereoPannerNode can express: master gain fans out to a left and a right gain, merged
+		// no StereoPannerNode can express: voice gain fans out to a left and a right gain, merged
 		// into the two output channels.
 		const leftGain = this.#context.createGain();
 		const rightGain = this.#context.createGain();
@@ -113,7 +137,7 @@ export class WebAudioDevice implements AudioDevice {
 		gainNode.connect(rightGain);
 		leftGain.connect(merger, 0, 0);
 		rightGain.connect(merger, 0, 1);
-		merger.connect(this.#context.destination);
+		merger.connect(this.#output);
 		let finished = false;
 		// Web Audio reports the exact end, including a stop we requested, so the voice needs no
 		// duration bookkeeping to know it is done.
@@ -121,6 +145,7 @@ export class WebAudioDevice implements AudioDevice {
 			finished = true;
 			source.disconnect();
 		};
+		this.#hasStartedPlayback = true;
 		source.start();
 		let stopped = false;
 		let lastGain = gain;
@@ -197,6 +222,7 @@ export class WebAudioDevice implements AudioDevice {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#output.disconnect();
 		this.#buffers.clear();
 		this.#bufferSourceBytes.clear();
 		this.#pending.clear();

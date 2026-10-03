@@ -130,6 +130,22 @@ export const clientUiSettingsSchema = z
 	.readonly();
 export type ClientUiSettings = z.infer<typeof clientUiSettingsSchema>;
 
+/** User-owned mix preferences; master and mute affect output, categories affect spatial gain. */
+export const clientAudioSettingsSchema = z
+	.object({
+		/** Final output multiplier, independent of spatial audibility. */
+		masterVolume: finiteNumber.min(0).max(1),
+		/** Gameplay effects, including portal transition cues. */
+		effectVolume: finiteNumber.min(0).max(1),
+		/** Environmental ambience. */
+		ambientVolume: finiteNumber.min(0).max(1),
+		/** Silence output without discarding the saved mix. */
+		muted: z.boolean(),
+	})
+	.strict()
+	.readonly();
+export type ClientAudioSettings = z.infer<typeof clientAudioSettingsSchema>;
+
 /** Composed runtime view; persistence validates and saves its sections independently. */
 export const clientUserSettingsSchema = z
 	.object({
@@ -144,6 +160,7 @@ export const clientUserSettingsSchema = z
 			.readonly(),
 		chatFilters: chatFiltersSchema,
 		graphics: clientGraphicsSettingsSchema,
+		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,
 		input: clientKeyboardSettingsSchema,
 		inspection: z

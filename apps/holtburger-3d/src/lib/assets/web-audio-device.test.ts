@@ -7,6 +7,8 @@ const SOUND = "0x0a000207" as DatAssetId;
 interface FakeParam {
 	value: number;
 	setTargetAtTime: ReturnType<typeof vi.fn>;
+	cancelAndHoldAtTime: ReturnType<typeof vi.fn>;
+	linearRampToValueAtTime: ReturnType<typeof vi.fn>;
 }
 
 interface FakeSourceNode {
@@ -18,7 +20,7 @@ interface FakeSourceNode {
 function fakeContext() {
 	const started: FakeSourceNode[] = [];
 	const stopped: unknown[] = [];
-	/** Gain params in creation order: master, left channel, right channel — per voice. */
+	/** Gain params in creation order: shared output, then voice, left, right per voice. */
 	const gains: FakeParam[] = [];
 	const node = () => ({
 		connect: vi.fn(function (this: unknown, next: unknown) {
@@ -26,8 +28,14 @@ function fakeContext() {
 		}),
 		disconnect: vi.fn(),
 	});
+	const gainNodes: ReturnType<typeof node>[] = [];
 	const param = (record: FakeParam[]): FakeParam => {
-		const created: FakeParam = { setTargetAtTime: vi.fn(), value: 0 };
+		const created: FakeParam = {
+			setTargetAtTime: vi.fn(),
+			cancelAndHoldAtTime: vi.fn(),
+			linearRampToValueAtTime: vi.fn(),
+			value: 0,
+		};
 		record.push(created);
 		return created;
 	};
@@ -47,21 +55,25 @@ function fakeContext() {
 			return source;
 		},
 		createChannelMerger: () => node(),
-		createGain: () => ({ ...node(), gain: param(gains) }),
+		createGain: () => {
+			const created = { ...node(), gain: param(gains) };
+			gainNodes.push(created);
+			return created;
+		},
 		currentTime: 42,
 		decodeAudioData: async () => ({}) as AudioBuffer,
 		destination: {},
 	} as unknown as AudioContext;
-	return { context, gains, started, stopped };
+	return { context, gains, gainNodes, started, stopped };
 }
 
 /** Per-voice view over the flat creation-ordered gain params. */
 function voiceGains(gains: FakeParam[], voiceIndex: number) {
-	return {
-		left: gains[voiceIndex * 3 + 1]!,
-		master: gains[voiceIndex * 3]!,
-		right: gains[voiceIndex * 3 + 2]!,
-	};
+	const offset = 1 + voiceIndex * 3;
+	const [gain, left, right] = gains.slice(offset, offset + 3);
+	if (!gain || !left || !right)
+		throw new Error("Voice gains were not constructed");
+	return { gain, left, right };
 }
 
 /** Retail's far-channel shadow at full pan: 15 dB down. */
@@ -84,6 +96,55 @@ function fakeSource(): AudioAssetSource & { loads: DatAssetId[] } {
 }
 
 describe("WebAudioDevice", () => {
+	it("installs the initial mix before playback and ramps live output to exact silence", async () => {
+		const { context, gains, gainNodes } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		const [output] = gains;
+		if (!output) throw new Error("Output gain missing");
+		device.setOutputVolume(0);
+		expect(output.value).toBe(0);
+		await device.prepare(SOUND);
+		device.playOneShot(SOUND, 0.5, 0);
+		device.setOutputVolume(0.25);
+		expect(output.cancelAndHoldAtTime).toHaveBeenLastCalledWith(
+			context.currentTime,
+		);
+		expect(output.linearRampToValueAtTime).toHaveBeenLastCalledWith(
+			0.25,
+			context.currentTime + SMOOTHING,
+		);
+		device.setOutputVolume(0);
+		expect(output.linearRampToValueAtTime).toHaveBeenLastCalledWith(
+			0,
+			context.currentTime + SMOOTHING,
+		);
+		expect(voiceGains(gains, 0).gain.value).toBe(0.5);
+		device.playOneShot(SOUND, 0.2, 0);
+		expect(voiceGains(gains, 1).gain.value).toBe(0.2);
+		const [outputNode] = gainNodes;
+		if (!outputNode) throw new Error("Output node missing");
+		expect(outputNode.connect).toHaveBeenCalledWith(context.destination);
+		device.destroy();
+		device.destroy();
+		expect(outputNode.disconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([NaN, Infinity, -0.01, 1.01])(
+		"rejects invalid output volume %s",
+		(volume) => {
+			const { context } = fakeContext();
+			const device = new WebAudioDevice(
+				context,
+				fakeSource(),
+				SMOOTHING,
+				LINEAR,
+			);
+			expect(() => device.setOutputVolume(volume)).toThrow(
+				"Output volume must be finite and within [0, 1]",
+			);
+		},
+	);
+
 	it("refuses an undecoded sound until the audio owner prepares it", async () => {
 		const { context, started } = fakeContext();
 		const source = fakeSource();
@@ -154,10 +215,10 @@ describe("WebAudioDevice", () => {
 
 		voice.setPlacement(0.5, -0.25);
 
-		const { left, master, right } = voiceGains(gains, 0);
+		const { left, gain, right } = voiceGains(gains, 0);
 		// Initial values are set directly (the signal starts there); updates must glide.
-		expect(master.value).toBe(1);
-		expect(master.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
+		expect(gain.value).toBe(1);
+		expect(gain.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
 		// Pan -0.25 puts the source to the left: left ear untouched, right ear shadowed.
 		expect(left.setTargetAtTime).toHaveBeenCalledWith(1, 42, SMOOTHING);
 		expect(right.setTargetAtTime).toHaveBeenCalledWith(
@@ -175,8 +236,8 @@ describe("WebAudioDevice", () => {
 		await device.prepare(SOUND);
 		device.playOneShot(SOUND, 0.8, 0)!;
 
-		const { left, master, right } = voiceGains(gains, 0);
-		expect(master.value).toBeCloseTo(0.8);
+		const { left, gain, right } = voiceGains(gains, 0);
+		expect(gain.value).toBeCloseTo(0.8);
 		expect(left.value).toBe(1);
 		expect(right.value).toBe(1);
 	});
@@ -234,13 +295,13 @@ describe("WebAudioDevice", () => {
 		await device.prepare(SOUND);
 		const voice = device.playOneShot(SOUND, 0.04, 1)!;
 
-		const { left, master, right } = voiceGains(gains, 0);
-		expect(master.value).toBeCloseTo(0.2);
+		const { left, gain, right } = voiceGains(gains, 0);
+		expect(gain.value).toBeCloseTo(0.2);
 		expect(right.value).toBe(1);
 		expect(left.value).toBeCloseTo(FULL_PAN_SHADOW);
 
 		voice.setPlacement(0.25, 1);
-		expect(master.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
+		expect(gain.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
 	});
 
 	it("refuses playback after destruction", async () => {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 	import ClientBindingDialog from "./ClientBindingDialog.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import {
@@ -18,6 +19,7 @@
 		type TextureFilteringCapabilities,
 	} from "../lib/game/renderer/texture-filtering-policy";
 	import type {
+		ClientAudioSettings,
 		ClientGraphicsSettings,
 		ClientUiSettings,
 	} from "./client-settings-contract";
@@ -39,8 +41,11 @@
 		type InputDisplayPlatform,
 	} from "../lib/input/input-presentation";
 
-	export type SettingsTab = "graphics" | "ui" | "input";
+	export type SettingsTab = "graphics" | "audio" | "ui" | "input";
 	interface Props {
+		/** User-scoped audio mix and mute preferences. */
+		readonly audio: ClientAudioSettings;
+		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
 		readonly input: ClientKeyboardConfiguration;
@@ -55,6 +60,8 @@
 		readonly onResetHudPlacements: () => void;
 	}
 	let {
+		audio,
+		onAudioChange,
 		graphics,
 		ui,
 		input,
@@ -288,9 +295,15 @@
 		serif: "Georgia / Times New Roman",
 		mono: "Courier New",
 	};
+	const audioControls = [
+		{ key: "masterVolume", label: "Master" },
+		{ key: "effectVolume", label: "Sound effects" },
+		{ key: "ambientVolume", label: "Ambience" },
+	] as const;
 	const tabs: readonly { readonly id: SettingsTab; readonly label: string }[] =
 		[
 			{ id: "graphics", label: "Graphics" },
+			{ id: "audio", label: "Audio" },
 			{ id: "ui", label: "UI" },
 			{ id: "input", label: "Input" },
 		];
@@ -444,6 +457,45 @@
 								weatherEnabled: event.currentTarget.checked,
 							})}
 					/> Weather</label
+				>
+			</div>
+		{:else if selectedTab === "audio"}
+			<div
+				role="tabpanel"
+				id="settings-section-audio"
+				aria-labelledby="settings-tab-audio"
+				class="settings-section"
+			>
+				{#each audioControls as control}
+					<label
+						>{control.label}: {Math.round(audio[control.key] * 100)}%
+						<input
+							type="range"
+							min="0"
+							max="1"
+							step="0.01"
+							value={audio[control.key]}
+							oninput={(event) =>
+								onAudioChange({
+									...audio,
+									[control.key]: event.currentTarget.valueAsNumber,
+								})}
+						/>
+					</label>
+				{/each}
+				<label class="checkbox"
+					><input
+						type="checkbox"
+						checked={audio.muted}
+						onchange={(event) =>
+							onAudioChange({ ...audio, muted: event.currentTarget.checked })}
+					/> Mute all</label
+				>
+				<button
+					type="button"
+					class="ui-button"
+					onclick={() => onAudioChange(CLIENT_AUDIO_DEFAULTS)}
+					>Reset audio</button
 				>
 			</div>
 		{:else if selectedTab === "ui"}

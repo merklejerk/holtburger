@@ -2,11 +2,15 @@
 
 use super::*;
 use crate::motion::AuthoredCollisionPose;
+use crate::spatial::{
+    CameraCollisionQuery, FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere,
+};
 use holtburger_content::collision_pose::CollisionPoseLibrary;
 use holtburger_dat::file_type::{
     Animation, animation::AnimationFlags, setup_model::AnimationFrame,
 };
 use holtburger_dat::graphics::Frame;
+use holtburger_dat::physics::InternalNode;
 
 fn animated_panel_configuration() -> (u32, DynamicPhysicalBodyConfiguration) {
     let animation_id = 0x03000001;
@@ -50,6 +54,134 @@ fn animated_panel_configuration() -> (u32, DynamicPhysicalBodyConfiguration) {
         true,
     );
     (animation_id, config)
+}
+
+#[test]
+fn stationary_camera_recovery_checks_entity_paths_endpoints_and_target_exclusion() {
+    let surface = polygon_wall_shape();
+    let solid = surface.as_bsp().unwrap();
+    let bounds = Sphere {
+        center: Vector3::zero(),
+        radius: 5.0,
+    };
+    let leaf = |index, solid| {
+        BspNode::Leaf(BspLeaf {
+            index,
+            solid,
+            sphere: Some(bounds),
+            poly_ids: vec![1],
+        })
+    };
+    let static_shape = Arc::new(CollisionShape::Bsp(BspSolid {
+        bsp: BspNode::Internal(InternalNode {
+            tag: *b"BPnn",
+            plane: Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            pos: Some(Box::new(leaf(1, 1))),
+            neg: Some(Box::new(leaf(0, 0))),
+            sphere: Some(bounds),
+            poly_ids: Vec::new(),
+        }),
+        bounds,
+        box_bounds: CollisionBox::from_points([
+            bounds.center - Vector3::new(5.0, 5.0, 5.0),
+            bounds.center + Vector3::new(5.0, 5.0, 5.0),
+        ])
+        .unwrap(),
+        polygons: solid.polygons.clone(),
+    }));
+    let collider = PlacedCollider::new(
+        static_shape,
+        LandblockPlacement {
+            origin: Vector3::new(97.0, 96.0, 1.0),
+            orientation: Quaternion::from_axis_angle(
+                Vector3::new(0.0, 0.0, 1.0),
+                std::f32::consts::PI,
+            )
+            .unwrap(),
+        },
+        ColliderScale::uniform(1.0).unwrap(),
+        StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+    )
+    .unwrap();
+    let mut asset = flat_collision_asset(0);
+    asset.static_geometry = LandblockColliders::new(vec![collider], Vec::new());
+    let mut environment = flat_collision_scene();
+    environment.insert(asset).unwrap();
+    let original = FreeSphereState {
+        pose: pose(Vector3::new(95.5, 96.0, 1.0)),
+        cell: None,
+        radius: 0.3,
+    };
+    assert!(matches!(
+        settle_free_sphere(
+            &environment,
+            FLY_CONFIG.into(),
+            original,
+            PhysicalCollisionFilter::ALL
+        )
+        .unwrap(),
+        FreeSphereSettleOutcome::Settled { .. }
+    ));
+
+    // The first panel blocks only the correction path; the second overlaps its endpoint.
+    for panel_x in [96.0, 97.5] {
+        let id = SpatialBodyId::Entity(Guid(12));
+        let mut scene = SpatialScene::new();
+        let (_, config) = animated_panel_configuration();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(panel_x, 96.0, 1.0)),
+            Instant::now(),
+        ));
+        scene
+            .set_dynamic_physical_body(id, Some(config), PhysicalCollisionFilter::ALL, None)
+            .unwrap();
+        scene
+            .body_mut(id)
+            .unwrap()
+            .physical
+            .as_mut()
+            .unwrap()
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .collision
+            .contact_response = crate::spatial::EntityContactResponse::Obstacle;
+        let entities = scene.entity_collision_snapshot().unwrap();
+        let query = CameraCollisionQuery {
+            environment: &environment,
+            entities: &entities,
+            target: SpatialBodyId::LocalPlayer(Guid(99)),
+        };
+        let outcome = settle_free_sphere(
+            &query,
+            FLY_CONFIG.into(),
+            original,
+            PhysicalCollisionFilter::ALL,
+        )
+        .unwrap();
+        assert!(
+            matches!(outcome, FreeSphereSettleOutcome::RecoveryUnavailable { .. }),
+            "panel X={panel_x}: {outcome:?}"
+        );
+        let excluded = CameraCollisionQuery {
+            target: id,
+            ..query
+        };
+        assert!(matches!(
+            settle_free_sphere(
+                &excluded,
+                FLY_CONFIG.into(),
+                original,
+                PhysicalCollisionFilter::ALL
+            )
+            .unwrap(),
+            FreeSphereSettleOutcome::Settled { .. }
+        ));
+    }
 }
 
 #[test]
@@ -316,6 +448,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
         .value
         .unwrap();
     assert!(hit.time_of_impact < 0.4);
+    assert_eq!(query.entity_sweep_sphere(request).unwrap(), Some(hit));
     let config = FreeSphereConfig {
         maximum_substep_distance: 0.1,
         maximum_substeps: 64,
@@ -379,6 +512,10 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
         .unwrap()
         .value
         .unwrap();
+    assert_eq!(
+        moved_query.entity_sweep_sphere(request).unwrap(),
+        Some(moved_hit)
+    );
     assert!(
         (moved_hit.time_of_impact - hit.time_of_impact - 1.0 / request.displacement.x).abs()
             < 0.001
@@ -396,6 +533,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
         entities: &after,
         target: id,
     };
+    assert!(excluded.entity_sweep_sphere(request).unwrap().is_none());
     assert!(
         excluded
             .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)

@@ -22,6 +22,11 @@ pub trait SphereCollisionQuery {
         radius: f32,
         placement: &SpatialMembership,
     ) -> Result<Vec<StaticContact>>;
+    /// Continuous entity-only obstruction; recovery separately admits its starting static solids.
+    fn entity_sweep_sphere(
+        &self,
+        request: StaticSphereSweepRequest,
+    ) -> Result<Option<StaticSphereSweepHit>>;
     /// Earliest obstruction under the caller's explicit coverage policy.
     fn sweep_sphere(
         &self,
@@ -33,6 +38,12 @@ pub trait SphereCollisionQuery {
 impl SphereCollisionQuery for CollisionScene {
     fn environment(&self) -> &CollisionScene {
         self
+    }
+    fn entity_sweep_sphere(
+        &self,
+        _: StaticSphereSweepRequest,
+    ) -> Result<Option<StaticSphereSweepHit>> {
+        Ok(None)
     }
     fn entity_contacts(
         &self,
@@ -65,6 +76,13 @@ pub struct CameraCollisionQuery<'a> {
 impl SphereCollisionQuery for CameraCollisionQuery<'_> {
     fn environment(&self) -> &CollisionScene {
         self.environment
+    }
+    fn entity_sweep_sphere(
+        &self,
+        request: StaticSphereSweepRequest,
+    ) -> Result<Option<StaticSphereSweepHit>> {
+        self.environment
+            .sweep_camera_entity_sphere(self.entities, self.target, request)
     }
     fn entity_contacts(
         &self,

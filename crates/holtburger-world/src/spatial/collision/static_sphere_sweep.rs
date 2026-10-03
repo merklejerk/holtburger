@@ -11,11 +11,12 @@ use parry3d::shape::{Ball, Cylinder, Triangle};
 use crate::spatial::{SpatialBodyId, volume_query::placed_volume_sweep_contact};
 
 use super::{
-    CELL_PLANE_TOLERANCE, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
-    GlobalCellRange, MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionExclusions,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacedMotionPathRequest, SpatialMembership,
-    SphereSweep, UncoveredCollisionQuery, anchor_to_landblock, landblock_key,
-    overlapped_terrain_cells, point_between_landblocks, touched_landblocks, validate_sweep,
+    CELL_PLANE_TOLERANCE, ColliderReference, CollisionQueryError, CollisionQueryPolicy,
+    CollisionScene, GlobalCellRange, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath,
+    PlacedMotionPathRequest, SpatialMembership, SphereSweep, UncoveredCollisionQuery,
+    anchor_to_landblock, landblock_key, overlapped_terrain_cells, point_between_landblocks,
+    touched_landblocks, validate_sweep,
 };
 
 /// One continuous sphere displacement against resident static collision geometry.
@@ -106,9 +107,9 @@ pub(crate) struct PreparedHardSphereSweep {
 }
 
 /// Resident static candidates and the domains used to select hard-entity candidates.
-struct StaticSphereTrace {
+pub(super) struct StaticSphereTrace {
     /// Earliest resident static hit in original request fractions.
-    hit: Option<StaticSphereSweepHit>,
+    pub(super) hit: Option<StaticSphereSweepHit>,
     /// Candidate domains used when admitting hard-entity geometry.
     membership: SpatialMembership,
 }
@@ -181,7 +182,7 @@ impl CollisionScene {
             .value)
     }
 
-    fn finish_sphere_path(
+    pub(super) fn finish_sphere_path(
         &self,
         request: StaticSphereSweepRequest,
         fraction: f32,
@@ -323,6 +324,49 @@ impl CollisionScene {
     ) -> anyhow::Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>> {
         let traced = self.trace_static_sphere(request)?;
         let mut earliest = traced.hit;
+        self.update_camera_entity_hit(
+            entities,
+            excluded,
+            request,
+            &traced.membership,
+            &mut earliest,
+        )?;
+        let fraction = earliest.map_or(1.0, |hit| hit.time_of_impact);
+        let accepted = self.finish_sphere_path(request, fraction, policy)?;
+        Ok(UncoveredCollisionQuery {
+            value: earliest,
+            unavailable_owner: accepted.unavailable_owner,
+        })
+    }
+
+    /// Entity-only path check for stationary recovery; static recovery owns path coverage.
+    pub(crate) fn sweep_camera_entity_sphere(
+        &self,
+        entities: &crate::spatial::EntityCollisionSnapshot,
+        excluded: SpatialBodyId,
+        request: StaticSphereSweepRequest,
+    ) -> anyhow::Result<Option<StaticSphereSweepHit>> {
+        let sweep = SphereSweep {
+            anchor: request.anchor,
+            start: request.start,
+            end: request.end(),
+            radius: request.radius,
+        };
+        validate_sweep(sweep)?;
+        let membership = self.sweep_candidate_membership(sweep, request.previous_cell)?;
+        let mut earliest = None;
+        self.update_camera_entity_hit(entities, excluded, request, &membership, &mut earliest)?;
+        Ok(earliest)
+    }
+
+    fn update_camera_entity_hit(
+        &self,
+        entities: &crate::spatial::EntityCollisionSnapshot,
+        excluded: SpatialBodyId,
+        request: StaticSphereSweepRequest,
+        membership: &SpatialMembership,
+        earliest: &mut Option<StaticSphereSweepHit>,
+    ) -> anyhow::Result<()> {
         let end = request.end();
         let extent = request.radius;
         let minimum = holtburger_common::Vector3::new(
@@ -337,27 +381,20 @@ impl CollisionScene {
         );
         let ball = Ball::new(request.radius);
         let moving = MovingSphereCast::new(&ball, request.start, request.displacement);
-        for id in entities.index.candidates(
-            Some(excluded),
-            request.anchor,
-            minimum,
-            maximum,
-            &traced.membership,
-        ) {
+        for id in
+            entities
+                .index
+                .candidates(Some(excluded), request.anchor, minimum, maximum, membership)
+        {
             let target = &entities.targets[&id];
             if !target.camera_solid {
                 continue;
             }
             for shape in target.shapes.iter() {
-                moving.update_collider_hit(shape, target.anchor, request.anchor, &mut earliest)?;
+                moving.update_collider_hit(shape, target.anchor, request.anchor, earliest)?;
             }
         }
-        let fraction = earliest.map_or(1.0, |hit| hit.time_of_impact);
-        let accepted = self.finish_sphere_path(request, fraction, policy)?;
-        Ok(UncoveredCollisionQuery {
-            value: earliest,
-            unavailable_owner: accepted.unavailable_owner,
-        })
+        Ok(())
     }
 
     /// Returns the earliest installed obstruction under one explicit coverage policy.
@@ -378,6 +415,14 @@ impl CollisionScene {
     fn trace_static_sphere(
         &self,
         request: StaticSphereSweepRequest,
+    ) -> Result<StaticSphereTrace, CollisionQueryError> {
+        self.trace_static_sphere_excluding(request, &[])
+    }
+
+    pub(super) fn trace_static_sphere_excluding(
+        &self,
+        request: StaticSphereSweepRequest,
+        excluded: &[ColliderReference],
     ) -> Result<StaticSphereTrace, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
@@ -432,6 +477,9 @@ impl CollisionScene {
 
         let query_cells = swept_query_cells(sweep);
         for selected in self.selected_colliders(query_cells, &swept_placement) {
+            if excluded.contains(&selected.reference) {
+                continue;
+            }
             let collider = &self.landblocks[&selected.reference.owner]
                 .static_geometry
                 .colliders[selected.reference.collider_index];

@@ -2,7 +2,9 @@
 
 mod entity_surface_ray;
 mod selection_ray;
+mod solid_recovery;
 mod static_sphere_sweep;
+pub(super) use solid_recovery::SolidPlacementRecovery;
 pub(crate) use static_sphere_sweep::{PreparedHardSphereSweep, sphere_path_touches_shape};
 mod static_surface_ray;
 mod surface_ray_path;

@@ -1,3 +1,4 @@
+import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import {
 	entityFacts,
 	playerEntitySnapshot,
@@ -385,6 +386,71 @@ describe("ClientPresentationSession", () => {
 		presentation.setFrameSettings(hiddenSettings);
 		expect(runtime.frameSettings.at(-1)?.showRetailHiddenGeometry).toBe(false);
 		await presentation.destroy();
+	});
+
+	it("applies the latest pending mix before playback and retains levels through mute and replacement", async () => {
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(currentState(0x0101_0001)),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const owner = fakeOwner(runtime, activeRegion());
+		let releaseGate: () => void = () => {
+			throw new Error("Construction gate not installed");
+		};
+		let signalEntered: () => void = () => {
+			throw new Error("Construction signal not installed");
+		};
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve;
+		});
+		const entered = new Promise<void>((resolve) => {
+			signalEntered = resolve;
+		});
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => {
+				signalEntered();
+				await gate;
+				return owner;
+			},
+		});
+		const mix = {
+			...CLIENT_AUDIO_DEFAULTS,
+			masterVolume: 0.4,
+			effectVolume: 0.7,
+			ambientVolume: 0.2,
+		};
+		presentation.setAudioSettings(mix);
+		const starting = presentation.start();
+		await entered;
+		presentation.setAudioSettings({ ...mix, muted: true });
+		releaseGate();
+		await starting;
+		expect(owner.outputVolumes).toEqual([0]);
+		expect(runtime.audioSettings.at(-1)).toEqual({
+			effectVolume: mix.effectVolume,
+			ambientVolume: mix.ambientVolume,
+		});
+		presentation.setAudioSettings(mix);
+		expect(owner.outputVolumes.at(-1)).toBe(mix.masterVolume);
+		await presentation.destroy();
+		const replacementOwner = fakeOwner(
+			new FakePresentationRuntime(),
+			activeRegion(),
+		);
+		const replacement = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => replacementOwner,
+		});
+		replacement.setAudioSettings({ ...mix, muted: true });
+		await replacement.start();
+		expect(replacementOwner.outputVolumes).toEqual([0]);
+		await replacement.destroy();
 	});
 
 	it("reissues scene demand when view distance changes without moving", async () => {
@@ -1387,6 +1453,9 @@ function fallbackCameraTick(identity: {
 }
 
 class FakePresentationRuntime implements ClientPresentationRuntime {
+	audioSettings: Parameters<
+		ClientPresentationRuntime["setAudioSettings"]
+	>[0][] = [];
 	readonly mapGeometry = { revision: 0 } as MapTerrainSource["mapGeometry"];
 	readonly terrainInstallationRevision = 0;
 	readonly dynamicEntityPlacementRevision = 0;
@@ -1451,6 +1520,11 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.#nextUpsertRealization = { kind: "failure", error };
 	}
 
+	setAudioSettings(
+		settings: Parameters<ClientPresentationRuntime["setAudioSettings"]>[0],
+	): void {
+		this.audioSettings.push(settings);
+	}
 	setFrameSettings(
 		settings: Parameters<ClientPresentationRuntime["setFrameSettings"]>[0],
 	): void {
@@ -1702,6 +1776,8 @@ function fakeOwner(
 	activeRegion: ActiveRegionSource;
 	profileSource: LandblockProfileSource;
 	runtime: FakePresentationRuntime;
+	outputVolumes: number[];
+	setOutputVolume(volume: number): void;
 	destroyed: boolean;
 	destroy(): Promise<void>;
 } {
@@ -1714,6 +1790,10 @@ function fakeOwner(
 			}),
 		},
 		runtime,
+		outputVolumes: [] as number[],
+		setOutputVolume(volume: number) {
+			this.outputVolumes.push(volume);
+		},
 		destroyed: false,
 		async destroy() {
 			this.destroyed = true;

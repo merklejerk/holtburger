@@ -118,6 +118,7 @@ export async function probeClientAudio() {
 		if (device.getPreparedSourceBytes(soundId) !== bytes.byteLength)
 			throw new Error("Audio decoder lost the transferred source-byte count.");
 		return {
+			outputMix: await probeOutputMix(),
 			context: context.state,
 			loads,
 			decodedBytes: bytes.byteLength,
@@ -160,4 +161,66 @@ function toneWave(): ArrayBuffer {
 			true,
 		);
 	return bytes;
+}
+
+/** Render actual browser output to prove master gain follows the voice contour and reaches silence. */
+async function probeOutputMix() {
+	const tuning = SHARED_FRONTEND_TUNING.audio;
+	async function renderPeak(volume: number, live: boolean): Promise<number> {
+		const sampleRate = 48_000;
+		const context = new OfflineAudioContext(2, sampleRate / 10, sampleRate);
+		const soundId = "0x0a000001" as DatAssetId;
+		const device = new WebAudioDevice(
+			context,
+			{ destroy() {}, loadAudio: async () => toneWave() },
+			tuning.placementSmoothingSeconds,
+			tuning.loudnessCurveExponent,
+		);
+		try {
+			if (!live) device.setOutputVolume(volume);
+			await device.prepare(soundId);
+			if (!device.playOneShot(soundId, 0.2, 0))
+				throw new Error("Prepared offline tone refused");
+			if (live) device.setOutputVolume(volume);
+			const buffer = await context.startRendering();
+			// Measure after the live ramp, excluding the resampler's end boundary.
+			const start = Math.ceil(tuning.placementSmoothingSeconds * sampleRate);
+			const end = Math.floor(buffer.length * 0.9);
+			if (start >= end)
+				throw new Error(
+					"Output probe tone is shorter than the configured smoothing ramp",
+				);
+			let peak = 0;
+			for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+				const samples = buffer.getChannelData(channel);
+				for (let i = start; i < end; i += 1)
+					peak = Math.max(peak, Math.abs(samples[i]));
+			}
+			return peak;
+		} finally {
+			device.destroy();
+		}
+	}
+	const full = await renderPeak(1, false);
+	const half = await renderPeak(0.5, false);
+	const muted = await renderPeak(0, false);
+	const liveHalf = await renderPeak(0.5, true);
+	const liveMuted = await renderPeak(0, true);
+	if (
+		!(full > 0) ||
+		Math.abs(half / full - 0.5) > 0.001 ||
+		Math.abs(liveHalf / full - 0.5) > 0.001 ||
+		muted !== 0 ||
+		liveMuted !== 0
+	) {
+		throw new Error(
+			`Browser output mix failed: ${JSON.stringify({ full, half, muted, liveHalf, liveMuted })}`,
+		);
+	}
+	return {
+		halfRatio: half / full,
+		liveHalfRatio: liveHalf / full,
+		muted,
+		liveMuted,
+	};
 }

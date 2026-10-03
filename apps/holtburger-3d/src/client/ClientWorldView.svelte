@@ -83,6 +83,7 @@
 	} from "./client-host-contract";
 	import type {
 		ClientCharacterSettings,
+		ClientAudioSettings,
 		ClientGraphicsSettings,
 		ClientUiSettings,
 	} from "./client-settings-contract";
@@ -130,6 +131,9 @@
 		) => void;
 		/** User-scoped divider height inside creature inspections. */
 		readonly inspectionPreviewHeight: number;
+		/** User-scoped audio mix and mute preferences. */
+		readonly audio: ClientAudioSettings;
+		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		/** User graphics snapshot and focused edit operation. */
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
@@ -276,6 +280,8 @@
 		onChatFiltersChange,
 		inspectionPreviewHeight,
 		onInspectionPreviewHeightChange,
+		audio,
+		onAudioChange,
 		graphics,
 		ui,
 		input,
@@ -1142,6 +1148,8 @@
 				{:else if panel === "settings"}
 					<ClientSettingsPanel
 						{displayPlatform}
+						{audio}
+						{onAudioChange}
 						{graphics}
 						{ui}
 						{input}

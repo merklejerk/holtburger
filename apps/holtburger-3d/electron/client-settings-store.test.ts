@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { ClientSettingsStore } from "./client-settings-store";
 import {
+	CLIENT_AUDIO_DEFAULTS,
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
 } from "../src/client/client-settings-defaults";
@@ -28,6 +29,29 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("round-trips the audio mix and resets it to declared defaults", async () => {
+		const path = await temporarySettingsPath();
+		const store = new ClientSettingsStore(path, initialWindow);
+		await store.load();
+		expect(store.readUser("persisted").sections.audio).toBeUndefined();
+		const audio = {
+			...CLIENT_AUDIO_DEFAULTS,
+			masterVolume: 0.35,
+			effectVolume: 0.6,
+			ambientVolume: 0.2,
+			muted: true,
+		};
+		await store.saveUserPatch({ sections: { audio } });
+		const loaded = new ClientSettingsStore(path, initialWindow);
+		await loaded.load();
+		expect(loaded.readUser("persisted").sections.audio).toEqual(audio);
+		await loaded.saveUserPatch({ sections: { audio: CLIENT_AUDIO_DEFAULTS } });
+		const reset = new ClientSettingsStore(path, initialWindow);
+		await reset.load();
+		expect(reset.readUser("persisted").sections.audio).toEqual(
+			CLIENT_AUDIO_DEFAULTS,
+		);
+	});
 	it("loads and saves user, HUD, window, and character sections independently", async () => {
 		const path = await temporarySettingsPath();
 		const store = new ClientSettingsStore(path, initialWindow);

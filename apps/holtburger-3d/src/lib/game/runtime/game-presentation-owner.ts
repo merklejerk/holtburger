@@ -73,6 +73,8 @@ export class GamePresentationOwner {
 	readonly portalTransitionAssets: PortalTransitionAssets;
 	readonly textureFilteringCapabilities: TextureFilteringCapabilities;
 	readonly #teardown: PresentationTeardownStack;
+	/** Browser output control retained alongside the teardown-owned audio device. */
+	readonly #audioDevice: WebAudioDevice;
 	#destroyed = false;
 
 	private constructor(resources: {
@@ -94,6 +96,7 @@ export class GamePresentationOwner {
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities;
 		readonly objectPreviewResources: ObjectPreviewResources;
 	}) {
+		this.#audioDevice = resources.audioDevice;
 		this.activeRegion = resources.activeRegion;
 		this.device = resources.device;
 		this.profileSource = resources.profileSource;
@@ -102,6 +105,11 @@ export class GamePresentationOwner {
 		this.portalTransitionAssets = resources.portalTransitionAssets;
 		this.textureFilteringCapabilities = resources.textureFilteringCapabilities;
 		this.#teardown = createPresentationTeardown(resources);
+	}
+
+	/** Set browser output loudness independently of runtime sound placement. */
+	setOutputVolume(volume: number): void {
+		this.#audioDevice.setOutputVolume(volume);
 	}
 
 	/** Build and install one complete active-region presentation composition. */

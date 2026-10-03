@@ -147,6 +147,8 @@ try {
 			trade: result.clientTrade,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientAudio) {
+		report = { clientAudio: result.clientAudio, browserErrors };
 	} else if (options.clientBook) {
 		report = {
 			clientBook: result.clientBook,
@@ -361,6 +363,7 @@ function parseArgs(args) {
 		clientWorldMap: false,
 		clientHud: false,
 		clientConnection: false,
+		clientAudio: false,
 		characterSheet: false,
 		clientBook: false,
 		clientTrade: false,
@@ -474,6 +477,10 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--client-audio":
+				parsed.clientHud = true;
+				parsed.clientAudio = true;
+				break;
 			case "--client-connection":
 				parsed.clientHud = true;
 				parsed.clientConnection = true;
@@ -1711,6 +1718,7 @@ Options:
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
   --world-map           Exercise the retained World map with an isolated cache and real content.
+  --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4221,6 +4229,27 @@ async function runClientHudHarness({ viteUrl }) {
 				consoleMessages,
 			};
 		}
+		if (options.clientAudio) {
+			// Live AudioContext activation requires a browser-recognized user gesture.
+			const audio = await client.send("Runtime.evaluate", {
+				expression:
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeAudio()",
+				userGesture: true,
+				awaitPromise: true,
+				returnByValue: true,
+			});
+			if (audio.exceptionDetails)
+				throw new Error(
+					audio.exceptionDetails.exception?.description ??
+						audio.exceptionDetails.text,
+				);
+			return {
+				clientAudio: audio.result.value,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+
 		if (options.clientConnection) {
 			return {
 				connectionBadge: await evaluate(

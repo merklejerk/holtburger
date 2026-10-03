@@ -7,6 +7,7 @@ import {
 import { initialActionBar } from "./client-action-bar-state";
 import { initialSpellBarBindings } from "./client-spell-bar-state";
 import type {
+	ClientAudioSettings,
 	ClientCharacterSettings,
 	ClientUserSettings,
 } from "./client-settings-contract";
@@ -14,6 +15,14 @@ import { CLIENT_TUNING } from "./client-tuning";
 import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy";
 import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
+
+/** First-run and reset mix; frontend preferences remain separate from engine tuning. */
+export const CLIENT_AUDIO_DEFAULTS = {
+	masterVolume: 1,
+	effectVolume: 1,
+	ambientVolume: 1,
+	muted: false,
+} as const satisfies ClientAudioSettings;
 
 /** Build absence defaults from the same constants consumed by the live client. */
 export function createDefaultClientUserSettings(
@@ -30,6 +39,7 @@ export function createDefaultClientUserSettings(
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
+		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import {
+	clientAudioSettingsSchema,
 	clientCharacterSettingsSchema,
 	clientUserSettingsSchema,
 } from "./client-settings-contract";
 import {
+	CLIENT_AUDIO_DEFAULTS,
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
 } from "./client-settings-defaults";
@@ -13,6 +15,29 @@ import { hudTrayOrientation, rotateHudTray } from "./client-hud-tray-layout";
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("uses the declared initial audio mix", () => {
+		expect(createDefaultClientUserSettings(viewport, 8).audio).toEqual(
+			CLIENT_AUDIO_DEFAULTS,
+		);
+	});
+	it.each(["masterVolume", "effectVolume", "ambientVolume"] as const)(
+		"validates %s independently",
+		(key) => {
+			for (const invalid of [NaN, Infinity, -0.01, 1.01]) {
+				expect(() =>
+					clientAudioSettingsSchema.parse({
+						...CLIENT_AUDIO_DEFAULTS,
+						[key]: invalid,
+					}),
+				).toThrow();
+			}
+			expect(
+				clientAudioSettingsSchema.parse({ ...CLIENT_AUDIO_DEFAULTS, [key]: 0 })[
+					key
+				],
+			).toBe(0);
+		},
+	);
 	it("validates complete runtime user and character settings", () => {
 		const user = createDefaultClientUserSettings(viewport, 8);
 		const character = createDefaultClientCharacterSettings();

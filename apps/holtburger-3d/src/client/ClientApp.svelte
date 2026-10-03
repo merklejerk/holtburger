@@ -118,11 +118,13 @@
 	} from "../lib/game/renderer/texture-filtering-policy";
 	import type {
 		ClientCharacterSettings,
+		ClientAudioSettings,
 		ClientGraphicsSettings,
 		ClientUiSettings,
 		ClientUserSettings,
 	} from "./client-settings-contract";
 	import {
+		clientAudioSettingsSchema,
 		clientGraphicsSettingsSchema,
 		clientUiSettingsSchema,
 	} from "./client-settings-contract";
@@ -546,6 +548,11 @@
 					};
 		frameSettings = frameSettingsWithGraphics(frameSettings, effective);
 		presentationSession?.setFrameSettings(frameSettings);
+	}
+	function changeAudio(audio: ClientAudioSettings): void {
+		const accepted = clientAudioSettingsSchema.parse(audio);
+		changeUserSection("audio", accepted);
+		presentationSession?.setAudioSettings(accepted);
 	}
 	function changeGraphics(graphics: ClientGraphicsSettings): void {
 		const accepted = clientGraphicsSettingsSchema.parse(graphics);
@@ -1203,6 +1210,8 @@
 		// Frame settings are cold presentation policy, not renderer identity. The control handler
 		// updates the live owner directly; this snapshot only initializes a genuinely new owner.
 		presentation.setFrameSettings(untrack(() => frameSettings));
+		// Audio preferences are initialization snapshots, never presentation lifecycle dependencies.
+		presentation.setAudioSettings(untrack(() => userSettings.audio));
 		presentation.setSceneInterestRadii(
 			clientSceneInterestRadii(
 				untrack(() => userSettings.graphics.viewDistance),
@@ -1615,6 +1624,8 @@
 			onChatFiltersChange={(chatFilters) =>
 				changeUserSection("chatFilters", chatFilters)}
 			inspectionPreviewHeight={userSettings.inspection.previewHeight}
+			audio={userSettings.audio}
+			onAudioChange={changeAudio}
 			graphics={userSettings.graphics}
 			ui={userSettings.ui}
 			input={userSettings.input}

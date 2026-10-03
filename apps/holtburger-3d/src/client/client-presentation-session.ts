@@ -1,3 +1,9 @@
+import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
+import {
+	clientAudioSettingsSchema,
+	type ClientAudioSettings,
+} from "./client-settings-contract";
+import type { AudioSettings } from "../lib/game/systems/audio-system";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
 	acVector3,
@@ -259,6 +265,8 @@ export type ClientPresentationCameraController = PossessionCameraController<
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
 export interface ClientPresentationRuntime extends MapTerrainSource {
 	setFrameSettings(settings: FrameSettings): void;
+	/** Category preferences applied by the runtime spatial audio system. */
+	setAudioSettings(settings: AudioSettings): void;
 	/** Accept every desired record before returning the visual-realization promise. */
 	replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
@@ -348,6 +356,8 @@ export interface ClientPresentationOwner {
 	readonly activeRegion: ActiveRegionSource;
 	readonly profileSource: LandblockProfileSource;
 	readonly runtime: ClientPresentationRuntime;
+	/** Final browser output multiplier, independent of category audibility. */
+	setOutputVolume(volume: number): void;
 	readonly objectPreviewResources?: ObjectPreviewResources;
 	/** GPU capability published once when the concrete renderer owner is ready. */
 	readonly textureFilteringCapabilities?: TextureFilteringCapabilities;
@@ -410,6 +420,8 @@ export class ClientPresentationSession {
 	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	#owner: ClientPresentationOwner | null = null;
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
+	/** Latest user mix, retained while browser resources are being constructed. */
+	#audioSettings: ClientAudioSettings = CLIENT_AUDIO_DEFAULTS;
 	#sceneInterestRadii: SceneInterestRadii = clientSceneInterestRadii(
 		CLIENT_GRAPHICS_DEFAULTS.viewDistance,
 	);
@@ -828,6 +840,22 @@ export class ClientPresentationSession {
 		this.#owner?.runtime.setFrameSettings(settings);
 	}
 
+	/** Retain cold preferences during construction and update the live owner without rebuilding it. */
+	setAudioSettings(settings: ClientAudioSettings): void {
+		this.#audioSettings = clientAudioSettingsSchema.parse(settings);
+		if (this.#owner !== null) this.#applyAudioSettings(this.#owner);
+	}
+
+	/** The client owns mute policy; the browser adapter consumes only its resulting output gain. */
+	#applyAudioSettings(owner: ClientPresentationOwner): void {
+		const settings = this.#audioSettings;
+		owner.setOutputVolume(settings.muted ? 0 : settings.masterVolume);
+		owner.runtime.setAudioSettings({
+			effectVolume: settings.effectVolume,
+			ambientVolume: settings.ambientVolume,
+		});
+	}
+
 	/** Reissue static demand on the next frame even if the player has not moved. */
 	setSceneInterestRadii(radii: SceneInterestRadii): void {
 		validateSceneInterestRadiiOrThrow(radii);
@@ -1165,6 +1193,7 @@ export class ClientPresentationSession {
 				await owner.destroy();
 				return;
 			}
+			this.#applyAudioSettings(owner);
 			this.#owner = owner;
 			this.#onTextureFilteringCapabilities?.(
 				owner.textureFilteringCapabilities ?? null,

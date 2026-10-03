@@ -19,6 +19,7 @@ export const clientUserSectionSchemas = {
 	minimapViewDiameters: userShape.minimapViewDiameters,
 	chatFilters: userShape.chatFilters,
 	graphics: userShape.graphics,
+	audio: userShape.audio,
 	ui: userShape.ui,
 	input: userShape.input,
 	inspection: userShape.inspection,

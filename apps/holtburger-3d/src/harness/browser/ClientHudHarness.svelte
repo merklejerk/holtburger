@@ -133,6 +133,7 @@
 	} from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
 	import {
+		CLIENT_AUDIO_DEFAULTS,
 		createDefaultClientCharacterSettings,
 		createDefaultClientUserSettings,
 	} from "../../client/client-settings-defaults";
@@ -875,6 +876,8 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Exercise settings controls and real browser audio independently of inventory fixtures. */
+		readonly probeAudio: () => ReturnType<typeof probeAudioControls>;
 		readonly setMapTeleportPermission: (allowed: boolean) => void;
 		readonly readMapTeleports: () => typeof interactionCommands;
 		/** Hold and advance synthetic map generation to verify progress markup deterministically. */
@@ -2043,6 +2046,72 @@
 			boomCamera: await probeBoomCameraCorrection(),
 			use,
 			commands: [...interactionCommands],
+		};
+	}
+
+	async function probeAudioControls() {
+		document
+			.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')
+			?.click();
+		await tick();
+		const tab = document.querySelector<HTMLButtonElement>(
+			"#settings-tab-audio",
+		);
+		if (!tab) throw new Error("Audio settings tab missing");
+		tab.click();
+		await tick();
+		const panel = document.querySelector<HTMLElement>(
+			"#settings-section-audio",
+		);
+		if (!panel) throw new Error("Audio settings panel missing");
+		const sliders = [
+			...panel.querySelectorAll<HTMLInputElement>('input[type="range"]'),
+		];
+		const keys = ["masterVolume", "effectVolume", "ambientVolume"] as const;
+		if (sliders.length !== keys.length)
+			throw new Error("Audio sliders missing");
+		const mix = {
+			...CLIENT_AUDIO_DEFAULTS,
+			masterVolume: 0.4,
+			effectVolume: 0.6,
+			ambientVolume: 0.2,
+		};
+		for (const [index, key] of keys.entries()) {
+			const slider = sliders[index];
+			if (!slider) throw new Error(`Audio slider missing: ${key}`);
+			slider.value = String(mix[key]);
+			slider.dispatchEvent(new Event("input", { bubbles: true }));
+			await tick();
+		}
+		const mute = panel.querySelector<HTMLInputElement>(
+			'input[type="checkbox"]',
+		);
+		const reset = panel.querySelector<HTMLButtonElement>("button");
+		if (!mute || !reset) throw new Error("Audio mute or reset missing");
+		mute.click();
+		await tick();
+		if (
+			!userSettings.audio.muted ||
+			keys.some((key) => userSettings.audio[key] !== mix[key])
+		)
+			throw new Error("Mute discarded the audio mix");
+		mute.click();
+		await tick();
+		if (
+			userSettings.audio.muted ||
+			keys.some((key) => userSettings.audio[key] !== mix[key])
+		)
+			throw new Error("Unmute discarded the audio mix");
+		reset.click();
+		await tick();
+		if (
+			userSettings.audio.muted !== CLIENT_AUDIO_DEFAULTS.muted ||
+			keys.some((key) => userSettings.audio[key] !== CLIENT_AUDIO_DEFAULTS[key])
+		)
+			throw new Error("Audio reset did not restore declared defaults");
+		return {
+			settings: { ...userSettings.audio },
+			playback: await probeClientAudio(),
 		};
 	}
 
@@ -3283,6 +3352,7 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeAudio: probeAudioControls,
 			setMapTeleportPermission: (allowed) =>
 				emitInteractionEvent("client-map-teleport-capability-changed", allowed),
 			readMapTeleports: () =>
@@ -3508,6 +3578,8 @@
 			};
 		}}
 		inspectionPreviewHeight={userSettings.inspection.previewHeight}
+		audio={userSettings.audio}
+		onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
 		graphics={userSettings.graphics}
 		ui={userSettings.ui}
 		input={userSettings.input}

@@ -929,13 +929,35 @@ impl KinematicBoomController {
             PhysicalCollisionFilter::ALL,
             CollisionQueryPolicy::AllowUncoveredQuery,
         );
-        let FreeSphereSettleOutcome::Settled {
-            body,
-            contact_passes,
-            unavailable_owner,
-            ..
-        } = (match outcome {
-            Ok(outcome) => outcome,
+        let (body, contact_passes, unavailable_owner) = match outcome {
+            Ok(FreeSphereSettleOutcome::Settled {
+                body,
+                contact_passes,
+                unavailable_owner,
+                ..
+            }) => (body, contact_passes, unavailable_owner),
+            Ok(
+                FreeSphereSettleOutcome::BudgetExceeded {
+                    contact_passes,
+                    unavailable_owner,
+                }
+                | FreeSphereSettleOutcome::RecoveryUnavailable {
+                    contact_passes,
+                    unavailable_owner,
+                },
+            ) => {
+                let mut collision_proof = KinematicBoomCollisionProof::Covered;
+                collision_proof.include(unavailable_owner);
+                return Ok(fallback(
+                    self.camera(),
+                    KinematicBoomFailureReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics {
+                        contact_passes,
+                        collision_proof,
+                        ..KinematicBoomDiagnostics::default()
+                    },
+                ));
+            }
             Err(_) => {
                 return Ok(fallback(
                     self.camera(),
@@ -943,16 +965,6 @@ impl KinematicBoomController {
                     KinematicBoomDiagnostics::default(),
                 ));
             }
-        })
-        else {
-            return Ok(fallback(
-                self.camera(),
-                KinematicBoomFailureReason::FreeSphereQuery,
-                KinematicBoomDiagnostics {
-                    contact_passes: self.profile.placement.maximum_contact_passes,
-                    ..KinematicBoomDiagnostics::default()
-                },
-            ));
         };
         let camera = KinematicBoomPlacement {
             pose: body.pose,
@@ -1133,6 +1145,10 @@ impl KinematicBoomController {
                 body
             }
             FreeSphereSettleOutcome::BudgetExceeded {
+                contact_passes,
+                unavailable_owner,
+            }
+            | FreeSphereSettleOutcome::RecoveryUnavailable {
                 contact_passes,
                 unavailable_owner,
             } => {

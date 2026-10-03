@@ -80,8 +80,10 @@ function optionalPlanarOffset(value) {
 
 function probeMode(value) {
 	const mode = value ?? "drive";
-	if (mode !== "drive" && mode !== "passive") {
-		throw new Error("HOLTBURGER_PROBE_MODE must be drive or passive.");
+	if (mode !== "drive" && mode !== "passive" && mode !== "teleport") {
+		throw new Error(
+			"HOLTBURGER_PROBE_MODE must be drive, passive, or teleport.",
+		);
 	}
 	return mode;
 }
@@ -971,6 +973,7 @@ async function main() {
 		}
 		if (
 			mode === "passive" ||
+			mode === "teleport" ||
 			requestedMapPoint !== undefined ||
 			requestedMapWater !== undefined
 		) {

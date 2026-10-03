@@ -27,6 +27,79 @@ pub struct ShapeContact {
     pub depth: f32,
 }
 
+/// Bounds stationary recovery work across partition depth and scene candidates.
+pub(super) const SOLID_RECOVERY_CANDIDATE_LIMIT: usize = 32;
+
+/// Center occupancy is independent of whether a useful correction can be proposed.
+pub(super) enum SolidRegionRecovery {
+    /// The center-containing region is not solid.
+    Outside,
+    /// Candidate endpoints; an empty list still means the center is occupied.
+    Occupied(Vec<Vector3>),
+    /// Classification exceeded the bounded ancestor-plane search.
+    LimitExceeded,
+}
+
+/// Proposes exits from the center-containing leaf; scene queries must validate every endpoint.
+/// Ancestor partitions can separate two solid leaves, so these are not separating contacts.
+pub(super) fn placed_solid_recovery_candidates(
+    collider: &PlacedCollisionShape,
+    solid: &BspSolid,
+    center: Vector3,
+    radius: f32,
+    epsilon: f32,
+) -> SolidRegionRecovery {
+    let mut node = &solid.bsp;
+    let mut planes = Vec::new();
+    loop {
+        if !node_bounds_reach(node, collider, center, radius) {
+            return SolidRegionRecovery::Outside;
+        }
+        let (plane, positive, negative) = match node {
+            BspNode::Leaf(leaf) => {
+                return if leaf.solid == 1 {
+                    SolidRegionRecovery::Occupied(
+                        planes
+                            .into_iter()
+                            .map(|plane: BoundingPlane| {
+                                let depth = radius - plane.normal.dot(&center) - plane.d + epsilon;
+                                center + plane.normal * depth
+                            })
+                            .collect(),
+                    )
+                } else {
+                    SolidRegionRecovery::Outside
+                };
+            }
+            BspNode::Port(portal) => (
+                portal.plane,
+                Some(portal.pos.as_ref()),
+                Some(portal.neg.as_ref()),
+            ),
+            BspNode::Internal(internal) => (
+                internal.plane,
+                internal.pos.as_deref(),
+                internal.neg.as_deref(),
+            ),
+        };
+        if planes.len() == SOLID_RECOVERY_CANDIDATE_LIMIT {
+            return SolidRegionRecovery::LimitExceeded;
+        }
+        let plane = transform_plane(plane, collider);
+        let child = if plane.distance_to_point(&center) >= 0.0 {
+            planes.push(BoundingPlane::positive(plane));
+            positive
+        } else {
+            planes.push(BoundingPlane::negative(plane));
+            negative
+        };
+        let Some(child) = child else {
+            return SolidRegionRecovery::Outside;
+        };
+        node = child;
+    }
+}
+
 /// One polygon surface reachable by lowering a sphere vertically.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapeSupport {

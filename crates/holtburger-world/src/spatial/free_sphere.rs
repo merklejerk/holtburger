@@ -6,8 +6,9 @@ use holtburger_common::{Guid, Vector3};
 
 use super::collision::{
     CellTransitRequest, CollisionQueryPolicy, MotionWaypoint, MovementObstructionRequest,
-    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, SpatialMembership,
-    SphereSweep, StaticContact, anchor_point_to_cell_position, anchor_point_to_outdoor_position,
+    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest,
+    SolidPlacementRecovery, SpatialMembership, SphereSweep, StaticContact,
+    StaticSphereSweepRequest, anchor_point_to_cell_position, anchor_point_to_outdoor_position,
     landblock_key, separating_displacement,
 };
 use super::{PhysicalCollisionFilter, SphereCollisionQuery};
@@ -84,6 +85,14 @@ pub enum FreeSphereSettleOutcome {
     /// No safe placement was proven within the configured contact-pass budget.
     BudgetExceeded {
         /// Placement-contact passes evaluated before refusing the request.
+        contact_passes: usize,
+        /// First unavailable owner crossed by an explicitly uncovered query.
+        unavailable_owner: Option<Guid>,
+    },
+    /// BSP occupancy could not be resolved by the bounded correction search.
+    /// This is a bounded-search failure, not proof that no placement exists anywhere.
+    RecoveryUnavailable {
+        /// Contact-separation passes evaluated before the unsuccessful recovery search.
         contact_passes: usize,
         /// First unavailable owner crossed by an explicitly uncovered query.
         unavailable_owner: Option<Guid>,
@@ -377,18 +386,58 @@ pub fn settle_free_sphere_with_policy(
     )?;
 
     for contact_passes in 0..=config.maximum_contact_passes {
-        let contacts = placement_contacts(
+        let request = PlacementRequest {
+            anchor,
+            center,
+            radius: body.radius,
+            placement: &placement,
+        };
+        let recovery = scene
+            .environment()
+            .solid_recovery_candidates(request, config.separation_epsilon);
+        if contact_passes == config.maximum_contact_passes
+            && !matches!(recovery, SolidPlacementRecovery::Outside)
+        {
+            return Ok(FreeSphereSettleOutcome::BudgetExceeded {
+                contact_passes,
+                unavailable_owner,
+            });
+        }
+        match recover_solid_placement(
             scene,
-            PlacementRequest {
-                anchor,
-                center,
-                radius: body.radius,
-                placement: &placement,
-            },
+            request,
+            recovery,
+            config.separation_epsilon,
             filter,
             query_policy,
             &mut unavailable_owner,
-        )?;
+        )? {
+            SolidRecoveryResult::SurfaceOnly => {}
+            SolidRecoveryResult::Recovered {
+                center: recovered,
+                placement: recovered_placement,
+            } => {
+                let cell = recovered_placement.committed_cell();
+                return Ok(FreeSphereSettleOutcome::Settled {
+                    body: FreeSphereState {
+                        pose: pose_for_commit(anchor, recovered, body.pose, cell),
+                        cell,
+                        radius: body.radius,
+                    },
+                    separation: recovered - start,
+                    contact_passes: contact_passes + 1,
+                    unavailable_owner,
+                });
+            }
+            SolidRecoveryResult::Unavailable => {
+                return Ok(FreeSphereSettleOutcome::RecoveryUnavailable {
+                    contact_passes,
+                    unavailable_owner,
+                });
+            }
+        }
+        let contacts =
+            placement_contacts(scene, request, filter, query_policy, &mut unavailable_owner)?;
         if contacts.is_empty() {
             let cell = placement.committed_cell();
             return Ok(FreeSphereSettleOutcome::Settled {
@@ -420,6 +469,87 @@ pub fn settle_free_sphere_with_policy(
     }
 
     unreachable!("the inclusive contact-pass loop always settles or exhausts its budget")
+}
+
+/// A rejected candidate never masquerades as ordinary overlap-free placement.
+enum SolidRecoveryResult {
+    /// No center-solid occupancy; finite polygon and volume contacts retain ordinary settlement.
+    SurfaceOnly,
+    /// Endpoint and complete path have been checked against the querying sphere's obstacles.
+    Recovered {
+        /// Clear endpoint in the request frame.
+        center: Vector3,
+        /// Membership evaluated at that endpoint.
+        placement: SpatialMembership,
+    },
+    /// The bounded candidate set supplies no proven correction.
+    Unavailable,
+}
+
+fn recover_solid_placement(
+    scene: &dyn SphereCollisionQuery,
+    request: PlacementRequest<'_>,
+    recovery: SolidPlacementRecovery,
+    epsilon: f32,
+    filter: PhysicalCollisionFilter,
+    policy: CollisionQueryPolicy,
+    unavailable_owner: &mut Option<Guid>,
+) -> Result<SolidRecoveryResult> {
+    let candidates = match recovery {
+        SolidPlacementRecovery::Outside => return Ok(SolidRecoveryResult::SurfaceOnly),
+        SolidPlacementRecovery::LimitExceeded => return Ok(SolidRecoveryResult::Unavailable),
+        SolidPlacementRecovery::Occupied(candidates) => candidates,
+    };
+    for center in &candidates.centers {
+        let placement = transit_placement(
+            scene,
+            CellTransitRequest {
+                previous_cell: request.placement.committed_cell(),
+                anchor: request.anchor,
+                center: *center,
+                radius: request.radius,
+            },
+            policy,
+            unavailable_owner,
+        )?;
+        let endpoint = PlacementRequest {
+            anchor: request.anchor,
+            center: *center,
+            radius: request.radius,
+            placement: &placement,
+        };
+        // Contact directions do not encode every occupied region (e.g. a solid root leaf).
+        // Establish center clearance independently before trusting an empty contact list.
+        if !matches!(
+            scene
+                .environment()
+                .solid_recovery_candidates(endpoint, epsilon),
+            SolidPlacementRecovery::Outside
+        ) || !placement_contacts(scene, endpoint, filter, policy, unavailable_owner)?.is_empty()
+        {
+            continue;
+        }
+        let sweep = StaticSphereSweepRequest {
+            anchor: request.anchor,
+            start: request.center,
+            displacement: *center - request.center,
+            previous_cell: request.placement.committed_cell(),
+            radius: request.radius,
+            filter,
+        };
+        let path = scene
+            .environment()
+            .sweep_solid_recovery(sweep, &candidates, policy)?;
+        remember_unavailable_owner(unavailable_owner, path.unavailable_owner);
+        if path.value.is_some() || scene.entity_sweep_sphere(sweep)?.is_some() {
+            continue;
+        }
+        return Ok(SolidRecoveryResult::Recovered {
+            center: *center,
+            placement,
+        });
+    }
+    Ok(SolidRecoveryResult::Unavailable)
 }
 
 /// Closes a partial solve's normalized tick without inventing unevaluated geometry.
@@ -531,14 +661,26 @@ fn transit(
     query_policy: CollisionQueryPolicy,
     unavailable_owner: &mut Option<Guid>,
 ) -> Result<SpatialMembership> {
-    let query = scene
-        .environment()
-        .transit_cell_allow_uncovered(CellTransitRequest {
+    transit_placement(
+        scene,
+        CellTransitRequest {
             previous_cell: body.cell,
             anchor,
             center,
             radius: body.radius,
-        })?;
+        },
+        query_policy,
+        unavailable_owner,
+    )
+}
+
+fn transit_placement(
+    scene: &dyn SphereCollisionQuery,
+    request: CellTransitRequest,
+    query_policy: CollisionQueryPolicy,
+    unavailable_owner: &mut Option<Guid>,
+) -> Result<SpatialMembership> {
+    let query = scene.environment().transit_cell_allow_uncovered(request)?;
     if query_policy == CollisionQueryPolicy::RequireCollisionCoverage
         && let Some(owner) = query.unavailable_owner
     {
@@ -774,6 +916,10 @@ mod tests {
     }
 
     fn polygon_wall_x(x: f32) -> PlacedCollider {
+        polygon_wall_face(x, -1.0)
+    }
+
+    fn polygon_wall_face(x: f32, normal_x: f32) -> PlacedCollider {
         let bounds = Sphere {
             center: Vector3::new(x, 20.0, 10.0),
             radius: 30.0,
@@ -794,14 +940,20 @@ mod tests {
             polygons: HashMap::from([(
                 1,
                 holtburger_content::CollisionPolygon {
-                    vertices: vec![
-                        Vector3::new(x, 0.0, 0.0),
-                        Vector3::new(x, 0.0, 20.0),
-                        Vector3::new(x, 40.0, 20.0),
-                        Vector3::new(x, 40.0, 0.0),
-                    ],
-                    normal: Vector3::new(-1.0, 0.0, 0.0),
-                    d: x,
+                    vertices: {
+                        let mut vertices = vec![
+                            Vector3::new(x, 0.0, 0.0),
+                            Vector3::new(x, 0.0, 20.0),
+                            Vector3::new(x, 40.0, 20.0),
+                            Vector3::new(x, 40.0, 0.0),
+                        ];
+                        if normal_x > 0.0 {
+                            vertices.reverse();
+                        }
+                        vertices
+                    },
+                    normal: Vector3::new(normal_x, 0.0, 0.0),
+                    d: -normal_x * x,
                 },
             )]),
         }));
@@ -821,6 +973,316 @@ mod tests {
             },
             source_placement: StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
         }
+    }
+
+    /// Two solid leaves share an internal Y partition; only the X planes exit the slab.
+    fn partitioned_slab() -> PlacedCollider {
+        let bounds = Sphere {
+            center: Vector3::new(10.0, 20.0, 5.0),
+            radius: 30.0,
+        };
+        let leaf = |index, solid| {
+            BspNode::Leaf(BspLeaf {
+                index,
+                solid,
+                sphere: Some(bounds),
+                poly_ids: vec![1, 2],
+            })
+        };
+        let split = |plane, positive, negative| {
+            BspNode::Internal(InternalNode {
+                tag: *b"BPnn",
+                plane,
+                pos: Some(Box::new(positive)),
+                neg: Some(Box::new(negative)),
+                sphere: Some(bounds),
+                poly_ids: Vec::new(),
+            })
+        };
+        let partition = split(
+            Plane {
+                normal: Vector3::new(0.0, 1.0, 0.0),
+                d: -20.0,
+            },
+            leaf(1, 1),
+            leaf(2, 1),
+        );
+        let lower = split(
+            Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -8.0,
+            },
+            partition,
+            leaf(3, 0),
+        );
+        let root = split(
+            Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -12.0,
+            },
+            leaf(4, 0),
+            lower,
+        );
+        let box_bounds = CollisionBox::from_points([
+            Vector3::new(8.0, 0.0, 0.0),
+            Vector3::new(12.0, 40.0, 10.0),
+        ])
+        .unwrap();
+        let face = |x, direction| {
+            let point = Vector3::new(x, 20.0, 5.0);
+            let tangent = Vector3::new(0.0, direction * 20.0, 0.0);
+            let bitangent = Vector3::new(0.0, 0.0, 5.0);
+            let normal = Vector3::new(direction, 0.0, 0.0);
+            CollisionPolygon {
+                vertices: vec![
+                    point - tangent - bitangent,
+                    point + tangent - bitangent,
+                    point + tangent + bitangent,
+                    point - tangent + bitangent,
+                ],
+                normal,
+                d: -normal.dot(&point),
+            }
+        };
+        PlacedCollider::new(
+            Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: root,
+                bounds,
+                box_bounds,
+                polygons: HashMap::from([(1, face(8.0, -1.0)), (2, face(12.0, 1.0))]),
+            })),
+            LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+        )
+        .unwrap()
+    }
+
+    fn assert_clear(scene: &CollisionScene, result: FreeSphereState) {
+        let anchor = landblock_key(result.pose.landblock_id);
+        let placement = scene
+            .transit_cell(CellTransitRequest {
+                previous_cell: result.cell,
+                anchor,
+                center: result.pose.coords,
+                radius: result.radius,
+            })
+            .unwrap();
+        assert!(
+            scene
+                .placement_contacts(PlacementRequest {
+                    anchor,
+                    center: result.pose.coords,
+                    radius: result.radius,
+                    placement: &placement,
+                })
+                .unwrap()
+                .is_empty(),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn stationary_settle_exits_adjacent_solid_leaves_at_the_requested_radius() {
+        let scene = scene(vec![partitioned_slab()]);
+        let original = body(Vector3::new(10.0, 20.05, 5.0));
+        let result = settled(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                original,
+                PhysicalCollisionFilter::ALL,
+            )
+            .unwrap(),
+        );
+        assert!(
+            result.pose.coords.x < 8.0 || result.pose.coords.x > 12.0,
+            "{result:?}"
+        );
+        assert_eq!(result.radius, original.radius);
+        assert_eq!(result.pose.coords.y, original.pose.coords.y);
+        assert_clear(&scene, result);
+    }
+
+    #[test]
+    fn stationary_settle_preserves_radius_only_surface_recovery() {
+        let scene = scene(vec![partitioned_slab()]);
+        let original = body(Vector3::new(12.5, 20.05, 5.0));
+        let result = settled(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                original,
+                PhysicalCollisionFilter::ALL,
+            )
+            .unwrap(),
+        );
+        assert!(result.pose.coords.x > original.pose.coords.x);
+        assert_eq!(result.radius, original.radius);
+        assert_clear(&scene, result);
+    }
+
+    #[test]
+    fn stationary_settle_recovers_rotated_nonuniform_geometry() {
+        let source = partitioned_slab();
+        let collider = PlacedCollider::new(
+            source.shape.clone(),
+            LandblockPlacement {
+                origin: Vector3::new(40.0, 40.0, 0.0),
+                orientation: Quaternion::from_axis_angle(
+                    Vector3::new(0.0, 0.0, 1.0),
+                    std::f32::consts::FRAC_PI_3,
+                )
+                .unwrap(),
+            },
+            ColliderScale::from_components(Vector3::new(2.0, 0.5, 1.0)).unwrap(),
+            source.source_placement,
+        )
+        .unwrap();
+        let original = body(collider.point_to_landblock_space(Vector3::new(10.0, 20.05, 5.0)));
+        let scene = scene(vec![collider]);
+        let result = settled(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                original,
+                PhysicalCollisionFilter::ALL,
+            )
+            .unwrap(),
+        );
+        assert_eq!(result.radius, original.radius);
+        assert_clear(&scene, result);
+    }
+
+    #[test]
+    fn stationary_settle_exits_all_overlapping_starting_solids() {
+        let inner = partitioned_slab();
+        let outer = PlacedCollider::new(
+            inner.shape.clone(),
+            LandblockPlacement {
+                origin: Vector3::new(-10.0, 0.0, 0.0),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(2.0).unwrap(),
+            inner.source_placement,
+        )
+        .unwrap();
+        let scene = scene(vec![inner, outer]);
+        let original = body(Vector3::new(10.0, 20.05, 5.0));
+        let result = settled(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                original,
+                PhysicalCollisionFilter::ALL,
+            )
+            .unwrap(),
+        );
+        assert!(
+            result.pose.coords.x < 6.0 || result.pose.coords.x > 14.0,
+            "{result:?}"
+        );
+        assert_clear(&scene, result);
+    }
+
+    #[test]
+    fn stationary_settle_reports_recovery_unavailable_at_the_partition_work_limit() {
+        let mut collider = partitioned_slab();
+        let original = collider.shape.as_bsp().unwrap();
+        let mut bsp = original.bsp.clone();
+        for _ in 0..crate::spatial::bsp_query::SOLID_RECOVERY_CANDIDATE_LIMIT {
+            bsp = BspNode::Internal(InternalNode {
+                tag: *b"BPnn",
+                plane: Plane {
+                    normal: Vector3::new(0.0, 0.0, 1.0),
+                    d: -100.0,
+                },
+                pos: None,
+                neg: Some(Box::new(bsp)),
+                sphere: Some(original.bounds),
+                poly_ids: Vec::new(),
+            });
+        }
+        collider.geometry.shape = Arc::new(CollisionShape::Bsp(BspSolid {
+            bsp,
+            bounds: original.bounds,
+            box_bounds: original.box_bounds,
+            polygons: original.polygons.clone(),
+        }));
+        assert!(matches!(
+            settle_free_sphere(
+                &scene(vec![collider]),
+                config().into(),
+                body(Vector3::new(10.0, 20.05, 5.0)),
+                PhysicalCollisionFilter::ALL
+            )
+            .unwrap(),
+            FreeSphereSettleOutcome::RecoveryUnavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn stationary_settle_rejects_clear_endpoints_across_unrelated_walls() {
+        let scene = scene(vec![
+            partitioned_slab(),
+            polygon_wall_x(11.5),
+            polygon_wall_face(8.5, 1.0),
+        ]);
+        let original = body(Vector3::new(10.0, 20.05, 5.0));
+        // Both exterior endpoints are clear. Their paths cross distinct, non-containing faces.
+        let separation = original.radius + config().separation_epsilon;
+        for x in [8.0 - separation, 12.0 + separation] {
+            assert_clear(
+                &scene,
+                body(Vector3::new(
+                    x,
+                    original.pose.coords.y,
+                    original.pose.coords.z,
+                )),
+            );
+        }
+        assert!(matches!(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                original,
+                PhysicalCollisionFilter::ALL
+            )
+            .unwrap(),
+            FreeSphereSettleOutcome::RecoveryUnavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn stationary_settle_does_not_clear_a_solid_region_without_exit_candidates() {
+        let mut collider = partitioned_slab();
+        let original = collider.shape.as_bsp().unwrap();
+        let bsp = BspNode::Leaf(BspLeaf {
+            index: 1,
+            solid: 1,
+            sphere: Some(original.bounds),
+            poly_ids: vec![1, 2],
+        });
+        collider.geometry.shape = Arc::new(CollisionShape::Bsp(BspSolid {
+            bsp,
+            bounds: original.bounds,
+            box_bounds: original.box_bounds,
+            polygons: original.polygons.clone(),
+        }));
+        let scene = scene(vec![collider]);
+        assert!(matches!(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                body(Vector3::new(10.0, 20.05, 5.0)),
+                PhysicalCollisionFilter::ALL
+            )
+            .unwrap(),
+            FreeSphereSettleOutcome::RecoveryUnavailable { .. }
+        ));
     }
 
     fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
@@ -1377,6 +1839,11 @@ mod tests {
         assert_eq!(body.cell, Some(Guid(0xda55_0100)));
         assert_eq!(body.pose.landblock_id, Guid(0xda55_0100));
         assert!((body.pose.coords.x - 12.0).abs() < 1e-4);
+        let stationary = settled(
+            settle_free_sphere(&scene, config().into(), body, PhysicalCollisionFilter::ALL)
+                .unwrap(),
+        );
+        assert_eq!(stationary, body);
     }
 
     #[test]

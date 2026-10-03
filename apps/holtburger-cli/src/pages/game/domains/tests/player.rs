@@ -152,6 +152,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         combat: Default::default(),
         lifecycle: ClientLifecycleState::InWorld,
         entity_collision_disabled: false,
+        can_teleport_from_map: false,
         local_player_guid: Some(guid),
         server_time: None,
         world_generation: 1,

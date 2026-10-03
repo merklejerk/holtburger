@@ -166,6 +166,11 @@ impl HbaReader {
         })
     }
 
+    /// Metadata of the opened archive, for consumers retaining mount-time source provenance.
+    pub fn source_metadata(&self) -> Result<std::fs::Metadata> {
+        Ok(self.file.metadata()?)
+    }
+
     pub fn namespaces(&self) -> impl Iterator<Item = ResourceNamespace> + '_ {
         self.namespace_spans.iter().map(|span| span.namespace)
     }

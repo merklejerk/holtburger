@@ -109,6 +109,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 330, height: 310 },
 		minSize: { width: 280, height: 220 },
 	},
+	world: {
+		anchor: "center-right",
+		offset: { x: 16, y: 0 },
+		size: { width: 640, height: 640 },
+		minSize: { width: 360, height: 300 },
+	},
 	settings: {
 		anchor: "center-right",
 		offset: { x: 16, y: 0 },

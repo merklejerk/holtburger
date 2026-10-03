@@ -503,9 +503,19 @@ async function main() {
 	const requestedTeleport = process.env.HOLTBURGER_PROBE_TELEPORT;
 	const requestedTeleportSequence =
 		process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE;
+	const requestedMapPoint = process.env.HOLTBURGER_PROBE_MAP_POINT;
+	const requestedMapWater = process.env.HOLTBURGER_PROBE_MAP_WATER;
+	if (
+		requestedMapPoint !== undefined &&
+		(requestedTeleport !== undefined || requestedTeleportSequence !== undefined)
+	)
+		throw new Error("Choose map teleport or chat teleport for one probe run.");
 	if (
 		mode === "passive" &&
-		(requestedTeleport !== undefined || requestedTeleportSequence !== undefined)
+		(requestedTeleport !== undefined ||
+			requestedTeleportSequence !== undefined ||
+			requestedMapPoint !== undefined ||
+			requestedMapWater !== undefined)
 	) {
 		throw new Error(
 			"passive client probe cannot be combined with teleport commands.",
@@ -551,6 +561,7 @@ async function main() {
 	let teleport = null;
 	const teleports = [];
 	const events = [
+		"client-chat-message",
 		"client-current-state",
 		"client-lifecycle-changed",
 		"client-character-motion-capabilities-updated",
@@ -796,6 +807,28 @@ async function main() {
 						player.placement.pose,
 					)
 				: [];
+		const teleportRequests = teleportCommands.map((command) => ({
+			command: "send_client_chat",
+			args: { message: command },
+		}));
+		if (requestedMapPoint !== undefined) {
+			if (!currentState.canTeleportFromMap)
+				throw new Error("Selected character cannot teleport from the map.");
+			if (player?.placement?.kind !== "world")
+				throw new Error("Map teleport requires a world-placed player.");
+			const [x, z] = optionalPlanarOffset(requestedMapPoint);
+			const source = worldPoint(player.placement.pose);
+			teleportRequests.push(
+				{
+					command: "teleport_client_to_map_position",
+					args: { position: { x, z } },
+				},
+				{
+					command: "teleport_client_to_map_position",
+					args: { position: { x: source.x, z: -source.y } },
+				},
+			);
+		}
 		if (
 			(requestedTeleport !== undefined ||
 				requestedTeleportSequence !== undefined) &&
@@ -805,10 +838,10 @@ async function main() {
 		}
 		let driveError = null;
 		const drivePhases = [];
-		if (teleportCommands.length > 0) {
+		if (teleportRequests.length > 0) {
 			let sourcePlayer = player;
 			let previousLifecycle = portalSpace;
-			for (const [index, command] of teleportCommands.entries()) {
+			for (const [index, request] of teleportRequests.entries()) {
 				const sourcePose = sourcePlayer.placement.pose;
 				const teleportLifecyclePromise = waiter.wait(
 					"client-lifecycle-changed",
@@ -840,7 +873,7 @@ async function main() {
 					`teleport ${index + 1} destination player placement`,
 				);
 				void destinationEntityPromise.catch(() => undefined);
-				await invokeMovement("send_client_chat", { message: command });
+				await invokeMovement(request.command, request.args);
 				lastCompletedPhase = `teleport-${index + 1}-command-sent`;
 				const [teleportLifecycle] = await Promise.all([
 					teleportLifecyclePromise,
@@ -870,8 +903,16 @@ async function main() {
 				if (destinationPlayer?.placement?.kind !== "world") {
 					throw new Error("teleport destination player is not world-placed");
 				}
+				if (request.command === "teleport_client_to_map_position") {
+					const actual = worldPoint(destinationPlayer.placement.pose);
+					const expected = request.args.position;
+					if (Math.hypot(actual.x - expected.x, actual.y + expected.z) > 0.1)
+						throw new Error(
+							"ACE map destination disagrees with the clicked coordinates.",
+						);
+				}
 				teleport = {
-					command,
+					command: request,
 					sourcePose,
 					destinationPose: destinationPlayer.placement.pose,
 					lifecycle: teleportLifecycle,
@@ -905,7 +946,34 @@ async function main() {
 				previousLifecycle = teleportLifecycle;
 			}
 		}
-		if (mode === "passive") {
+		if (requestedMapWater !== undefined) {
+			if (!currentState.canTeleportFromMap)
+				throw new Error("Selected character cannot test map water rejection.");
+			const [x, z] = optionalPlanarOffset(requestedMapWater);
+			const count = lifecycle.length;
+			const diagnostic = waiter.wait(
+				"client-chat-message",
+				(payload) => payload?.message?.includes("entirely filled with water"),
+				timeoutMs,
+				"map water rejection",
+			);
+			void diagnostic.catch(() => undefined);
+			await invokeMovement("teleport_client_to_map_position", {
+				position: { x, z },
+			});
+			await diagnostic;
+			await delay(observationMs);
+			if (lifecycle.slice(count).some((entry) => entry.kind === "portal-space"))
+				throw new Error(
+					"Rejected water destination started a world transition.",
+				);
+			lastCompletedPhase = "map-water-rejected";
+		}
+		if (
+			mode === "passive" ||
+			requestedMapPoint !== undefined ||
+			requestedMapWater !== undefined
+		) {
 			await delay(observationMs);
 			lastCompletedPhase = "passive-observation-completed";
 		} else {

@@ -269,6 +269,7 @@ export function createClientHudLayout(
 		enchantments: place(defaults.enchantments),
 		characterSheet: place(defaults.characterSheet),
 		debug: place(defaults.debug),
+		world: place(defaults.world),
 		settings: place(defaults.settings),
 		frameRate: place(defaults.frameRate),
 		jumpPower: place(defaults.jumpPower),

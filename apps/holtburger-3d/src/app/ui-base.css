@@ -694,6 +694,34 @@
 		color: var(--ui-color-text);
 		font-size: var(--ui-font-size-caption);
 	}
+	/* Map anchors retain position only; label appearance responds directly to theme changes. */
+	.ui-theme
+		.ui-world-map-settlements:not(.ui-world-map-labels-visible)
+		.ui-world-map-label {
+		visibility: hidden;
+	}
+	.ui-theme .ui-world-map-label {
+		font: var(--ui-world-map-label-font, 11px var(--ui-font-body));
+		fill: var(--ui-world-map-label-color, var(--ui-color-text));
+		stroke: var(--ui-world-map-label-outline-color, #141414);
+		stroke-width: var(--ui-world-map-label-outline-width, 2.5px);
+		stroke-linejoin: round;
+		paint-order: stroke;
+		dominant-baseline: central;
+		transform: translateX(var(--ui-world-map-label-offset, 7px));
+	}
+	.ui-theme .ui-world-map-settlement-dot {
+		r: var(--ui-world-map-settlement-dot-radius, 3px);
+		fill: var(
+			--ui-world-map-settlement-dot-color,
+			var(--ui-world-map-label-color, var(--ui-color-text))
+		);
+		stroke: var(
+			--ui-world-map-settlement-dot-outline-color,
+			var(--ui-world-map-label-outline-color, #141414)
+		);
+		stroke-width: var(--ui-world-map-settlement-dot-outline-width, 1.5px);
+	}
 	.ui-theme .jump-power-track {
 		border: 1px solid var(--ui-color-border);
 	}

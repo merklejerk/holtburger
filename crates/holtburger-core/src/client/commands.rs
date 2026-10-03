@@ -189,6 +189,7 @@ impl ClientRuntime {
             | ClientCommand::RecallLifestone
             | ClientCommand::TeleportToPklArena
             | ClientCommand::TeleportToMarketplace
+            | ClientCommand::TeleportToMapPosition(_)
             | ClientCommand::RecallAllegianceHousing
             | ClientCommand::SwearAllegiance { .. }
             | ClientCommand::Unswear { .. }
@@ -667,6 +668,9 @@ impl ClientRuntime {
                     TeleToMarketPlaceActionData,
                 )))
                 .await
+            }
+            ClientCommand::TeleportToMapPosition(position) => {
+                self.teleport_to_map_position(position).await
             }
             ClientCommand::RecallAllegianceHousing => {
                 log::info!(">>> Recalling to allegiance housing");

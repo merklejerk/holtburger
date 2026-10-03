@@ -39,7 +39,7 @@ describe("ClientSettingsStore", () => {
 		const character = createDefaultClientCharacterSettings();
 		await store.saveUserPatch({
 			sections: { graphics: user.graphics },
-			hudPlacements: { book: user.hudLayout.book },
+			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
 		});
 		await store.saveCharacterPatch("example:9000/0x50000001", {
 			actionBars: character.actionBars,
@@ -51,7 +51,7 @@ describe("ClientSettingsStore", () => {
 		await loaded.load();
 		expect(loaded.readUser("persisted")).toMatchObject({
 			sections: { graphics: user.graphics },
-			hudPlacements: { book: user.hudLayout.book },
+			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
 			unavailable: [],
 		});
 		expect(loaded.readUser("fresh")).toMatchObject({
@@ -103,7 +103,7 @@ describe("ClientSettingsStore", () => {
 		);
 		await store.saveUserPatch({
 			sections: { graphics: user.graphics },
-			hudPlacements: { book: user.hudLayout.book },
+			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
 		});
 		await store.saveCharacterPatch("example:9000/0x50000001", {
 			combatControls: createDefaultClientCharacterSettings().combatControls,

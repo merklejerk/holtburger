@@ -63,6 +63,8 @@ import type {
 /** Content/status commands implemented by the shared host-content capability. */
 const SHARED_HOST_COMMAND_NAMES = [
 	"host_status",
+	"open_world_map",
+	"read_world_map_tiles",
 	"load_active_region_data",
 	"load_landblock_source_batch",
 	"load_landblock_profile",
@@ -117,6 +119,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"replace_client_drive",
 	"queue_client_character_motion_event",
 	"send_client_chat",
+	"teleport_client_to_map_position",
 	"toggle_client_combat_mode",
 	"set_client_appearance_option",
 	"cast_client_spell",
@@ -204,6 +207,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-state-resyncing",
 	"client-entity-facts-changed",
 	"client-entity-collision-disabled",
+	"client-map-teleport-capability-changed",
 	"client-lifecycle-changed",
 	"client-connection-updated",
 	"client-character-motion-capabilities-updated",
@@ -302,6 +306,7 @@ export interface HostEventPayloadMap {
 	"client-state-resyncing": null;
 	"client-entity-facts-changed": ClientEntityDelta;
 	"client-entity-collision-disabled": boolean;
+	"client-map-teleport-capability-changed": boolean;
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-connection-updated": ClientConnectionSample;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;

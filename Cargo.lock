@@ -1592,6 +1592,7 @@ dependencies = [
  "log",
  "nucleo-matcher",
  "png",
+ "rayon",
  "rmp-serde",
  "serde",
  "serde_bytes",

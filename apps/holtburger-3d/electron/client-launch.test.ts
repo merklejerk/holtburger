@@ -34,6 +34,25 @@ describe("Electron application arguments", () => {
 });
 
 describe("parseClientLaunchArguments", () => {
+	it("keeps cache bypass in the launch contract and rejects values or duplicates", () => {
+		expect(
+			parseClientLaunchArguments(["--account=ash", "--ignore-world-map-cache"]),
+		).toMatchObject({ ignoreWorldMapCache: true, rendererArguments: [] });
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--ignore-world-map-cache=true",
+			]),
+		).toThrow("does not accept a value");
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--ignore-world-map-cache",
+				"--ignore-world-map-cache",
+			]),
+		).toThrow("more than once");
+	});
+
 	it("resolves direct-launch settings paths from Electron's working directory", () => {
 		const settingsFile = resolve("settings.json");
 		expect(
@@ -71,6 +90,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "secret",
 			},
 			ignorePersistedConfig: false,
+			ignoreWorldMapCache: false,
 			settingsFile: null,
 			rendererArguments: ["--query=landblock=0x7fffff"],
 		});
@@ -94,6 +114,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "",
 			},
 			ignorePersistedConfig: false,
+			ignoreWorldMapCache: false,
 			settingsFile: null,
 			rendererArguments: [],
 		});
@@ -171,6 +192,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "secret",
 			},
 			ignorePersistedConfig: true,
+			ignoreWorldMapCache: false,
 			settingsFile: null,
 			rendererArguments: [],
 		});

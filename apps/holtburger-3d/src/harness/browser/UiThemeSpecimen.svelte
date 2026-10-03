@@ -28,7 +28,7 @@
 		"training",
 		"spells",
 		"party",
-		"map",
+		"world",
 		"journal",
 		"settings",
 	] as const satisfies readonly ClientHudIconName[];

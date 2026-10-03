@@ -40,6 +40,7 @@ async function fixture() {
 	const baseline: ClientCurrentState = {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
+		canTeleportFromMap: false,
 		localPlayerGuid: PLAYER,
 		serverTime: 1,
 		worldGeneration: 1,

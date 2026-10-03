@@ -54,7 +54,12 @@ export default tseslint.config(
 		},
 	},
 	{
-		files: ["electron/**/*.ts", "scripts/**/*.mjs", "vite.config.ts"],
+		files: [
+			"electron/**/*.ts",
+			"scripts/**/*.mjs",
+			"scripts/**/*.ts",
+			"vite.config.ts",
+		],
 		languageOptions: {
 			ecmaVersion: "latest",
 			sourceType: "module",

@@ -59,8 +59,20 @@ impl ContentRepositoryDiscovery {
     }
 }
 
+/// Filesystem revision of an archive captured from its opened handle at mounting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountedContentSource {
+    /// Canonical source path, in repository precedence order.
+    pub path: PathBuf,
+    /// Opened archive length in bytes.
+    pub size: u64,
+    /// Opened archive modification time; this is a revision stamp, not a byte digest.
+    pub modified: std::time::SystemTime,
+}
+
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
+    mounted_sources: Vec<MountedContentSource>,
     resource_index: Vec<RepositoryResourceIndexEntry>,
     source_description: Option<String>,
 }
@@ -101,12 +113,19 @@ impl ContentRepository {
     pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut mounts = Vec::new();
+        let mut mounted_sources = Vec::new();
         let mut resource_index = Vec::new();
 
         if path.extension() == Some(OsStr::new("hba")) {
-            mount_hba_source(&path, &mut mounts, &mut resource_index)?;
+            mount_hba_source(
+                &path,
+                &mut mounts,
+                &mut mounted_sources,
+                &mut resource_index,
+            )?;
             return Ok(Self {
                 mounts,
+                mounted_sources,
                 resource_index,
                 source_description: Some(path.display().to_string()),
             });
@@ -114,9 +133,15 @@ impl ContentRepository {
 
         let hba_path = path.with_extension("hba");
         if hba_path.exists() {
-            mount_hba_source(&hba_path, &mut mounts, &mut resource_index)?;
+            mount_hba_source(
+                &hba_path,
+                &mut mounts,
+                &mut mounted_sources,
+                &mut resource_index,
+            )?;
             return Ok(Self {
                 mounts,
+                mounted_sources,
                 resource_index,
                 source_description: Some(hba_path.display().to_string()),
             });
@@ -131,6 +156,7 @@ impl ContentRepository {
     pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut mounts = Vec::new();
+        let mut mounted_sources = Vec::new();
         let mut resource_index = Vec::new();
 
         if !path.is_dir() {
@@ -140,9 +166,15 @@ impl ContentRepository {
             ));
         }
 
-        discover_hba_mounts_in_dir(&path, &mut mounts, &mut resource_index)?;
+        discover_hba_mounts_in_dir(
+            &path,
+            &mut mounts,
+            &mut mounted_sources,
+            &mut resource_index,
+        )?;
         Ok(Self {
             mounts,
+            mounted_sources,
             resource_index,
             source_description: Some(path.display().to_string()),
         })
@@ -156,6 +188,7 @@ impl ContentRepository {
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
+            mounted_sources: Vec::new(),
             resource_index: Vec::new(),
             source_description: None,
         }
@@ -209,6 +242,11 @@ impl ContentRepository {
         }
 
         Err(missing_asset_error(key, self.source_description.as_deref()))
+    }
+
+    /// Opened archive revisions in mount order; injected sources have no filesystem provenance.
+    pub fn mounted_sources(&self) -> &[MountedContentSource] {
+        &self.mounted_sources
     }
 
     pub fn source_description(&self) -> Option<&str> {
@@ -321,6 +359,7 @@ fn missing_asset_error(key: ResourceKey<'_>, source_description: Option<&str>) -
 fn discover_hba_mounts_in_dir(
     dats_path: &Path,
     mounts: &mut Vec<Arc<dyn ResourceSource>>,
+    mounted_sources: &mut Vec<MountedContentSource>,
     resource_index: &mut Vec<RepositoryResourceIndexEntry>,
 ) -> Result<()> {
     let mut candidates = Vec::new();
@@ -371,7 +410,14 @@ fn discover_hba_mounts_in_dir(
     });
 
     for (path, namespaces, archive) in candidates {
-        mount_archive_source(&path, archive, namespaces, mounts, resource_index)?;
+        mount_archive_source(
+            &path,
+            archive,
+            namespaces,
+            mounts,
+            mounted_sources,
+            resource_index,
+        )?;
     }
 
     Ok(())
@@ -380,6 +426,7 @@ fn discover_hba_mounts_in_dir(
 fn mount_hba_source(
     path: &Path,
     mounts: &mut Vec<Arc<dyn ResourceSource>>,
+    mounted_sources: &mut Vec<MountedContentSource>,
     resource_index: &mut Vec<RepositoryResourceIndexEntry>,
 ) -> Result<()> {
     let archive = HbaReader::open(path)
@@ -396,7 +443,14 @@ fn mount_hba_source(
         ));
     }
 
-    mount_archive_source(path, Arc::new(archive), namespaces, mounts, resource_index)
+    mount_archive_source(
+        path,
+        Arc::new(archive),
+        namespaces,
+        mounts,
+        mounted_sources,
+        resource_index,
+    )
 }
 
 fn mount_archive_source(
@@ -404,6 +458,7 @@ fn mount_archive_source(
     archive: Arc<HbaReader>,
     namespaces: Vec<String>,
     mounts: &mut Vec<Arc<dyn ResourceSource>>,
+    mounted_sources: &mut Vec<MountedContentSource>,
     resource_index: &mut Vec<RepositoryResourceIndexEntry>,
 ) -> Result<()> {
     log::info!(
@@ -412,6 +467,12 @@ fn mount_archive_source(
         namespaces.join(", ")
     );
 
+    let metadata = archive.source_metadata()?;
+    mounted_sources.push(MountedContentSource {
+        path: fs::canonicalize(path)?,
+        size: metadata.len(),
+        modified: metadata.modified()?,
+    });
     append_archive_index(path, &archive, resource_index)?;
     mounts.push(archive);
 

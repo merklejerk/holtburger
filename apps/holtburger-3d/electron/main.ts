@@ -77,6 +77,7 @@ function entryArguments(): {
 	mode: HostMode;
 	clientStartup?: ClientLaunchConfiguration;
 	ignorePersistedConfig: boolean;
+	ignoreWorldMapCache: boolean;
 	settingsFile: string | null;
 } {
 	const entryArguments = electronApplicationArguments(
@@ -92,12 +93,14 @@ function entryArguments(): {
 	const mode: HostMode = selectedEntryName === "client" ? "client" : "explorer";
 	let clientStartup: ClientLaunchConfiguration | undefined;
 	let ignorePersistedConfig = false;
+	let ignoreWorldMapCache = false;
 	let settingsFile: string | null = null;
 	let rendererArguments: readonly string[] = entryArgs;
 	if (mode === "client") {
 		const parsed = parseClientLaunchArguments(entryArgs);
 		clientStartup = parsed.startup;
 		ignorePersistedConfig = parsed.ignorePersistedConfig;
+		ignoreWorldMapCache = parsed.ignoreWorldMapCache;
 		settingsFile = parsed.settingsFile;
 		rendererArguments = parsed.rendererArguments;
 	} else {
@@ -114,6 +117,7 @@ function entryArguments(): {
 		mode,
 		clientStartup,
 		ignorePersistedConfig,
+		ignoreWorldMapCache,
 		settingsFile,
 	};
 }
@@ -134,8 +138,16 @@ function hostBinaryPath(): string {
 		: join(workspaceRoot(), "target", "debug", executable);
 }
 
-function hostEnvironment(): NodeJS.ProcessEnv {
+function hostEnvironment(ignoreWorldMapCache: boolean): NodeJS.ProcessEnv {
 	const environment = { ...process.env };
+	environment.HOLTBURGER_IGNORE_WORLD_MAP_CACHE = ignoreWorldMapCache
+		? "1"
+		: "0";
+	environment.HOLTBURGER_WORLD_MAP_CACHE = join(
+		app.getPath("userData"),
+		"cache",
+		"world-map",
+	);
 	if (environment.HOLTBURGER_DATS === undefined && !app.isPackaged) {
 		const workspaceDats = join(workspaceRoot(), "dats");
 		if (existsSync(workspaceDats)) environment.HOLTBURGER_DATS = workspaceDats;
@@ -143,9 +155,13 @@ function hostEnvironment(): NodeJS.ProcessEnv {
 	return environment;
 }
 
-async function startHost(window: BrowserWindow, mode: HostMode): Promise<void> {
+async function startHost(
+	window: BrowserWindow,
+	mode: HostMode,
+	ignoreWorldMapCache: boolean,
+): Promise<void> {
 	const child = spawn(hostBinaryPath(), [`--mode=${mode}`], {
-		env: hostEnvironment(),
+		env: hostEnvironment(ignoreWorldMapCache),
 		stdio: "pipe",
 		windowsHide: true,
 	});
@@ -555,7 +571,7 @@ app.whenReady().then(async () => {
 	}
 	installIpcBridge(window, entry.mode, entry.clientStartup);
 	try {
-		await startHost(window, entry.mode);
+		await startHost(window, entry.mode, entry.ignoreWorldMapCache);
 		await loadEntry(window, entry.path, entry.mode);
 	} catch (error) {
 		hostReady.reject(error);

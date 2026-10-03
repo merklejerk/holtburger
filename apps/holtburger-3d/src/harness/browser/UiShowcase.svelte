@@ -58,6 +58,7 @@
 		| "book"
 		| "debug"
 		| "settings"
+		| "world"
 		| "spells"
 		| "enchantments"
 		| "characterSheet"

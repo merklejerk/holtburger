@@ -19,6 +19,7 @@ const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
 	"password",
 	"melee-max-chase-distance",
 	"ignore-config",
+	"ignore-world-map-cache",
 	"settings-file",
 ]);
 const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
@@ -29,7 +30,10 @@ const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 	["p", "password"],
 	["i", "ignore-config"],
 ]);
-const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set(["ignore-config"]);
+const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set([
+	"ignore-config",
+	"ignore-world-map-cache",
+]);
 
 function isKnownEntry(value) {
 	return Object.hasOwn(ENTRY_PATHS, value);

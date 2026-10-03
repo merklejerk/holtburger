@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, type Snippet } from "svelte";
+	import { onDestroy, type Snippet } from "svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
@@ -27,6 +27,8 @@
 		readonly viewport: ClientHudViewport;
 		/** Launcher click revision promotes an already open independent window. */
 		readonly focusRevision?: number;
+		/** Hidden retained windows release input ownership without unmounting their content. */
+		readonly visible?: boolean;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
@@ -40,6 +42,7 @@
 		icon,
 		viewport,
 		focusRevision = 0,
+		visible = true,
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
@@ -50,10 +53,19 @@
 	);
 	let cancelPointerGesture: (() => void) | null = null;
 	let escapeContext: EscapeContextHandle | null = null;
+	let element: HTMLElement;
 	/** Cold visual order is published by the same owner that routes Escape. */
 	let depth = $state(0);
 	onDestroy(() => cancelPointerGesture?.());
-	onMount(() => {
+	$effect(() => {
+		if (!visible) {
+			cancelPointerGesture?.();
+			cancelPointerGesture = null;
+			const focused = document.activeElement;
+			if (focused instanceof HTMLElement && element?.contains(focused))
+				focused.blur();
+			return;
+		}
 		// Read the current prop when Escape fires; keyed window content can replace its close target.
 		escapeContext = keyboard.bindEscapeContext(
 			() => onClose(),
@@ -65,7 +77,7 @@
 		};
 	});
 	$effect(() => {
-		if (focusRevision > 0) escapeContext?.promote();
+		if (visible && focusRevision > 0) escapeContext?.promote();
 	});
 	function focusWindow(): void {
 		// Pointer intent promotes the window; automatic editor/modal focus restoration does not.
@@ -159,6 +171,10 @@
 
 <section
 	class="hud-window ui-panel"
+	bind:this={element}
+	hidden={!visible}
+	inert={!visible}
+	style:display={visible ? undefined : "none"}
 	style:left={`${resolved.left}px`}
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}

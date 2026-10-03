@@ -127,6 +127,14 @@ export const SHARED_FRONTEND_TUNING = {
 			automaticReanchorDistanceMeters: 8,
 		},
 	},
+	worldMap: {
+		/** Pointer travel in CSS pixels that commits the gesture to panning. */
+		panThresholdPixels: 4,
+		/** Smallest horizontal span for this outdoor overview, in meters. */
+		minimumSpanMeters: 384,
+		/** Multiplicative scroll zoom response per wheel delta. */
+		wheelZoomRate: 0.001,
+	},
 	map: {
 		/**
 		 * Overhead-map presentation. Shared by the Explorer and the future client shell, so this

@@ -1,5 +1,6 @@
 import { tradeSnapshotSchema } from "./client-trade-contract";
 import { z } from "zod";
+
 import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
 import { characterSheetSchema } from "./client-character-sheet-contract";
 import { clientEntitySnapshotSchema } from "./client-entity-mirror";
@@ -13,6 +14,18 @@ import {
 	landblockVector3,
 	type LandblockVector3,
 } from "../lib/assets/ac-frame";
+
+/** Canonical map-plane point: X east, Z south; ACE supplies the missing height. */
+export const clientMapPositionSchema = z
+	.object({
+		x: z.number().finite(),
+		z: z.number().finite(),
+	})
+	.strict();
+export type ClientMapPosition = z.infer<typeof clientMapPositionSchema>;
+
+/** Core-owned cold admission; consumers do not interpret character permission flags. */
+export const mapTeleportCapabilitySchema = z.boolean();
 
 /** Server-confirmed stance consumed by the shortcut dock. */
 const combatModeSchema = z.enum([
@@ -336,6 +349,7 @@ export type ClientConnectionSample = z.infer<typeof connectionSampleSchema>;
 
 const currentStateSchema = z
 	.object({
+		canTeleportFromMap: z.boolean(),
 		connection: connectionSampleSchema.nullable(),
 		entityCollisionDisabled: z.boolean(),
 		lifecycle: lifecycleSchema,

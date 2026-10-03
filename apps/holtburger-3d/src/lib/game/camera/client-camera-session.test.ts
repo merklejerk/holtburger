@@ -314,6 +314,7 @@ function currentState(): ClientCurrentState {
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
+		canTeleportFromMap: false,
 		localPlayerGuid: PLAYER_GUID,
 		entities: playerEntitySnapshot(PLAYER_GUID),
 		serverTime: 10,

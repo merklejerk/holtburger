@@ -8,7 +8,7 @@
 	import TrainingIcon from "../assets/icons/hud-training.svg?component";
 	import SpellsIcon from "../assets/icons/hud-spells.svg?component";
 	import PartyIcon from "../assets/icons/hud-party.svg?component";
-	import MapIcon from "../assets/icons/hud-map.svg?component";
+	import WorldIcon from "../assets/icons/hud-world.svg?component";
 	import JournalIcon from "../assets/icons/hud-journal.svg?component";
 	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
 	import DebugIcon from "../assets/icons/hud-debug.svg?component";
@@ -22,6 +22,7 @@
 	import SaveLoadoutIcon from "../assets/icons/hud-save-loadout.svg?component";
 	import SelectTextIcon from "../assets/icons/hud-select-text.svg?component";
 	import AddIcon from "../assets/icons/hud-add.svg?component";
+	import EyeIcon from "../assets/icons/hud-eye.svg?component";
 	import ResetIcon from "../assets/icons/hud-reset.svg?component";
 	import LockedIcon from "../assets/icons/hud-locked.svg?component";
 	import UnlockedIcon from "../assets/icons/hud-unlocked.svg?component";
@@ -35,7 +36,7 @@
 		| "training"
 		| "spells"
 		| "party"
-		| "map"
+		| "world"
 		| "journal"
 		| "settings"
 		| "debug"
@@ -50,6 +51,8 @@
 		/** Pointer over text for enabling chat-history selection. */
 		| "select-text"
 		| "add"
+		/** Eye for toggling map label visibility. */
+		| "eye"
 		| "reset"
 		| "locked"
 		| "unlocked";
@@ -69,7 +72,7 @@
 		training: TrainingIcon,
 		spells: SpellsIcon,
 		party: PartyIcon,
-		map: MapIcon,
+		world: WorldIcon,
 		journal: JournalIcon,
 		settings: SettingsIcon,
 		debug: DebugIcon,
@@ -83,6 +86,7 @@
 		"save-loadout": SaveLoadoutIcon,
 		"select-text": SelectTextIcon,
 		add: AddIcon,
+		eye: EyeIcon,
 		reset: ResetIcon,
 		locked: LockedIcon,
 		unlocked: UnlockedIcon,

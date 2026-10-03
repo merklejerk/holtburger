@@ -14,6 +14,26 @@ use crate::host_mode::ClientLaunchConfiguration;
 use crate::protocol::{HostResponse, ProtocolError, application_error};
 use crate::shared_host_content::SharedHostContent;
 
+/// Canonical scene map-plane coordinates (X east, Z south), without an invented height.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientMapPosition {
+    pub x: f32,
+    pub z: f32,
+}
+
+impl ClientMapPosition {
+    /// Validate and convert the authored horizontal domain at its owning adapter boundary.
+    fn destination(self) -> Result<holtburger_common::position::WorldPosition> {
+        let mut position =
+            crate::placed_motion_presentation::scene_point_to_pose([self.x, 0.0, self.z])?;
+        // Block 0000 with the converter's owner selector is also Guid::NULL. Seed a terrain
+        // selector so normalization can derive a valid cell even at the southwest origin.
+        position.landblock_id.0 |= 1;
+        Ok(position.normalize_outdoor_cell())
+    }
+}
+
 /// Strict renderer-owned camera identity reused by camera-ray commands.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -298,6 +318,10 @@ pub enum ClientHostCommand {
     SendClientChat {
         message: String,
     },
+    /// Canonical horizontal map point; ACE owns destination height.
+    TeleportClientToMapPosition {
+        position: ClientMapPosition,
+    },
     StartClientCamera {
         request: holtburger_core::ClientCameraStartRequest,
     },
@@ -357,6 +381,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "replace_client_drive",
     "queue_client_character_motion_event",
     "send_client_chat",
+    "teleport_client_to_map_position",
     "toggle_client_combat_mode",
     "set_client_appearance_option",
     "cast_client_spell",
@@ -871,6 +896,14 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        TeleportClientToMapPosition { position } => {
+            let destination = position.destination().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::TeleportToMapPosition(destination))
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
         StartClientCamera { request } => runtime
             .start_camera(request)
             .await
@@ -1074,5 +1107,57 @@ mod tests {
         .unwrap();
         request.direction[2] = f32::INFINITY;
         assert!(request.into_core().is_err());
+    }
+}
+
+#[cfg(test)]
+mod map_position_tests {
+    use super::ClientMapPosition;
+    use holtburger_common::position::{MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK};
+
+    #[test]
+    fn converts_scene_axes_and_derives_cells_across_a_landblock_seam() {
+        let position = ClientMapPosition {
+            x: METERS_PER_LANDBLOCK + 30.0,
+            z: -50.0,
+        }
+        .destination()
+        .unwrap();
+        assert_eq!(position.landblock_coords(), (1, 0));
+        assert_eq!(position.landblock_id.0 & 0xffff, 11);
+        assert_eq!(position.coords.x, 30.0);
+        assert_eq!(position.coords.y, 50.0);
+        assert_eq!(position.coords.z, 0.0);
+        let origin = ClientMapPosition { x: 0.0, z: 0.0 }.destination().unwrap();
+        assert_eq!(origin.landblock_id.0, 1);
+    }
+
+    #[test]
+    fn rejects_non_finite_and_exclusive_outer_edges() {
+        let extent = (f32::from(MAX_OUTDOOR_LANDBLOCK_AXIS) + 1.0) * METERS_PER_LANDBLOCK;
+        for position in [
+            ClientMapPosition {
+                x: f32::NAN,
+                z: 0.0,
+            },
+            ClientMapPosition {
+                x: 0.0,
+                z: f32::INFINITY,
+            },
+            ClientMapPosition { x: -1.0, z: 0.0 },
+            ClientMapPosition { x: 0.0, z: 1.0 },
+            ClientMapPosition { x: extent, z: 0.0 },
+            ClientMapPosition { x: 0.0, z: -extent },
+        ] {
+            assert!(position.destination().is_err());
+        }
+        assert!(
+            ClientMapPosition {
+                x: extent - 1.0,
+                z: -extent + 1.0
+            }
+            .destination()
+            .is_ok()
+        );
     }
 }

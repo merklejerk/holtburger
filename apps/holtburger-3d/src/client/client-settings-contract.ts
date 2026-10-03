@@ -68,6 +68,7 @@ const clientHudLayoutSchema = z
 		inspection: hudPlacementSchema,
 		book: hudPlacementSchema,
 		debug: hudPlacementSchema,
+		world: hudPlacementSchema,
 		settings: hudPlacementSchema,
 		frameRate: hudPlacementSchema,
 		jumpPower: hudPlacementSchema,

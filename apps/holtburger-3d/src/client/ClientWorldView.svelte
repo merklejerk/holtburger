@@ -57,6 +57,8 @@
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
+	import ClientWorldPanel from "./ClientWorldPanel.svelte";
+	import type { WorldMapSource } from "../lib/game/world-map/types";
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
@@ -72,6 +74,7 @@
 	import type { ClientObjectInspectionState } from "./client-object-inspection";
 	import type {
 		ClientAttackProfile,
+		ClientMapPosition,
 		ClientCombatMode,
 		ClientCombatStatus,
 		ClientAppearanceOption,
@@ -172,6 +175,13 @@
 		readonly cameraController: ClientViewportCameraController | null;
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
+		/** Static host capability, owned by the mounted transport lifetime. */
+		readonly worldMapSource: WorldMapSource | null;
+		/** Shared core admission and app-owned request feedback. */
+		readonly canTeleportFromMap: boolean;
+		readonly onTeleportToMapPosition: (
+			position: ClientMapPosition,
+		) => Promise<void>;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		/** Client-owned selected facts with optional presentation details. */
 		readonly readSelectedEntity: () => ClientSelectedEntity | null;
@@ -295,6 +305,9 @@
 		cameraController,
 		debugEnabled,
 		readMinimapFrame,
+		worldMapSource,
+		canTeleportFromMap,
+		onTeleportToMapPosition,
 		readDiagnostics,
 		readSelectedEntity,
 		readFrameRates,
@@ -447,6 +460,11 @@
 		height: window.innerHeight,
 	};
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	/** First activation mounts the map once; panel switches only change its visibility. */
+	let worldMounted = $state(false);
+	$effect(() => {
+		if (activePanel === "world") worldMounted = true;
+	});
 	let enchantmentsOpen = $state(false);
 	let enchantmentLaunch = $state<{
 		kind: "beneficial" | "harmful";
@@ -1053,7 +1071,24 @@
 		{/key}
 	{/if}
 
-	{#if activePanel !== null}
+	{#if worldMounted && worldMapSource !== null}
+		{#key worldMapSource}
+			<ClientWorldPanel
+				source={worldMapSource}
+				{canTeleportFromMap}
+				{onTeleportToMapPosition}
+				visible={activePanel === "world"}
+				placement={hudLayout.world}
+				{viewport}
+				readFrame={readMinimapFrame}
+				onClose={() => (activePanel = null)}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("world", placement)}
+			/>
+		{/key}
+	{/if}
+
+	{#if activePanel !== null && activePanel !== "world"}
 		{@const panel = activePanel}
 		{#key panel}
 			<ClientHudWindow

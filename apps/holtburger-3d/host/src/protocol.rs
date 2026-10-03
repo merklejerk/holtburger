@@ -99,6 +99,8 @@ pub enum HostEvent {
     /// Semantic entity records, independent of dynamic renderer events.
     ClientEntityFactsChanged(holtburger_core::ClientEntityDelta),
     ClientEntityCollisionDisabled(bool),
+    /// Cold permission edge owned by core.
+    ClientMapTeleportCapabilityChanged(bool),
     /// Shared transport rates, reliability, and health for client HUD consumers.
     ClientConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
@@ -421,6 +423,9 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::EntityCollisionDisabled(disabled) => {
                 HostEvent::ClientEntityCollisionDisabled(disabled)
             }
+            crate::client_projection::ClientHostEvent::MapTeleportCapabilityChanged(allowed) => {
+                HostEvent::ClientMapTeleportCapabilityChanged(allowed)
+            }
             crate::client_projection::ClientHostEvent::CurrentState(state) => {
                 HostEvent::ClientCurrentState(state)
             }
@@ -606,6 +611,14 @@ impl ExplorerEventSink for StdioEventSink {
     }
 }
 
+/// Stops cooperative blocking preparation on every transport exit, including error returns.
+struct MapStopGuard(Arc<crate::world_map::WorldMapService>);
+impl Drop for MapStopGuard {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
 /// Runs the framed sidecar protocol over stdin/stdout.
 pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
     let (sender, receiver) = mpsc::sync_channel(WRITER_QUEUE_CAPACITY);
@@ -623,6 +636,7 @@ pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
         Arc::clone(&event_sink) as Arc<dyn ClientEventSink>,
         event_sink as Arc<dyn ExplorerEventSink>,
     )?);
+    let _map_stop = MapStopGuard(Arc::clone(&runtime.content().world_map));
     sender
         .send(ProtocolFrame::Handshake {
             protocol_version: PROTOCOL_VERSION,
@@ -715,6 +729,7 @@ pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
             result??;
         }
     };
+    runtime.content().world_map.stop();
     while let Some(result) = pending.join_next().await {
         result??;
     }
@@ -1189,6 +1204,28 @@ mod tests {
             };
             assert_eq!(decoded.0, guid);
         }
+    }
+
+    #[test]
+    fn world_map_commands_decode_the_frontend_request_contract() {
+        let open: HostCommand = serde_json::from_value(
+            serde_json::json!({"command":"open_world_map","request":{"intent":"retry"}}),
+        )
+        .unwrap();
+        assert!(matches!(
+            open,
+            HostCommand::Shared(SharedContentCommand::OpenWorldMap {
+                request: crate::world_map::OpenWorldMapRequest {
+                    intent: crate::world_map::OpenWorldMapIntent::Retry
+                }
+            })
+        ));
+        let read: HostCommand = serde_json::from_value(serde_json::json!({"command":"read_world_map_tiles","request":{"receiptId":"receipt","nextTile":3}})).unwrap();
+        let HostCommand::Shared(SharedContentCommand::ReadWorldMapTiles { request }) = read else {
+            panic!("image request decoded into the wrong owner");
+        };
+        assert_eq!(request.receipt_id, "receipt");
+        assert_eq!(request.next_tile, 3);
     }
 
     #[test]

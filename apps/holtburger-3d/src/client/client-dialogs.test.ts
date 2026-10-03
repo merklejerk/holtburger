@@ -37,6 +37,7 @@ async function fixture() {
 		emit("client-current-state", {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
+			canTeleportFromMap: false,
 			localPlayerGuid: 7,
 			entities: playerEntitySnapshot(7),
 			serverTime: 1,

@@ -544,8 +544,8 @@ pub enum GameActionOpcode {
     // TeleToPkArena = 0x0027,
     /// C2S: Teleport to the character's attuned Lifestone.
     TeleToLifestone = 0x0063,
-    // /// C2S: Special advocate-only teleport command.
-    // AdvocateTeleport = 0x00D6,
+    /// C2S: Privileged map teleport; ACE accepts admin, arch, or PSR characters.
+    AdvocateTeleport = 0x00D6,
     /// C2S: Teleport to the allegiance mansion or villa.
     TeleToMansion = 0x0278,
     /// C2S: Teleport to the Marketplace.

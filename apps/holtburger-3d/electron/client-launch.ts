@@ -15,6 +15,8 @@ export interface ParsedClientLaunchArguments {
 	readonly startup: ClientLaunchConfiguration;
 	/** Treat persisted renderer-owned settings as absent without disabling later saves. */
 	readonly ignorePersistedConfig: boolean;
+	/** Regenerate the map on first request, then reuse it for this host lifetime. */
+	readonly ignoreWorldMapCache: boolean;
 	/** Resolved path for the collection-format settings file. */
 	readonly settingsFile: string | null;
 	/** Arguments intentionally left for the renderer entry URL (for example --query). */
@@ -61,6 +63,7 @@ export function parseClientLaunchArguments(
 	let password = "";
 	let meleeMaxChaseDistance: number | undefined;
 	let ignorePersistedConfig = false;
+	let ignoreWorldMapCache = false;
 	let settingsFile: string | null = null;
 	const rendererArguments: string[] = [];
 	const seen = new Set<string>();
@@ -84,6 +87,13 @@ export function parseClientLaunchArguments(
 					"client launch argument --ignore-config/-i does not accept a value",
 				);
 			ignorePersistedConfig = true;
+			continue;
+		}
+
+		if (name === "ignore-world-map-cache") {
+			if (parsed.value !== undefined)
+				throw new Error("--ignore-world-map-cache does not accept a value");
+			ignoreWorldMapCache = true;
 			continue;
 		}
 
@@ -140,6 +150,7 @@ export function parseClientLaunchArguments(
 			...(meleeMaxChaseDistance === undefined ? {} : { meleeMaxChaseDistance }),
 		},
 		ignorePersistedConfig,
+		ignoreWorldMapCache,
 		settingsFile,
 		rendererArguments,
 	};

@@ -1203,6 +1203,34 @@ describe("ClientLifecycleSession", () => {
 		await expect(session.sendChat("   ")).rejects.toThrow("visible text");
 		expect(transport.calls).toHaveLength(1);
 	});
+
+	it("submits finite map points and forwards authoritative permission edges", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const permissions: boolean[] = [];
+		const unsubscribe = session.subscribe((event) => {
+			if (event.type === "map-teleport-capability")
+				permissions.push(event.allowed);
+			if (event.type === "current-state")
+				permissions.push(event.state.canTeleportFromMap);
+		});
+		transport.setCurrentState({ ...currentState(1), canTeleportFromMap: true });
+		await session.start();
+		transport.emit("client-map-teleport-capability-changed", false);
+		expect(permissions).toEqual([true, false]);
+		await session.teleportToMapPosition({ x: 42, z: -24 });
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "teleport_client_to_map_position",
+			args: { position: { x: 42, z: -24 } },
+		});
+		const count = transport.invocations.length;
+		await expect(
+			session.teleportToMapPosition({ x: NaN, z: -24 }),
+		).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(count);
+		unsubscribe();
+		session.stop();
+	});
 });
 
 function characterSheet(
@@ -1248,6 +1276,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
+		canTeleportFromMap: false,
 		localPlayerGuid: playerGuid,
 		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 10,

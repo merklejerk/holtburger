@@ -79,6 +79,9 @@ import {
 } from "./client-entity-mirror";
 import {
 	decodeClientCurrentState,
+	clientMapPositionSchema,
+	type ClientMapPosition,
+	mapTeleportCapabilitySchema,
 	connectionSampleSchema,
 	type ClientConnectionSample,
 	decodeClientCombatMode,
@@ -175,6 +178,7 @@ type ClientCommandName = Extract<
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "send_client_chat"
+	| "teleport_client_to_map_position"
 	| "toggle_client_combat_mode"
 	| "set_client_appearance_option"
 	| "cast_client_spell"
@@ -228,6 +232,7 @@ type ClientEventName = Extract<
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
+	| "client-map-teleport-capability-changed"
 	| "client-lifecycle-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
@@ -360,6 +365,7 @@ export type ClientLifecycleSessionEvent =
 			readonly result: ClientInventoryPreviewResult;
 	  }
 	| { readonly type: "entity-collision-disabled"; readonly disabled: boolean }
+	| { readonly type: "map-teleport-capability"; readonly allowed: boolean }
 	| { readonly type: "dynamic-sound-cue"; readonly cue: ClientDynamicSoundCue }
 	| {
 			readonly type: "confirmation";
@@ -766,6 +772,13 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("send_client_chat", { message });
 	}
 
+	/** Submit one map point; server updates establish the actual teleport outcome. */
+	async teleportToMapPosition(position: ClientMapPosition): Promise<void> {
+		await this.#transport.invoke("teleport_client_to_map_position", {
+			position: clientMapPositionSchema.parse(position),
+		});
+	}
+
 	/** Register a client camera generation; its authority receipt arrives on the sibling event. */
 	async startCamera(request: ClientCameraStartRequest): Promise<void> {
 		await this.#transport.invoke("start_client_camera", { request });
@@ -979,6 +992,14 @@ export class ClientLifecycleSession {
 				}),
 				await this.#transport.listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
+				),
+				await this.#transport.listen(
+					"client-map-teleport-capability-changed",
+					(payload) =>
+						this.#emit({
+							type: "map-teleport-capability",
+							allowed: mapTeleportCapabilitySchema.parse(payload),
+						}),
 				),
 			);
 			unlisteners.push(

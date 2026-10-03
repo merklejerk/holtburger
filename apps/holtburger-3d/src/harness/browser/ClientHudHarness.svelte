@@ -105,6 +105,7 @@
 	import { ClientInventoryState } from "../../client/client-inventory-state";
 	import { browserUiIconRepository } from "../../app/ui-icon-repository";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
+	import { createWorldMapFixture } from "./world-map-fixture";
 	import type {
 		ClientChatErrorMessage,
 		ClientChatLine,
@@ -458,6 +459,7 @@
 	}
 
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
+	const worldMapFixture = createWorldMapFixture();
 
 	interface ClientHudHarnessRectangle {
 		readonly height: number;
@@ -873,6 +875,16 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		readonly setMapTeleportPermission: (allowed: boolean) => void;
+		readonly readMapTeleports: () => typeof interactionCommands;
+		/** Hold and advance synthetic map generation to verify progress markup deterministically. */
+		readonly holdWorldMapPreparation: () => void;
+		readonly advanceWorldMapPreparation: () => void;
+		readonly releaseWorldMapPreparation: () => void;
+		/** Requests made by the retained World-panel fixture. */
+		readonly readWorldMapFixture: () => ReturnType<
+			typeof worldMapFixture.read
+		> & { readonly sceneZooms: number; readonly sceneOrbits: number };
 		/** Verify keyboard acquisition through the real browser input boundary. */
 		readonly probeTargeting: () => ReturnType<typeof probeClientTargeting>;
 		/** Install a real DOM fixture for CDP keyboard and pointer events. */
@@ -1053,12 +1065,14 @@
 		command: string;
 		args: Record<string, unknown> | undefined;
 	}[] = [];
+	let canTeleportFromMap = $state(false);
 	/** Establish actual session facts for the mounted HUD and its interaction probes. */
 	function emitInteractionBaseline(playerGuid = 1): void {
 		const playerName = playerGuid === 1 ? "Wayfarer" : "Wayfarer II";
 		emitInteractionEvent("client-current-state", {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
+			canTeleportFromMap: false,
 			localPlayerGuid: playerGuid,
 			serverTime: 10,
 			worldGeneration: 1,
@@ -3256,6 +3270,12 @@
 		);
 		spells = spellState;
 		probeBrowserInput(keyboard, inputGate);
+		const unsubscribeMapTeleport = interactionLifecycle.subscribe((event) => {
+			if (event.type === "map-teleport-capability")
+				canTeleportFromMap = event.allowed;
+			if (event.type === "current-state")
+				canTeleportFromMap = event.state.canTeleportFromMap;
+		});
 		void interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
@@ -3263,6 +3283,20 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			setMapTeleportPermission: (allowed) =>
+				emitInteractionEvent("client-map-teleport-capability-changed", allowed),
+			readMapTeleports: () =>
+				interactionCommands.filter(
+					(entry) => entry.command === "teleport_client_to_map_position",
+				),
+			holdWorldMapPreparation: worldMapFixture.holdPreparation,
+			advanceWorldMapPreparation: worldMapFixture.advancePreparation,
+			releaseWorldMapPreparation: worldMapFixture.releasePreparation,
+			readWorldMapFixture: () => ({
+				...worldMapFixture.read(),
+				sceneZooms: zoomDeltas.length,
+				sceneOrbits: orbitDeltas.length,
+			}),
 			probeTargeting: () => probeClientTargeting(keyboard),
 			beginKeyboardProbe: () => {
 				keyboardFixture = installKeyboardPolicyFixture(keyboard, inputGate);
@@ -3420,6 +3454,7 @@
 		};
 		return () => {
 			objectInspectionProbe.end();
+			unsubscribeMapTeleport();
 			unsubscribeObjectInspection();
 			unsubscribeBookReader();
 			bookReaderOwner.destroy();
@@ -3587,6 +3622,10 @@
 		{unrestrictedUse}
 		onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
 		{readMinimapFrame}
+		worldMapSource={worldMapFixture.source}
+		{canTeleportFromMap}
+		onTeleportToMapPosition={(position) =>
+			interactionLifecycle.teleportToMapPosition(position)}
 		{readDiagnostics}
 		{readSelectedEntity}
 		{readFrameRates}

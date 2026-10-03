@@ -128,6 +128,8 @@ struct ExplorerPossessionTickResponse {
 }
 
 struct DevHostState {
+    /// Static world-map owner shared with production sidecar commands.
+    world_map: holtburger_3d_host::world_map::WorldMapService,
     content: ContentAssetRuntime,
     /// Held so the harness can stage a motion closure, which entity activation requires.
     motion: Arc<holtburger_content::MotionSequenceCatalog>,
@@ -212,6 +214,31 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                         &serde_json::to_vec(&profile)?,
                     )
                     .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/world-map-open") => {
+            let request: holtburger_3d_host::world_map::OpenWorldMapRequest =
+                serde_json::from_slice(&request.body)?;
+            match state.world_map.open(request.intent).await {
+                Ok(manifest) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&manifest)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/world-map-tiles") => {
+            let request = serde_json::from_slice(&request.body)?;
+            match state.world_map.read_tiles(request).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }
                 Err(error) => write_error(&mut stream, error).await,
             }
@@ -629,6 +656,12 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
 
 fn discover_host_state() -> anyhow::Result<DevHostState> {
     let repository = Arc::new(ContentRepository::discover(None)?);
+    let world_map = holtburger_3d_host::world_map::WorldMapService::new(
+        Arc::clone(&repository),
+        std::env::var_os(holtburger_3d_host::world_map::CACHE_ENV).map(std::path::PathBuf::from),
+        std::env::var_os(holtburger_3d_host::world_map::IGNORE_CACHE_ENV)
+            .is_some_and(|value| value == "1"),
+    );
     let service =
         ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
     let content = ContentAssetRuntime::new(service.clone());
@@ -659,6 +692,7 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
         Arc::clone(&simulation),
     )?);
     Ok(DevHostState {
+        world_map,
         content,
         motion: motion_catalog,
         delivery: Arc::new(ExplorerEntityDelivery::new(Arc::clone(&runtime))),

@@ -91,9 +91,11 @@
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	} from "./client-selected-entity-tracking";
 	import ClientWorldView from "./ClientWorldView.svelte";
+	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
 		ClientCombatMode,
+		ClientMapPosition,
 		ClientAttackProfile,
 		ClientCombatStatus,
 		ClientCharacterMotionCapabilities,
@@ -193,6 +195,8 @@
 	);
 
 	let entityCollisionDisabled = $state(false);
+	/** Cold core admission consumed by the World panel's click gesture. */
+	let canTeleportFromMap = $state(false);
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
 	);
@@ -344,6 +348,9 @@
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
+	const worldMapSource = $derived(
+		hostTransport === null ? null : hostWorldMapSource(hostTransport),
+	);
 	let startupError = $state<string | null>(null);
 	let commandFailure = $state<string | null>(null);
 	function reportCommandFailure(error: unknown): void {
@@ -706,6 +713,9 @@
 			case "entity-collision-disabled":
 				entityCollisionDisabled = event.disabled;
 				return;
+			case "map-teleport-capability":
+				canTeleportFromMap = event.allowed;
+				return;
 			case "combat-mode":
 				combatMode = event.mode;
 				return;
@@ -716,6 +726,7 @@
 				appearanceOptions = event.options;
 				return;
 			case "current-state":
+				canTeleportFromMap = event.state.canTeleportFromMap;
 				enchantments = session?.state().enchantments ?? null;
 				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
@@ -748,10 +759,12 @@
 				});
 				return;
 			case "resyncing":
+				canTeleportFromMap = false;
 				enchantments = null;
 				appearanceOptions = null;
 				return;
 			case "lifecycle":
+				if (event.lifecycle.kind !== "in-world") canTeleportFromMap = false;
 				enchantments = session?.state().enchantments ?? null;
 				appearanceOptions = session?.state().appearanceOptions ?? null;
 				if (event.lifecycle.kind !== "in-world") {
@@ -926,6 +939,17 @@
 			message,
 			CLIENT_TUNING.chat.sentHistoryLimit,
 		);
+	}
+
+	async function teleportToMapPosition(
+		position: ClientMapPosition,
+	): Promise<void> {
+		try {
+			if (session === null) throw new Error("Client session unavailable.");
+			await session.teleportToMapPosition(position);
+		} catch (error) {
+			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+		}
 	}
 
 	/** Keyboard and button activation capture the same selection before starting the request. */
@@ -1549,6 +1573,7 @@
 			owner.stop();
 			enchantments = null;
 			session = null;
+			canTeleportFromMap = false;
 			hostTransport = null;
 		};
 	});
@@ -1626,6 +1651,9 @@
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
 			{readMinimapFrame}
+			{worldMapSource}
+			{canTeleportFromMap}
+			onTeleportToMapPosition={teleportToMapPosition}
 			{readDiagnostics}
 			{readSelectedEntity}
 			{readFrameRates}

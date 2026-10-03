@@ -22,6 +22,7 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    AdvocateTeleport(Box<AdvocateTeleportActionData>),
     Jump(Box<JumpActionData>),
     AutonomousPosition(Box<AutonomousPositionActionData>),
     MoveToState(Box<MoveToStateActionData>),
@@ -100,6 +101,9 @@ impl ProtocolUnpack for GameActionMessage {
 
         let action_data = match action_op {
             Some(op) => match op {
+                GameActionOpcode::AdvocateTeleport => GameAction::AdvocateTeleport(Box::new(
+                    AdvocateTeleportActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::Jump => {
                     GameAction::Jump(Box::new(JumpActionData::unpack(data, offset)?))
                 }
@@ -310,6 +314,11 @@ impl ProtocolPack for GameActionMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.action {
+            GameAction::AdvocateTeleport(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AdvocateTeleport as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::Jump(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Jump as u32)
                     .unwrap();

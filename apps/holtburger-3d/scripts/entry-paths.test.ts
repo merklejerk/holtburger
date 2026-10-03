@@ -10,6 +10,18 @@ import {
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
 
 describe("development launcher arguments", () => {
+	it("forwards world-map cache bypass to main without putting it in the renderer URL", () => {
+		expect(
+			partitionClientLaunchArguments(["--ignore-world-map-cache", "--debug"]),
+		).toEqual({
+			launchArguments: ["--ignore-world-map-cache"],
+			rendererArguments: ["--debug"],
+		});
+		expect(() =>
+			partitionClientLaunchArguments(["--ignore-world-map-cache=true"]),
+		).toThrow("does not accept a value");
+	});
+
 	it("turns the bare client debug flag into an explicit renderer value", () => {
 		expect(buildEntryPath("client/index.html", ["--debug"])).toBe(
 			"client/index.html?debug=true",

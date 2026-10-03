@@ -236,18 +236,66 @@ npm run dev:client -- --vite-port 1432
 For client mode, `--port` remains the ACE server port; use `--vite-port` for the renderer server.
 Client launch options accept long and one-character spellings:
 
-| Long option       | Short option | Value               |
-| ----------------- | ------------ | ------------------- |
-| `--server`        | `-s`         | Host or `host:port` |
-| `--host`          | `-h`         | Host                |
-| `--port`          | `-P`         | ACE server port     |
-| `--account`       | `-a`         | Account name        |
-| `--password`      | `-p`         | Password            |
-| `--ignore-config` | `-i`         | No value            |
-| `--settings-file` |              | JSON file path      |
+| Long option                | Short option | Value               |
+| -------------------------- | ------------ | ------------------- |
+| `--server`                 | `-s`         | Host or `host:port` |
+| `--host`                   | `-h`         | Host                |
+| `--port`                   | `-P`         | ACE server port     |
+| `--account`                | `-a`         | Account name        |
+| `--password`               | `-p`         | Password            |
+| `--ignore-config`          | `-i`         | No value            |
+| `--ignore-world-map-cache` |              | No value            |
+| `--settings-file`          |              | JSON file path      |
 
 Valued long and short options accept either `--name=value`/`-x=value` or separated values.
 Connection credentials stay in Electron main and are never copied into the renderer URL.
+
+The World panel bakes a north-up 2048×2048 terrain image in the Rust host, with mean diffuse
+colors and fixed hillshading. All present landblocks contribute terrain, including dungeon-only
+owners. Up to four bake workers process bounded batches after the first tile. Its 128×128 tiles appear as they finish; the progress footer leaves
+pan, zoom, and the bottom-right Reset view icon usable during generation. Reset view recenters
+and fits the whole world without added padding; the HUD-styled button appears only when the view differs from that reset.
+Hovering terrain shows outdoor coordinates in a floating tooltip. Panning keeps the viewport inside the map; axes larger than the map stay
+centered. The World and Housing tabs retain the same map and view; Housing is a placeholder. Canvas2D scales a retained image, drawing only
+on arrival, interaction, resize, or reopening. The player marker reprojects in each image draw, with a 30 Hz movement timer between draws.
+
+Characters with ACE's `IsAdmin`, `IsArch`, or `IsPsr` permission can click a terrain point to request
+a map teleport. Dragging beyond the map's pointer threshold pans instead; canceled gestures never
+teleport. The clicked horizontal coordinates are preserved, and ACE resolves terrain height and
+building placement and rejects entirely-water landblocks. Permission and in-world admission are
+rechecked in core. The image may still be streaming when a location is clicked.
+
+The map overlays 52 default-world settlements using verified ACE portal arrivals and an outdoor
+vendor placement as approximate anchors. Labels default to hidden: hovering a dot shows its name and anchor coordinates only in the
+tooltip. The bottom-left eye icon toggle shows all in-view names; its state is retained while the panel stays
+mounted and resets to off on a new panel lifetime. Labels can overlap and the map surface clips
+them at its edges. Annotations appear during terrain streaming and reproject in the terrain draw callback. The retained
+[SQL and conversion recipe](../holtburger-tools/sql/README.md) reproduces the bundled data without
+runtime database access. Crater Lake Village uses Silencia’s placement, confirmed by four vendors
+with ACE’s `TownName = CraterLake` tag. Island/geographic labels are outside this settlement list. Custom-server town locations can differ.
+
+Settlement labels use `.ui-world-map-label` and dots use `.ui-world-map-settlement-dot` in the
+shared theme layer. Label properties are `--ui-world-map-label-font` (a CSS font shorthand),
+`--ui-world-map-label-color`, `--ui-world-map-label-outline-color`,
+`--ui-world-map-label-outline-width`, and `--ui-world-map-label-offset`. Dots expose
+`--ui-world-map-settlement-dot-radius`, `--ui-world-map-settlement-dot-color`,
+`--ui-world-map-settlement-dot-outline-color`, and `--ui-world-map-settlement-dot-outline-width`.
+Themes can also style those classes directly, including letter spacing and text decoration.
+The default label font uses `--ui-font-body` and its color uses `--ui-color-text`.
+Theme changes apply to retained SVG nodes without text measurement or image regeneration.
+
+Only successful completion publishes the raw RGBA8 cache under `<userData>/cache/world-map`.
+Pixels occupy 16 MiB plus a small header. Source archive revisions and bake settings invalidate
+stale caches; incomplete output is discarded. First activation starts generation; login does not.
+
+Pass `--ignore-world-map-cache` to regenerate the world map on its first request, even if a valid
+cache exists. Concurrent requests and panel reopenings still reuse the prepared image for that
+host lifetime. Successful generation atomically replaces the disk cache; the flag does not delete
+it at launch or change when map loading begins.
+
+```sh
+npm run dev:client -- --account YOUR_ACCOUNT --ignore-world-map-cache
+```
 
 Pass `--ignore-config` or `-i` to treat persisted user and character settings as absent for that
 run. Native window placement still restores normally. Persistence remains enabled, so the newly
@@ -349,6 +397,13 @@ Set `HOLTBURGER_PROBE_MODE=passive` to observe the current character without sen
 chat, or drive commands. Passive mode rejects teleport options instead of silently becoming an
 active probe. The default `drive` mode retains the movement phases used by the ordinary motion
 probe.
+
+Set `HOLTBURGER_PROBE_MAP_POINT` to canonical `x,z` coordinates to exercise the typed map action
+instead of chat teleport or ordinary drive phases. The live probe verifies destination coordinates
+and activation/reveal, then requests a map teleport back to the source horizontal position.
+`HOLTBURGER_PROBE_MAP_WATER=x,z` additionally checks ACE's entirely-water diagnostic and absence
+of a portal-space transition. These options require an eligible character and are rejected in
+passive mode; choose a verified entirely-water location for the water check.
 
 ## Packaging and platform status
 

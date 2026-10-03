@@ -73,6 +73,8 @@ export interface ClientUiDefaults {
 	readonly book: Omit<ClientUiPanel, "resizable">;
 	/** Diagnostics window with independently retained geometry; borders always resize. */
 	readonly debug: Omit<ClientUiPanel, "resizable">;
+	/** Retained World window with World and Housing tabs. */
+	readonly world: Omit<ClientUiPanel, "resizable">;
 	/** Floating client preferences window. */
 	readonly settings: Omit<ClientUiPanel, "resizable">;
 	/** Frame-rate readout. */

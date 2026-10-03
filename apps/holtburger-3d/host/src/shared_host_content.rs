@@ -30,6 +30,8 @@ pub struct SharedHostContent {
     pub motion_catalog: Arc<holtburger_content::MotionSequenceCatalog>,
     /// Optional static entity catalog shared by both host modes.
     pub weenie_catalog: Arc<WeenieCatalogContent>,
+    /// Lazy map-image service, independent of client authority and scene residency.
+    pub world_map: Arc<crate::world_map::WorldMapService>,
     /// Lazily parsed client bootstrap, cached at the content owner rather than in either mode.
     client_bootstrap: Arc<Mutex<Option<Arc<WorldBootstrap>>>>,
     /// One decoded spell table shared by bootstrap assembly and static queries.
@@ -64,7 +66,13 @@ impl SharedHostContent {
         let motion_catalog = repository
             .read_motion_sequence_catalog()
             .context("failed to project the motion contract from configured content")?;
+        let world_map = Arc::new(crate::world_map::WorldMapService::new(
+            Arc::clone(&repository),
+            std::env::var_os(crate::world_map::CACHE_ENV).map(std::path::PathBuf::from),
+            std::env::var_os(crate::world_map::IGNORE_CACHE_ENV).is_some_and(|value| value == "1"),
+        ));
         Ok(Self {
+            world_map,
             runtime: ContentAssetRuntime::new(service.clone()),
             repository,
             weenie_catalog,
@@ -142,6 +150,12 @@ impl SharedHostContent {
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum SharedContentCommand {
     HostStatus,
+    OpenWorldMap {
+        request: crate::world_map::OpenWorldMapRequest,
+    },
+    ReadWorldMapTiles {
+        request: crate::world_map::ReadWorldMapTilesRequest,
+    },
     LoadActiveRegionData,
     LoadAnimation {
         request: LoadAnimationRequest,
@@ -193,6 +207,8 @@ pub enum SharedContentCommand {
 /// Exact wire names owned by the shared-content dispatcher.
 pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "host_status",
+    "open_world_map",
+    "read_world_map_tiles",
     "load_active_region_data",
     "load_animation",
     "load_setup_visual",
@@ -221,6 +237,22 @@ pub async fn dispatch_shared_content(
 
     match command {
         HostStatus => encode_json(runtime.status()),
+        OpenWorldMap { request } => encode_json(
+            runtime
+                .content()
+                .world_map
+                .open(request.intent)
+                .await
+                .map_err(application_error)?,
+        ),
+        ReadWorldMapTiles { request } => Ok(HostResponse::Binary(
+            runtime
+                .content()
+                .world_map
+                .read_tiles(request)
+                .await
+                .map_err(application_error)?,
+        )),
         LoadActiveRegionData => Ok(HostResponse::Binary(
             crate::load_active_region_data_bytes(&runtime.content().runtime)
                 .await

@@ -57,6 +57,13 @@ const children = [];
 const tempDirectories = [];
 
 try {
+	if (options.worldMap) {
+		const cacheRoot = await mkdtemp(
+			join(tmpdir(), "holtburger-world-map-cache-"),
+		);
+		tempDirectories.push(cacheRoot);
+		childEnvironment.HOLTBURGER_WORLD_MAP_CACHE = cacheRoot;
+	}
 	const contentHostUrl =
 		options.clientHud || options.characterSheet
 			? null
@@ -89,7 +96,37 @@ try {
 		}
 	}
 	let report;
-	if (options.uiTheme) {
+	if (options.clientWorldMap) {
+		report = {
+			suite: "client-world-map",
+			passed: true,
+			evidence: result.worldMapPanel,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.worldMap) {
+		report = {
+			suite: "world-map",
+			passed: true,
+			hardware: result.hardware,
+			memory: result.memory,
+			contention: result.contention,
+			partial: result.partial,
+			markerProjection: result.markerProjection,
+			controls: result.controls,
+			settlements: result.settlements,
+			teleport: result.teleport,
+			initial: result.initial,
+			wholeWorld: result.wholeWorld,
+			closeUp: result.closeUp,
+			zoomLatency: result.zoomLatency,
+			reopened: result.reopened,
+			lost: result.lost,
+			failed: result.failed,
+			retried: result.retried,
+			disposed: result.disposed,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.uiTheme) {
 		report = {
 			uiTheme: result.uiTheme.evidence,
 			glRenderer: result.glRenderer,
@@ -320,6 +357,8 @@ try {
 function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
+		worldMap: false,
+		clientWorldMap: false,
 		clientHud: false,
 		clientConnection: false,
 		characterSheet: false,
@@ -438,6 +477,13 @@ function parseArgs(args) {
 			case "--client-connection":
 				parsed.clientHud = true;
 				parsed.clientConnection = true;
+				break;
+			case "--world-map":
+				parsed.worldMap = true;
+				break;
+			case "--client-world-map":
+				parsed.clientHud = true;
+				parsed.clientWorldMap = true;
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
@@ -1251,11 +1297,15 @@ function parseArgs(args) {
 		);
 	}
 	if (
-		[parsed.uiTheme, parsed.clientHud, parsed.characterSheet].filter(Boolean)
-			.length > 1
+		[
+			parsed.worldMap,
+			parsed.uiTheme,
+			parsed.clientHud,
+			parsed.characterSheet,
+		].filter(Boolean).length > 1
 	)
 		throw new Error(
-			"Choose one of --ui-theme, --client-hud, or --character-sheet.",
+			"Choose one of --world-map, --ui-theme, --client-hud, or --character-sheet.",
 		);
 	if (
 		parsed.cameraLandblockId &&
@@ -1659,6 +1709,8 @@ Options:
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
+  --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
+  --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4147,6 +4199,12 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientWorldMap)
+			return {
+				worldMapPanel: await probeClientWorldMap(client),
+				state: { error: null, ready: true },
+				consoleMessages,
+			};
 		if (options.characterSheet) {
 			return {
 				characterSheet: await probeCharacterSheet(
@@ -4255,7 +4313,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			: "&audioTrace=1";
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker = options.worldMarker ? "&worldMarker=true" : "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -4309,6 +4367,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.worldMap)
+			return await probeWorldMap(client, consoleMessages, browserWebSocketUrl);
 		await waitForHarnessApi(client);
 
 		if (process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL === "1") {
@@ -6275,4 +6335,508 @@ async function evaluateExpression(client, expression) {
 
 function delay(milliseconds) {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/** Production image decoding, Canvas2D rendering, retained-window ownership, and failure outcomes. */
+async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
+	const browser = await createCdpClient(browserWebSocketUrl);
+	let hardware;
+	try {
+		hardware = (await browser.send("SystemInfo.getInfo")).gpu.devices;
+	} finally {
+		browser.close();
+	}
+	const measureMemory = async () => {
+		const browser = await createCdpClient(browserWebSocketUrl);
+		try {
+			const { processInfo } = await browser.send("SystemInfo.getProcessInfo");
+			if (process.platform !== "linux")
+				return { platform: process.platform, processes: processInfo };
+			const processes = await Promise.all(
+				processInfo.map(async (info) => {
+					const status = await readFile(`/proc/${info.id}/status`, "utf8");
+					const rss = status.match(/^VmRSS:\s+(\d+) kB$/m);
+					if (!rss)
+						throw new Error(`Chrome process ${info.id} has no RSS status.`);
+					return { id: info.id, type: info.type, rssKiB: Number(rss[1]) };
+				}),
+			);
+			return { platform: process.platform, processes };
+		} finally {
+			browser.close();
+		}
+	};
+	const openingMemory = await measureMemory();
+	const api = "globalThis.__HOLTBURGER_WORLD_MAP_HARNESS__";
+	const until = async (kind) => {
+		const deadline = Date.now() + 120000;
+		while (Date.now() < deadline) {
+			const value = await evaluateExpression(client, `${api}?.read()`);
+			if (value?.kind === kind) return value;
+			if (value?.kind === "unavailable" || value?.kind === "load-failed")
+				throw new Error(JSON.stringify(value));
+			await delay(100);
+		}
+		throw new Error(`World map never reached ${kind}.`);
+	};
+	const partialDeadline = Date.now() + 120000;
+	let partial;
+	while (Date.now() < partialDeadline) {
+		partial = await evaluateExpression(client, `${api}?.read()`);
+		if (partial?.image?.appliedTiles > 0) break;
+		if (partial?.diagnostic) throw new Error(JSON.stringify(partial));
+		await delay(20);
+	}
+	if (partial?.kind !== "streaming" || partial.image.appliedTiles >= 256)
+		throw new Error("Cold image did not become usable progressively.");
+	const streamingSettlements = await evaluateExpression(
+		client,
+		`${api}.settlementProbe()`,
+	);
+	if (streamingSettlements.kind !== "streaming")
+		throw new Error(
+			"Settlement overlay was not exercised during tile streaming.",
+		);
+	const coldContent = await evaluateExpression(client, `${api}.contentProbe()`);
+	const streamingTeleport = await evaluateExpression(
+		client,
+		`${api}.teleportProbe()`,
+	);
+	if (streamingTeleport.kind !== "streaming")
+		throw new Error("Map click was not exercised during streaming.");
+	await evaluateExpression(client, `${api}.pan()`);
+	const partialScreenshot = (
+		await client.send("Page.captureScreenshot", { format: "png" })
+	).data;
+	const initial = await until("ready");
+	const controls = await evaluateExpression(client, `${api}.controlsProbe()`);
+	const readyTeleport = await evaluateExpression(
+		client,
+		`${api}.teleportProbe()`,
+	);
+	const readySettlements = await evaluateExpression(
+		client,
+		`${api}.settlementProbe()`,
+	);
+	const markerProjection = await evaluateExpression(
+		client,
+		`${api}.markerProjectionProbe()`,
+	);
+	await evaluateExpression(client, `${api}.fit()`);
+	const fitted = await evaluateExpression(client, `${api}.read()`);
+	const readyMemory = await measureMemory();
+	const warmContent = await evaluateExpression(client, `${api}.contentProbe()`);
+	if (
+		initial.image.appliedTiles !== 256 ||
+		initial.transferredBytes !== 2048 ** 2 * 4
+	)
+		throw new Error("World-map stream did not install the complete image.");
+	// Check focus release and fit-view preservation before switching to a closer projection.
+	await evaluateExpression(
+		client,
+		`document.querySelector('section.hud-window[aria-label="World"] button').focus(); true`,
+	);
+	await evaluateExpression(client, `${api}.visibility(false)`);
+	await delay(100);
+	const hiddenFit = await evaluateExpression(client, `${api}.read()`);
+	const retainedFocus = await evaluateExpression(
+		client,
+		`document.querySelector('section.hud-window[aria-label="World"]').contains(document.activeElement)`,
+	);
+	if (
+		retainedFocus ||
+		JSON.stringify(hiddenFit.view) !== JSON.stringify(fitted.view)
+	)
+		throw new Error(
+			"Hiding the World window retained focus or changed its view.",
+		);
+	await evaluateExpression(client, `${api}.visibility(true)`);
+
+	const wholeWorld = await evaluateExpression(
+		client,
+		`${api}.benchmark(${initial.view.spanMeters})`,
+	);
+	const overview = (
+		await client.send("Page.captureScreenshot", { format: "png" })
+	).data;
+	const zoomLatency = await evaluateExpression(
+		client,
+		`${api}.benchmarkZoomLatency()`,
+	);
+	const closeUp = await evaluateExpression(client, `${api}.benchmark(768)`);
+	await evaluateExpression(client, `${api}.pan()`);
+	const canvasIdentity = await evaluateExpression(
+		client,
+		`globalThis.__retainedMapCanvas = document.querySelector('canvas[aria-label="World terrain map"]'); true`,
+	);
+	if (!canvasIdentity) throw new Error("Map canvas missing.");
+	await evaluateExpression(client, `${api}.visibility(false)`);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Escape",
+		code: "Escape",
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Escape",
+		code: "Escape",
+	});
+	const hidden = await evaluateExpression(client, `${api}.read()`);
+	if (hidden.closeCount !== 0 || hidden.visible)
+		throw new Error("Hidden World window participated in Escape.");
+	await evaluateExpression(client, `${api}.visibility(true)`);
+	const retained = await evaluateExpression(
+		client,
+		`globalThis.__retainedMapCanvas === document.querySelector('canvas[aria-label="World terrain map"]')`,
+	);
+	const reopened = await evaluateExpression(client, `${api}.read()`);
+	if (
+		!retained ||
+		reopened.opens !== initial.opens ||
+		reopened.tileReads !== initial.tileReads
+	)
+		throw new Error("Map reopening requested data or replaced its canvas.");
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Escape",
+		code: "Escape",
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Escape",
+		code: "Escape",
+	});
+	await delay(100);
+	const escaped = await evaluateExpression(client, `${api}.read()`);
+	if (escaped.visible || escaped.closeCount !== 1)
+		throw new Error("Visible World window did not close with Escape.");
+	await evaluateExpression(client, `${api}.visibility(true)`);
+	const screenshot = (
+		await client.send("Page.captureScreenshot", { format: "png" })
+	).data;
+	await evaluateExpression(client, `${api}.loseContext()`);
+	await delay(100);
+	const lost = await evaluateExpression(client, `${api}.read()`);
+	if (lost.kind !== "load-failed")
+		throw new Error("Canvas contents loss was not retryable.");
+	await evaluateExpression(client, `${api}.retry()`);
+	await until("ready");
+	await evaluateExpression(client, `${api}.retryFixture()`);
+	const failed = await evaluateExpression(client, `${api}.read()`);
+	if (failed.kind !== "load-failed")
+		throw new Error("Injected load failure was not retryable.");
+	await evaluateExpression(client, `${api}.retry()`);
+	const retried = await until("ready");
+	const disposed = await evaluateExpression(client, `${api}.dispose()`);
+	if (disposed !== "disposed")
+		throw new Error("Owner teardown did not dispose resources.");
+	return {
+		state: {
+			error: null,
+			ready: true,
+			viewport: {
+				width: options.viewportWidth,
+				height: options.viewportHeight,
+			},
+		},
+		cameraSweepScreenshots: {
+			"whole-world": overview,
+			partial: partialScreenshot,
+		},
+		partial,
+		markerProjection,
+		controls,
+		settlements: { streaming: streamingSettlements, ready: readySettlements },
+		teleport: { streaming: streamingTeleport, ready: readyTeleport },
+		hardware,
+		memory: { opening: openingMemory, ready: readyMemory },
+		contention: { duringGeneration: coldContent, afterGeneration: warmContent },
+		initial,
+		wholeWorld,
+		closeUp,
+		zoomLatency,
+		reopened,
+		lost,
+		failed,
+		retried,
+		disposed,
+		screenshot,
+		consoleMessages,
+	};
+}
+
+/** The actual client shell owns first activation, panel switching, and retained placement. */
+async function probeClientWorldMap(client) {
+	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
+	const read = (expression) => evaluateExpression(client, expression);
+	const click = async (label) => {
+		await read(
+			`document.querySelector('button[aria-label="${label}"]').click()`,
+		);
+		await delay(100);
+	};
+	const initial = await read(`${api}.readWorldMapFixture()`);
+	if (initial.opens !== 0)
+		throw new Error("World map loaded before dock activation.");
+	await read(`${api}.holdWorldMapPreparation()`);
+	await click("World");
+	const readProgress = () =>
+		read(
+			`(() => { const status=document.querySelector('section.hud-window[aria-label="World"] [role="status"]'); const bar=status?.querySelector('progress'); return {label:status?.textContent.trim(), value:bar?.value, max:bar?.max}; })()`,
+		);
+	const startedProgress = await readProgress();
+	if (
+		!startedProgress.label?.startsWith("World map:") ||
+		startedProgress.value !== 1 ||
+		!(startedProgress.max > 0)
+	)
+		throw new Error("World panel did not display initial generation progress.");
+	const settlementPoint = await read(
+		`(() => { const node = [...document.querySelectorAll('section.hud-window[aria-label="World"] .world-settlements g[data-settlement]')].find(node => node.dataset.settlement === 'Holtburg'); const rect = node.querySelector('circle').getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		...settlementPoint,
+	});
+	const settlementTooltip = await read(
+		`document.querySelector('section.hud-window[aria-label="World"] .world-map-tooltip').textContent`,
+	);
+	if (settlementTooltip !== "Holtburg · 42.0N, 33.5E")
+		throw new Error(
+			"Client map pointer input did not show its settlement anchor.",
+		);
+	const partialBefore = await read(`${api}.readWorldMapFixture()`);
+	const partialPoint = await read(
+		`(() => {const rect=document.querySelector('canvas[aria-label="World terrain map"]').getBoundingClientRect(); return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};})()`,
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseWheel",
+		...partialPoint,
+		deltaX: 0,
+		deltaY: -400,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...partialPoint,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x: partialPoint.x + 30,
+		y: partialPoint.y + 20,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		x: partialPoint.x + 30,
+		y: partialPoint.y + 20,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+
+	await delay(50);
+
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x: partialPoint.x,
+		y: partialPoint.y,
+	});
+	const hoverPosition = await read(
+		`(() => { const tip = document.querySelector('section.hud-window[aria-label="World"] .world-map-tooltip'); return { hidden: tip.hidden, text: tip.textContent }; })()`,
+	);
+	if (
+		hoverPosition.hidden ||
+		!/\d+\.\d+[NS], \d+\.\d+[EW]/.test(hoverPosition.text)
+	)
+		throw new Error(
+			"Real map pointer input did not display outdoor coordinates.",
+		);
+	const partialAfter = await read(`${api}.readWorldMapFixture()`);
+	// Exercise browser pointer delivery through the real panel and session transport boundary.
+	const mapClick = async () => {
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...partialPoint,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...partialPoint,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		await delay(20);
+	};
+	await mapClick();
+	if ((await read(`${api}.readMapTeleports()`)).length !== 0)
+		throw new Error("Ordinary map click dispatched teleport.");
+	await read(`${api}.setMapTeleportPermission(true)`);
+	await delay(20);
+	await mapClick();
+	const mapRequests = await read(`${api}.readMapTeleports()`);
+	if (
+		mapRequests.length !== 1 ||
+		!Number.isFinite(mapRequests[0].args?.position?.x) ||
+		!Number.isFinite(mapRequests[0].args?.position?.z)
+	)
+		throw new Error(
+			"Privileged click did not reach the session with map coordinates.",
+		);
+	await read(`${api}.setMapTeleportPermission(false)`);
+	await delay(20);
+	await mapClick();
+	if ((await read(`${api}.readMapTeleports()`)).length !== 1)
+		throw new Error("Revoked map permission still dispatched.");
+	if (JSON.stringify(partialBefore) !== JSON.stringify(partialAfter))
+		throw new Error(
+			"Partial map gestures requested content or changed the game camera.",
+		);
+	if (
+		await read(
+			`document.querySelector('section.hud-window[aria-label="World"] button[aria-label="Reset view"]').disabled`,
+		)
+	)
+		throw new Error("Partial image controls were disabled.");
+	const beforeHousing = await read(`${api}.readWorldMapFixture()`);
+	await read(
+		`globalThis.__tabMapCanvas = document.querySelector('canvas[aria-label="World terrain map"]'); document.querySelector('[role="tab"][aria-controls$="-housing"]').click()`,
+	);
+	await delay(50);
+	if (
+		!(await read(
+			`document.querySelector('canvas[aria-label="World terrain map"]').closest('[role="tabpanel"]').hidden && [...document.querySelectorAll('[role="tabpanel"]')].some(panel => !panel.hidden && panel.textContent.includes('Housing is not available yet.'))`,
+		))
+	)
+		throw new Error(
+			"Housing tab did not hide the retained map and show its placeholder.",
+		);
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-world"]').click()`,
+	);
+	await delay(50);
+	if (
+		!(await read(
+			`globalThis.__tabMapCanvas === document.querySelector('canvas[aria-label="World terrain map"]')`,
+		)) ||
+		JSON.stringify(beforeHousing) !==
+			JSON.stringify(await read(`${api}.readWorldMapFixture()`))
+	)
+		throw new Error(
+			"Tab switching replaced the canvas or requested more map content.",
+		);
+	await read(`${api}.advanceWorldMapPreparation()`);
+	await delay(50);
+	const advancedProgress = await readProgress();
+	if (
+		advancedProgress.value !== Math.floor(advancedProgress.max / 2) ||
+		advancedProgress.label === startedProgress.label
+	)
+		throw new Error("World panel generation progress did not advance.");
+	await read(`${api}.releaseWorldMapPreparation()`);
+	const deadline = Date.now() + 30000;
+	while (
+		await read(
+			`Boolean(document.querySelector('section.hud-window[aria-label="World"] [role="status"]'))`,
+		)
+	) {
+		if (Date.now() > deadline)
+			throw new Error("Client World panel did not become ready.");
+		await delay(100);
+	}
+	const loaded = await read(`${api}.readWorldMapFixture()`);
+	if (loaded.opens !== 1 || loaded.deliveredTiles !== loaded.expectedTiles)
+		throw new Error("Dock did not eagerly load exactly one image.");
+	await read(
+		`globalThis.__clientWorldCanvas = document.querySelector('canvas[aria-label="World terrain map"]'); true`,
+	);
+	const mapPoint = await read(
+		`(() => {const rect=document.querySelector('canvas[aria-label="World terrain map"]').getBoundingClientRect(); return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};})()`,
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseWheel",
+		...mapPoint,
+		deltaX: 0,
+		deltaY: -400,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...mapPoint,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x: mapPoint.x + 30,
+		y: mapPoint.y + 20,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		x: mapPoint.x + 30,
+		y: mapPoint.y + 20,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	await delay(100);
+	const gestured = await read(`${api}.readWorldMapFixture()`);
+	if (JSON.stringify(loaded) !== JSON.stringify(gestured))
+		throw new Error(
+			"Map gestures requested content or changed the game camera.",
+		);
+	await click("Inventory");
+	if (
+		!(await read(
+			`document.querySelector('section.hud-window[aria-label="World"]').hidden && Boolean(document.querySelector('section.hud-window[aria-label="Inventory"]'))`,
+		))
+	)
+		throw new Error("Panel switching did not retain a hidden World window.");
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Escape",
+		code: "Escape",
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Escape",
+		code: "Escape",
+	});
+	await delay(100);
+	if (
+		await read(
+			`Boolean(document.querySelector('section.hud-window[aria-label="Inventory"]'))`,
+		)
+	)
+		throw new Error("Hidden World window intercepted Inventory Escape.");
+	await click("World");
+	const retained = await read(
+		`globalThis.__clientWorldCanvas === document.querySelector('canvas[aria-label="World terrain map"]') && !document.querySelector('section.hud-window[aria-label="World"]').hidden`,
+	);
+	const reopened = await read(`${api}.readWorldMapFixture()`);
+	if (!retained || JSON.stringify(loaded) !== JSON.stringify(reopened))
+		throw new Error("Reopen replaced the canvas or reloaded the dataset.");
+	await click("Close World");
+	if (
+		!(await read(
+			`document.querySelector('section.hud-window[aria-label="World"]').hidden`,
+		))
+	)
+		throw new Error("World close did not hide its retained window.");
+	return {
+		initial,
+		loaded,
+		reopened,
+		retained,
+		startedProgress,
+		advancedProgress,
+	};
 }

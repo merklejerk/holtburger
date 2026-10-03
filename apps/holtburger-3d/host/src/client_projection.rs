@@ -440,6 +440,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Core-derived current permission and lifecycle admission for map teleport.
+    pub can_teleport_from_map: bool,
     /// Shared transport observation, absent before the first completed interval.
     pub connection: Option<holtburger_core::client::connection::ConnectionSample>,
     /// Server-confirmed P2P offers, atomically recovered with their item descriptions.
@@ -940,6 +942,7 @@ pub enum ClientHostEvent {
     /// Core-derived inventory preview, correlated with the active gesture.
     InventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     EntityCollisionDisabled(bool),
+    MapTeleportCapabilityChanged(bool),
     CurrentState(Box<ClientCurrentState>),
     /// The receiver lost events and is awaiting the existing application replacement.
     StateResyncing,
@@ -1152,6 +1155,7 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
+            can_teleport_from_map: snapshot.can_teleport_from_map,
             known_spells: snapshot.known_spells.clone(),
             trade: snapshot.trade.clone(),
             enchantments: snapshot
@@ -1182,6 +1186,9 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::MapTeleportCapabilityChanged(allowed) => {
+            Some(ClientHostEvent::MapTeleportCapabilityChanged(allowed))
+        }
         ClientViewEvent::ProgressionEvaluated {
             request_id,
             evaluations,

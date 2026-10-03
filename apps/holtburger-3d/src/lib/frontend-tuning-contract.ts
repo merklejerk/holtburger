@@ -360,6 +360,15 @@ export interface FrontendTuning {
 	readonly portalTransition: FrontendPortalTransitionTuning;
 	/** Shared overhead-map presentation and view bounds. */
 	readonly map: FrontendMapTuning;
+	/** App-local outdoor overview view and zoom policy. */
+	readonly worldMap: {
+		/** Pointer travel in CSS pixels that permanently disqualifies a click. */
+		readonly panThresholdPixels: number;
+		/** Minimum horizontal view extent in meters. */
+		readonly minimumSpanMeters: number;
+		/** Exponential zoom per normalized wheel pixel. */
+		readonly wheelZoomRate: number;
+	};
 	/** Shared HUD minimap interaction policy. */
 	readonly minimap: FrontendMinimapTuning;
 	/** Renderer presentation defaults and quality policy. */

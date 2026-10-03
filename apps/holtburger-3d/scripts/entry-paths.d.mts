@@ -16,6 +16,7 @@ export type ClientLaunchArgumentName =
 	| "password"
 	| "melee-max-chase-distance"
 	| "ignore-config"
+	| "ignore-world-map-cache"
 	| "settings-file";
 export function parseClientLaunchArgument(argument: string): {
 	readonly name: ClientLaunchArgumentName;

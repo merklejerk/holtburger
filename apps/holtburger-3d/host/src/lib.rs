@@ -62,8 +62,10 @@ pub mod sky_source;
 pub mod sound_table_source;
 pub mod source_projection;
 pub mod spell_references;
+mod terrain_color;
 pub mod ui_icons;
 pub mod weenie_appearance;
+pub mod world_map;
 
 pub use shared_host_content::SharedHostContent;
 
@@ -92,6 +94,9 @@ use physics_script_source::serialize_physics_script_record_binary;
 use physics_script_table_source::serialize_physics_script_table_record_binary;
 use sound_table_source::serialize_sound_table_record_binary;
 use source_projection::dat_id;
+#[cfg(test)]
+use terrain_color::mean_rgb_from_rgba8_texels;
+use terrain_color::mean_rgb_rgba8;
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
 const BINARY_ENVELOPE_HEADER_LEN: usize = 12;
@@ -1178,44 +1183,6 @@ enum TexturePixelsSurfaceManifest {
     },
     /// Every unrelated texture purpose preserves the existing surface manifest shape.
     Conventional(TexturePixelsSurfaceFields),
-}
-
-/// Compute one normalized RGB mean from complete RGBA8 level-zero pixels.
-fn mean_rgb_rgba8(width: u32, height: u32, pixels: &[u8]) -> Result<[f32; 3]> {
-    let texel_count = usize::try_from(u64::from(width) * u64::from(height))?;
-    let expected_byte_length = texel_count
-        .checked_mul(4)
-        .context("terrain-color RGBA8 byte length overflowed")?;
-    if texel_count == 0 || pixels.len() != expected_byte_length {
-        anyhow::bail!("terrain-color mean requires complete non-empty RGBA8 pixels");
-    }
-    mean_rgb_from_rgba8_texels(
-        texel_count,
-        pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|texel| [texel[0], texel[1], texel[2], texel[3]]),
-    )
-}
-
-fn mean_rgb_from_rgba8_texels(
-    expected_texel_count: usize,
-    texels: impl IntoIterator<Item = [u8; 4]>,
-) -> Result<[f32; 3]> {
-    let mut sums = [0_u64; 3];
-    let mut texel_count = 0_usize;
-    for texel in texels {
-        sums[0] += u64::from(texel[0]);
-        sums[1] += u64::from(texel[1]);
-        sums[2] += u64::from(texel[2]);
-        texel_count += 1;
-    }
-    if texel_count == 0 || texel_count != expected_texel_count {
-        anyhow::bail!("terrain-color mean received an incompatible texel count");
-    }
-    let normalization = 1.0_f64 / (texel_count as f64 * f64::from(u8::MAX));
-    Ok(sums.map(|sum| (sum as f64 * normalization) as f32))
 }
 
 fn terrain_sections(terrain: &LandblockTerrain) -> Vec<BinarySectionManifest> {

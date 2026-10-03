@@ -1,9 +1,34 @@
 use crate::messages::movement::types::RawMotionState;
-use crate::messages::utils::{align_offset, pad_to_4};
+use crate::messages::utils::{align_offset, pad_to_4, read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::position::WorldPosition;
 use serde::{Deserialize, Serialize};
+
+/// Privileged map teleport (`0x00D6`); ACE resolves height and building placement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdvocateTeleportActionData {
+    /// Retail target field; ACE reads but does not use it for map teleport.
+    pub target: String,
+    /// Outdoor destination in AC landblock-local coordinates.
+    pub position: WorldPosition,
+}
+
+impl ProtocolUnpack for AdvocateTeleportActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Some(Self {
+            target: read_string16(data, offset)?,
+            position: WorldPosition::unpack(data, offset)?,
+        })
+    }
+}
+
+impl ProtocolPack for AdvocateTeleportActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.target);
+        self.position.pack(buf);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MoveToStateActionData {
@@ -200,6 +225,44 @@ mod tests {
     use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
     use holtburger_common::Guid;
+
+    #[test]
+    fn advocate_teleport_matches_ace_wire_order() {
+        // ACE GameActionAdvocateTeleport: String16L then cell, XYZ, quaternion WXYZ.
+        let expected = [
+            7, 0, 0, 0, 0xd6, 0, 0, 0, // sequence and action
+            0, 0, 0, 0, // empty padded target
+            1, 0, 0x34, 0x12, // cell 12340001
+            0, 0, 0x20, 0x41, // X 10
+            0, 0, 0xa0, 0x41, // Y 20
+            0, 0, 0, 0, // Z 0
+            0, 0, 0x80, 0x3f, // W 1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // XYZ 0
+        ];
+        let message = GameActionMessage {
+            sequence: 7,
+            action: GameAction::AdvocateTeleport(Box::new(AdvocateTeleportActionData {
+                target: String::new(),
+                position: WorldPosition {
+                    landblock_id: Guid(0x12340001),
+                    coords: holtburger_common::Vector3::new(10.0, 20.0, 0.0),
+                    rotation: holtburger_common::Quaternion::identity(),
+                },
+            })),
+        };
+        let mut packed = Vec::new();
+        message.pack(&mut packed);
+        assert_eq!(packed, expected);
+        let mut offset = 0;
+        assert_eq!(
+            GameActionMessage::unpack(&expected, &mut offset),
+            Some(message)
+        );
+        assert_eq!(offset, expected.len());
+        for length in 0..expected.len() {
+            assert!(GameActionMessage::unpack(&expected[..length], &mut 0).is_none());
+        }
+    }
 
     const RETAIL_JUMP_ACTION_BODY: [u8; 56] = [
         0x00, 0x00, 0x00, 0x3F, // extent: 0.5

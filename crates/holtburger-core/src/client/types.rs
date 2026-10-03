@@ -366,6 +366,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Current character may request map teleport; includes in-world lifecycle admission.
+    pub can_teleport_from_map: bool,
     /// Latest transport rates and live health; absent before the first interval.
     pub connection: Option<super::connection::ConnectionSample>,
     /// Complete P2P negotiation level recovered with its semantic item records.
@@ -708,6 +710,8 @@ pub enum ClientViewEvent {
     EntityFactsChanged(super::entity_facts::ClientEntityDelta),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
     LifecycleChanged(ClientLifecycleState),
+    /// Character permission or lifecycle changed map-teleport admission.
+    MapTeleportCapabilityChanged(bool),
     /// Ordered jump gesture result used only to reconcile optimistic client presentation.
     CharacterMotionFeedback(ClientCharacterMotionFeedback),
     /// Latest correlated precise-jump hover evaluation; older pointer samples are replaceable.
@@ -990,6 +994,8 @@ pub enum ClientCommand {
     RecallLifestone,
     TeleportToPklArena,
     TeleportToMarketplace,
+    /// Privileged outdoor map request; ACE supplies destination height and building placement.
+    TeleportToMapPosition(holtburger_common::position::WorldPosition),
     RecallAllegianceHousing,
     SwearAllegiance {
         target: Guid,

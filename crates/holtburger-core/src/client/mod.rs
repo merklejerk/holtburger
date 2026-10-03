@@ -39,6 +39,7 @@ pub mod inventory_plan;
 mod inventory_runtime;
 pub mod inventory_storage;
 pub mod item_use;
+mod map_teleport;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -132,6 +133,8 @@ enum PublishedCharacterMotionCapabilities {
 }
 
 pub struct ClientRuntime {
+    /// Last published cold map-teleport admission, for edge-only notification.
+    published_map_teleport_capability: bool,
     pub session: Session,
     /// Shared traffic baseline and rates, independent of world replacement.
     connection: connection::ConnectionSampler,
@@ -339,6 +342,7 @@ impl ClientRuntime {
     /// Builds one atomic replacement level for shells that lost their event baseline.
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
+            can_teleport_from_map: self.can_teleport_from_map(),
             lifecycle: self.lifecycle(),
             connection: self.connection.snapshot(
                 Instant::now(),
@@ -870,6 +874,7 @@ impl ClientRuntime {
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
+        self.publish_map_teleport_capability();
         self.emit_character_sheet();
     }
 
@@ -924,6 +929,7 @@ impl ClientRuntime {
 
     /// Reconcile once against final world facts after all events from one packet.
     fn finish_character_world_events(&mut self, sheet_changed: bool) {
+        self.publish_map_teleport_capability();
         if self.progression.reconcile(&self.world) {
             self.emit_progression_guards();
         } else if sheet_changed {

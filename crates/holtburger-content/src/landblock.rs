@@ -181,27 +181,78 @@ impl LandblockAssetAssembler {
         active_region: &ActiveRegionData,
         raw_landblock_id: u32,
     ) -> Result<Option<LandblockAsset>> {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_key = ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id);
-        if content.resource_metadata(landblock_key).is_none() {
+        let Some((landblock, info)) =
+            load_landblock_records(content, decode_cache, raw_landblock_id)?
+        else {
             return Ok(None);
-        }
-
-        let landblock = decode_cache
-            .cell_landblock(content, landblock_id)
-            .with_context(|| format!("Could not load CellLandblock 0x{landblock_id:08X}"))?;
-        ensure!(
-            landblock.id == landblock_id,
-            "CellLandblock source 0x{landblock_id:08X} decoded record id 0x{:08X}",
-            landblock.id
-        );
-
+        };
+        let landblock_id = landblock.id;
         let terrain = assemble_terrain(&landblock, &active_region.descriptor)?;
-        let info = if landblock.has_objects == 0 {
-            None
-        } else {
-            let info_id = landblock_id & 0xffff_fffe;
-            Some(
+
+        Ok(Some(assemble_from_records(
+            landblock_id,
+            terrain,
+            info.as_deref(),
+        )))
+    }
+}
+
+/// Reads a landblock's authored terrain without loading objects, buildings, or interior records.
+/// Only a missing CellLandblock returns `None`; scene classification does not filter terrain.
+pub fn read_landblock_terrain(
+    content: &ContentRepository,
+    decode_cache: &ContentDecodeCache,
+    active_region: &ActiveRegionData,
+    raw_landblock_id: u32,
+) -> Result<Option<LandblockTerrain>> {
+    load_landblock(content, decode_cache, raw_landblock_id)?
+        .map(|landblock| assemble_terrain(&landblock, &active_region.descriptor))
+        .transpose()
+}
+
+/// Load and validate the terrain root independently of optional scene products.
+fn load_landblock(
+    content: &ContentRepository,
+    decode_cache: &ContentDecodeCache,
+    raw_landblock_id: u32,
+) -> Result<Option<std::sync::Arc<CellLandblock>>> {
+    let landblock_id = normalize_landblock_id(raw_landblock_id);
+    let landblock_key = ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id);
+    if content.resource_metadata(landblock_key).is_none() {
+        return Ok(None);
+    }
+    let landblock = decode_cache
+        .cell_landblock(content, landblock_id)
+        .with_context(|| format!("Could not load CellLandblock 0x{landblock_id:08X}"))?;
+    ensure!(
+        landblock.id == landblock_id,
+        "CellLandblock source 0x{landblock_id:08X} decoded record id 0x{:08X}",
+        landblock.id
+    );
+    Ok(Some(landblock))
+}
+
+/// Validated terrain and scene metadata used by shallow scene assembly.
+type LandblockRecords = (
+    std::sync::Arc<CellLandblock>,
+    Option<std::sync::Arc<LandblockInfo>>,
+);
+
+fn load_landblock_records(
+    content: &ContentRepository,
+    decode_cache: &ContentDecodeCache,
+    raw_landblock_id: u32,
+) -> Result<Option<LandblockRecords>> {
+    let Some(landblock) = load_landblock(content, decode_cache, raw_landblock_id)? else {
+        return Ok(None);
+    };
+    let landblock_id = landblock.id;
+
+    let info = if landblock.has_objects == 0 {
+        None
+    } else {
+        let info_id = landblock_id & 0xffff_fffe;
+        Some(
                 decode_cache
                     .landblock_info(content, info_id)
                     .with_context(|| {
@@ -210,23 +261,18 @@ impl LandblockAssetAssembler {
                         )
                     })?,
             )
-        };
+    };
 
-        if let Some(info) = &info {
-            let expected_id = landblock_id & 0xffff_fffe;
-            ensure!(
-                info.id == expected_id,
-                "LandblockInfo source 0x{expected_id:08X} decoded record id 0x{:08X}",
-                info.id
-            );
-        }
-
-        Ok(Some(assemble_from_records(
-            landblock_id,
-            terrain,
-            info.as_deref(),
-        )))
+    if let Some(info) = &info {
+        let expected_id = landblock_id & 0xffff_fffe;
+        ensure!(
+            info.id == expected_id,
+            "LandblockInfo source 0x{expected_id:08X} decoded record id 0x{:08X}",
+            info.id
+        );
     }
+
+    Ok(Some((landblock, info)))
 }
 
 fn assemble_terrain(
@@ -541,6 +587,101 @@ mod tests {
                 z: 0.0,
             },
         }
+    }
+
+    #[test]
+    fn terrain_query_includes_dungeon_roots_without_loading_scene_records() {
+        use holtburger_dat::{DatFileType, HbaWriter};
+        use std::sync::Arc;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("terrain.hba");
+        let mut writer = HbaWriter::new();
+        // Record layout is ID/HasObjects, 81 u16 terrain samples, 81 height bytes, alignment.
+        let record = |id: u32, has_objects: u32, nonflat: bool| {
+            let mut bytes = Vec::new();
+            bytes.extend(id.to_le_bytes());
+            bytes.extend(has_objects.to_le_bytes());
+            for vertex in 0..LANDBLOCK_GRID_SIZE.pow(2) {
+                bytes.extend((vertex as u16 * 4).to_le_bytes());
+            }
+            bytes.extend(
+                (0..LANDBLOCK_GRID_SIZE.pow(2))
+                    .map(|vertex| if nonflat { vertex as u8 } else { 0 }),
+            );
+            bytes.resize(bytes.len().next_multiple_of(4), 0);
+            bytes
+        };
+        for (id, has_objects, nonflat) in [
+            (0x0105_ffff, 1, false),
+            (0x0106_ffff, 0, true),
+            (0x0107_ffff, 1, true),
+        ] {
+            writer
+                .add(
+                    EOR_CELL_NAMESPACE,
+                    id,
+                    DatFileType::Landblock as u32,
+                    record(id, has_objects, nonflat),
+                )
+                .unwrap();
+        }
+        let mut info = Vec::new();
+        info.extend(0x0105_fffe_u32.to_le_bytes());
+        info.extend(1_u32.to_le_bytes());
+        info.extend(0_u32.to_le_bytes());
+        info.extend(0_u16.to_le_bytes());
+        info.extend(0_u16.to_le_bytes());
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0105_fffe,
+                DatFileType::LandblockInfo as u32,
+                info,
+            )
+            .unwrap();
+        writer.write(&path).unwrap();
+        let repository = ContentRepository::from_hba_path(&path).unwrap();
+        let region = ActiveRegionData::new(Arc::new(synthetic_region(std::array::from_fn(|i| {
+            i as f32
+        }))));
+        let cache = ContentDecodeCache::new();
+        assert!(
+            read_landblock_terrain(&repository, &cache, &region, 0x0104_ffff)
+                .unwrap()
+                .is_none()
+        );
+        let dungeon = read_landblock_terrain(&repository, &cache, &region, 0x0105_ffff)
+            .unwrap()
+            .unwrap();
+        assert!(dungeon.heights.iter().all(|height| *height == 0.0));
+        let full_dungeon = LandblockAssetAssembler
+            .assemble(&repository, &cache, &region, 0x0105_ffff)
+            .unwrap()
+            .unwrap();
+        assert_eq!(full_dungeon.scene_class, LandblockSceneClass::DungeonOnly);
+        assert_eq!(
+            dungeon.terrain_samples,
+            full_dungeon.terrain.terrain_samples
+        );
+        let terrain = read_landblock_terrain(&repository, &cache, &region, 0x0106_ffff)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terrain.heights[1], LANDBLOCK_GRID_SIZE as f32);
+        assert_eq!(terrain.terrain_samples[1], LANDBLOCK_GRID_SIZE as u16 * 4);
+        let full = LandblockAssetAssembler
+            .assemble(&repository, &cache, &region, 0x0106_ffff)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terrain.heights, full.terrain.heights);
+        assert_eq!(terrain.cell_diagonals, full.terrain.cell_diagonals);
+        let terrain_only = read_landblock_terrain(&repository, &cache, &region, 0x0107_ffff)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terrain_only.heights, terrain.heights);
+        let error = LandblockAssetAssembler
+            .assemble(&repository, &cache, &region, 0x0107_ffff)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("promises required LandblockInfo"));
     }
 
     fn synthetic_region(land_height_table: [f32; 256]) -> RegionDesc {

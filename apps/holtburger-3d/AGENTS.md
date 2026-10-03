@@ -345,6 +345,18 @@ routine adjustment, not constants whose current values are behavioral invariants
   do not turn a current preference into a limit merely to make it testable.
 - Delete tests whose only claim is that today's configurable default remains today's default.
 
+## Editable SVG Assets
+
+- Author static UI icons and marker artwork as independent `.svg` files under
+  `src/assets/icons/`. Do not inline their shapes in Svelte markup or construct
+  their geometry in TypeScript.
+- Import assets through the existing SVG component pipeline for Svelte markup.
+  Imperative overlays may import raw SVG and clone its authored nodes.
+- Keep dynamic placement, visibility, and text in the consuming UI or overlay;
+  an SVG container or data-driven label does not need to be an asset.
+- Preserve CSS theme hooks when extracting artwork so themes can style the
+  rendered SVG elements.
+
 ## Working Style
 
 - Prefer clean cutovers. Remove aliases, compatibility wrappers, stale comments,

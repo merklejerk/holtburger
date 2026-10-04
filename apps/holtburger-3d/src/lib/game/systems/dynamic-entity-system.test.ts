@@ -525,6 +525,108 @@ describe("DynamicEntitySystem authored ownership", () => {
 		}
 	});
 
+	it("keeps held geometry independent of parent scale through pose, scale, and appearance updates", async () => {
+		const { scene, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const parentBase = source("scaled-parent");
+		const parentPose = Object.assign(Mat4.identity(), { m41: 1 });
+		const parentSource: PlacedDynamicPresentationSource = {
+			...parentBase,
+			source: {
+				...parentBase.source,
+				scale: new Vec3(3, 3, 3),
+				presentation: {
+					...parentBase.source.presentation,
+					parts: parentBase.source.presentation.parts.map((part) => ({
+						...part,
+						defaultScale: new Vec3(2, 4, 5),
+					})),
+					placementPoses: new Map([
+						[0, { placementId: 0, partTransforms: [parentPose] }],
+					]),
+					holdingLocations: new Map([
+						[
+							"right-hand",
+							{
+								location: "right-hand",
+								partIndex: 0,
+								offsetTransform: Object.assign(Mat4.identity(), { m41: 2 }),
+							},
+						],
+					]),
+				},
+			},
+		};
+		const childBase = source("scaled-child");
+		const childSource: PlacedDynamicPresentationSource = {
+			...childBase,
+			source: { ...childBase.source, scale: new Vec3(0.5, 0.5, 0.5) },
+		};
+		const parent = system.replaceOwner("parent", [parentSource]);
+		const child = system.replaceOwner("child", [childSource]);
+		await Promise.all([parent.ready, child.ready]);
+		const prepared = requiredAt(parent.getPreparedEntities(), 0);
+		commit(parent);
+		commit(child);
+		const parentRoot = requiredAt(parent.nodeIds, 0);
+		const childRoot = requiredAt(child.nodeIds, 0);
+		system.publishPresentation([
+			{
+				...presentationSample(prepared, 0),
+				articulatedPose: {
+					authoredRootTransform: null,
+					partToObjectTransforms: [parentPose],
+				},
+			},
+		]);
+		system.attachEntity(childRoot, parentRoot, "right-hand", 0);
+		const frame = system.requestPartNode(parentRoot, 0);
+		if (frame === null)
+			throw new Error("Parent attachment frame was not installed.");
+		const expectChild = (x: number) => {
+			const transform = system.withSelectionGeometry(
+				childRoot,
+				({ parts }) => parts[0]?.sourceToLandblock,
+			);
+			expect(transform?.m41).toBe(x);
+			expect([transform?.m11, transform?.m22, transform?.m33]).toEqual([
+				0.5, 0.5, 0.5,
+			]);
+		};
+		// Scale moves the hand; the holding offset and child's geometry keep their own sizes.
+		expectChild(5);
+		expect(scene.getResolvedPlacement(frame)?.localToLandblock.m11).toBe(1);
+		expect(
+			system.getRenderable(parentRoot)?.parts[0]?.localToVisualRoot.m11,
+		).toBe(6);
+		system.publishPresentation([
+			{
+				...presentationSample(prepared, 0),
+				articulatedPose: {
+					authoredRootTransform: null,
+					partToObjectTransforms: [Object.assign(Mat4.identity(), { m41: 4 })],
+				},
+			},
+		]);
+		expectChild(14);
+		system.updateRootScale(parentRoot, 2);
+		expectChild(10);
+		const replacement = await system.stageVisualReplacement(
+			"parent",
+			parentRoot,
+			parentSource.source,
+		);
+		if (replacement.kind !== "staged")
+			throw new Error("Compatible replacement was rejected.");
+		replacement.commit();
+		replacement.release();
+		expect(system.requestPartNode(parentRoot, 0)).toBe(frame);
+		expectChild(10);
+		system.removeOwner("child");
+		await system.destroy();
+	});
+
 	it("keeps held-child poses and picking coherent through parent and child appearance replacement", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -1434,6 +1536,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		expect(system.getPreparedAnimation(nodeId)).toBe(prepared);
 		expect(scene.getResolvedPlacement(partNodeId)?.localToLandblock.m11).toBe(
+			1,
+		);
+		expect(system.getRenderable(nodeId)?.parts[0]?.localToVisualRoot.m11).toBe(
 			2,
 		);
 		expectBounds(

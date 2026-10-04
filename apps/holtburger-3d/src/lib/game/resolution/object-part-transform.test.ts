@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { transformPoint3 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
-import { composeObjectPartTransform } from "./object-part-transform";
+import {
+	composeObjectPartFrame,
+	composeObjectPartTransform,
+} from "./object-part-transform";
+
+describe("composeObjectPartFrame", () => {
+	it("preserves rigid orientation while source scale moves the part origin", () => {
+		const pose = new Mat4(0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1);
+		const scale = new Vec3(2, 3, 4);
+		const frame = composeObjectPartFrame(pose, scale, Mat4.zero());
+		expect(transformPoint3(frame, Vec3.zero())).toEqual(new Vec3(2, 6, 12));
+		expect(transformPoint3(frame, new Vec3(1, 0, 0))).toEqual(
+			new Vec3(2, 7, 12),
+		);
+		expect(composeObjectPartFrame(pose, scale, pose)).toEqual(frame);
+	});
+});
 
 describe("composeObjectPartTransform", () => {
 	it("scales pose translation without scaling its orientation", () => {

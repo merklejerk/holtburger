@@ -132,13 +132,13 @@ pub struct JunctionCandidate<'a> {
 
 /// One coplanar-overlapping group that was detected but declined a junction id.
 #[derive(Debug, Clone)]
-pub struct OversizedJunction {
+pub struct AmbiguousJunction {
     /// Candidate indices of every member crossing, ascending.
     pub members: Vec<usize>,
-    /// Supporting plane of the first member, for the caller's warning.
+    /// Supporting plane of the first conflicting crossing, for the caller's warning.
     pub plane: RenderPlane,
-    /// Largest per-source-domain member count that exceeded the exemption bound.
-    pub largest_domain_member_count: usize,
+    /// Three same-source-domain crossings with pairwise-overlapping interiors.
+    pub conflicting_crossings: [usize; 3],
 }
 
 /// Junction identities for one candidate set, parallel to the input slice.
@@ -146,27 +146,28 @@ pub struct OversizedJunction {
 pub struct JunctionResolution {
     /// One-based junction group per candidate; `None` carries today's strict entry test.
     pub assignments: Vec<Option<NonZeroU32>>,
-    /// Groups declined because a single source domain contributed more than two members.
-    pub oversized: Vec<OversizedJunction>,
+    /// Groups declined because three exits in one source domain can compete.
+    pub ambiguous: Vec<AmbiguousJunction>,
 }
 
 /// Whether two crossing apertures are coplanar and share interior area.
 ///
-/// This is the authoritative junction predicate: the propagation shader's equal-depth exemption is
-/// sound exactly where this holds, because a same-depth advance is confined to one supporting
-/// plane. Orientation is ignored — a junction's two directed crossings face opposite ways.
+/// Establish footprint connectivity for a possible coincident junction. Orientation is ignored
+/// because reciprocal crossings can have opposed normals. `resolve_junction_groups` separately
+/// checks whether same-domain exits can compete before assigning an identity.
 pub fn apertures_form_junction(left: &PortalAperture, right: &PortalAperture) -> Result<bool> {
-    if !planes_coincide(left.plane, right.plane)? {
-        return Ok(false);
-    }
-    if !bounds_overlap_with_slack(left, right) {
-        return Ok(false);
+    Ok(junction_overlap_area(left, right)? > JUNCTION_OVERLAP_AREA_MINIMUM)
+}
+
+/// Compute overlap once; grouping tolerates tiny contact while ambiguity must retain it.
+fn junction_overlap_area(left: &PortalAperture, right: &PortalAperture) -> Result<f64> {
+    if !planes_coincide(left.plane, right.plane)? || !bounds_overlap_with_slack(left, right) {
+        return Ok(0.0);
     }
     let basis = PlaneBasis::from_plane(left.plane)?;
     let left_polygon = project_polygon(left, basis)?;
     let right_polygon = project_polygon(right, basis)?;
-    let shared_area = left_polygon.intersection(&right_polygon).unsigned_area();
-    Ok(shared_area > JUNCTION_OVERLAP_AREA_MINIMUM)
+    Ok(left_polygon.intersection(&right_polygon).unsigned_area())
 }
 
 /// Group coplanar-overlapping crossings into junction identities.
@@ -174,13 +175,18 @@ pub fn apertures_form_junction(left: &PortalAperture, right: &PortalAperture) ->
 /// Connected components are formed over the pairwise predicate. A component receives one shared
 /// one-based id unless it is a pure reciprocal pair — an ordinary doorway's two directed crossings
 /// occupy one footprint and need no exemption because reciprocal suppression already covers them —
-/// or some single source domain contributed more than two members. The latter is the exemption's
-/// soundness bound: with at most two same-domain exits on one plane, reciprocal suppression leaves
-/// at most one usable equal-depth advance, so no rasterization-order ambiguity or same-depth cycle
-/// can exist. Oversized components keep the strict entry test and are reported for the caller to
-/// log.
+/// or one source domain has three pairwise-overlapping exits. Pairwise-disjoint pieces do not
+/// compete at a pixel, even when a larger aperture connects them into one component. A triangle
+/// in the same-domain overlap graph conservatively detects every possible three-way interior
+/// overlap (including pairwise overlaps without a common triple intersection). Without one,
+/// at most two same-domain exits cover any interior point; reciprocal suppression retains the
+/// existing bound of at most one equal-depth continuation. Ambiguous components keep the strict
+/// entry test. Any positive interior overlap counts for ambiguity, including overlaps smaller
+/// than the area threshold used to form components. Boundary-only contact has zero area.
 pub fn resolve_junction_groups(candidates: &[JunctionCandidate]) -> Result<JunctionResolution> {
     let mut parents: Vec<usize> = (0..candidates.len()).collect();
+    // Retain only same-domain edges: component connectivity and ambiguity share one geometry test.
+    let mut overlaps = vec![std::collections::BTreeSet::<usize>::new(); candidates.len()];
     fn find(parents: &mut Vec<usize>, index: usize) -> usize {
         if parents[index] != index {
             let root = find(parents, parents[index]);
@@ -190,7 +196,15 @@ pub fn resolve_junction_groups(candidates: &[JunctionCandidate]) -> Result<Junct
     }
     for left in 0..candidates.len() {
         for right in (left + 1)..candidates.len() {
-            if apertures_form_junction(candidates[left].aperture, candidates[right].aperture)? {
+            let shared_area =
+                junction_overlap_area(candidates[left].aperture, candidates[right].aperture)?;
+            if shared_area > 0.0
+                && candidates[left].source_domain == candidates[right].source_domain
+            {
+                overlaps[left].insert(right);
+                overlaps[right].insert(left);
+            }
+            if shared_area > JUNCTION_OVERLAP_AREA_MINIMUM {
                 let left_root = find(&mut parents, left);
                 let right_root = find(&mut parents, right);
                 if left_root != right_root {
@@ -207,7 +221,7 @@ pub fn resolve_junction_groups(candidates: &[JunctionCandidate]) -> Result<Junct
     }
 
     let mut assignments = vec![None; candidates.len()];
-    let mut oversized = Vec::new();
+    let mut ambiguous = Vec::new();
     let mut next_group = 1u32;
     for members in members_by_root.into_values() {
         if members.len() < 2 {
@@ -222,18 +236,11 @@ pub fn resolve_junction_groups(candidates: &[JunctionCandidate]) -> Result<Junct
             );
             continue;
         }
-        let mut domain_counts = std::collections::BTreeMap::<u32, usize>::new();
-        for member in &members {
-            *domain_counts
-                .entry(candidates[*member].source_domain)
-                .or_default() += 1;
-        }
-        let largest = domain_counts.values().copied().max().unwrap_or(0);
-        if largest > 2 {
-            oversized.push(OversizedJunction {
-                plane: candidates[members[0]].aperture.plane,
+        if let Some(conflicting_crossings) = overlapping_exit_triangle(&members, &overlaps) {
+            ambiguous.push(AmbiguousJunction {
+                plane: candidates[conflicting_crossings[0]].aperture.plane,
                 members,
-                largest_domain_member_count: largest,
+                conflicting_crossings,
             });
             continue;
         }
@@ -256,8 +263,31 @@ pub fn resolve_junction_groups(candidates: &[JunctionCandidate]) -> Result<Junct
     }
     Ok(JunctionResolution {
         assignments,
-        oversized,
+        ambiguous,
     })
+}
+
+/// A same-domain overlap triangle witnesses a potentially ambiguous equal-depth continuation.
+fn overlapping_exit_triangle(
+    members: &[usize],
+    overlaps: &[std::collections::BTreeSet<usize>],
+) -> Option<[usize; 3]> {
+    for &left in members {
+        // Stable increasing indices visit each triangle once and keep diagnostics reproducible.
+        for &middle in overlaps[left].range((left + 1)..) {
+            // Subthreshold overlap edges can reach another component; they cannot grant or
+            // invalidate this component's shared junction identity.
+            if members.binary_search(&middle).is_err() {
+                continue;
+            }
+            for &right in overlaps[middle].range((middle + 1)..) {
+                if overlaps[left].contains(&right) && members.binary_search(&right).is_ok() {
+                    return Some([left, middle, right]);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Whether two supporting planes are parallel and co-located within junction tolerances.
@@ -590,7 +620,66 @@ mod tests {
                 .iter()
                 .all(|assignment| *assignment == Some(group))
         );
-        assert!(resolution.oversized.is_empty());
+        assert!(resolution.ambiguous.is_empty());
+    }
+
+    #[test]
+    fn partitioned_openings_share_a_junction_with_one_tall_opening() {
+        let tall = aperture(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)], 0.0);
+        let pieces = (0..3)
+            .map(|band| {
+                let bottom = band as f32;
+                aperture(
+                    &[
+                        (0.0, bottom),
+                        (4.0, bottom),
+                        (4.0, bottom + 1.0),
+                        (0.0, bottom + 1.0),
+                    ],
+                    0.0,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut candidates = vec![
+            junction_candidate(&tall, 1, Some(1)),
+            junction_candidate(&tall, 0, Some(0)),
+        ];
+        for (band, piece) in pieces.iter().enumerate() {
+            let exit = 2 + band * 2;
+            candidates.push(junction_candidate(piece, 2, Some(exit + 1)));
+            candidates.push(junction_candidate(piece, 0, Some(exit)));
+        }
+
+        let resolution = resolve_junction_groups(&candidates).unwrap();
+
+        let group = resolution.assignments[0].expect("partitioned passage receives a junction");
+        assert!(
+            resolution
+                .assignments
+                .iter()
+                .all(|assignment| *assignment == Some(group))
+        );
+        assert!(resolution.ambiguous.is_empty());
+    }
+
+    #[test]
+    fn overlapping_partition_pieces_decline_the_whole_junction() {
+        let tall = aperture(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)], 0.0);
+        let lower = aperture(&[(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)], 0.0);
+        let upper = aperture(&[(0.0, 1.0), (4.0, 1.0), (4.0, 3.0), (0.0, 3.0)], 0.0);
+        let candidates = [
+            junction_candidate(&tall, 1, Some(1)),
+            junction_candidate(&tall, 0, Some(0)),
+            junction_candidate(&lower, 2, Some(3)),
+            junction_candidate(&lower, 0, Some(2)),
+            junction_candidate(&upper, 2, Some(5)),
+            junction_candidate(&upper, 0, Some(4)),
+        ];
+
+        let resolution = resolve_junction_groups(&candidates).unwrap();
+
+        assert!(resolution.assignments.iter().all(Option::is_none));
+        assert_eq!(resolution.ambiguous[0].conflicting_crossings, [1, 3, 5]);
     }
 
     #[test]
@@ -607,12 +696,12 @@ mod tests {
         let resolution = resolve_junction_groups(&candidates).unwrap();
 
         assert!(resolution.assignments.iter().all(Option::is_none));
-        assert!(resolution.oversized.is_empty());
+        assert!(resolution.ambiguous.is_empty());
     }
 
     #[test]
-    fn oversized_domain_membership_degrades_without_ids() {
-        // Three overlapping exits from one domain on one plane: the exemption bound fails, so the
+    fn three_pairwise_overlapping_same_domain_exits_receive_no_id() {
+        // Three pairwise-overlapping exits from one domain: the exemption bound fails, so the
         // whole component must keep the strict entry test.
         let footprint = aperture(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)], 0.0);
         let candidates = [
@@ -625,9 +714,79 @@ mod tests {
         let resolution = resolve_junction_groups(&candidates).unwrap();
 
         assert!(resolution.assignments.iter().all(Option::is_none));
-        assert_eq!(resolution.oversized.len(), 1);
-        assert_eq!(resolution.oversized[0].members, vec![0, 1, 2, 3]);
-        assert_eq!(resolution.oversized[0].largest_domain_member_count, 3);
+        assert_eq!(resolution.ambiguous.len(), 1);
+        assert_eq!(resolution.ambiguous[0].members, vec![0, 1, 2, 3]);
+        assert_eq!(resolution.ambiguous[0].conflicting_crossings, [0, 1, 2]);
+    }
+
+    #[test]
+    fn subthreshold_overlap_still_rejects_competing_partition_pieces() {
+        let tall = aperture(&[(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (0.0, 2.0)], 0.0);
+        let overlap_height = (JUNCTION_OVERLAP_AREA_MINIMUM * 0.5) as f32;
+        let lower = aperture(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], 0.0);
+        let upper = aperture(
+            &[
+                (0.0, 1.0 - overlap_height),
+                (1.0, 1.0 - overlap_height),
+                (1.0, 2.0),
+                (0.0, 2.0),
+            ],
+            0.0,
+        );
+        assert!(!apertures_form_junction(&lower, &upper).unwrap());
+        assert!(junction_overlap_area(&lower, &upper).unwrap() > 0.0);
+        let candidates = [
+            junction_candidate(&tall, 0, None),
+            junction_candidate(&lower, 0, None),
+            junction_candidate(&upper, 0, None),
+        ];
+
+        let resolution = resolve_junction_groups(&candidates).unwrap();
+
+        assert!(resolution.assignments.iter().all(Option::is_none));
+        assert_eq!(resolution.ambiguous[0].conflicting_crossings, [0, 1, 2]);
+    }
+
+    #[test]
+    fn subthreshold_contact_outside_a_component_does_not_decline_its_junction() {
+        let door = aperture(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], 0.0);
+        let height = (JUNCTION_OVERLAP_AREA_MINIMUM * 0.5) as f32;
+        let tiny = aperture(&[(0.0, 0.0), (1.0, 0.0), (1.0, height), (0.0, height)], 0.0);
+        let candidates = [
+            junction_candidate(&door, 0, None),
+            junction_candidate(&door, 0, None),
+            junction_candidate(&tiny, 0, None),
+        ];
+
+        let resolution = resolve_junction_groups(&candidates).unwrap();
+
+        let group = resolution.assignments[0].expect("larger openings retain their junction");
+        assert_eq!(resolution.assignments[1], Some(group));
+        assert_eq!(resolution.assignments[2], None);
+        assert!(resolution.ambiguous.is_empty());
+    }
+
+    #[test]
+    fn pairwise_overlap_without_a_triple_intersection_is_conservatively_declined() {
+        let horizontal = aperture(&[(0.0, 0.0), (4.0, 0.0), (4.0, 1.0), (0.0, 1.0)], 0.0);
+        let vertical = aperture(&[(0.0, 0.0), (1.0, 0.0), (1.0, 4.0), (0.0, 4.0)], 0.0);
+        let diagonal = aperture(&[(0.0, 3.0), (3.0, 0.0), (3.0, 3.0)], 0.0);
+        let basis = PlaneBasis::from_plane(horizontal.plane).unwrap();
+        let shared = project_polygon(&horizontal, basis)
+            .unwrap()
+            .intersection(&project_polygon(&vertical, basis).unwrap())
+            .intersection(&project_polygon(&diagonal, basis).unwrap());
+        assert!(shared.unsigned_area() <= JUNCTION_OVERLAP_AREA_MINIMUM);
+        let candidates = [
+            junction_candidate(&horizontal, 0, None),
+            junction_candidate(&vertical, 0, None),
+            junction_candidate(&diagonal, 0, None),
+        ];
+
+        let resolution = resolve_junction_groups(&candidates).unwrap();
+
+        assert!(resolution.assignments.iter().all(Option::is_none));
+        assert_eq!(resolution.ambiguous[0].conflicting_crossings, [0, 1, 2]);
     }
 
     #[test]

@@ -75,7 +75,7 @@ interface PortalScopeWindowArenaTrace {
 	readonly outgoingCrossingInputCount: number;
 	/** Apertures classified against the finite near-clip volume. */
 	readonly nearClipClassificationCount: number;
-	/** Non-straddling aperture planes tested against the camera position. */
+	/** Crossings whose source planes were tested once in this frame. */
 	readonly facingTestCount: number;
 	/** Route-specific inherited-window projections attempted. */
 	readonly routeProjectionCount: number;
@@ -333,6 +333,8 @@ class PortalScopeWindowTopologyIndex {
 
 /** Fixed queue, selection, mutation, and numeric-window storage. */
 class PortalScopeWindowArena {
+	/** Per-frame source-plane classification: 0 untested, 1 back-facing, 2 facing. */
+	readonly cameraFacingByCrossingId: Uint8Array;
 	readonly coverageByScopeId: Uint32Array;
 	/** Mutation-log tails retained before each frontier expansion. */
 	readonly frontierMutationCheckpoints: Uint32Array;
@@ -376,6 +378,7 @@ class PortalScopeWindowArena {
 		maximumDepth: number,
 		windowCapacity: PortalWindowArenaCapacity,
 	) {
+		this.cameraFacingByCrossingId = new Uint8Array(crossingCount);
 		this.coverageByScopeId = new Uint32Array(scopeCount);
 		this.coverageByScopeId.fill(NO_PORTAL_ARENA_WINDOW);
 		this.frontierMutationCheckpoints = new Uint32Array(maximumDepth);
@@ -406,6 +409,7 @@ class PortalScopeWindowArena {
 		this.selectedScopeIds = new Uint32Array(scopeCount);
 		this.windows = new PortalWindowArena(windowCapacity, crossingCount);
 		this.typedCapacityBytes =
+			this.cameraFacingByCrossingId.byteLength +
 			this.coverageByScopeId.byteLength +
 			this.frontierMutationCheckpoints.byteLength +
 			this.frontierQueueCheckpoints.byteLength +
@@ -796,7 +800,7 @@ export class PortalScopeWindowCuller {
 		this.#frame.selectedRenderDomainCount = this.#selectedRenderDomainCount;
 		this.#frame.selectedScopeCount = this.#selectedScopeCount;
 		this.#frame.status = declinedDepth === null ? "complete" : "truncated";
-		this.#refreshSelectedCrossings(arena, index);
+		this.#refreshSelectedCrossings(arena, index, input);
 		this.#frame.trace.arenaCapacityBytes =
 			arena.typedCapacityBytes +
 			index.outgoingCrossingIds.byteLength +
@@ -859,7 +863,7 @@ export class PortalScopeWindowCuller {
 		this.#frame.selectedRenderDomainCount = this.#selectedRenderDomainCount;
 		this.#frame.selectedScopeCount = this.#selectedScopeCount;
 		this.#frame.status = "truncated";
-		this.#refreshSelectedCrossings(this.#arena, this.#index);
+		this.#refreshSelectedCrossings(this.#arena, this.#index, null);
 		this.#frame.trace.selectedCrossingInputCount =
 			this.#selectedCrossingInputCount;
 		this.#frame.trace.selectedCrossingMarkerWordInputCount =
@@ -868,6 +872,7 @@ export class PortalScopeWindowCuller {
 	}
 
 	#beginFrame(arena: PortalScopeWindowArena): number {
+		arena.cameraFacingByCrossingId.fill(0);
 		for (let index = 0; index < this.#queueCount; index += 1) {
 			arena.queueWindows[index] = NO_PORTAL_ARENA_WINDOW;
 			arena.queueNearPlaneStraddles[index] = 0;
@@ -925,6 +930,7 @@ export class PortalScopeWindowCuller {
 	#refreshSelectedCrossings(
 		arena: PortalScopeWindowArena,
 		index: PortalScopeWindowTopologyIndex,
+		input: PortalScopeWindowCullInput | null,
 	): void {
 		for (
 			let ordinal = 0;
@@ -938,6 +944,21 @@ export class PortalScopeWindowCuller {
 			const crossingId = arena.selectedCrossingIds[ordinal]!;
 			arena.clearCrossingSelection(crossingId);
 			arena.selectedNearPlaneByCrossingId[crossingId] = 0;
+		}
+		// Preserve traversal eligibility before GPU admission: facing source planes or
+		// straddles with a retained route. Rebuild exceptions after every frontier retreat.
+		for (let queueIndex = 1; queueIndex < this.#queueCount; queueIndex += 1) {
+			if (arena.queueNearPlaneStraddles[queueIndex] === 0) continue;
+			const crossingId = arena.queueCrossingIds[queueIndex]!;
+			if (crossingId < 0) {
+				throw new Error(
+					"Retained near-plane portal work has no selected crossing.",
+				);
+			}
+			// A near-plane straddle within one render island affects traversal only.
+			if (this.#sharesRenderDomain(index, index.crossings[crossingId]!))
+				continue;
+			arena.selectedNearPlaneByCrossingId[crossingId] = 1;
 		}
 		let selectedCrossingCount = 0;
 		const markerWordCount = arena.selectedCrossingMarkerWords.length;
@@ -959,7 +980,9 @@ export class PortalScopeWindowCuller {
 					this.#selectedCrossingInputCount += 1;
 					if (
 						arena.selectedByScopeId[crossing.targetScopeId] === 0 ||
-						this.#sharesRenderDomain(index, crossing)
+						this.#sharesRenderDomain(index, crossing) ||
+						(!this.#facesCamera(arena, index, crossingId, input) &&
+							arena.selectedNearPlaneByCrossingId[crossingId] === 0)
 					) {
 						continue;
 					}
@@ -989,7 +1012,9 @@ export class PortalScopeWindowCuller {
 				if (
 					arena.selectedByScopeId[crossing.sourceScopeId] === 0 ||
 					arena.selectedByScopeId[crossing.targetScopeId] === 0 ||
-					this.#sharesRenderDomain(index, crossing)
+					this.#sharesRenderDomain(index, crossing) ||
+					(!this.#facesCamera(arena, index, crossingId, input) &&
+						arena.selectedNearPlaneByCrossingId[crossingId] === 0)
 				) {
 					continue;
 				}
@@ -999,19 +1024,30 @@ export class PortalScopeWindowCuller {
 				selectedCrossingCount += 1;
 			}
 		}
-		for (let queueIndex = 1; queueIndex < this.#queueCount; queueIndex += 1) {
-			if (arena.queueNearPlaneStraddles[queueIndex] === 0) continue;
-			const crossingId = arena.queueCrossingIds[queueIndex]!;
-			if (crossingId < 0) {
+		this.#frame.selectedCrossingCount = selectedCrossingCount;
+	}
+
+	/** Reuse source-plane decisions through selection and synchronous frontier retreat. */
+	#facesCamera(
+		arena: PortalScopeWindowArena,
+		index: PortalScopeWindowTopologyIndex,
+		crossingId: number,
+		input: PortalScopeWindowCullInput | null,
+	): boolean {
+		let classification = arena.cameraFacingByCrossingId[crossingId]!;
+		if (classification === 0) {
+			// Retreat only removes scopes/routes, so every ordinary candidate was classified
+			// during the initial selection, including retained near-plane straddles.
+			if (input === null) {
 				throw new Error(
-					"Retained near-plane portal work has no selected crossing.",
+					"Portal frontier retreat encountered an unclassified source plane.",
 				);
 			}
-			// A near-plane straddle within one render island affects traversal only.
-			if (!arena.isCrossingSelected(crossingId)) continue;
-			arena.selectedNearPlaneByCrossingId[crossingId] = 1;
+			this.#facingTestCount += 1;
+			classification = facesCamera(index.crossings[crossingId]!, input) ? 2 : 1;
+			arena.cameraFacingByCrossingId[crossingId] = classification;
 		}
-		this.#frame.selectedCrossingCount = selectedCrossingCount;
+		return classification === 2;
 	}
 
 	#sharesRenderDomain(
@@ -1059,10 +1095,11 @@ export class PortalScopeWindowCuller {
 				this.#projectionMeter,
 				crossingId,
 			);
-			if (!nearPlaneStraddle) {
-				this.#facingTestCount += 1;
-				if (!facesCamera(indexed, input)) continue;
-			}
+			if (
+				!nearPlaneStraddle &&
+				!this.#facesCamera(arena, index, crossingId, input)
+			)
+				continue;
 			const minimumNdcArea = nearPlaneStraddle
 				? 0
 				: input.portalFootprint.minimumPixelArea /

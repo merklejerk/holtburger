@@ -906,19 +906,18 @@ fn resolve_crossing_junction_groups(
         })
         .collect::<Vec<_>>();
     let resolution = resolve_junction_groups(&candidates)?;
-    for oversized in &resolution.oversized {
+    for ambiguous in &resolution.ambiguous {
         log::warn!(
             "landblock 0x{landblock_id:08X} declines a portal junction: {} crossings share plane \
-             (({:.4},{:.4},{:.4})|{:.4}) and one render domain contributes {}; members keep the \
-             strict entry test: {}",
-            oversized.members.len(),
-            oversized.plane.normal.x,
-            oversized.plane.normal.y,
-            oversized.plane.normal.z,
-            oversized.plane.d,
-            oversized.largest_domain_member_count,
-            oversized
-                .members
+             (({:.4},{:.4},{:.4})|{:.4}) and three same-domain exits overlap pairwise; members keep \
+             the strict entry test; conflicting apertures: {}",
+            ambiguous.members.len(),
+            ambiguous.plane.normal.x,
+            ambiguous.plane.normal.y,
+            ambiguous.plane.normal.z,
+            ambiguous.plane.d,
+            ambiguous
+                .conflicting_crossings
                 .iter()
                 .map(|member| {
                     apertures.identities[crossings[*member].source_aperture_index].as_str()

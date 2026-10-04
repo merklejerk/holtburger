@@ -29,7 +29,10 @@ import {
 	type ResolvedObjectPresentation,
 	resolvePlacementPose,
 } from "../resolution/presentation";
-import { composeObjectPartTransform } from "../resolution/object-part-transform";
+import {
+	composeObjectPartFrame,
+	composeObjectPartTransform,
+} from "../resolution/object-part-transform";
 import type {
 	ActiveDynamicPart,
 	ArticulatedPose,
@@ -72,7 +75,7 @@ import type { SelectionGeometryMorphology } from "../selection/entity-interactio
 
 /** A requested authored part frame retained until its entity is destroyed. */
 interface DynamicAttachmentFrame extends SceneChildTransform {
-	/** Authored identity used to rebind the borrowed matrix after appearance replacement. */
+	/** Authored identity selecting the rigid pose across appearance replacement. */
 	readonly partIndex: number;
 }
 
@@ -92,7 +95,7 @@ interface DynamicEntityRecord {
 	/** Mutable display content updated independently from immutable visual setup facts. */
 	nameplateContent: NameplateContent | null;
 	renderable: DynamicEntityRenderable;
-	/** Sparse attachment nodes and borrowed matrices published with the visual root atomically. */
+	/** Sparse attachment nodes and owned rigid matrices published with the visual root atomically. */
 	attachmentFrames: DynamicAttachmentFrame[];
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
@@ -607,15 +610,14 @@ export class DynamicEntitySystem<
 					};
 				});
 				const renderable = prepareRenderable(parts, template);
-				// Attachment identities survive replacement, but their borrowed matrices do not.
-				const attachmentFrames = entity.attachmentFrames.map((frame) => {
+				// Requested rigid frames retain their identities across geometry replacement.
+				for (const frame of entity.attachmentFrames) {
 					const part = parts.find((part) => part.partIndex === frame.partIndex);
 					if (!part)
 						throw new Error(
 							`Replacement removes requested attachment part ${frame.partIndex}.`,
 						);
-					return { ...frame, transform: part.localToVisualRoot };
-				});
+				}
 				const rigidBounds = this.#presentationBoundsForSample(
 					parts,
 					entity.visualRootTransform,
@@ -631,7 +633,6 @@ export class DynamicEntitySystem<
 				entity.articulatedPose = replacementPose;
 				entity.setupBounds = setupBounds;
 				entity.renderable = renderable;
-				entity.attachmentFrames = attachmentFrames;
 				entity.motionPlayback = visual.motionPlayback;
 				entity.preparedAnimation = visual.animation;
 				entity.cullingBounds = visual.animation.localBounds
@@ -642,7 +643,11 @@ export class DynamicEntitySystem<
 				entity.selectionGeometryMorphology =
 					template.selectionGeometryMorphology;
 				this.#publishCullingBounds(entity);
-				this.#publishAttachmentFrames(entity, entity.visualRootTransform);
+				this.#publishAttachmentFrames(
+					entity,
+					entity.visualRootTransform,
+					replacementPose,
+				);
 				this.#pendingTemplateStages.delete(ownerId);
 			},
 		};
@@ -686,14 +691,24 @@ export class DynamicEntitySystem<
 			(frame) => frame.partIndex === part.partIndex,
 		);
 		if (existing) return existing;
+		const pose = entity.articulatedPose.partToObjectTransforms[part.partIndex];
+		if (!pose)
+			throw new Error(
+				`Requested attachment part ${part.partIndex} has no current pose.`,
+			);
+		const transform = composeObjectPartFrame(
+			pose,
+			entity.rootScale,
+			Mat4.zero(),
+		);
 		const frame = {
 			partIndex: part.partIndex,
 			nodeId: this.#scene.createNode({
 				localBounds: null,
-				localTransform: part.localToVisualRoot,
+				localTransform: transform,
 				parentId: entity.visualRootNodeId,
 			}),
-			transform: part.localToVisualRoot,
+			transform,
 		};
 		entity.attachmentFrames.push(frame);
 		return frame;
@@ -703,7 +718,16 @@ export class DynamicEntitySystem<
 	#publishAttachmentFrames(
 		entity: DynamicEntityRecord,
 		visualRootTransform: Mat4,
+		pose: ArticulatedPose,
 	): void {
+		for (const frame of entity.attachmentFrames) {
+			const partPose = pose.partToObjectTransforms[frame.partIndex];
+			if (!partPose)
+				throw new Error(
+					`Requested attachment part ${frame.partIndex} has no current pose.`,
+				);
+			composeObjectPartFrame(partPose, entity.rootScale, frame.transform);
+		}
 		this.#scene.updateLocalTransformWithChildren(
 			entity.visualRootNodeId,
 			visualRootTransform,
@@ -784,7 +808,7 @@ export class DynamicEntitySystem<
 				part.localToVisualRoot,
 			);
 		}
-		this.#publishAttachmentFrames(child, child.visualRootTransform);
+		this.#publishAttachmentFrames(child, child.visualRootTransform, pose);
 		child.articulatedPose = pose;
 		const placedBounds = presentationBoundsForPose(child.source, pose);
 		child.rigidPresentationBounds = placedBounds;
@@ -1043,7 +1067,11 @@ export class DynamicEntitySystem<
 				part.localToVisualRoot,
 			);
 		}
-		this.#publishAttachmentFrames(entity, entity.visualRootTransform);
+		this.#publishAttachmentFrames(
+			entity,
+			entity.visualRootTransform,
+			entity.articulatedPose,
+		);
 		entity.rigidPresentationBounds = this.#presentationBoundsForSample(
 			entity.renderable.parts,
 			entity.visualRootTransform,
@@ -1624,7 +1652,11 @@ export class DynamicEntitySystem<
 			entity.appliedEnvelopeRadius,
 			entity.publishedPresentationBounds,
 		);
-		this.#publishAttachmentFrames(entity, visualRootTransform);
+		this.#publishAttachmentFrames(
+			entity,
+			visualRootTransform,
+			sample.articulatedPose,
+		);
 		entity.visualRootTransform.copy(visualRootTransform);
 		entity.articulatedPose = sample.articulatedPose;
 		entity.rigidPresentationBounds = rigidPresentationBounds;

@@ -1,6 +1,24 @@
 import { Mat4, Vec3 } from "../math/types";
 
 /**
+ * Retail's part frame carries source-scaled translation and a rigid orientation.
+ * `CPartArray::UpdateParts` (`acclient.c:314107`) keeps geometry scale separate;
+ * `CPhysicsObj::UpdateChild` (`acclient.c:308302`) combines this frame with the
+ * holding offset without passing parent geometry scale into the child's frame.
+ */
+export function composeObjectPartFrame(
+	rigidPose: Mat4,
+	sourceScale: Vec3,
+	target: Mat4,
+): Mat4 {
+	target.copy(rigidPose);
+	target.m41 = rigidPose.m41 * sourceScale.x;
+	target.m42 = rigidPose.m42 * sourceScale.y;
+	target.m43 = rigidPose.m43 * sourceScale.z;
+	return target;
+}
+
+/**
  * Compose one retail-style part transform from a rigid pose and independent geometry scales.
  *
  * `Frame::combine` scales the pose origin by the object source scale without scaling its

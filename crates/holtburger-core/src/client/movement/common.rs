@@ -7,17 +7,8 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_world::WorldState;
-use holtburger_world::context::WorldContextExt;
 use std::f32::consts::{PI, TAU};
 
-// ACE's movement packets carry a run-rate / speed scalar, not a standalone
-// "already world-space" speed constant divorced from animation. In the retail
-// math that scalar is applied against the run animation base speed, and after
-// the engine's unit conversion it ends up numerically matching our meters/sec
-// representation. That coincidence is useful, but it is also the trap: this
-// value is the *maximum* run speed for a fully capped player, not the speed
-// every character should emit or simulate.
-const FALLBACK_RUN_RATE_SCALAR: f32 = 4.5;
 pub(super) const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
 pub(super) const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
@@ -113,19 +104,10 @@ fn hold_key_for_motion_state(state: CharacterDrive) -> HoldKey {
     }
 }
 
-pub(super) fn player_run_rate_scalar(world: &WorldState) -> f32 {
-    world.player_run_rate().unwrap_or(FALLBACK_RUN_RATE_SCALAR)
-}
-
-fn longitudinal_command_for_state(
-    longitudinal: LongitudinalMotion,
-    gait: Gait,
-    run_rate_scalar: f32,
-) -> (u32, f32) {
-    match (gait, longitudinal) {
-        (Gait::Run, LongitudinalMotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, run_rate_scalar),
-        (Gait::Walk, LongitudinalMotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, 1.0),
-        (_, LongitudinalMotion::Backward) => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
+fn longitudinal_command_for_state(longitudinal: LongitudinalMotion) -> u32 {
+    match longitudinal {
+        LongitudinalMotion::Forward => WALK_FORWARD_MOTION_COMMAND,
+        LongitudinalMotion::Backward => WALK_BACKWARD_MOTION_COMMAND,
     }
 }
 
@@ -148,7 +130,6 @@ pub(super) fn build_motion_state_raw_motion_state(
     state: CharacterDrive,
     motion_style: MotionStyle,
 ) -> RawMotionState {
-    let run_rate_scalar = player_run_rate_scalar(world);
     let axis_hold_key = hold_key_for_motion_state(state) as u32;
     let mut raw_motion_state = RawMotionState {
         flags: RawMotionFlags::CURRENT_HOLD_KEY,
@@ -157,14 +138,15 @@ pub(super) fn build_motion_state_raw_motion_state(
     };
 
     if let Some(longitudinal) = state.longitudinal {
-        let (command, speed) =
-            longitudinal_command_for_state(longitudinal, state.gait, run_rate_scalar);
         raw_motion_state.flags |= RawMotionFlags::FORWARD_COMMAND
             | RawMotionFlags::FORWARD_HOLD_KEY
             | RawMotionFlags::FORWARD_SPEED;
-        raw_motion_state.forward_command = Some(command);
+        raw_motion_state.forward_command = Some(longitudinal_command_for_state(longitudinal));
         raw_motion_state.forward_hold_key = Some(axis_hold_key);
-        raw_motion_state.forward_speed = Some(speed);
+        // Raw speed precedes hold-key adjustment. ACE and retail apply the actor's run
+        // rate when Run is held (`CMotionInterp::apply_run_to_command`, acclient.c:329739).
+        // Sending an already-adjusted rate here would multiply forward running twice.
+        raw_motion_state.forward_speed = Some(1.0);
     }
 
     if let Some(lateral) = state.lateral {

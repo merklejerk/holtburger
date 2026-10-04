@@ -1,6 +1,6 @@
 use super::super::common::{
     TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
-    build_autonomous_position, build_motion_state_raw_motion_state, player_run_rate_scalar,
+    build_autonomous_position, build_motion_state_raw_motion_state,
     raw_motion_state_with_motion_style,
 };
 use super::*;
@@ -98,7 +98,7 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
         },
     );
 
-    player_run_rate_scalar(world)
+    world.player_run_rate().expect("seeded player run rate")
 }
 
 fn seed_local_player(world: &mut WorldState, guid: Guid, position: WorldPosition) {
@@ -825,30 +825,33 @@ fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
 }
 
 #[test]
-fn motion_state_raw_motion_state_uses_player_run_rate_scalar_for_forward_speed() {
-    let mut world = WorldState::synthetic();
-    let expected_run_rate_scalar = seed_player_run_rate_scalar(&mut world, 300);
+fn forward_run_packet_leaves_actor_rate_to_hold_key_adjustment() {
+    for run_skill in [0, 100, 300, 800] {
+        let mut world = WorldState::synthetic();
+        let run_rate = seed_player_run_rate_scalar(&mut world, run_skill);
+        let drive = CharacterDrive::builder().run().forward().build();
+        let raw = build_motion_state_raw_motion_state(&world, drive, MotionStyle::PreserveServer);
 
-    let raw_motion_state = build_motion_state_raw_motion_state(
-        &world,
-        CharacterDrive::builder().run().forward().build(),
-        MotionStyle::PreserveServer,
-    );
+        assert_eq!(raw.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
+        assert_eq!(raw.current_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw.forward_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw.forward_speed, Some(1.0));
+        assert!(raw.flags.contains(RawMotionFlags::FORWARD_HOLD_KEY));
+        assert!(raw.flags.contains(RawMotionFlags::FORWARD_SPEED));
 
-    assert_eq!(
-        raw_motion_state.forward_command,
-        Some(WALK_FORWARD_MOTION_COMMAND)
-    );
-    assert_eq!(raw_motion_state.forward_hold_key, Some(HoldKey::Run as u32));
-    assert_eq!(
-        raw_motion_state.forward_speed,
-        Some(expected_run_rate_scalar)
-    );
-    assert!(
-        raw_motion_state
-            .flags
-            .contains(RawMotionFlags::FORWARD_HOLD_KEY)
-    );
+        // ACE's Run-held WalkForward becomes RunForward at raw speed * actor rate
+        // (MotionInterp.apply_run_to_command; acclient.c:329739-329778).
+        let server_forward = raw
+            .forward_speed
+            .map(|speed| (MotionCommand::RUN_FORWARD, speed * run_rate));
+        let local_order = crate::motion_order_for_drive(
+            drive,
+            run_rate,
+            MotionCommand(MotionStance::NonCombat as u32),
+        )
+        .expect("valid running drive");
+        assert_eq!(server_forward, local_order.forward);
+    }
 }
 
 #[test]

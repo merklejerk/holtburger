@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getLandblockCoordinates } from "../landblocks";
+import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec2, Vec3 } from "../math/types";
 import type {
 	PortalCrossingId,
@@ -8,7 +8,11 @@ import type {
 	SceneTopologyScope,
 	SceneTopologyView,
 } from "../scene";
-import type { PlanarAperture } from "../scene/planar-aperture";
+import {
+	PORTAL_QUERY_EPSILON,
+	signedPlaneDistance,
+	type PlanarAperture,
+} from "../scene/planar-aperture";
 import { scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
@@ -186,6 +190,161 @@ describe("portal scope-window culler differential", () => {
 				(_, ordinal) => alternate.selectedCrossing(ordinal).id,
 			),
 		).toEqual(["portal-crossing:sparse-unselected-0"]);
+	});
+
+	it.each([false, true])(
+		"excludes back-facing crossings between independently reached rooms (sparse=%s)",
+		(sparse) => {
+			const first = envCellScope("facing-first"),
+				second = envCellScope("facing-second");
+			const aperture = rectangleAperture(-0.8, -0.8, 0.8, 0.8);
+			const scopes = [
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(first, "first"),
+				topologyScope(second, "second"),
+			];
+			const edges = [
+				crossing("root-first", OUTDOOR_SCOPE, first, aperture),
+				crossing("root-second", OUTDOOR_SCOPE, second, aperture),
+				{
+					...crossing("back-facing", first, second, aperture),
+					acceptedSide: "negative" as const,
+				},
+			];
+			if (sparse) {
+				for (let ordinal = 0; ordinal < 64; ordinal += 1) {
+					const source = envCellScope(`unreached-source-${ordinal}`),
+						target = envCellScope(`unreached-target-${ordinal}`);
+					scopes.push(
+						topologyScope(source, `source-${ordinal}`),
+						topologyScope(target, `target-${ordinal}`),
+					);
+					edges.push(
+						crossing(`unreached-${ordinal}`, source, target, aperture),
+					);
+				}
+			}
+			const culler = new PortalScopeWindowCuller(cullerCapacity());
+			const graph = topology(scopes, edges, 91_000);
+			const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+			expect(frame.selectedScopeCount).toBe(3);
+			expect(selectedCrossingIds(frame)).toEqual([
+				"portal-crossing:root-first",
+				"portal-crossing:root-second",
+			]);
+			expect(frame.trace.selectedCrossingMarkerWordInputCount > 0).toBe(sparse);
+			// A changed eye must invalidate the previous frame's facing decisions.
+			const reverse = culler.cull(
+				graph,
+				planInput(OUTDOOR_SCOPE, {
+					nearClipVolume: createCameraNearClipVolume(
+						{ fov: 90, near: 0.5 },
+						{ position: new Vec3(0, 0, -1), rotation: Quat.identity() },
+						1,
+					),
+				}),
+			);
+			expect(reverse.selectedScopeCount).toBe(1);
+			expect(reverse.selectedCrossingCount).toBe(0);
+		},
+	);
+
+	it.each(["positive", "negative"] as const)(
+		"uses the authored source plane and landblock offset for %s crossings",
+		(acceptedSide) => {
+			const first = envCellScope("offset-first"),
+				second = envCellScope("offset-second");
+			const aperture = rectangleAperture(-0.8, -0.8, 0.8, 0.8);
+			const edge = {
+				...crossing("offset-source", first, second, aperture),
+				acceptedSide,
+				sourceAperture: scenePortalAperture(
+					"portal-aperture:offset-source",
+					{
+						indices: new Uint32Array([0, 1, 2]),
+						plane: { normal: new Vec3(1, 0, 0), d: 1 },
+						vertices: new Float32Array([
+							-1, -0.8, -0.8, -1, 0.8, -0.8, -1, 0, 0.8,
+						]),
+					},
+					EAST_LANDBLOCK_ID,
+				),
+			};
+			const graph = topology(
+				[
+					topologyScope(OUTDOOR_SCOPE, null),
+					topologyScope(first, "first"),
+					topologyScope(second, "second"),
+				],
+				[
+					crossing("root-first", OUTDOOR_SCOPE, first, aperture),
+					crossing("root-second", OUTDOOR_SCOPE, second, aperture),
+					edge,
+				],
+				93_000,
+			);
+			const frame = new PortalScopeWindowCuller(cullerCapacity()).cull(
+				graph,
+				planInput(OUTDOOR_SCOPE),
+			);
+			expect(frame.selectedScopeCount).toBe(3);
+			expect(selectedCrossingIds(frame).includes(edge.id)).toBe(
+				acceptedSide === "negative",
+			);
+		},
+	);
+
+	it("retains a back-facing near-plane route and removes its exception on frontier retreat", () => {
+		const child = envCellScope("near-child"),
+			middle = envCellScope("near-middle");
+		const near = {
+			...crossing(
+				"near-back-facing",
+				middle,
+				child,
+				rectangleAperture(-0.8, -0.8, 0.8, 0.8, 0.75),
+			),
+			acceptedSide: "negative" as const,
+		};
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(child, "child"),
+				topologyScope(middle, "middle"),
+			],
+			[
+				crossing(
+					"narrow-child",
+					OUTDOOR_SCOPE,
+					child,
+					rectangleAperture(-0.2, -0.2, 0.2, 0.2),
+				),
+				crossing(
+					"wide-middle",
+					OUTDOOR_SCOPE,
+					middle,
+					rectangleAperture(-0.9, -0.9, 0.9, 0.9),
+				),
+				near,
+			],
+			92_000,
+		);
+		const culler = new PortalScopeWindowCuller(cullerCapacity());
+		const frame = culler.cull(graph, planInput(OUTDOOR_SCOPE));
+		expect(sourceFacesCamera(near, planInput(OUTDOOR_SCOPE))).toBe(false);
+		expect(selectedCrossingIds(frame)).toContain(near.id);
+		expect(
+			frame.selectedCrossingNearPlaneStraddle(
+				selectedCrossingIds(frame).indexOf(near.id),
+			),
+		).toBe(true);
+		while (frame.completedDepth > 1)
+			expect(culler.declineDeepestCompletedFrontier(frame)).toBe(true);
+		expect(frame.selectedScopeCount).toBe(3);
+		expect(selectedCrossingIds(frame)).toEqual([
+			"portal-crossing:narrow-child",
+			"portal-crossing:wide-middle",
+		]);
 	});
 
 	it("reuses an aperture projection across independent routes", () => {
@@ -667,21 +826,34 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 		).toBe(ordinal);
 	}
 	const selectedScopeIdentities = new Set(actual.map(({ scope }) => scope));
-	const expectedCrossingIds = fixture.topology.crossings
+	const facingCrossingIds = fixture.topology.crossings
 		.filter(
-			({ source, target }) =>
-				selectedScopeIdentities.has(scopeIdentity(source)) &&
-				selectedScopeIdentities.has(scopeIdentity(target)),
+			(edge) =>
+				selectedScopeIdentities.has(scopeIdentity(edge.source)) &&
+				selectedScopeIdentities.has(scopeIdentity(edge.target)) &&
+				sourceFacesCamera(edge, fixture.input),
 		)
 		.map(({ id }) => id)
 		.sort();
-	const actualCrossingIds = Array.from(
-		{ length: arenaFrame.selectedCrossingCount },
-		(_, ordinal) => arenaFrame.selectedCrossing(ordinal).id,
-	);
-	expect(actualCrossingIds, `${fixture.label} selected crossings`).toEqual(
-		expectedCrossingIds,
-	);
+	const actualFacingCrossingIds: string[] = [];
+	for (
+		let ordinal = 0;
+		ordinal < arenaFrame.selectedCrossingCount;
+		ordinal += 1
+	) {
+		const edge = arenaFrame.selectedCrossing(ordinal);
+		if (sourceFacesCamera(edge, fixture.input))
+			actualFacingCrossingIds.push(edge.id);
+		else
+			expect(
+				arenaFrame.selectedCrossingNearPlaneStraddle(ordinal),
+				`${fixture.label} back-facing crossing requires a retained straddle`,
+			).toBe(true);
+	}
+	expect(
+		actualFacingCrossingIds,
+		`${fixture.label} camera-facing selected crossings`,
+	).toEqual(facingCrossingIds);
 	expect(
 		arenaFrame.trace.selectedCrossingInputCount,
 		`${fixture.label} selected-crossing inputs`,
@@ -693,7 +865,7 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 	expect(
 		arenaFrame.trace.facingTestCount,
 		`${fixture.label} facing tests`,
-	).toBeLessThanOrEqual(arenaFrame.trace.nearClipClassificationCount);
+	).toBeLessThanOrEqual(fixture.topology.crossings.length);
 	expect(
 		arenaFrame.trace.routeProjectionCount,
 		`${fixture.label} route projections`,
@@ -720,6 +892,36 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 			immutableResult.diagnostics.rejectedPortalFootprintCount,
 		immutable: expected,
 	};
+}
+
+/** Independent geometric assertion in the aperture's authored coordinate space. */
+function sourceFacesCamera(
+	edge: ScenePortalCrossingInput,
+	input: PortalScopeWindowReferenceInput,
+): boolean {
+	const offset = createLandblockOffset(
+		getLandblockCoordinates(edge.sourceAperture.landblockId),
+		input.anchorCoordinates,
+	);
+	const eye = input.nearClipVolume.eye;
+	const eyeInSource = new Vec3(
+		eye.x - offset.x,
+		eye.y - offset.y,
+		eye.z - offset.z,
+	);
+	const distance = signedPlaneDistance(edge.sourceAperture.plane, eyeInSource);
+	return edge.acceptedSide === "positive"
+		? distance > PORTAL_QUERY_EPSILON
+		: distance < -PORTAL_QUERY_EPSILON;
+}
+
+function selectedCrossingIds(
+	frame: ReturnType<PortalScopeWindowCuller["cull"]>,
+): string[] {
+	return Array.from(
+		{ length: frame.selectedCrossingCount },
+		(_, ordinal) => frame.selectedCrossing(ordinal).id,
+	);
 }
 
 function assertFamilyEvidence(

@@ -623,9 +623,9 @@ export class PortalScopeAtlasPlanner {
 		// Per-pixel entry depth must strictly increase along a path, so no directed crossing can
 		// recur and crossing count is a universal propagation bound without a convergence readback
 		// or topology walk. The one exemption — an equal-depth advance across a host-proven
-		// coincident junction — preserves this: the host bounds same-domain junction exits at two,
-		// and reciprocal suppression removes one, so a same-depth walk takes at most one junction
-		// step before depth strictly increases again.
+		// coincident junction — preserves this: the host bounds overlapping same-domain exits at two
+		// per interior point, and reciprocal suppression removes one. A same-depth walk takes at most
+		// one junction step before depth strictly increases again.
 		const traversalDepth = Math.min(
 			retainedDepthLimit,
 			visibility.selectedCrossingCount,

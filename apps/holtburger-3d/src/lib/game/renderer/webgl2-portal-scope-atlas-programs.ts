@@ -360,8 +360,8 @@ void main() {
 	// A host-proven coincident junction licenses a zero-thickness advance: when the arrival and the
 	// candidate crossing share one junction group, equal entry-plane depth is authored geometry,
 	// not backtracking. Reciprocal suppression above still rejects the immediate return, and the
-	// host bounds same-domain junction exits at two, so exactly one same-junction candidate can
-	// survive here.
+	// host bounds overlapping same-domain junction exits at two per interior point, so at most
+	// one same-junction candidate can survive here.
 	bool sameJunction = arrival.route.w != 0u
 		&& arrival.route.w == uArrivals[vOutputArrival - 1u].route.w;
 	if (!sameJunction

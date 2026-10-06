@@ -131,6 +131,19 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::SubmitHousingManagement(request) => {
+                self.submit_housing_management(request).await
+            }
+            ClientCommand::RefreshHousing => self.query_home().await,
+            ClientCommand::QueryHousingAccess => self.query_housing_access().await,
+            ClientCommand::SearchHousing { house_type } => self.search_housing(house_type).await,
+            ClientCommand::SubmitHousingPayment(request) => {
+                self.submit_housing_payment(request).await
+            }
+            ClientCommand::PreviewHousingPayment(request) => {
+                self.preview_housing_payment(request);
+                Ok(())
+            }
             ClientCommand::Trade(request) => self.submit_trade(request).await,
             ClientCommand::PreviewVendorTrade(request) => {
                 self.preview_vendor_trade(request);
@@ -331,6 +344,10 @@ impl ClientRuntime {
     }
 
     pub(super) async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
+        let use_target = match &action {
+            GameAction::Use(data) => Some(data.guid),
+            _ => None,
+        };
         let transfer = match &action {
             GameAction::PutItemInContainer(data)
                 if self.world.is_world_container_content(data.item_guid)
@@ -344,6 +361,14 @@ impl ClientRuntime {
             self.world.retain_inventory_transfer(item);
         }
         let result = self.session.send_action(action).await;
+        if result.is_ok()
+            && let Some(crystal) = use_target
+        {
+            self.housing_opening = Some(super::housing::HousingOpening {
+                crystal,
+                deadline: Instant::now() + super::BUSY_OPERATION_TIMEOUT,
+            });
+        }
         if result.is_err()
             && let Some(item) = transfer
         {

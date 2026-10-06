@@ -122,9 +122,16 @@ pub enum HostEvent {
     ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
+    ClientHousingUpdated(Box<holtburger_core::client::housing::HousingSnapshot>),
+    ClientHousingCrystalReceived(holtburger_core::client::housing::HousingCrystalView),
     ClientVendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
     ClientTradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
     ClientVendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
+    ClientHousingPaymentPreview(holtburger_core::client::housing_payment::HousingPreviewResult),
+    ClientHousingPaymentFinished(holtburger_core::client::housing_execution::HousingPaymentResult),
+    ClientHousingManagementFinished(
+        holtburger_core::client::housing_management::HousingManagementResult,
+    ),
     ClientVendorResult(holtburger_core::client::vendor_transaction::VendorTradeResult),
     ClientVendorPhase(holtburger_core::client::vendor_transaction::VendorTradePhase),
     ClientEntitySelectionQueryResult(
@@ -408,6 +415,15 @@ impl ClientEventSink for StdioEventSink {
         event: crate::client_projection::ClientHostEvent,
     ) -> anyhow::Result<()> {
         let event = match event {
+            crate::client_projection::ClientHostEvent::HousingManagementFinished(result) => {
+                HostEvent::ClientHousingManagementFinished(result)
+            }
+            crate::client_projection::ClientHostEvent::HousingUpdated(housing) => {
+                HostEvent::ClientHousingUpdated(Box::new(housing))
+            }
+            crate::client_projection::ClientHostEvent::HousingCrystalReceived(crystal) => {
+                HostEvent::ClientHousingCrystalReceived(crystal)
+            }
             crate::client_projection::ClientHostEvent::BookOpened(book) => {
                 HostEvent::ClientBookOpened(book)
             }
@@ -470,6 +486,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::VendorPreview(result) => {
                 HostEvent::ClientVendorPreview(result)
+            }
+            crate::client_projection::ClientHostEvent::HousingPaymentPreview(result) => {
+                HostEvent::ClientHousingPaymentPreview(result)
+            }
+            crate::client_projection::ClientHostEvent::HousingPaymentFinished(result) => {
+                HostEvent::ClientHousingPaymentFinished(result)
             }
             crate::client_projection::ClientHostEvent::VendorResult(result) => {
                 HostEvent::ClientVendorResult(result)

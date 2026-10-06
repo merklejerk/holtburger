@@ -51,6 +51,38 @@ pub enum FellowshipActivity {
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
+    /// Accepted effective-home facts, including an authoritative absence.
+    HousingHomeUpdated {
+        /// Retained accepted facts after this packet.
+        home: crate::housing::HomeKnowledge,
+        /// Complete replies and maintenance deltas have different query lifetimes.
+        source: crate::housing::HousingHomeUpdateSource,
+    },
+    /// Full crystal profile receipt; consumers distinguish receipt from retained state.
+    HousingCrystalReceived(Box<crate::housing::HousingCrystal>),
+    /// Raw housing status notice for core query/feedback handling.
+    HousingStatusReceived(u32),
+    /// Incremental facts arrived before a full home baseline.
+    HousingRefreshRequired,
+    /// Invalid authoritative housing payload; previous accepted facts remain intact.
+    HousingDataRejected {
+        /// Failed complete reply or incremental maintenance input.
+        source: crate::housing::HousingHomeUpdateSource,
+        /// Distinct validation failure, without changing retained authority.
+        error: String,
+    },
+    /// Crystal validation failure cannot finish an effective-home query.
+    HousingCrystalRejected(String),
+    /// Raw transaction notice; no inventory-success claim is derived from it.
+    HousingTransactionNotice(u32),
+    /// Named permissions for the server's implicit effective home; no request or house ID.
+    HousingAccessUpdated(Box<crate::housing::management::HousingAccessRecords>),
+    /// Invalid permission facts, without invalidating a simultaneous home query.
+    HousingAccessRejected(String),
+    /// Available area results retaining their searched type and total house count.
+    HousingSearchUpdated(Box<crate::housing::management::HousingSearchResults>),
+    /// Invalid search results, separate from home/access-query lifecycles.
+    HousingSearchRejected(String),
     /// Data lifetime is unchanged; scene consumers must admit or withdraw this incarnation.
     EntityScenePlacementChanged {
         /// Retained entity whose placement changed.

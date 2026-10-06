@@ -3,6 +3,7 @@ pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
 pub use crate::messages::fellowship::events::*;
+pub use crate::messages::housing::*;
 pub use crate::messages::inventory::events::*;
 pub use crate::messages::magic::events::*;
 pub use crate::messages::misc::events::*;
@@ -25,6 +26,14 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    HouseProfile(Box<HouseProfileEventData>),
+    HouseData(Box<HouseData>),
+    HouseStatus(Box<HouseStatusEventData>),
+    UpdateRentTime(Box<HouseRentTimeEventData>),
+    UpdateRentPayment(Box<HouseRentPaymentEventData>),
+    HouseTransaction(Box<HouseTransactionEventData>),
+    UpdateHar(Box<HouseAccess>),
+    AvailableHouses(Box<HouseAvailableHouses>),
     PlayerDescription(Box<PlayerDescriptionEventData>),
     PingResponse(Box<PingResponseEventData>),
     ViewContents(Box<ViewContentsEventData>),
@@ -283,6 +292,30 @@ impl ProtocolUnpack for GameEventMessage {
                     GameEvent::TradeFailure(Box::new(TradeFailureEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::ClearTradeAcceptance => GameEvent::ClearTradeAcceptance,
+                GameEventOpcode::UpdateHar => {
+                    GameEvent::UpdateHar(Box::new(HouseAccess::unpack(data, offset)?))
+                }
+                GameEventOpcode::AvailableHouses => GameEvent::AvailableHouses(Box::new(
+                    HouseAvailableHouses::unpack(data, offset)?,
+                )),
+                GameEventOpcode::HouseProfile => {
+                    GameEvent::HouseProfile(Box::new(HouseProfileEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::HouseData => {
+                    GameEvent::HouseData(Box::new(HouseData::unpack(data, offset)?))
+                }
+                GameEventOpcode::HouseStatus => {
+                    GameEvent::HouseStatus(Box::new(HouseStatusEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::UpdateRentTime => GameEvent::UpdateRentTime(Box::new(
+                    HouseRentTimeEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::UpdateRentPayment => GameEvent::UpdateRentPayment(Box::new(
+                    HouseRentPaymentEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::HouseTransaction => GameEvent::HouseTransaction(Box::new(
+                    HouseTransactionEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::BookDataResponse => GameEvent::BookDataResponse(Box::new(
                     BookDataResponseEventData::unpack(data, offset)?,
                 )),
@@ -591,6 +624,38 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::ClearTradeAcceptance => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ClearTradeAcceptance as u32)
                     .unwrap();
+            }
+            GameEvent::UpdateHar(data) => {
+                (GameEventOpcode::UpdateHar as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::AvailableHouses(data) => {
+                (GameEventOpcode::AvailableHouses as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseProfile(data) => {
+                (GameEventOpcode::HouseProfile as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseData(data) => {
+                (GameEventOpcode::HouseData as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseStatus(data) => {
+                (GameEventOpcode::HouseStatus as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::UpdateRentTime(data) => {
+                (GameEventOpcode::UpdateRentTime as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::UpdateRentPayment(data) => {
+                (GameEventOpcode::UpdateRentPayment as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseTransaction(data) => {
+                (GameEventOpcode::HouseTransaction as u32).pack(buf);
+                data.pack(buf);
             }
             GameEvent::BookDataResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::BookDataResponse as u32)

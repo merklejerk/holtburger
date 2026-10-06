@@ -49,6 +49,47 @@ h3d owns draft editing, visual merging, categories, gestures, and HUD geometry.
 Display groups retain all source identities, so partial outcomes can remove only
 fulfilled contributions. They never become physical inventory stacks or entities.
 
+### Housing execution and information
+
+World retains effective-home/crystal/access/search facts and owns payment accounting.
+Core's focused `client/housing*.rs` modules own initial home queries, retained query
+loading, account-owner classification, candidate resolution, requirement-targeted auto-fill,
+and submitted payment/management execution. Preview operations explicitly quote, add to
+a requirement, or fill it; core validates current template compatibility and preserves
+unrelated row accounting. H3D owns tabs and draft-only row gestures. The first completed
+character activation queries housing;
+teleport and frontend tab focus do not. Complete home replies finish a home query;
+maintenance deltas and rejected crystal profiles cannot finish it or a dependent HAR read.
+Returning to the character roster or terminating the session retires submitted admission,
+then clears housing facts, read deadlines, and crystal-opening intent. Housing replies
+received outside initial entry or the active world are discarded before world reduction;
+they cannot restore the previous character's facts in a replacement snapshot.
+
+`client/busy_operation.rs` owns admission, deadline, cancellation, and terminal busy
+publication. Vendor, housing payment, and housing management keep their own completion
+evidence. Housing never completes from generic UseDone. Payment requires matching
+profile facts plus exact expected source consumption; internal recovery retains the
+original deadline and never retries payment or recreates crystal-opening intent.
+Permission edits finish with a dispatch receipt, leaving success/failure to server feedback.
+Core loads named HAR when the effective home is ready and schedules two delayed reads
+after permission edits. One coordinator coalesces edits behind outstanding reads, retains
+refreshing state across scheduled delays, and bounds the complete sequence. Returned
+values never validate the edit or determine another read. Background refreshes do not
+retain inventory mutation admission or prevent another administrative edit. H3D retains
+requested checkbox values in its session owner until the refresh sequence finishes;
+undisclosed booleans default unchecked, while undisclosed requested values remain local
+intentions. Hook visibility uses explicit Show/Hide requests.
+Abandonment shares inventory admission
+because ACE removes the deed, and may select another account home afterward. Hook/boot
+requests have dispatch receipts rather than invented completion facts. Read-only search
+and home/access queries do not acquire the inventory mutation owner.
+
+The host projects typed commands, replacement snapshots, and terminal receipts. H3D owns
+candidate editing, confirmations, window/tab lifetime, range-dismissal policy, search
+presentation, landscape-only home markers, and existing toast display. Server wire replies
+lack client request IDs; local sequence/home epochs guard admission and consumer ownership,
+but cannot prove perfect correlation of same-home/same-crystal late replies.
+
 ### Command and Controller Boundary
 
 The core crate exposes two layers of client-facing behavior:

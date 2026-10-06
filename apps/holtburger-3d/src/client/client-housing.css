@@ -1,0 +1,109 @@
+/* Housing surfaces share native disclosures, themed controls, and aligned data rows. */
+@layer components {
+	.housing-tab {
+		padding: 12px;
+		overflow: auto;
+		height: 100%;
+	}
+	.housing-overview,
+	.housing-form-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.housing-overview {
+		justify-content: space-between;
+	}
+	.housing-tab h3,
+	.housing-tab h4 {
+		margin: 8px 0;
+	}
+	.housing-tab p {
+		margin: 8px 0;
+	}
+	.housing-section > summary {
+		padding: 10px 0;
+	}
+	.housing-section-body {
+		padding: 0 0 12px;
+	}
+	.housing-facts {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: 6px 16px;
+	}
+	.housing-facts dt {
+		color: var(--ui-color-muted);
+	}
+	.housing-facts dd {
+		margin: 0;
+		text-align: right;
+	}
+	.housing-table {
+		width: 100%;
+		border-collapse: collapse;
+	}
+	.housing-table th,
+	.housing-table td {
+		padding: 6px 4px;
+		text-align: left;
+	}
+	.housing-table thead {
+		color: var(--ui-color-muted);
+		border-bottom: 1px solid var(--ui-color-border);
+	}
+	.housing-table tbody th {
+		font-weight: normal;
+	}
+	.housing-table th:last-child,
+	.housing-table td:last-child {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.housing-tab fieldset {
+		border: 0;
+		margin: 0;
+		padding: 0;
+		min-width: 0;
+	}
+	.housing-tab .housing-toggle {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin: 10px 0;
+	}
+	.housing-form-row .ui-input {
+		min-width: 0;
+		flex: 1;
+	}
+	.housing-guest-access {
+		margin: 12px 0;
+		padding: 8px;
+		border: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 40%, transparent);
+		background: var(--ui-color-well);
+		box-shadow: inset 0 2px 4px var(--ui-color-shadow);
+	}
+	.housing-guest-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 8px 0;
+		border-bottom: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
+	}
+	.housing-guest-row > strong {
+		flex: 1;
+		overflow-wrap: anywhere;
+	}
+	.housing-guest-list {
+		list-style: none;
+		margin: 8px 0;
+		padding: 0;
+	}
+	.housing-danger {
+		color: var(--ui-color-danger);
+	}
+}

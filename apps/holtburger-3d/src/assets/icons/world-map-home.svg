@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" x="-10" y="-10" width="20" height="20" viewBox="-10 -10 20 20">
+  <path d="M-8-1 0-8 8-1H6V7H-6V-1ZM-2 7V1H2V7" fill="var(--ui-accent, #f0cf78)" stroke="var(--ui-bg, #20252c)" stroke-width="1.5" stroke-linejoin="round" />
+</svg>

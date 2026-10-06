@@ -7,6 +7,7 @@ pub mod fellowship;
 pub mod game_action;
 pub mod game_event;
 pub mod game_message;
+pub mod housing;
 pub mod inventory;
 pub mod magic;
 pub mod misc;

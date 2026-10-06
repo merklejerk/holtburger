@@ -1,3 +1,4 @@
+import { housingSnapshotSchema } from "./client-housing-contract";
 import { tradeSnapshotSchema } from "./client-trade-contract";
 import { z } from "zod";
 
@@ -349,6 +350,7 @@ export type ClientConnectionSample = z.infer<typeof connectionSampleSchema>;
 
 const currentStateSchema = z
 	.object({
+		housing: housingSnapshotSchema,
 		canTeleportFromMap: z.boolean(),
 		connection: connectionSampleSchema.nullable(),
 		entityCollisionDisabled: z.boolean(),

@@ -1140,7 +1140,10 @@ mod tests {
             ClientViewEvent::ActionResult { .. }
         ));
         client.note_busy_error(WeenieError::YoureTooBusy, None);
-        client.finish_busy_operation_from_use_done(WeenieError::None);
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
         assert!(client.active_busy_operation.is_none());
         let mut saw_error = false;
         while let Ok(event) = events.try_recv() {
@@ -1234,7 +1237,10 @@ mod tests {
                 Some(BusyOperationKind::SpellCast)
             );
         }
-        client.finish_busy_operation_from_use_done(WeenieError::None);
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
         assert!(client.active_busy_operation.is_none());
     }
 
@@ -1348,7 +1354,10 @@ mod tests {
             action,
             GameAction::MoveToState(_) | GameAction::AutonomousPosition(_)
         )));
-        client.finish_busy_operation_from_use_done(WeenieError::None);
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
         assert!(client.active_busy_operation.is_none());
     }
 

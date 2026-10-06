@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { emptyHousing } from "../../client/client-housing-contract";
 	import { onMount, tick } from "svelte";
 	import ClientWorldPanel from "../../client/ClientWorldPanel.svelte";
 	import { createClientHudLayout } from "../../client/client-hud-layout";
@@ -723,6 +724,11 @@
 
 {#if mounted}
 	<ClientWorldPanel
+		characterGuid={1}
+		housingManagement={null}
+		housing={emptyHousing()}
+		onRefreshHousing={async () => {}}
+		onSearchHousing={async () => {}}
 		bind:this={panel}
 		{source}
 		{canTeleportFromMap}

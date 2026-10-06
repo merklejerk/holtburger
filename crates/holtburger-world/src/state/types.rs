@@ -68,6 +68,8 @@ pub struct WorldState {
     /// rather than producing it.
     pub motion_runtimes: MotionRuntimeRegistry,
     pub scene: SpatialScene,
+    /// Retained character housing, independent of local scene residency.
+    pub housing: crate::housing::HousingState,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
@@ -451,6 +453,7 @@ impl WorldState {
             motion_sequences: Arc::clone(&bootstrap.motion_sequences),
             motion_runtimes: MotionRuntimeRegistry::new(),
             scene: SpatialScene::new(),
+            housing: crate::housing::HousingState::default(),
             vendor: None,
             fellowship: None,
             trade: None,

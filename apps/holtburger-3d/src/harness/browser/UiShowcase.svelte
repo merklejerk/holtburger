@@ -53,6 +53,7 @@
 		| "inventory"
 		| "worldContainer"
 		| "vendor"
+		| "houseCrystal"
 		| "trade"
 		| "inspection"
 		| "book"

@@ -3,7 +3,7 @@ import { dynamicEntityWorldOrigin } from "../lib/game/runtime/dynamic-entity-pre
 import type { ClientEntityMirror } from "./client-entity-mirror";
 
 /** Borrow just the accepted identity and pose facts needed by this policy. */
-interface VendorPoseSource {
+interface EntityPoseSource {
 	currentEntities(): Iterable<
 		Pick<DynamicEntityView, "identity" | "placement">
 	>;
@@ -11,10 +11,10 @@ interface VendorPoseSource {
 }
 
 /** App-local distance from accepted world poses, independent of renderer residency. */
-export function sampleVendorDistanceMeters(
+export function sampleEntityDistanceMeters(
 	entities: Pick<ClientEntityMirror, "read">,
-	motion: VendorPoseSource,
-	vendorGuid: number,
+	motion: EntityPoseSource,
+	entityGuid: number,
 ): number | null {
 	const read = entities.read();
 	if (
@@ -24,16 +24,16 @@ export function sampleVendorDistanceMeters(
 	)
 		return null;
 	let player = null;
-	let vendor = null;
+	let target = null;
 	for (const entity of motion.currentEntities()) {
 		if (entity.placement.kind !== "world") continue;
 		if (entity.identity.guid === read.level.playerGuid)
 			player = dynamicEntityWorldOrigin(entity.placement);
-		else if (entity.identity.guid === vendorGuid)
-			vendor = dynamicEntityWorldOrigin(entity.placement);
-		if (player !== null && vendor !== null) break;
+		else if (entity.identity.guid === entityGuid)
+			target = dynamicEntityWorldOrigin(entity.placement);
+		if (player !== null && target !== null) break;
 	}
-	return player === null || vendor === null
+	return player === null || target === null
 		? null
-		: Math.hypot(player.x - vendor.x, player.y - vendor.y, player.z - vendor.z);
+		: Math.hypot(player.x - target.x, player.y - target.y, player.z - target.z);
 }

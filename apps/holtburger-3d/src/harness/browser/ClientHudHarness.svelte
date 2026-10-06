@@ -1,8 +1,17 @@
 <script lang="ts">
+	import { ClientHousingManagementState } from "../../client/client-housing-management-state";
+	import {
+		emptyHousing,
+		housingSnapshotSchema,
+		housingManagementResultSchema,
+		type HousingSnapshot,
+	} from "../../client/client-housing-contract";
 	import { ClientTradeState } from "../../client/client-trade-state";
 	import { createTradeFixture } from "./client-trade-fixture";
 	import { createVendorFixture } from "./client-vendor-fixture";
 	import { ClientVendorState } from "../../client/client-vendor-state";
+	import { ClientHouseCrystalState } from "../../client/client-house-crystal-state";
+	import { createHousingFixture } from "./client-housing-fixture";
 	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
 	import { handleCombatBarKeydown } from "../../client/client-combat-bar-input";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
@@ -71,7 +80,8 @@
 	} from "../../client/client-dialogs";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { probeBrowserInput } from "./input-browser-probe";
-	import { onMount, tick, untrack } from "svelte";
+	import { mount, onMount, tick, unmount, untrack } from "svelte";
+	import ClientHousingManagement from "../../client/ClientHousingManagement.svelte";
 	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
@@ -461,6 +471,11 @@
 
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 	const worldMapFixture = createWorldMapFixture();
+	/** Cold authority fixtures for Housing tab/map acceptance through production components. */
+	let housingCharacterGuid = $state<number | null>(1);
+	let housing = $state<HousingSnapshot>(emptyHousing());
+	let housingRefreshes = 0;
+	const housingSearches: number[] = [];
 
 	interface ClientHudHarnessRectangle {
 		readonly height: number;
@@ -693,9 +708,10 @@
 			})),
 			removed: [],
 		});
+		const previousDialogs = dialogOwner;
 		const owner = new ClientDialogs(interactionLifecycle);
 		dialogOwner = owner;
-		const unbind = owner.bindItems(itemInteractions);
+		const unbind = owner.bindLocal(itemInteractions);
 		const unsubscribe = owner.subscribe((value) => {
 			dialogPresentation = value;
 		});
@@ -841,8 +857,8 @@
 				unbind();
 				unsubscribe();
 				owner.destroy();
-				dialogOwner = null;
-				dialogPresentation = null;
+				dialogOwner = previousDialogs;
+				dialogPresentation = previousDialogs?.snapshot() ?? null;
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
 					worldContainer: null,
@@ -876,6 +892,19 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Replace housing without mounting a new World panel or replaying crystal intent. */
+		readonly setHousing: (snapshot: unknown) => void;
+		/** Match core retirement followed by a new character's complete replacement state. */
+		readonly replaceHousingCharacter: (playerGuid: number) => void;
+		readonly readHousingRefreshes: () => number;
+		readonly readHousingSearches: () => readonly number[];
+		/** Inject the existing core timeout snapshot/feedback seam. */
+		readonly timeoutHousingSearch: () => void;
+		/** Explicit synthetic authority for production management controls. */
+		readonly readHousingManagementCommands: () => typeof interactionCommands;
+		readonly finishHousingManagement: (result: unknown) => void;
+		/** Remount production controls with the same session owner during a refresh. */
+		readonly probeHousingManagementRemount: () => Promise<boolean>;
 		/** Exercise settings controls and real browser audio independently of inventory fixtures. */
 		readonly probeAudio: () => ReturnType<typeof probeAudioControls>;
 		readonly setMapTeleportPermission: (allowed: boolean) => void;
@@ -900,6 +929,8 @@
 		readonly probeInventory: typeof probeInventory;
 		/** Synthetic replies through the real vendor session and HUD. */
 		readonly vendorProbe: ReturnType<typeof createVendorFixture>;
+		/** Synthetic profiles and payment quotes through production session decoding. */
+		readonly housingProbe: ReturnType<typeof createHousingFixture>;
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
@@ -1052,6 +1083,8 @@
 	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
+	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
+	let housingManagement = $state<ClientHousingManagementState | null>(null);
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	function readInventoryEntities() {
@@ -1076,6 +1109,7 @@
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
+			housing: emptyHousing(),
 			localPlayerGuid: playerGuid,
 			serverTime: 10,
 			worldGeneration: 1,
@@ -1765,6 +1799,7 @@
 	let dialogOwner: ClientDialogs | null = null;
 
 	async function probeDialogs() {
+		const previousDialogs = dialogOwner;
 		const owner = new ClientDialogs(interactionLifecycle);
 		dialogOwner = owner;
 		const unsubscribe = owner.subscribe((value) => {
@@ -1885,7 +1920,8 @@
 		} finally {
 			owner.destroy();
 			unsubscribe();
-			dialogOwner = null;
+			dialogOwner = previousDialogs;
+			dialogPresentation = previousDialogs?.snapshot() ?? null;
 			emitInteractionBaseline();
 			await tick();
 		}
@@ -3234,6 +3270,36 @@
 			() => 0,
 		);
 		vendor = vendorOwner;
+		const houseCrystalOwner = new ClientHouseCrystalState(
+			interactionLifecycle,
+			icons,
+			(message) => inventoryToasts.publish({ message, tone: "warning" }),
+			// The synthetic HUD has no scene poses; range lifetime is covered by focused state tests.
+			() => 0,
+			() => {
+				vendorOwner.close();
+				const read = interactionLifecycle.entities.read();
+				if (
+					read.kind === "current" &&
+					read.level.worldContainer.kind === "open"
+				)
+					containerOwner.close(read.level.worldContainer.root);
+			},
+		);
+		houseCrystal = houseCrystalOwner;
+		const housingManagementOwner = new ClientHousingManagementState(
+			interactionLifecycle,
+			(message) => inventoryToasts.publish({ message, tone: "warning" }),
+		);
+		housingManagement = housingManagementOwner;
+		const housingDialogs = new ClientDialogs(interactionLifecycle);
+		dialogOwner = housingDialogs;
+		const unbindHousingDialogs = housingDialogs.bindLocal(
+			housingManagementOwner,
+		);
+		const unsubscribeHousingDialogs = housingDialogs.subscribe((value) => {
+			dialogPresentation = value;
+		});
 		const tradeOwner = new ClientTradeState(
 			interactionLifecycle,
 			icons,
@@ -3339,12 +3405,19 @@
 		);
 		spells = spellState;
 		probeBrowserInput(keyboard, inputGate);
-		const unsubscribeMapTeleport = interactionLifecycle.subscribe((event) => {
-			if (event.type === "map-teleport-capability")
-				canTeleportFromMap = event.allowed;
-			if (event.type === "current-state")
-				canTeleportFromMap = event.state.canTeleportFromMap;
-		});
+		const unsubscribePanelAuthority = interactionLifecycle.subscribe(
+			(event) => {
+				if (event.type === "housing-updated") housing = event.housing;
+				if (event.type === "current-state") {
+					housing = event.state.housing;
+					housingCharacterGuid = event.state.localPlayerGuid;
+				}
+				if (event.type === "map-teleport-capability")
+					canTeleportFromMap = event.allowed;
+				if (event.type === "current-state")
+					canTeleportFromMap = event.state.canTeleportFromMap;
+			},
+		);
 		void interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
@@ -3352,6 +3425,67 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			setHousing: (snapshot) => {
+				emitInteractionEvent(
+					"client-housing-updated",
+					housingSnapshotSchema.parse(snapshot),
+				);
+			},
+			replaceHousingCharacter: (playerGuid) => {
+				emitInteractionEvent("client-housing-updated", emptyHousing());
+				emitInteractionEvent("client-lifecycle-changed", {
+					kind: "character-selection",
+					characters: [],
+				});
+				emitInteractionBaseline(playerGuid);
+			},
+			readHousingRefreshes: () => housingRefreshes,
+			readHousingSearches: () => housingSearches,
+			timeoutHousingSearch: () => {
+				emitInteractionEvent("client-housing-updated", {
+					...housing,
+					search: { ...housing.search, pendingType: null },
+				});
+				inventoryToasts.publish({
+					message: "Housing search timed out waiting for the server",
+					tone: "warning",
+				});
+			},
+			readHousingManagementCommands: () =>
+				interactionCommands.filter(
+					(entry) =>
+						entry.command === "query_client_housing_access" ||
+						entry.command === "submit_client_housing_management",
+				),
+			probeHousingManagementRemount: async () => {
+				const target = document.createElement("div");
+				target.hidden = true;
+				document.body.append(target);
+				const commandCount = interactionCommands.length;
+				try {
+					for (let attempt = 0; attempt < 2; attempt++) {
+						const component = mount(ClientHousingManagement, {
+							target,
+							props: { model: housingManagementOwner },
+						});
+						await tick();
+						await tick();
+						const checked = target.querySelector<HTMLInputElement>(
+							'input[type="checkbox"]',
+						)?.checked;
+						await unmount(component);
+						if (checked !== true) return false;
+					}
+					return interactionCommands.length === commandCount;
+				} finally {
+					target.remove();
+				}
+			},
+			finishHousingManagement: (result) =>
+				emitInteractionEvent(
+					"client-housing-management-finished",
+					housingManagementResultSchema.parse(result),
+				),
 			probeAudio: probeAudioControls,
 			setMapTeleportPermission: (allowed) =>
 				emitInteractionEvent("client-map-teleport-capability-changed", allowed),
@@ -3384,6 +3518,11 @@
 				commands: interactionCommands,
 			}),
 			vendorProbe: createVendorFixture({
+				emit: emitInteractionEvent,
+				baseline: emitInteractionBaseline,
+				commands: interactionCommands,
+			}),
+			housingProbe: createHousingFixture({
 				emit: emitInteractionEvent,
 				baseline: emitInteractionBaseline,
 				commands: interactionCommands,
@@ -3524,7 +3663,7 @@
 		};
 		return () => {
 			objectInspectionProbe.end();
-			unsubscribeMapTeleport();
+			unsubscribePanelAuthority();
 			unsubscribeObjectInspection();
 			unsubscribeBookReader();
 			bookReaderOwner.destroy();
@@ -3538,6 +3677,14 @@
 			tradeOwner.destroy();
 			trade = null;
 			vendorOwner.destroy();
+			unbindHousingDialogs();
+			unsubscribeHousingDialogs();
+			housingDialogs.destroy();
+			if (dialogOwner === housingDialogs) dialogOwner = null;
+			housingManagementOwner.destroy();
+			housingManagement = null;
+			houseCrystalOwner.destroy();
+			houseCrystal = null;
 			vendor = null;
 			worldContainer = null;
 			unsubscribeInventoryToasts();
@@ -3568,6 +3715,20 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		characterGuid={housingCharacterGuid}
+		{houseCrystal}
+		{housing}
+		{housingManagement}
+		onSearchHousing={async (houseType) => {
+			housingSearches.push(houseType);
+			housing = {
+				...housing,
+				search: { ...housing.search, pendingType: houseType },
+			};
+		}}
+		onRefreshHousing={async () => {
+			housingRefreshes += 1;
+		}}
 		readConnection={() => interactionLifecycle.connectionSample()}
 		characterSheet={interactionLifecycle.characterSheet}
 		{appearanceOptions}

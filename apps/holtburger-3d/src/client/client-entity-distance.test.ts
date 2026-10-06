@@ -6,7 +6,7 @@ import {
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { ClientEntityMirror } from "./client-entity-mirror";
 import { entityFacts } from "./client-entity-mirror.test-support";
-import { sampleVendorDistanceMeters } from "./client-vendor-range";
+import { sampleEntityDistanceMeters } from "./client-entity-distance";
 
 function placed(
 	guid: number,
@@ -29,7 +29,7 @@ function placed(
 	};
 }
 
-it("measures vendor reach across adjacent landblock frames", () => {
+it("measures entity reach across adjacent landblock frames", () => {
 	const entities = new ClientEntityMirror();
 	entities.commit(
 		entities.prepareSnapshot(
@@ -47,6 +47,6 @@ it("measures vendor reach across adjacent landblock frames", () => {
 		currentEntities: () => [player, vendor],
 		isAwaitingSnapshot: () => false,
 	};
-	expect(sampleVendorDistanceMeters(entities, motion, 2)).toBe(2);
-	expect(sampleVendorDistanceMeters(entities, motion, 3)).toBeNull();
+	expect(sampleEntityDistanceMeters(entities, motion, 2)).toBe(2);
+	expect(sampleEntityDistanceMeters(entities, motion, 3)).toBeNull();
 });

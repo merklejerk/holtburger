@@ -1,3 +1,4 @@
+import { emptyHousing } from "./client-housing-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiIconRepository } from "../app/ui-icon-repository";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -41,6 +42,7 @@ async function fixture() {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		housing: emptyHousing(),
 		localPlayerGuid: PLAYER,
 		serverTime: 1,
 		worldGeneration: 1,

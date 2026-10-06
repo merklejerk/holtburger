@@ -1,7 +1,11 @@
 <script lang="ts">
+	import type { ClientHousingManagementState } from "./client-housing-management-state";
+	import type { HousingSnapshot } from "./client-housing-contract";
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import ClientTradeWindow from "./ClientTradeWindow.svelte";
 	import type { ClientTradeState } from "./client-trade-state";
+	import type { ClientHouseCrystalState } from "./client-house-crystal-state";
+	import ClientHouseCrystalWindow from "./ClientHouseCrystalWindow.svelte";
 	import ClientVendorWindow from "./ClientVendorWindow.svelte";
 	import type { ClientVendorState } from "./client-vendor-state";
 	import type { ItemDragSession } from "./client-item-drag";
@@ -181,6 +185,12 @@
 		readonly readMinimapFrame: () => MinimapFrame;
 		/** Static host capability, owned by the mounted transport lifetime. */
 		readonly worldMapSource: WorldMapSource | null;
+		/** Cold identity for character-scoped map search selection. */
+		readonly characterGuid: number | null;
+		readonly housing: HousingSnapshot;
+		readonly housingManagement: ClientHousingManagementState | null;
+		readonly onRefreshHousing: () => Promise<void>;
+		readonly onSearchHousing: (houseType: number) => Promise<void>;
 		/** Shared core admission and app-owned request feedback. */
 		readonly canTeleportFromMap: boolean;
 		readonly onTeleportToMapPosition: (
@@ -203,6 +213,8 @@
 		readonly itemSession: ItemDragSession | null;
 		/** Session-owned vendor draft and catalog presentation. */
 		readonly vendor: ClientVendorState | null;
+		/** Session-local crystal interaction; effective-home knowledge is separate. */
+		readonly houseCrystal: ClientHouseCrystalState | null;
 		/** Session-owned P2P gestures and confirmed offer presentation. */
 		readonly trade: ClientTradeState | null;
 		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
@@ -312,6 +324,11 @@
 		debugEnabled,
 		readMinimapFrame,
 		worldMapSource,
+		characterGuid,
+		housing,
+		housingManagement,
+		onRefreshHousing,
+		onSearchHousing,
 		canTeleportFromMap,
 		onTeleportToMapPosition,
 		readDiagnostics,
@@ -325,6 +342,7 @@
 		itemSession,
 		worldContainer,
 		vendor,
+		houseCrystal,
 		trade,
 		itemInteractions,
 		onSelectContentsItem,
@@ -799,6 +817,7 @@
 				session={itemSession}
 				{worldContainer}
 				{vendor}
+				{houseCrystal}
 				{trade}
 				onDragOwner={(owner) => (itemDrag = owner)}
 				{onPickInventoryTarget}
@@ -1045,6 +1064,18 @@
 			/>
 		{/key}
 	{/if}
+	{#if houseCrystal !== null}
+		{#key houseCrystal}
+			<ClientHouseCrystalWindow
+				model={houseCrystal}
+				placement={hudLayout.houseCrystal}
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("houseCrystal", placement)}
+				{onExamineItem}
+			/>
+		{/key}
+	{/if}
 	{#if objectInspection.kind === "ready"}
 		{#key objectInspection.guid}
 			<ClientInspectionWindow
@@ -1081,6 +1112,11 @@
 		{#key worldMapSource}
 			<ClientWorldPanel
 				source={worldMapSource}
+				{characterGuid}
+				{housing}
+				{housingManagement}
+				{onRefreshHousing}
+				{onSearchHousing}
 				{canTeleportFromMap}
 				{onTeleportToMapPosition}
 				visible={activePanel === "world"}

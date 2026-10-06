@@ -15,8 +15,7 @@ mod commerce;
 pub use commerce::{VendorQuoteError, VendorSaleRejection, VendorValueLimits};
 mod draft;
 pub use draft::{
-    PYREAL_WCID, VendorCurrencyQuote, VendorDraft, VendorDraftQuote, VendorLineQuote,
-    VendorPurchase,
+    VendorCurrencyQuote, VendorDraft, VendorDraftQuote, VendorLineQuote, VendorPurchase,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

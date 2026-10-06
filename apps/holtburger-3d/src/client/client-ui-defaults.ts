@@ -67,6 +67,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 420, height: 500 },
 		minSize: { width: 300, height: 260 },
 	},
+	houseCrystal: {
+		anchor: "top-left",
+		offset: { x: 370, y: 170 },
+		size: { width: 440, height: 520 },
+		minSize: { width: 340, height: 300 },
+	},
 	inspection: {
 		anchor: "center-right",
 		offset: { x: 32, y: 0 },

@@ -96,7 +96,14 @@ try {
 		}
 	}
 	let report;
-	if (options.clientWorldMap) {
+	if (options.clientHousing) {
+		report = {
+			suite: "client-housing",
+			passed: true,
+			evidence: result.housing,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientWorldMap) {
 		report = {
 			suite: "client-world-map",
 			passed: true,
@@ -361,6 +368,7 @@ function parseArgs(args) {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		worldMap: false,
 		clientWorldMap: false,
+		clientHousing: false,
 		clientHud: false,
 		clientConnection: false,
 		clientAudio: false,
@@ -491,6 +499,10 @@ function parseArgs(args) {
 			case "--client-world-map":
 				parsed.clientHud = true;
 				parsed.clientWorldMap = true;
+				break;
+			case "--client-housing":
+				parsed.clientHud = true;
+				parsed.clientHousing = true;
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
@@ -1717,6 +1729,7 @@ Options:
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
+  --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
@@ -4207,6 +4220,12 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientHousing)
+			return {
+				housing: await probeClientHousing(client),
+				state: { error: null, ready: true },
+				consoleMessages,
+			};
 		if (options.clientWorldMap)
 			return {
 				worldMapPanel: await probeClientWorldMap(client),
@@ -6595,6 +6614,508 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 }
 
 /** The actual client shell owns first activation, panel switching, and retained placement. */
+async function probeClientHousing(client) {
+	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.housingProbe";
+	const read = (expression) => evaluateExpression(client, expression);
+	const settle = () => read(`${api}.settle()`);
+	const windowSelector = 'section.hud-window[aria-label="Cottage crystal"]';
+	const verifyPaymentFooter = async () => {
+		if (
+			!(await read(`(() => {
+			const panel = document.querySelector('${windowSelector} .house-crystal-panel');
+			const button = panel.querySelector('footer .housing-pay');
+			if (!button || !['Buy house', 'Pay maintenance'].includes(button.textContent.trim())) return false;
+			const bounds = panel.getBoundingClientRect();
+			const action = button.getBoundingClientRect();
+			const style = getComputedStyle(panel);
+			return Math.abs(bounds.right - parseFloat(style.paddingRight) - action.right) < 1
+				&& Math.abs(bounds.bottom - parseFloat(style.paddingBottom) - action.bottom) < 1
+				&& !panel.textContent.includes('Checking payment');
+		})()`))
+		)
+			throw new Error(
+				"Housing payment action is not anchored at the lower right.",
+			);
+	};
+	const verifyPaymentArtwork = async () => {
+		const contained = await read(`(() => {
+			const rows = [...document.querySelectorAll('${windowSelector} .housing-requirement-row')];
+			return rows.length > 0 && rows.every(row => {
+				const cell = row.querySelector('.item-grid-cell');
+				const image = cell?.querySelector('img.ui-icon');
+				if (!cell) return false;
+				const bounds = cell.getBoundingClientRect();
+				if (bounds.width <= 0 || bounds.height <= 0) return false;
+				if (cell.dataset.empty === 'true') {
+					if (!image) return cell.childElementCount === 0;
+					const style = getComputedStyle(cell.querySelector('.item-cell-art'));
+					if (style.filter !== 'grayscale(1)' || parseFloat(style.opacity) >= 1) return false;
+				}
+				if (!image) return false;
+				const art = image.getBoundingClientRect();
+				return bounds.width > 0 && bounds.height > 0 && art.width > 0 && art.height > 0
+					&& art.left >= bounds.left - 1 && art.top >= bounds.top - 1
+					&& art.right <= bounds.right + 1 && art.bottom <= bounds.bottom + 1;
+			});
+		})()`);
+		if (!contained)
+			throw new Error(
+				"Housing payment artwork escaped its inventory item cell.",
+			);
+	};
+	await read(`${api}.begin("empty")`);
+	await settle();
+	await read(`${api}.reply()`);
+	await settle();
+	const verifyUnownedPaymentHints = async (count) => {
+		if (
+			!(await read(
+				`document.querySelectorAll('${windowSelector} .item-grid-cell[data-empty="true"] img.ui-icon').length === ${count}`,
+			))
+		)
+			throw new Error(
+				"Unowned Pyreal/Writ requirements have no reference artwork.",
+			);
+		await verifyPaymentArtwork();
+	};
+	await verifyUnownedPaymentHints(2);
+	await read(`${api}.profile('other',false,false,true)`);
+	await settle();
+	await read(`${api}.reply()`);
+	await settle();
+	await verifyUnownedPaymentHints(1);
+	await read(`${api}.begin("single")`);
+	await settle();
+	await read(`${api}.reply()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector}')?.textContent.replace(/\\s+/g, " ").includes('Available for purchase')`,
+		))
+	)
+		throw new Error(
+			"Ordinary housing profile did not open the purchase HUD: " +
+				JSON.stringify(
+					await read(
+						`({window: document.querySelector('${windowSelector}')?.textContent, panels: [...document.querySelectorAll('section.hud-window')].map(panel => panel.getAttribute('aria-label'))})`,
+					),
+				),
+		);
+	await verifyPaymentFooter();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector} .ui-tabs .ui-tab[aria-selected="true"]') !== null && document.querySelector('${windowSelector} .housing-requirement-cell .item-grid-cell[data-empty="true"] img.ui-icon') !== null`,
+		))
+	)
+		throw new Error(
+			"The empty payment row did not use shared tabs and desired-item artwork.",
+		);
+	if (
+		!(await read(`(() => {
+		const cell = document.querySelector('${windowSelector} .item-grid-cell[data-empty="true"]');
+		const style = getComputedStyle(cell);
+		const artStyle = getComputedStyle(cell.querySelector('.item-cell-art'));
+		return artStyle.filter === 'grayscale(1)' && parseFloat(artStyle.opacity) > 0
+			&& parseFloat(artStyle.opacity) < 1 && cell.disabled
+			&& parseFloat(style.borderTopWidth) > 0 && style.boxShadow.includes('inset')
+			&& style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+	})()`))
+	)
+		throw new Error(
+			"Empty payment cell lacks the shared recessed slot styling.",
+		);
+
+	await read(
+		`document.querySelector('button[aria-label="Inventory"]').click()`,
+	);
+	await settle();
+	const dragPoints = async (points) => {
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...points.source,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...points.source,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: points.source.x + 20,
+			y: points.source.y,
+			button: "left",
+			buttons: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...points.target,
+			button: "left",
+			buttons: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...points.target,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+	};
+	const dragPayment = async (item = "coins", wcid = 273) => {
+		const points = await read(`(() => {
+		const source=document.querySelector('.contents-scroll .item-grid-cell[data-item-guid="'+${api}[${JSON.stringify(item)}]+'"]');
+		const target=document.querySelector('[data-housing-payment][data-housing-wcid="${wcid}"]');
+		if (!source || !target) throw new Error('Missing housing drag surfaces');
+		source.scrollIntoView({block:'nearest'}); target.scrollIntoView({block:'nearest'});
+		const center=node=>{const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};
+		return {source:center(source),target:center(target)};
+	})()`);
+		await dragPoints(points);
+	};
+	await dragPayment();
+	await settle();
+	const manual = await read(`${api}.pending()`);
+	if (
+		manual.operation.kind !== "add" ||
+		manual.operation.wcid !== 273 ||
+		manual.operation.item !== (await read(`${api}.coins`)) ||
+		manual.draft.items.length !== 0
+	)
+		throw new Error(
+			"Housing drop did not preview the selected physical source.",
+		);
+	await read(`${api}.reply()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector} [data-housing-progress]').textContent.replace(/\\s+/g, ' ').trim() === '3 / 13'`,
+		))
+	)
+		throw new Error(
+			"Manual housing contribution was not displayed from the quote.",
+		);
+	await verifyPaymentArtwork();
+	await read(
+		`document.querySelector('${windowSelector} button[aria-label="Auto-fill Pyreal"]').click()`,
+	);
+	const automatic = await read(`${api}.pending()`);
+	if (
+		automatic.operation.kind !== "fill" ||
+		automatic.operation.wcid !== 273 ||
+		JSON.stringify(automatic.draft.items) !==
+			JSON.stringify([manual.operation.item])
+	)
+		throw new Error(
+			"Auto-fill lost the manual draft or did not request candidate selection.",
+		);
+	await read(`${api}.reply()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector} [data-housing-progress]').textContent.replace(/\\s+/g, ' ').trim() === '13 / 13'`,
+		))
+	)
+		throw new Error(
+			"Auto-filled sources did not display the complete shared quote.",
+		);
+	await verifyPaymentArtwork();
+	await read(
+		`document.querySelector('${windowSelector} [role="tab"][id^="housing-details-"]').click()`,
+	);
+	await read(`${api}.retained()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector} [role="tab"][id^="housing-details-"]').getAttribute('aria-selected') === 'true'`,
+		))
+	)
+		throw new Error("Retained profile reset the Details selection.");
+	if (
+		!(await read(`(() => {
+		const panel = document.querySelector('${windowSelector} [role="tabpanel"]');
+		return panel.querySelector('[aria-label="Eligibility"] dl') !== null
+			&& ['Purchase', 'Maintenance'].every(name => {
+				const table = panel.querySelector('[aria-label="' + name + ' requirements"] table');
+				return table?.querySelector('thead').textContent.includes('Paid / required')
+					&& table.querySelector('tbody td').textContent.trim() === '0 / 13';
+			});
+	})()`))
+	)
+		throw new Error(
+			"Housing Details did not group eligibility and authoritative payment progress.",
+		);
+	await read(
+		`document.querySelector('${windowSelector} [role="tab"][id^="housing-action-"]').click()`,
+	);
+	await settle();
+	const dragRow = async (destination) => {
+		const points = await read(`(() => {
+            const source = document.querySelector('${windowSelector} [data-housing-payment] .item-grid-cell');
+            const target = ${JSON.stringify(destination)} === 'inside' ? source
+                : ${JSON.stringify(destination)} === 'inventory'
+                    ? document.querySelector('.contents-scroll .item-grid-cell[data-item-guid="'+${api}.coins+'"]')
+                    : ${JSON.stringify(destination)} === 'other' ? document.querySelector('[data-housing-wcid="42"] .item-grid-cell')
+                    : document.querySelector('.client-canvas');
+            if (!source || !target) throw new Error('Missing row drag surfaces');
+            source.scrollIntoView({block:'nearest'});
+            if (${JSON.stringify(destination)} === 'inventory') target.scrollIntoView({block:'nearest'});
+            const center = node => { const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; };
+            return {source:center(source), target:${JSON.stringify(destination)} === 'world'
+                ? {x:target.getBoundingClientRect().right-20,y:target.getBoundingClientRect().top+20}
+                : center(target)};
+        })()`);
+		await dragPoints(points);
+		await settle();
+	};
+	const beforeCancel = await read(`${api}.pending()`);
+	await dragRow("inside");
+	if ((await read(`${api}.pending()`)).sequence !== beforeCancel.sequence)
+		throw new Error("Releasing inside a requirement cell changed the draft.");
+	for (const destination of ["inventory", "world"]) {
+		await dragRow(destination);
+		const cleared = await read(`${api}.pending()`);
+		if (cleared.operation.kind !== "quote" || cleared.draft.items.length !== 0)
+			throw new Error(
+				`Dragging a row to ${destination} did not clear only its draft.`,
+			);
+		await read(`${api}.reply()`);
+		await settle();
+		await read(
+			`document.querySelector('${windowSelector} button[aria-label="Auto-fill Pyreal"]').click()`,
+		);
+		await read(`${api}.reply()`);
+		await settle();
+	}
+
+	const commands = await read(`${api}.commands()`);
+	if (commands.some((entry) => entry.command.startsWith("submit_")))
+		throw new Error(
+			"Preparing housing payment dispatched an inventory transfer or payment.",
+		);
+	await read(
+		`[...document.querySelectorAll('${windowSelector} button')].find(button=>button.textContent.trim()==='Buy house').click()`,
+	);
+	await settle();
+	const submitted = await read(`${api}.submitted()`);
+	if (
+		JSON.stringify(submitted.draft.items) !==
+			JSON.stringify([await read(`${api}.coins`), await read(`${api}.note`)]) ||
+		!submitted.quote.complete
+	)
+		throw new Error(
+			"Submission did not preserve current source identities and consumption.",
+		);
+	await read(`${api}.accept()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector}').textContent.replace(/\\s+/g, " ").includes('Waiting for housing payment') && [...document.querySelectorAll('${windowSelector} .housing-payment-actions button')].every(button=>button.disabled)`,
+		))
+	)
+		throw new Error(
+			"Submitted housing payment did not block another draft or payment.",
+		);
+	await read(
+		`document.querySelector('${windowSelector} button[aria-label="Close Cottage crystal"]').click()`,
+	);
+	await settle();
+	await read(`${api}.retained()`);
+	await settle();
+	if (await read(`Boolean(document.querySelector('${windowSelector}'))`))
+		throw new Error(
+			"Retained housing facts reopened a dismissed crystal window.",
+		);
+	await read(`${api}.finish('unresolved')`);
+	await settle();
+	if (
+		!(await read(
+			`[...document.querySelectorAll('.client-toast')].some(node=>node.textContent.replace(/\\s+/g, " ").includes('Housing payment could not be confirmed'))`,
+		))
+	)
+		throw new Error(
+			"Dismissed housing execution did not surface its uncertainty through a toast.",
+		);
+	const paymentCommands = await read(`${api}.commands()`);
+	if (
+		paymentCommands.filter(
+			(entry) => entry.command === "submit_client_housing_payment",
+		).length !== 1 ||
+		paymentCommands.some((entry) => entry.command === "submit_client_inventory")
+	)
+		throw new Error(
+			"Housing confirmation sent duplicate payment or a premature inventory transfer.",
+		);
+	const variants = [];
+	for (const [ownership, free, paid, active, expected] of [
+		["character", false, false, true, "Owned by you"],
+		["account", false, false, true, "Owned by your account"],
+		["other", true, false, true, "Maintenance is free this period."],
+		["other", false, true, true, "Maintenance is paid."],
+		["available", false, false, false, "This dwelling is disabled."],
+	]) {
+		await read(
+			`${api}.profile(${JSON.stringify(ownership)},${free},${paid},${active})`,
+		);
+		await settle();
+		const text = await read(
+			`document.querySelector('${windowSelector}').textContent`,
+		);
+		if (!text.replace(/\s+/g, " ").includes(expected))
+			throw new Error(`Missing crystal variant: ${expected}`);
+		variants.push(expected);
+	}
+	await read(`${api}.profile('other',false,false,true)`);
+	await settle();
+	await read(`${api}.reply()`);
+	await settle();
+	await dragPayment();
+	await settle();
+	await read(`${api}.reply()`);
+	await settle();
+	await read(
+		`[...document.querySelectorAll('${windowSelector} button')].find(button=>button.textContent.trim()==='Pay maintenance').click()`,
+	);
+	await settle();
+	const maintenance = await read(`${api}.submitted()`);
+	await verifyPaymentFooter();
+	if (
+		maintenance.draft.purpose !== "maintenance" ||
+		maintenance.quote.complete ||
+		!maintenance.quote.contributes
+	)
+		throw new Error(
+			"Partial maintenance submission was blocked or replaced by full payment.",
+		);
+	await read(`${api}.finish('completed')`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector}').querySelectorAll('.housing-requirement-row .item-grid-cell[data-empty="true"] img.ui-icon').length === 1 && !document.querySelector('${windowSelector}').textContent.replace(/\\s+/g, " ").includes('Maintenance is paid.')`,
+		))
+	)
+		throw new Error(
+			"Completed contribution did not retire the draft while retaining unpaid maintenance.",
+		);
+	await read(`${api}.begin("multiple")`);
+	await settle();
+	await read(`${api}.reply()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('.contents-scroll .item-grid-cell[data-item-guid="'+${api}.coins+'"]') !== null`,
+		))
+	)
+		await read(
+			`document.querySelector('button[aria-label="Inventory"]').click()`,
+		);
+	await settle();
+	await dragPayment("coins", 273);
+	await read(`${api}.reply()`);
+	await settle();
+	await dragPayment("writSmall", 42);
+	await read(`${api}.reply()`);
+	await settle();
+	await read(
+		`document.querySelector('${windowSelector} button[aria-label="Auto-fill Writ"]').click()`,
+	);
+	await read(`${api}.reply()`);
+	await settle();
+	const isolated = await read(`(() => {
+        const rows = [...document.querySelectorAll('${windowSelector} .housing-requirement-row')];
+        return rows.map(row => ({wcid:Number(row.dataset.housingRequirement), text:row.textContent.replace(/\\s+/g,' '), progress:Number(row.querySelector('[data-housing-progress]').dataset.housingProgress), prepared:Number(row.querySelector('[data-housing-progress]').dataset.housingPrepared)}));
+    })()`);
+	if (
+		isolated.length !== 2 ||
+		isolated[0].progress !== 3 ||
+		isolated[1].progress !== 4 ||
+		isolated[0].prepared !== 3 ||
+		isolated[1].prepared !== 3
+	)
+		throw new Error(
+			"Requirement auto-fill changed another row or lost combined stack selection.",
+		);
+	await dragPayment("coins", 42);
+	await read(`${api}.reply()`);
+	await settle();
+	if (
+		!(await read(
+			`[...document.querySelectorAll('.client-toast')].some(node => node.textContent.includes('That item does not match'))`,
+		))
+	)
+		throw new Error(
+			"Mismatched requirement drop did not surface its rejection toast.",
+		);
+	const mutationsBeforeRowRemoval = await read(
+		`${api}.commands().filter(entry => entry.command.startsWith('submit_')).length`,
+	);
+	await dragRow("inventory");
+	const retainedOtherRow = await read(`${api}.pending()`);
+	if (
+		retainedOtherRow.operation.kind !== "quote" ||
+		JSON.stringify(retainedOtherRow.draft.items) !==
+			JSON.stringify([
+				await read(`${api}.writSmall`),
+				await read(`${api}.writLarge`),
+			])
+	)
+		throw new Error("Clearing one requirement removed another row selection.");
+	await read(`${api}.reply()`);
+	await settle();
+	await dragPayment("note", 273);
+	await read(`${api}.reply()`);
+	await settle();
+	if (
+		!(await read(
+			`document.querySelector('${windowSelector} [data-housing-requirement="273"]').textContent.replace(/\\s+/g,' ').includes('+7 excess')`,
+		))
+	)
+		throw new Error(
+			"Rounded note excess was not disclosed beside its requirement.",
+		);
+	await dragRow("other");
+	if (
+		(await read(`${api}.pending()`)).operation.kind !== "quote" ||
+		(await read(
+			`${api}.commands().filter(entry => entry.command.startsWith('submit_')).length`,
+		)) !== mutationsBeforeRowRemoval
+	)
+		throw new Error(
+			"A draft row release over another row dispatched a real mutation.",
+		);
+	await read(`${api}.reply()`);
+	await settle();
+
+	await verifyPaymentArtwork();
+
+	await read(
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.replaceHousingCharacter(2)",
+	);
+	await settle();
+	if (await read(`Boolean(document.querySelector('${windowSelector}'))`))
+		throw new Error("Character replacement retained the outgoing crystal HUD.");
+	await read(`${api}.retained()`);
+	await settle();
+	if (await read(`Boolean(document.querySelector('${windowSelector}'))`))
+		throw new Error(
+			"Retained profile reopened a crystal after character replacement.",
+		);
+
+	return {
+		manual,
+		automatic,
+		requirementRows: isolated,
+		retainedOtherRow,
+		commands: commands.map((entry) => entry.command),
+		submitted,
+		maintenance,
+		paymentCommands: paymentCommands.map((entry) => entry.command),
+		variants,
+		dismissedSnapshotStayedClosed: true,
+		characterReplacementStayedClosed: true,
+	};
+}
+
 async function probeClientWorldMap(client) {
 	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
 	const read = (expression) => evaluateExpression(client, expression);
@@ -6611,7 +7132,7 @@ async function probeClientWorldMap(client) {
 	await click("World");
 	const readProgress = () =>
 		read(
-			`(() => { const status=document.querySelector('section.hud-window[aria-label="World"] [role="status"]'); const bar=status?.querySelector('progress'); return {label:status?.textContent.trim(), value:bar?.value, max:bar?.max}; })()`,
+			`(() => { const status=document.querySelector('section.hud-window[aria-label="World"] .world-map-page [role="status"]'); const bar=status?.querySelector('progress'); return {label:status?.textContent.trim(), value:bar?.value, max:bar?.max}; })()`,
 		);
 	const startedProgress = await readProgress();
 	if (
@@ -6740,11 +7261,11 @@ async function probeClientWorldMap(client) {
 	await delay(50);
 	if (
 		!(await read(
-			`document.querySelector('canvas[aria-label="World terrain map"]').closest('[role="tabpanel"]').hidden && [...document.querySelectorAll('[role="tabpanel"]')].some(panel => !panel.hidden && panel.textContent.includes('Housing is not available yet.'))`,
+			`document.querySelector('canvas[aria-label="World terrain map"]').closest('[role="tabpanel"]').hidden && [...document.querySelectorAll('[role="tabpanel"]')].some(panel => !panel.hidden && panel.textContent.includes('Housing information unavailable.'))`,
 		))
 	)
 		throw new Error(
-			"Housing tab did not hide the retained map and show its placeholder.",
+			"Housing tab did not hide the retained map and show its unqueried state.",
 		);
 	await read(
 		`document.querySelector('[role="tab"][aria-controls$="-world"]').click()`,
@@ -6772,7 +7293,7 @@ async function probeClientWorldMap(client) {
 	const deadline = Date.now() + 30000;
 	while (
 		await read(
-			`Boolean(document.querySelector('section.hud-window[aria-label="World"] [role="status"]'))`,
+			`Boolean(document.querySelector('section.hud-window[aria-label="World"] .world-map-page [role="status"]'))`,
 		)
 	) {
 		if (Date.now() > deadline)
@@ -6853,6 +7374,799 @@ async function probeClientWorldMap(client) {
 	const reopened = await read(`${api}.readWorldMapFixture()`);
 	if (!retained || JSON.stringify(loaded) !== JSON.stringify(reopened))
 		throw new Error("Reopen replaced the canvas or reloaded the dataset.");
+	const landscapeHome = {
+		home: {
+			kind: "owned",
+			home: {
+				houseType: 1,
+				boughtAt: 100,
+				maintenanceFree: false,
+				buy: [],
+				rent: [
+					{
+						wcid: 273,
+						name: "Pyreal",
+						pluralName: "Pyreals",
+						required: 100,
+						paid: 30,
+						remaining: 70,
+					},
+				],
+				maintenancePaid: false,
+				period: { start: 200, end: 300, nextDue: 300 },
+				position: {
+					landblockId: 0xa9b40001,
+					coords: { x: 80, y: 90, z: 0 },
+					rotation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+			},
+		},
+		refreshing: false,
+		crystal: null,
+		pendingPayment: null,
+		pendingManagement: null,
+		access: { generation: 0, records: null, refreshing: false },
+		search: { results: null, pendingType: null },
+	};
+	await read(`${api}.setHousing(${JSON.stringify(landscapeHome)})`);
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-housing"]').click()`,
+	);
+	await delay(50);
+	if (
+		!(await read(
+			`(() => { const panel=document.querySelector('.housing-tab'); return panel.querySelector('.housing-type').textContent.trim() === 'Cottage' && panel.querySelector('.housing-table td').textContent.trim() === '30 / 100' && panel.querySelector('.housing-summary').querySelectorAll('.housing-maintenance-deadline').length === 1 && panel.querySelector('.housing-maintenance-deadline').textContent.trim() === 'Payment deadline' && ${api}.readHousingRefreshes() === 0; })()`,
+		))
+	)
+		throw new Error(
+			"Housing tab did not consume retained home facts without querying.",
+		);
+	if (
+		!(await read(`(() => {
+		const tab = document.querySelector('.housing-tab');
+		const page = tab.closest('[role="tabpanel"]');
+		const bounds = page.getBoundingClientRect();
+		const content = tab.getBoundingClientRect();
+		return Math.abs(bounds.left-content.left) < 1 && Math.abs(bounds.top-content.top) < 1
+			&& Math.abs(bounds.width-content.width) < 1 && Math.abs(bounds.height-content.height) < 1;
+	})()`))
+	)
+		throw new Error(
+			"Housing tab does not fill its page; placeholder spacing remains.",
+		);
+
+	if (
+		!(await read(`(() => {
+		const disclosures = [...document.querySelectorAll('.housing-tab details.ui-disclosure')];
+		return disclosures.length >= 5 && disclosures.filter(section => section.open).length === 1
+			&& disclosures.find(section => section.open).querySelector('summary').textContent === 'Maintenance';
+	})()`))
+	)
+		throw new Error(
+			"Housing tab did not default to a compact collapsible layout.",
+		);
+	if (
+		!(await read(`(() => {
+		const panel = document.querySelector('.housing-tab');
+		const location = panel.querySelector('.housing-summary > .housing-location');
+		return location?.getBoundingClientRect().height > 0 && location.previousElementSibling.textContent.trim() === 'Location'
+			&& ![...panel.querySelectorAll('button')].some(button => ['Refresh', 'Show on map'].includes(button.textContent.trim()));
+	})()`))
+	)
+		throw new Error(
+			"Housing summary did not expose coordinates without redundant controls.",
+		);
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-world"]').click()`,
+	);
+	await delay(200);
+	const homeMarker = await read(`(() => {
+		const marker = document.querySelector('.world-home-target');
+		const matrix = marker.transform.baseVal.consolidate()?.matrix;
+		return { visible: marker.style.display !== 'none', x: matrix?.e, y: matrix?.f };
+	})()`);
+	if (
+		!homeMarker.visible ||
+		!Number.isFinite(homeMarker.x) ||
+		!Number.isFinite(homeMarker.y)
+	)
+		throw new Error("Retained home location did not populate the map marker.");
+	const apartmentHome = structuredClone(landscapeHome);
+	apartmentHome.home.home.houseType = 4;
+	apartmentHome.home.home.boughtAt = null;
+	await read(`${api}.setHousing(${JSON.stringify(apartmentHome)})`);
+	await delay(200);
+	if (
+		!(await read(
+			`document.querySelector('.world-home-target').style.display === 'none'`,
+		))
+	)
+		throw new Error("Apartment replacement retained a landscape marker.");
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-housing"]').click()`,
+	);
+	await delay(50);
+	if (
+		!(await read(
+			`(() => { const panel=document.querySelector('.housing-tab'); return panel.textContent.includes('Apartment') && panel.textContent.includes('Date unavailable') && ![...panel.querySelectorAll('button')].some(button => button.textContent.trim() === 'Show on map'); })()`,
+		))
+	)
+		throw new Error(
+			"Apartment home exposed a map action or invented purchase date.",
+		);
+
+	const manage = '[aria-label="Manage housing"]';
+	const manageClick = async (label) => {
+		await read(
+			`(() => { const button=[...document.querySelectorAll('${manage} button')].find(node => node.textContent.trim() === ${JSON.stringify(label)}); if(!button) throw new Error('Missing management button '+${JSON.stringify(label)}); button.click(); })()`,
+		);
+		await delay(300);
+	};
+	await read(
+		`document.querySelector('${manage} details[aria-label="Access permissions"]').open = true`,
+	);
+	await delay(300);
+	let managementCommands = await read(`${api}.readHousingManagementCommands()`);
+	if (
+		managementCommands.filter(
+			(entry) => entry.command === "query_client_housing_access",
+		).length !== 0
+	)
+		throw new Error(
+			"Disclosure expansion dispatched a permission query instead of consuming core facts.",
+		);
+	const managementHome = structuredClone(apartmentHome);
+	managementHome.access = {
+		generation: 0,
+		refreshing: false,
+		records: {
+			publicEntry: false,
+			guests: [{ character: 2, name: "Fixture guest", storageAllowed: false }],
+			allegiance: null,
+			roommates: null,
+		},
+	};
+	await read(`${api}.setHousing(${JSON.stringify(managementHome)})`);
+	await delay(300);
+	if (
+		!(await read(
+			`document.querySelector('${manage}').textContent.includes('Fixture guest')`,
+		))
+	)
+		throw new Error(
+			"Management did not show named permissions or preserve unknown allegiance facts.",
+		);
+	if (
+		!(await read(`(() => {
+        const root = document.querySelector('${manage}');
+        return !root.querySelector('select') && ['Allegiance entry', 'Allegiance storage'].every(label => {
+            const input = root.querySelector('input[aria-label="' + label + '"]');
+            return !input.indeterminate && !input.checked;
+        });
+    })()`))
+	)
+		throw new Error(
+			"Undisclosed binary settings did not default to unchecked.",
+		);
+	await read(
+		`document.querySelector('${manage} input[type="checkbox"]').click()`,
+	);
+	await delay(300);
+	managementCommands = await read(`${api}.readHousingManagementCommands()`);
+	const publicRequest = managementCommands.findLast(
+		(entry) => entry.command === "submit_client_housing_management",
+	)?.args?.request;
+	if (
+		publicRequest?.action.kind !== "publicEntry" ||
+		publicRequest.action.enabled !== true
+	)
+		throw new Error(
+			"Public-entry control did not submit its explicit desired state.",
+		);
+	if (!(await read(`document.querySelector('${manage} fieldset').disabled`)))
+		throw new Error(
+			"Submitted administration did not block competing controls.",
+		);
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: publicRequest.sequence, generation: publicRequest.generation, outcome: { kind: "requested" } })})`,
+	);
+	await delay(300);
+	if (
+		!(await read(
+			`document.querySelector('${manage} input[type="checkbox"]').checked`,
+		))
+	)
+		throw new Error("Requested checkbox value snapped back after dispatch.");
+	managementHome.access.refreshing = true;
+	await read(`${api}.setHousing(${JSON.stringify(managementHome)})`);
+	await delay(300);
+	if (
+		!(await read(
+			`document.querySelector('${manage} input[type="checkbox"]').checked && !document.querySelector('${manage} fieldset').disabled`,
+		))
+	)
+		throw new Error(
+			"Stale background facts replaced the intention or blocked unrelated controls.",
+		);
+	if (!(await read(`${api}.probeHousingManagementRemount()`)))
+		throw new Error(
+			"Remounting housing controls lost the requested checkbox value or dispatched another command.",
+		);
+	managementHome.access.refreshing = false;
+	managementHome.access.records.publicEntry = true;
+	await read(`${api}.setHousing(${JSON.stringify(managementHome)})`);
+	await delay(300);
+	if (
+		!(await read(
+			`document.querySelector('${manage} input[type="checkbox"]').checked`,
+		))
+	)
+		throw new Error(
+			"Refreshed facts did not update the checkbox independently of the dispatch receipt.",
+		);
+	await read(`(() => {
+		const section = document.querySelector('${manage} details[aria-label="Decorations"]');
+		section.open = true;
+		[...section.querySelectorAll('button')].find(button => button.textContent.trim() === 'Show empty hooks').click();
+	})()`);
+	await delay(300);
+	managementCommands = await read(`${api}.readHousingManagementCommands()`);
+	const hooksRequest = managementCommands.findLast(
+		(entry) => entry.command === "submit_client_housing_management",
+	)?.args?.request;
+	if (
+		hooksRequest?.action.kind !== "hooks" ||
+		hooksRequest.action.enabled !== true
+	)
+		throw new Error(
+			"Empty-hook control did not submit an explicit show request.",
+		);
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: hooksRequest.sequence, generation: hooksRequest.generation, outcome: { kind: "requested" } })})`,
+	);
+	await delay(300);
+	await manageClick("Hide empty hooks");
+	await delay(300);
+	const hideHooksRequest = await read(
+		`${api}.readHousingManagementCommands().findLast(entry => entry.command === 'submit_client_housing_management').args.request`,
+	);
+	if (
+		hideHooksRequest.action.kind !== "hooks" ||
+		hideHooksRequest.action.enabled !== false
+	)
+		throw new Error(
+			"Hide hooks button did not submit an explicit hide command.",
+		);
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: hideHooksRequest.sequence, generation: hideHooksRequest.generation, outcome: { kind: "requested" } })})`,
+	);
+	await delay(300);
+
+	await read(
+		`document.querySelector('${manage} details[aria-label="Access permissions"]').open = true`,
+	);
+	await manageClick("Revoke all storage access");
+	const revokeStorage = await read(
+		`${api}.readHousingManagementCommands().findLast(entry => entry.command === 'submit_client_housing_management').args.request`,
+	);
+	if (
+		revokeStorage.action.kind !== "removeAllStorage" ||
+		!(await read(
+			`[...document.querySelectorAll('${manage} details[aria-label="Access permissions"] button')].some(button => button.textContent.trim() === 'Revoke all storage access')`,
+		))
+	)
+		throw new Error("Revoke storage did not dispatch from Access & guests.");
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: revokeStorage.sequence, generation: revokeStorage.generation, outcome: { kind: "requested" } })})`,
+	);
+	await delay(300);
+	await manageClick("Remove all guests");
+	const removeGuests = await read(
+		`${api}.readHousingManagementCommands().findLast(entry => entry.command === 'submit_client_housing_management').args.request`,
+	);
+	if (
+		removeGuests.action.kind !== "removeAllGuests" ||
+		!(await read(
+			`[...document.querySelectorAll('${manage} .housing-guest-access button')].some(button => button.textContent.trim() === 'Remove all guests')`,
+		))
+	)
+		throw new Error(
+			"Remove all guests did not dispatch from the guest access group.",
+		);
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: removeGuests.sequence, generation: removeGuests.generation, outcome: { kind: "requested" } })})`,
+	);
+	await delay(300);
+	const submitHousingName = async (label, value) => {
+		await read(
+			`(() => { const input = document.querySelector('${manage} input[aria-label="${label}"]'); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); })()`,
+		);
+		await delay(30);
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key: "Enter",
+			text: "\r",
+			code: "Enter",
+			windowsVirtualKeyCode: 13,
+		});
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			key: "Enter",
+			code: "Enter",
+			windowsVirtualKeyCode: 13,
+		});
+		await delay(300);
+	};
+	for (const [label, name, kind] of [
+		["Guest character name", "New guest", "addGuest"],
+		["Occupant character name", "Named occupant", "bootGuest"],
+	]) {
+		const before = await read(
+			`${api}.readHousingManagementCommands().filter(entry => entry.command === 'submit_client_housing_management').length`,
+		);
+		await submitHousingName(label, name);
+		const commands = await read(
+			`${api}.readHousingManagementCommands().filter(entry => entry.command === 'submit_client_housing_management')`,
+		);
+		const request = commands.at(-1)?.args.request;
+		if (
+			commands.length !== before + 1 ||
+			request?.action.kind !== kind ||
+			request.action.name !== name
+		)
+			throw new Error(
+				`Enter did not submit exactly one ${kind} action: ${JSON.stringify({ before, commands, active: await read("document.activeElement.outerHTML") })}`,
+			);
+		await read(
+			`${api}.finishHousingManagement(${JSON.stringify({ sequence: request.sequence, generation: request.generation, outcome: { kind: "requested" } })})`,
+		);
+		await delay(300);
+	}
+	await read(
+		`(() => { const input = document.querySelector('${manage} input[aria-label="Occupant character name"]'); input.value = '   '; input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
+	);
+	await delay(30);
+	await manageClick("Boot all");
+	const bootRequest = await read(
+		`${api}.readHousingManagementCommands().findLast(entry => entry.command === 'submit_client_housing_management').args.request`,
+	);
+	if (
+		bootRequest.action.kind !== "bootEveryone" ||
+		!(await read(
+			`[...document.querySelectorAll('${manage} [aria-label="Access permissions"] button')].some(button => button.textContent.trim() === 'Boot all') && !document.querySelector('dialog.client-message-dialog')`,
+		))
+	)
+		throw new Error(
+			"Boot action did not submit directly from access controls.",
+		);
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: bootRequest.sequence, generation: bootRequest.generation, outcome: { kind: "requested" } })})`,
+	);
+	await delay(300);
+	managementCommands = await read(`${api}.readHousingManagementCommands()`);
+	const beforeAbandon = managementCommands.filter(
+		(entry) => entry.command === "submit_client_housing_management",
+	).length;
+	await read(
+		`document.querySelector('${manage} details[aria-label="Advanced housing actions"]').open = true`,
+	);
+	await manageClick("Abandon home…");
+	if (
+		!(await read(
+			`document.querySelector('dialog.client-message-dialog').textContent.includes('remove its deed')`,
+		))
+	)
+		throw new Error(
+			"Abandonment confirmation omitted owning-character requirement.",
+		);
+	const typeAbandonment = async (value) => {
+		await read(
+			`(() => { const input = document.querySelector('dialog.client-message-dialog input'); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
+		);
+		await delay(30);
+	};
+	const acceptDisabled = () =>
+		read(
+			`document.querySelector('dialog.client-message-dialog .client-message-actions button:last-child').disabled`,
+		);
+	if (!(await acceptDisabled()))
+		throw new Error("Empty abandonment input allowed confirmation.");
+	await typeAbandonment("Abandon");
+	if (!(await acceptDisabled()))
+		throw new Error("Abandonment accepted a nonmatching word.");
+	await typeAbandonment("abandon");
+	if (await acceptDisabled())
+		throw new Error("Matching abandonment input did not enable confirmation.");
+	const clickDialogPoint = async (point) => {
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...point,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...point,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		await delay(50);
+	};
+	await clickDialogPoint(
+		await read(
+			`(() => { const bounds = document.querySelector('dialog.client-message-dialog').getBoundingClientRect(); return { x: bounds.left + 8, y: bounds.top + 8 }; })()`,
+		),
+	);
+	if (
+		!(await read(
+			`Boolean(document.querySelector('dialog.client-message-dialog'))`,
+		))
+	)
+		throw new Error("Inside modal click canceled abandonment.");
+	await clickDialogPoint({ x: 2, y: 2 });
+	if (
+		await read(
+			`Boolean(document.querySelector('dialog.client-message-dialog'))`,
+		)
+	)
+		throw new Error("Backdrop click did not cancel abandonment.");
+	await delay(300);
+	await manageClick("Abandon home…");
+	if (!(await acceptDisabled()))
+		throw new Error("Reopened abandonment inherited the previous input.");
+	await typeAbandonment("abandon");
+	managementHome.access.generation += 1;
+	await read(`${api}.setHousing(${JSON.stringify(managementHome)})`);
+	await delay(300);
+	if (
+		await read(
+			`Boolean(document.querySelector('dialog.client-message-dialog'))`,
+		)
+	)
+		throw new Error("Home replacement retained stale management confirmation.");
+	await read(
+		`document.querySelector('${manage} details[aria-label="Advanced housing actions"]').open = true`,
+	);
+	await manageClick("Abandon home…");
+	managementCommands = await read(`${api}.readHousingManagementCommands()`);
+	if (
+		managementCommands.filter(
+			(entry) => entry.command === "submit_client_housing_management",
+		).length !== beforeAbandon
+	)
+		throw new Error("Abandonment dispatched before confirmation.");
+	if (!(await acceptDisabled()))
+		throw new Error("Home replacement inherited abandonment input.");
+	await typeAbandonment("abandon");
+	await read(
+		`document.querySelector('dialog.client-message-dialog .client-message-actions button:last-child').click()`,
+	);
+	await delay(300);
+	managementCommands = await read(`${api}.readHousingManagementCommands()`);
+	const abandonRequest = managementCommands.findLast(
+		(entry) => entry.command === "submit_client_housing_management",
+	)?.args?.request;
+	if (
+		abandonRequest?.action.kind !== "abandon" ||
+		abandonRequest.generation !== managementHome.access.generation
+	)
+		throw new Error("Confirmed abandonment lost the reviewed home epoch.");
+	await read(
+		`${api}.finishHousingManagement(${JSON.stringify({ sequence: abandonRequest.sequence, generation: abandonRequest.generation, outcome: { kind: "rejected", reason: "Only the owner can do this" } })})`,
+	);
+	await delay(300);
+	if (
+		!(await read(
+			`!document.querySelector('${manage} fieldset').disabled && document.querySelector('${manage}').getAttribute('aria-busy') === 'false'`,
+		))
+	)
+		throw new Error(
+			"Owner-only rejection did not retire management admission.",
+		);
+	const searchSnapshot = structuredClone(apartmentHome);
+	searchSnapshot.home = { kind: "none" };
+	searchSnapshot.search = {
+		results: { houseType: 4, areas: [0xa9b40001], totalAvailable: 3 },
+		pendingType: null,
+	};
+	await read(`${api}.setHousing(${JSON.stringify(searchSnapshot)})`);
+	await delay(50);
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-world"]').click()`,
+	);
+	await delay(50);
+	const chooseHousing = async (type) => {
+		await read(
+			`(() => { const select=document.querySelector('[aria-label="Housing search"]'); select.value='${type}'; select.dispatchEvent(new Event('change',{bubbles:true})); })()`,
+		);
+		await delay(50);
+	};
+	const markerCount = () =>
+		read(`document.querySelectorAll('[data-housing-search-areas]').length`);
+	if (
+		!(await read(
+			`(() => {const select=document.querySelector('[aria-label="Housing search"]');return select.value==='0' && [...select.options].every(option=>option.value!=='4') && ${api}.readHousingSearches().length===0;})()`,
+		))
+	)
+		throw new Error(
+			"Map housing search did not start hidden without apartment options or implicit requests.",
+		);
+	await chooseHousing(2);
+	const housingSearches = await read(`${api}.readHousingSearches()`);
+	if (
+		JSON.stringify(housingSearches) !== JSON.stringify([2]) ||
+		(await markerCount()) !== 0
+	)
+		throw new Error(
+			"Map search did not dispatch once or exposed mismatched apartment areas.",
+		);
+	if (
+		!(await read(
+			`(() => {const select=document.querySelector('[aria-label="Housing search"]');return select.getAttribute('aria-busy')==='true' && !select.options[0].disabled && [...select.options].slice(1).every(option=>option.disabled);})()`,
+		))
+	)
+		throw new Error(
+			"Pending map search admission disabled None or enabled another type.",
+		);
+	await chooseHousing(0);
+	searchSnapshot.search = {
+		results: {
+			houseType: 2,
+			areas: [0xa9b40001, 0xaab40001],
+			totalAvailable: 3,
+		},
+		pendingType: null,
+	};
+	await read(`${api}.setHousing(${JSON.stringify(searchSnapshot)})`);
+	await delay(50);
+	if ((await markerCount()) !== 0)
+		throw new Error("Late map search reply re-enabled a hidden filter.");
+	await chooseHousing(2);
+	if ((await markerCount()) === 0)
+		throw new Error("Matching retained map search areas did not render.");
+	await read(`${api}.timeoutHousingSearch()`);
+	await delay(100);
+	if (
+		!(await read(
+			`document.querySelector('.client-toast[role="alert"]').textContent.includes('Housing search timed out') && !document.querySelector('[aria-label="Housing search"] option[value="1"]').disabled`,
+		)) ||
+		(await read(`${api}.readHousingSearches()`)).length !== 2
+	)
+		throw new Error(
+			"Timeout failed to restore map admission with a toast or resent search.",
+		);
+	const denseAreas = Array.from(
+		{ length: 25 },
+		(_, index) =>
+			(((0xa9 + (index % 5)) << 24) |
+				((0xb4 + Math.floor(index / 5)) << 16) |
+				1) >>>
+			0,
+	);
+	searchSnapshot.search.results.areas = denseAreas;
+	await read(`${api}.setHousing(${JSON.stringify(searchSnapshot)})`);
+	await read(`document.querySelector('.world-map-reset').click()`);
+	await delay(100);
+	const clusteredCount = await markerCount();
+	if (clusteredCount === 0 || clusteredCount >= denseAreas.length)
+		throw new Error("Dense world-fit areas were not clustered.");
+	const markerPoint = await read(
+		`(() => {const rect=document.querySelector('[data-housing-search-areas] circle').getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};})()`,
+	);
+	const mapCenter = await read(
+		`(() => {const rect=document.querySelector('[aria-label="World terrain map"]').getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};})()`,
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...markerPoint,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		...mapCenter,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		...mapCenter,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	await delay(50);
+	let separated = false;
+	for (let step = 0; step < 8; step++) {
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseWheel",
+			...mapCenter,
+			deltaX: 0,
+			deltaY: -400,
+		});
+		await delay(40);
+		// Zoom is center-based. Keep the fixture areas in view before zooming again.
+		const visibleMarker = await read(
+			`(() => {const node=document.querySelector('[data-housing-search-areas] circle');if(!node)return null;const rect=node.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};})()`,
+		);
+		if (visibleMarker) {
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mousePressed",
+				...visibleMarker,
+				button: "left",
+				buttons: 1,
+				clickCount: 1,
+			});
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				...mapCenter,
+				button: "left",
+				buttons: 1,
+			});
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseReleased",
+				...mapCenter,
+				button: "left",
+				buttons: 0,
+				clickCount: 1,
+			});
+			await delay(40);
+		}
+		if ((await markerCount()) > clusteredCount) {
+			separated = true;
+			break;
+		}
+	}
+	if (!separated)
+		throw new Error("Housing clusters did not separate with real map zoom.");
+	const clusterPositions = () =>
+		read(
+			`Array.from(document.querySelectorAll('[data-housing-search-areas]'), node => ({areas:node.dataset.housingSearchAreas, x:node.transform.baseVal.getItem(0).matrix.e, y:node.transform.baseVal.getItem(0).matrix.f}))`,
+		);
+	const beforePan = await clusterPositions();
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...mapCenter,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x: mapCenter.x + 10,
+		y: mapCenter.y + 7,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		x: mapCenter.x + 10,
+		y: mapCenter.y + 7,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	await delay(50);
+	const afterPan = await clusterPositions();
+	const stablePan =
+		beforePan.length > 0 &&
+		beforePan.every((before) => {
+			const after = afterPan.find(
+				(candidate) => candidate.areas === before.areas,
+			);
+			return (
+				after &&
+				Math.abs(after.x - before.x - 10) < 0.1 &&
+				Math.abs(after.y - before.y - 7) < 0.1
+			);
+		});
+	if (!stablePan)
+		throw new Error(
+			"Map pan changed housing cluster membership or centroid motion.",
+		);
+	await read(`document.querySelector('.world-map-reset').click()`);
+	await delay(50);
+	const beforeResize = await read(
+		`document.querySelector('.world-housing-search').innerHTML`,
+	);
+	await read(`document.querySelector('.world-map-surface').style.width='75%'`);
+	await delay(100);
+	if (
+		(await markerCount()) === 0 ||
+		(await read(
+			`document.querySelector('.world-housing-search').innerHTML`,
+		)) === beforeResize
+	)
+		throw new Error("Map resize did not reproject housing areas.");
+	await read(`document.querySelector('.world-map-surface').style.width=''`);
+	await delay(100);
+	await click("Close World");
+	await click("World");
+	await delay(50);
+	if (
+		!(await read(
+			`document.querySelector('[aria-label="Housing search"]').value==='2' && ${api}.readHousingSearches().length===2`,
+		))
+	)
+		throw new Error("Panel hiding lost the filter or resent the request.");
+	searchSnapshot.search.pendingType = null;
+	await read(`${api}.setHousing(${JSON.stringify(searchSnapshot)})`);
+	await delay(50);
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-housing"]').click()`,
+	);
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-world"]').click()`,
+	);
+	await delay(50);
+	if ((await read(`${api}.readHousingSearches()`)).length !== 2)
+		throw new Error("Tab focus resent map search.");
+	searchSnapshot.search = {
+		results: { houseType: 2, areas: [], totalAvailable: 0 },
+		pendingType: null,
+	};
+	await read(`${api}.setHousing(${JSON.stringify(searchSnapshot)})`);
+	await delay(50);
+	if (
+		(await markerCount()) !== 0 ||
+		!(await read(
+			`document.querySelector('[aria-label="Housing search"] option:checked').textContent.includes('(0)')`,
+		))
+	)
+		throw new Error("Empty map search was not indicated in the selector.");
+	await read(
+		`document.querySelector('[role="tab"][aria-controls$="-housing"]').click()`,
+	);
+	await read(`${api}.setHousing(${JSON.stringify(managementHome)})`);
+	await delay(300);
+
+	await read(
+		`document.querySelector('${manage} details[aria-label="Advanced housing actions"]').open = true`,
+	);
+	await manageClick("Abandon home…");
+	const beforeCharacterReplacement = await read(
+		`${api}.readHousingManagementCommands().length`,
+	);
+	await read(`${api}.replaceHousingCharacter(2)`);
+	await delay(300);
+	if (
+		!(await read(`(() => {
+		const panel = document.querySelector('.housing-tab');
+		return panel.textContent.includes('Housing information unavailable')
+			&& !panel.textContent.includes('Fixture guest')
+			&& !document.querySelector('dialog.client-message-dialog')
+			&& ${api}.readHousingManagementCommands().length === ${beforeCharacterReplacement};
+	})()`))
+	)
+		throw new Error(
+			"Character replacement retained old home, permissions, or management review.",
+		);
+	if (
+		!(await read(
+			`document.querySelector('[aria-label="Housing search"]').value === '0' && document.querySelectorAll('[data-housing-search-areas]').length === 0`,
+		))
+	)
+		throw new Error(
+			"Character replacement retained the old map search filter.",
+		);
+	await read(`document.querySelector('.housing-tab button').click()`);
+	if ((await read(`${api}.readHousingRefreshes()`)) !== 1)
+		throw new Error(
+			"Unavailable housing Retry did not request information once.",
+		);
+	await read(`${api}.setHousing(${JSON.stringify(landscapeHome)})`);
+	await delay(300);
+	if (
+		!(await read(
+			`document.querySelector('.housing-tab').textContent.includes('Cottage') && ${api}.readHousingRefreshes() === 1`,
+		))
+	)
+		throw new Error(
+			"Replacement home did not populate without an implicit focus query.",
+		);
 	await click("Close World");
 	if (
 		!(await read(
@@ -6867,5 +8181,13 @@ async function probeClientWorldMap(client) {
 		retained,
 		startedProgress,
 		advancedProgress,
+		homeMarker,
+		housingRefreshes: await read(`${api}.readHousingRefreshes()`),
+		housingSearches: await read(`${api}.readHousingSearches()`),
+		housingClustering: { clusteredCount, separated, stablePan },
+		characterReplacementClearedHousing: true,
+		managementActions: managementCommands
+			.filter((entry) => entry.command === "submit_client_housing_management")
+			.map((entry) => entry.args.request.action),
 	};
 }

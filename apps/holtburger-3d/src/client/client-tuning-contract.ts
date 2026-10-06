@@ -41,6 +41,11 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 
 /** Exhaustive client-owned tuning contract used to drive authoring completion. */
 export interface ClientTuning {
+	/** Screen-space density of available housing area markers. */
+	readonly housingSearch: {
+		/** CSS-pixel width of a bucket merging available housing areas. */
+		readonly clusterSpacingCssPixels: number;
+	};
 	/** In-memory sent-chat input retained for this app session. */
 	readonly chat: { readonly sentHistoryLimit: number };
 	/** Mounted spell-list artwork sampling; membership itself is event-driven. */
@@ -135,6 +140,11 @@ export interface ClientTuning {
 	/** App-local vendor window and trade reach. */
 	readonly vendor: {
 		/** Maximum player-to-vendor world distance while the shop remains usable. */
+		readonly maximumDistanceMeters: number;
+	};
+	/** App-local crystal dismissal policy, independent of vendor reach. */
+	readonly housing: {
+		/** Accepted player-to-crystal range retained while preparing payment. */
 		readonly maximumDistanceMeters: number;
 	};
 	/** Mounted inventory display sampling policy. */

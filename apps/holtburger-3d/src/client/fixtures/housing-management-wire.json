@@ -1,0 +1,18 @@
+{
+	"request": {
+		"sequence": 31,
+		"player": 1,
+		"generation": 4,
+		"action": {
+			"kind": "hooks",
+			"enabled": false
+		}
+	},
+	"result": {
+		"sequence": 31,
+		"generation": 4,
+		"outcome": {
+			"kind": "requested"
+		}
+	}
+}

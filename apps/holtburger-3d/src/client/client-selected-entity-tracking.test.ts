@@ -1,3 +1,4 @@
+import { emptyHousing } from "./client-housing-contract";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 import { entityFacts } from "./client-entity-mirror.test-support";
@@ -41,6 +42,7 @@ async function fixture() {
 		localPlayerGuid: 1,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		housing: emptyHousing(),
 		serverTime: 10,
 		worldGeneration: 2,
 		connection: null,

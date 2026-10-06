@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
 mod builder;
+mod busy_operation;
 mod camera;
 mod camera_service;
 pub mod character_axes;
@@ -35,6 +36,11 @@ pub mod entity_facts;
 mod entity_visual_facts;
 pub mod equipment_plan;
 mod equipment_runtime;
+pub mod housing;
+pub mod housing_execution;
+pub mod housing_management;
+pub mod housing_payment;
+pub mod housing_queries;
 pub mod inventory_plan;
 mod inventory_runtime;
 pub mod inventory_storage;
@@ -105,6 +111,10 @@ pub(super) enum PendingOperation {
         target: Option<Guid>,
     },
     Vendor(Box<vendor_transaction::VendorExecution>),
+    /// Housing completion requires inventory plus profile authority, never UseDone.
+    Housing(Box<housing_execution::HousingExecution>),
+    /// Administrative completion uses HAR/home facts rather than UseDone.
+    HousingManagement(Box<housing_management::HousingManagementExecution>),
 }
 
 impl PendingOperation {
@@ -114,6 +124,8 @@ impl PendingOperation {
             Self::UseWithTarget => BusyOperationKind::UseWithTarget,
             Self::SpellCast { .. } => BusyOperationKind::SpellCast,
             Self::Vendor(execution) => execution.kind(),
+            Self::Housing(execution) => execution.kind(),
+            Self::HousingManagement(_) => BusyOperationKind::HousingManagement,
         }
     }
 }
@@ -142,6 +154,12 @@ pub struct ClientRuntime {
     /// Character advancement admission and duplicate suppression for this runtime.
     progression: progression::ProgressionState,
     active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Pending complete home query, independent of inventory busy operations.
+    housing_query_deadline: Option<Instant>,
+    /// Ordinary-use intent authorizing one crystal-opening receipt, never a snapshot replay.
+    housing_opening: Option<housing::HousingOpening>,
+    /// Serialized read-only access/search admission, independent of inventory mutation.
+    housing_queries: housing_queries::HousingQueries,
     /// Cached narrow entity records and pending semantic invalidation.
     entity_facts: entity_facts::EntityFactsPublication,
     /// Equipped source already requested while its consumption policy remains unknown.
@@ -394,6 +412,7 @@ impl ClientRuntime {
             trade: self.trade_snapshot(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),
+            housing: self.housing_snapshot(),
             dynamic: DynamicEntitySnapshot::new(
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),
@@ -441,6 +460,7 @@ impl ClientRuntime {
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
         self.reset_combat_engagement();
         self.clear_busy_operation();
+        self.reset_housing();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("Client is exiting; the last request may still complete");
         self.exit_cause = Some(cause);
@@ -460,6 +480,7 @@ impl ClientRuntime {
         cause: ClientWorldActivationState,
         player_guid: Guid,
     ) {
+        self.housing_opening = None;
         self.reset_combat_engagement();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("World lifecycle changed; the last request may still complete");
@@ -626,6 +647,7 @@ impl ClientRuntime {
         self.state = ClientState::InWorld;
         self.send_status_event();
         if initial_entry {
+            self.query_home().await?;
             // Character entry retires the frontend's previous semantic baseline. Publish the
             // established player and inventory together before resuming ordinary deltas.
             self.emit_current_application_snapshot();
@@ -727,60 +749,6 @@ impl ClientRuntime {
         })
     }
 
-    /// Release local operation ownership without claiming server completion.
-    pub(super) fn clear_busy_operation(&mut self) {
-        if let Some(pending) = self.active_busy_operation.take() {
-            self.emit_vendor_abort(&pending.operation, "Vendor interaction ended".to_string());
-            self.emit_busy_state_updated();
-        }
-    }
-
-    pub(super) fn arm_busy_operation(&mut self, operation: PendingOperation) -> bool {
-        if let Some(active) = self.active_busy_operation.as_ref() {
-            log::warn!(
-                "Ignoring busy-tracked {:?} while {:?} is still pending.",
-                operation,
-                active.operation
-            );
-            return false;
-        }
-
-        self.active_busy_operation = Some(PendingBusyOperation {
-            operation,
-            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
-            pending_error: None,
-        });
-        self.emit_busy_state_updated();
-        true
-    }
-
-    pub(super) fn note_busy_error(&mut self, error: WeenieError, parameter: Option<String>) {
-        if let Some(pending) = &mut self.active_busy_operation {
-            pending.pending_error = Some((error, parameter));
-        }
-    }
-
-    pub(super) fn finish_busy_operation_from_use_done(&mut self, error: WeenieError) {
-        let Some(pending) = self.active_busy_operation.take() else {
-            return;
-        };
-
-        let (resolved_error, parameter) = if error == WeenieError::None {
-            pending.pending_error.unwrap_or((error, None))
-        } else {
-            (error, None)
-        };
-
-        self.emit_busy_state_updated();
-        self.emit_busy_operation_finished(
-            pending.operation.kind(),
-            BusyOperationResult::Completed {
-                error: resolved_error,
-                parameter,
-            },
-        );
-    }
-
     fn emit_fellowship_state_updated(&self) {
         let _ = self
             .client_view_event_tx
@@ -854,6 +822,7 @@ impl ClientRuntime {
                 self.emit_progression_guards();
             }
             self.reset_container_access();
+            self.reset_housing();
             self.trade_additions.clear();
             self.entity_cue_inbox.clear();
             if let Some(coordinator) = self.collision_coordinator.as_mut() {
@@ -886,6 +855,7 @@ impl ClientRuntime {
 
     /// Project one event without finalizing a packet's character replacement yet.
     fn project_world_event(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
+        self.observe_housing_world_event(event);
         if matches!(
             event,
             WorldEvent::PlayerInfo(_)

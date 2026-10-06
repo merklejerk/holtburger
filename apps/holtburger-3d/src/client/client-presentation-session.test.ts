@@ -1,3 +1,4 @@
+import { emptyHousing } from "./client-housing-contract";
 import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import {
 	entityFacts,
@@ -1874,6 +1875,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		housing: emptyHousing(),
 		localPlayerGuid: playerGuid,
 		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 75,

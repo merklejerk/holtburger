@@ -86,7 +86,7 @@ impl From<VendorState> for ClientVendorSnapshot {
             offers,
             currency: if vendor.alternate_currency_wcid == 0 {
                 ClientVendorCurrency {
-                    wcid: holtburger_world::vendor::PYREAL_WCID,
+                    wcid: holtburger_world::currency::PYREAL_WCID,
                     name: "Pyreals".into(),
                 }
             } else {

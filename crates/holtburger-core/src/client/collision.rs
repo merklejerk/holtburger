@@ -1849,6 +1849,16 @@ mod tests {
             assert!(client.activation.is_none());
             assert_eq!(client.state, ClientState::InWorld);
             assert!(client.session.bytes_out > 0);
+            assert_eq!(
+                client.housing_snapshot().refreshing,
+                cause == ClientWorldActivationState::InitialEntry
+            );
+            let completed_sequence = client.session.game_action_sequence;
+            client.try_complete_world_activation().await.unwrap();
+            assert_eq!(
+                client.session.game_action_sequence, completed_sequence,
+                "completed activation cannot query housing again"
+            );
             let mut snapshots = Vec::new();
             while let Ok(event) = events.try_recv() {
                 if let super::super::ClientViewEvent::ApplicationSnapshot(snapshot) = event {
@@ -1858,6 +1868,11 @@ mod tests {
             if cause == ClientWorldActivationState::InitialEntry {
                 assert_eq!(snapshots.len(), 1);
                 assert_eq!(snapshots[0].local_player_guid, Some(guid));
+                assert!(snapshots[0].housing.refreshing);
+                assert_eq!(
+                    snapshots[0].housing.home,
+                    holtburger_world::housing::HomeKnowledge::Unqueried
+                );
                 assert_eq!(snapshots[0].entities.entities.len(), 1);
                 assert_eq!(snapshots[0].entities.entities[0].guid, guid);
             } else {

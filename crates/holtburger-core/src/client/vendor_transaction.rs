@@ -286,9 +286,8 @@ impl ClientRuntime {
         if let Err(error) = self.send_game_action(action).await {
             if let Some(pending) = self.active_busy_operation.take() {
                 let message = format!("Vendor request could not be sent: {error}");
-                self.emit_vendor_abort(&pending.operation, message.clone());
-                self.emit_busy_state_updated();
-                self.emit_busy_operation_finished(
+                self.emit_pending_abort(&pending.operation, message.clone());
+                self.publish_busy_completion(
                     pending.operation.kind(),
                     BusyOperationResult::Failed { message },
                 );
@@ -350,14 +349,12 @@ impl ClientRuntime {
         }
     }
 
-    pub(super) fn emit_vendor_abort(&self, operation: &PendingOperation, message: String) {
-        if let PendingOperation::Vendor(execution) = operation {
-            let _ = self
-                .client_view_event_tx
-                .send(ClientViewEvent::VendorTradeFinished(
-                    execution.failed(message),
-                ));
-        }
+    pub(super) fn emit_vendor_abort(&self, execution: &VendorExecution, message: String) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::VendorTradeFinished(
+                execution.failed(message),
+            ));
     }
 
     /// Consumes vendor completion without releasing busy ownership between phases.
@@ -426,16 +423,14 @@ impl ClientRuntime {
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::VendorTradeFinished(result));
-            self.emit_busy_state_updated();
-            self.emit_busy_operation_finished(kind, BusyOperationResult::Failed { message });
+            self.publish_busy_completion(kind, BusyOperationResult::Failed { message });
         } else {
             let result = execution.result(VendorTradeOutcome::Completed);
             let kind = execution.kind();
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::VendorTradeFinished(result));
-            self.emit_busy_state_updated();
-            self.emit_busy_operation_finished(
+            self.publish_busy_completion(
                 kind,
                 BusyOperationResult::Completed {
                     error: WeenieError::None,
@@ -671,22 +666,57 @@ mod tests {
                 event,
                 ClientViewEvent::BusyStateUpdated { busy: None }
                     | ClientViewEvent::VendorTradeFinished(_)
+                    | ClientViewEvent::BusyOperationFinished { .. }
             ));
         }
         done(&mut client, WeenieError::None).await;
         assert!(client.active_busy_operation.is_none());
-        let mut receipt = None;
-        while let Ok(event) = events.try_recv() {
-            if let ClientViewEvent::VendorTradeFinished(result) = event {
-                receipt = Some(result);
-            }
-        }
-        let receipt = receipt.unwrap();
+        let terminal: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+        assert_eq!(
+            terminal
+                .iter()
+                .filter(|event| matches!(event, ClientViewEvent::BusyStateUpdated { busy: None }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            terminal
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    ClientViewEvent::BusyOperationFinished {
+                        operation: BusyOperationKind::Buy,
+                        result: BusyOperationResult::Completed {
+                            error: WeenieError::None,
+                            parameter: None
+                        }
+                    }
+                ))
+                .count(),
+            1
+        );
+        let receipts: Vec<_> = terminal
+            .iter()
+            .filter_map(|event| match event {
+                ClientViewEvent::VendorTradeFinished(result) => Some(result),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(receipts.len(), 1);
+        let receipt = receipts[0];
         assert_eq!(receipt.sold, vec![FIRST, SECOND]);
         assert_eq!(receipt.outcome, VendorTradeOutcome::Completed);
         assert_eq!(receipt.sale_issue, None);
         done(&mut client, WeenieError::None).await;
         assert_eq!(client.session.game_action_sequence, 2);
+        assert!(
+            !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event,
+                ClientViewEvent::BusyStateUpdated { .. }
+                    | ClientViewEvent::BusyOperationFinished { .. }
+                    | ClientViewEvent::VendorTradeFinished(_)
+            ))
+        );
     }
 
     #[tokio::test]

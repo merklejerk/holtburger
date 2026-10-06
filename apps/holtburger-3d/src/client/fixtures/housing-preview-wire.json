@@ -1,0 +1,64 @@
+{
+	"request": {
+		"sequence": 9,
+		"draft": {
+			"crystal": 100,
+			"purpose": "maintenance",
+			"items": [11, 12, 14]
+		},
+		"operation": {
+			"kind": "fill",
+			"wcid": 42
+		}
+	},
+	"result": {
+		"sequence": 9,
+		"crystal": 100,
+		"outcome": {
+			"kind": "ready",
+			"items": [11, 12, 14, 13],
+			"quote": {
+				"lines": [
+					{
+						"wcid": 273,
+						"sources": [11, 14],
+						"consumption": [
+							{
+								"item": 11,
+								"quantity": 13,
+								"value": 13
+							}
+						],
+						"credited": 13,
+						"shortfall": 0,
+						"excess": 0,
+						"effectivePaid": 13
+					},
+					{
+						"wcid": 42,
+						"sources": [12, 13],
+						"consumption": [
+							{
+								"item": 12,
+								"quantity": 2,
+								"value": 2
+							},
+							{
+								"item": 13,
+								"quantity": 1,
+								"value": 1
+							}
+						],
+						"credited": 3,
+						"shortfall": 0,
+						"excess": 0,
+						"effectivePaid": 4
+					}
+				],
+				"complete": true,
+				"contributes": true
+			},
+			"unavailable": []
+		}
+	}
+}

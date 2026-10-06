@@ -1,7 +1,7 @@
-import type { ItemInteractionState } from "./client-item-interactions";
+import { emptyHousing } from "./client-housing-contract";
 import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
 import { describe, expect, it, vi } from "vitest";
-import { ClientDialogs } from "./client-dialogs";
+import { ClientDialogs, type LocalConfirmationRequest } from "./client-dialogs";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 
 async function fixture() {
@@ -38,6 +38,7 @@ async function fixture() {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
+			housing: emptyHousing(),
 			localPlayerGuid: 7,
 			entities: playerEntitySnapshot(7),
 			serverTime: 1,
@@ -72,33 +73,58 @@ async function fixture() {
 }
 
 describe("ClientDialogs", () => {
+	it("routes typed local questions after server questions and ignores stale answers", async () => {
+		const f = await fixture();
+		const question: LocalConfirmationRequest = {
+			requestId: "local-typed-1",
+			text: "Confirm destructive action?",
+			typedConfirmation: { requiredText: "confirm" },
+		};
+		const respond = vi.fn();
+		const unsubscribe = vi.fn();
+		const release = f.dialogs.bindLocal({
+			question: () => question,
+			respond,
+			subscribe: () => unsubscribe,
+		});
+		expect(f.dialogs.snapshot()).toMatchObject({
+			kind: "local-confirmation",
+			request: {
+				requestId: question.requestId,
+				text: question.text,
+				typedConfirmation: { requiredText: "confirm" },
+			},
+		});
+		f.request("1");
+		await f.dialogs.respond(question.requestId, true);
+		expect(respond).not.toHaveBeenCalled();
+		f.emit("client-confirmation-updated", { confirmation: null });
+		await f.dialogs.respond("local-typed-stale", true);
+		expect(respond).not.toHaveBeenCalled();
+		await f.dialogs.respond(question.requestId, false);
+		expect(respond).toHaveBeenCalledExactlyOnceWith(question.requestId, false);
+		release();
+		expect(f.dialogs.snapshot()).toBeNull();
+		expect(unsubscribe).toHaveBeenCalledTimes(1);
+		f.destroy();
+	});
+
 	it("owns local subscription teardown without requiring unbind before destroy", async () => {
 		const f = await fixture();
 		const unsubscribe = vi.fn();
-		const local: ItemInteractionState = {
-			kind: "confirming",
-			question: { id: "local-1", text: "Destroy armor?" },
-			request: {
-				sequence: 1,
-				player: 7,
-				sourceOwned: true,
-				intent: { kind: "targeted", source: 2, target: 3 },
-				expected: { kind: "destroy-item", target: 3, amount: 1 },
-			},
-		};
-		const items = {
-			snapshot: () => local,
+		const source = {
+			question: () => ({ requestId: "local-1", text: "Destroy armor?" }),
 			subscribe: () => unsubscribe,
 			respond: vi.fn(),
 		};
-		const release = f.dialogs.bindItems(items);
+		const release = f.dialogs.bindLocal(source);
 		expect(f.dialogs.snapshot()?.kind).toBe("local-confirmation");
 		f.dialogs.destroy();
 		expect(f.dialogs.snapshot()).toBeNull();
 		expect(unsubscribe).toHaveBeenCalledOnce();
 		release();
 		expect(unsubscribe).toHaveBeenCalledOnce();
-		expect(() => f.dialogs.bindItems(items)).toThrow("after destruction");
+		expect(() => f.dialogs.bindLocal(source)).toThrow("after destruction");
 		f.destroy();
 	});
 

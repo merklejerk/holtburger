@@ -95,24 +95,9 @@ impl ClientRuntime {
 
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
         self.poll_container_close_timeout(now);
-        let Some(pending) = self.active_busy_operation.as_ref() else {
-            return;
-        };
-
-        if now < pending.deadline {
-            return;
-        }
-
-        let pending = self
-            .active_busy_operation
-            .take()
-            .expect("busy operation should still exist when timing out");
-        self.emit_busy_state_updated();
-        self.emit_vendor_abort(
-            &pending.operation,
-            "Vendor transaction timed out".to_string(),
-        );
-        self.emit_busy_operation_finished(pending.operation.kind(), BusyOperationResult::TimedOut);
+        self.poll_housing_query_timeout(now);
+        self.poll_housing_information_timeouts(now);
+        self.expire_busy_operation(now);
     }
 
     pub(super) fn emit_runtime_body_snapshot(&self) {
@@ -242,6 +227,8 @@ impl ClientRuntime {
                             .await?;
                     }
 
+                    self.poll_housing_recovery(now).await?;
+                    self.advance_housing_access_query(now).await?;
                     self.poll_busy_timeout(now);
                     self.poll_trade_addition_timeout(now);
                     if let Err(error) = self.maintain_container_range().await {

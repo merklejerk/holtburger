@@ -297,6 +297,27 @@ pub enum ClientHostCommand {
     },
     StopClientCombatEngagement,
     RequestClientCurrentState,
+    /// Refresh the active character/account effective home.
+    RefreshClientHousing,
+    /// Submit reviewed implicit-home administration.
+    SubmitClientHousingManagement {
+        request: holtburger_core::client::housing_management::HousingManagementRequest,
+    },
+    /// Read named permissions after effective-home initialization.
+    QueryClientHousingAccess,
+    /// Search available areas of a supported housing type.
+    SearchClientHousing {
+        #[serde(rename = "houseType")]
+        house_type: u32,
+    },
+    /// Quote or edit a requirement-row draft without sending BuyHouse/RentHouse.
+    PreviewClientHousingPayment {
+        request: holtburger_core::client::housing_payment::HousingPreviewRequest,
+    },
+    /// Submit the housing profile and consumption accepted in confirmation.
+    SubmitClientHousingPayment {
+        request: holtburger_core::client::housing_execution::HousingPaymentRequest,
+    },
     SelectClientCharacter {
         guid: holtburger_common::Guid,
     },
@@ -377,6 +398,12 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_progression",
     "start_client",
     "request_client_current_state",
+    "refresh_client_housing",
+    "query_client_housing_access",
+    "search_client_housing",
+    "preview_client_housing_payment",
+    "submit_client_housing_payment",
+    "submit_client_housing_management",
     "select_client_character",
     "replace_client_drive",
     "queue_client_character_motion_event",
@@ -721,6 +748,26 @@ pub async fn dispatch_client(
     use ClientHostCommand::*;
 
     match command {
+        QueryClientHousingAccess => runtime
+            .send_command(ClientCommand::QueryHousingAccess)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SearchClientHousing { house_type } => runtime
+            .send_command(ClientCommand::SearchHousing { house_type })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientHousingManagement { request } => runtime
+            .send_command(ClientCommand::SubmitHousingManagement(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RefreshClientHousing => runtime
+            .send_command(ClientCommand::RefreshHousing)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         StartClient { startup } => runtime
             .start(startup)
             .await
@@ -852,6 +899,16 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        PreviewClientHousingPayment { request } => runtime
+            .send_command(ClientCommand::PreviewHousingPayment(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientHousingPayment { request } => runtime
+            .send_command(ClientCommand::SubmitHousingPayment(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         PreviewClientVendor { request } => runtime
             .send_command(ClientCommand::PreviewVendorTrade(request))
             .await
@@ -965,6 +1022,26 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn housing_information_commands_decode_frontend_payloads() {
+        let access = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "query_client_housing_access"
+        }))
+        .unwrap();
+        assert!(matches!(
+            access,
+            ClientHostCommand::QueryClientHousingAccess
+        ));
+        let search = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "search_client_housing", "houseType": 4
+        }))
+        .unwrap();
+        assert!(matches!(
+            search,
+            ClientHostCommand::SearchClientHousing { house_type: 4 }
+        ));
+    }
 
     #[test]
     fn appearance_command_accepts_only_the_two_exposed_options() {

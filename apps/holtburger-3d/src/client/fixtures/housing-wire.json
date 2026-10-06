@@ -1,0 +1,22 @@
+{
+	"home": {
+		"kind": "unqueried"
+	},
+	"refreshing": true,
+	"crystal": null,
+	"pendingPayment": null,
+	"access": {
+		"generation": 0,
+		"records": null,
+		"refreshing": true
+	},
+	"search": {
+		"results": {
+			"houseType": 4,
+			"areas": [305397761],
+			"totalAvailable": 2
+		},
+		"pendingType": 1
+	},
+	"pendingManagement": null
+}

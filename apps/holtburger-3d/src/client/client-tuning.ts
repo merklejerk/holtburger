@@ -38,6 +38,8 @@ const CLIENT_PORTAL_TRANSITION = {
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
+	/** Marker clustering stays in CSS pixels independently of render density. */
+	housingSearch: { clusterSpacingCssPixels: 28 },
 	chat: {
 		/** Nonnegative maximum of locally queued chat inputs retained for recall. */
 		sentHistoryLimit: 100,
@@ -125,6 +127,10 @@ export const CLIENT_TUNING = {
 	vendor: {
 		/** Generous reach beyond the vendor's use radius, checked in world space. */
 		maximumDistanceMeters: 15,
+	},
+	housing: {
+		/** Retail crystal range, acclient.c:240162; sampled outside the reactive graph. */
+		maximumDistanceMeters: 9,
 	},
 	inventory: {
 		/** Pointer travel that distinguishes inventory selection from dragging. */

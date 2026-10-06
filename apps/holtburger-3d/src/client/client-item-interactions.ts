@@ -1,3 +1,7 @@
+import type {
+	LocalConfirmationRequest,
+	LocalDialogSource,
+} from "./client-dialogs";
 import { bindingAction } from "./client-action-item";
 import { wieldedCasterSpell } from "./client-inventory-equipment";
 import type { ClientEntitySelection } from "./client-entity-selection";
@@ -71,7 +75,7 @@ function allocateOperation(): number {
 }
 
 /** One frontend use flow. Rust evaluates consequences; this owner decides whether to ask. */
-export class ClientItemInteractions {
+export class ClientItemInteractions implements LocalDialogSource {
 	readonly #session: Session;
 	readonly #selection: Pick<
 		ClientEntitySelection,
@@ -114,6 +118,14 @@ export class ClientItemInteractions {
 	snapshot(): ItemInteractionState {
 		return this.#state;
 	}
+	/** Item-use confirmation policy is owned here, independently of the modal presenter. */
+	question(): LocalConfirmationRequest | null {
+		const local = this.snapshot();
+		return local.kind === "confirming"
+			? { requestId: local.question.id, text: local.question.text }
+			: null;
+	}
+
 	subscribe(listener: (state: ItemInteractionState) => void): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);

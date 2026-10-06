@@ -1,6 +1,12 @@
 <script lang="ts">
+	import { ClientHousingManagementState } from "./client-housing-management-state";
+	import {
+		emptyHousing,
+		type HousingSnapshot,
+	} from "./client-housing-contract";
 	import { ClientVendorState } from "./client-vendor-state";
-	import { sampleVendorDistanceMeters } from "./client-vendor-range";
+	import { sampleEntityDistanceMeters } from "./client-entity-distance";
+	import { ClientHouseCrystalState } from "./client-house-crystal-state";
 	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import {
 		initialSpellBarBindings,
@@ -347,6 +353,9 @@
 
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
+	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
+	let housingManagement = $state<ClientHousingManagementState | null>(null);
+	let housing = $state<HousingSnapshot>(emptyHousing());
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
@@ -717,6 +726,12 @@
 
 	function receive(event: ClientLifecycleSessionEvent): void {
 		switch (event.type) {
+			case "housing-updated":
+				housing = event.housing;
+				return;
+			case "housing-crystal-received":
+				housing = { ...housing, crystal: event.crystal };
+				return;
 			case "entity-collision-disabled":
 				entityCollisionDisabled = event.disabled;
 				return;
@@ -733,6 +748,7 @@
 				appearanceOptions = event.options;
 				return;
 			case "current-state":
+				housing = event.state.housing;
 				canTeleportFromMap = event.state.canTeleportFromMap;
 				enchantments = session?.state().enchantments ?? null;
 				acceptCharacterGuid(event.state.localPlayerGuid);
@@ -1436,9 +1452,31 @@
 			icons,
 			(message) => toastCenter.publish({ message, tone: "warning" }),
 			(vendorGuid) =>
-				sampleVendorDistanceMeters(owner.entities, owner.mirror, vendorGuid),
+				sampleEntityDistanceMeters(owner.entities, owner.mirror, vendorGuid),
 		);
 		vendor = vendorOwner;
+		const houseCrystalOwner = new ClientHouseCrystalState(
+			owner,
+			icons,
+			(message) => toastCenter.publish({ message, tone: "warning" }),
+			(crystal) =>
+				sampleEntityDistanceMeters(owner.entities, owner.mirror, crystal),
+			() => {
+				vendorOwner.close();
+				const read = owner.entities.read();
+				if (
+					read.kind === "current" &&
+					read.level.worldContainer.kind === "open"
+				)
+					containerOwner.close(read.level.worldContainer.root);
+			},
+		);
+		houseCrystal = houseCrystalOwner;
+		const housingManagementOwner = new ClientHousingManagementState(
+			owner,
+			(message) => toastCenter.publish({ message, tone: "warning" }),
+		);
+		housingManagement = housingManagementOwner;
 		const tradeOwner = new ClientTradeState(owner, icons, appendChatError);
 		trade = tradeOwner;
 		const spellReferences = new SpellReferences(transport);
@@ -1446,6 +1484,7 @@
 		spells = spellState;
 		const dialogOwner = new ClientDialogs(owner);
 		dialogs = dialogOwner;
+		const unbindHousingDialogs = dialogOwner.bindLocal(housingManagementOwner);
 		const unsubscribeDialogs = dialogOwner.subscribe(
 			(value) => (dialogPresentation = value),
 		);
@@ -1505,7 +1544,7 @@
 			},
 		});
 		itemInteractions = items;
-		const unbindItems = dialogOwner.bindItems(items);
+		const unbindItems = dialogOwner.bindLocal(items);
 		unrestrictedUse = false;
 		const unsubscribeSelection = selection.subscribe((guid) => {
 			selectedEntityGuid = guid;
@@ -1541,10 +1580,15 @@
 			tradeOwner.destroy();
 			trade = null;
 			vendorOwner.destroy();
+			housingManagementOwner.destroy();
+			housingManagement = null;
+			houseCrystalOwner.destroy();
+			houseCrystal = null;
 			vendor = null;
 			worldContainer = null;
 			inventory = null;
 			icons.dispose();
+			unbindHousingDialogs();
 			unbindItems();
 			items.destroy();
 			itemInteractions = null;
@@ -1582,6 +1626,7 @@
 			owner.stop();
 			enchantments = null;
 			session = null;
+			housing = emptyHousing();
 			canTeleportFromMap = false;
 			hostTransport = null;
 		};
@@ -1662,7 +1707,28 @@
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
 			{readMinimapFrame}
+			characterGuid={characterSettings.kind === "absent"
+				? null
+				: characterSettings.characterGuid}
 			{worldMapSource}
+			{housing}
+			{housingManagement}
+			onSearchHousing={async (houseType) => {
+				if (session === null) return;
+				try {
+					await session.searchHousing(houseType);
+				} catch (error) {
+					toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+				}
+			}}
+			onRefreshHousing={async () => {
+				if (session === null) return;
+				try {
+					await session.refreshHousing();
+				} catch (error) {
+					toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+				}
+			}}
 			{canTeleportFromMap}
 			onTeleportToMapPosition={teleportToMapPosition}
 			{readDiagnostics}
@@ -1675,6 +1741,7 @@
 			{inventory}
 			{worldContainer}
 			{vendor}
+			{houseCrystal}
 			{trade}
 			{itemInteractions}
 			{objectInspection}

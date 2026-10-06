@@ -88,7 +88,8 @@ pub fn read_string16(data: &[u8], offset: &mut usize) -> Option<String> {
     *offset += len;
 
     align_offset(offset, 4);
-    Some(s)
+    // Aligned strings include their trailing padding, even at the end of a payload.
+    (*offset <= data.len()).then_some(s)
 }
 
 pub fn read_hashtable_header(data: &[u8], offset: &mut usize) -> Option<(usize, usize)> {
@@ -343,6 +344,20 @@ mod tests {
         let read = read_string16(&buf, &mut offset).unwrap();
         assert_eq!(read, s);
         assert_eq!(offset, 8);
+    }
+
+    #[test]
+    fn test_string16_requires_complete_padding() {
+        let mut buf = Vec::new();
+        write_string16(&mut buf, "abc");
+        for end in 5..buf.len() {
+            assert!(read_string16(&buf[..end], &mut 0).is_none());
+        }
+        // Callers for unpadded wire layouts deliberately accept the same string bytes.
+        assert_eq!(
+            read_string16_unpadded(&buf[..5], &mut 0).as_deref(),
+            Some("abc")
+        );
     }
 
     #[test]

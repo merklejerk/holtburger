@@ -65,6 +65,8 @@ export interface ClientUiDefaults {
 	readonly worldContainer: Omit<ClientUiPanel, "resizable">;
 	/** Vendor catalog, currencies, and combined trade draft. */
 	readonly vendor: Omit<ClientUiPanel, "resizable">;
+	/** Crystal ownership, requirements, and physical payment draft. */
+	readonly houseCrystal: Omit<ClientUiPanel, "resizable">;
 	/** Server-confirmed player-to-player offers and acceptance. */
 	readonly trade: Omit<ClientUiPanel, "resizable">;
 	/** Independent server-confirmed object inspection window. */

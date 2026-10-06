@@ -110,6 +110,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.reset_housing();
         if self.progression.clear() {
             self.emit_progression_guards();
         }
@@ -299,6 +300,28 @@ impl ClientRuntime {
 
         log::debug!("GameMessage: {:?}", message);
 
+        // Housing replies have no request ID. Outside an active character lifetime,
+        // late replies cannot restore the previous character's replacement facts.
+        if !matches!(
+            self.state,
+            ClientState::EnteringWorld | ClientState::InWorld
+        ) && let GameMessage::GameEvent(event) = &message
+            && matches!(
+                event.event,
+                GameEvent::HouseData(_)
+                    | GameEvent::HouseProfile(_)
+                    | GameEvent::HouseStatus(_)
+                    | GameEvent::UpdateRentTime(_)
+                    | GameEvent::UpdateRentPayment(_)
+                    | GameEvent::UpdateHar(_)
+                    | GameEvent::HouseTransaction(_)
+                    | GameEvent::AvailableHouses(_)
+            )
+        {
+            log::debug!("Discarding housing reply outside a character lifetime");
+            return Ok(Vec::new());
+        }
+
         if let GameMessage::ServerName(data) = &message {
             self.world_name = Some(data.name.clone());
             let _ = self
@@ -350,8 +373,16 @@ impl ClientRuntime {
             self.described_character = Some(description.guid);
         }
         self.handle_world_events(world_events.clone()).await?;
+        if world_events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::HousingRefreshRequired))
+        {
+            self.query_home().await?;
+        }
         self.observe_container_message(&message, previous_container_root)
             .await?;
+        self.reconcile_housing_payment();
+        self.advance_housing_access_query(Instant::now()).await?;
 
         match message {
             GameMessage::UpdatePosition(_) => Ok(()),
@@ -359,6 +390,7 @@ impl ClientRuntime {
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
                 self.clear_busy_operation();
+                self.reset_housing();
                 self.described_character = None;
                 self.refresh_spell_inspection_context();
                 self.authenticating = false;
@@ -626,16 +658,7 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
-                    let vendor_completed = self.finish_vendor_use_done(data.error).await?;
-                    if !vendor_completed {
-                        self.finish_busy_operation_from_use_done(data.error);
-                    }
-                    if !vendor_completed && data.error != WeenieError::None {
-                        self.emit_action_result(
-                            ActionResultSource::Wire,
-                            ActionResultReason::Weenie(data.error, None),
-                        );
-                    }
+                    self.finish_busy_operation_from_use_done(data.error).await?;
                     Ok(())
                 }
                 GameEvent::TradeFailure(data) => {
@@ -1318,7 +1341,10 @@ mod tests {
 
         client.active_busy_operation.as_mut().unwrap().deadline = std::time::Instant::now();
         assert!(!client.suppresses_local_target_turn(&turn));
-        client.finish_busy_operation_from_use_done(WeenieError::None);
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
         assert!(!client.suppresses_local_target_turn(&turn));
         turn.server_control_sequence = 11;
         turn.movement_sequence = 21;
@@ -1840,12 +1866,56 @@ mod tests {
         client.handle_world_events(changes).await.unwrap();
         assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
 
+        // Home knowledge is retained independently of repeated player hydration and travel.
+        client.activation = None;
+        client.state = ClientState::InWorld;
+        client.query_home().await.unwrap();
+        let home_reply = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 1,
+            event: GameEvent::HouseData(Box::new(HouseData {
+                buy_time: 100,
+                rent_time: 200,
+                house_type: 1,
+                maintenance_free: false,
+                buy: vec![],
+                rent: vec![],
+                position: Default::default(),
+            })),
+        }));
+        client
+            .handle_message(&encode_message(&home_reply))
+            .await
+            .unwrap();
+        let home = client.housing_snapshot();
+        let query_sequence = client.session.game_action_sequence;
+        let mut repeated_description = message.clone();
+        if let GameMessage::GameEvent(event) = &mut repeated_description
+            && let GameEvent::PlayerDescription(description) = &mut event.event
+        {
+            // Preserve the latest authoritative spell set in this repeated hydration fixture.
+            description.spells = std::collections::BTreeMap::from([(3, 1.0)]);
+        }
+        client
+            .handle_message(&encode_message(&repeated_description))
+            .await
+            .unwrap();
+        assert_eq!(client.housing_snapshot(), home);
+        assert_eq!(client.session.game_action_sequence, query_sequence);
         // Scene replacement is independent of character knowledge.
         client.start_world_activation(ClientWorldActivationState::Teleport, player);
+        assert_eq!(client.housing_snapshot(), home);
+        assert_eq!(client.session.game_action_sequence, query_sequence);
         assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
         assert!(client.application_snapshot().character_options.is_some());
         client.character_selection.character_id = Some(Guid(0x50000002));
+        // PlayerCreate may already establish the selected identity before description hydration.
+        client.world.player.guid = Guid(0x50000002);
         client.begin_world_entry_transition().await.unwrap();
+        assert_eq!(
+            client.housing_snapshot(),
+            super::super::housing::HousingSnapshot::default()
+        );
         assert_eq!(client.application_snapshot().known_spells, None);
         assert!(client.application_snapshot().enchantments.is_none());
         assert_eq!(client.application_snapshot().character_options, None);

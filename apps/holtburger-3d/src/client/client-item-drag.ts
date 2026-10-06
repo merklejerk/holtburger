@@ -1,5 +1,9 @@
 import type { ClientTradeState } from "./client-trade-state";
 import type {
+	ClientHouseCrystalState,
+	HousingRowDrag,
+} from "./client-house-crystal-state";
+import type {
 	ClientViewportTargetPicker,
 	ClientViewportTargetResult,
 } from "./client-pointer-selection-controller";
@@ -80,6 +84,12 @@ interface ViewportDragTarget {
 }
 type DragTarget =
 	| {
+			readonly kind: "housing";
+			readonly element: HTMLElement;
+			readonly crystal: number;
+			readonly wcid: number;
+	  }
+	| {
 			readonly kind: "trade";
 			readonly element: HTMLElement;
 			readonly partner: number;
@@ -122,6 +132,15 @@ export class ClientItemDrag {
 	readonly #unsubscribe: () => void;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#gesture: Gesture | null = null;
+	/** Requirement drafts have a separate local gesture and never enter inventory targeting. */
+	#housingGesture: {
+		readonly identity: HousingRowDrag;
+		readonly element: HTMLElement;
+		readonly pointer: number;
+		readonly x: number;
+		readonly y: number;
+		dragging: boolean;
+	} | null = null;
 	#cursor = { x: 0, y: 0 };
 	/** Last active gesture views; idle world clicks do not prepare contents sections. */
 	#views: readonly unknown[] = [];
@@ -153,6 +172,11 @@ export class ClientItemDrag {
 		private readonly trade: Pick<
 			ClientTradeState,
 			"acceptsDrop" | "add" | "reportFailure"
+		> | null,
+		/** Housing selects draft IDs only; a drop never dispatches an inventory transfer. */
+		private readonly houseCrystal: Pick<
+			ClientHouseCrystalState,
+			"acceptsDrop" | "add" | "captureRow" | "clearRow"
 		> | null,
 	) {
 		this.#root = root;
@@ -216,7 +240,7 @@ export class ClientItemDrag {
 
 	/** Cancel only a pointer gesture; the HUD owns fallback interaction cancellation. */
 	cancel(): boolean {
-		if (this.#gesture === null) return false;
+		if (this.#gesture === null && this.#housingGesture === null) return false;
 		this.#cancel();
 		return true;
 	}
@@ -237,6 +261,31 @@ export class ClientItemDrag {
 			this.#root.querySelector('[data-inventory-modal="true"]') !== null
 		)
 			return;
+		const requirement =
+			event.target instanceof Element
+				? event.target.closest<HTMLElement>(
+						"[data-housing-payment] .item-grid-cell",
+					)
+				: null;
+		if (requirement !== null && this.#root.contains(requirement)) {
+			const row = requirement.closest<HTMLElement>("[data-housing-wcid]");
+			if (row === null) return;
+			const identity = this.houseCrystal?.captureRow(
+				Number(row.dataset.housingWcid),
+			);
+			if (identity == null) return;
+			this.#cancel();
+			this.#housingGesture = {
+				identity,
+				element: requirement,
+				pointer: event.pointerId,
+				x: event.clientX,
+				y: event.clientY,
+				dragging: false,
+			};
+			event.stopPropagation();
+			return;
+		}
 		const offer =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>(
@@ -313,6 +362,41 @@ export class ClientItemDrag {
 	};
 
 	#move = (event: PointerEvent): void => {
+		const housing = this.#housingGesture;
+		if (housing !== null) {
+			if (housing.pointer !== event.pointerId) return;
+			if (!housing.element.isConnected) {
+				this.#cancel();
+				return;
+			}
+			if (
+				!housing.dragging &&
+				Math.hypot(event.clientX - housing.x, event.clientY - housing.y) <
+					CLIENT_TUNING.inventory.dragThresholdCssPixels
+			)
+				return;
+			if (!housing.dragging) {
+				housing.dragging = true;
+				this.cancelInteraction();
+				const bounds = housing.element.getBoundingClientRect();
+				this.#ghost.style.width = `${bounds.width}px`;
+				this.#ghost.style.height = `${bounds.height}px`;
+				this.#ghost.replaceChildren(
+					housing.element
+						.querySelector(".ui-icon, .ui-icon-fallback")
+						?.cloneNode(true) ??
+						housing.element.getAttribute("aria-label") ??
+						"",
+				);
+				this.#ghost.hidden = false;
+				this.#ghost.showPopover();
+				this.#root.dataset.itemDragging = "true";
+			}
+			this.#ghost.style.transform = `translate(${event.clientX + 12}px, ${event.clientY + 12}px)`;
+			event.preventDefault();
+			event.stopPropagation();
+			return;
+		}
 		if (!this.#validateGesture()) return;
 		let gesture = this.#gesture;
 		if (
@@ -436,6 +520,17 @@ export class ClientItemDrag {
 			return;
 		}
 		const hit = document.elementFromPoint(this.#cursor.x, this.#cursor.y);
+		const payment = hit?.closest<HTMLElement>("[data-housing-payment]");
+		if (payment != null && this.#root.contains(payment)) {
+			this.#clearHighlight();
+			const crystal = Number(payment.dataset.housingPayment);
+			const wcid = Number(payment.dataset.housingWcid);
+			gesture.target = { kind: "housing", element: payment, crystal, wcid };
+			payment.dataset.inventoryDrop = this.#canPay(gesture.source, crystal)
+				? "accepted"
+				: "rejected";
+			return;
+		}
 
 		const offer = hit?.closest<HTMLElement>("[data-trade-offer]");
 		if (offer != null && this.#root.contains(offer)) {
@@ -579,6 +674,14 @@ export class ClientItemDrag {
 			item: gesture.source.item,
 			target,
 		});
+	}
+
+	#canPay(source: DragSource, crystal: number): boolean {
+		return (
+			typeof source.origin === "string" &&
+			source.origin !== "vendor" &&
+			this.houseCrystal?.acceptsDrop(crystal, source.item) === true
+		);
 	}
 
 	/** Only owned inventory gestures can contribute to P2P offers. */
@@ -839,6 +942,22 @@ export class ClientItemDrag {
 	}
 
 	#up = (event: PointerEvent): void => {
+		const housing = this.#housingGesture;
+		if (housing !== null) {
+			if (housing.pointer !== event.pointerId) return;
+			if (housing.dragging) {
+				event.preventDefault();
+				event.stopPropagation();
+				this.#suppressClick = true;
+				this.#suppressDoubleClickUntil =
+					performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
+				const hit = document.elementFromPoint(event.clientX, event.clientY);
+				const outside = !housing.element.contains(hit);
+				this.#finishGesture();
+				if (outside) this.houseCrystal?.clearRow(housing.identity);
+			} else this.#finishGesture();
+			return;
+		}
 		if (!this.#validateGesture()) return;
 		const gesture = this.#gesture;
 		if (
@@ -862,6 +981,18 @@ export class ClientItemDrag {
 		this.#cursor = { x: event.clientX, y: event.clientY };
 		this.#target(true);
 		if (this.#gesture !== gesture) return;
+		if (gesture.target?.kind === "housing") {
+			const { source, target } = gesture;
+			const accepted = this.#canPay(source, target.crystal);
+			this.#finishGesture();
+			if (accepted)
+				this.houseCrystal?.add(target.crystal, target.wcid, source.item);
+			else
+				this.reportNotice(
+					"Drag a carried inventory item into this payment draft.",
+				);
+			return;
+		}
 
 		if (gesture.target?.kind === "trade") {
 			const { source, target } = gesture;
@@ -949,6 +1080,7 @@ export class ClientItemDrag {
 	#finishGesture(): void {
 		this.#clearDimming();
 		this.#gesture = null;
+		this.#housingGesture = null;
 		this.#views = [];
 		this.#ghost.hidden = true;
 		this.#ghost.hidePopover();
@@ -956,7 +1088,10 @@ export class ClientItemDrag {
 		this.#clearHighlight();
 	}
 	#cancel = (): void => {
-		if (this.#gesture?.kind === "dragging") {
+		if (
+			this.#gesture?.kind === "dragging" ||
+			this.#housingGesture?.dragging === true
+		) {
 			this.#suppressClick = true;
 			this.#suppressDoubleClickUntil =
 				performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
@@ -968,6 +1103,7 @@ export class ClientItemDrag {
 		this.reportFailure(`Inventory request failed: ${String(error)}`);
 	}
 	#cancelPointer = (event: PointerEvent): void => {
+		if (this.#housingGesture?.pointer === event.pointerId) this.#cancel();
 		if (
 			this.#gesture?.kind !== "released" &&
 			this.#gesture?.pointer === event.pointerId

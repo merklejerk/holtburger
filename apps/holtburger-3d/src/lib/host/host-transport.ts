@@ -1,3 +1,10 @@
+import type {
+	HousingSnapshot,
+	HousingCrystal,
+	HousingPreviewResult,
+	HousingPaymentResult,
+	HousingManagementResult,
+} from "../../client/client-housing-contract";
 import type { TradeSnapshot } from "../../client/client-trade-contract";
 import type {
 	VendorSnapshot,
@@ -115,6 +122,12 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"examine_client_entity",
 	"read_client_book_page",
 	"request_client_current_state",
+	"refresh_client_housing",
+	"query_client_housing_access",
+	"search_client_housing",
+	"preview_client_housing_payment",
+	"submit_client_housing_payment",
+	"submit_client_housing_management",
 	"select_client_character",
 	"replace_client_drive",
 	"queue_client_character_motion_event",
@@ -196,6 +209,11 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
 	"client-inventory-preview",
 	"client-vendor-snapshot",
+	"client-housing-updated",
+	"client-housing-payment-preview",
+	"client-housing-payment-finished",
+	"client-housing-management-finished",
+	"client-housing-crystal-received",
 	"client-trade-snapshot",
 	"client-vendor-preview",
 	"client-vendor-result",
@@ -289,6 +307,11 @@ export interface HostEventPayloadMap {
 	"client-object-preview-result": ObjectPreviewResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;
 	"client-vendor-snapshot": VendorSnapshot;
+	"client-housing-updated": HousingSnapshot;
+	"client-housing-payment-preview": HousingPreviewResult;
+	"client-housing-payment-finished": HousingPaymentResult;
+	"client-housing-management-finished": HousingManagementResult;
+	"client-housing-crystal-received": HousingCrystal;
 	"client-trade-snapshot": TradeSnapshot;
 	"client-vendor-preview": VendorPreview;
 	"client-vendor-result": VendorResult;

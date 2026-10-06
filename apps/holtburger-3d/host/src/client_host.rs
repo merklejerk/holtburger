@@ -288,6 +288,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            housing: Default::default(),
             connection: None,
             trade: Default::default(),
             character_options: None,
@@ -508,6 +509,18 @@ mod tests {
                 },
             },
         );
+        snapshot.housing.home = holtburger_world::housing::HomeKnowledge::None;
+        snapshot.housing.pending_payment = Some(
+            holtburger_core::client::housing_execution::HousingPendingPayment {
+                sequence: 9,
+                crystal: Guid(100),
+                purpose:
+                    holtburger_core::client::housing_payment::HousingPaymentPurpose::Maintenance,
+            },
+        );
+        snapshot.housing.access.generation = 7;
+        snapshot.housing.search.pending_type = Some(4);
+        let expected_housing = snapshot.housing.clone();
         snapshot.character_sheet = Some(Box::new(holtburger_core::ClientCharacterSheet {
             character: Guid(1),
             name: Some("Test Character".into()),
@@ -532,6 +545,7 @@ mod tests {
         let Some(ClientHostEvent::CurrentState(current)) = forwarded.recv().await else {
             panic!("missing lag replacement");
         };
+        assert_eq!(current.housing, expected_housing);
         let sheet = current
             .character_sheet
             .expect("lag replacement lost character sheet");
@@ -807,6 +821,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            housing: Default::default(),
             connection: None,
             trade: Default::default(),
             character_options: None,

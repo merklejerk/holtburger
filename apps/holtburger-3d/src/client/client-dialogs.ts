@@ -1,15 +1,24 @@
-import type { ClientItemInteractions } from "./client-item-interactions";
 import type { ClientConfirmation } from "./client-host-contract";
 import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
 
+/** Local modal policy; typed destructive confirmations can be canceled from the backdrop. */
+export interface LocalConfirmationRequest {
+	readonly requestId: string;
+	readonly text: string;
+	readonly typedConfirmation?: {
+		/** Exact input required before the acceptance callback can run. */
+		readonly requiredText: string;
+	};
+}
+
 /** One cold UI value: popup dismissal and server response retain different identities. */
 export type ClientDialogPresentation =
 	| {
 			readonly kind: "local-confirmation";
-			readonly request: { readonly requestId: string; readonly text: string };
+			readonly request: LocalConfirmationRequest;
 			readonly submission: { readonly kind: "ready"; readonly error: null };
 	  }
 	| { readonly kind: "popup"; readonly id: number; readonly text: string }
@@ -21,10 +30,12 @@ export type ClientDialogPresentation =
 				| { readonly kind: "submitting" };
 	  };
 
-type ItemDialogs = Pick<
-	ClientItemInteractions,
-	"snapshot" | "subscribe" | "respond"
->;
+/** Each local owner retains its question and dispatch policy; dialogs only present and route answers. */
+export interface LocalDialogSource {
+	readonly question: () => LocalConfirmationRequest | null;
+	readonly subscribe: (listener: () => void) => () => void;
+	readonly respond: (requestId: string, accepted: boolean) => void;
+}
 
 type DialogSession = Pick<
 	ClientLifecycleSession,
@@ -46,11 +57,14 @@ export class ClientDialogs {
 	>();
 	readonly #popups: PopupPresentation[] = [];
 	#confirmation: ConfirmationPresentation | null = null;
-	/** Local question state remains with the interaction owner. */
-	#itemBinding: {
-		readonly items: ItemDialogs;
-		readonly unsubscribe: () => void;
-	} | null = null;
+	/** Binding order chooses among local questions; server confirmations retain priority. */
+	readonly #localBindings = new Map<
+		LocalDialogSource,
+		{
+			readonly source: LocalDialogSource;
+			readonly unsubscribe: () => void;
+		}
+	>();
 	#nextPopupId = 1;
 	#destroyed = false;
 
@@ -60,20 +74,28 @@ export class ClientDialogs {
 		this.#unsubscribe = session.subscribe((event) => this.#receive(event));
 	}
 
+	#localQuestion(): {
+		readonly source: LocalDialogSource;
+		readonly question: NonNullable<ReturnType<LocalDialogSource["question"]>>;
+	} | null {
+		for (const { source } of this.#localBindings.values()) {
+			const question = source.question();
+			if (question !== null) return { source, question };
+		}
+		return null;
+	}
+
 	snapshot(): ClientDialogPresentation | null {
-		const local = this.#itemBinding?.items.snapshot();
+		const local = this.#localQuestion();
 		return (
 			this.#confirmation ??
-			(local?.kind === "confirming"
-				? {
+			(local === null
+				? (this.#popups[0] ?? null)
+				: {
 						kind: "local-confirmation",
-						request: {
-							requestId: local.question.id,
-							text: local.question.text,
-						},
+						request: local.question,
 						submission: { kind: "ready", error: null },
-					}
-				: (this.#popups[0] ?? null))
+					})
 		);
 	}
 
@@ -84,22 +106,22 @@ export class ClientDialogs {
 		return () => this.#listeners.delete(listener);
 	}
 
-	/** Bind local presentation without copying its pending operation into the dialog owner. */
-	bindItems(items: ItemDialogs): () => void {
+	/** Bind an owner-provided question without copying its operation or feature policy. */
+	bindLocal(source: LocalDialogSource): () => void {
 		if (this.#destroyed)
-			throw new Error("Cannot bind item dialogs after destruction.");
-		if (this.#itemBinding !== null)
-			throw new Error("Item dialog owner is already bound.");
+			throw new Error("Cannot bind local dialogs after destruction.");
+		if (this.#localBindings.has(source))
+			throw new Error("Local dialog owner is already bound.");
 		const binding = {
-			items,
-			unsubscribe: items.subscribe(() => this.#publish()),
+			source,
+			unsubscribe: source.subscribe(() => this.#publish()),
 		};
-		this.#itemBinding = binding;
+		this.#localBindings.set(source, binding);
 		this.#publish();
 		return () => {
-			if (this.#itemBinding !== binding) return;
+			if (this.#localBindings.get(source) !== binding) return;
 			binding.unsubscribe();
-			this.#itemBinding = null;
+			this.#localBindings.delete(source);
 			this.#publish();
 		};
 	}
@@ -113,14 +135,13 @@ export class ClientDialogs {
 
 	/** Local answers return to their owner; server questions await authority acknowledgement. */
 	async respond(requestId: string, accepted: boolean): Promise<void> {
-		const local = this.#itemBinding?.items.snapshot();
+		const local = this.#localQuestion();
 		if (
 			!this.#destroyed &&
 			this.#confirmation === null &&
-			local?.kind === "confirming" &&
-			local.question.id === requestId
+			local?.question.requestId === requestId
 		) {
-			this.#itemBinding?.items.respond(requestId, accepted);
+			local.source.respond(requestId, accepted);
 			return;
 		}
 		const current = this.#confirmation;
@@ -157,8 +178,8 @@ export class ClientDialogs {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#unsubscribe();
-		this.#itemBinding?.unsubscribe();
-		this.#itemBinding = null;
+		for (const binding of this.#localBindings.values()) binding.unsubscribe();
+		this.#localBindings.clear();
 		this.#popups.length = 0;
 		this.#confirmation = null;
 		this.#publish();

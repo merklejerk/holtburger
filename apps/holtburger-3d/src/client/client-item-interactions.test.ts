@@ -1,3 +1,4 @@
+import { emptyHousing } from "./client-housing-contract";
 import { describe, expect, it, vi } from "vitest";
 import { ClientItemInteractions } from "./client-item-interactions";
 import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
@@ -53,6 +54,7 @@ async function fixture() {
 		localPlayerGuid: 1,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		housing: emptyHousing(),
 		serverTime: 10,
 		worldGeneration: 2,
 		connection: null,
@@ -448,6 +450,10 @@ describe("shared frontend item interaction flow", () => {
 		});
 		const state = f.interactions.snapshot();
 		if (state.kind !== "confirming") throw new Error("Expected local question");
+		expect(f.interactions.question()).toEqual({
+			requestId: state.question.id,
+			text: state.question.text,
+		});
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		f.select(1);
 		f.interactions.respond(state.question.id, true);

@@ -440,6 +440,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Effective-home and crystal facts recovered atomically with the character.
+    pub housing: holtburger_core::client::housing::HousingSnapshot,
     /// Core-derived current permission and lifecycle admission for map teleport.
     pub can_teleport_from_map: bool,
     /// Shared transport observation, absent before the first completed interval.
@@ -905,6 +907,10 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Housing replacement level, independent of window-opening policy.
+    HousingUpdated(holtburger_core::client::housing::HousingSnapshot),
+    /// Accepted full crystal receipt for the active character.
+    HousingCrystalReceived(holtburger_core::client::housing::HousingCrystalView),
     /// Coherent character facts after a relevant authoritative mutation.
     CharacterSheetUpdated(Option<Box<ClientCharacterSheetWire>>),
     /// Correlated quotes for the active character scope.
@@ -924,6 +930,10 @@ pub enum ClientHostEvent {
     TradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
     /// Correlated shared draft quote.
     VendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
+    HousingPaymentPreview(holtburger_core::client::housing_payment::HousingPreviewResult),
+    HousingPaymentFinished(holtburger_core::client::housing_execution::HousingPaymentResult),
+    /// Administrative evidence classification, without another toast owner.
+    HousingManagementFinished(holtburger_core::client::housing_management::HousingManagementResult),
     /// Terminal receipt identifying which sale sources actually transferred.
     VendorResult(holtburger_core::client::vendor_transaction::VendorTradeResult),
     /// Current operation label while the submitted draft is locked.
@@ -1155,6 +1165,7 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
+            housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
             known_spells: snapshot.known_spells.clone(),
             trade: snapshot.trade.clone(),
@@ -1186,6 +1197,10 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::HousingUpdated(housing) => Some(ClientHostEvent::HousingUpdated(housing)),
+        ClientViewEvent::HousingCrystalReceived(crystal) => {
+            Some(ClientHostEvent::HousingCrystalReceived(crystal))
+        }
         ClientViewEvent::MapTeleportCapabilityChanged(allowed) => {
             Some(ClientHostEvent::MapTeleportCapabilityChanged(allowed))
         }
@@ -1222,6 +1237,15 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))
         }
         ClientViewEvent::VendorDraftPreview(result) => Some(ClientHostEvent::VendorPreview(result)),
+        ClientViewEvent::HousingPaymentPreview(result) => {
+            Some(ClientHostEvent::HousingPaymentPreview(result))
+        }
+        ClientViewEvent::HousingManagementFinished(result) => {
+            Some(ClientHostEvent::HousingManagementFinished(result))
+        }
+        ClientViewEvent::HousingPaymentFinished(result) => {
+            Some(ClientHostEvent::HousingPaymentFinished(result))
+        }
         ClientViewEvent::VendorTradeFinished(result) => Some(ClientHostEvent::VendorResult(result)),
         ClientViewEvent::BusyStateUpdated {
             busy: Some(BusyOperationKind::Buy),
@@ -1389,8 +1413,12 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 BusyOperationKind::UseWithTarget => "Use with target",
                 BusyOperationKind::Salvage => "Salvage",
                 BusyOperationKind::SpellCast => "Spell cast",
-                // Vendor receipts already own the terminal notice, including partial progress.
-                BusyOperationKind::Buy | BusyOperationKind::Sell => return None,
+                // Transaction receipts already own the terminal notice, including partial progress.
+                BusyOperationKind::Buy
+                | BusyOperationKind::Sell
+                | BusyOperationKind::HousingPurchase
+                | BusyOperationKind::HousingMaintenance
+                | BusyOperationKind::HousingManagement => return None,
             };
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                 message: format!("{operation} timed out waiting for the server."),
@@ -1615,6 +1643,145 @@ mod tests {
             serde_json::from_value::<holtburger_core::ClientProgressionQuote>(serialized).unwrap(),
             quote
         );
+    }
+
+    #[test]
+    fn housing_row_preview_matches_the_browser_wire_fixture() {
+        use crate::{client_runtime::ClientHostCommand, host_event_sink::ClientEventSink};
+        use holtburger_core::client::housing_payment::{
+            HousingPreviewOperation, HousingPreviewOutcome, HousingPreviewResult,
+        };
+        use holtburger_world::housing::{
+            HousingRequirement,
+            payment::{HousingPaymentItem, HousingPaymentKind, quote_payment},
+        };
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/housing-preview-wire.json"
+        ))
+        .unwrap();
+        let command: ClientHostCommand = serde_json::from_value(serde_json::json!({"command":"preview_client_housing_payment", "request":fixture["request"]})).unwrap();
+        let ClientHostCommand::PreviewClientHousingPayment { request } = command else {
+            panic!("Expected row preview command");
+        };
+        assert_eq!(
+            request.operation,
+            HousingPreviewOperation::Fill { wcid: 42 }
+        );
+        assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+        let requirements =
+            [(273, 13, 0), (42, 4, 1)].map(|(wcid, required, paid)| HousingRequirement {
+                wcid,
+                required,
+                paid,
+                remaining: required - paid,
+                name: "Payment".into(),
+                plural_name: "Payments".into(),
+            });
+        let facts =
+            [(11, 273, 13), (12, 42, 2), (14, 273, 20), (13, 42, 3)].map(|(id, wcid, quantity)| {
+                HousingPaymentItem {
+                    guid: Guid(id),
+                    wcid,
+                    quantity,
+                    kind: HousingPaymentKind::Item,
+                }
+            });
+        let result = HousingPreviewResult {
+            sequence: request.sequence,
+            crystal: request.draft.crystal,
+            outcome: HousingPreviewOutcome::Ready {
+                items: facts.iter().map(|source| source.guid).collect(),
+                quote: quote_payment(&requirements, &facts).unwrap(),
+                unavailable: vec![],
+            },
+        };
+        let projected =
+            project_client_event(ClientViewEvent::HousingPaymentPreview(result)).unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        crate::protocol::StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("Expected preview event");
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap()["payload"],
+            fixture["result"]
+        );
+    }
+
+    #[test]
+    fn housing_management_intent_and_result_match_the_browser_fixture() {
+        use crate::{client_runtime::ClientHostCommand, host_event_sink::ClientEventSink};
+        use holtburger_core::client::housing_management::{
+            HousingManagementAction, HousingManagementOutcome, HousingManagementResult,
+        };
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/housing-management-wire.json"
+        ))
+        .unwrap();
+        let command: ClientHostCommand = serde_json::from_value(serde_json::json!({"command": "submit_client_housing_management", "request": fixture["request"]})).unwrap();
+        let ClientHostCommand::SubmitClientHousingManagement { request } = command else {
+            panic!("expected administrative command")
+        };
+        assert_eq!(
+            request.action,
+            HousingManagementAction::Hooks { enabled: false }
+        );
+        assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+        let result = HousingManagementResult {
+            sequence: request.sequence,
+            generation: request.generation,
+            outcome: HousingManagementOutcome::Requested,
+        };
+        let projected =
+            project_client_event(ClientViewEvent::HousingManagementFinished(result)).unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let sink = crate::protocol::StdioEventSink::new(sender);
+        sink.publish_client_event(projected).unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected receipt event")
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(wire["payload"], fixture["result"]);
+    }
+
+    #[test]
+    fn housing_information_snapshot_matches_the_shared_browser_fixture() {
+        use holtburger_core::client::{
+            housing::HousingSnapshot,
+            housing_queries::{HousingAccessSnapshot, HousingSearchSnapshot},
+        };
+        use holtburger_world::housing::management::HousingSearchResults;
+        let snapshot = HousingSnapshot {
+            refreshing: true,
+            access: HousingAccessSnapshot {
+                refreshing: true,
+                ..Default::default()
+            },
+            search: HousingSearchSnapshot {
+                results: Some(HousingSearchResults {
+                    house_type: 4,
+                    areas: vec![Guid(0x12340001)],
+                    total_available: 2,
+                }),
+                pending_type: Some(1),
+            },
+            ..Default::default()
+        };
+        let projected = project_client_event(ClientViewEvent::HousingUpdated(snapshot)).unwrap();
+        use crate::host_event_sink::ClientEventSink;
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let sink = crate::protocol::StdioEventSink::new(sender);
+        sink.publish_client_event(projected).unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("housing projection must publish an event");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/housing-wire.json"))
+                .unwrap();
+        assert_eq!(wire["payload"], fixture);
     }
 
     #[test]
@@ -2096,6 +2263,25 @@ mod tests {
                         error,
                         parameter: None
                     },
+                })
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn transaction_timeouts_leave_feedback_to_their_receipts() {
+        for operation in [
+            BusyOperationKind::Buy,
+            BusyOperationKind::Sell,
+            BusyOperationKind::HousingPurchase,
+            BusyOperationKind::HousingMaintenance,
+            BusyOperationKind::HousingManagement,
+        ] {
+            assert!(
+                project_client_event(ClientViewEvent::BusyOperationFinished {
+                    operation,
+                    result: BusyOperationResult::TimedOut,
                 })
                 .is_none()
             );

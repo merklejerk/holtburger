@@ -1,13 +1,11 @@
 use super::commerce::quantity;
 use crate::WorldState;
+use crate::currency::PYREAL_WCID;
 use crate::state::storage::{RosterCoverage, StorageLocation};
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, WorldObjectExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-
-/// ACE WeenieClassName.W_COINSTACK_CLASS; pyreal payments consume these objects.
-pub const PYREAL_WCID: u32 = 273;
 
 /// Purchase quantity refers to units of an offer, not available vendor supply.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -2,6 +2,7 @@ pub use crate::messages::book::actions::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
 pub use crate::messages::fellowship::actions::*;
+pub use crate::messages::housing::*;
 pub use crate::messages::inventory::actions::*;
 pub use crate::messages::magic::actions::*;
 pub use crate::messages::misc::actions::*;
@@ -22,6 +23,25 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    BuyHouse(Box<HousePaymentActionData>),
+    RentHouse(Box<HousePaymentActionData>),
+    HouseQuery,
+    AbandonHouse,
+    RemoveAllStoragePermission,
+    RequestFullGuestList,
+    AddAllStoragePermission,
+    RemoveAllPermanentGuests,
+    BootEveryone,
+    AddPermanentGuest(Box<HouseGuestActionData>),
+    RemovePermanentGuest(Box<HouseGuestActionData>),
+    BootSpecificHouseGuest(Box<HouseGuestActionData>),
+    SetOpenHouseStatus(Box<HouseFlagActionData>),
+    SetHooksVisibility(Box<HouseFlagActionData>),
+    ModifyAllegianceGuestPermission(Box<HouseFlagActionData>),
+    ModifyAllegianceStoragePermission(Box<HouseFlagActionData>),
+    ChangeStoragePermission(Box<HouseStoragePermissionActionData>),
+    ListAvailableHouses(Box<HouseSearchActionData>),
+
     AdvocateTeleport(Box<AdvocateTeleportActionData>),
     Jump(Box<JumpActionData>),
     AutonomousPosition(Box<AutonomousPositionActionData>),
@@ -270,6 +290,53 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Sell => {
                     GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::BuyHouse => {
+                    GameAction::BuyHouse(Box::new(HousePaymentActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RentHouse => {
+                    GameAction::RentHouse(Box::new(HousePaymentActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::HouseQuery => GameAction::HouseQuery,
+                GameActionOpcode::AbandonHouse => GameAction::AbandonHouse,
+                GameActionOpcode::RemoveAllStoragePermission => {
+                    GameAction::RemoveAllStoragePermission
+                }
+                GameActionOpcode::RequestFullGuestList => GameAction::RequestFullGuestList,
+                GameActionOpcode::AddAllStoragePermission => GameAction::AddAllStoragePermission,
+                GameActionOpcode::RemoveAllPermanentGuests => GameAction::RemoveAllPermanentGuests,
+                GameActionOpcode::BootEveryone => GameAction::BootEveryone,
+                GameActionOpcode::AddPermanentGuest => GameAction::AddPermanentGuest(Box::new(
+                    HouseGuestActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RemovePermanentGuest => GameAction::RemovePermanentGuest(
+                    Box::new(HouseGuestActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::BootSpecificHouseGuest => GameAction::BootSpecificHouseGuest(
+                    Box::new(HouseGuestActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::SetOpenHouseStatus => GameAction::SetOpenHouseStatus(Box::new(
+                    HouseFlagActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::SetHooksVisibility => GameAction::SetHooksVisibility(Box::new(
+                    HouseFlagActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::ModifyAllegianceGuestPermission => {
+                    GameAction::ModifyAllegianceGuestPermission(Box::new(
+                        HouseFlagActionData::unpack(data, offset)?,
+                    ))
+                }
+                GameActionOpcode::ModifyAllegianceStoragePermission => {
+                    GameAction::ModifyAllegianceStoragePermission(Box::new(
+                        HouseFlagActionData::unpack(data, offset)?,
+                    ))
+                }
+                GameActionOpcode::ChangeStoragePermission => GameAction::ChangeStoragePermission(
+                    Box::new(HouseStoragePermissionActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::ListAvailableHouses => GameAction::ListAvailableHouses(Box::new(
+                    HouseSearchActionData::unpack(data, offset)?,
+                )),
+
                 GameActionOpcode::BookPageData => GameAction::BookPageData(Box::new(
                     BookPageDataActionData::unpack(data, offset)?,
                 )),
@@ -589,6 +656,66 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::BuyHouse(data) => {
+                (GameActionOpcode::BuyHouse as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::RentHouse(data) => {
+                (GameActionOpcode::RentHouse as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::HouseQuery => (GameActionOpcode::HouseQuery as u32).pack(buf),
+            GameAction::AbandonHouse => (GameActionOpcode::AbandonHouse as u32).pack(buf),
+            GameAction::RemoveAllStoragePermission => {
+                (GameActionOpcode::RemoveAllStoragePermission as u32).pack(buf)
+            }
+            GameAction::RequestFullGuestList => {
+                (GameActionOpcode::RequestFullGuestList as u32).pack(buf)
+            }
+            GameAction::AddAllStoragePermission => {
+                (GameActionOpcode::AddAllStoragePermission as u32).pack(buf)
+            }
+            GameAction::RemoveAllPermanentGuests => {
+                (GameActionOpcode::RemoveAllPermanentGuests as u32).pack(buf)
+            }
+            GameAction::BootEveryone => (GameActionOpcode::BootEveryone as u32).pack(buf),
+            GameAction::AddPermanentGuest(data) => {
+                (GameActionOpcode::AddPermanentGuest as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::RemovePermanentGuest(data) => {
+                (GameActionOpcode::RemovePermanentGuest as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::BootSpecificHouseGuest(data) => {
+                (GameActionOpcode::BootSpecificHouseGuest as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::SetOpenHouseStatus(data) => {
+                (GameActionOpcode::SetOpenHouseStatus as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::SetHooksVisibility(data) => {
+                (GameActionOpcode::SetHooksVisibility as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ModifyAllegianceGuestPermission(data) => {
+                (GameActionOpcode::ModifyAllegianceGuestPermission as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ModifyAllegianceStoragePermission(data) => {
+                (GameActionOpcode::ModifyAllegianceStoragePermission as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ChangeStoragePermission(data) => {
+                (GameActionOpcode::ChangeStoragePermission as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ListAvailableHouses(data) => {
+                (GameActionOpcode::ListAvailableHouses as u32).pack(buf);
+                data.pack(buf);
+            }
+
             GameAction::BookPageData(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::BookPageData as u32)
                     .unwrap();

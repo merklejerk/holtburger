@@ -64,6 +64,7 @@ const clientHudLayoutSchema = z
 		inventory: hudPlacementSchema,
 		worldContainer: hudPlacementSchema,
 		vendor: hudPlacementSchema,
+		houseCrystal: hudPlacementSchema,
 		trade: hudPlacementSchema,
 		inspection: hudPlacementSchema,
 		book: hudPlacementSchema,

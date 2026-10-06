@@ -46,3 +46,24 @@ The conversion uses ACE's 192-meter landblocks: scene X = block X × 192 + local
 Generated comments retain source kind, WCID and cell provenance; the runtime consumes only name and
 branded position. To change coverage, edit the SQL selection, verify the source, and regenerate;
 never manually edit generated coordinates. Remove the intermediate TSV after review.
+
+## Housing payment artwork
+
+`housing-payment-icons.sql` selects the exact template WCIDs used by SlumLord buy/rent create lists, together with their complete item-icon composition inputs. The reference snapshot contains 34 templates, including Pyreals and Writs of Refuge. The generated table is app-local presentation reference data; it supplies no inventory objects or payment eligibility. Live exact-WCID inventory artwork takes precedence, including custom server appearances. A custom template outside this reference set remains without artwork until the client learns its description.
+
+Run the read-only query with an authorized database connection, checking success before generation:
+
+```sh
+mysql --host=127.0.0.1 --user=YOUR_USER --password --database=ace_world \
+  --batch --raw --skip-column-names \
+  < apps/holtburger-tools/sql/housing-payment-icons.sql \
+  > /tmp/housing-payment-icons.tsv
+```
+
+From `apps/holtburger-3d`:
+
+```sh
+npm run generate:housing-payment-icons -- /tmp/housing-payment-icons.tsv
+```
+
+The generator rejects malformed/duplicate rows, missing composition inputs, and invalid base icon DIDs. It retains names as source comments, includes the full effects/overlay/underlay composition, and uses the app formatter. It adds no runtime database connection or catalog dependency.

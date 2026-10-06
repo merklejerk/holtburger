@@ -685,3 +685,124 @@ client transport orders datagrams and reassembles complete messages before dispa
 | `0xF7B0:0x0205` | `ResetTrade` | S2C | Acceptance cleared due to change. |
 | `0xF7B1:0x01FA` | `AcceptTrade` | C2S | Client accepts current offer. |
 | `0xF7B1:0x01FB` | `DeclineTrade` | C2S | Client cancels trade. |
+
+---
+
+### Housing
+
+Housing actions use the normal `0xF7B1` GameAction envelope (sequence, action opcode).
+Events use `0xF7B0` (target character, event sequence, event opcode). Bodies below
+exclude these envelope fields. Numeric fields are little-endian; GUIDs are u32.
+`bool32` is a u32 boolean. `String16L` is the aligned Windows-1252 length-prefixed
+string described in [serialization](serialization.md), including its extended-length
+form. `List<T>` is a u32 count followed by that many elements; it is distinct from
+HAR's packed hash-table header.
+
+| Direction | Opcode | Body in wire order |
+| --- | --- | --- |
+| C2S BuyHouse | `0x021C` | crystal GUID, List<item GUID> |
+| C2S HouseQuery | `0x021E` | empty |
+| C2S AbandonHouse | `0x021F` | empty |
+| C2S RentHouse | `0x0221` | crystal GUID, List<item GUID> |
+| S2C HouseProfile | `0x021D` | crystal GUID, HouseProfile structure below |
+| S2C HouseData | `0x0225` | HouseData structure below |
+| S2C HouseStatus | `0x0226` | status/error u32 |
+| S2C UpdateRentTime | `0x0227` | period-start Unix timestamp u32 |
+| S2C UpdateRentPayment | `0x0228` | List<HousePayment> |
+| S2C UpdateHar | `0x0257` | versioned access structure below |
+| S2C HouseTransaction | `0x0259` | raw notice u32 |
+| C2S ListAvailableHouses | `0x0270` | house type u32 |
+| S2C AvailableHouses | `0x0271` | house type u32, List<location cell u32>, total available i32 |
+
+`HousePayment` fields, in order, are required i32, paid i32, item template/WCID u32,
+singular name String16L, plural name String16L. Preserve signed values when decoding;
+negative requirement/progress is invalid usable housing knowledge, not an unsigned
+quantity. The action transmits physical item identities, not per-stack requested
+quantities. ACE decides which quantities to consume, accepts partial maintenance
+contributions, and can round trade-note consumption above credited value. A quote
+must expose consumed versus credited value and must be revalidated before submission.
+
+`HouseProfile` fields are dwelling ID u32, owner GUID, flags u32, minimum level i32,
+maximum level i32, minimum allegiance rank i32, maximum allegiance rank i32,
+maintenance-free bool32, house type u32, owner name String16L, List<HousePayment>
+purchase requirements, List<HousePayment> maintenance requirements. Restriction -1
+means unbounded. Owner zero means available. House types 1/2/3/4 mean cottage/villa/
+mansion/apartment. Unknown raw flags/types should remain lossless, without invented
+capabilities.
+
+`HouseData` fields are purchase Unix timestamp u32, maintenance period-start Unix
+timestamp u32, house type u32, maintenance-free bool32, purchase-payment list,
+maintenance-payment list, and Position. Position is 32 bytes: cell/landblock u32,
+local x/y/z f32, then quaternion w/x/y/z f32, in that order.
+HouseData contains no owner, dwelling ID, or crystal identity; do not link it to a
+nearby crystal by matching location. Apartment purchase time is not a reliable
+purchase date. ACE periods are 30 days for landscape houses and 90 days for apartments;
+period end and next payment due differ when maintenance is already paid or free.
+
+#### Named access records and management
+
+HAR is versioned. Decode its first u32 before reading optional fields:
+
+- Legacy values `0..0xFFFF`: the value itself is public-entry status. Read the guest
+  table immediately afterward; allegiance/roommate disclosure is absent.
+- `0x10000001`: read flags u32, monarch GUID, then the guest table.
+- `0x10000002`: read flags u32, monarch GUID, guest table, then List<roommate GUID>.
+- Other headers have no established layout; reject rather than guessing offsets.
+
+The guest table starts with entry count u16 and bucket count u16, followed by that
+many records: character GUID key, storage-allowed bool32, character name String16L.
+The bucket count is hash metadata, not an additional list. An entry grants named
+entry permission; its boolean adds storage. Versioned flags disclose public entry
+(bit 0), allegiance entry (bits 1 or 2), and allegiance storage (bit 2). Storage also
+implies entry. Roommates exclude the owner and cannot identify the owning character.
+
+| C2S opcode | Action | Body |
+| --- | --- | --- |
+| `0x0245` | AddPermanentGuest | name String16L |
+| `0x0246` | RemovePermanentGuest | name String16L |
+| `0x0247` | SetOpenHouseStatus | enabled bool32 |
+| `0x0249` | ChangeStoragePermission | name String16L, allowed bool32 |
+| `0x024A` | BootSpecificHouseGuest | name String16L |
+| `0x024C` | RemoveAllStoragePermission | empty |
+| `0x024D` | RequestFullGuestList | empty |
+| `0x025C` | AddAllStoragePermission | empty |
+| `0x025E` | RemoveAllPermanentGuests | empty |
+| `0x025F` | BootEveryone | empty |
+| `0x0266` | SetHooksVisibility | enabled bool32 |
+| `0x0267` | ModifyAllegianceGuestPermission | enabled bool32 |
+| `0x0268` | ModifyAllegianceStoragePermission | enabled bool32 |
+
+Management targets the server's implicit effective home. RequestFullGuestList returns
+named HAR; HouseQuery does not. Permission edits generally emit chat and nearby
+restriction updates, so request HAR explicitly afterward. Abandonment and allegiance
+permission changes require the directly owning character; account relationship alone
+does not establish eligibility. Abandonment removes the deed and performs a home query;
+that query may select another account home. Hook visibility and booting lack an
+explicit retained completion field. Show/hide commands affect empty hooks; occupied
+hooks keep world-container interactions.
+
+HouseQuery selects the character/account home according to ACE's `house_per_char`
+policy. BadParam HouseStatus is an empty query result; HouseEvicted is also used in
+login bookkeeping and is not proof of no home. Maintenance events modify retained
+facts but do not answer a complete home query. Crystal rejection must likewise remain
+independent of home/access query admission.
+
+HouseProfile, HAR, and HouseData do not echo a client request ID. Ordinary crystal Use
+returns a profile; ACE QueryLord (`0x0258`) currently has no refresh implementation.
+Recover payment facts through HouseQuery and a reachable ordinary Use without
+rearming mutation admission, replaying window-opening intent, or retrying payment.
+Payment completion requires matching authoritative ownership/progress and expected
+physical consumption; generic UseDone, chat, and send completion are insufficient.
+
+Available locations are deduplicated areas from `HouseList.GetAvailableLocations`,
+not individual crystal listings. Total available counts houses independently of area
+count. Apartment results remain textual; their location cells do not establish a
+usable apartment map marker.
+
+Ground truth: `ACE/Source/ACE.Server/Network/Structure/{HouseProfile,HouseData,
+HousePayment,HouseAccess,GuestInfo}.cs`, `Player_House.cs`, `SlumLord.cs`, `House.cs`,
+`Entity/HouseList.cs`, corresponding housing GameAction/GameEvent writers, and retail
+`acclient.c:452545` (HAR unpack), `452232` (GuestInfo unpack), `239488` (payment IDs),
+`239914` (profile window), and `383610` (initial housing query). The implemented
+codecs and checked-in synthetic fixtures are in `messages/housing/`; live ACE trace
+verification is tracked separately in the housing implementation plan.

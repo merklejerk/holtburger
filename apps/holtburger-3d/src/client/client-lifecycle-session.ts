@@ -1,4 +1,24 @@
 import {
+	emptyHousing,
+	housingManagementRequestSchema,
+	housingManagementResultSchema,
+	type HousingManagementRequest,
+	type HousingManagementResult,
+	housingSearchRequestSchema,
+	housingSnapshotSchema,
+	housingCrystalSchema,
+	type HousingSnapshot,
+	type HousingCrystal,
+	housingPreviewRequestSchema,
+	housingPreviewResultSchema,
+	type HousingPreviewRequest,
+	type HousingPreviewResult,
+	housingPaymentRequestSchema,
+	housingPaymentResultSchema,
+	type HousingPaymentRequest,
+	type HousingPaymentResult,
+} from "./client-housing-contract";
+import {
 	tradeRequestSchema,
 	tradeSnapshotSchema,
 	type TradeSnapshot,
@@ -174,6 +194,12 @@ type ClientCommandName = Extract<
 	| "examine_client_entity"
 	| "read_client_book_page"
 	| "request_client_current_state"
+	| "refresh_client_housing"
+	| "query_client_housing_access"
+	| "search_client_housing"
+	| "preview_client_housing_payment"
+	| "submit_client_housing_payment"
+	| "submit_client_housing_management"
 	| "select_client_character"
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
@@ -221,6 +247,11 @@ type ClientEventName = Extract<
 	| "client-connection-updated"
 	| "client-inventory-preview"
 	| "client-vendor-snapshot"
+	| "client-housing-updated"
+	| "client-housing-payment-preview"
+	| "client-housing-payment-finished"
+	| "client-housing-management-finished"
+	| "client-housing-crystal-received"
 	| "client-trade-snapshot"
 	| "client-vendor-preview"
 	| "client-vendor-result"
@@ -323,6 +354,23 @@ export interface ClientLifecycleSessionState {
 export type ClientLifecycleSessionEvent =
 	| { readonly type: "book-opened"; readonly receipt: ClientBookOpened }
 	| { readonly type: "book-updated"; readonly book: ClientBook }
+	| { readonly type: "housing-updated"; readonly housing: HousingSnapshot }
+	| {
+			readonly type: "housing-management-finished";
+			readonly result: HousingManagementResult;
+	  }
+	| {
+			readonly type: "housing-payment-finished";
+			readonly result: HousingPaymentResult;
+	  }
+	| {
+			readonly type: "housing-payment-preview";
+			readonly result: HousingPreviewResult;
+	  }
+	| {
+			readonly type: "housing-crystal-received";
+			readonly crystal: HousingCrystal;
+	  }
 	| { readonly type: "vendor-snapshot"; readonly vendor: VendorSnapshot }
 	| { readonly type: "trade-snapshot"; readonly trade: TradeSnapshot }
 	| { readonly type: "vendor-preview"; readonly result: VendorPreview }
@@ -457,6 +505,7 @@ export class ClientLifecycleSession {
 	/** Transport samples stay imperative; only the mounted badge polls them. */
 	#connection: ClientConnectionObservation | null = null;
 	#vendor: VendorSnapshot = null;
+	#housing: HousingSnapshot = emptyHousing();
 	#trade: TradeSnapshot = { trade: null, pending_items: [] };
 	#entryRequestGuid: number | null = null;
 
@@ -492,6 +541,7 @@ export class ClientLifecycleSession {
 		this.#connection = null;
 		this.characterSheet.reset(null);
 		this.#vendor = null;
+		this.#housing = emptyHousing();
 		this.#trade = { trade: null, pending_items: [] };
 		let siblingUnlisteners: readonly (() => void)[] = [];
 		try {
@@ -524,6 +574,7 @@ export class ClientLifecycleSession {
 		};
 		this.characterSheet.reset(null);
 		this.#connection = null;
+		this.#housing = emptyHousing();
 		this.#emit({ type: "resyncing" });
 	}
 
@@ -621,7 +672,51 @@ export class ClientLifecycleSession {
 		});
 	}
 
-	/** Latest catalog survives panel mounts; the draft remains app-local. */
+	/** Retained housing facts survive panel mounts; opening intent is an independent event. */
+	housingSnapshot(): HousingSnapshot {
+		return this.#housing;
+	}
+
+	async refreshHousing(): Promise<void> {
+		await this.#transport.invoke("refresh_client_housing");
+	}
+
+	/** Explicit management reads wait for effective-home initialization in core. */
+	async queryHousingAccess(): Promise<void> {
+		await this.#transport.invoke("query_client_housing_access");
+	}
+
+	/** Available results describe areas, including textual apartment results. */
+	async searchHousing(houseType: number): Promise<void> {
+		await this.#transport.invoke(
+			"search_client_housing",
+			housingSearchRequestSchema.parse({ houseType }),
+		);
+	}
+
+	/** Preview edits and auto-fill return candidates only; no payment or item transfer is sent. */
+	async previewHousingPayment(request: HousingPreviewRequest): Promise<void> {
+		await this.#transport.invoke("preview_client_housing_payment", {
+			request: housingPreviewRequestSchema.parse(request),
+		});
+	}
+
+	/** Payment dispatch carries the profile and consumption accepted in confirmation. */
+	async submitHousingPayment(request: HousingPaymentRequest): Promise<void> {
+		await this.#transport.invoke("submit_client_housing_payment", {
+			request: housingPaymentRequestSchema.parse(request),
+		});
+	}
+
+	/** Submit only the explicitly reviewed character/home administrative intent. */
+	async submitHousingManagement(
+		request: HousingManagementRequest,
+	): Promise<void> {
+		await this.#transport.invoke("submit_client_housing_management", {
+			request: housingManagementRequestSchema.parse(request),
+		});
+	}
+
 	vendorSnapshot(): VendorSnapshot {
 		return this.#vendor;
 	}
@@ -1110,6 +1205,36 @@ export class ClientLifecycleSession {
 					this.#trade = tradeSnapshotSchema.parse(payload);
 					this.#emit({ type: "trade-snapshot", trade: this.#trade });
 				}),
+				await this.#transport.listen(
+					"client-housing-management-finished",
+					(payload) => {
+						this.#emit({
+							type: "housing-management-finished",
+							result: housingManagementResultSchema.parse(payload),
+						});
+					},
+				),
+				await this.#transport.listen("client-housing-updated", (payload) => {
+					this.#housing = housingSnapshotSchema.parse(payload);
+					this.#emit({ type: "housing-updated", housing: this.#housing });
+				}),
+				await this.#transport.listen(
+					"client-housing-payment-finished",
+					(payload) => {
+						this.#emit({
+							type: "housing-payment-finished",
+							result: housingPaymentResultSchema.parse(payload),
+						});
+					},
+				),
+				await this.#transport.listen(
+					"client-housing-crystal-received",
+					(payload) => {
+						const crystal = housingCrystalSchema.parse(payload);
+						this.#housing = { ...this.#housing, crystal };
+						this.#emit({ type: "housing-crystal-received", crystal });
+					},
+				),
 				await this.#transport.listen("client-vendor-snapshot", (payload) => {
 					this.#vendor = vendorSnapshotSchema.parse(payload);
 					this.#emit({ type: "vendor-snapshot", vendor: this.#vendor });
@@ -1138,6 +1263,17 @@ export class ClientLifecycleSession {
 						result: inventoryPreviewResultSchema.parse(payload),
 					});
 				}),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-housing-payment-preview",
+					(payload) => {
+						this.#emit({
+							type: "housing-payment-preview",
+							result: housingPreviewResultSchema.parse(payload),
+						});
+					},
+				),
 			);
 			unlisteners.push(
 				await this.#transport.listen(
@@ -1276,6 +1412,7 @@ export class ClientLifecycleSession {
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
 		this.characterSheet.reset(state.characterSheet);
+		this.#housing = state.housing;
 		this.#trade = state.trade;
 		const semantic = this.entities.prepareSnapshot(
 			state.entities,

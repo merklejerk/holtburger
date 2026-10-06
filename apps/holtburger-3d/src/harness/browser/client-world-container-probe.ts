@@ -1,4 +1,5 @@
 import { tick } from "svelte";
+import { emptyHousing } from "../../client/client-housing-contract";
 import { inventoryPreviewRequestSchema } from "../../client/client-inventory-contract";
 import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 import type { ClientEntityFacts } from "../../client/client-entity-mirror";
@@ -136,6 +137,8 @@ export async function probeWorldContainer(options: {
 		emit("client-current-state", {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
+			canTeleportFromMap: false,
+			housing: emptyHousing(),
 			localPlayerGuid: 1,
 			serverTime: 10,
 			worldGeneration: 1,

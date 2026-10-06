@@ -1,3 +1,4 @@
+import { emptyHousing } from "../../../client/client-housing-contract";
 import { SceneGraph } from "../scene";
 import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import { dynamicEntityPlacementFromPoint } from "../runtime/dynamic-entity-presentation";
@@ -315,6 +316,7 @@ function currentState(): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		housing: emptyHousing(),
 		localPlayerGuid: PLAYER_GUID,
 		entities: playerEntitySnapshot(PLAYER_GUID),
 		serverTime: 10,

@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import type { ClientHousingManagementState } from "./client-housing-management-state";
+	import ClientHousingTab from "./ClientHousingTab.svelte";
+	import type { HousingSnapshot } from "./client-housing-contract";
+	import { housingMapPosition } from "./client-housing-map";
+	import WorldMapHomeIcon from "../assets/icons/world-map-home.svg?component";
+	import { projectWorldMapPoint } from "../lib/game/world-map/view";
+	import { onMount, untrack } from "svelte";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import { trackWorldMapGesture } from "../lib/game/world-map/pointer-gesture";
 	import type { ClientMapPosition } from "./client-host-contract";
@@ -23,7 +29,15 @@
 		ClientHudViewport,
 	} from "./client-hud-layout";
 
+	import { HousingSearchOverlay } from "./client-housing-search-overlay";
+
 	interface Props {
+		/** Cold character identity resets the search filter independently of transport lifetime. */
+		readonly characterGuid: number | null;
+		readonly housing: HousingSnapshot;
+		readonly housingManagement: ClientHousingManagementState | null;
+		readonly onRefreshHousing: () => Promise<void>;
+		readonly onSearchHousing: (houseType: number) => Promise<void>;
 		/** One mounted transport's static map capability. */
 		readonly source: WorldMapSource;
 		/** Core admission is rechecked at release and command dispatch. */
@@ -42,6 +56,11 @@
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
 	const {
+		characterGuid,
+		housing,
+		housingManagement,
+		onRefreshHousing,
+		onSearchHousing,
 		source,
 		canTeleportFromMap,
 		onTeleportToMapPosition,
@@ -52,8 +71,45 @@
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
+	let searchRoot: SVGGElement;
+	let searchOverlay: HousingSearchOverlay | null = null;
+	/** Filter intent belongs to a character, even while the transport/map survives. */
+	let searchSelection = $state<{ character: number | null; type: number }>({
+		character: null,
+		type: 0,
+	});
+	const searchType = $derived(
+		searchSelection.character === characterGuid ? searchSelection.type : 0,
+	);
+	const searchTypes = [
+		{ value: 1, label: "Cottage" },
+		{ value: 2, label: "Villa" },
+		{ value: 3, label: "Mansion" },
+	] as const;
+	$effect(() => {
+		searchSelection = { character: characterGuid, type: 0 };
+	});
+	$effect(() => {
+		const cells =
+			searchType !== 0 && housing.search.results?.houseType === searchType
+				? housing.search.results.areas
+				: null;
+		untrack(() => {
+			searchOverlay?.setAreas(cells);
+			drawOverlays();
+		});
+	});
+	function selectHousing(event: Event): void {
+		if (!(event.currentTarget instanceof HTMLSelectElement)) return;
+		const type = Number(event.currentTarget.value);
+		if (type !== 0 && housing.search.pendingType !== null) return;
+		searchSelection = { character: characterGuid, type };
+		if (type !== 0) void onSearchHousing(type);
+	}
+
 	let canvas: HTMLCanvasElement;
 	let playerMarker: SVGGElement;
+	let homeMarker: SVGGElement;
 	let settlementRoot: SVGGElement;
 	let settlementOverlay: WorldMapSettlementOverlay | null = null;
 	let resetButton: HTMLButtonElement;
@@ -100,6 +156,7 @@
 			WORLD_MAP_SETTLEMENTS,
 		);
 		settlementOverlay = settlements;
+		searchOverlay = new HousingSearchOverlay(searchRoot);
 		const mounted = new WorldMapOwner(source, canvas);
 		owner = mounted;
 		mounted.setVisible(visible && activeTab === "world");
@@ -121,6 +178,8 @@
 			unsubscribeDraw();
 			mounted.destroy();
 			settlements.destroy();
+			searchOverlay?.destroy();
+			searchOverlay = null;
 			settlementOverlay = null;
 			owner = null;
 		};
@@ -142,9 +201,13 @@
 		drawPlayer();
 		if (!owner) return;
 		const view = owner.readView();
-		if (view)
+		if (view) {
 			settlementOverlay?.draw(view, canvas.clientWidth, canvas.clientHeight);
-		else settlementOverlay?.clear();
+			searchOverlay?.draw(view, canvas.clientWidth, canvas.clientHeight);
+		} else {
+			settlementOverlay?.clear();
+			searchOverlay?.clear();
+		}
 		resetButton.hidden = !owner.readView() || owner.isResetView();
 		drawTooltip();
 	}
@@ -204,7 +267,22 @@
 		const view = owner.readView();
 		if (!view) {
 			playerMarker.style.display = "none";
+			homeMarker.style.display = "none";
 			return;
+		}
+		const home = housingMapPosition(housing);
+		homeMarker.style.display = home === null ? "none" : "";
+		if (home !== null) {
+			const point = projectWorldMapPoint(
+				home,
+				view,
+				canvas.clientWidth,
+				canvas.clientHeight,
+			);
+			homeMarker.setAttribute(
+				"transform",
+				`translate(${point[0]} ${point[1]})`,
+			);
 		}
 		const position = worldMapPlayer(
 			readFrame().subject,
@@ -343,6 +421,12 @@
 					onwheel={zoom}
 				></canvas>
 				<svg class="world-map-overlay" aria-hidden="true">
+					<g bind:this={searchRoot} class="world-housing-search" />
+					<g
+						bind:this={homeMarker}
+						class="world-home-target"
+						style:display="none"><WorldMapHomeIcon /></g
+					>
 					<g
 						bind:this={settlementRoot}
 						class="world-settlements ui-world-map-settlements"
@@ -355,6 +439,31 @@
 						<WorldMapPlayerIcon />
 					</g>
 				</svg>
+				<label class="world-map-housing-filter"
+					>Housing
+					<select
+						class="ui-input"
+						aria-label="Housing search"
+						aria-busy={housing.search.pendingType !== null}
+						value={searchType}
+						onchange={selectHousing}
+					>
+						<option value={0}>None</option>
+						{#each searchTypes as type}
+							<option
+								value={type.value}
+								disabled={housing.search.pendingType !== null}
+								>{type.label}{housing.search.pendingType === type.value
+									? " — Searching…"
+									: housing.search.results?.houseType === type.value &&
+										  housing.search.results.totalAvailable === 0
+										? " (0)"
+										: ""}</option
+							>
+						{/each}
+					</select></label
+				>
+
 				<button
 					class="ui-hud-button world-map-labels"
 					type="button"
@@ -427,7 +536,11 @@
 			hidden={activeTab !== "housing"}
 			inert={activeTab !== "housing"}
 		>
-			<p class="ui-muted">Housing is not available yet.</p>
+			<ClientHousingTab
+				{housing}
+				management={housingManagement}
+				onRefresh={onRefreshHousing}
+			/>
 		</div>
 	</div>
 </ClientHudWindow>
@@ -456,8 +569,19 @@
 		}
 		.world-housing-page {
 			display: grid;
-			place-content: center;
-			padding: 20px;
+			min-width: 0;
+			min-height: 0;
+			overflow: hidden;
+		}
+		.world-map-housing-filter {
+			position: absolute;
+			bottom: 8px;
+			left: 50%;
+			transform: translateX(-50%);
+			height: 30px;
+			display: flex;
+			align-items: center;
+			gap: 6px;
 		}
 		.world-map-labels,
 		.world-map-reset {

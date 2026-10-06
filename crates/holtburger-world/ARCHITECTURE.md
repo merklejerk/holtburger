@@ -37,6 +37,7 @@ This layer is responsible for turning decoded protocol messages into state mutat
 - `properties`: property fan-out across player, entities, vendor state, and derived side effects
 - `login`: world-facing bootstrap completion for flows such as `PlayerDescription`
 - `trade`: trade/vendor protocol flows
+- `housing`: complete home/crystal replies, maintenance deltas, named access records, and available-area search
 - `system`: `SetState` plus oddball protocol/system events such as `UseDone` and `WeenieError*`
 
 Key rule: routing order is explicit and meaningful. Shared flows preserve
@@ -615,3 +616,25 @@ preserve motion. PK property updates do preserve it. Property ordering and delet
 remain owned by the existing transport/world lifecycle; this policy adds no independent sequence
 tracking. Once a pair becomes exempt it produces no fresh touches; existing collision reports
 end through the established expiry rule.
+
+## Housing facts
+
+`housing.rs` keeps unqueried, absent, and owned effective-home knowledge separate from
+crystal profiles. Shared models compute requirement remainder, maintenance status/deadlines,
+and the ACE-compatible physical-item payment quote. `housing/management.rs` normalizes
+named permissions and search areas while retaining older-format unknown disclosures.
+The server's available-house count is distinct from deduplicated area count. Home data
+contains no owner or dwelling identity; account relationship belongs in core, using the
+character roster and a disclosed crystal owner.
+
+Payment quote lines retain selected source GUIDs independently of expected consumption,
+including unused stacks. Requirement-row editing therefore does not reconstruct membership
+from consumed quantities. Matching is shared with core admission and auto-fill; a source
+matching multiple requirement rows is explicitly refused because ACE builds consumption
+independently for each row over the same selection.
+
+Housing reducer events preserve complete-reply versus incremental-maintenance provenance.
+Invalid crystal facts emit a separate rejection, so they cannot retire a home query.
+Changed home identity and explicit ownership transitions invalidate named access through
+one world-owned epoch. The epoch is local admission evidence, not a wire request ID.
+World owns no query deadline, window policy, confirmation, or transaction retry.

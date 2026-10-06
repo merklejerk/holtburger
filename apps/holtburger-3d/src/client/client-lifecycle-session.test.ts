@@ -1,4 +1,14 @@
+import housingPreviewWireFixture from "./fixtures/housing-preview-wire.json";
+import housingManagementWireFixture from "./fixtures/housing-management-wire.json";
+import housingWireFixture from "./fixtures/housing-wire.json";
 import vendorFixture from "./fixtures/vendor-wire.json";
+import {
+	emptyHousing,
+	housingPreviewRequestSchema,
+	housingManagementRequestSchema,
+	housingSnapshotSchema,
+	type HousingSnapshot,
+} from "./client-housing-contract";
 import { ClientVendorState } from "./client-vendor-state";
 import { UiIconRepository } from "../app/ui-icon-repository";
 import { vendorRequestSchema } from "./client-vendor-contract";
@@ -72,6 +82,262 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("carries row-targeted previews and unused selected sources through the shared wire fixture", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const receipts: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-payment-preview") receipts.push(event.result);
+		});
+		await session.start();
+		const request = housingPreviewRequestSchema.parse(
+			housingPreviewWireFixture.request,
+		);
+		await session.previewHousingPayment(request);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "preview_client_housing_payment",
+			args: { request },
+		});
+		transport.emit(
+			"client-housing-payment-preview",
+			housingPreviewWireFixture.result,
+		);
+		expect(receipts).toEqual([housingPreviewWireFixture.result]);
+		session.stop();
+	});
+
+	it("dispatches reviewed management and validates its receipt without another toast owner", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const receipts: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-management-finished")
+				receipts.push(event.result);
+		});
+		await session.start();
+		const request = housingManagementRequestSchema.parse(
+			housingManagementWireFixture.request,
+		);
+		await session.submitHousingManagement(request);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_housing_management",
+			args: { request },
+		});
+		transport.emit(
+			"client-housing-management-finished",
+			housingManagementWireFixture.result,
+		);
+		expect(receipts).toEqual([housingManagementWireFixture.result]);
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+		await expect(
+			session.submitHousingManagement({ ...request, sequence: -1 }),
+		).rejects.toThrow();
+		session.stop();
+	});
+
+	it("accepts the housing snapshot produced through the host projection", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const housing = housingSnapshotSchema.parse(housingWireFixture);
+		transport.setCurrentState({ ...currentState(1), housing });
+		await session.start();
+		expect(session.housingSnapshot()).toEqual(housingWireFixture);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", { ...currentState(1), housing });
+		expect(session.housingSnapshot()).toEqual(housingWireFixture);
+		session.stop();
+	});
+
+	it("restores access/search loading without querying and dispatches explicit typed reads", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const housing: HousingSnapshot = {
+			...emptyHousing(),
+			access: {
+				generation: 5,
+				refreshing: true,
+				records: {
+					publicEntry: true,
+					guests: [{ character: 7, name: "Guest", storageAllowed: false }],
+					allegiance: null,
+					roommates: null,
+				},
+			},
+			search: {
+				pendingType: 1,
+				results: { houseType: 4, areas: [0x12340001], totalAvailable: 2 },
+			},
+		};
+		transport.setCurrentState({ ...currentState(1), housing });
+		await session.start();
+		expect(session.housingSnapshot()).toEqual(housing);
+		expect(
+			transport.invocations.filter(
+				(entry) =>
+					entry.command === "query_client_housing_access" ||
+					entry.command === "search_client_housing",
+			),
+		).toEqual([]);
+		await session.queryHousingAccess();
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "query_client_housing_access",
+			args: undefined,
+		});
+		await session.searchHousing(4);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "search_client_housing",
+			args: { houseType: 4 },
+		});
+		await expect(session.searchHousing(0)).rejects.toThrow();
+		await expect(session.searchHousing(1.5)).rejects.toThrow();
+		session.stop();
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+	});
+
+	it("retains pending housing payment through replacement and validates terminal feedback", async () => {
+		const transport = new FakeClientTransport();
+		const pendingPayment = {
+			sequence: 15,
+			crystal: 100,
+			purpose: "purchase",
+		} as const;
+		transport.setCurrentState({
+			...currentState(1),
+			housing: { ...emptyHousing(), pendingPayment },
+		});
+		const session = new ClientLifecycleSession(transport);
+		const results: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-payment-finished") results.push(event.result);
+		});
+		await session.start();
+		expect(session.housingSnapshot().pendingPayment).toEqual(pendingPayment);
+		expect(
+			transport.calls.indexOf("listen:client-housing-payment-finished"),
+		).toBeLessThan(
+			transport.calls.indexOf("invoke:request_client_current_state"),
+		);
+		const result = {
+			sequence: 15,
+			crystal: 100,
+			outcome: { kind: "unresolved", reason: "No authoritative response" },
+			notify: true,
+		};
+		transport.emit("client-housing-payment-finished", result);
+		expect(results).toEqual([result]);
+		expect(() =>
+			transport.emit("client-housing-payment-finished", {
+				...result,
+				notify: "yes",
+			}),
+		).toThrow();
+		transport.emit("client-housing-updated", emptyHousing());
+		expect(session.housingSnapshot().pendingPayment).toBeNull();
+		session.stop();
+	});
+	it("validates housing preview commands and emits their correlated receipts without retaining opening intent", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const receipts: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-payment-preview") receipts.push(event.result);
+		});
+		const request = {
+			sequence: 9,
+			draft: { crystal: 100, purpose: "maintenance", items: [11] },
+			operation: { kind: "fill", wcid: 273 },
+		} as const;
+		await session.previewHousingPayment({
+			...request,
+			draft: { ...request.draft, items: [...request.draft.items] },
+		});
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "preview_client_housing_payment",
+			args: { request },
+		});
+		const result = {
+			sequence: 9,
+			crystal: 100,
+			outcome: {
+				kind: "ready",
+				items: [11, 12],
+				quote: {
+					lines: [
+						{
+							wcid: 273,
+							sources: [11, 12],
+							consumption: [
+								{ item: 11, quantity: 3, value: 3 },
+								{ item: 12, quantity: 1, value: 10 },
+							],
+							credited: 13,
+							effectivePaid: 13,
+							shortfall: 0,
+							excess: 0,
+						},
+					],
+					complete: true,
+					contributes: true,
+				},
+				unavailable: [],
+			},
+		};
+		transport.emit("client-housing-payment-preview", result);
+		expect(receipts).toEqual([result]);
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+		await expect(
+			session.previewHousingPayment({
+				...request,
+				sequence: -1,
+				draft: { ...request.draft, items: [] },
+			}),
+		).rejects.toThrow();
+		session.stop();
+	});
+
+	it("retains housing through travel, replaces it on recovery, and clears it on stop", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const home: HousingSnapshot = {
+			...emptyHousing(),
+			home: { kind: "none" },
+		};
+		transport.setCurrentState({ ...currentState(1), housing: home });
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		expect(session.housingSnapshot()).toEqual(home);
+		expect(
+			transport.calls.indexOf("listen:client-housing-updated"),
+		).toBeLessThan(
+			transport.calls.indexOf("invoke:request_client_current_state"),
+		);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.housingSnapshot()).toEqual(home);
+		await session.refreshHousing();
+		expect(transport.invocations.at(-1)?.command).toBe(
+			"refresh_client_housing",
+		);
+		transport.emit("client-housing-updated", { ...home, refreshing: true });
+		expect(session.housingSnapshot().refreshing).toBe(true);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			housing: home,
+		});
+		expect(session.housingSnapshot()).toEqual(home);
+		expect(
+			events.filter((type) => type === "housing-crystal-received"),
+		).toEqual([]);
+		session.stop();
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+	});
+
 	it("retains connection samples independently of portal lifecycle and replaces them after loss", async () => {
 		const transport = new FakeClientTransport();
 		const baseline = {
@@ -1277,6 +1543,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		housing: emptyHousing(),
 		localPlayerGuid: playerGuid,
 		entities: playerEntitySnapshot(playerGuid),
 		serverTime: 10,

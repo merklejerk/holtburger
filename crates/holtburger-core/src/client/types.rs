@@ -366,6 +366,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Retained housing and pending query state for replacement recovery.
+    pub housing: super::housing::HousingSnapshot,
     /// Current character may request map teleport; includes in-world lifecycle admission.
     pub can_teleport_from_map: bool,
     /// Latest transport rates and live health; absent before the first interval.
@@ -635,6 +637,12 @@ pub enum BusyOperationKind {
     SpellCast,
     Buy,
     Sell,
+    /// Purchase reconciled from item consumption and matching ownership.
+    HousingPurchase,
+    /// Maintenance reconciled from item consumption and matching credited progress.
+    HousingMaintenance,
+    /// Serialized implicit-home administration; abandonment also removes the deed.
+    HousingManagement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -679,6 +687,10 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Replacement housing facts; this event never requests opening a window.
+    HousingUpdated(super::housing::HousingSnapshot),
+    /// Full accepted crystal receipt; the frontend owns whether to open its HUD.
+    HousingCrystalReceived(super::housing::HousingCrystalView),
     /// Complete current character facts after a relevant authoritative mutation.
     CharacterSheetUpdated(Option<Box<super::ClientCharacterSheet>>),
     /// Batched read-only advancement quotes for one frontend request.
@@ -880,6 +892,12 @@ pub enum ClientViewEvent {
     VendorTradeFinished(super::vendor_transaction::VendorTradeResult),
     /// Shared quote for a candidate vendor draft.
     VendorDraftPreview(super::vendor_transaction::VendorPreviewResult),
+    /// Candidate housing quote; no inventory is transferred or reserved.
+    HousingPaymentPreview(super::housing_payment::HousingPreviewResult),
+    /// Payment fulfillment or bounded uncertainty, correlated to its local submission.
+    HousingPaymentFinished(super::housing_execution::HousingPaymentResult),
+    /// Administrative evidence or uncertainty, independent of panel lifetime.
+    HousingManagementFinished(super::housing_management::HousingManagementResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
     FellowshipStateUpdated {
         fellowship: Option<FellowshipState>,
@@ -960,6 +978,14 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Explicit refresh of the active character/account effective home.
+    RefreshHousing,
+    /// Read named access records after effective-home initialization completes.
+    QueryHousingAccess,
+    /// Search available areas by a known HouseType, independently of home ownership.
+    SearchHousing {
+        house_type: u32,
+    },
     /// Read-only character-bound spell examination.
     QuerySpellInspection(super::spell_inspection::SpellInspectionQuery),
     /// Evaluate and dispatch only if the expected consequence still matches.
@@ -1090,6 +1116,12 @@ pub enum ClientCommand {
     VendorTrade(super::vendor_transaction::VendorTradeRequest),
     /// Evaluate a draft without changing inventory or sending a server action.
     PreviewVendorTrade(super::vendor_transaction::VendorTradeRequest),
+    /// Evaluate or auto-fill a housing draft without submitting payment.
+    PreviewHousingPayment(super::housing_payment::HousingPreviewRequest),
+    /// Submit reviewed housing consumption through the shared mutation owner.
+    SubmitHousingPayment(super::housing_execution::HousingPaymentRequest),
+    /// Reviewed implicit-home administrative request.
+    SubmitHousingManagement(super::housing_management::HousingManagementRequest),
     Buy {
         vendor: Guid,
         items: Vec<ItemProfileActionData>,

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ClientTradeState } from "./client-trade-state";
+	import type { ClientHouseCrystalState } from "./client-house-crystal-state";
 	import type { ClientVendorState } from "./client-vendor-state";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
 	import { reconcileActionBars } from "./client-action-bar-reconciliation";
@@ -62,6 +63,7 @@
 		/** Shared command/fact authority for gestures and binding reconciliation. */
 		session: ItemDragSession;
 		vendor: ClientVendorState | null;
+		houseCrystal: ClientHouseCrystalState | null;
 		trade: ClientTradeState | null;
 		worldContainer: ClientWorldContainerPanelState | null;
 		/** Session use flow shared with inventory and selected-entity controls. */
@@ -82,6 +84,7 @@
 		session,
 		worldContainer,
 		vendor,
+		houseCrystal,
 		trade,
 		interactions,
 		editable,
@@ -228,6 +231,7 @@
 			onInventoryNotice,
 			vendor,
 			trade,
+			houseCrystal,
 		);
 		onDragOwner(drag);
 		const repository = inventory.icons;

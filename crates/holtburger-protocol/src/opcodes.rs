@@ -498,44 +498,42 @@ pub enum GameActionOpcode {
     // FellowshipChangeOpenness = 0x0291,
 
     // --- Housing ---
-    // /// C2S: Purchase a selected house.
-    // BuyHouse = 0x021C,
-    // /// C2S: Query detailed information about a house.
-    // HouseQuery = 0x021E,
-    // /// C2S: Evict oneself from currently owned house.
-    // AbandonHouse = 0x021F,
-    // /// C2S: Pay the weekly rent for the house.
-    // RentHouse = 0x0221,
-    // /// C2S: Add a player to the house's permanent guest list.
-    // AddPermanentGuest = 0x0245,
-    // /// C2S: Remove a player from the permanent guest list.
-    // RemovePermanentGuest = 0x0246,
-    // /// C2S: Toggle "Open House" mode (allows anyone to enter).
-    // SetOpenHouseStatus = 0x0247,
-    // /// C2S: Update entry/storage permissions for house items.
-    // ChangeStoragePermission = 0x0249,
-    // /// C2S: Forcibly remove a specific guest from the house.
-    // BootSpecificHouseGuest = 0x024A,
-    // /// C2S: Revoke storage permissions from all players.
-    // RemoveAllStoragePermission = 0x024C,
-    // /// C2S: Request the full list of guests currently in the house.
-    // RequestFullGuestList = 0x024D,
-    // /// C2S: Query the owner/lord of a house.
-    // QueryLord = 0x0258,
-    // /// C2S: Grant storage permissions to every guest.
-    // AddAllStoragePermission = 0x025C,
-    // /// C2S: Clear the entire permanent guest list.
-    // RemoveAllPermanentGuests = 0x025E,
-    // /// C2S: Forcibly remove all guests from the house.
-    // BootEveryone = 0x025F,
-    // /// C2S: Toggle the visibility of housing decor hooks.
-    // SetHooksVisibility = 0x0266,
-    // /// C2S: Grant/revoke house entry based on allegiance rank.
-    // ModifyAllegianceGuestPermission = 0x0267,
-    // /// C2S: Grant/revoke storage access based on allegiance rank.
-    // ModifyAllegianceStoragePermission = 0x0268,
-    // /// C2S: Request a list of houses currently available for purchase.
-    // ListAvailableHouses = 0x0270,
+    /// C2S: Purchase a selected house.
+    BuyHouse = 0x021C,
+    /// C2S: Query the character/account's effective home.
+    HouseQuery = 0x021E,
+    /// C2S: Abandon the directly owning character's home.
+    AbandonHouse = 0x021F,
+    /// C2S: Contribute physical items toward house maintenance.
+    RentHouse = 0x0221,
+    /// C2S: Add a player to the house's permanent guest list.
+    AddPermanentGuest = 0x0245,
+    /// C2S: Remove a player from the permanent guest list.
+    RemovePermanentGuest = 0x0246,
+    /// C2S: Set public entry permission (open permits anyone to enter).
+    SetOpenHouseStatus = 0x0247,
+    /// C2S: Update entry/storage permissions for house items.
+    ChangeStoragePermission = 0x0249,
+    /// C2S: Forcibly remove a specific guest from the house.
+    BootSpecificHouseGuest = 0x024A,
+    /// C2S: Revoke storage permissions from all players.
+    RemoveAllStoragePermission = 0x024C,
+    /// C2S: Request named housing access records.
+    RequestFullGuestList = 0x024D,
+    /// C2S: Grant storage permissions to every guest.
+    AddAllStoragePermission = 0x025C,
+    /// C2S: Clear the entire permanent guest list.
+    RemoveAllPermanentGuests = 0x025E,
+    /// C2S: Forcibly remove all guests from the house.
+    BootEveryone = 0x025F,
+    /// C2S: Show or hide empty housing hooks.
+    SetHooksVisibility = 0x0266,
+    /// C2S: Grant/revoke entry to the owning character's allegiance.
+    ModifyAllegianceGuestPermission = 0x0267,
+    /// C2S: Grant/revoke storage access to the owning character's allegiance.
+    ModifyAllegianceStoragePermission = 0x0268,
+    /// C2S: Request a list of houses currently available for purchase.
+    ListAvailableHouses = 0x0270,
 
     // --- Movement (Extra) ---
     /// C2S: Teleport to a PK-Lite arena.
@@ -772,26 +770,22 @@ pub enum GameEventOpcode {
     // MiscPortalstormSubsided = 0x02CC,
 
     // --- Housing ---
-    // /// S2C: Returns detailed profile and description of a house.
-    // HouseProfile = 0x021D,
-    // /// S2C: Detailed data for a specific house.
-    // HouseData = 0x0225,
-    // /// S2C: Updates the ownership and status of a house.
-    // HouseStatus = 0x0226,
-    // /// S2C: Updates the remaining rent time for a property.
-    // UpdateRentTime = 0x0227,
-    // /// S2C: Confirms a rent payment was processed.
-    // UpdateRentPayment = 0x0228,
-    // /// S2C: Updates the guest and banning restrictions for a house.
-    // HouseUpdateRestrictions = 0x0248,
-    // /// S2C: Updates House Accessibility Rules (HAR) such as guest lists.
-    // UpdateHar = 0x0257,
-    // /// S2C: Response containing extended data for a house.
-    // HouseDataResponse = 0x022F,
-    // /// S2C: Notification of a house-related transaction (purchase/sale).
-    // HouseTransaction = 0x0259,
-    // /// S2C: Returns a list of currently available houses for purchase.
-    // AvailableHouses = 0x0271,
+    /// S2C: Returns detailed profile and description of a house.
+    HouseProfile = 0x021D,
+    /// S2C: Retained effective-home facts without an owner or house identity.
+    HouseData = 0x0225,
+    /// S2C: Housing status/error code; source meaning determines home absence.
+    HouseStatus = 0x0226,
+    /// S2C: Replaces the effective home's maintenance period start timestamp.
+    UpdateRentTime = 0x0227,
+    /// S2C: Replaces maintenance progress; does not correlate a submitted payment.
+    UpdateRentPayment = 0x0228,
+    /// S2C: Updates House Accessibility Rules (HAR) such as guest lists.
+    UpdateHar = 0x0257,
+    /// S2C: Notification of a house-related transaction (purchase/sale).
+    HouseTransaction = 0x0259,
+    /// S2C: Returns a list of currently available houses for purchase.
+    AvailableHouses = 0x0271,
 
     // --- Fellowship (Extra) ---
     /// S2C: Notifies that a member has quit the fellowship.

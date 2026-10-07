@@ -1,8 +1,5 @@
 import { z } from "zod";
 
-/** ACE's fellowship capacity (Entity/Fellowship.cs:26); used for recruitment presentation. */
-export const PARTY_MEMBER_LIMIT = 9;
-
 const guid = z.number().int().positive().max(0xffff_ffff);
 const u32 = z.number().int().nonnegative().max(0xffff_ffff);
 /** Membership facts retained imperatively; vitals never enter the management reactive graph. */
@@ -14,12 +11,22 @@ export const partySnapshotSchema = z
 		evenShare: z.boolean(),
 		open: z.boolean(),
 		locked: z.boolean(),
+		/** World-owned actor permissions; frontend adds only local interaction gating. */
+		capabilities: z
+			.object({
+				isLeader: z.boolean(),
+				canRecruit: z.boolean(),
+				canChangeOpenness: z.boolean(),
+			})
+			.strict(),
 		members: z.array(
 			z
 				.object({
 					guid,
 					name: z.string(),
 					level: u32,
+					/** Shared permission to promote or dismiss this roster member. */
+					canManage: z.boolean(),
 					vitals: z.tuple([u32, u32, u32, u32, u32, u32]),
 				})
 				.strict(),

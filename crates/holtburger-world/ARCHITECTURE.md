@@ -617,6 +617,18 @@ remain owned by the existing transport/world lifecycle; this policy adds no inde
 tracking. Once a pair becomes exempt it produces no fresh touches; existing collision reports
 end through the established expiry rule.
 
+## Fellowship facts and capabilities
+
+`state/fellowship.rs` retains authoritative fellowship snapshots and derives actor capabilities
+for both clients: leadership, recruitment permission/capacity, openness changes, and management
+of other roster members. Unknown leadership grants no leader permissions. Locked-party rejoin
+eligibility and recipient restrictions remain server-owned.
+
+Core owns command dispatch and character lifetime. Its fellowship events capture local actor
+identity with the roster; H3D projects the same capabilities for replacement snapshots and
+incremental updates. Frontends retain pending indicators, optimistic presentation, dialogs,
+notifications, and view-specific update subscription demand.
+
 ## Housing facts
 
 `housing.rs` keeps unqueried, absent, and owned effective-home knowledge separate from

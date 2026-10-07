@@ -4,6 +4,31 @@ use holtburger_protocol::messages::{
     FellowshipLockEntryData, FellowshipMemberData,
 };
 
+/// ACE's ordinary fellowship capacity (ACE.Server/Entity/Fellowship.cs:26).
+pub const FELLOWSHIP_MEMBER_LIMIT: usize = 9;
+
+/// Locally knowable actor permissions; recipient privacy and locked-party rejoin remain server-owned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FellowshipCapabilities {
+    /// Retain actor identity internally so member checks cannot use a different actor.
+    #[serde(skip)]
+    player: Option<Guid>,
+    /// Leadership permits disbanding and managing other roster members.
+    pub is_leader: bool,
+    /// Recruitment permission and capacity, excluding recipient-specific restrictions.
+    pub can_recruit: bool,
+    /// Only the leader of an unlocked fellowship can change recruitment policy.
+    pub can_change_openness: bool,
+}
+
+impl FellowshipCapabilities {
+    /// The supplied target must be a current roster member; self-management uses quit instead.
+    pub fn can_manage_member(self, member: &FellowshipMemberState) -> bool {
+        self.is_leader && self.player.is_some_and(|player| player != member.guid)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FellowshipMemberState {
     pub guid: Guid,
@@ -105,6 +130,21 @@ pub struct FellowshipState {
 }
 
 impl FellowshipState {
+    /// Shared game rules from Player_Fellowship.cs; no frontend pending or focus policy belongs here.
+    pub fn capabilities(&self, player: Option<Guid>) -> FellowshipCapabilities {
+        let is_member = player.is_some_and(|player| self.members.iter().any(|m| m.guid == player));
+        let is_leader = is_member && self.leader_guid.is_some() && self.leader_guid == player;
+        FellowshipCapabilities {
+            player,
+            is_leader,
+            // Locked parties can recruit recent departed members; ACE owns that time-sensitive check.
+            can_recruit: is_member
+                && (is_leader || self.open)
+                && self.members.len() < FELLOWSHIP_MEMBER_LIMIT,
+            can_change_openness: is_leader && !self.is_locked,
+        }
+    }
+
     pub fn unknown_with_member(member: FellowshipMemberState) -> Self {
         Self {
             name: String::new(),
@@ -172,5 +212,73 @@ impl From<&FellowshipFullUpdateEventData> for FellowshipState {
                 .map(FellowshipLockEntryState::from)
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn party() -> FellowshipState {
+        let member = |guid| FellowshipMemberState {
+            guid: Guid(guid),
+            name: format!("Member {guid}"),
+            level: 1,
+            cached_cp: 0,
+            cached_luminance: 0,
+            max_health: 0,
+            max_stamina: 0,
+            max_mana: 0,
+            current_health: 0,
+            current_stamina: 0,
+            current_mana: 0,
+            share_loot: false,
+        };
+        let mut party = FellowshipState::unknown_with_member(member(1));
+        party.upsert_member(member(2));
+        party.leader_guid = Some(Guid(1));
+        party
+    }
+
+    #[test]
+    fn fellowship_capabilities_distinguish_leader_member_and_unknown_actor() {
+        let mut party = party();
+        let leader = party.capabilities(Some(Guid(1)));
+        assert!(leader.is_leader && leader.can_recruit && leader.can_change_openness);
+        assert!(!leader.can_manage_member(&party.members[0]));
+        assert!(leader.can_manage_member(&party.members[1]));
+        for actor in [None, Some(Guid(2)), Some(Guid(99))] {
+            let capabilities = party.capabilities(actor);
+            assert!(!capabilities.is_leader);
+            assert!(!capabilities.can_recruit);
+            assert!(!capabilities.can_change_openness);
+            assert!(!capabilities.can_manage_member(&party.members[0]));
+        }
+        party.open = true;
+        assert!(party.capabilities(Some(Guid(2))).can_recruit);
+        assert!(!party.capabilities(Some(Guid(99))).can_recruit);
+        party.leader_guid = None;
+        assert!(!party.capabilities(Some(Guid(1))).is_leader);
+        assert!(party.capabilities(Some(Guid(1))).can_recruit);
+        party.open = false;
+        assert!(!party.capabilities(Some(Guid(1))).can_recruit);
+    }
+
+    #[test]
+    fn fellowship_capabilities_keep_locked_rejoin_server_owned_and_enforce_capacity() {
+        let mut party = party();
+        party.is_locked = true;
+        let leader = party.capabilities(Some(Guid(1)));
+        assert!(leader.can_recruit);
+        assert!(!leader.can_change_openness);
+        assert!(leader.can_manage_member(&party.members[1]));
+        while party.members.len() < FELLOWSHIP_MEMBER_LIMIT {
+            let mut member = party.members[1].clone();
+            member.guid = Guid(party.members.len() as u32 + 1);
+            party.upsert_member(member);
+        }
+        assert!(!party.capabilities(Some(Guid(1))).can_recruit);
+        party.open = true;
+        assert!(!party.capabilities(Some(Guid(2))).can_recruit);
     }
 }

@@ -4,13 +4,16 @@ import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte
 import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
 import { CLIENT_TUNING } from "../../client/client-tuning";
 import ClientSocialPanel from "../../client/ClientSocialPanel.svelte";
-import { PARTY_MEMBER_LIMIT } from "../../client/client-party-contract";
+import type { PartySnapshot } from "../../client/client-party-contract";
 import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 import {
 	ClientPartyState,
 	PARTY_DISPLAY_INTERVAL_MS,
 } from "../../client/client-party-state";
 import type { ClientLifecycleSession } from "../../client/client-lifecycle-session";
+
+/** Full-roster browser scenario; production capacity is owned by world. */
+const SCENARIO_MEMBER_COUNT = 9;
 
 /** Real browser component lifetime and strict session events with synthetic server facts. */
 export async function probeParty(options: {
@@ -39,21 +42,41 @@ export async function probeParty(options: {
 	target.style.overflow = "hidden";
 	document.body.append(target);
 	const start = commands.length;
-	const party = {
+	const party: PartySnapshot = {
 		name: "Browser Raid",
 		leader: 1,
 		shareXp: true,
 		evenShare: true,
 		open: false,
 		locked: false,
-		members: Array.from({ length: PARTY_MEMBER_LIMIT }, (_, index) => index + 1)
+		capabilities: {
+			isLeader: true,
+			canRecruit: false,
+			canChangeOpenness: true,
+		},
+		members: Array.from(
+			{ length: SCENARIO_MEMBER_COUNT },
+			(_, index) => index + 1,
+		)
 			.reverse()
 			.map((guid) => ({
 				guid,
 				name: `Player ${guid}`,
 				level: 15,
+				canManage: guid !== 1,
 				vitals: [10, 11, 12, 20, 21, 22],
 			})),
+	};
+	// Explicit host outputs let the browser verify consumption without replicating game rules.
+	const memberParty: PartySnapshot = {
+		...party,
+		leader: 2,
+		capabilities: {
+			isLeader: false,
+			canRecruit: false,
+			canChangeOpenness: false,
+		},
+		members: party.members.map((member) => ({ ...member, canManage: false })),
 	};
 	const require = (condition: boolean, message: string) => {
 		if (!condition) throw new Error(message);
@@ -163,7 +186,7 @@ export async function probeParty(options: {
 				const beforeStaleHandoff = commands.length;
 				leave.click();
 				await tick();
-				emit("client-party-updated", { party: { ...party, leader: 2 } });
+				emit("client-party-updated", { party: memberParty });
 				await settle();
 				require(document.querySelector("dialog[open]") ===
 					null, "Changed leadership retained the handoff draft");
@@ -243,7 +266,7 @@ export async function probeParty(options: {
 					?.querySelector("strong")
 					?.textContent?.trim() ===
 					"Player 1 (you)", "Pending promotion moved the leader marker before authority");
-				emit("client-party-updated", { party: { ...party, leader: 2 } });
+				emit("client-party-updated", { party: memberParty });
 				await settle();
 				require(roster
 					.querySelector('[aria-label="Party leader"]')
@@ -261,11 +284,11 @@ export async function probeParty(options: {
 					true, "Member lost the permitted leave action");
 				emit("client-party-updated", {
 					party: {
-						...party,
-						leader: 2,
+						...memberParty,
 						open: true,
-						members: party.members.filter(
-							(member) => member.guid !== PARTY_MEMBER_LIMIT,
+						capabilities: { ...memberParty.capabilities, canRecruit: true },
+						members: memberParty.members.filter(
+							(member) => member.guid !== SCENARIO_MEMBER_COUNT,
 						),
 					},
 				});
@@ -276,8 +299,13 @@ export async function probeParty(options: {
 					party: {
 						...party,
 						locked: true,
+						capabilities: {
+							isLeader: true,
+							canRecruit: true,
+							canChangeOpenness: false,
+						},
 						members: party.members.filter(
-							(member) => member.guid !== PARTY_MEMBER_LIMIT,
+							(member) => member.guid !== SCENARIO_MEMBER_COUNT,
 						),
 					},
 				});
@@ -287,7 +315,9 @@ export async function probeParty(options: {
 				), "Locked party exposed a forbidden openness change");
 				require(inviteButton() !==
 					null, "Locked party lost the server-controlled HUD rejoin path");
-				emit("client-party-updated", { party: { ...party, leader: null } });
+				emit("client-party-updated", {
+					party: { ...memberParty, leader: null },
+				});
 				await settle();
 				require(roster.querySelector("button") === null &&
 					!target.textContent?.includes("Disband") &&
@@ -455,11 +485,11 @@ export async function probeParty(options: {
 		await settle();
 		emit("client-party-updated", {
 			party: {
-				...party,
-				leader: 2,
+				...memberParty,
 				open: true,
-				members: party.members.filter(
-					(member) => member.guid !== PARTY_MEMBER_LIMIT,
+				capabilities: { ...memberParty.capabilities, canRecruit: true },
+				members: memberParty.members.filter(
+					(member) => member.guid !== SCENARIO_MEMBER_COUNT,
 				),
 			},
 		});
@@ -478,8 +508,9 @@ export async function probeParty(options: {
 			party: {
 				...party,
 				open: true,
+				capabilities: { ...party.capabilities, canRecruit: true },
 				members: party.members.filter(
-					(member) => member.guid !== PARTY_MEMBER_LIMIT,
+					(member) => member.guid !== SCENARIO_MEMBER_COUNT,
 				),
 			},
 		});

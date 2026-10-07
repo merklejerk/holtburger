@@ -731,6 +731,12 @@ impl ClientRuntime {
                         player_guid: player_id,
                     });
 
+                // Early fellowship packets can precede PlayerCreate. Refresh actor permissions
+                // with the retained roster instead of waiting for another server party update.
+                if self.world.fellowship.is_some() {
+                    self.emit_fellowship_state_updated();
+                }
+
                 if self.activation.is_none() {
                     self.start_world_activation_with_reset(
                         ClientWorldActivationState::InitialEntry,
@@ -966,6 +972,79 @@ mod tests {
         let mut encoded = Vec::new();
         message.pack(&mut encoded);
         encoded
+    }
+
+    #[tokio::test]
+    async fn fellowship_before_player_create_republishes_with_established_actor() {
+        use holtburger_protocol::messages::{
+            FellowshipFullUpdateEventData, FellowshipMemberData, PlayerCreateData,
+        };
+        let mut client = build_test_client();
+        let player = Guid(0x5000_0001);
+        client.character_selection.character_id = Some(player);
+        client.begin_world_entry_transition().await.unwrap();
+        client.state = ClientState::EnteringWorld;
+        let mut events = client.subscribe_client_view_events();
+        let early_party = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 1,
+            event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+                fellows: vec![FellowshipMemberData {
+                    guid: player,
+                    name: "Leader".to_string(),
+                    level: 1,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 0,
+                    max_stamina: 0,
+                    max_mana: 0,
+                    current_health: 0,
+                    current_stamina: 0,
+                    current_mana: 0,
+                    share_loot: 0,
+                }],
+                fellowship_name: "Early Raid".to_string(),
+                leader_guid: player,
+                share_xp: true,
+                even_share: true,
+                open: false,
+                is_locked: false,
+                departed_members: Vec::new(),
+                fellowship_locks: Vec::new(),
+            })),
+        })));
+        client.handle_message(&early_party).await.unwrap();
+        let mut saw_early = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::FellowshipStateUpdated {
+                player_guid,
+                fellowship: Some(party),
+            } = event
+            {
+                assert_eq!(player_guid, None);
+                assert!(!party.capabilities(player_guid).is_leader);
+                saw_early = true;
+            }
+        }
+        assert!(saw_early);
+        let created = encode_message(&GameMessage::PlayerCreate(Box::new(PlayerCreateData {
+            guid: player,
+        })));
+        client.handle_message(&created).await.unwrap();
+        let mut saw_refresh = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::FellowshipStateUpdated {
+                player_guid,
+                fellowship: Some(party),
+            } = event
+            {
+                assert_eq!(player_guid, Some(player));
+                assert_eq!(party.name, "Early Raid");
+                assert!(party.capabilities(player_guid).is_leader);
+                saw_refresh = true;
+            }
+        }
+        assert!(saw_refresh);
     }
 
     #[tokio::test]

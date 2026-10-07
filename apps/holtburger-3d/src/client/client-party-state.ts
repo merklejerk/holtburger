@@ -4,7 +4,6 @@ import type {
 } from "./client-dialogs";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 import {
-	PARTY_MEMBER_LIMIT,
 	partyActionSchema,
 	type PartyAction,
 	type PartyPreferences,
@@ -139,11 +138,15 @@ export class ClientPartyState implements LocalDialogSource {
 									? this.#pending.action.open
 									: party.open,
 							locked: party.locked,
-							members: party.members.map(({ guid, name, level }) => ({
-								guid,
-								name,
-								level,
-							})),
+							capabilities: party.capabilities,
+							members: party.members.map(
+								({ guid, name, level, canManage }) => ({
+									guid,
+									name,
+									level,
+									canManage,
+								}),
+							),
 						},
 			preferences,
 			player: state.playerGuid,
@@ -179,19 +182,28 @@ export class ClientPartyState implements LocalDialogSource {
 		action = partyActionSchema.parse(action);
 		const view = this.read();
 		if (!view.enabled || view.player === null) return;
-		if (action.kind === "dismiss" || action.kind === "disband") {
-			const target =
-				action.kind === "dismiss"
-					? view.party?.members.find((member) => member.guid === action.target)
-					: null;
-			if (action.kind === "dismiss" && target === undefined) return;
+		if (action.kind === "invite" && !this.canInvite(action.target)) return;
+		if (
+			action.kind === "openness" &&
+			!view.party?.capabilities.canChangeOpenness
+		)
+			return;
+		if (action.kind === "disband" && !view.party?.capabilities.isLeader) return;
+		let question: string | null =
+			action.kind === "disband" ? "Disband this party for every member?" : null;
+		if (action.kind === "dismiss" || action.kind === "promote") {
+			const member = view.party?.members.find(
+				(member) => member.guid === action.target,
+			);
+			if (member === undefined || !member.canManage) return;
+			if (action.kind === "dismiss")
+				question = `Dismiss ${member.name} from the party?`;
+		}
+		if (question !== null) {
 			this.#review = {
 				request: {
 					requestId: `party-${++this.#sequence}`,
-					text:
-						action.kind === "dismiss"
-							? `Dismiss ${target?.name} from the party?`
-							: "Disband this party for every member?",
+					text: question,
 				},
 				action,
 				player: view.player,
@@ -201,15 +213,14 @@ export class ClientPartyState implements LocalDialogSource {
 		} else if (action.kind === "leave") this.leave(null);
 		else void this.#submit(action, null, []);
 	}
-	/** Frontend recruitment policy; private recipient restrictions remain server-owned. */
+	/** Shared recruitment permission plus frontend availability and target identity. */
 	canInvite(target: number): boolean {
 		const view = this.read();
 		return (
 			view.enabled &&
 			view.party !== null &&
 			target !== view.player &&
-			(view.party.leader === view.player || view.party.open) &&
-			view.party.members.length < PARTY_MEMBER_LIMIT &&
+			view.party.capabilities.canRecruit &&
 			!view.party.members.some((member) => member.guid === target)
 		);
 	}
@@ -218,7 +229,7 @@ export class ClientPartyState implements LocalDialogSource {
 		const view = this.read();
 		if (!view.enabled || view.party === null) return;
 		const needsHandoff =
-			view.party.leader === view.player && view.party.members.length > 1;
+			view.party.capabilities.isLeader && view.party.members.length > 1;
 		if (
 			needsHandoff &&
 			(successor === null ||

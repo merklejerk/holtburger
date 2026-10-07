@@ -97,6 +97,7 @@ fn projected_fellowship_state_updates_game_data() {
     };
 
     let result = state.handle_view_event(ClientViewEvent::FellowshipStateUpdated {
+        player_guid: state.data.player_guid,
         fellowship: Some(fellowship.clone()),
     });
 
@@ -154,6 +155,7 @@ fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
     };
 
     let result = state.handle_view_event(ClientViewEvent::FellowshipStateUpdated {
+        player_guid: state.data.player_guid,
         fellowship: Some(fellowship.clone()),
     });
 

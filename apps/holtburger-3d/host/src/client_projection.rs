@@ -1175,7 +1175,9 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
-            party: snapshot.fellowship.as_ref().map(Into::into),
+            party: snapshot.fellowship.as_ref().map(|party| {
+                crate::client_party::ClientPartySnapshot::project(party, snapshot.local_player_guid)
+            }),
             party_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
@@ -1352,11 +1354,14 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
             Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
-        ClientViewEvent::FellowshipStateUpdated { fellowship } => {
-            Some(ClientHostEvent::PartyUpdated {
-                party: fellowship.as_ref().map(Into::into),
-            })
-        }
+        ClientViewEvent::FellowshipStateUpdated {
+            fellowship,
+            player_guid,
+        } => Some(ClientHostEvent::PartyUpdated {
+            party: fellowship
+                .as_ref()
+                .map(|party| crate::client_party::ClientPartySnapshot::project(party, player_guid)),
+        }),
         ClientViewEvent::PlayerOptionsUpdated { options } => {
             Some(ClientHostEvent::CharacterPreferencesUpdated {
                 appearance: options.into(),

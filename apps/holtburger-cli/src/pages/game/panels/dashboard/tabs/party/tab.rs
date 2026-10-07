@@ -108,12 +108,6 @@ impl PartyTab {
         members.into_iter().nth(selected_index)
     }
 
-    fn is_party_leader(&self, data: &GameData) -> bool {
-        data.party.as_ref().is_some_and(|party| {
-            party.leader_guid.is_some() && party.leader_guid == data.player_guid
-        })
-    }
-
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
         self.visible_members(data).len()
     }
@@ -189,7 +183,11 @@ impl TabController for PartyTab {
             ]);
         }
 
-        if self.is_party_leader(data) && Some(selected.member.guid) != data.player_guid {
+        if data.party.as_ref().is_some_and(|party| {
+            party
+                .capabilities(data.player_guid)
+                .can_manage_member(selected.member)
+        }) {
             verbs.push(Verb::new(
                 AppAction::UninviteFromParty {
                     target: selected.member.guid,

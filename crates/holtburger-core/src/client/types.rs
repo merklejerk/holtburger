@@ -902,6 +902,8 @@ pub enum ClientViewEvent {
     HousingManagementFinished(super::housing_management::HousingManagementResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
     FellowshipStateUpdated {
+        /// Actor identity captured with the roster for consistent capability projection.
+        player_guid: Option<Guid>,
         fellowship: Option<FellowshipState>,
     },
     FellowshipActivity {

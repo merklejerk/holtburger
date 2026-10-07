@@ -332,6 +332,34 @@ Lifecycle maintenance was traced through roster/leader changes, modal cancellati
 Fresh verification passed: 75 focused frontend tests, type checks with zero Svelte warnings, ESLint, Knip, affected-crate Clippy, Rust formatting, 16 protocol fellowship tests, five world fellowship tests, three host Party tests, and the core character-lifetime recovery test. Real Chrome Party checks pass, including twelve backdrop variants; focused keyboard-policy and Settings-tabs suites also pass. Earlier full-suite evidence and the unrelated full-HUD spell-search failure remain recorded below. Verification is nonvisual and synthetic, not live multiplayer acceptance.
 
 
+### Shared Party capability review (2026-10-07)
+
+Verdict: ready within the capability consolidation and immediate caller scope, relative to
+`4a6a5557`. World owns stateless actor permissions and member-management checks; core owns
+commands and character lifetime; TUI and H3D retain their own interaction policy. Recruitment
+capacity moved out of frontend production code. Locked rejoin eligibility and recipient
+restrictions remain server-owned; no new synchronization or transaction controller is justified.
+
+Reviewed seams: ACE fellowship rules, world full/partial/departure updates, core roster events
+and replacement snapshots, early entry/PlayerCreate/retirement, both host projection paths,
+strict frontend schemas and retained session state, Party owner/actions/dialog retirement,
+Social control visibility, selected-entity recruitment, and TUI member verbs/event handling.
+Socket transport, general rendering, other Social domains, and live multiplayer behavior remain
+outside this review. A capacity or permission rule change now has one production owner; the
+frontend adds availability and target-identity checks rather than reconstructing those rules.
+
+Three bounded issues were fixed: the browser fixture replicated Rust permission policy through
+an unchecked payload cast; dismissal looked up and checked the same member twice; and an early
+Party update could retain disabled permissions after PlayerCreate established the actor. Browser
+scenarios now supply explicit typed permissions, member actions use one checked lookup, and
+PlayerCreate republishes retained Party facts. A protocol-message regression proves that early
+unknown-actor facts become actionable without another server Party packet.
+
+Verification passed: 56 focused frontend tests; 47 targeted Rust tests across world, host, CLI,
+and core; frontend type/lint/dead-code checks; affected-crate Clippy and formatting; and the
+nonvisual Chrome Party suite with synthetic facts. No visual acceptance was performed.
+
+
 ### Party implementation evidence (2026-10-06)
 
 - Social shortcut/window, management controls, creation preferences, explicit handoff, destructive review, and session-owned bounded pending presentation are implemented. Future tabs remain unavailable.

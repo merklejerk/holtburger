@@ -35,7 +35,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         ClientViewEvent::FellowshipActivity { activity } => {
             let _ = activity;
         }
-        ClientViewEvent::FellowshipStateUpdated { fellowship } => {
+        ClientViewEvent::FellowshipStateUpdated { fellowship, .. } => {
             let should_open_party_tab =
                 fellowship.is_some() && state.runtime.open_party_tab_on_next_fellowship_update;
 

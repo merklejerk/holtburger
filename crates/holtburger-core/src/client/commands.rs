@@ -1537,7 +1537,7 @@ mod tests {
         while let Ok(event) = events.try_recv() {
             if matches!(
                 event,
-                ClientViewEvent::FellowshipStateUpdated { fellowship: Some(fellowship) }
+                ClientViewEvent::FellowshipStateUpdated { fellowship: Some(fellowship), .. }
                     if fellowship.name == "Raid Bus"
                         && fellowship.members.len() == 1
                         && fellowship.departed_members.len() == 1

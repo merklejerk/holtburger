@@ -65,9 +65,7 @@
 				a.guid - b.guid,
 		),
 	);
-	const leader = $derived(
-		view.party?.leader !== null && view.party?.leader === view.player,
-	);
+	const leader = $derived(view.party?.capabilities.isLeader === true);
 	const candidates = $derived(
 		members.filter((member) => member.guid !== view.player),
 	);
@@ -166,7 +164,7 @@
 									</div>
 									<span class="ui-muted">Level {entry.level}</span>
 								</div>
-								{#if leader && entry.guid !== view.player}
+								{#if entry.canManage}
 									<div class="ui-icon-actions">
 										<button
 											class="ui-button ui-icon-button"
@@ -195,7 +193,7 @@
 					</ul>
 				</div>
 			</details>
-			{#if leader && !view.party.locked}
+			{#if view.party.capabilities.canChangeOpenness}
 				<label
 					><input
 						type="checkbox"

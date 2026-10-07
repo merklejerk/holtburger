@@ -754,6 +754,8 @@ impl ClientRuntime {
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::FellowshipStateUpdated {
+                player_guid: (self.world.player.guid != Guid::NULL)
+                    .then_some(self.world.player.guid),
                 fellowship: self.world.fellowship.clone(),
             });
     }
@@ -1276,6 +1278,8 @@ impl ClientRuntime {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::FellowshipStateUpdated {
+                        player_guid: (self.world.player.guid != Guid::NULL)
+                            .then_some(self.world.player.guid),
                         fellowship: fellowship.clone(),
                     });
             }

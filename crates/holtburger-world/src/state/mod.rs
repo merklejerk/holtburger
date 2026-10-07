@@ -16,8 +16,8 @@ mod world_container;
 pub use world_container::WorldContainerState;
 
 pub use fellowship::{
-    FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
-    FellowshipMemberState, FellowshipState,
+    FELLOWSHIP_MEMBER_LIMIT, FellowshipCapabilities, FellowshipDepartedMemberState,
+    FellowshipLockEntryState, FellowshipLockState, FellowshipMemberState, FellowshipState,
 };
 pub use motion_resolution::{
     AuthoredBodyMotionTick, AuthoredMotionDriveError, BodyProjectionResolver,

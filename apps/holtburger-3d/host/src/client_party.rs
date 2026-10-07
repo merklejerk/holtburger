@@ -1,7 +1,7 @@
 //! Narrow H3D party management and vital projection; shared membership remains world-owned.
 use holtburger_common::{CharacterOption, Guid};
 use holtburger_core::{ClientCommand, PlayerCharacterOptions};
-use holtburger_world::state::FellowshipState;
+use holtburger_world::state::{FellowshipCapabilities, FellowshipState};
 use serde::{Deserialize, Serialize};
 
 /// Character preferences mirrored by core after dispatch, not server acknowledgements.
@@ -41,6 +41,8 @@ pub struct ClientPartySnapshot {
     pub open: bool,
     /// Content-controlled lock; server decides rejoin eligibility.
     pub locked: bool,
+    /// Shared game permissions for the actor captured with this roster.
+    pub capabilities: FellowshipCapabilities,
     /// Members remain meaningful without a corresponding visible scene entity.
     pub members: Vec<ClientPartyMember>,
 }
@@ -54,11 +56,15 @@ pub struct ClientPartyMember {
     pub name: String,
     /// Latest server-reported level for roster display.
     pub level: u32,
+    /// Shared permission to promote or dismiss this current roster member.
+    pub can_manage: bool,
     /// Current health, stamina, mana followed by their maxima.
     pub vitals: [u32; 6],
 }
-impl From<&FellowshipState> for ClientPartySnapshot {
-    fn from(party: &FellowshipState) -> Self {
+impl ClientPartySnapshot {
+    /// Project one coherent roster and its actor permissions for both snapshot and delta paths.
+    pub fn project(party: &FellowshipState, player: Option<Guid>) -> Self {
+        let capabilities = party.capabilities(player);
         Self {
             name: party.name.clone(),
             leader: party.leader_guid,
@@ -66,6 +72,7 @@ impl From<&FellowshipState> for ClientPartySnapshot {
             even_share: party.even_share,
             open: party.open,
             locked: party.is_locked,
+            capabilities,
             members: party
                 .members
                 .iter()
@@ -73,6 +80,7 @@ impl From<&FellowshipState> for ClientPartySnapshot {
                     guid: member.guid,
                     name: member.name.clone(),
                     level: member.level,
+                    can_manage: capabilities.can_manage_member(member),
                     vitals: [
                         member.current_health,
                         member.current_stamina,
@@ -148,7 +156,8 @@ mod tests {
             current_mana: 3,
             share_loot: false,
         });
-        let value = serde_json::to_value(ClientPartySnapshot::from(&party)).unwrap();
+        let value =
+            serde_json::to_value(ClientPartySnapshot::project(&party, Some(Guid(42)))).unwrap();
         assert_eq!(value["leader"], serde_json::Value::Null);
         assert_eq!(value["members"][0]["guid"], 42);
         assert_eq!(

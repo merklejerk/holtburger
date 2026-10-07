@@ -779,18 +779,33 @@ mod tests {
         };
         let party = holtburger_world::state::FellowshipState {
             name: "Raid".to_string(),
-            leader_guid: None,
+            leader_guid: Some(Guid(1)),
             share_xp: true,
             even_share: false,
             open: true,
             is_locked: false,
-            members: Vec::new(),
+            members: vec![holtburger_world::state::FellowshipMemberState {
+                guid: Guid(1),
+                name: "Leader".to_string(),
+                level: 1,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 0,
+                max_stamina: 0,
+                max_mana: 0,
+                current_health: 0,
+                current_stamina: 0,
+                current_mana: 0,
+                share_loot: false,
+            }],
             departed_members: Vec::new(),
             locks: Vec::new(),
         };
+        snapshot.local_player_guid = Some(Guid(1));
         snapshot.fellowship = Some(party.clone());
         let replacement = ClientCurrentState::from(snapshot.as_ref());
         let event = project_client_event(ClientViewEvent::FellowshipStateUpdated {
+            player_guid: snapshot.local_player_guid,
             fellowship: Some(party),
         });
         let Some(ClientHostEvent::PartyUpdated { party: incremental }) = event else {

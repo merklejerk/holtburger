@@ -1417,8 +1417,19 @@ describe("ClientLifecycleSession", () => {
 			evenShare: true,
 			open: false,
 			locked: false,
+			capabilities: {
+				isLeader: true,
+				canRecruit: true,
+				canChangeOpenness: true,
+			},
 			members: [
-				{ guid: 1, name: "Player", level: 10, vitals: [1, 2, 3, 4, 5, 6] },
+				{
+					guid: 1,
+					name: "Player",
+					level: 10,
+					canManage: false,
+					vitals: [1, 2, 3, 4, 5, 6],
+				},
 			],
 		};
 		const preferences = {

@@ -18,10 +18,12 @@ function fixture() {
 		evenShare: true,
 		open: false,
 		locked: false,
+		capabilities: { isLeader: true, canRecruit: true, canChangeOpenness: true },
 		members: [1, 2].map((guid) => ({
 			guid,
 			name: `Member ${guid}`,
 			level: 10,
+			canManage: guid !== 1,
 			vitals: [10, 10, 10, 20, 20, 20],
 		})),
 	};
@@ -201,8 +203,14 @@ describe("party presentation ownership", () => {
 		f.setParty({
 			...party,
 			leader: 2,
+			capabilities: {
+				isLeader: false,
+				canRecruit: false,
+				canChangeOpenness: false,
+			},
 			members: party.members.map((member) => ({
 				...member,
+				canManage: false,
 				vitals: [10, 10, 10, 20, 20, 20],
 			})),
 		});
@@ -221,6 +229,36 @@ describe("party presentation ownership", () => {
 			[{ kind: "promote", target: 2 }],
 			[{ kind: "leave" }],
 		]);
+		f.owner.destroy();
+	});
+	it("uses shared permissions even when raw party facts would suggest leadership", () => {
+		const f = fixture();
+		const party = f.owner.read().party;
+		if (party === null) throw new Error("Missing fixture party");
+		f.setParty({
+			...party,
+			capabilities: {
+				isLeader: false,
+				canRecruit: false,
+				canChangeOpenness: false,
+			},
+			members: party.members.map((member) => ({
+				...member,
+				canManage: false,
+				vitals: [10, 10, 10, 20, 20, 20],
+			})),
+		});
+		expect(f.owner.canInvite(3)).toBe(false);
+		for (const action of [
+			{ kind: "invite", target: 3 },
+			{ kind: "promote", target: 2 },
+			{ kind: "dismiss", target: 2 },
+			{ kind: "disband" },
+			{ kind: "openness", open: true },
+		] as const)
+			f.owner.request(action);
+		expect(f.submit).not.toHaveBeenCalled();
+		expect(f.owner.question()).toBeNull();
 		f.owner.destroy();
 	});
 	it("recruits from the HUD without enabling panel update demand", () => {

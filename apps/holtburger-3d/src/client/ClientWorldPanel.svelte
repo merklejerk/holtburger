@@ -1,5 +1,6 @@
 <script lang="ts">
 	import UiTabs from "../app/UiTabs.svelte";
+	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
 	import ClientHousingTab from "./ClientHousingTab.svelte";
 	import type { HousingSnapshot } from "./client-housing-contract";
@@ -22,12 +23,6 @@
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import WorldMapPlayerIcon from "../assets/icons/world-map-player.svg?component";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
-	import ClientHudWindow from "./ClientHudWindow.svelte";
-	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
-	import type {
-		ClientHudPlacement,
-		ClientHudViewport,
-	} from "./client-hud-layout";
 
 	import { HousingSearchOverlay } from "./client-housing-search-overlay";
 
@@ -48,12 +43,8 @@
 		) => Promise<void>;
 		/** Visibility never owns canvas or dataset lifetime. */
 		readonly visible: boolean;
-		readonly placement: ClientHudPlacement;
-		readonly viewport: ClientHudViewport;
 		/** Coherent player placement, pulled at bounded overlay cadence. */
 		readonly readFrame: () => MinimapFrame;
-		readonly onClose: () => void;
-		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
 	const {
 		characterGuid,
@@ -65,11 +56,7 @@
 		canTeleportFromMap,
 		onTeleportToMapPosition,
 		visible,
-		placement,
-		viewport,
 		readFrame,
-		onClose,
-		onPlacementChange,
 	}: Props = $props();
 	let searchRoot: SVGGElement;
 	let searchOverlay: HousingSearchOverlay | null = null;
@@ -367,32 +354,20 @@
 	}
 </script>
 
-<ClientHudWindow
-	title="World"
-	icon="world"
-	{visible}
-	{placement}
-	{viewport}
-	{onClose}
-	{onPlacementChange}
-	minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
-	minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
->
-	<div class="world-panel ui-body ui-tabbed-panel">
-		<UiTabs
-			label="World tabs"
-			{tabs}
-			selected={activeTab}
-			onSelect={(value) => (activeTab = value)}
-		/>
-		<div
-			class="world-page world-map-page"
-			role="tabpanel"
-			id={`${panelId}-world`}
-			aria-labelledby={`${panelId}-world-tab`}
-			hidden={activeTab !== "world"}
-			inert={activeTab !== "world"}
-		>
+<div class="world-panel ui-body ui-tabbed-panel">
+	<UiTabs
+		label="World tabs"
+		{tabs}
+		selected={activeTab}
+		onSelect={(value) => (activeTab = value)}
+	/>
+	<UiTabPanel
+		id={`${panelId}-world`}
+		labelledBy={`${panelId}-world-tab`}
+		active={activeTab === "world"}
+		scroll={false}
+	>
+		<div class="world-map-page">
 			<div class="world-map-surface">
 				<canvas
 					bind:this={canvas}
@@ -510,34 +485,33 @@
 				</div>
 			{/if}
 		</div>
-		<div
-			class="world-page world-housing-page"
-			role="tabpanel"
-			id={`${panelId}-housing`}
-			aria-labelledby={`${panelId}-housing-tab`}
-			hidden={activeTab !== "housing"}
-			inert={activeTab !== "housing"}
-		>
+	</UiTabPanel>
+	<UiTabPanel
+		id={`${panelId}-housing`}
+		labelledBy={`${panelId}-housing-tab`}
+		active={activeTab === "housing"}
+		scroll={false}
+	>
+		<div class="world-housing-page">
 			<ClientHousingTab
 				{housing}
 				management={housingManagement}
 				onRefresh={onRefreshHousing}
 			/>
 		</div>
-	</div>
-</ClientHudWindow>
+	</UiTabPanel>
+</div>
 
 <style>
 	@layer components {
 		.world-map-page {
+			height: 100%;
 			display: grid;
 			min-height: 0;
 			grid-template-rows: minmax(0, 1fr) auto;
 		}
-		.world-page[hidden] {
-			display: none;
-		}
 		.world-housing-page {
+			height: 100%;
 			display: grid;
 			min-width: 0;
 			min-height: 0;

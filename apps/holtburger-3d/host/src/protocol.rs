@@ -173,6 +173,10 @@ pub enum HostEvent {
         party: crate::client_party::ClientPartyPreferences,
         friends: crate::client_friends::ClientFriendsPreferences,
     },
+    /// Current character-owned ignore projection.
+    ClientSquelchUpdated {
+        squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
+    },
     /// Current friend list projection.
     ClientFriendsUpdated {
         friends: Option<crate::client_friends::ClientFriendsSnapshot>,
@@ -556,6 +560,9 @@ impl ClientEventSink for StdioEventSink {
                 party,
                 friends,
             },
+            crate::client_projection::ClientHostEvent::SquelchUpdated { squelch } => {
+                HostEvent::ClientSquelchUpdated { squelch }
+            }
             crate::client_projection::ClientHostEvent::FriendsUpdated { friends } => {
                 HostEvent::ClientFriendsUpdated { friends }
             }

@@ -276,10 +276,10 @@ pub enum GameActionOpcode {
     // QueryMotd = 0x0255,
     // /// C2S: Clear the current Message of the Day (MOTD).
     // ClearMotd = 0x0256,
-    // /// C2S: Mute/squelch a specific character.
-    // ModifyCharacterSquelch = 0x0058,
-    // /// C2S: Mute/squelch an entire account.
-    // ModifyAccountSquelch = 0x0059,
+    /// C2S: Mute/squelch a specific character.
+    ModifyCharacterSquelch = 0x0058,
+    /// C2S: Mute/squelch an entire account.
+    ModifyAccountSquelch = 0x0059,
     // /// C2S: Mute/squelch a global chat channel.
     // ModifyGlobalSquelch = 0x005B,
     /// C2S: Perform a character emote.
@@ -689,8 +689,8 @@ pub enum GameEventOpcode {
     CommunicationTransientString = 0x02EB,
     // /// S2C: Triggers a character emote action.
     // Emote = 0x01E2,
-    // /// S2C: Synchronizes the client's squelch (ignore) list.
-    // SetSquelchDb = 0x01F4,
+    /// S2C: Replace the character-owned ignore database.
+    SetSquelchDb = 0x01F4,
     /// S2C: Configures the Turbine-specific chat channels.
     SetTurbineChatChannels = 0x0295,
 

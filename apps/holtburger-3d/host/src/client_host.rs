@@ -290,6 +290,7 @@ mod tests {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
             fellowship: None,
             friends: None,
+            squelch: None,
             housing: Default::default(),
             connection: None,
             trade: Default::default(),
@@ -774,6 +775,56 @@ mod tests {
     }
 
     #[test]
+    fn replacement_and_incremental_squelch_projections_agree() {
+        use holtburger_core::ClientCommand;
+        use holtburger_world::state::squelch::{SquelchFilter, SquelchRecord, SquelchState};
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected fixture");
+        };
+        let db = SquelchState {
+            characters: [(
+                Guid(42),
+                SquelchRecord {
+                    name: "Amy".into(),
+                    account: true,
+                    filter: SquelchFilter {
+                        words: vec![8, 8, 8, 8],
+                    },
+                },
+            )]
+            .into(),
+            accounts: [("legacy".into(), Guid(42))].into(),
+            globals: SquelchRecord {
+                filter: SquelchFilter { words: vec![4] },
+                ..Default::default()
+            },
+        };
+        snapshot.squelch = Some(db.clone());
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let Some(ClientHostEvent::SquelchUpdated {
+            squelch: incremental,
+        }) = project_client_event(ClientViewEvent::SquelchStateUpdated { squelch: Some(db) })
+        else {
+            panic!("Expected publication");
+        };
+        let replacement = serde_json::to_value(replacement.squelch).unwrap();
+        assert_eq!(replacement, serde_json::to_value(incremental).unwrap());
+        assert_eq!(replacement["entries"][0]["removalScope"], "account");
+        assert_eq!(replacement["entries"][0]["coverage"], "partial");
+        let action: crate::client_squelch::ClientSquelchAction = serde_json::from_value(
+            serde_json::json!({"kind":"remove","guid":42,"scope":"account"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            ClientCommand::from(action),
+            ClientCommand::RemoveIgnore {
+                guid: Guid(42),
+                scope: holtburger_world::state::squelch::SquelchScope::Account
+            }
+        ));
+    }
+
+    #[test]
     fn replacement_and_incremental_friends_projections_agree_without_event_history() {
         use holtburger_world::state::friends::{FriendState, FriendsState};
         let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
@@ -900,6 +951,7 @@ mod tests {
         let snapshot = ClientApplicationSnapshot {
             fellowship: None,
             friends: None,
+            squelch: None,
             housing: Default::default(),
             connection: None,
             trade: Default::default(),

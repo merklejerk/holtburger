@@ -1,6 +1,6 @@
 # H3D social panel
 
-Status: Party and Friends accepted; implementation and review checkpoints complete. Ignores is next; Ignores and Allegiance have not started.
+Status: Party, Friends, and Ignores accepted. Ignores and the shared window/tab consolidation passed scoped code-quality review and automated verification. Allegiance has not started.
 
 ## Goal and boundaries
 
@@ -234,7 +234,7 @@ Deliverables:
 - Character action carries desired enable, GUID/name, and one message-category ID; account action carries desired enable and a character name identifying the target account.
 - Decode both hash tables, counted bitset words, names, account flags, and globals. Preserve unknown bits/word detail; do not flatten the words into independent filters or blindly treat the first word as the complete mask.
 - Add focused world squelch state/handler and core squelch command/publication modules, then a typed host adapter and dedicated H3D contract/owner/tab. Central dispatchers and lifecycle entry points delegate. The frontend owner retains the projection and pending intent; the lifecycle session does not keep a second squelch DB. No core refresh controller is needed for this replacement-only protocol.
-- Default add scope to Entire account; offer This character only. Account squelches affect all target-account characters and all supported categories. The list belongs to the current player character, not all of that player's account characters.
+- Provide explicit Ignore account and Ignore character buttons beside one character-name draft; account is first and remains the Enter-key default. Account squelches affect all target-account characters and all supported categories. The list belongs to the current player character, not all of that player's account characters.
 - Keep scope labels clear; display existing partial/category/global restrictions without turning them into ordinary all-message ignores. Remove basic entries with the appropriate scope/action.
 - The character table can merge an account flag onto an existing character restriction for the same GUID. Treat it as one disclosed record, not proof that one scope supersedes the other. If needed show both scopes; removing the account restriction may reveal a retained character restriction in the next DB. Remove only the explicitly chosen scope and reconcile from that replacement rather than deleting both locally.
 - Account removal uses the server-provided representative character name; expose refusal rather than guessing another account identity if it cannot resolve.
@@ -331,7 +331,7 @@ Final cleanup phase:
 - [ ] All four slices expose functional UI, commands, incoming state, and current-state recovery.
 - [ ] Each slice has passed its automated checks and explicit user manual acceptance gate.
 - [ ] Party management contains no member vital view; shared state remains suitable for the follow-up HUD.
-- [ ] Ignores defaults to account scope and accurately distinguishes target scope from local ownership.
+- [x] Ignores defaults to account scope and accurately distinguishes target scope from local ownership.
 - [ ] Allegiance displays a partial relationship view and honest XP facts with no administration expansion.
 - [ ] Membership/list optimism never mutates authoritative facts; existing locally mirrored preferences remain explicitly distinct from acknowledged facts. Host queue acceptance is never presented as server acceptance.
 - [ ] Pending UI is bounded, stale local work cannot affect a different character/domain, and closing tabs does not lose sync.
@@ -348,7 +348,7 @@ Source review resolved option acknowledgement/effects, the replacement-snapshot 
 | --- | --- | --- |
 | Party | Implemented; automated checks, nonvisual browser verification, and scoped code-quality review passed. See evidence below. | Accepted 2026-10-07 |
 | Friends | Implemented; focused automated checks, nonvisual browser verification, and scoped ownership/code-quality review passed. | Accepted 2026-10-07 |
-| Ignores | Not started | Pending |
+| Ignores | Implemented; automated checks, nonvisual browser verification, and scoped code-quality review passed. | Accepted 2026-10-07 |
 | Allegiance | Not started | Pending |
 | Cleanup/review | Not started | Pending |
 
@@ -493,3 +493,64 @@ Invitation feedback correction: after invitation submission completes, the party
 Modal backdrop policy correction: `UiDialog` defaults to outside-click cancellation. Messages and ordinary/local/server confirmations now cancel or decline through their existing callbacks, with an explicit exception while a server confirmation answer is submitting. The common `dismissDialogOnBackdrop` action also handles quantity and keybinding panel overlays and Explorer texture inspection without changing their layout or focus ownership. Party creation and handoff inherit the shell default. The gesture requires both press and click on the backdrop and resets on pointer cancellation, preserving control drags. Browser verification covers twelve variants across the six dialog surfaces, including the submission exception, ordinary/typed questions, quantity purposes, and keybinding conflicts. Visual Party acceptance remains the user's gate.
 
 Keyboard ownership correction: the app-level `KeyboardInputPolicy` now prevents pointer clicks on ordinary buttons, tabs, toggles, ranges, and disclosures from acquiring keyboard ownership even beneath a `nativeControls` scope. Native-control registration continues to support deliberate keyboard traversal; editors and selects acquire input as before, and modals retain their explicit ownership. Label activation resolves the associated input, and icon children resolve the enclosing button. The pointer focus identity expires after browser click defaults, so later deliberate focus is unaffected. Clicking nearby controls preserves an already active editor, including Chat drafts; clicking a mouse control after native button traversal returns to game input. Social's empty panel-wide keyboard scope is removed. The focused `--client-keyboard` browser harness covers held movement, native gestures, editing, Tab/button activation, later programmatic focus, Chat, and modal restoration independently of the full HUD suite. Settings-tabs and Party browser probes pass; other Social domains remain behind the user's Party acceptance gate.
+
+### Ignores implementation checkpoint (2026-10-07)
+
+The Phase 3 vertical slice is implemented. Manual gate 3 remains pending; Allegiance has not started.
+
+- Protocol adds `ModifyCharacterSquelch 0x0058`, `ModifyAccountSquelch 0x0059`, and replacement `SetSquelchDb 0x01F4`. Both hash tables, bucket headers, counted category words, account flags, names, and globals decode. Wire fixtures retain multiword/unknown category data; world retains records without flattening them.
+- `world::state::squelch` owns replacement facts, 128-bit all-channel interpretation, and basic ignore scope classification. `core::client::squelch` owns commands, retained-identity removal, publication, entry initialization, and retirement. Central runtime/command dispatchers only route. H3D's focused host adapter produces the same projection for current-state recovery and events; its session-owned frontend owner retains pending intent and display state without a second session DB.
+- New ignores use explicit Ignore account and Ignore character buttons; account remains the Enter-key default. Records are name-sorted and searchable, with trailing remove icons and shared inset/capped lists. Account removal retains any character restriction reported by the next replacement. Partial character filters, global restrictions, and the normally empty legacy account table are disclosed read-only; advanced editing and global mutation remain deferred.
+- Pending work settles immediately from current facts, including ACE's leading-plus/case-insensitive name aliases. Missing updates release the overlay quietly after the bounded wait, with no retry, pretend refresh, or player-facing synchronization diagnostics. Actual dispatch failure produces a concise error. Server refusal uses existing server chat. No additional client chat-filter authority was added.
+- Source/lifecycle verification found and corrected an early-delivery ordering issue: the session may still hold the previous player GUID when an entering character's replacement arrives. Explicit session retirement resets the owner; subsequent identity establishment only updates context and retires pending intent, preserving the early DB. Portal travel and event-loss recovery retain authoritative facts.
+- Friends and Ignores now share the ACE character-name lookup normalization and common shrinkable row content/name/trailing-action styles. Both retain their own reconciliation rules; no generic Social system or transactional mutation framework was introduced.
+
+Review boundary: the accumulated Ignores slice relative to Friends commit `3fe54d30`, including new files, changed fixtures, and touched Friends/UI reuse. Inspected seams include ACE action readers, SquelchDB/SquelchInfo writers, manager resolution/merge/removal/login behavior, retail bitset lookup, protocol envelopes, world replacement/classification, core entry/admission/commands/recovery/retirement, host projection/action/stdio routing, strict frontend contracts/transport/lifecycle, owner settlement, actual Social panel composition, shared styles, and browser probes. General socket sequencing, renderer behavior, and live multi-account delivery remain outside this review; the latter belongs to manual gate 3.
+
+Maintenance traces: account removal must change only its target scope and allow character restrictions to reappear; early replacement must survive later player establishment; a new advanced-category editor would consume retained words and introduce its own explicit actions rather than widen basic all-channel removal. Scope/category decisions remain in world/core; ordering/search and pending presentation remain app-local. Generic pending-action consolidation was considered but left separate: Friends also mirrors preferences, while Ignores confirms scoped replacement facts and protects partial restrictions. The small shared lookup calculation and row presentation were consolidated without coupling those policies.
+
+Verdict: ready within the initial Ignores scope, with no blocking code-quality findings. Manual acceptance remains required before Phase 4.
+
+Verification:
+
+- 149 frontend tests across 11 files passed: Ignores/Friends owners, lifecycle/host contracts, Party owner, and affected dialog/item/presentation/selection/trade/camera snapshot consumers.
+- Eight focused Rust tests passed across protocol (3), world (2), core (2), and host (1). Core tests also cover both scope removal paths; the final core rerun passed.
+- `npm run check` passed with zero Svelte errors/warnings and all app/node/test/Electron type checks. `npm run lint:ts`, `npm run lint:dead`, and `cargo clippy -p holtburger-3d-host -p holtburger-cli --all-targets -- -D warnings` passed. Both formatting checks and `git diff --check` passed. The existing binrw future-incompatibility notice remains.
+- `npm run harness:browser -- --client-squelch --brief` passed: two remounts, three scoped mutations, retained character restriction after account removal, immediate alias settlement, read-only restriction disclosure, and shared scrolling shell. Friends and Party browser probes passed too, including Party's twelve modal-backdrop cases. An initial Ignores probe expected the wrong remount ordering for `+Cara`; its fixture expectation was corrected. A Friends run overlapped formatter-triggered HMR and failed; its clean rerun passed after formatting completed.
+
+Next checkpoint: user manual gate 3. Verify account scope against a second target-account character, character-only scope, removal, owning-character relog persistence, separate lists on another local character, and existing partial/global restrictions when available. Live filtering/persistence and visual acceptance have not been claimed. Changes remain uncommitted; Allegiance has not started.
+
+
+### Ignores actions and Social retention correction (2026-10-07)
+
+User correction replaces the scope selector/Add Ignore flow with a character-name input and two compact actions: Ignore account and Ignore character. Form submission/Enter chooses account; the character button submits that explicit scope directly. The host/shared commands are unchanged.
+
+Social now uses the existing `ClientHudWindow.visible` retained-window policy already used by World. `ClientWorldView` mounts Social on first activation and subsequently hides it rather than destroying it. Social retains its tab contents with hidden/inert panels, preserving selected tab, outer and nested scrolling, name drafts, and disclosure state across close/reopen and tab switches. Retention is local to the current world presentation, not new persisted account settings. Hidden windows release input through the shared shell, stop Party update demand and display polling, and dismiss local Party modal drafts.
+
+The browser Ignores probe now exercises both add buttons and the actual WorldView Social launcher/close/reopen composition, including both scroll containers, draft retention, and disclosure retention. The HUD harness supplies real Social domain owners instead of null stubs. The Party probe checks for inline creation inputs within the Party tab rather than counting editors in retained hidden tabs. Verification passed: 29 focused owner tests; full app/node/test/Electron type checks with zero Svelte errors/warnings; TypeScript/dead-code lint; formatting and whitespace checks; and Ignores, Friends, and Party browser probes. Ignores now verifies four mutations (both add scopes and both remove scopes) plus actual window tab/outer-scroll/list-scroll/draft/disclosure retention. Party demand transitions and twelve modal-backdrop cases pass after scoping the probe assertion to Party. User manual gate 3 still applies.
+
+
+### Shared window and tab lifetime checkpoint (2026-10-07)
+
+First-open retention now belongs to `ClientHudWindow`, in the H3D frontend UI layer. A declared window with `visible={false}` does not mount its content until first opening; closing subsequently hides and makes the retained window inert, releases Escape/input ownership, and cancels active pointer gestures. Already-open callers render immediately so existing mount-time DOM consumers retain their initialization ordering. World and Social now declare their shells consistently without per-window mounted-once flags. Domain identity keys still retire content when its map source or Social owner is replaced.
+
+`ClientWorldPanel` now owns map/tab content and resources, while its parent owns the window shell. This keeps canvas initialization inside the shell's lazy child lifetime. Both production and the isolated map harness use that composition. World continues to stop its draw cadence while hidden; Social stops Party display polling and update demand, and dismisses transient Party dialogs. Authoritative state owners remain outside the presentation lifetime.
+
+New app-local `UiTabPanel` consolidates accessible tab-panel links, hidden/inert retained content, shrinkable sizing, and default scrolling. Social and World use it together with `UiTabs` and one outer `ui-body` inset. Canvas and nested scroll layouts opt out of default scrolling and retain their feature-specific layout. Feature owners still own selection, commands, and resource visibility; no generic window manager or shared Rust UX system was added. Other existing ordinary panels retain their current caller lifetimes in this focused migration; new retained windows follow the documented shell composition. Trade/vendor/inspection lifetimes remain tied to their domain identities.
+
+Verification: full app/node/test/Electron checks passed with zero Svelte errors/warnings, TypeScript/dead-code lint passed, formatting and whitespace checks passed, and 44 existing input-policy/layout tests passed. Focused browser suites passed for Social/Ignores (first-open laziness, tab/outer-scroll/list-scroll/draft/disclosure retention), World (zero map opens before activation, one source opening retained through close/reopen, Housing state/actions), Party (update demand and twelve modal-backdrop cases), and keyboard ownership/restoration. Visual acceptance remains with the user. Manual Ignores gate 3 remains pending; Allegiance has not started. Changes remain uncommitted.
+
+
+### Ignores acceptance and final code-quality review (2026-10-07)
+
+The user accepted Ignores and requested review/commit. Gate 3 is accepted; Allegiance remains unstarted.
+
+Review baseline: Friends commit `3fe54d30`. Reviewed the accumulated Ignores implementation, both explicit add actions and right alignment, shared Friends/Ignores row styles and name normalization, retained Social state, and shared window/tab lifetime consolidation. Included all new files, current-state fixture migrations, production callers, and browser harness consumers. ACE submodule diagnostics are unrelated and excluded from the commit.
+
+Verdict: ready within this scope, with no blocking code-quality findings. Protocol retains both tables and category words; world owns category coverage and basic removal eligibility; core owns admission, commands, and publication; the host has one projection shared by events and recovery; the frontend owner manages pending intent without optimistic authoritative changes. Central modules only route these focused behaviors. Reviewed command success/refusal, scope overlap, early hydration, portal retention, event-loss recovery, character retirement, and stale dispatch completion. Server refusal remains ordinary server chat; missing evidence quietly releases pending presentation and does not retry.
+
+Consolidation review: common ACE name normalization and compact row styling have two current consumers and one app-local implementation. Friends and Ignores reconciliation remain separate because mirrored preferences and scoped replacement evidence have different guarantees. `ClientHudWindow` owns first-open retention and input/gesture release; `UiTabPanel` owns retained tab semantics and scrolling. World and Social supply visibility and keep resource work with their feature owners. Interaction windows still retire on domain identity, and other ordinary panels have not been migrated in this focused change. No global window manager, universal Social controller, or transactional mutation framework is needed.
+
+Maintenance traces covered account removal revealing a partial character restriction, early DB delivery before local player establishment, reopening with preserved nested scroll/drafts/disclosures, and a new category editor consuming retained shared facts instead of reinterpreting masks in H3D. Seam coverage includes ACE readers/writers/manager/login, protocol envelopes, world reduction/classification, core routing/entry/retirement, host action/projection/stdio, transport schemas, lifecycle recovery, frontend reconciliation, actual panel composition, and map harness composition. General transport sequencing, full renderer behavior, and independent live multi-account persistence experiments remain outside this review; user acceptance is recorded without claiming those experiments were performed by the agent.
+
+Final verification is recorded in the commit: focused Rust squelch tests, 143 affected frontend tests, app/node/test/Electron type checks, TypeScript/dead-code lint, Rust clippy, formatting/whitespace checks, and the Ignores browser probe. The preceding shared-window checkpoint also passed 44 input/layout tests and World/Party/keyboard browser suites. Next planned slice is the narrow Allegiance baseline, under its own acceptance gate.

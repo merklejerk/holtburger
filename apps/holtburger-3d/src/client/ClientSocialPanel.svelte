@@ -1,9 +1,12 @@
 <script lang="ts">
-	import { onMount, untrack } from "svelte";
+	import ClientIgnoresPanel from "./ClientIgnoresPanel.svelte";
+	import type { ClientSquelchState } from "./client-squelch-state";
+	import { onDestroy, untrack } from "svelte";
 	import ClientFriendsPanel from "./ClientFriendsPanel.svelte";
 	import type { ClientFriendsState } from "./client-friends-state";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import UiTabs from "../app/UiTabs.svelte";
+	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import ClientPartyCreateDialog from "./ClientPartyCreateDialog.svelte";
 	import ClientPartyLeaveDialog from "./ClientPartyLeaveDialog.svelte";
 	import {
@@ -14,8 +17,11 @@
 		/** Session-lifetime owner survives window dismissal. */
 		readonly owner: ClientPartyState;
 		readonly friends: ClientFriendsState;
+		readonly squelch: ClientSquelchState;
+		/** Retained windows hide without discarding tab, scroll, or disclosure state. */
+		readonly visible?: boolean;
 	}
-	const { owner, friends }: Props = $props();
+	const { owner, friends, squelch, visible = true }: Props = $props();
 	// The initial read seeds cold markup; only the mounted display timer publishes later facts.
 	let view = $state(untrack(() => owner.read()));
 	/** The draft belongs to its opening character and retires on lifecycle or party change. */
@@ -46,7 +52,6 @@
 			label: "Ignores",
 			id: "social-ignores-tab",
 			panelId: "social-ignores-panel",
-			disabled: true,
 		},
 	] as const;
 	/** Captured cold party identity retires the handoff draft when membership or leadership changes. */
@@ -72,8 +77,12 @@
 	const candidates = $derived(
 		members.filter((member) => member.guid !== view.player),
 	);
-	onMount(() => {
-		owner.setVisible(selected === "party");
+	$effect(() => {
+		if (!visible) {
+			creationPlayer = null;
+			handoff = null;
+			return;
+		}
 		const pull = () => {
 			const next = owner.read();
 			if (
@@ -91,14 +100,15 @@
 			)
 				handoff = null;
 		};
-		pull();
+		// Cold visibility owns the timer; reads inside pull must not own its lifetime.
+		untrack(pull);
 		const timer = setInterval(pull, PARTY_DISPLAY_INTERVAL_MS);
 		return () => {
 			clearInterval(timer);
-			owner.setVisible(false);
 		};
 	});
-	$effect(() => owner.setVisible(selected === "party"));
+	$effect(() => owner.setVisible(visible && selected === "party"));
+	onDestroy(() => owner.setVisible(false));
 </script>
 
 <div class="ui-body ui-tabbed-panel">
@@ -110,13 +120,12 @@
 			selected = value;
 		}}
 	/>
-	{#if selected === "party"}
-		<div
-			class="social-tab"
-			id="social-party-panel"
-			role="tabpanel"
-			aria-labelledby="social-party-tab"
-		>
+	<UiTabPanel
+		id="social-party-panel"
+		labelledBy="social-party-tab"
+		active={selected === "party"}
+	>
+		<div class="social-tab">
 			{#if view.pending}<p role="status">Waiting for party state…</p>{/if}
 			{#if view.party === null}
 				<div class="actions">
@@ -270,18 +279,27 @@
 				</div>
 			</details>
 		</div>
-	{:else if selected === "friends"}
-		<div
-			class="social-tab"
-			id="social-friends-panel"
-			role="tabpanel"
-			aria-labelledby="social-friends-tab"
-		>
+	</UiTabPanel>
+	<UiTabPanel
+		id="social-friends-panel"
+		labelledBy="social-friends-tab"
+		active={selected === "friends"}
+	>
+		<div class="social-tab">
 			<ClientFriendsPanel owner={friends} />
 		</div>
-	{/if}
+	</UiTabPanel>
+	<UiTabPanel
+		id="social-ignores-panel"
+		labelledBy="social-ignores-tab"
+		active={selected === "ignores"}
+	>
+		<div class="social-tab">
+			<ClientIgnoresPanel owner={squelch} />
+		</div>
+	</UiTabPanel>
 </div>
-{#if creationPlayer !== null && view.preferences !== null}
+{#if visible && creationPlayer !== null && view.preferences !== null}
 	<ClientPartyCreateDialog
 		preferences={view.preferences}
 		onCancel={() => (creationPlayer = null)}
@@ -298,7 +316,7 @@
 	/>
 {/if}
 
-{#if handoff !== null}
+{#if visible && handoff !== null}
 	<ClientPartyLeaveDialog
 		{candidates}
 		onCancel={() => (handoff = null)}
@@ -325,9 +343,6 @@
 		.social-tab {
 			display: grid;
 			align-content: start;
-			min-width: 0;
-			min-height: 0;
-			overflow: auto;
 			gap: 10px;
 		}
 		.social-tab p,

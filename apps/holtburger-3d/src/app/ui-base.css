@@ -552,6 +552,23 @@
 		border-bottom: 1px solid
 			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
 	}
+	/* Compact management rows keep names shrinkable and icon actions at the end. */
+	.ui-theme .ui-list-row-nowrap {
+		flex-wrap: nowrap;
+	}
+	.ui-theme .ui-list-content {
+		flex: 1;
+		min-width: 0;
+	}
+	.ui-theme .ui-list-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.ui-theme .ui-list-actions {
+		margin-inline-start: auto;
+		flex-shrink: 0;
+	}
 	/* Semantic control groups share panel spacing without browser fieldset frames. */
 	.ui-theme .ui-fieldset {
 		border: 0;

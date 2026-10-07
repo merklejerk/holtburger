@@ -10,6 +10,7 @@ pub use crate::messages::misc::actions::*;
 pub use crate::messages::movement::actions::*;
 pub use crate::messages::object::actions::*;
 pub use crate::messages::player::actions::*;
+pub use crate::messages::squelch::*;
 pub use crate::messages::trade::actions::*;
 
 use crate::opcodes::GameActionOpcode;
@@ -25,6 +26,8 @@ pub struct GameActionMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
     AddFriend(Box<AddFriendActionData>),
+    ModifyAccountSquelch(Box<ModifyAccountSquelchActionData>),
+    ModifyCharacterSquelch(Box<ModifyCharacterSquelchActionData>),
     RemoveFriend(Box<RemoveFriendActionData>),
     BuyHouse(Box<HousePaymentActionData>),
     RentHouse(Box<HousePaymentActionData>),
@@ -187,6 +190,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::ChatChannel => {
                     GameAction::ChatChannel(Box::new(ChatChannelActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::ModifyCharacterSquelch => GameAction::ModifyCharacterSquelch(
+                    Box::new(ModifyCharacterSquelchActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::ModifyAccountSquelch => GameAction::ModifyAccountSquelch(
+                    Box::new(ModifyAccountSquelchActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::AddFriend => {
                     GameAction::AddFriend(Box::new(AddFriendActionData::unpack(data, offset)?))
                 }
@@ -492,6 +501,14 @@ impl ProtocolPack for GameActionMessage {
             GameAction::ChatChannel(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::ChatChannel as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ModifyCharacterSquelch(data) => {
+                (GameActionOpcode::ModifyCharacterSquelch as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ModifyAccountSquelch(data) => {
+                (GameActionOpcode::ModifyAccountSquelch as u32).pack(buf);
                 data.pack(buf);
             }
             GameAction::AddFriend(data) => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, type Snippet } from "svelte";
+	import { onDestroy, untrack, type Snippet } from "svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
@@ -27,7 +27,7 @@
 		readonly viewport: ClientHudViewport;
 		/** Launcher click revision promotes an already open independent window. */
 		readonly focusRevision?: number;
-		/** Hidden retained windows release input ownership without unmounting their content. */
+		/** Content mounts on first opening and stays retained while hidden; hidden windows release input ownership. */
 		readonly visible?: boolean;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
@@ -53,7 +53,14 @@
 	);
 	let cancelPointerGesture: (() => void) | null = null;
 	let escapeContext: EscapeContextHandle | null = null;
-	let element: HTMLElement;
+	/** The DOM reference becomes available only after first opening. */
+	let element = $state<HTMLElement>();
+	/** The shell owns first-open lifetime; callers only supply visibility and domain identity. */
+	// Initial visibility is a mount-time snapshot: already-open callers need their DOM during onMount.
+	let mounted = $state(untrack(() => visible));
+	$effect(() => {
+		if (visible) mounted = true;
+	});
 	/** Cold visual order is published by the same owner that routes Escape. */
 	let depth = $state(0);
 	onDestroy(() => cancelPointerGesture?.());
@@ -169,47 +176,49 @@
 	}
 </script>
 
-<section
-	class="hud-window ui-panel"
-	bind:this={element}
-	hidden={!visible}
-	inert={!visible}
-	style:display={visible ? undefined : "none"}
-	style:left={`${resolved.left}px`}
-	style:top={`${resolved.top}px`}
-	style:width={`${resolved.width}px`}
-	style:height={`${resolved.height}px`}
-	style:z-index={CLIENT_UI_LAYERS.windowBase + depth}
-	aria-label={title}
-	onpointerdowncapture={focusWindow}
->
-	<header
-		class="hud-window-titlebar ui-frame"
-		role="group"
-		aria-label={`${title} window controls`}
-		onpointerdown={beginDrag}
+{#if mounted}
+	<section
+		class="hud-window ui-panel"
+		bind:this={element}
+		hidden={!visible}
+		inert={!visible}
+		style:display={visible ? undefined : "none"}
+		style:left={`${resolved.left}px`}
+		style:top={`${resolved.top}px`}
+		style:width={`${resolved.width}px`}
+		style:height={`${resolved.height}px`}
+		style:z-index={CLIENT_UI_LAYERS.windowBase + depth}
+		aria-label={title}
+		onpointerdowncapture={focusWindow}
 	>
-		<span class="hud-window-title"
-			><span class="hud-window-icon"><ClientHudIcon name={icon} /></span
-			>{title}</span
+		<header
+			class="hud-window-titlebar ui-frame"
+			role="group"
+			aria-label={`${title} window controls`}
+			onpointerdown={beginDrag}
 		>
-		<button
-			type="button"
-			class="ui-button hud-window-close"
-			aria-label={`Close ${title}`}
-			onpointerdown={(event) => event.stopPropagation()}
-			onclick={onClose}>×</button
-		>
-	</header>
-	<div class="hud-window-content">{@render children()}</div>
-	{#each resizeHandles as handle}
-		<div
-			class={`hud-window-resize hud-window-resize-${handle.name}`}
-			role="presentation"
-			onpointerdown={(event) => beginResize(event, handle.edges)}
-		></div>
-	{/each}
-</section>
+			<span class="hud-window-title"
+				><span class="hud-window-icon"><ClientHudIcon name={icon} /></span
+				>{title}</span
+			>
+			<button
+				type="button"
+				class="ui-button hud-window-close"
+				aria-label={`Close ${title}`}
+				onpointerdown={(event) => event.stopPropagation()}
+				onclick={onClose}>×</button
+			>
+		</header>
+		<div class="hud-window-content">{@render children()}</div>
+		{#each resizeHandles as handle}
+			<div
+				class={`hud-window-resize hud-window-resize-${handle.name}`}
+				role="presentation"
+				onpointerdown={(event) => beginResize(event, handle.edges)}
+			></div>
+		{/each}
+	</section>
+{/if}
 
 <style>
 	@layer components {

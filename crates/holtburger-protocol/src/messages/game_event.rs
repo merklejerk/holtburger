@@ -11,6 +11,7 @@ pub use crate::messages::misc::events::*;
 pub use crate::messages::network::events::*;
 pub use crate::messages::object::events::*;
 pub use crate::messages::player::events::*;
+pub use crate::messages::squelch::*;
 pub use crate::messages::trade::events::*;
 
 use crate::opcodes::GameEventOpcode;
@@ -28,6 +29,7 @@ pub struct GameEventMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
     FriendsListUpdate(Box<FriendsListUpdateEventData>),
+    SetSquelchDb(Box<SetSquelchDbEventData>),
     HouseProfile(Box<HouseProfileEventData>),
     HouseData(Box<HouseData>),
     HouseStatus(Box<HouseStatusEventData>),
@@ -262,6 +264,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::QueryItemManaResponse => GameEvent::QueryItemManaResponse(
                     Box::new(QueryItemManaResponseEventData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::SetSquelchDb => {
+                    GameEvent::SetSquelchDb(Box::new(SetSquelchDbEventData::unpack(data, offset)?))
+                }
                 GameEventOpcode::FriendsListUpdate => GameEvent::FriendsListUpdate(Box::new(
                     FriendsListUpdateEventData::unpack(data, offset)?,
                 )),
@@ -570,6 +575,10 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::QueryItemManaResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::QueryItemManaResponse as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::SetSquelchDb(data) => {
+                (GameEventOpcode::SetSquelchDb as u32).pack(buf);
                 data.pack(buf);
             }
             GameEvent::FriendsListUpdate(data) => {

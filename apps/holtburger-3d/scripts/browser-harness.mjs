@@ -175,6 +175,12 @@ try {
 			evidence: result.clientKeyboard,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientSquelch) {
+		report = {
+			suite: "client-squelch",
+			...result.clientSquelch,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientFriends) {
 		report = {
 			suite: "client-friends",
@@ -408,6 +414,7 @@ function parseArgs(args) {
 		characterSheet: false,
 		clientParty: false,
 		clientFriends: false,
+		clientSquelch: false,
 		clientBook: false,
 		clientTrade: false,
 		uiTheme: false,
@@ -556,6 +563,10 @@ function parseArgs(args) {
 			case "--client-trade":
 				parsed.clientHud = true;
 				parsed.clientTrade = true;
+				break;
+			case "--client-squelch":
+				parsed.clientHud = true;
+				parsed.clientSquelch = true;
 				break;
 			case "--client-friends":
 				parsed.clientHud = true;
@@ -4353,6 +4364,17 @@ async function runClientHudHarness({ viteUrl }) {
 		if (options.clientTrade) {
 			return {
 				clientTrade: await probeTrade(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientSquelch) {
+			return {
+				clientSquelch: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSquelch",
+					[],
+				),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

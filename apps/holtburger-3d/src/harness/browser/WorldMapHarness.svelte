@@ -2,6 +2,7 @@
 	import { emptyHousing } from "../../client/client-housing-contract";
 	import { onMount, tick } from "svelte";
 	import ClientWorldPanel from "../../client/ClientWorldPanel.svelte";
+	import ClientHudWindow from "../../client/ClientHudWindow.svelte";
 	import { createClientHudLayout } from "../../client/client-hud-layout";
 	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
@@ -723,26 +724,34 @@
 </script>
 
 {#if mounted}
-	<ClientWorldPanel
-		characterGuid={1}
-		housingManagement={null}
-		housing={emptyHousing()}
-		onRefreshHousing={async () => {}}
-		onSearchHousing={async () => {}}
-		bind:this={panel}
-		{source}
-		{canTeleportFromMap}
-		onTeleportToMapPosition={async (position) => {
-			mapTeleports.push(position);
-		}}
+	<ClientHudWindow
+		title="World"
+		icon="world"
 		{visible}
 		{viewport}
 		{placement}
-		{readFrame}
+		minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
+		minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
 		onClose={() => {
 			visible = false;
 			closeCount++;
 		}}
 		onPlacementChange={(value) => (placement = value)}
-	/>
+	>
+		<ClientWorldPanel
+			characterGuid={1}
+			housingManagement={null}
+			housing={emptyHousing()}
+			onRefreshHousing={async () => {}}
+			onSearchHousing={async () => {}}
+			bind:this={panel}
+			{source}
+			{canTeleportFromMap}
+			onTeleportToMapPosition={async (position) => {
+				mapTeleports.push(position);
+			}}
+			{visible}
+			{readFrame}
+		/>
+	</ClientHudWindow>
 {/if}

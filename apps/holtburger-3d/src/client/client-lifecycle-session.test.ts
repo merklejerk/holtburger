@@ -1442,6 +1442,7 @@ describe("ClientLifecycleSession", () => {
 			party,
 			partyPreferences: preferences,
 			friends: null,
+			squelch: null,
 			friendsPreferences: null,
 		});
 		await session.start();
@@ -1468,6 +1469,59 @@ describe("ClientLifecycleSession", () => {
 		session.stop();
 		expect(session.partySnapshot()).toBeNull();
 		expect(session.partyPreferences()).toBeNull();
+	});
+
+	it("routes Ignores early delivery, recovery, portal retention, and retirement", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(42));
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const squelch = {
+			entries: [
+				{
+					guid: 10,
+					name: "Amy",
+					account: true,
+					coverage: "all",
+					removalScope: "account",
+				},
+			],
+			legacyAccounts: [],
+			globalCoverage: "none",
+		};
+		transport.emit("client-squelch-updated", { squelch });
+		await session.squelch.request({
+			kind: "remove",
+			guid: 10,
+			scope: "account",
+		});
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_squelch",
+			args: { action: { kind: "remove", guid: 10, scope: "account" } },
+		});
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.squelch.read().entries).toEqual(squelch.entries);
+		expect(session.squelch.read().enabled).toBe(false);
+		transport.emit("client-current-state", {
+			...currentState(42),
+			squelch: { entries: [], legacyAccounts: [], globalCoverage: "none" },
+		});
+		expect(session.squelch.read().pending).toBeNull();
+		expect(session.squelch.read().known).toBe(true);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 99,
+		});
+		expect(session.squelch.read().known).toBe(false);
+		transport.emit("client-squelch-updated", { squelch });
+		transport.emit("client-local-player-established", { playerGuid: 99 });
+		expect(session.squelch.read().entries).toEqual(squelch.entries);
+		session.stop();
+		expect(session.squelch.read().known).toBe(false);
 	});
 
 	it("routes Friends facts, character recovery, and mirrored options", async () => {
@@ -1669,6 +1723,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		party: null,
 		partyPreferences: null,
 		friends: null,
+		squelch: null,
 		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },

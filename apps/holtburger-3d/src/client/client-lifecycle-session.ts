@@ -1,3 +1,5 @@
+import { ClientSquelchState } from "./client-squelch-state";
+import { squelchUpdatedSchema } from "./client-squelch-contract";
 import { ClientFriendsState } from "./client-friends-state";
 import { friendsUpdatedSchema } from "./client-friends-contract";
 import { z } from "zod";
@@ -214,6 +216,7 @@ type ClientCommandName = Extract<
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "submit_client_friends"
+	| "submit_client_squelch"
 	| "submit_client_party"
 	| "set_client_party_updates"
 	| "send_client_chat"
@@ -296,6 +299,7 @@ type ClientEventName = Extract<
 	| "client-player-enchantments-updated"
 	| "client-character-preferences-updated"
 	| "client-friends-updated"
+	| "client-squelch-updated"
 	| "client-party-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
@@ -511,6 +515,8 @@ export class ClientLifecycleSession {
 	readonly characterSheet: ClientCharacterSheetState;
 	/** Dedicated Friends owner; the session only routes transport and lifecycle. */
 	readonly friends: ClientFriendsState;
+	/** Dedicated Ignores projection; the session routes rather than duplicates state. */
+	readonly squelch: ClientSquelchState;
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ClientLifecycleTransport;
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -533,6 +539,9 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.squelch = new ClientSquelchState(async (action) => {
+			await this.#transport.invoke("submit_client_squelch", { action });
+		});
 		this.friends = new ClientFriendsState(async (action) => {
 			await this.#transport.invoke("submit_client_friends", { action });
 		});
@@ -561,6 +570,7 @@ export class ClientLifecycleSession {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
 		this.friends.reset();
+		this.squelch.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
 		this.#connection = null;
@@ -587,6 +597,7 @@ export class ClientLifecycleSession {
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
 		this.friends.reset();
+		this.squelch.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
 		for (const unlisten of this.#unlisten ?? []) unlisten();
@@ -1092,6 +1103,11 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-squelch-updated", (payload) => {
+					this.squelch.update(squelchUpdatedSchema.parse(payload).squelch);
+				}),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-friends-updated", (payload) => {
 					this.friends.update(friendsUpdatedSchema.parse(payload).friends);
 				}),
@@ -1470,6 +1486,11 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		this.squelch.recover(
+			state.squelch,
+			state.localPlayerGuid,
+			state.lifecycle.kind === "in-world",
+		);
 		this.friends.recover(
 			state.friends,
 			state.friendsPreferences,
@@ -1567,6 +1588,7 @@ export class ClientLifecycleSession {
 		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
 		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
 			this.friends.reset();
+			this.squelch.reset();
 			this.#party = null;
 			this.#partyPreferences = null;
 		}
@@ -1687,17 +1709,24 @@ export class ClientLifecycleSession {
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {
-		if (event.type === "resyncing")
+		if (event.type === "resyncing") {
 			this.friends.setContext(this.#state.playerGuid, false);
+			this.squelch.setContext(this.#state.playerGuid, false);
+		}
 		if (
 			event.type === "lifecycle" ||
 			event.type === "current-state" ||
 			event.type === "local-player-established"
-		)
+		) {
+			this.squelch.setContext(
+				this.#state.playerGuid,
+				this.#state.lifecycle?.kind === "in-world",
+			);
 			this.friends.setContext(
 				this.#state.playerGuid,
 				this.#state.lifecycle?.kind === "in-world",
 			);
+		}
 		for (const listener of this.#listeners) listener(event);
 	}
 }

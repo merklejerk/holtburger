@@ -1,3 +1,4 @@
+import { squelchSnapshotSchema } from "./client-squelch-contract";
 import {
 	friendsSnapshotSchema,
 	friendsPreferencesSchema,
@@ -379,6 +380,7 @@ const currentStateSchema = z
 		party: partySnapshotSchema.nullable(),
 		partyPreferences: partyPreferencesSchema.nullable(),
 		friends: friendsSnapshotSchema.nullable(),
+		squelch: squelchSnapshotSchema.nullable(),
 		friendsPreferences: friendsPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,

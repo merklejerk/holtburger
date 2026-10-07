@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientSquelchState } from "./client-squelch-state";
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
 	import type { HousingSnapshot } from "./client-housing-contract";
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
@@ -122,6 +123,7 @@
 		/** Session-lifetime party presentation owner. */
 		readonly party: ClientPartyState | null;
 		readonly friends: ClientFriendsState | null;
+		readonly squelch: ClientSquelchState | null;
 		/** User-scoped fixed HUD geometry, independent of open-panel state. */
 		readonly hudLayout: ClientHudLayout;
 		readonly onHudPlacementChange: (
@@ -290,6 +292,7 @@
 		hudLayout,
 		party,
 		friends,
+		squelch,
 		onHudPlacementChange,
 		onHudReset,
 		spellBarShape,
@@ -492,11 +495,6 @@
 		height: window.innerHeight,
 	};
 	let activePanel = $state<ClientSystemPanel | null>(null);
-	/** First activation mounts the map once; panel switches only change its visibility. */
-	let worldMounted = $state(false);
-	$effect(() => {
-		if (activePanel === "world") worldMounted = true;
-	});
 	let enchantmentsOpen = $state(false);
 	let enchantmentLaunch = $state<{
 		kind: "beneficial" | "harmful";
@@ -1132,48 +1130,74 @@
 		{/key}
 	{/if}
 
-	{#if worldMounted && worldMapSource !== null}
+	{#if worldMapSource !== null}
 		{#key worldMapSource}
-			<ClientWorldPanel
-				source={worldMapSource}
-				{characterGuid}
-				{housing}
-				{housingManagement}
-				{onRefreshHousing}
-				{onSearchHousing}
-				{canTeleportFromMap}
-				{onTeleportToMapPosition}
+			<ClientHudWindow
+				icon="world"
+				title="World"
 				visible={activePanel === "world"}
 				placement={hudLayout.world}
+				minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
 				{viewport}
-				readFrame={readMinimapFrame}
 				onClose={() => (activePanel = null)}
 				onPlacementChange={(placement) =>
 					changeHudPlacement("world", placement)}
-			/>
+			>
+				<ClientWorldPanel
+					source={worldMapSource}
+					{characterGuid}
+					{housing}
+					{housingManagement}
+					{onRefreshHousing}
+					{onSearchHousing}
+					{canTeleportFromMap}
+					{onTeleportToMapPosition}
+					visible={activePanel === "world"}
+					readFrame={readMinimapFrame}
+				/>
+			</ClientHudWindow>
 		{/key}
 	{/if}
 
-	{#if activePanel !== null && activePanel !== "world"}
+	{#if party !== null && friends !== null && squelch !== null}
+		{#key party}
+			<ClientHudWindow
+				icon="party"
+				title="Social"
+				visible={activePanel === "social"}
+				placement={hudLayout.social}
+				minWidth={CLIENT_UI_DEFAULTS.social.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.social.minSize.height}
+				{viewport}
+				onClose={() => (activePanel = null)}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("social", placement)}
+			>
+				<ClientSocialPanel
+					owner={party}
+					{friends}
+					{squelch}
+					visible={activePanel === "social"}
+				/>
+			</ClientHudWindow>
+		{/key}
+	{/if}
+
+	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social"}
 		{@const panel = activePanel}
 		{#key panel}
 			<ClientHudWindow
-				icon={panel === "characterSheet"
-					? "training"
-					: panel === "social"
-						? "party"
-						: panel}
-				title={panel === "social"
-					? "Social"
-					: panel === "inventory"
-						? "Inventory"
-						: panel === "spells"
-							? "Spells"
-							: panel === "characterSheet"
-								? "Character"
-								: panel === "settings"
-									? "Settings"
-									: "Client diagnostics"}
+				icon={panel === "characterSheet" ? "training" : panel}
+				title={panel === "inventory"
+					? "Inventory"
+					: panel === "spells"
+						? "Spells"
+						: panel === "characterSheet"
+							? "Character"
+							: panel === "settings"
+								? "Settings"
+								: "Client diagnostics"}
 				placement={hudLayout[panel]}
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
@@ -1181,12 +1205,7 @@
 				onClose={() => (activePanel = null)}
 				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
 			>
-				{#if panel === "social"}
-					{#if party !== null && friends !== null}<ClientSocialPanel
-							owner={party}
-							{friends}
-						/>{/if}
-				{:else if panel === "spells"}
+				{#if panel === "spells"}
 					{#if spells !== null}{#key spells}<ClientSpellsPanel
 								{spells}
 								castEnabled={combatEnabled && combatMode === "magic"}

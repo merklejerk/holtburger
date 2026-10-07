@@ -73,8 +73,8 @@
 			<div class="ui-inset">
 				<ul class="ui-scroll-list" aria-label="Friends">
 					{#each view.members as member (member.guid)}
-						<li class="ui-list-row friend-row">
-							<div class="friend-info">
+						<li class="ui-list-row ui-list-row-nowrap">
+							<div class="ui-list-content friend-info">
 								<span
 									class="friend-presence"
 									class:online={member.online}
@@ -85,12 +85,14 @@
 										name={member.online ? "online" : "offline"}
 									/></span
 								>
-								<strong>{member.name || "Name unavailable"}</strong>
+								<strong class="ui-list-name"
+									>{member.name || "Name unavailable"}</strong
+								>
 								{#if view.pending?.kind === "remove" && view.pending.guid === member.guid}<span
 										class="ui-muted">Removing…</span
 									>{/if}
 							</div>
-							<div class="ui-icon-actions friend-actions">
+							<div class="ui-icon-actions ui-list-actions">
 								<button
 									class="ui-button ui-icon-button"
 									type="button"
@@ -151,20 +153,10 @@
 		.add-friend {
 			grid-template-columns: minmax(0, 1fr) auto;
 		}
-		.friend-row {
-			flex-wrap: nowrap;
-		}
 		.friend-info {
 			display: flex;
 			align-items: center;
 			gap: 6px;
-			flex: 1;
-			min-width: 0;
-		}
-		.friend-info strong {
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
 		}
 		.friend-presence {
 			width: 14px;
@@ -174,10 +166,6 @@
 		}
 		.friend-presence.online {
 			color: var(--ui-color-success);
-		}
-		.friend-actions {
-			margin-inline-start: auto;
-			flex-shrink: 0;
 		}
 	}
 </style>

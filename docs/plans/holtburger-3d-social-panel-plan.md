@@ -1,6 +1,6 @@
 # H3D social panel
 
-Status: Party implemented and awaiting manual gate 1. Shared state, wire commands, host/session contracts, and Social window are wired and verified. Friends, Ignores, and Allegiance have not started.
+Status: Party and Friends accepted; implementation and review checkpoints complete. Ignores is next; Ignores and Allegiance have not started.
 
 ## Goal and boundaries
 
@@ -11,7 +11,7 @@ Implement one tab as a complete domain slice at a time. After its automated chec
 In scope:
 
 - Party management: roster names/levels/leader, sharing and openness status, create/invite/dismiss/promote/leave/disband, and relevant character preferences.
-- Friends: initial list and live updates, add/remove, presence, start tell, search/filter, and appear offline.
+- Friends: initial list and live updates, add/remove, presence, a disabled Tell affordance, search/filter, and appear offline.
 - Ignores: add/remove account or character squelches, defaulting new ignores to account scope; preserve existing category/global filtering facts.
 - Allegiance: local monarch/patron/self/direct-vassal relationships, swear/break/dismiss, presence, rank/counts, and server-reported XP facts.
 - Necessary protocol, world, core, host, frontend, and focused diagnostic support.
@@ -86,7 +86,34 @@ ACE defines the server contract; the retail decompile resolves client behavior a
 | H3D host | Narrow typed commands and domain projections, initial snapshot and incremental event transport | Duplicate authority or re-derived relationship rules |
 | H3D frontend | Session-lifetime domain presentation owners, pending intent, sorting/filtering, dialogs, tab demand | Fabricated server success or world-state mutation |
 
-Use one focused domain module per tab where it improves locality. Prefer extracting existing social command branches from `client/commands.rs` into a focused module over growing that dispatcher. Do not rename public Party vocabulary merely to mirror the wire's Fellowship vocabulary; choose names appropriate to the layer and keep them consistent.
+Implement each new tab as a focused domain across the owning layers. Central command/message dispatchers route to domain methods; they do not acquire domain reconciliation, pending-action policy, or substantial command implementations. Lifecycle entry points delegate domain reset and replacement recovery. Keep genuinely shared envelopes and composition at their existing boundaries. Do not rename public Party vocabulary merely to mirror the wire's Fellowship vocabulary; choose names appropriate to the layer and keep them consistent.
+
+### Domain size and shared systems
+
+The existing core client, command/message dispatchers, and H3D lifecycle session are already large integration modules. This policy applies to Party, Friends, Ignores, and Allegiance: shared domain facts and reusable behaviors have focused owners, while frontends own their interaction policy. New slices must not become collections of embedded behaviors in integration files. Establish these boundaries within Social without requiring a wholesale refactor of unrelated client domains.
+
+| Domain | World-owned facts/semantics | Core-owned reusable behavior | H3D-owned presentation |
+| --- | --- | --- | --- |
+| Party | Existing fellowship roster, leadership, and actor capabilities | Party commands and update demand handling | Existing pending actions, creation/handoff dialogs, management tab, and selected-entity invitation |
+| Friends | Records and full/delta/presence reconciliation | Add/remove commands and state publication | Pending rows, search/filter/sort, and disabled Tell affordance |
+| Ignores | Squelch replacement state, scope/category/global facts | Scope-specific mutations and state publication | Scope choice, restriction disclosure, and pending add/remove |
+| Allegiance | Partial relationship profile, presence, and shared relationship eligibility | Swear/break commands, state publication, and bounded profile-read coordination | Relationship/XP presentation, refresh affordance, and destructive review |
+
+Use focused domain modules in world, core, and the host, with dedicated frontend contracts/owners/components where behavior warrants them. A module need not become a stateful system object: Party and Friends can use retained world state plus focused core methods; Allegiance has a concrete need for a bounded query owner. Shared option mutation stays on the existing character-option path. No aggregate Social owner should absorb the four domains' state machines.
+
+Friends is the next concrete application of these boundaries:
+
+| Layer / proposed location | Responsibility and integration seam |
+| --- | --- |
+| World `state/friends.rs` and `handlers/friends.rs` | Retained friend records and full/delta/presence reconciliation. World owns authoritative reconciliation; core coordinates character-lifetime reset. |
+| Core `client/friends.rs` | Reusable add/remove behavior and state publication. Existing dispatchers delegate; snapshot envelopes reference the domain state. |
+| H3D host `client_friends.rs` | Narrow typed projection/action adapter, used by both replacement and incremental paths. No replicated friend rules. |
+| H3D `client-friends-contract.ts`, `client-friends-state.ts`, and a Friends tab component | Strict contract and a session-lifetime domain owner for the retained projection, pending presentation, filtering, and actions. The component uses existing shared UI primitives. |
+| H3D lifecycle session and app composition | Bind transport, forward updates, and delegate recovery/retirement to the Friends owner. Avoid a second retained friend list or inline Friends mutation policy in the session. |
+
+Names may follow immediate repository conventions; responsibility boundaries are required. The frontend projection is a read model of world facts, not another authority. Give the owner narrow typed command callbacks and update/reset entry points; do not make it depend on the entire lifecycle session. Tell composition and chat modes are deferred; the Friends button is disabled until that broader design is implemented.
+
+A shared Friends domain is justified by reusable state and commands even before the TUI exposes friend controls. A stateful core controller is not currently justified: Friends has no supported refresh/subscription coordination to own. Add one only if implementation uncovers a concrete shared behavior requiring it. Do not introduce a generic Social system, plugin registry, or transaction framework. Apply the same ownership checks at every tab gate while allowing different internal shapes for different wire behavior.
 
 ```mermaid
 flowchart LR
@@ -177,24 +204,26 @@ Deliverables:
 - Add C2S `AddFriend 0x0018` (name), `RemoveFriend 0x0017` (GUID), and S2C `FriendsListUpdate 0x0021`.
 - Decode complete friend records, including appear-offline and nested GUID lists, without assuming ACE's empty nested lists are the only legal payload.
 - Implement full replacement, add, remove, presence update, and retail silent-removal type 3 semantics. Preserve wire facts; retain only runtime fields with named consumers.
-- Add world friend state/reducer and core commands/publication, then extend the existing typed H3D route and session owner.
-- Render online-first/name sorting, text search, online-only filter, add/remove, and start tell. H3D currently exposes local speech only: add a typed recipient/message host route to existing `ClientCommand::Tell`, and a small local composer request to focus/prepopulate a tell draft in `ClientChat.svelte`. Keep composer intent app-local; do not build slash-command parsing or a conversation subsystem. Starting a tell must not immediately send anything or overwrite a nonempty draft without an explicit user choice.
+- Add world friend state/reducer and a focused core Friends command/publication module, then the typed host adapter and H3D Friends owner described above. Keep central dispatchers and lifecycle code to routing/composition; colocate Friends behavior and focused tests with its domain. Any touched existing Friends path must cut over to the same owner.
+- Render online-first/name sorting, text search, online-only filter, add/remove, and a disabled Tell icon button. Use compact online/offline icons with accessible labels/tooltips and right-aligned row actions. Chat modes and tell composition are deferred; do not add a Friends-specific composer or unused H3D tell route.
 - Expose appear offline through the existing character-option command and locally mirrored options. This is a server-backed preference, not a local settings-store preference and not proof the server acknowledged it.
 - Do not use the obsolete `FriendsOld` message as a refresh workaround or implement unconfirmed bulk clearing.
+- Missing mutation evidence quietly retires the pending row without a success claim or sync warning. Server chat already reports ordinary refusals. Only an actual dispatch failure produces a concise local action error; diagnostic detail stays in developer logging.
 
 Automated acceptance:
 
 - Full/delta packet fixtures and malformed count/truncation coverage follow repository protocol conventions.
 - Reducer tests cover full-empty replacement, updates without duplicates, removal/presence, early initial state, and character switch.
 - Presentation tests cover pending add/remove, refusal/dispatch failure, stale completion, and opening after initial delivery.
-- Cover login list delivery before `PlayerCreate`, a transport-accepted option without an echo, and the tell route/composer handoff independently of local speech.
+- Cover login list delivery before `PlayerCreate`, a transport-accepted option without an echo, and retained Friends projection ownership.
 - Nonvisual runtime verification covers command/event routing and tab remounts.
+- Review ownership before gate 2: one world reconciliation path, one frontend projection owner, shared core command behavior, and matching replacement/incremental adapters. Friends sorting/pending logic lives outside the lifecycle session and reconciliation lives outside central dispatchers. Exercise recovery and retirement through these delegation seams. Confirm the tab reuses shared tabs, dialogs, buttons, subsections, inset lists, and scrolling styles.
 
 Manual gate 2:
 
 - Add an existing online/offline character; verify unknown/duplicate/self requests produce honest feedback.
 - Verify presence changes and appear-offline behavior with another client.
-- Remove, filter, start tell, close/reopen, portal, and switch character.
+- Remove, filter, inspect presence icons and the disabled Tell affordance, close/reopen, portal, and switch character.
 - Accept or correct the slice, then resteer Ignores.
 
 ## Phase 3: Ignores (squelch)
@@ -204,7 +233,7 @@ Deliverables:
 - Add C2S `ModifyCharacterSquelch 0x0058` and `ModifyAccountSquelch 0x0059`; decode S2C `SetSquelchDB 0x01F4`.
 - Character action carries desired enable, GUID/name, and one message-category ID; account action carries desired enable and a character name identifying the target account.
 - Decode both hash tables, counted bitset words, names, account flags, and globals. Preserve unknown bits/word detail; do not flatten the words into independent filters or blindly treat the first word as the complete mask.
-- Add world replacement-state handling and core basic commands/publication, then the H3D owner and tab.
+- Add focused world squelch state/handler and core squelch command/publication modules, then a typed host adapter and dedicated H3D contract/owner/tab. Central dispatchers and lifecycle entry points delegate. The frontend owner retains the projection and pending intent; the lifecycle session does not keep a second squelch DB. No core refresh controller is needed for this replacement-only protocol.
 - Default add scope to Entire account; offer This character only. Account squelches affect all target-account characters and all supported categories. The list belongs to the current player character, not all of that player's account characters.
 - Keep scope labels clear; display existing partial/category/global restrictions without turning them into ordinary all-message ignores. Remove basic entries with the appropriate scope/action.
 - The character table can merge an account flag onto an existing character restriction for the same GUID. Treat it as one disclosed record, not proof that one scope supersedes the other. If needed show both scopes; removing the account restriction may reveal a retained character restriction in the next DB. Remove only the explicitly chosen scope and reconcile from that replacement rather than deleting both locally.
@@ -219,6 +248,7 @@ Automated acceptance:
 - Tests cover early DB delivery, absent empty-login DB, complete replacement, overlapping account/character entries where representable, and character reset.
 - Presentation tests cover pending operations, scope-correct removal, unsolicited replacement, remount, and dispatch failure.
 - Runtime verification covers command/event delivery without requiring production assets in retained tests.
+- Apply the domain ownership review from gate 2 to squelch replacement, scope-specific commands, recovery/retirement, and pending presentation. Verify scope/category semantics have one shared owner and UI primitives/styles are reused.
 
 Manual gate 3:
 
@@ -235,7 +265,7 @@ Deliverables:
 
 - Add C2S `AllegianceUpdateRequest 0x001F`; decode S2C `AllegianceUpdate 0x0020`, update-done `0x01C8` (error code), login notification `0x027A` (GUID and boolean), and update-aborted `0x0003` (one error-type `u32`, proven at retail `acclient.c:669414`).
 - Decode profile totals, versioned hierarchy, parent links, and flagged node sections. Consume all metadata without inventing meaningful values for ACE's blanked fields.
-- Add world allegiance state/reduction, core refresh/publication, and H3D projection/owner/tab.
+- Add focused world allegiance state/handler and core allegiance command/publication modules, with a bounded profile-query owner for the supported refresh path. Route existing swear/break behavior through the same domain methods. Add a typed host adapter and dedicated H3D contract/owner/tab; central dispatchers and lifecycle code delegate rather than holding relationship or query logic. Keep the authoritative profile in world and frontend review/pending policy in H3D.
 - Interpret the payload as monarch/patron/self/direct-vassal context, not a complete member roster. Do not conflate total descendants with direct vassals.
 - Presence notifications can mention undisclosed members: update known profile nodes only, without creating nameless roster entries or a speculative full-roster cache. ACE sends notifications only when `ShowAllegianceLogons` is enabled; expose that existing preference alongside the tab, and state that presence reflects the last snapshot/update when disabled. Do not secretly enable it.
 - Render relationship context, ranks, levels/presence where supplied, counts, and server-reported cached/contributed XP. Preserve gender/heritage where needed for later title lookup; numeric rank is sufficient initially.
@@ -252,6 +282,7 @@ Automated acceptance:
 - Tests cover profile replacement, presence, relationship invalidation, refresh completion/error, portal retention, and character retirement.
 - Presentation tests establish partial-tree/count labeling, stale destructive confirmation retirement, and pending versus authoritative relationships.
 - Runtime verification exercises the complete typed command/event route.
+- Apply the domain ownership review from prior gates to profile/presence reduction, relationship eligibility, query completion/deadline, and frontend review. Confirm the core query owner does not acquire UI pending policy or claim mutation acknowledgement.
 
 Manual gate 4:
 
@@ -277,6 +308,7 @@ Final cleanup phase:
 - Check no domain owner is destroyed by payload changes or tied to tab mounting.
 - Confirm the management tab never subscribes reactively to raw vital cadence.
 - Reassess any duplicated helpers: extract only proven shared primitives, not a generic state machine.
+- Audit all four Social domains against the ownership table. Party already has focused world semantics and frontend interaction policy; extract its remaining substantial core command implementations from `client/commands.rs` into a focused Party module, preserving command behavior and leaving dispatcher delegation. Remove any duplicate paths exposed by that move. Review lifecycle-session domain retention/composition across all four tabs; consolidate only concrete duplicate ownership or policy, without rebuilding unrelated session infrastructure.
 - Complete targeted correctness and code-quality review, including retail markers when observable behavior changed.
 - Update this working plan's implementation/check/gate record. Do not stage or commit unless asked.
 
@@ -292,6 +324,7 @@ Final cleanup phase:
 | Party HUD follows soon | Preserve vitals and shared state; add only the subscription coordination needed by current consumers. |
 | ACE suppresses allegiance administration metadata | Keep the baseline to relationships/XP; do not synthesize a management dashboard. |
 | Existing category squelches exceed initial UI | Preserve/disclose them; defer editing controls and unused mutation APIs. |
+| Central client/session modules accumulate unrelated domain behavior | Require focused owners across all four Social domains; central code delegates. Review each tab gate and clean up Party's remaining core command placement without expanding into a general client refactor. |
 
 ## Definition of done
 
@@ -309,12 +342,12 @@ Final cleanup phase:
 
 Established decisions: Party -> Friends -> Ignores -> Allegiance; management-only Party; account-default ignores with character alternative; narrow allegiance relationships/XP; domain-specific sync; lightweight optimism; user gates after every tab.
 
-Source review resolved option acknowledgement/effects, the replacement-snapshot seam, early social initialization, H3D tell exposure, overlapping ignore scopes, and allegiance presence/abort behavior. The narrow fixes are included in their phases. No blocking product question remains. This is a source-level execution audit, not evidence that the proposed implementation has passed runtime checks; those remain per-slice requirements.
+Source review resolved option acknowledgement/effects, the replacement-snapshot seam, early social initialization, the existing shared Tell capability, overlapping ignore scopes, and allegiance presence/abort behavior. The narrow fixes are included in their phases. No blocking product question remains. This is a source-level execution audit, not evidence that the proposed implementation has passed runtime checks; those remain per-slice requirements.
 
 | Milestone | Implementation/checks | User acceptance/corrections |
 | --- | --- | --- |
 | Party | Implemented; automated checks, nonvisual browser verification, and scoped code-quality review passed. See evidence below. | Accepted 2026-10-07 |
-| Friends | Not started | Pending |
+| Friends | Implemented; focused automated checks, nonvisual browser verification, and scoped ownership/code-quality review passed. | Accepted 2026-10-07 |
 | Ignores | Not started | Pending |
 | Allegiance | Not started | Pending |
 | Cleanup/review | Not started | Pending |
@@ -331,6 +364,42 @@ Lifecycle maintenance was traced through roster/leader changes, modal cancellati
 
 Fresh verification passed: 75 focused frontend tests, type checks with zero Svelte warnings, ESLint, Knip, affected-crate Clippy, Rust formatting, 16 protocol fellowship tests, five world fellowship tests, three host Party tests, and the core character-lifetime recovery test. Real Chrome Party checks pass, including twelve backdrop variants; focused keyboard-policy and Settings-tabs suites also pass. Earlier full-suite evidence and the unrelated full-HUD spell-search failure remain recorded below. Verification is nonvisual and synthetic, not live multiplayer acceptance.
 
+### Friends implementation and scoped review (2026-10-07)
+
+Initial implementation checkpoint (before the corrections and acceptance below): Friends was ready for manual gate 2. Added add/remove wire actions and full/delta/presence decoding, including retail silent removal and both nested GUID lists. Protocol retains the complete record; the runtime list retains identity, name, and server-reported presence because those have current consumers. World owns reconciliation, a focused core Friends module owns commands/publication/reset, and a typed host adapter projects the same records for replacement and incremental delivery. Existing TUI consumers compile against the extended shared contracts; new TUI friend controls are outside this slice.
+
+The H3D Friends owner retains the projection, filters, and one bounded pending intent with a narrow injected command callback. The lifecycle session forwards events and delegates recovery/retirement without retaining a second list. Queue acceptance does not change membership; missing updates release presentation after a deadline without retries or a fabricated refresh. Early entry, portal retention, character retirement, stale asynchronous failures, and mirrored appear-offline preferences have focused coverage. The tab reuses shared tabs, controls, disclosure sections, inset lists, scrolling, and icons.
+
+The initial checkpoint included a tell composer/route, subsequently removed at the user’s request. The Tell button now remains disabled; chat-mode design is outside this Social slice. Existing shared core Tell behavior remains available to its prior consumers.
+
+Initial review verdict (before Tell removal): ready within the Friends slice and immediate caller scope relative to `8ed3fe2e`. Reviewed ACE/retail wire and mutation sources, protocol action/event envelopes, world reduction, core dispatch/admission/snapshot/reset, host replacement/incremental/preferences/action routes, strict frontend contracts, Friends owner/component, Social navigation, and chat draft handoff. Socket transport, general renderer behavior, live multiplayer, and later Social domains were not independently audited. The review removed a duplicated list-height setting, fixed pointer availability on tell recipient controls, corrected stale method documentation, and removed a Party browser assertion that assumed every other Social tab remained unavailable. Different Party/Friends pending and update-demand behavior remains local rather than introducing a generic controller. Party's remaining core command placement is still an explicit final-cleanup item.
+
+Verification at the initial checkpoint: 69 focused frontend tests across Friends, lifecycle, host contracts, and Party; seven targeted Rust tests across protocol, world, core, and host; frontend type checks with zero Svelte errors/warnings; ESLint, Knip, scoped formatting; affected-crate Clippy and Rust formatting. Real Chrome Friends verification passes for mounting/remounting, add settlement while unmounted, search, pending removal, tell focus, both cancellation and explicit nonempty-draft handoff, recipient pointer controls, and typed Tell dispatch. The existing Party Chrome suite also passes, including its demand lifecycle and twelve backdrop variants. Browser evidence uses synthetic server facts and is nonvisual. No live multiplayer or visual acceptance is claimed. No commit was requested for this slice.
+
+
+### Friends pending-row correction (2026-10-07)
+
+User live review exposed a confirmed `+Holtfighter` row alongside pending `holtfighter`. Settlement was event-driven, but compared display names without ACE's leading-plus lookup alias (`PlayerManager.cs:521`), so the pending row timed out despite successful addition. The frontend presentation matcher now ignores leading plus signs and case on both names; this does not alter server facts or outbound intent. Timeout/dispatch feedback clears on subsequent facts and expires after a bounded display duration, reusing the domain's one timer. New requests and character retirement cancel the old timer.
+
+Verification at that checkpoint: 48 focused Friends/lifecycle tests, frontend type checks with zero Svelte diagnostics, ESLint, formatting, and the nonvisual Chrome Friends probe passed. The browser fixture submits `Cara` and receives `+Cara`, then verifies no pending row remains after remount. Gate 2 remains pending.
+
+Subsequent user steering removes sync details from player-facing feedback. An unresolved pending row now clears quietly at its deadline; server chat remains responsible for ordinary refusals. Actual dispatch failures show a concise action error and keep technical details in developer logging. The extra feedback expiry timer/constant and its superseded timeout-feedback test were removed. Name-alias settlement remains event-driven and unchanged.
+
+### Friends scope and row correction (2026-10-07)
+
+User steering defers tell composition until chat modes are designed. Removed the H3D tell command route, composer recipient state/modal, app callbacks, and their harness checks; restored the prior chat implementation. Friends retains a disabled Tell icon button. Online/offline indicators are independent SVG assets rendered through the shared icon component, with filled/hollow shapes, semantic colors, tooltips, and accessible labels. Names and presence occupy one compact row with actions aligned to the trailing edge. Gate 2 remains pending.
+
+### Friends acceptance and final code-quality review (2026-10-07)
+
+The user accepted Friends gate 2 and requested review and commit. Verdict: ready within the accumulated Friends implementation and immediate caller scope, relative to `8ed3fe2e`; no blocking code findings. The review corrected current plan status, clarified that core coordinates character retirement, marked superseded Tell evidence as historical, and removed a stale runtime comment advertising tell recipient selection.
+
+Reviewed seams: ACE add/remove handlers, list serialization and name lookup; retail update kinds; protocol action/event registration, bounded decoding and complete nested records; world reconciliation; core admission, commands, publication, initial entry and retirement; host actions and matching replacement/incremental/preferences projections; stdio envelopes and frontend transport registration/strict decoding; lifecycle routing; Friends owner, component, Social navigation and app composition; their focused tests and browser harness. Existing socket sequencing, general rendering, live multiplayer, and later Social domains were not independently audited. Visual acceptance belongs to the user.
+
+Maintenance traces covered early delivery before player establishment, portal travel, replacement recovery, tab unmount/remount, character retirement, stale command failures, server-resolved name aliases, and missing mutation evidence. Protocol keeps unused legacy record fields losslessly; runtime retains only consumed identity/name/presence facts. Locally mirrored options remain distinct from membership evidence and server acknowledgement. Queue acceptance does not insert/remove friends; the one deadline releases pending presentation quietly and never retries.
+
+Consolidation pass: Friends uses existing character-option mutation, strict transport contracts, shared tabs, disclosure sections, inset/capped lists, controls and icon rendering. Its event-driven list and pending owner remain separate from Party's update-demand/vital cadence and Housing's query/management behavior: a generic social controller or mutation framework would erase real timing and authority differences. Central integration modules contain routing and lifecycle handoffs; shared behavior stays in the focused world/core domain modules. Tell composition and the H3D route are removed; only the disabled button and pre-existing shared core command remain. Party's previously scheduled command-module cleanup remains bounded follow-up.
+
+Verification: 70 focused frontend tests across Friends, lifecycle, host contracts and Party passed. Type checks, ESLint, Knip, affected-crate Clippy, Rust formatting and the nonvisual Friends browser probe passed after the final UX correction. Seven targeted Rust tests across protocol, world, core and host passed, as did the full frontend format check, Rust formatting and whitespace checks.
 
 ### Shared Party capability review (2026-10-07)
 
@@ -371,7 +440,7 @@ nonvisual Chrome Party suite with synthetic facts. No visual acceptance was perf
 - Source/contract review covered wire -> world -> core snapshot/event -> host -> strict session decoder -> owner -> component, along with retirement and delayed handoff completion. Existing character-preference mirroring remains unchanged in meaning. No automatic retries or transactional receipt machinery were introduced.
 - Verification exposed pre-existing housing busy-operation omissions in scripting/CLI plus a missing housing field in a CLI snapshot fixture. These were verified against HEAD and repaired narrowly so affected consumers compile.
 
-Next action: Party gate 1 is accepted as of 2026-10-07. Complete the requested review/commit checkpoint before starting Friends.
+Next implementation slice: Ignores (Phase 3), following the same focused domain ownership and manual acceptance policy. Friends gate 2 is accepted; this review/commit turn does not start the next slice.
 
 
 ### Party UX correction (2026-10-06)

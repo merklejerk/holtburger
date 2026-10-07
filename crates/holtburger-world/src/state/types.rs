@@ -72,6 +72,8 @@ pub struct WorldState {
     pub housing: crate::housing::HousingState,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
+    /// Last accepted friend list; None until initial delivery or after character retirement.
+    pub friends: Option<super::friends::FriendsState>,
     pub trade: Option<TradeState>,
     /// Last published trade revision, retained across negotiations with the same partner.
     pub(crate) trade_revision: u32,
@@ -456,6 +458,7 @@ impl WorldState {
             housing: crate::housing::HousingState::default(),
             vendor: None,
             fellowship: None,
+            friends: None,
             trade: None,
             trade_revision: 0,
             world_container: super::WorldContainerState::Closed,

@@ -1,3 +1,7 @@
+import {
+	friendsSnapshotSchema,
+	friendsPreferencesSchema,
+} from "./client-friends-contract";
 import { housingSnapshotSchema } from "./client-housing-contract";
 import { tradeSnapshotSchema } from "./client-trade-contract";
 import { z } from "zod";
@@ -330,6 +334,7 @@ const characterPreferencesSchema = z
 	.object({
 		appearance: clientAppearanceOptionsSchema,
 		party: partyPreferencesSchema,
+		friends: friendsPreferencesSchema,
 	})
 	.strict();
 export function decodeClientCharacterPreferences(value: unknown) {
@@ -373,6 +378,8 @@ const currentStateSchema = z
 		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
 		party: partySnapshotSchema.nullable(),
 		partyPreferences: partyPreferencesSchema.nullable(),
+		friends: friendsSnapshotSchema.nullable(),
+		friendsPreferences: friendsPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,
 		vitals: z.array(vitalSchema),

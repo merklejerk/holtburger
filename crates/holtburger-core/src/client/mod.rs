@@ -36,6 +36,7 @@ pub mod entity_facts;
 mod entity_visual_facts;
 pub mod equipment_plan;
 mod equipment_runtime;
+mod friends;
 pub mod housing;
 pub mod housing_execution;
 pub mod housing_management;
@@ -361,6 +362,7 @@ impl ClientRuntime {
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
             fellowship: self.world.fellowship.clone(),
+            friends: self.world.friends.clone(),
             can_teleport_from_map: self.can_teleport_from_map(),
             lifecycle: self.lifecycle(),
             connection: self.connection.snapshot(
@@ -779,6 +781,7 @@ impl ClientRuntime {
         self.emit_spell_inspection_context();
         self.publish_entity_facts();
         self.emit_fellowship_state_updated();
+        self.emit_friends_state_updated();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
         self.emit_dynamic_entity_snapshot();
@@ -824,6 +827,7 @@ impl ClientRuntime {
             if self.progression.clear() {
                 self.emit_progression_guards();
             }
+            self.reset_friends();
             self.world.fellowship = None;
             self.emit_fellowship_state_updated();
             self.reset_container_access();
@@ -1274,6 +1278,7 @@ impl ClientRuntime {
                 // reconstructing a vendor snapshot from partial appraisal events.
                 self.emit_vendor_state_updated();
             }
+            WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
             WorldEvent::FellowshipStateUpdated(fellowship) => {
                 let _ = self
                     .client_view_event_tx

@@ -329,6 +329,8 @@ function currentState(): ClientCurrentState {
 		appearanceOptions: null,
 		party: null,
 		partyPreferences: null,
+		friends: null,
+		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

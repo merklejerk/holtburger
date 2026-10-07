@@ -336,6 +336,10 @@ pub enum ClientHostCommand {
         request_id: String,
         accepted: bool,
     },
+    /// Friends mutations use the focused shared command behavior.
+    SubmitClientFriends {
+        action: crate::client_friends::ClientFriendsAction,
+    },
     /// Party management delegates to reusable core commands.
     SubmitClientParty {
         action: crate::client_party::ClientPartyAction,
@@ -416,6 +420,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "replace_client_drive",
     "queue_client_character_motion_event",
     "submit_client_party",
+    "submit_client_friends",
     "set_client_party_updates",
     "send_client_chat",
     "teleport_client_to_map_position",
@@ -958,6 +963,11 @@ pub async fn dispatch_client(
                 .map(|()| HostResponse::Unit)
                 .map_err(application_error)
         }
+        SubmitClientFriends { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SubmitClientParty { action } => runtime
             .send_command(action.into())
             .await

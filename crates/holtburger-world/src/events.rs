@@ -237,6 +237,8 @@ pub enum WorldEvent {
     },
     VendorStateUpdated(Option<vendor::VendorState>),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
+    /// The retained character friend list changed.
+    FriendsStateUpdated,
     FellowshipStateUpdated(Option<state::FellowshipState>),
     FellowshipActivity(FellowshipActivity),
     TradeStateUpdated(Option<state::TradeState>),

@@ -1441,6 +1441,8 @@ describe("ClientLifecycleSession", () => {
 			...currentState(1),
 			party,
 			partyPreferences: preferences,
+			friends: null,
+			friendsPreferences: null,
 		});
 		await session.start();
 		expect(session.partySnapshot()).toEqual(party);
@@ -1468,6 +1470,49 @@ describe("ClientLifecycleSession", () => {
 		expect(session.partyPreferences()).toBeNull();
 	});
 
+	it("routes Friends facts, character recovery, and mirrored options", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(42));
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const friends = { members: [{ guid: 10, name: "Amy", online: true }] };
+		transport.emit("client-friends-updated", { friends });
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: true, showCloak: true },
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+		});
+		expect(session.friends.read().members).toEqual(friends.members);
+		await session.friends.request({ kind: "appearOffline", enabled: true });
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_friends",
+			args: { action: { kind: "appearOffline", enabled: true } },
+		});
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.friends.read().known).toBe(true);
+		transport.emit("client-current-state", {
+			...currentState(42),
+			friends,
+			friendsPreferences: { appearOffline: true },
+		});
+		expect(session.friends.read().pending).toBeNull();
+		expect(session.friends.read().preferences).toEqual({ appearOffline: true });
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 99,
+		});
+		expect(session.friends.read().known).toBe(false);
+		transport.emit("client-friends-updated", { friends });
+		transport.emit("client-local-player-established", { playerGuid: 99 });
+		expect(session.friends.read().members).toEqual(friends.members);
+		session.stop();
+		expect(session.friends.read().known).toBe(false);
+	});
+
 	it("retains appearance updates and submits an appearance change", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1476,6 +1521,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-character-preferences-updated", {
 			appearance: { showHelmet: false, showCloak: true },
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
 		});
 		expect(session.state().appearanceOptions).toEqual({
 			showHelmet: false,
@@ -1516,6 +1562,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-character-preferences-updated", {
 			appearance: options,
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
 		});
 		transport.emit("client-state-resyncing", null);
 		expect(session.state().appearanceOptions).toBeNull();
@@ -1621,6 +1668,8 @@ function currentState(playerGuid: number): ClientCurrentState {
 		appearanceOptions: null,
 		party: null,
 		partyPreferences: null,
+		friends: null,
+		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

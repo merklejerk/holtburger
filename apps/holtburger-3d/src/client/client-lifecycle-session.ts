@@ -1,3 +1,5 @@
+import { ClientFriendsState } from "./client-friends-state";
+import { friendsUpdatedSchema } from "./client-friends-contract";
 import { z } from "zod";
 import {
 	partySnapshotSchema,
@@ -211,6 +213,7 @@ type ClientCommandName = Extract<
 	| "select_client_character"
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
+	| "submit_client_friends"
 	| "submit_client_party"
 	| "set_client_party_updates"
 	| "send_client_chat"
@@ -292,6 +295,7 @@ type ClientEventName = Extract<
 	| "client-player-spells-updated"
 	| "client-player-enchantments-updated"
 	| "client-character-preferences-updated"
+	| "client-friends-updated"
 	| "client-party-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
@@ -505,6 +509,8 @@ export type ClientLifecycleSessionEvent =
 export class ClientLifecycleSession {
 	/** Imperative progression owner retained across character-panel mounts. */
 	readonly characterSheet: ClientCharacterSheetState;
+	/** Dedicated Friends owner; the session only routes transport and lifecycle. */
+	readonly friends: ClientFriendsState;
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ClientLifecycleTransport;
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -527,6 +533,9 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.friends = new ClientFriendsState(async (action) => {
+			await this.#transport.invoke("submit_client_friends", { action });
+		});
 		this.characterSheet = new ClientCharacterSheetState(
 			(requestId, intents) => this.evaluateProgression(requestId, intents),
 			(quote) => this.submitProgression(quote),
@@ -551,6 +560,7 @@ export class ClientLifecycleSession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
+		this.friends.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
 		this.#connection = null;
@@ -576,6 +586,7 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.friends.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
 		for (const unlisten of this.#unlisten ?? []) unlisten();
@@ -1081,6 +1092,11 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-friends-updated", (payload) => {
+					this.friends.update(friendsUpdatedSchema.parse(payload).friends);
+				}),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-party-updated", (payload) => {
 					this.#party = z
 						.object({ party: partySnapshotSchema.nullable() })
@@ -1095,6 +1111,7 @@ export class ClientLifecycleSession {
 						const preferences = decodeClientCharacterPreferences(payload);
 						const options = preferences.appearance;
 						this.#partyPreferences = preferences.party;
+						this.friends.updatePreferences(preferences.friends);
 						this.#state = { ...this.#state, appearanceOptions: options };
 						this.#emit({ type: "appearance-options", options });
 					},
@@ -1453,6 +1470,12 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		this.friends.recover(
+			state.friends,
+			state.friendsPreferences,
+			state.localPlayerGuid,
+			state.lifecycle.kind === "in-world",
+		);
 		this.#party = state.party;
 		this.#partyPreferences = state.partyPreferences;
 		this.characterSheet.reset(state.characterSheet);
@@ -1543,6 +1566,7 @@ export class ClientLifecycleSession {
 		if (retiresCharacterDescription) this.characterSheet.reset(null);
 		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
 		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
+			this.friends.reset();
 			this.#party = null;
 			this.#partyPreferences = null;
 		}
@@ -1663,6 +1687,17 @@ export class ClientLifecycleSession {
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {
+		if (event.type === "resyncing")
+			this.friends.setContext(this.#state.playerGuid, false);
+		if (
+			event.type === "lifecycle" ||
+			event.type === "current-state" ||
+			event.type === "local-player-established"
+		)
+			this.friends.setContext(
+				this.#state.playerGuid,
+				this.#state.lifecycle?.kind === "in-world",
+			);
 		for (const listener of this.#listeners) listener(event);
 	}
 }

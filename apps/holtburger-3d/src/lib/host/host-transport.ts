@@ -1,4 +1,8 @@
 import type {
+	FriendsSnapshot,
+	FriendsPreferences,
+} from "../../client/client-friends-contract";
+import type {
 	PartyPreferences,
 	PartySnapshot,
 } from "../../client/client-party-contract";
@@ -136,6 +140,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"replace_client_drive",
 	"queue_client_character_motion_event",
 	"submit_client_party",
+	"submit_client_friends",
 	"set_client_party_updates",
 	"send_client_chat",
 	"teleport_client_to_map_position",
@@ -252,6 +257,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-player-enchantments-updated",
 	"client-character-preferences-updated",
 	"client-party-updated",
+	"client-friends-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-entity-health-updated",
@@ -354,7 +360,9 @@ export interface HostEventPayloadMap {
 	"client-character-preferences-updated": {
 		appearance: ClientAppearanceOptions;
 		party: PartyPreferences;
+		friends: FriendsPreferences;
 	};
+	"client-friends-updated": { friends: FriendsSnapshot | null };
 	"client-party-updated": {
 		party: PartySnapshot | null;
 	};

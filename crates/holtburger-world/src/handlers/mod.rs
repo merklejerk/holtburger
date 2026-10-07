@@ -1,4 +1,5 @@
 pub mod fellowship;
+pub mod friends;
 pub mod housing;
 pub mod inventory;
 pub mod movement;

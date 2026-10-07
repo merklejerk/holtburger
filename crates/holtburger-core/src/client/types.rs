@@ -368,6 +368,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 pub struct ClientApplicationSnapshot {
     /// Retained fellowship facts, including vital detail for independent consumers.
     pub fellowship: Option<FellowshipState>,
+    /// Retained friend facts; absent until initial delivery or after retirement.
+    pub friends: Option<holtburger_world::state::friends::FriendsState>,
     /// Retained housing and pending query state for replacement recovery.
     pub housing: super::housing::HousingSnapshot,
     /// Current character may request map teleport; includes in-world lifecycle admission.
@@ -901,6 +903,11 @@ pub enum ClientViewEvent {
     /// Administrative evidence or uncertainty, independent of panel lifetime.
     HousingManagementFinished(super::housing_management::HousingManagementResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
+    /// Replacement projection of the character-owned friend list.
+    FriendsStateUpdated {
+        /// None denotes unknown/retired rather than a confirmed empty list.
+        friends: Option<holtburger_world::state::friends::FriendsState>,
+    },
     FellowshipStateUpdated {
         /// Actor identity captured with the roster for consistent capability projection.
         player_guid: Option<Guid>,
@@ -1147,6 +1154,14 @@ pub enum ClientCommand {
         target: Guid,
     },
     LeaveParty,
+    /// Add a friend by server-resolved character name.
+    AddFriend {
+        name: String,
+    },
+    /// Remove a friend by retained identity.
+    RemoveFriend {
+        guid: Guid,
+    },
     /// End the active fellowship; the server restricts this to its leader.
     DisbandParty,
     /// Explicit enrollment policy for the active fellowship.

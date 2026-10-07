@@ -171,6 +171,11 @@ pub enum HostEvent {
     ClientCharacterPreferencesUpdated {
         appearance: crate::client_projection::ClientAppearanceOptions,
         party: crate::client_party::ClientPartyPreferences,
+        friends: crate::client_friends::ClientFriendsPreferences,
+    },
+    /// Current friend list projection.
+    ClientFriendsUpdated {
+        friends: Option<crate::client_friends::ClientFriendsSnapshot>,
     },
     ClientPartyUpdated {
         party: Option<crate::client_party::ClientPartySnapshot>,
@@ -545,7 +550,15 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::CharacterPreferencesUpdated {
                 appearance,
                 party,
-            } => HostEvent::ClientCharacterPreferencesUpdated { appearance, party },
+                friends,
+            } => HostEvent::ClientCharacterPreferencesUpdated {
+                appearance,
+                party,
+                friends,
+            },
+            crate::client_projection::ClientHostEvent::FriendsUpdated { friends } => {
+                HostEvent::ClientFriendsUpdated { friends }
+            }
             crate::client_projection::ClientHostEvent::PartyUpdated { party } => {
                 HostEvent::ClientPartyUpdated { party }
             }

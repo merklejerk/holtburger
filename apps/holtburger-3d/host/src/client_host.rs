@@ -289,6 +289,7 @@ mod tests {
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
             fellowship: None,
+            friends: None,
             housing: Default::default(),
             connection: None,
             trade: Default::default(),
@@ -773,6 +774,36 @@ mod tests {
     }
 
     #[test]
+    fn replacement_and_incremental_friends_projections_agree_without_event_history() {
+        use holtburger_world::state::friends::{FriendState, FriendsState};
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected replacement fixture");
+        };
+        let friend = FriendState {
+            guid: Guid(42),
+            name: "Amy".into(),
+            online: true,
+        };
+        let friends = FriendsState {
+            members: [(friend.guid, friend)].into(),
+        };
+        snapshot.friends = Some(friends.clone());
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let Some(ClientHostEvent::FriendsUpdated {
+            friends: incremental,
+        }) = project_client_event(ClientViewEvent::FriendsStateUpdated {
+            friends: Some(friends),
+        })
+        else {
+            panic!("Expected Friends publication");
+        };
+        assert_eq!(
+            serde_json::to_value(replacement.friends).unwrap(),
+            serde_json::to_value(incremental).unwrap()
+        );
+    }
+
+    #[test]
     fn replacement_and_incremental_party_projections_agree_without_event_history() {
         let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
             panic!("Expected replacement fixture");
@@ -868,6 +899,7 @@ mod tests {
 
         let snapshot = ClientApplicationSnapshot {
             fellowship: None,
+            friends: None,
             housing: Default::default(),
             connection: None,
             trade: Default::default(),

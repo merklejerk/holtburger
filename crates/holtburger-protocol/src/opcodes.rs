@@ -430,10 +430,10 @@ pub enum GameActionOpcode {
     BreakAllegiance = 0x001E,
     // /// C2S: Request an update of allegiance information.
     // AllegianceUpdateRequest = 0x001F,
-    // /// C2S: Add a player to the friends list.
-    // AddFriend = 0x0018,
-    // /// C2S: Remove a player from the friends list.
-    // RemoveFriend = 0x0017,
+    /// C2S: Add a player to the friends list.
+    AddFriend = 0x0018,
+    /// C2S: Remove a player from the friends list.
+    RemoveFriend = 0x0017,
     // /// C2S: Query detailed allegiance hierarchy and status.
     // AllegianceInfoRequest = 0x027B,
     // /// C2S: Query the name of an allegiance member.
@@ -699,8 +699,8 @@ pub enum GameEventOpcode {
     // AllegianceUpdateAborted = 0x0003,
     // /// S2C: Update to allegiance data (vassals, patrons).
     // AllegianceUpdate = 0x0020,
-    // /// S2C: Full update of the player's friends list.
-    // FriendsListUpdate = 0x0021,
+    /// S2C: Full replacement or incremental update of the player's friends list.
+    FriendsListUpdate = 0x0021,
     // /// S2C: Detailed information about a character title.
     // CharacterTitle = 0x0029,
     // /// S2C: Update to the current active title.

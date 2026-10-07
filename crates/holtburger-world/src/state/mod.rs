@@ -1,6 +1,7 @@
 pub(crate) mod attachment_lifecycle;
 mod entity_scale;
 pub mod fellowship;
+pub mod friends;
 pub mod liveness;
 pub mod motion_resolution;
 pub mod mutations;

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { dismissDialogOnBackdrop } from "../app/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type {
@@ -309,6 +310,7 @@
 <dialog
 	tabindex="-1"
 	use:keyboard.modal
+	use:dismissDialogOnBackdrop={onClose}
 	class="texture-page-modal ui-panel"
 	data-browser-display-modal
 	aria-labelledby="texture-page-modal-title"

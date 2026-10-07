@@ -1,3 +1,11 @@
+import { z } from "zod";
+import {
+	partySnapshotSchema,
+	partyActionSchema,
+	type PartySnapshot,
+	type PartyPreferences,
+	type PartyAction,
+} from "./client-party-contract";
 import {
 	emptyHousing,
 	housingManagementRequestSchema,
@@ -111,7 +119,7 @@ import {
 	clientAttackProfileSchema,
 	type ClientAttackProfile,
 	decodeClientSpells,
-	decodeClientAppearanceOptions,
+	decodeClientCharacterPreferences,
 	type ClientAppearanceOption,
 	type ClientAppearanceOptions,
 	decodeClientEntityCollisionDisabled,
@@ -203,6 +211,8 @@ type ClientCommandName = Extract<
 	| "select_client_character"
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
+	| "submit_client_party"
+	| "set_client_party_updates"
 	| "send_client_chat"
 	| "teleport_client_to_map_position"
 	| "toggle_client_combat_mode"
@@ -281,7 +291,8 @@ type ClientEventName = Extract<
 	| "client-progression-feedback"
 	| "client-player-spells-updated"
 	| "client-player-enchantments-updated"
-	| "client-appearance-options-updated"
+	| "client-character-preferences-updated"
+	| "client-party-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
 	| "client-entity-health-updated"
@@ -501,6 +512,8 @@ export class ClientLifecycleSession {
 	readonly entities = new ClientEntityMirror();
 	readonly #dynamicSession: DynamicEntitySession;
 	#unlisten: readonly (() => void)[] | null = null;
+	#party: PartySnapshot | null = null;
+	#partyPreferences: PartyPreferences | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
 	/** Transport samples stay imperative; only the mounted badge polls them. */
 	#connection: ClientConnectionObservation | null = null;
@@ -538,6 +551,8 @@ export class ClientLifecycleSession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
+		this.#party = null;
+		this.#partyPreferences = null;
 		this.#connection = null;
 		this.characterSheet.reset(null);
 		this.#vendor = null;
@@ -561,6 +576,8 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.#party = null;
+		this.#partyPreferences = null;
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
 		this.#dynamicSession.stop();
@@ -859,6 +876,21 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("stop_client_combat_engagement");
 	}
 
+	/** Retained fellowship facts stay imperative, independent of panel lifetime. */
+	partySnapshot(): PartySnapshot | null {
+		return this.#party;
+	}
+	partyPreferences(): PartyPreferences | null {
+		return this.#partyPreferences;
+	}
+	async submitParty(action: PartyAction): Promise<void> {
+		await this.#transport.invoke("submit_client_party", {
+			action: partyActionSchema.parse(action),
+		});
+	}
+	async setPartyUpdates(enabled: boolean): Promise<void> {
+		await this.#transport.invoke("set_client_party_updates", { enabled });
+	}
 	/** Send one ordinary local-speech message. */
 	async sendChat(message: string): Promise<void> {
 		if (message.trim().length === 0) {
@@ -1049,10 +1081,20 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-party-updated", (payload) => {
+					this.#party = z
+						.object({ party: partySnapshotSchema.nullable() })
+						.strict()
+						.parse(payload).party;
+				}),
+			);
+			unlisteners.push(
 				await this.#transport.listen(
-					"client-appearance-options-updated",
+					"client-character-preferences-updated",
 					(payload) => {
-						const options = decodeClientAppearanceOptions(payload);
+						const preferences = decodeClientCharacterPreferences(payload);
+						const options = preferences.appearance;
+						this.#partyPreferences = preferences.party;
 						this.#state = { ...this.#state, appearanceOptions: options };
 						this.#emit({ type: "appearance-options", options });
 					},
@@ -1411,6 +1453,8 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		this.#party = state.party;
+		this.#partyPreferences = state.partyPreferences;
 		this.characterSheet.reset(state.characterSheet);
 		this.#housing = state.housing;
 		this.#trade = state.trade;
@@ -1497,6 +1541,11 @@ export class ClientLifecycleSession {
 					: this.#state.worldGeneration,
 		};
 		if (retiresCharacterDescription) this.characterSheet.reset(null);
+		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
+		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
+			this.#party = null;
+			this.#partyPreferences = null;
+		}
 		// Initial activation may arrive as portal-space without a separate entering-world event.
 		// Its completion supplies the new character baseline; teleports retain the current one.
 		if (

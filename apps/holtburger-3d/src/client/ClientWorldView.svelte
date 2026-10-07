@@ -51,6 +51,8 @@
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
 	import type { ClientActionBar } from "./client-action-bar-state";
+	import ClientSocialPanel from "./ClientSocialPanel.svelte";
+	import type { ClientPartyState } from "./client-party-state";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
@@ -116,6 +118,8 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** Session-lifetime party presentation owner. */
+		readonly party: ClientPartyState | null;
 		/** User-scoped fixed HUD geometry, independent of open-panel state. */
 		readonly hudLayout: ClientHudLayout;
 		readonly onHudPlacementChange: (
@@ -282,6 +286,7 @@
 
 	let {
 		hudLayout,
+		party,
 		onHudPlacementChange,
 		onHudReset,
 		spellBarShape,
@@ -539,6 +544,17 @@
 	let pointerInsideCanvas = false;
 	const HUD_PREVIEW_JUMP_EXTENT = 0.45;
 	const HUD_PREVIEW_TOAST_MESSAGE = "Notification preview";
+
+	/** Selection facts identify players; the party owner owns recruitment permissions. */
+	function inviteTarget(): number | null {
+		const selected = readSelectedEntity();
+		return selected !== null &&
+			selected.facts?.description.kind === "known" &&
+			selected.facts.description.mapCategory === "player" &&
+			party?.canInvite(selected.guid)
+			? selected.guid
+			: null;
+	}
 
 	function canSplitSelectedEntity(): boolean {
 		return (
@@ -994,6 +1010,11 @@
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
 				readCanSplit={canSplitSelectedEntity}
+				readCanInvite={() => inviteTarget() !== null}
+				onInvite={() => {
+					const target = inviteTarget();
+					if (target !== null) party?.request({ kind: "invite", target });
+				}}
 				readSelectedDisplay={() => {
 					const display = readSelectedEntityDisplay();
 					return itemInteraction.kind === "acquiring" &&
@@ -1134,16 +1155,22 @@
 		{@const panel = activePanel}
 		{#key panel}
 			<ClientHudWindow
-				icon={panel === "characterSheet" ? "training" : panel}
-				title={panel === "inventory"
-					? "Inventory"
-					: panel === "spells"
-						? "Spells"
-						: panel === "characterSheet"
-							? "Character"
-							: panel === "settings"
-								? "Settings"
-								: "Client diagnostics"}
+				icon={panel === "characterSheet"
+					? "training"
+					: panel === "social"
+						? "party"
+						: panel}
+				title={panel === "social"
+					? "Social"
+					: panel === "inventory"
+						? "Inventory"
+						: panel === "spells"
+							? "Spells"
+							: panel === "characterSheet"
+								? "Character"
+								: panel === "settings"
+									? "Settings"
+									: "Client diagnostics"}
 				placement={hudLayout[panel]}
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
@@ -1151,7 +1178,9 @@
 				onClose={() => (activePanel = null)}
 				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
 			>
-				{#if panel === "spells"}
+				{#if panel === "social"}
+					{#if party !== null}<ClientSocialPanel owner={party} />{/if}
+				{:else if panel === "spells"}
 					{#if spells !== null}{#key spells}<ClientSpellsPanel
 								{spells}
 								castEnabled={combatEnabled && combatMode === "magic"}

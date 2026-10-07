@@ -55,6 +55,8 @@ export interface ClientUiDefaults {
 	readonly chat: ClientUiPanel;
 	/** Known-spells floating window. */
 	readonly spells: Omit<ClientUiPanel, "resizable">;
+	/** Character social management window. */
+	readonly social: Omit<ClientUiPanel, "resizable">;
 	/** Independent active-enchantments floating window. */
 	readonly enchantments: Omit<ClientUiPanel, "resizable">;
 	/** Character progression window, distinct from the always-visible HUD. */

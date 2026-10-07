@@ -17,6 +17,10 @@
 		readonly readSelectedDisplay: () => ClientSelectedEntityDisplay;
 		/** Bounded inventory-owned eligibility read sampled with the selected display. */
 		readonly readCanSplit: () => boolean;
+		/** Sample app-owned party eligibility alongside the selected display. */
+		readonly readCanInvite: () => boolean;
+		/** Invite the current eligible selection through its party owner. */
+		readonly onInvite: () => void;
 		/** Forward the button edge to the session-owned interaction controller. */
 		readonly onInteract: () => void;
 		/** Request examination for the selection captured by the app owner. */
@@ -31,6 +35,8 @@
 		selectedGuid,
 		readSelectedDisplay,
 		readCanSplit,
+		readCanInvite,
+		onInvite,
 		onInteract,
 		onExamine,
 		examinePending,
@@ -40,6 +46,7 @@
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	);
 	let canSplit = $state(false);
+	let canInvite = $state(false);
 	const structureDisplay = $derived(itemStructureDisplay(display.structure));
 	const displayName = $derived(
 		(display.name ?? "Selected Entity") +
@@ -61,6 +68,7 @@
 			display =
 				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
 			canSplit = guid !== null && readCanSplit();
+			canInvite = guid !== null && readCanInvite();
 		});
 	});
 
@@ -71,6 +79,7 @@
 					? EMPTY_CLIENT_SELECTED_DISPLAY
 					: readSelectedDisplay();
 			canSplit = selectedGuid !== null && readCanSplit();
+			canInvite = selectedGuid !== null && readCanInvite();
 		};
 		const interval = window.setInterval(
 			sample,
@@ -85,17 +94,23 @@
 		<div class="selected-entity__actions">
 			<button
 				class="ui-hud-button"
-				class:trade-interaction={display.interactionLabel === "Trade"}
 				type="button"
 				disabled={!display.canInteract}
 				onclick={onInteract}
 				aria-label={display.interactionLabel}
 				title={display.interactionLabel}
 			>
-				{#if display.interactionLabel === "Trade"}Trade{:else}<ClientHudIcon
-						name="interact"
-					/>{/if}
+				<ClientHudIcon
+					name={display.interactionLabel === "Trade" ? "trade" : "interact"}
+				/>
 			</button>
+			{#if canInvite}<button
+					class="ui-hud-button"
+					type="button"
+					onclick={onInvite}
+					aria-label="Invite to party"
+					title="Invite to party"><ClientHudIcon name="invite" /></button
+				>{/if}
 			{#if canSplit}<button
 					class="ui-hud-button"
 					type="button"
@@ -177,9 +192,6 @@
 			padding: 4px;
 			place-items: center;
 			pointer-events: auto;
-		}
-		.selected-entity__heading button.trade-interaction {
-			width: auto;
 		}
 		.selected-entity__heading button :global(svg) {
 			width: 16px;

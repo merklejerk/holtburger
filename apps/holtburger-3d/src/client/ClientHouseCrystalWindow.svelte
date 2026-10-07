@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiTabs from "../app/UiTabs.svelte";
 	import AutoFillIcon from "../assets/icons/housing-auto-fill.svg?component";
 	import { housingTypeLabel } from "./client-housing-presentation";
 	import { onMount } from "svelte";
@@ -36,32 +37,6 @@
 	const { keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	function handleKeydown(event: KeyboardEvent): void {
-		const tab =
-			event.target instanceof HTMLElement
-				? event.target.closest<HTMLElement>('[role="tab"]')
-				: null;
-		if (
-			tab !== null &&
-			["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
-		) {
-			event.preventDefault();
-			const destination =
-				event.key === "Home"
-					? "action"
-					: event.key === "End"
-						? "details"
-						: tab.dataset.housingTab === "action"
-							? "details"
-							: "action";
-			act(() => model.selectTab(destination));
-			tab
-				.closest('[role="tablist"]')
-				?.querySelector<HTMLButtonElement>(
-					`[data-housing-tab="${destination}"]`,
-				)
-				?.focus();
-			return;
-		}
 		const target =
 			event.target instanceof HTMLElement
 				? event.target.closest<HTMLElement>("[data-housing-requirement]")
@@ -130,7 +105,7 @@
 			onClose={() => act(() => model.close())}
 		>
 			<div
-				class="house-crystal-panel"
+				class="house-crystal-panel ui-body"
 				data-house-crystal={crystal.crystal}
 				use:keyboard.scope={{ nativeControls: true, keydown: handleKeydown }}
 			>
@@ -157,35 +132,25 @@
 								This dwelling is disabled.
 							</p>{/if}
 					</div>
-					<div
-						class="housing-tabs ui-tabs"
-						role="tablist"
-						aria-label="Crystal information"
-					>
-						<button
-							class="ui-tab"
-							role="tab"
-							id={`housing-action-${crystal.crystal}`}
-							aria-controls={`housing-action-panel-${crystal.crystal}`}
-							aria-selected={current.tab === "action"}
-							data-housing-tab="action"
-							tabindex={current.tab === "action" ? 0 : -1}
-							onclick={() => act(() => model.selectTab("action"))}
-						>
-							{current.purpose === "purchase" ? "Purchase" : "Maintain"}
-						</button>
-						<button
-							class="ui-tab"
-							role="tab"
-							id={`housing-details-${crystal.crystal}`}
-							aria-controls={`housing-details-panel-${crystal.crystal}`}
-							aria-selected={current.tab === "details"}
-							data-housing-tab="details"
-							tabindex={current.tab === "details" ? 0 : -1}
-							onclick={() => act(() => model.selectTab("details"))}
-							>Details</button
-						>
-					</div>
+					<UiTabs
+						label="Crystal information"
+						tabs={[
+							{
+								value: "action",
+								label: current.purpose === "purchase" ? "Purchase" : "Maintain",
+								id: `housing-action-${crystal.crystal}`,
+								panelId: `housing-action-panel-${crystal.crystal}`,
+							},
+							{
+								value: "details",
+								label: "Details",
+								id: `housing-details-${crystal.crystal}`,
+								panelId: `housing-details-panel-${crystal.crystal}`,
+							},
+						]}
+						selected={current.tab}
+						onSelect={(value) => act(() => model.selectTab(value))}
+					/>
 					{#if current.tab === "action"}
 						<div
 							role="tabpanel"
@@ -358,7 +323,6 @@
 		.house-crystal-panel {
 			display: flex;
 			flex-direction: column;
-			padding: 12px;
 			height: 100%;
 		}
 		.housing-content {
@@ -408,9 +372,6 @@
 			font-variant-numeric: tabular-nums;
 		}
 		.housing-summary {
-			margin-bottom: 12px;
-		}
-		.housing-tabs {
 			margin-bottom: 12px;
 		}
 		.housing-requirement-row {

@@ -1648,7 +1648,7 @@ mod tests {
         state.view.focused_pane = FocusedPane::Input;
         state.data.party = Some(holtburger_world::state::FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: false,
             open: true,

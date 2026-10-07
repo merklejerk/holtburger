@@ -1861,7 +1861,7 @@ fn test_fellowship_full_update_populates_world_state_and_emits_projection() {
         Some(fellowship)
             if fellowship.name == "Raid Bus"
                 && fellowship.members.len() == 2
-                && fellowship.leader_guid == Guid(0x5000_0001)
+                && fellowship.leader_guid == Some(Guid(0x5000_0001))
     ));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -1929,7 +1929,7 @@ fn test_fellowship_quit_for_local_player_clears_state() {
     state.player.guid = player_guid;
     state.fellowship = Some(FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: player_guid,
+        leader_guid: Some(player_guid),
         share_xp: true,
         even_share: false,
         open: true,
@@ -1973,7 +1973,7 @@ fn test_fellowship_quit_for_local_player_clears_state() {
 }
 
 #[test]
-fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
+fn test_fellowship_quit_for_leader_waits_for_server_successor() {
     let mut state = WorldState::synthetic();
     let leader_guid = Guid(0x5000_0001);
     let member_guid = Guid(0x5000_0002);
@@ -1981,7 +1981,7 @@ fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
     state.player.guid = Guid(0x5000_00FF);
     state.fellowship = Some(FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid,
+        leader_guid: Some(leader_guid),
         share_xp: true,
         even_share: false,
         open: true,
@@ -2033,12 +2033,46 @@ fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
     let fellowship = state.fellowship.as_ref().expect("fellowship should remain");
     assert_eq!(fellowship.members.len(), 1);
     assert_eq!(fellowship.members[0].guid, member_guid);
-    assert_eq!(fellowship.leader_guid, member_guid);
+    assert_eq!(fellowship.leader_guid, None);
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::FellowshipStateUpdated(Some(fellowship))
-            if fellowship.leader_guid == member_guid && fellowship.members.len() == 1
+            if fellowship.leader_guid.is_none() && fellowship.members.len() == 1
     )));
+
+    let replacement = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: state.player.guid,
+        sequence: 2,
+        event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+            fellows: vec![FellowshipMemberData {
+                guid: member_guid,
+                name: "Bravo".to_string(),
+                level: 18,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 220,
+                max_stamina: 160,
+                max_mana: 140,
+                current_health: 215,
+                current_stamina: 150,
+                current_mana: 130,
+                share_loot: 1,
+            }],
+            fellowship_name: "Raid Bus".to_string(),
+            leader_guid: member_guid,
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            departed_members: Vec::new(),
+            fellowship_locks: Vec::new(),
+        })),
+    }));
+    state.handle_message(&replacement);
+    assert_eq!(
+        state.fellowship.as_ref().unwrap().leader_guid,
+        Some(member_guid)
+    );
 }
 
 #[test]
@@ -2047,7 +2081,7 @@ fn test_fellowship_update_fellow_for_new_remote_member_emits_join_activity() {
     state.player.guid = Guid(0x5000_0001);
     state.fellowship = Some(FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: Guid(0x5000_0001),
+        leader_guid: Some(Guid(0x5000_0001)),
         share_xp: true,
         even_share: false,
         open: true,

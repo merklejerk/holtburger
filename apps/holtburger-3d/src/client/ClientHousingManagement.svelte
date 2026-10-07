@@ -52,11 +52,11 @@
 >
 	{#if view !== null}
 		<details
-			class="ui-disclosure housing-section"
+			class="ui-disclosure ui-disclosure-section"
 			aria-label="Access permissions"
 		>
 			<summary>Access &amp; guests</summary>
-			<div class="housing-section-body">
+			<div class="ui-disclosure-body">
 				{#if view.records === null && !view.loading}
 					<button
 						class="ui-button"
@@ -65,6 +65,7 @@
 					>
 				{/if}
 				<fieldset
+					class="ui-fieldset"
 					disabled={!view.editable || view.confirmation !== null}
 					aria-label="Access controls"
 				>
@@ -109,7 +110,10 @@
 								)}
 						/>Allegiance storage</label
 					>
-					<section class="housing-guest-access" aria-label="Guest access">
+					<section
+						class="housing-guest-access ui-inset"
+						aria-label="Guest access"
+					>
 						{#if view.guests !== null}
 							<form class="housing-form-row" onsubmit={addGuest}>
 								<input
@@ -124,9 +128,9 @@
 									type="submit">Add guest</button
 								>
 							</form>
-							<ul class="housing-guest-list">
+							<ul class="housing-guest-list ui-scroll-list">
 								{#each view.guests as guest (guest.character)}
-									<li class="housing-guest-row">
+									<li class="housing-guest-row ui-list-row">
 										<strong>{guest.name}</strong>
 										<label class="housing-toggle"
 											><input
@@ -198,10 +202,16 @@
 				</fieldset>
 			</div>
 		</details>
-		<details class="ui-disclosure housing-section" aria-label="Decorations">
+		<details
+			class="ui-disclosure ui-disclosure-section"
+			aria-label="Decorations"
+		>
 			<summary>Decorations</summary>
-			<div class="housing-section-body">
-				<fieldset disabled={!view.editable || view.confirmation !== null}>
+			<div class="ui-disclosure-body">
+				<fieldset
+					class="ui-fieldset"
+					disabled={!view.editable || view.confirmation !== null}
+				>
 					<div class="housing-form-row">
 						<button
 							class="ui-button"
@@ -221,12 +231,15 @@
 		</details>
 
 		<details
-			class="ui-disclosure housing-section"
+			class="ui-disclosure ui-disclosure-section"
 			aria-label="Advanced housing actions"
 		>
 			<summary>Advanced</summary>
-			<div class="housing-section-body">
-				<fieldset disabled={!view.editable || view.confirmation !== null}>
+			<div class="ui-disclosure-body">
+				<fieldset
+					class="ui-fieldset"
+					disabled={!view.editable || view.confirmation !== null}
+				>
 					<button
 						class="ui-button housing-danger"
 						onclick={() => act(() => model.request({ kind: "abandon" }))}

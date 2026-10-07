@@ -462,21 +462,16 @@ export async function probeActionBars(
         const measure = () => {
             const style = getComputedStyle(marker);
             const foreground = getComputedStyle(marker.querySelector('path:last-child'));
-            const outline = getComputedStyle(marker.querySelector('.alternate-outline'));
             const rect = marker.getBoundingClientRect();
             const cell = marker.closest('.action-cell').getBoundingClientRect();
             return { width: rect.width, height: rect.height, gap: cell.top - rect.bottom,
-                color: foreground.stroke, stroke: foreground.strokeWidth,
-                outlineColor: outline.stroke, outline: outline.strokeWidth, filter: style.filter };
+                color: foreground.stroke, filter: style.filter };
         };
         const overrides = {
             '--ui-action-alternate-width': '48px',
             '--ui-action-alternate-height': '40px',
             '--ui-action-alternate-gap': '8px',
             '--ui-action-alternate-color': '#00ff00',
-            '--ui-action-alternate-stroke-width': '2',
-            '--ui-action-alternate-outline-width': '5',
-            '--ui-action-alternate-outline-color': '#0000ff',
             '--ui-action-alternate-filter': 'none',
         };
         const baseline = measure();
@@ -500,9 +495,6 @@ export async function probeActionBars(
 		height: 40,
 		gap: 8,
 		color: "rgb(0, 255, 0)",
-		stroke: "2px",
-		outlineColor: "rgb(0, 0, 255)",
-		outline: "5px",
 		filter: "none",
 	});
 	assert.deepEqual(

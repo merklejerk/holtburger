@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-import { probeCharacterSheet, probeClientHud } from "./client-hud-probe.mjs";
+import {
+	probeCharacterSheet,
+	probeClientHud,
+	probeClientSettingsTabs,
+} from "./client-hud-probe.mjs";
+import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { existsSync } from "node:fs";
@@ -96,7 +101,14 @@ try {
 		}
 	}
 	let report;
-	if (options.clientHousing) {
+	if (options.clientSettingsTabs) {
+		report = {
+			suite: "client-settings-tabs",
+			passed: true,
+			evidence: result.clientSettingsTabs,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientHousing) {
 		report = {
 			suite: "client-housing",
 			passed: true,
@@ -156,6 +168,19 @@ try {
 		};
 	} else if (options.clientAudio) {
 		report = { clientAudio: result.clientAudio, browserErrors };
+	} else if (options.clientKeyboard) {
+		report = {
+			suite: "client-keyboard",
+			passed: true,
+			evidence: result.clientKeyboard,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientParty) {
+		report = {
+			suite: "client-party",
+			...result.clientParty,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientBook) {
 		report = {
 			clientBook: result.clientBook,
@@ -370,9 +395,12 @@ function parseArgs(args) {
 		clientWorldMap: false,
 		clientHousing: false,
 		clientHud: false,
+		clientSettingsTabs: false,
+		clientKeyboard: false,
 		clientConnection: false,
 		clientAudio: false,
 		characterSheet: false,
+		clientParty: false,
 		clientBook: false,
 		clientTrade: false,
 		uiTheme: false,
@@ -504,6 +532,14 @@ function parseArgs(args) {
 				parsed.clientHud = true;
 				parsed.clientHousing = true;
 				break;
+			case "--client-settings-tabs":
+				parsed.clientHud = true;
+				parsed.clientSettingsTabs = true;
+				break;
+			case "--client-keyboard":
+				parsed.clientHud = true;
+				parsed.clientKeyboard = true;
+				break;
 			case "--client-hud":
 				parsed.clientHud = true;
 				break;
@@ -513,6 +549,10 @@ function parseArgs(args) {
 			case "--client-trade":
 				parsed.clientHud = true;
 				parsed.clientTrade = true;
+				break;
+			case "--client-party":
+				parsed.clientHud = true;
+				parsed.clientParty = true;
 				break;
 			case "--client-book":
 				parsed.clientHud = true;
@@ -1726,12 +1766,14 @@ Options:
                        With --screenshot, also writes <path>.<variant>.png.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
+  --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
+  --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4220,6 +4262,23 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientKeyboard)
+			return {
+				clientKeyboard: await probeKeyboardPolicy(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+
+		if (options.clientSettingsTabs)
+			return {
+				clientSettingsTabs: await probeClientSettingsTabs(
+					client,
+					evaluateExpression,
+					delay,
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientHousing)
 			return {
 				housing: await probeClientHousing(client),
@@ -4283,6 +4342,17 @@ async function runClientHudHarness({ viteUrl }) {
 		if (options.clientTrade) {
 			return {
 				clientTrade: await probeTrade(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientParty) {
+			return {
+				clientParty: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeParty",
+					[],
+				),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

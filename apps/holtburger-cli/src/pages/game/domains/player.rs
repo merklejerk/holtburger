@@ -90,6 +90,9 @@ fn log_busy_operation_result(
         holtburger_core::BusyOperationKind::SpellCast => "Spell cast",
         holtburger_core::BusyOperationKind::Buy => "Buy",
         holtburger_core::BusyOperationKind::Sell => "Sell",
+        holtburger_core::BusyOperationKind::HousingPurchase => "House purchase",
+        holtburger_core::BusyOperationKind::HousingMaintenance => "House maintenance",
+        holtburger_core::BusyOperationKind::HousingManagement => "House management",
     };
 
     match result {

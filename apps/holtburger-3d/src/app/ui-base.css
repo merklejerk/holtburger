@@ -134,6 +134,8 @@
 		--ui-menu-min-width: 140px;
 		--ui-menu-padding: 4px;
 		--ui-menu-item-padding: 5px 12px;
+		/* Shared management lists scroll independently of their surrounding controls. */
+		--ui-list-max-height: 240px;
 		--ui-icon-rendering: pixelated;
 		/* Spell panel and accordion density; icon size changes display only. */
 		--ui-spell-panel-padding: 8px;
@@ -411,6 +413,17 @@
 		min-height: 0;
 		padding: 0;
 	}
+	/* Member and key-binding rows share the same compact action controls. */
+	.ui-theme .ui-icon-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.ui-theme .ui-icon-actions .ui-icon-button {
+		width: 26px;
+		height: 26px;
+		padding: 4px;
+	}
 	/* State rules change defaults, not the property vocabulary. Explicit component
 	   variables are consumed in every state; themes select their values with CSS. */
 	.ui-theme
@@ -506,13 +519,64 @@
 		cursor: pointer;
 		font-family: var(--ui-font-heading);
 	}
+	/* Panel subsections share disclosure spacing across Housing and Social. */
+	.ui-theme .ui-disclosure-section > summary {
+		padding: 10px 0;
+	}
+	.ui-theme .ui-disclosure-body {
+		padding: 0 0 12px;
+	}
 	.ui-theme dialog::backdrop {
 		background: color-mix(in srgb, var(--ui-color-shadow) 70%, transparent);
+	}
+	/* Management lists share Housing's recessed surface and row treatment. */
+	.ui-theme .ui-inset {
+		padding: 8px;
+		border: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 40%, transparent);
+		background: var(--ui-color-well);
+		box-shadow: inset 0 2px 4px var(--ui-color-shadow);
+	}
+	.ui-theme .ui-scroll-list {
+		max-height: var(--ui-list-max-height);
+		overflow: auto;
+		list-style: none;
+		padding: 0;
+	}
+	.ui-theme .ui-list-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 8px 0;
+		border-bottom: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
+	}
+	/* Semantic control groups share panel spacing without browser fieldset frames. */
+	.ui-theme .ui-fieldset {
+		border: 0;
+		margin: 0;
+		padding: 0;
+		min-width: 0;
 	}
 	.ui-theme .ui-tabs {
 		display: flex;
 		gap: 0;
-		border-bottom: 1px solid var(--ui-color-border);
+	}
+	/* Fixed-height tabbed windows reserve the remaining height for their content. */
+	.ui-theme .ui-tabbed-panel {
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+	/* Panel tabs own the content gap; panel wrappers use the shared ui-body inset. */
+	.ui-theme .ui-panel-tabs {
+		margin-bottom: 12px;
+	}
+	.ui-theme .ui-panel-tabs .ui-tab {
+		flex: 1;
 	}
 	.ui-theme .ui-tab {
 		min-height: 28px;
@@ -838,5 +902,21 @@
 		color: var(--ui-color-text);
 		text-shadow: 0 1px 2px black;
 		pointer-events: none;
+	}
+}
+
+@layer components {
+	.ui-facts {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: 6px 16px;
+	}
+	.ui-facts dt {
+		color: var(--ui-color-muted);
+	}
+	.ui-facts dd {
+		overflow-wrap: anywhere;
+		margin: 0;
+		text-align: right;
 	}
 }

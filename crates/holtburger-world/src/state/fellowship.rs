@@ -93,7 +93,8 @@ impl From<&FellowshipLockEntryData> for FellowshipLockEntryState {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FellowshipState {
     pub name: String,
-    pub leader_guid: Guid,
+    /// Last server-reported leader; absent before a full snapshot or after that leader departs.
+    pub leader_guid: Option<Guid>,
     pub share_xp: bool,
     pub even_share: bool,
     pub open: bool,
@@ -107,7 +108,7 @@ impl FellowshipState {
     pub fn unknown_with_member(member: FellowshipMemberState) -> Self {
         Self {
             name: String::new(),
-            leader_guid: Guid::NULL,
+            leader_guid: None,
             share_xp: false,
             even_share: false,
             open: false,
@@ -135,16 +136,11 @@ impl FellowshipState {
         self.members.retain(|member| member.guid != guid);
     }
 
-    pub fn reassess_leader_after_departure(&mut self, departed_guid: Guid) {
-        if self.leader_guid != departed_guid {
-            return;
+    /// Departure cannot establish a successor. ACE follows with an authoritative full update.
+    pub fn retire_departed_leader(&mut self, departed_guid: Guid) {
+        if self.leader_guid == Some(departed_guid) {
+            self.leader_guid = None;
         }
-
-        self.leader_guid = self
-            .members
-            .first()
-            .map(|member| member.guid)
-            .unwrap_or(Guid::NULL);
     }
 }
 
@@ -159,7 +155,7 @@ impl From<&FellowshipFullUpdateEventData> for FellowshipState {
 
         Self {
             name: value.fellowship_name.clone(),
-            leader_guid: value.leader_guid,
+            leader_guid: (value.leader_guid != Guid::NULL).then_some(value.leader_guid),
             share_xp: value.share_xp,
             even_share: value.even_share,
             open: value.open,

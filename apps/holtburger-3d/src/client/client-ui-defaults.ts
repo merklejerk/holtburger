@@ -103,6 +103,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 390, height: 460 },
 		minSize: { width: 300, height: 250 },
 	},
+	social: {
+		anchor: "center-right",
+		offset: { x: 16, y: 0 },
+		size: { width: 440, height: 460 },
+		minSize: { width: 340, height: 300 },
+	},
 	characterSheet: {
 		anchor: "top-right",
 		offset: { x: 16, y: 220 },

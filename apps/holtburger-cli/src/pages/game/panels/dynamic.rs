@@ -492,7 +492,7 @@ mod tests {
         data.account_name = "acct".to_string();
         data.party = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: false,
             open: false,
@@ -518,7 +518,7 @@ mod tests {
         data.account_name = "acct".to_string();
         data.party = Some(FellowshipState {
             name: "   ".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: false,
             open: false,

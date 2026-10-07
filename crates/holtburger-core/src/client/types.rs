@@ -366,6 +366,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Retained fellowship facts, including vital detail for independent consumers.
+    pub fellowship: Option<FellowshipState>,
     /// Retained housing and pending query state for replacement recovery.
     pub housing: super::housing::HousingSnapshot,
     /// Current character may request map teleport; includes in-world lifecycle admission.
@@ -1143,6 +1145,12 @@ pub enum ClientCommand {
         target: Guid,
     },
     LeaveParty,
+    /// End the active fellowship; the server restricts this to its leader.
+    DisbandParty,
+    /// Explicit enrollment policy for the active fellowship.
+    SetPartyOpenness {
+        open: bool,
+    },
     UninviteFromParty {
         target: Guid,
     },

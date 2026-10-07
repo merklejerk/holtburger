@@ -60,14 +60,14 @@ impl PartyTab {
         &self,
         data: &'a GameData,
         member: &'a FellowshipMemberState,
-        leader_guid: Guid,
+        leader_guid: Option<Guid>,
     ) -> PartyListEntry<'a> {
         let is_self = Some(member.guid) == data.player_guid;
         let nearby = self.is_member_nearby(data, member.guid);
 
         PartyListEntry {
             member,
-            is_leader: member.guid == leader_guid,
+            is_leader: Some(member.guid) == leader_guid,
             is_self,
             shares_loot: member.share_loot,
             nearby,
@@ -109,9 +109,9 @@ impl PartyTab {
     }
 
     fn is_party_leader(&self, data: &GameData) -> bool {
-        data.party
-            .as_ref()
-            .is_some_and(|party| Some(party.leader_guid) == data.player_guid)
+        data.party.as_ref().is_some_and(|party| {
+            party.leader_guid.is_some() && party.leader_guid == data.player_guid
+        })
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -358,7 +358,7 @@ mod tests {
         let mut data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         data.party = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: true,
             open: false,
@@ -450,7 +450,7 @@ mod tests {
         let member_guid = Guid(0x50000002);
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.party = Some(FellowshipState {
-            leader_guid,
+            leader_guid: Some(leader_guid),
             ..party_state(player_guid, member_guid)
         });
 
@@ -597,7 +597,7 @@ mod tests {
         let member_guid = Guid(0x50000002);
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.party = Some(FellowshipState {
-            leader_guid,
+            leader_guid: Some(leader_guid),
             ..party_state(player_guid, member_guid)
         });
 
@@ -624,7 +624,7 @@ mod tests {
     fn party_state(player_guid: Guid, member_guid: Guid) -> FellowshipState {
         FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: player_guid,
+            leader_guid: Some(player_guid),
             share_xp: true,
             even_share: true,
             open: false,

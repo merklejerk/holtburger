@@ -80,7 +80,7 @@ pub fn render_party_tab(
     let leader_name = party
         .members
         .iter()
-        .find(|member| member.guid == party.leader_guid)
+        .find(|member| Some(member.guid) == party.leader_guid)
         .map(|member| member.name.as_str())
         .unwrap_or("Unknown");
 
@@ -217,7 +217,7 @@ mod tests {
         let mut data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         data.party = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: true,
             open: false,

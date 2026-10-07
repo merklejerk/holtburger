@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiTabs from "../app/UiTabs.svelte";
 	import { onMount } from "svelte";
 	import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 	import ClientBindingDialog from "./ClientBindingDialog.svelte";
@@ -253,23 +254,6 @@
 		);
 		closeBindingDialog();
 	}
-	function handleSettingsKeydown(event: KeyboardEvent): void {
-		if (
-			!(event.target instanceof HTMLElement) ||
-			event.target.getAttribute("role") !== "tab"
-		)
-			return;
-		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-		const index = tabs.findIndex((tab) => tab.id === selectedTab);
-		const next =
-			tabs[
-				(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) %
-					tabs.length
-			];
-		event.preventDefault();
-		onSelectTab(next.id);
-		document.getElementById(`settings-tab-${next.id}`)?.focus();
-	}
 	let supportedFiltering = $derived(
 		textureFilteringCapabilities === null
 			? []
@@ -300,13 +284,18 @@
 		{ key: "effectVolume", label: "Sound effects" },
 		{ key: "ambientVolume", label: "Ambience" },
 	] as const;
-	const tabs: readonly { readonly id: SettingsTab; readonly label: string }[] =
+	const tabs = (
 		[
-			{ id: "graphics", label: "Graphics" },
-			{ id: "audio", label: "Audio" },
-			{ id: "ui", label: "UI" },
-			{ id: "input", label: "Input" },
-		];
+			{ value: "graphics", label: "Graphics" },
+			{ value: "audio", label: "Audio" },
+			{ value: "ui", label: "UI" },
+			{ value: "input", label: "Input" },
+		] as const
+	).map((tab) => ({
+		...tab,
+		id: `settings-tab-${tab.value}`,
+		panelId: `settings-section-${tab.value}`,
+	}));
 </script>
 
 <section class="settings-panel ui-body" aria-label="Client settings">
@@ -315,27 +304,15 @@
 		inert={bindingDialog !== null}
 		use:keyboard.scope={{
 			nativeControls: true,
-			keydown: handleSettingsKeydown,
+			keydown: () => {},
 		}}
 	>
-		<div
-			class="settings-tabs ui-tabs"
-			role="tablist"
-			aria-label="Settings sections"
-		>
-			{#each tabs as tab}
-				<button
-					type="button"
-					class="ui-tab"
-					role="tab"
-					id={`settings-tab-${tab.id}`}
-					aria-controls={`settings-section-${tab.id}`}
-					aria-selected={selectedTab === tab.id}
-					tabindex={selectedTab === tab.id ? 0 : -1}
-					onclick={() => onSelectTab(tab.id)}>{tab.label}</button
-				>
-			{/each}
-		</div>
+		<UiTabs
+			label="Settings sections"
+			{tabs}
+			selected={selectedTab}
+			onSelect={onSelectTab}
+		/>
 		{#if selectedTab === "graphics"}
 			<div
 				role="tabpanel"
@@ -618,7 +595,7 @@
 										>
 									{:else}<span class="ui-muted">Unbound</span>{/each}
 								</div>
-								<div class="binding-actions">
+								<div class="binding-actions ui-icon-actions">
 									<button
 										type="button"
 										class="ui-button ui-icon-button"
@@ -672,13 +649,6 @@
 			box-sizing: border-box;
 			height: 100%;
 			overflow: auto;
-			padding: 12px;
-		}
-		.settings-tabs {
-			margin-bottom: 12px;
-		}
-		.settings-tabs button {
-			flex: 1;
 		}
 		.settings-section {
 			display: grid;
@@ -720,25 +690,15 @@
 		.binding-keys {
 			grid-area: keys;
 			min-width: 0;
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 3px;
 		}
 		.binding-actions {
 			grid-area: actions;
 			flex-wrap: nowrap;
 			gap: 3px;
-		}
-		.binding-keys,
-		.binding-actions {
-			display: flex;
-			align-items: center;
-		}
-		.binding-keys {
-			flex-wrap: wrap;
-			gap: 3px;
-		}
-		.binding-actions .ui-icon-button {
-			width: 26px;
-			height: 26px;
-			padding: 4px;
 		}
 		.binding-key {
 			display: inline-grid;

@@ -60,6 +60,7 @@
 		| "debug"
 		| "settings"
 		| "world"
+		| "social"
 		| "spells"
 		| "enchantments"
 		| "characterSheet"
@@ -402,6 +403,8 @@
 						interactionLabel: "Interact",
 					})}
 					readCanSplit={() => false}
+					readCanInvite={() => false}
+					onInvite={() => {}}
 					onInteract={() => {}}
 					onExamine={() => {}}
 					examinePending={false}

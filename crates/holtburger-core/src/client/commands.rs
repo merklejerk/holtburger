@@ -219,6 +219,8 @@ impl ClientRuntime {
             | ClientCommand::InviteToParty { .. }
             | ClientCommand::PromotePartyLeader { .. }
             | ClientCommand::LeaveParty
+            | ClientCommand::DisbandParty
+            | ClientCommand::SetPartyOpenness { .. }
             | ClientCommand::UninviteFromParty { .. } => self.handle_social_command(cmd).await,
 
             ClientCommand::Drop(_)
@@ -1152,6 +1154,18 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::SetPartyOpenness { open } => {
+                self.send_game_action(GameAction::FellowshipChangeOpenness(Box::new(
+                    FellowshipChangeOpennessActionData { open },
+                )))
+                .await
+            }
+            ClientCommand::DisbandParty => {
+                self.send_game_action(GameAction::FellowshipQuit(Box::new(
+                    FellowshipQuitActionData { disband: true },
+                )))
+                .await
+            }
             ClientCommand::LeaveParty => {
                 log::info!(">>> Leaving party");
                 self.send_game_action(GameAction::FellowshipQuit(Box::new(
@@ -1181,7 +1195,7 @@ impl ClientRuntime {
         let leader_name = fellowship
             .members
             .iter()
-            .find(|member| member.guid == fellowship.leader_guid)
+            .find(|member| Some(member.guid) == fellowship.leader_guid)
             .map(|member| member.name.as_str())
             .unwrap_or("Unknown");
 
@@ -1206,7 +1220,7 @@ impl ClientRuntime {
         ));
 
         for member in &fellowship.members {
-            let leader_suffix = if member.guid == fellowship.leader_guid {
+            let leader_suffix = if Some(member.guid) == fellowship.leader_guid {
                 " [leader]"
             } else {
                 ""
@@ -1478,7 +1492,7 @@ mod tests {
         let mut client = build_test_client();
         client.world.fellowship = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x5000_0001),
+            leader_guid: Some(Guid(0x5000_0001)),
             share_xp: true,
             even_share: false,
             open: true,
@@ -1848,7 +1862,7 @@ mod tests {
 
         client.world.fellowship = Some(holtburger_world::state::FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x5000_0001),
+            leader_guid: Some(Guid(0x5000_0001)),
             share_xp: true,
             even_share: false,
             open: true,
@@ -1974,7 +1988,7 @@ mod tests {
         client.world.player.guid = Guid(0x5000_0001);
         client.world.fellowship = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x5000_0001),
+            leader_guid: Some(Guid(0x5000_0001)),
             share_xp: true,
             even_share: false,
             open: true,

@@ -73,7 +73,7 @@ fn projected_fellowship_state_updates_game_data() {
     let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
     let fellowship = holtburger_world::state::FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: Guid(0x50000001),
+        leader_guid: Some(Guid(0x50000001)),
         share_xp: true,
         even_share: false,
         open: true,
@@ -130,7 +130,7 @@ fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
 
     let fellowship = holtburger_world::state::FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: Guid(0x50000002),
+        leader_guid: Some(Guid(0x50000002)),
         share_xp: true,
         even_share: false,
         open: true,

@@ -494,8 +494,8 @@ pub enum GameActionOpcode {
     FellowshipUpdateRequest = 0x00A6,
     /// C2S: Designate a new fellowship leader.
     FellowshipAssignNewLeader = 0x0290,
-    // /// C2S: Toggle the fellowship's open/closed enrollment status.
-    // FellowshipChangeOpenness = 0x0291,
+    /// C2S: Set whether non-leaders may recruit into the fellowship.
+    FellowshipChangeOpenness = 0x0291,
 
     // --- Housing ---
     /// C2S: Purchase a selected house.

@@ -288,6 +288,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            fellowship: None,
             housing: Default::default(),
             connection: None,
             trade: Default::default(),
@@ -772,6 +773,36 @@ mod tests {
     }
 
     #[test]
+    fn replacement_and_incremental_party_projections_agree_without_event_history() {
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected replacement fixture");
+        };
+        let party = holtburger_world::state::FellowshipState {
+            name: "Raid".to_string(),
+            leader_guid: None,
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: Vec::new(),
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        };
+        snapshot.fellowship = Some(party.clone());
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let event = project_client_event(ClientViewEvent::FellowshipStateUpdated {
+            fellowship: Some(party),
+        });
+        let Some(ClientHostEvent::PartyUpdated { party: incremental }) = event else {
+            panic!("Expected party publication");
+        };
+        assert_eq!(
+            serde_json::to_value(replacement.party).unwrap(),
+            serde_json::to_value(incremental).unwrap()
+        );
+    }
+
+    #[test]
     fn character_motion_request_rejects_invalid_extent_and_unknown_fields() {
         let invalid_extent: ClientCharacterMotionEventRequest =
             serde_json::from_value(serde_json::json!({
@@ -821,6 +852,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            fellowship: None,
             housing: Default::default(),
             connection: None,
             trade: Default::default(),

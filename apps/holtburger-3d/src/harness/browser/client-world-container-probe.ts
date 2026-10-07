@@ -148,6 +148,8 @@ export async function probeWorldContainer(options: {
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions: { showHelmet: true, showCloak: true },
+			party: null,
+			partyPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],

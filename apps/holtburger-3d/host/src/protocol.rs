@@ -168,7 +168,13 @@ pub enum HostEvent {
         spell_ids: Vec<u32>,
     },
     ClientPlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
-    ClientAppearanceOptionsUpdated(crate::client_projection::ClientAppearanceOptions),
+    ClientCharacterPreferencesUpdated {
+        appearance: crate::client_projection::ClientAppearanceOptions,
+        party: crate::client_party::ClientPartyPreferences,
+    },
+    ClientPartyUpdated {
+        party: Option<crate::client_party::ClientPartySnapshot>,
+    },
     ClientPlayerVitalsUpdated {
         vitals: Vec<crate::client_projection::ClientVitalWire>,
     },
@@ -536,8 +542,12 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::PlayerEnchantmentsUpdated(resolved) => {
                 HostEvent::ClientPlayerEnchantmentsUpdated(resolved)
             }
-            crate::client_projection::ClientHostEvent::AppearanceOptionsUpdated(options) => {
-                HostEvent::ClientAppearanceOptionsUpdated(options)
+            crate::client_projection::ClientHostEvent::CharacterPreferencesUpdated {
+                appearance,
+                party,
+            } => HostEvent::ClientCharacterPreferencesUpdated { appearance, party },
+            crate::client_projection::ClientHostEvent::PartyUpdated { party } => {
+                HostEvent::ClientPartyUpdated { party }
             }
             crate::client_projection::ClientHostEvent::PlayerVitalsUpdated { vitals } => {
                 HostEvent::ClientPlayerVitalsUpdated { vitals }

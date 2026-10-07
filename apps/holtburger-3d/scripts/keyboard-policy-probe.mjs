@@ -112,6 +112,103 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		await press("Tab", "Tab", 9, { modifiers: 8 });
 		assert.equal((await capture()).gameActive, true);
 
+		for (const selector of [
+			"#keyboard-native-button-icon",
+			"#keyboard-native-label",
+			"#keyboard-native-range",
+			"#keyboard-native-tab",
+			"#keyboard-native-summary",
+		]) {
+			await click(selector, selector === "#keyboard-native-range" ? 0.8 : 0.5);
+			state = await capture();
+			assert.equal(
+				state.gameActive,
+				true,
+				`${selector} must not acquire keyboard ownership`,
+			);
+			assert.equal(
+				state.movement.forward,
+				1,
+				`${selector} must preserve held game movement`,
+			);
+		}
+		assert.equal(
+			state.nativeClicks,
+			1,
+			"Nested button clicks still invoke their command",
+		);
+		assert.equal(
+			state.nativeChecked,
+			true,
+			"Label activation still toggles its checkbox",
+		);
+		assert.ok(
+			state.nativeRange > 50,
+			"Native-scoped slider preserves browser pointer interaction",
+		);
+		assert.equal(state.nativeTabClicks, 1, "Pointer tab selection still runs");
+		assert.equal(
+			state.nativeDisclosure,
+			true,
+			"Disclosure toggling still runs",
+		);
+		await click("#keyboard-native-button-icon");
+		assert.equal((await capture()).gameActive, true);
+		await invoke("focusNativeButton");
+		assert.equal(
+			(await capture()).focused,
+			"keyboard-native-button",
+			"Completed pointer gestures do not suppress later deliberate focus",
+		);
+		await press("Escape", "Escape", 27);
+		assert.equal((await capture()).gameActive, true);
+
+		await click("#keyboard-native-editor");
+		assert.equal(
+			(await capture()).gameActive,
+			false,
+			"Scoped editors acquire keyboard ownership",
+		);
+		await key("keyUp", "w", "KeyW", 87);
+		await press("w", "KeyW", 87, { text: "w" });
+		assert.equal((await capture()).nativeEditorValue, "w");
+		await press("Tab", "Tab", 9);
+		assert.equal(
+			(await capture()).focused,
+			"keyboard-native-button",
+			"Editor Tab traversal deliberately focuses native buttons",
+		);
+		assert.equal(
+			(await capture()).gameActive,
+			false,
+			"Deliberate native keyboard traversal stays in UI",
+		);
+		const beforeKeyboardClick = (await capture()).nativeClicks;
+		await press(" ", "Space", 32);
+		assert.equal(
+			(await capture()).nativeClicks,
+			beforeKeyboardClick + 1,
+			"Keyboard button activation survives the pointer-focus policy",
+		);
+		await click("#keyboard-native-label");
+		assert.equal(
+			(await capture()).gameActive,
+			true,
+			"Pointer toggles release keyboard navigation ownership",
+		);
+		assert.equal((await capture()).nativeChecked, false);
+		await key("keyDown", "w", "KeyW", 87);
+		await click("#keyboard-native-editor");
+		await click("#keyboard-native-button-icon");
+		assert.equal(
+			(await capture()).focused,
+			"keyboard-native-editor",
+			"Nearby buttons preserve the active editor without taking its keyboard input",
+		);
+		await click("#keyboard-viewport");
+		await key("keyUp", "w", "KeyW", 87);
+		await key("keyDown", "w", "KeyW", 87);
+
 		await click("#keyboard-editor");
 		state = await capture();
 		assert.equal(state.movement.forward, 0, "Editing cancels held movement");
@@ -476,6 +573,8 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		return {
 			contextualEscape: true,
 			nativeControls: true,
+			pointerControlsPreserveGame: true,
+			nativeScopeKeyboardTraversal: true,
 			editorOwnership: true,
 			explicitScopes: true,
 			modalRestoration: true,

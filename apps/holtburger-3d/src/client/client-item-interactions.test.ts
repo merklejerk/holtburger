@@ -63,6 +63,8 @@ async function fixture() {
 		knownSpells: null,
 		enchantments: null,
 		appearanceOptions: null,
+		party: null,
+		partyPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

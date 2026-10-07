@@ -67,6 +67,7 @@
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
+	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
 	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
@@ -80,7 +81,14 @@
 	} from "../../client/client-dialogs";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { probeBrowserInput } from "./input-browser-probe";
-	import { mount, onMount, tick, unmount, untrack } from "svelte";
+	import {
+		getAllContexts,
+		mount,
+		onMount,
+		tick,
+		unmount,
+		untrack,
+	} from "svelte";
 	import ClientHousingManagement from "../../client/ClientHousingManagement.svelte";
 	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
@@ -470,6 +478,7 @@
 	}
 
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
+	const partyProbeContext = getAllContexts();
 	const worldMapFixture = createWorldMapFixture();
 	/** Cold authority fixtures for Housing tab/map acceptance through production components. */
 	let housingCharacterGuid = $state<number | null>(1);
@@ -932,6 +941,7 @@
 		/** Synthetic profiles and payment quotes through production session decoding. */
 		readonly housingProbe: ReturnType<typeof createHousingFixture>;
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
+		readonly probeParty: () => ReturnType<typeof probeParty>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
 		readonly probeSpells: () => Promise<unknown>;
@@ -1119,6 +1129,8 @@
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions,
+			party: null,
+			partyPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
@@ -3527,6 +3539,13 @@
 				baseline: emitInteractionBaseline,
 				commands: interactionCommands,
 			}),
+			probeParty: () =>
+				probeParty({
+					context: partyProbeContext,
+					session: interactionLifecycle,
+					emit: emitInteractionEvent,
+					commands: interactionCommands,
+				}),
 			probeWorldContainer: async () => {
 				// Match ClientApp's feedback composition for server-refused transfer fixtures.
 				const unsubscribe = interactionLifecycle.subscribe((event) => {
@@ -3703,18 +3722,20 @@
 	});
 </script>
 
-{#if dialogPresentation !== null}
+<!-- Match the app's non-null dialog lifetime across nested snippet teardown. -->
+{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
 	<ClientMessageDialog
-		presentation={dialogPresentation}
+		{presentation}
 		onDismiss={(id) => dialogOwner?.dismissPopup(id)}
 		onRespond={(id, accepted) => {
 			void dialogOwner?.respond(id, accepted);
 		}}
 	/>
-{/if}
+{/each}
 
 {#if !previewCharacters}
 	<ClientWorldView
+		party={null}
 		characterGuid={housingCharacterGuid}
 		{houseCrystal}
 		{housing}

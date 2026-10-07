@@ -2268,7 +2268,7 @@ mod tests {
 
         fn party(&self) -> Option<crate::ScriptPartyView> {
             Some(ScriptPartyView {
-                leader_guid: Guid(7),
+                leader_guid: Some(Guid(7)),
                 members: vec![
                     ScriptPartyMemberView {
                         guid: Guid(7),

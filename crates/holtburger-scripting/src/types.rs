@@ -355,6 +355,12 @@ pub enum ScriptBusyOperation {
     SpellCast,
     Buy,
     Sell,
+    /// Purchase fulfillment, distinct from vendor buying.
+    HousingPurchase,
+    /// House maintenance contribution fulfillment.
+    HousingMaintenance,
+    /// House administration dispatch or abandonment.
+    HousingManagement,
 }
 
 impl ScriptBusyOperation {
@@ -366,6 +372,9 @@ impl ScriptBusyOperation {
             BusyOperationKind::SpellCast => Self::SpellCast,
             BusyOperationKind::Buy => Self::Buy,
             BusyOperationKind::Sell => Self::Sell,
+            BusyOperationKind::HousingPurchase => Self::HousingPurchase,
+            BusyOperationKind::HousingMaintenance => Self::HousingMaintenance,
+            BusyOperationKind::HousingManagement => Self::HousingManagement,
         }
     }
 }
@@ -847,7 +856,8 @@ pub struct ScriptTradeInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScriptPartyView {
-    pub leader_guid: Guid,
+    /// Server-reported leader, absent until a full fellowship update establishes one.
+    pub leader_guid: Option<Guid>,
     pub members: Vec<ScriptPartyMemberView>,
 }
 

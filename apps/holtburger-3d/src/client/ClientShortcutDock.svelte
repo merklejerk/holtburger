@@ -3,9 +3,16 @@
 
 	/** Implemented floating system windows; the combat action does not open a panel. */
 	export type ClientSystemPanel =
-		"inventory" | "debug" | "spells" | "settings" | "characterSheet" | "world";
+		| "inventory"
+		| "debug"
+		| "spells"
+		| "settings"
+		| "characterSheet"
+		| "world"
+		| "social";
 
 	function systemPanel(icon: ClientHudIconName): ClientSystemPanel | null {
+		if (icon === "party") return "social";
 		return icon === "training"
 			? "characterSheet"
 			: icon === "inventory" ||
@@ -30,7 +37,7 @@
 		{ icon: "inventory", label: "Inventory" },
 		{ icon: "training", label: "Character" },
 		{ icon: "spells", label: "Spells" },
-		{ icon: "party", label: "Party" },
+		{ icon: "party", label: "Social" },
 		{ icon: "world", label: "World" },
 		{ icon: "journal", label: "Journal" },
 		{ icon: "settings", label: "Settings" },

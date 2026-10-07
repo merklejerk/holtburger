@@ -360,6 +360,7 @@ impl ClientRuntime {
     /// Builds one atomic replacement level for shells that lost their event baseline.
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
+            fellowship: self.world.fellowship.clone(),
             can_teleport_from_map: self.can_teleport_from_map(),
             lifecycle: self.lifecycle(),
             connection: self.connection.snapshot(
@@ -821,6 +822,8 @@ impl ClientRuntime {
             if self.progression.clear() {
                 self.emit_progression_guards();
             }
+            self.world.fellowship = None;
+            self.emit_fellowship_state_updated();
             self.reset_container_access();
             self.reset_housing();
             self.trade_additions.clear();

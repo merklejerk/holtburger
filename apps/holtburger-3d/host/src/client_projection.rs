@@ -440,6 +440,10 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Fellowship replacement baseline, independent of sibling events.
+    pub party: Option<crate::client_party::ClientPartySnapshot>,
+    /// Locally mirrored party preferences after character description.
+    pub party_preferences: Option<crate::client_party::ClientPartyPreferences>,
     /// Effective-home and crystal facts recovered atomically with the character.
     pub housing: holtburger_core::client::housing::HousingSnapshot,
     /// Core-derived current permission and lifecycle admission for map teleport.
@@ -990,7 +994,13 @@ pub enum ClientHostEvent {
         spell_ids: Vec<u32>,
     },
     PlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
-    AppearanceOptionsUpdated(ClientAppearanceOptions),
+    CharacterPreferencesUpdated {
+        appearance: ClientAppearanceOptions,
+        party: crate::client_party::ClientPartyPreferences,
+    },
+    PartyUpdated {
+        party: Option<crate::client_party::ClientPartySnapshot>,
+    },
     PlayerVitalsUpdated {
         vitals: Vec<ClientVitalWire>,
     },
@@ -1165,6 +1175,8 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
+            party: snapshot.fellowship.as_ref().map(Into::into),
+            party_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
             known_spells: snapshot.known_spells.clone(),
@@ -1340,8 +1352,16 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
             Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
+        ClientViewEvent::FellowshipStateUpdated { fellowship } => {
+            Some(ClientHostEvent::PartyUpdated {
+                party: fellowship.as_ref().map(Into::into),
+            })
+        }
         ClientViewEvent::PlayerOptionsUpdated { options } => {
-            Some(ClientHostEvent::AppearanceOptionsUpdated(options.into()))
+            Some(ClientHostEvent::CharacterPreferencesUpdated {
+                appearance: options.into(),
+                party: options.into(),
+            })
         }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
             Some(ClientHostEvent::PlayerVitalsUpdated {

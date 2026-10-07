@@ -21,9 +21,6 @@
 </script>
 
 <div class="housing-tab">
-	<header class="housing-overview">
-		<h3>Your home</h3>
-	</header>
 	{#if housing.home.kind === "unqueried"}
 		<p class="ui-muted" role="status">
 			{housing.refreshing
@@ -39,7 +36,7 @@
 	{:else}
 		{@const home = housing.home.home}
 		{@const position = housingMapPosition(housing)}
-		<dl class="housing-facts housing-summary">
+		<dl class="ui-facts housing-summary">
 			<dt>Type</dt>
 			<dd class="housing-type">{housingTypeLabel(home.houseType)}</dd>
 			{#if position !== null}
@@ -74,11 +71,11 @@
 			{/if}
 		</dl>
 		<details
-			class="ui-disclosure housing-section"
+			class="ui-disclosure ui-disclosure-section"
 			open={!home.maintenanceFree && !home.maintenancePaid}
 		>
 			<summary>Maintenance</summary>
-			<div class="housing-section-body">
+			<div class="ui-disclosure-body">
 				{#if home.rent.length > 0}
 					<table class="housing-table">
 						<thead
@@ -97,10 +94,10 @@
 				{:else}<p class="ui-muted">No items required.</p>{/if}
 			</div>
 		</details>
-		<details class="ui-disclosure housing-section">
+		<details class="ui-disclosure ui-disclosure-section">
 			<summary>Property details</summary>
-			<div class="housing-section-body">
-				<dl class="housing-facts">
+			<div class="ui-disclosure-body">
+				<dl class="ui-facts">
 					<dt>Purchased</dt>
 					<dd>
 						{home.boughtAt === null ? "Date unavailable" : date(home.boughtAt)}

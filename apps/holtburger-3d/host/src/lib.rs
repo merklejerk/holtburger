@@ -21,6 +21,7 @@ pub mod behavior_hook_source;
 pub mod binary_source_record;
 pub mod cell_struct_projection;
 pub mod client_host;
+pub mod client_party;
 pub mod client_projection;
 pub mod client_runtime;
 pub mod client_vendor;

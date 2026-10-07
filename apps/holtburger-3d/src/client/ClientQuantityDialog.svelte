@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { dismissDialogOnBackdrop } from "../app/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	interface Props {
 		/** Frontend-confirmed bounds; the owning operation validates again on submit. */
@@ -61,6 +62,7 @@
 
 <div
 	class="quantity-overlay"
+	use:dismissDialogOnBackdrop={onCancel}
 	class:inventory-split-overlay={purpose === "split"}
 >
 	<dialog

@@ -26,6 +26,10 @@
 	import ResetIcon from "../assets/icons/hud-reset.svg?component";
 	import LockedIcon from "../assets/icons/hud-locked.svg?component";
 	import UnlockedIcon from "../assets/icons/hud-unlocked.svg?component";
+	import LeaderIcon from "../assets/icons/hud-leader.svg?component";
+	import RemoveIcon from "../assets/icons/hud-remove.svg?component";
+	import TradeIcon from "../assets/icons/hud-trade.svg?component";
+	import InviteIcon from "../assets/icons/hud-invite.svg?component";
 	export type ClientHudIconName =
 		| "buffed"
 		| "debuffed"
@@ -43,6 +47,8 @@
 		| "speech"
 		| "precise-jump"
 		| "interact"
+		| "trade"
+		| "invite"
 		| "split"
 		| "examine"
 		| "helmet"
@@ -55,7 +61,11 @@
 		| "eye"
 		| "reset"
 		| "locked"
-		| "unlocked";
+		| "unlocked"
+		/** Crown for granting party leadership. */
+		| "leader"
+		/** Cross for removing a member. */
+		| "remove";
 
 	interface Props {
 		readonly name: ClientHudIconName;
@@ -79,6 +89,8 @@
 		speech: SpeechIcon,
 		"precise-jump": PreciseJumpIcon,
 		interact: InteractIcon,
+		trade: TradeIcon,
+		invite: InviteIcon,
 		split: SplitIcon,
 		examine: ExamineIcon,
 		helmet: HelmetIcon,
@@ -90,6 +102,8 @@
 		reset: ResetIcon,
 		locked: LockedIcon,
 		unlocked: UnlockedIcon,
+		leader: LeaderIcon,
+		remove: RemoveIcon,
 	} satisfies Record<ClientHudIconName, typeof HelmetIcon>;
 	const Icon = $derived(icons[name]);
 </script>

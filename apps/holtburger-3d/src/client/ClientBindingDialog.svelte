@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { dismissDialogOnBackdrop } from "../app/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 
 	interface Props {
@@ -22,7 +23,7 @@
 	onMount(() => keyboard.activate(dialog));
 </script>
 
-<div class="binding-dialog-overlay">
+<div class="binding-dialog-overlay" use:dismissDialogOnBackdrop={onCancel}>
 	<dialog
 		open
 		class="binding-dialog ui-panel"

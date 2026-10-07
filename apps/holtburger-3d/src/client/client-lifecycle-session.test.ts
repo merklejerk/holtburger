@@ -1,3 +1,4 @@
+import type { PartySnapshot } from "./client-party-contract";
 import housingPreviewWireFixture from "./fixtures/housing-preview-wire.json";
 import housingManagementWireFixture from "./fixtures/housing-management-wire.json";
 import housingWireFixture from "./fixtures/housing-wire.json";
@@ -1406,14 +1407,64 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
 	});
 
+	it("recovers party without a sibling event, preserves early hydration through revelation, and retires it on stop", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const party: PartySnapshot = {
+			name: "Raid",
+			leader: 1,
+			shareXp: true,
+			evenShare: true,
+			open: false,
+			locked: false,
+			members: [
+				{ guid: 1, name: "Player", level: 10, vitals: [1, 2, 3, 4, 5, 6] },
+			],
+		};
+		const preferences = {
+			shareXp: true,
+			shareLoot: false,
+			ignoreRequests: false,
+		};
+		transport.setCurrentState({
+			...currentState(1),
+			party,
+			partyPreferences: preferences,
+		});
+		await session.start();
+		expect(session.partySnapshot()).toEqual(party);
+		expect(session.partyPreferences()).toEqual(preferences);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 1,
+		});
+		expect(session.partySnapshot()).toBeNull();
+		transport.emit("client-party-updated", { party });
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.partySnapshot()).toEqual(party);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 4,
+			cause: "teleport",
+		});
+		expect(session.partySnapshot()).toEqual(party);
+		session.stop();
+		expect(session.partySnapshot()).toBeNull();
+		expect(session.partyPreferences()).toBeNull();
+	});
+
 	it("retains appearance updates and submits an appearance change", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
 		await session.start();
 
-		transport.emit("client-appearance-options-updated", {
-			showHelmet: false,
-			showCloak: true,
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: false, showCloak: true },
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 		});
 		expect(session.state().appearanceOptions).toEqual({
 			showHelmet: false,
@@ -1451,7 +1502,10 @@ describe("ClientLifecycleSession", () => {
 			cause: "initial-entry",
 		});
 		expect(session.state().appearanceOptions).toBeNull();
-		transport.emit("client-appearance-options-updated", options);
+		transport.emit("client-character-preferences-updated", {
+			appearance: options,
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+		});
 		transport.emit("client-state-resyncing", null);
 		expect(session.state().appearanceOptions).toBeNull();
 		transport.emit("client-current-state", snapshot);
@@ -1554,6 +1608,8 @@ function currentState(playerGuid: number): ClientCurrentState {
 		knownSpells: null,
 		enchantments: null,
 		appearanceOptions: null,
+		party: null,
+		partyPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

@@ -1,6 +1,10 @@
 import { housingSnapshotSchema } from "./client-housing-contract";
 import { tradeSnapshotSchema } from "./client-trade-contract";
 import { z } from "zod";
+import {
+	partySnapshotSchema,
+	partyPreferencesSchema,
+} from "./client-party-contract";
 
 import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
 import { characterSheetSchema } from "./client-character-sheet-contract";
@@ -322,10 +326,14 @@ export type ClientAppearanceOptions = z.infer<
 	typeof clientAppearanceOptionsSchema
 >;
 export type ClientAppearanceOption = "helmet" | "cloak";
-export function decodeClientAppearanceOptions(
-	value: unknown,
-): ClientAppearanceOptions {
-	return clientAppearanceOptionsSchema.parse(value);
+const characterPreferencesSchema = z
+	.object({
+		appearance: clientAppearanceOptionsSchema,
+		party: partyPreferencesSchema,
+	})
+	.strict();
+export function decodeClientCharacterPreferences(value: unknown) {
+	return characterPreferencesSchema.parse(value);
 }
 
 /** Shared owner-produced rates, repair evidence, and connection classifications. */
@@ -363,6 +371,8 @@ const currentStateSchema = z
 		knownSpells: knownSpellIdsSchema.nullable(),
 		enchantments: resolvedEnchantmentsSchema.nullable(),
 		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
+		party: partySnapshotSchema.nullable(),
+		partyPreferences: partyPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,
 		vitals: z.array(vitalSchema),

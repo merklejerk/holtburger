@@ -1,4 +1,8 @@
 import type {
+	PartyPreferences,
+	PartySnapshot,
+} from "../../client/client-party-contract";
+import type {
 	HousingSnapshot,
 	HousingCrystal,
 	HousingPreviewResult,
@@ -131,6 +135,8 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"select_client_character",
 	"replace_client_drive",
 	"queue_client_character_motion_event",
+	"submit_client_party",
+	"set_client_party_updates",
 	"send_client_chat",
 	"teleport_client_to_map_position",
 	"toggle_client_combat_mode",
@@ -244,7 +250,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-progression-feedback",
 	"client-player-spells-updated",
 	"client-player-enchantments-updated",
-	"client-appearance-options-updated",
+	"client-character-preferences-updated",
+	"client-party-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-entity-health-updated",
@@ -344,7 +351,13 @@ export interface HostEventPayloadMap {
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
 	"client-player-enchantments-updated": unknown;
-	"client-appearance-options-updated": ClientAppearanceOptions;
+	"client-character-preferences-updated": {
+		appearance: ClientAppearanceOptions;
+		party: PartyPreferences;
+	};
+	"client-party-updated": {
+		party: PartySnapshot | null;
+	};
 	"client-combat-mode-updated": { mode: ClientCombatMode };
 	"client-combat-status-updated": ClientCombatStatus;
 	"client-player-vitals-updated": {

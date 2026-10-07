@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import UiDialog from "../app/UiDialog.svelte";
 	import type { ClientDialogPresentation } from "./client-dialogs";
 
 	interface Props {
@@ -9,7 +9,6 @@
 		readonly onRespond: (requestId: string, accepted: boolean) => void;
 	}
 	const { presentation, onDismiss, onRespond }: Props = $props();
-	const { keyboard } = useAppInputPolicy();
 	const submitting = $derived(
 		presentation.kind !== "popup" &&
 			presentation.submission.kind === "submitting",
@@ -33,50 +32,25 @@
 			(typedConfirmation === undefined ||
 				answer === typedConfirmation.requiredText),
 	);
-	let backdropPointer = false;
-
-	function outside(event: PointerEvent | MouseEvent): boolean {
-		if (!(event.currentTarget instanceof HTMLDialogElement)) return false;
-		const bounds = event.currentTarget.getBoundingClientRect();
-		return (
-			event.clientX < bounds.left ||
-			event.clientX > bounds.right ||
-			event.clientY < bounds.top ||
-			event.clientY > bounds.bottom
-		);
-	}
 
 	function accept(): void {
 		if (presentation.kind !== "popup" && canAccept)
 			onRespond(presentation.request.requestId, true);
 	}
 
-	function cancel(event: Event): void {
-		event.preventDefault();
+	function cancel(): void {
 		if (presentation.kind === "popup") onDismiss(presentation.id);
 		else if (!submitting) onRespond(presentation.request.requestId, false);
 	}
 </script>
 
-<dialog
-	use:keyboard.modal
-	class="client-message-dialog ui-panel"
-	tabindex="-1"
-	aria-labelledby="client-message-title"
-	aria-describedby="client-message-text"
-	oncancel={cancel}
-	onpointerdown={(event) => {
-		backdropPointer = outside(event);
-	}}
-	onclick={(event) => {
-		if (backdropPointer && outside(event) && typedConfirmation !== undefined)
-			cancel(event);
-		backdropPointer = false;
-	}}
+<UiDialog
+	title={presentation.kind === "popup" ? "Message" : "Confirmation"}
+	className="client-message-dialog"
+	describedBy="client-message-text"
+	onCancel={cancel}
+	dismissOnBackdrop={!submitting}
 >
-	<h2 id="client-message-title">
-		{presentation.kind === "popup" ? "Message" : "Confirmation"}
-	</h2>
 	<p id="client-message-text">
 		{presentation.kind === "popup"
 			? presentation.text
@@ -103,7 +77,7 @@
 			/>
 		</label>
 	{/if}
-	<div class="client-message-actions">
+	<div class="client-message-actions ui-dialog-actions">
 		{#if presentation.kind === "popup"}
 			<button class="ui-button" onclick={() => onDismiss(presentation.id)}
 				>Close</button
@@ -120,25 +94,10 @@
 			>
 		{/if}
 	</div>
-</dialog>
+</UiDialog>
 
 <style>
 	@layer components {
-		.client-message-dialog {
-			width: min(34rem, calc(100vw - 2rem));
-			max-height: calc(100vh - 2rem);
-			box-sizing: border-box;
-			overflow: auto;
-			padding: 1.25rem;
-			color: var(--ui-color-text);
-		}
-		.client-message-dialog::backdrop {
-			background: rgb(0 0 0 / 55%);
-		}
-		h2 {
-			margin-top: 0;
-			font-size: 1.1rem;
-		}
 		#client-message-text {
 			white-space: pre-wrap;
 			overflow-wrap: anywhere;
@@ -147,11 +106,6 @@
 			display: grid;
 			gap: 0.5rem;
 			margin-bottom: 1rem;
-		}
-		.client-message-actions {
-			display: flex;
-			justify-content: flex-end;
-			gap: 0.75rem;
 		}
 	}
 </style>

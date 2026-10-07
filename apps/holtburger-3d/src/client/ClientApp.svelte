@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientPartyState } from "./client-party-state";
 	import { ClientHousingManagementState } from "./client-housing-management-state";
 	import {
 		emptyHousing,
@@ -355,6 +356,7 @@
 	let vendor = $state<ClientVendorState | null>(null);
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
 	let housingManagement = $state<ClientHousingManagementState | null>(null);
+	let party = $state<ClientPartyState | null>(null);
 	let housing = $state<HousingSnapshot>(emptyHousing());
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
@@ -1477,6 +1479,12 @@
 			(message) => toastCenter.publish({ message, tone: "warning" }),
 		);
 		housingManagement = housingManagementOwner;
+		const partyOwner = new ClientPartyState(
+			owner,
+			(message) => toastCenter.publish({ message, tone: "warning" }),
+			(message) => toastCenter.publish({ message, tone: "status" }),
+		);
+		party = partyOwner;
 		const tradeOwner = new ClientTradeState(owner, icons, appendChatError);
 		trade = tradeOwner;
 		const spellReferences = new SpellReferences(transport);
@@ -1485,6 +1493,7 @@
 		const dialogOwner = new ClientDialogs(owner);
 		dialogs = dialogOwner;
 		const unbindHousingDialogs = dialogOwner.bindLocal(housingManagementOwner);
+		const unbindPartyDialogs = dialogOwner.bindLocal(partyOwner);
 		const unsubscribeDialogs = dialogOwner.subscribe(
 			(value) => (dialogPresentation = value),
 		);
@@ -1580,6 +1589,9 @@
 			tradeOwner.destroy();
 			trade = null;
 			vendorOwner.destroy();
+			partyOwner.destroy();
+			party = null;
+			unbindPartyDialogs();
 			housingManagementOwner.destroy();
 			housingManagement = null;
 			houseCrystalOwner.destroy();
@@ -1639,15 +1651,16 @@
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
 >
-	{#if dialogPresentation !== null}
+	<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
+	{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
 		<ClientMessageDialog
-			presentation={dialogPresentation}
+			{presentation}
 			onDismiss={(id) => dialogs?.dismissPopup(id)}
 			onRespond={(id, accepted) => {
 				void dialogs?.respond(id, accepted);
 			}}
 		/>
-	{/if}
+	{/each}
 	{#if !usesWorldPresentation}
 		<ClientToastOverlay {toast} persistentMessage={null} />
 	{/if}
@@ -1713,6 +1726,7 @@
 			{worldMapSource}
 			{housing}
 			{housingManagement}
+			{party}
 			onSearchHousing={async (houseType) => {
 				if (session === null) return;
 				try {

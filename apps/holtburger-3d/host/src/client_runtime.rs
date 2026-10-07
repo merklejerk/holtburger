@@ -336,6 +336,14 @@ pub enum ClientHostCommand {
         request_id: String,
         accepted: bool,
     },
+    /// Party management delegates to reusable core commands.
+    SubmitClientParty {
+        action: crate::client_party::ClientPartyAction,
+    },
+    /// Presentation demand controls fellowship update delivery.
+    SetClientPartyUpdates {
+        enabled: bool,
+    },
     SendClientChat {
         message: String,
     },
@@ -407,6 +415,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "select_client_character",
     "replace_client_drive",
     "queue_client_character_motion_event",
+    "submit_client_party",
+    "set_client_party_updates",
     "send_client_chat",
     "teleport_client_to_map_position",
     "toggle_client_combat_mode",
@@ -948,6 +958,16 @@ pub async fn dispatch_client(
                 .map(|()| HostResponse::Unit)
                 .map_err(application_error)
         }
+        SubmitClientParty { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientPartyUpdates { enabled } => runtime
+            .send_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SendClientChat { message } => runtime
             .send_chat(message)
             .await

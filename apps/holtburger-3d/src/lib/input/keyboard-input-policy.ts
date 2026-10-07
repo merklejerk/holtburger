@@ -16,7 +16,7 @@ export interface KeyboardScope {
 	readonly passthrough?: boolean;
 	/** One-shot command scopes end on cancellation and are not restored after modals. */
 	readonly transient?: boolean;
-	/** Allow native button/range focus and Tab traversal inside this deliberate UI surface. */
+	/** Allow deliberate keyboard focus and Tab traversal; pointer clicks do not acquire ownership. */
 	readonly nativeControls?: boolean;
 	/** Optional command that enters this scope from the game or another explicit scope. */
 	readonly activation?: (event: KeyboardEvent) => boolean;
@@ -111,6 +111,8 @@ export class KeyboardInputPolicy {
 	>();
 	/** Focused editor or intentional UI surface; null selects the game. */
 	#owner: HTMLElement | null = null;
+	/** Native focus caused by this pointer control must not activate a non-editor UI scope. */
+	#pointerControl: HTMLElement | null = null;
 	/** A pointer gesture must see Escape before a focused scope consumes it. */
 	#escapeCancellation: (() => boolean) | null = null;
 	/** Opt-in app contexts ordered from least to most recently engaged. */
@@ -159,6 +161,7 @@ export class KeyboardInputPolicy {
 		document.addEventListener("focusin", this.#focusIn);
 		document.addEventListener("focusout", this.#focusOut);
 		document.addEventListener("pointerdown", this.#pointerDown, true);
+		document.addEventListener("click", this.#click, true);
 		return () => {
 			window.removeEventListener("keydown", this.keydown, true);
 			window.removeEventListener("keyup", this.keyup, true);
@@ -167,8 +170,10 @@ export class KeyboardInputPolicy {
 			document.removeEventListener("focusin", this.#focusIn);
 			document.removeEventListener("focusout", this.#focusOut);
 			document.removeEventListener("pointerdown", this.#pointerDown, true);
+			document.removeEventListener("click", this.#click, true);
 			this.cancel();
 			this.#owner = null;
+			this.#pointerControl = null;
 			this.#presses.clear();
 			observer.disconnect();
 			this.#document = null;
@@ -324,6 +329,8 @@ export class KeyboardInputPolicy {
 
 	/** Capture routing also prevents native button activation from competing with game commands. */
 	readonly keydown = (event: KeyboardEvent): void => {
+		// Subsequent native Tab/arrow navigation is deliberate keyboard interaction.
+		this.#pointerControl = null;
 		this.#validateOwner();
 		if (this.#owner !== null)
 			this.#scopeFor(this.#owner)?.modifiersChanged?.(event);
@@ -519,7 +526,7 @@ export class KeyboardInputPolicy {
 		if (!(target instanceof HTMLElement)) return;
 		if (
 			isEditor(target) ||
-			this.#nativeControlsFor(target) ||
+			(this.#nativeControlsFor(target) && target !== this.#pointerControl) ||
 			this.#modals.at(-1)?.element.contains(target)
 		) {
 			this.#setOwner(target);
@@ -545,17 +552,38 @@ export class KeyboardInputPolicy {
 		});
 	};
 
+	readonly #click = (): void => {
+		const control = this.#pointerControl;
+		// Label activation focuses its input after click listeners; keep the identity through that
+		// browser default, then retire it so later deliberate programmatic focus is unaffected.
+		setTimeout(() => {
+			if (this.#pointerControl === control) this.#pointerControl = null;
+		}, 0);
+	};
+
 	readonly #pointerDown = (event: PointerEvent): void => {
 		const target = event.target;
 		if (!(target instanceof Element)) return;
-		if (target.closest("[data-game-viewport]") && this.#modals.length === 0)
+		// Labels focus their associated input, and icon children focus their enclosing button.
+		const control = target.closest<HTMLElement>(
+			"button, [role='button'], input, select, textarea, summary, a[href], [tabindex], [contenteditable], label",
+		);
+		this.#pointerControl =
+			control instanceof HTMLLabelElement ? control.control : control;
+		if (this.#modals.length !== 0) return;
+		if (target.closest("[data-game-viewport]")) this.returnToGame();
+		else if (
+			this.#pointerControl !== null &&
+			!isEditor(this.#pointerControl) &&
+			this.#owner !== null &&
+			!isEditor(this.#owner) &&
+			this.#nativeControlsFor(this.#owner)
+		) {
+			// Mouse controls end deliberate button traversal; an active editor keeps its input.
 			this.returnToGame();
-		// Preventing focus on buttons leaves clicks intact. Other native controls retain their gestures.
-		if (
-			this.#modals.length === 0 &&
-			target.closest("button, [role='button']") &&
-			!(target instanceof HTMLElement && this.#nativeControlsFor(target))
-		)
-			event.preventDefault();
+		}
+		// Prevent button focus, preserving click actions. Ranges/toggles retain their native gestures;
+		// focusin rejects their pointer-acquired focus even inside a native-control scope.
+		if (target.closest("button, [role='button']")) event.preventDefault();
 	};
 }

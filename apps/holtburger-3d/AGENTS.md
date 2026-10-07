@@ -52,6 +52,51 @@ target.
   and genuinely event-driven UI state should remain reactive where that keeps
   ownership and code clearer.
 
+### UI Reuse
+
+- Before adding UI markup, a component, or CSS, search existing client and
+  Explorer surfaces for equivalent controls, layouts, and interaction behavior.
+  Read their implementation and immediate consumers before deciding to recreate them.
+- Reuse existing components and shared styles for tabs, buttons, inputs, dialogs,
+  windows, and other common controls. Start with `src/app/ui-base.css` and its
+  theme classes (such as `ui-tabs`, `ui-tab`, `ui-button`, and `ui-input`), plus
+  existing component shells such as `src/app/UiDialog.svelte`. Keep feature CSS
+  focused on feature-specific layout rather than duplicating common chrome,
+  control states, typography, colors, or spacing conventions.
+- Reuse behavior as well as appearance: modal focus, keyboard ownership,
+  cancellation, and window interactions should use the existing frontend owners
+  and actions. A visually similar control with a separate interaction path is
+  still duplication.
+- Keyboard ownership stays with the game when ordinary panel buttons, tabs,
+  toggles, sliders, or disclosures are clicked. Editors (including selects) may
+  acquire it; modal and explicitly activated keyboard interactions retain ownership.
+  `KeyboardInputPolicy` owns this policy for the entire app. `nativeControls` enables
+  deliberate keyboard navigation, not pointer-acquired ownership. Do not add per-panel
+  focus/blur or return-to-game workarounds for ordinary controls.
+- Modal prompts cancel on backdrop clicks by default. Use `UiDialog` for ordinary
+  prompts; custom native dialogs and panel-scoped overlays share
+  `src/app/dialog-backdrop-dismiss.ts`. Cancellation must use the feature's
+  existing callback. Opt out explicitly when an answer is already being submitted,
+  rather than deriving backdrop policy from whether a prompt is destructive or typed.
+- Client panel tab strips use `src/app/UiTabs.svelte`, which owns tab semantics,
+  keyboard navigation, equal-width controls, and the gap before content. Use
+  `ui-body` once on the panel's outer content wrapper for the standard inset;
+  do not add a second padding layer to a nested scroll area or tab body.
+  Feature owners retain selection and decide whether inactive content stays
+  mounted (for example, World's canvas).
+  Fixed-height tabbed windows use `ui-tabbed-panel` to reserve space below the
+  tab strip; ordinary tab content needs `min-height: 0` and `overflow: auto`
+  so it scrolls within that space instead of growing beyond the window.
+- When a second real consumer reveals a common shell or behavior, consolidate
+  that shared part and migrate the touched consumers together. Keep feature
+  state, commands, and UX policy with their feature owners; shared UI belongs
+  inside this app, not in Rust game-state crates.
+- Prefer existing CSS classes or component composition when sufficient. Extract
+  a component only when it owns a demonstrated shared responsibility; avoid
+  speculative UI frameworks and variant-heavy wrappers. If an existing primitive
+  cannot fit the requirement, explain the concrete difference before adding a
+  separate implementation.
+
 ### Svelte `$state` Hygiene
 
 Treat `$state`, `$derived`, and `$effect` as a cold UI graph, never as an application event bus or a

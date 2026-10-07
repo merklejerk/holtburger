@@ -1313,33 +1313,10 @@ export async function probeClientHud(
 
 	inventory.trade = await probeTrade(client, evaluateExpression);
 
-	await evaluateExpression(
+	const settingsWindow = await probeClientSettingsTabs(
 		client,
-		`document.querySelector('button[aria-label="Settings"]').click()`,
-	);
-	await delay(50);
-	const settingsWindow = await evaluateExpression(
-		client,
-		`(async () => {
-			const window = document.querySelector('.hud-window[aria-label="Settings"]');
-			if (!window) throw new Error('Settings shortcut did not open its HUD window');
-			const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
-			if (tabs.join(',') !== 'Graphics,Audio,UI,Input') throw new Error('Settings tabs are incomplete');
-			const graphicsTab = window.querySelector('#settings-tab-graphics');
-			graphicsTab.focus();
-			const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true });
-			graphicsTab.dispatchEvent(tabEvent);
-			if (tabEvent.defaultPrevented) throw new Error('Settings intercepted native Tab traversal');
-			const nextEvent = new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true });
-			graphicsTab.dispatchEvent(nextEvent);
-			await new Promise((resolve) => requestAnimationFrame(resolve));
-			const selectedAfterArrow = window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim();
-			if (selectedAfterArrow !== 'Audio') throw new Error('Settings tabs ignored keyboard navigation');
-			window.querySelector('#settings-tab-graphics').click();
-			await new Promise((resolve) => requestAnimationFrame(resolve));
-			graphicsTab.focus();
-			return { tabs, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
-		})()`,
+		evaluateExpression,
+		delay,
 	);
 	for (const type of ["keyDown", "keyUp"]) {
 		await client.send("Input.dispatchKeyEvent", {
@@ -2541,4 +2518,48 @@ function assertClientHudRectangleInsideViewport(label, rectangle, viewport) {
 			`Client HUD rectangle escaped the viewport: ${JSON.stringify({ label, rectangle, viewport })}.`,
 		);
 	}
+}
+
+/** Focused tab behavior, also reused by the broader HUD suite. */
+export async function probeClientSettingsTabs(
+	client,
+	evaluateExpression,
+	delay,
+) {
+	await evaluateExpression(
+		client,
+		`document.querySelector('button[aria-label="Settings"]').click()`,
+	);
+	await delay(50);
+	return await evaluateExpression(
+		client,
+		`(async () => {
+			const window = document.querySelector('.hud-window[aria-label="Settings"]');
+			if (!window) throw new Error('Settings shortcut did not open its HUD window');
+			const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
+			if (tabs.join(',') !== 'Graphics,Audio,UI,Input') throw new Error('Settings tabs are incomplete');
+			const graphicsTab = window.querySelector('#settings-tab-graphics');
+			graphicsTab.focus();
+			const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true });
+			graphicsTab.dispatchEvent(tabEvent);
+			if (tabEvent.defaultPrevented) throw new Error('Settings intercepted native Tab traversal');
+			const nextEvent = new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true });
+			graphicsTab.dispatchEvent(nextEvent);
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const selectedAfterArrow = window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim();
+			if (selectedAfterArrow !== 'Audio') throw new Error('Settings tabs ignored keyboard navigation');
+			for (const [key, expected] of [['End', 'input'], ['ArrowRight', 'graphics'], ['ArrowLeft', 'input'], ['Home', 'graphics']]) {
+				const current = window.querySelector('[role="tab"][aria-selected="true"]');
+				current.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+				const destination = window.querySelector('#settings-tab-' + expected);
+				if (destination.getAttribute('aria-selected') !== 'true' || document.activeElement !== destination)
+					throw new Error('Settings tabs failed selection/focus for ' + key);
+			}
+			window.querySelector('#settings-tab-graphics').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			graphicsTab.focus();
+			return { tabs, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
+		})()`,
+	);
 }

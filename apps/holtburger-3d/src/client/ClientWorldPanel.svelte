@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiTabs from "../app/UiTabs.svelte";
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
 	import ClientHousingTab from "./ClientHousingTab.svelte";
 	import type { HousingSnapshot } from "./client-housing-contract";
@@ -21,7 +22,6 @@
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import WorldMapPlayerIcon from "../assets/icons/world-map-player.svg?component";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
-	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import type {
@@ -117,29 +117,24 @@
 	/** Last canvas hover in viewport pixels, reprojected after every map draw. */
 	let hover: { readonly x: number; readonly y: number } | null = null;
 	const panelId = $props.id();
-	const { keyboard } = useAppInputPolicy();
 	/** Tab choice only controls presentation; the image and current view stay retained. */
 	let activeTab = $state<"world" | "housing">("world");
 	/** Cold toggle markup; defaults to names shown only in the tooltip. */
 	let showAllLabels = $state(false);
 	const tabs = [
-		{ id: "world", label: "World" },
-		{ id: "housing", label: "Housing" },
+		{
+			value: "world",
+			label: "World",
+			id: `${panelId}-world-tab`,
+			panelId: `${panelId}-world`,
+		},
+		{
+			value: "housing",
+			label: "Housing",
+			id: `${panelId}-housing-tab`,
+			panelId: `${panelId}-housing`,
+		},
 	] as const;
-	function handleTabKey(event: KeyboardEvent): void {
-		if (
-			!(event.target instanceof HTMLElement) ||
-			event.target.getAttribute("role") !== "tab"
-		)
-			return;
-		if (event.key === "ArrowLeft" || event.key === "ArrowRight")
-			activeTab = activeTab === "world" ? "housing" : "world";
-		else if (event.key === "Home") activeTab = "world";
-		else if (event.key === "End") activeTab = "housing";
-		else return;
-		event.preventDefault();
-		document.getElementById(`${panelId}-${activeTab}-tab`)?.focus();
-	}
 	// Only status markup is reactive. Dataset arrays and input-rate view state stay imperative.
 	let mapState = $state.raw<WorldMapState>({ kind: "idle" });
 	let owner: WorldMapOwner | null = null;
@@ -383,26 +378,13 @@
 	minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
 	minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
 >
-	<div class="world-panel">
-		<div
-			class="world-tabs ui-tabs"
-			role="tablist"
-			aria-label="World tabs"
-			use:keyboard.scope={{ nativeControls: true, keydown: handleTabKey }}
-		>
-			{#each tabs as tab}
-				<button
-					type="button"
-					class="ui-tab"
-					role="tab"
-					id={`${panelId}-${tab.id}-tab`}
-					aria-controls={`${panelId}-${tab.id}`}
-					aria-selected={activeTab === tab.id}
-					tabindex={activeTab === tab.id ? 0 : -1}
-					onclick={() => (activeTab = tab.id)}>{tab.label}</button
-				>
-			{/each}
-		</div>
+	<div class="world-panel ui-body ui-tabbed-panel">
+		<UiTabs
+			label="World tabs"
+			{tabs}
+			selected={activeTab}
+			onSelect={(value) => (activeTab = value)}
+		/>
 		<div
 			class="world-page world-map-page"
 			role="tabpanel"
@@ -547,18 +529,6 @@
 
 <style>
 	@layer components {
-		.world-panel {
-			height: 100%;
-			display: grid;
-			grid-template-rows: auto minmax(0, 1fr);
-		}
-		.world-tabs.ui-tabs {
-			margin: 12px;
-			border-bottom: 0;
-		}
-		.world-tabs button {
-			flex: 1;
-		}
 		.world-map-page {
 			display: grid;
 			min-height: 0;

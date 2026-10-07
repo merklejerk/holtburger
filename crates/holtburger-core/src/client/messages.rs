@@ -110,6 +110,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.world.fellowship = None;
         self.reset_housing();
         if self.progression.clear() {
             self.emit_progression_guards();
@@ -299,6 +300,22 @@ impl ClientRuntime {
         let message = message.unwrap();
 
         log::debug!("GameMessage: {:?}", message);
+
+        if !matches!(
+            self.state,
+            ClientState::EnteringWorld | ClientState::InWorld
+        ) && let GameMessage::GameEvent(event) = &message
+            && matches!(
+                event.event,
+                GameEvent::FellowshipFullUpdate(_)
+                    | GameEvent::FellowshipUpdateFellow(_)
+                    | GameEvent::FellowshipQuit(_)
+                    | GameEvent::FellowshipDismiss(_)
+                    | GameEvent::FellowshipDisband
+            )
+        {
+            return Ok(Vec::new());
+        }
 
         // Housing replies have no request ID. Outside an active character lifetime,
         // late replies cannot restore the previous character's replacement facts.
@@ -949,6 +966,55 @@ mod tests {
         let mut encoded = Vec::new();
         message.pack(&mut encoded);
         encoded
+    }
+
+    #[tokio::test]
+    async fn fellowship_recovery_retains_portal_facts_and_retires_character_facts() {
+        use holtburger_protocol::messages::FellowshipFullUpdateEventData;
+        let mut client = build_test_client();
+        let player = Guid(0x5000_0001);
+        client.world.player.guid = player;
+        client.state = ClientState::InWorld;
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 1,
+            event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+                fellows: Vec::new(),
+                fellowship_name: "Raid".to_string(),
+                leader_guid: player,
+                share_xp: true,
+                even_share: true,
+                open: false,
+                is_locked: false,
+                departed_members: Vec::new(),
+                fellowship_locks: Vec::new(),
+            })),
+        })));
+        client.handle_message(&encoded).await.unwrap();
+        assert_eq!(
+            client
+                .application_snapshot()
+                .fellowship
+                .as_ref()
+                .unwrap()
+                .name,
+            "Raid"
+        );
+        client.bump_world_generation();
+        client.send_status_event();
+        assert!(client.application_snapshot().fellowship.is_some());
+
+        client.character_selection.character_id = Some(player);
+        client.begin_world_entry_transition().await.unwrap();
+        assert!(client.application_snapshot().fellowship.is_none());
+        client.state = ClientState::EnteringWorld;
+        client.handle_message(&encoded).await.unwrap();
+        assert!(client.application_snapshot().fellowship.is_some());
+        client.state = ClientState::Disconnected;
+        client.send_status_event();
+        assert!(client.application_snapshot().fellowship.is_none());
+        client.handle_message(&encoded).await.unwrap();
+        assert!(client.application_snapshot().fellowship.is_none());
     }
 
     fn server_controlled_motion(

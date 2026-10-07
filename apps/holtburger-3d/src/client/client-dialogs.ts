@@ -4,7 +4,7 @@ import type {
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
 
-/** Local modal policy; typed destructive confirmations can be canceled from the backdrop. */
+/** Local confirmation content; the shared dialog shell owns cancellation gestures. */
 export interface LocalConfirmationRequest {
 	readonly requestId: string;
 	readonly text: string;
@@ -48,7 +48,7 @@ type ConfirmationPresentation = Extract<
 >;
 type PopupPresentation = Extract<ClientDialogPresentation, { kind: "popup" }>;
 
-/** App-session dialog policy. Confirmations take priority; popups await explicit FIFO dismissal. */
+/** App-session dialog policy. Confirmations take priority; popups await FIFO dismissal. */
 export class ClientDialogs {
 	readonly #session: DialogSession;
 	readonly #unsubscribe: () => void;

@@ -44,6 +44,60 @@ export function installKeyboardPolicyFixture(
 	select.id = "keyboard-select";
 	select.add(new Option("First", "first"));
 	select.add(new Option("Second", "second"));
+	// Match the broad native-control registration used by Settings/trade/vendor panels.
+	const nativePanel = document.createElement("div");
+	nativePanel.style.cssText =
+		"position:absolute;right:calc(100% + 12px);top:0;width:300px;padding:12px;background:white;display:grid;gap:8px";
+	const nativeScope = keyboard.scope(nativePanel, {
+		nativeControls: true,
+		keydown: () => {},
+	});
+	const nativeEditor = document.createElement("input");
+	nativeEditor.id = "keyboard-native-editor";
+	const nativeButton = document.createElement("button");
+	nativeButton.id = "keyboard-native-button";
+	const buttonIcon = document.createElement("span");
+	buttonIcon.id = "keyboard-native-button-icon";
+	buttonIcon.textContent = "Nested native-scope button";
+	nativeButton.append(buttonIcon);
+	let nativeClicks = 0;
+	nativeButton.onclick = () => {
+		nativeClicks++;
+	};
+	const nativeCheckbox = document.createElement("input");
+	nativeCheckbox.type = "checkbox";
+	nativeCheckbox.id = "keyboard-native-checkbox";
+	const nativeLabel = document.createElement("label");
+	const labelText = document.createElement("span");
+	labelText.id = "keyboard-native-label";
+	labelText.textContent = "Toggle through label";
+	nativeLabel.append(nativeCheckbox, labelText);
+	const nativeRange = document.createElement("input");
+	nativeRange.type = "range";
+	nativeRange.id = "keyboard-native-range";
+	nativeRange.value = "0";
+	const nativeTab = document.createElement("button");
+	nativeTab.id = "keyboard-native-tab";
+	nativeTab.setAttribute("role", "tab");
+	nativeTab.textContent = "Panel tab";
+	let nativeTabClicks = 0;
+	nativeTab.onclick = () => {
+		nativeTabClicks++;
+	};
+	const nativeDisclosure = document.createElement("details");
+	const summary = document.createElement("summary");
+	summary.id = "keyboard-native-summary";
+	summary.textContent = "Panel subsection";
+	nativeDisclosure.append(summary);
+	nativePanel.append(
+		nativeEditor,
+		nativeButton,
+		nativeLabel,
+		nativeRange,
+		nativeTab,
+		nativeDisclosure,
+	);
+
 	const bar = document.createElement("div");
 	bar.id = "keyboard-bar";
 	bar.tabIndex = -1;
@@ -81,6 +135,7 @@ export function installKeyboardPolicyFixture(
 		checkbox,
 		range,
 		select,
+		nativePanel,
 		bar,
 	);
 	document.body.append(root);
@@ -130,11 +185,22 @@ export function installKeyboardPolicyFixture(
 			checked: checkbox.checked,
 			range: Number(range.value),
 			selected: select.value,
+			nativeClicks,
+			nativeTabClicks,
+			nativeChecked: nativeCheckbox.checked,
+			nativeRange: Number(nativeRange.value),
+			nativeDisclosure: nativeDisclosure.open,
+			nativeEditorValue: nativeEditor.value,
 			clicks,
 			presses,
 			releases,
 			cancels,
 		}),
+		focusNativeButton: async () => {
+			// Finish the browser's click-default task before starting a new deliberate focus action.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			nativeButton.focus();
+		},
 		openModal: () => {
 			modal = keyboard.modal(dialog);
 		},
@@ -158,6 +224,7 @@ export function installKeyboardPolicyFixture(
 			activity?.release();
 			closeModal();
 			scope.destroy();
+			nativeScope.destroy();
 			keyboard.returnToGame();
 			controller.dispose();
 			root.remove();

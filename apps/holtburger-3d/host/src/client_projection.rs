@@ -442,6 +442,10 @@ pub enum ClientWorldActivationCauseWire {
 pub struct ClientCurrentState {
     /// Fellowship replacement baseline, independent of sibling events.
     pub party: Option<crate::client_party::ClientPartySnapshot>,
+    /// Last accepted friend list; None until delivery or after retirement.
+    pub friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    /// Locally mirrored visibility preference.
+    pub friends_preferences: Option<crate::client_friends::ClientFriendsPreferences>,
     /// Locally mirrored party preferences after character description.
     pub party_preferences: Option<crate::client_party::ClientPartyPreferences>,
     /// Effective-home and crystal facts recovered atomically with the character.
@@ -997,6 +1001,11 @@ pub enum ClientHostEvent {
     CharacterPreferencesUpdated {
         appearance: ClientAppearanceOptions,
         party: crate::client_party::ClientPartyPreferences,
+        friends: crate::client_friends::ClientFriendsPreferences,
+    },
+    /// Retained friend list publication.
+    FriendsUpdated {
+        friends: Option<crate::client_friends::ClientFriendsSnapshot>,
     },
     PartyUpdated {
         party: Option<crate::client_party::ClientPartySnapshot>,
@@ -1179,6 +1188,8 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
                 crate::client_party::ClientPartySnapshot::project(party, snapshot.local_player_guid)
             }),
             party_preferences: snapshot.character_options.map(Into::into),
+            friends: snapshot.friends.as_ref().map(Into::into),
+            friends_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
             known_spells: snapshot.known_spells.clone(),
@@ -1354,6 +1365,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
             Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
+        ClientViewEvent::FriendsStateUpdated { friends } => Some(ClientHostEvent::FriendsUpdated {
+            friends: friends.as_ref().map(Into::into),
+        }),
         ClientViewEvent::FellowshipStateUpdated {
             fellowship,
             player_guid,
@@ -1366,6 +1380,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::CharacterPreferencesUpdated {
                 appearance: options.into(),
                 party: options.into(),
+                friends: options.into(),
             })
         }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {

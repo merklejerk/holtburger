@@ -2,6 +2,7 @@ pub use crate::messages::book::actions::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
 pub use crate::messages::fellowship::actions::*;
+pub use crate::messages::friends::*;
 pub use crate::messages::housing::*;
 pub use crate::messages::inventory::actions::*;
 pub use crate::messages::magic::actions::*;
@@ -23,6 +24,8 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    AddFriend(Box<AddFriendActionData>),
+    RemoveFriend(Box<RemoveFriendActionData>),
     BuyHouse(Box<HousePaymentActionData>),
     RentHouse(Box<HousePaymentActionData>),
     HouseQuery,
@@ -184,6 +187,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::ChatChannel => {
                     GameAction::ChatChannel(Box::new(ChatChannelActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::AddFriend => {
+                    GameAction::AddFriend(Box::new(AddFriendActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RemoveFriend => GameAction::RemoveFriend(Box::new(
+                    RemoveFriendActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::FellowshipCreate => GameAction::FellowshipCreate(Box::new(
                     FellowshipCreateActionData::unpack(data, offset)?,
                 )),
@@ -482,6 +491,16 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::ChatChannel(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::ChatChannel as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::AddFriend(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AddFriend as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RemoveFriend(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RemoveFriend as u32)
                     .unwrap();
                 data.pack(buf);
             }

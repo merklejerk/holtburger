@@ -1,6 +1,6 @@
 use crate::WorldEvent;
 use crate::handlers::{
-    fellowship, housing, inventory, movement, player, properties, system, trade,
+    fellowship, friends, housing, inventory, movement, player, properties, system, trade,
 };
 use crate::state::WorldState;
 use holtburger_protocol::messages::GameMessage;
@@ -45,6 +45,7 @@ pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mu
         if player_handled
             || housing::handle_event(state, event, events)
             || fellowship::handle_event(state, event, events)
+            || friends::handle_event(state, event, events)
             || trade::handle_event(state, event, events)
             || inventory::handle_event(state, event, events)
             || system::handle_event(state, event, events)

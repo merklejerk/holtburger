@@ -30,6 +30,8 @@
 	import RemoveIcon from "../assets/icons/hud-remove.svg?component";
 	import TradeIcon from "../assets/icons/hud-trade.svg?component";
 	import InviteIcon from "../assets/icons/hud-invite.svg?component";
+	import OnlineIcon from "../assets/icons/hud-online.svg?component";
+	import OfflineIcon from "../assets/icons/hud-offline.svg?component";
 	export type ClientHudIconName =
 		| "buffed"
 		| "debuffed"
@@ -49,6 +51,10 @@
 		| "interact"
 		| "trade"
 		| "invite"
+		/** Filled presence dot for an online character. */
+		| "online"
+		/** Hollow presence dot for an offline character. */
+		| "offline"
 		| "split"
 		| "examine"
 		| "helmet"
@@ -91,6 +97,8 @@
 		interact: InteractIcon,
 		trade: TradeIcon,
 		invite: InviteIcon,
+		online: OnlineIcon,
+		offline: OfflineIcon,
 		split: SplitIcon,
 		examine: ExamineIcon,
 		helmet: HelmetIcon,

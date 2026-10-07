@@ -3,6 +3,7 @@ pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
 pub use crate::messages::fellowship::events::*;
+pub use crate::messages::friends::*;
 pub use crate::messages::housing::*;
 pub use crate::messages::inventory::events::*;
 pub use crate::messages::magic::events::*;
@@ -26,6 +27,7 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    FriendsListUpdate(Box<FriendsListUpdateEventData>),
     HouseProfile(Box<HouseProfileEventData>),
     HouseData(Box<HouseData>),
     HouseStatus(Box<HouseStatusEventData>),
@@ -260,6 +262,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::QueryItemManaResponse => GameEvent::QueryItemManaResponse(
                     Box::new(QueryItemManaResponseEventData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::FriendsListUpdate => GameEvent::FriendsListUpdate(Box::new(
+                    FriendsListUpdateEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::FellowshipFullUpdate => GameEvent::FellowshipFullUpdate(Box::new(
                     FellowshipFullUpdateEventData::unpack(data, offset)?,
                 )),
@@ -564,6 +569,11 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::QueryItemManaResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::QueryItemManaResponse as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::FriendsListUpdate(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FriendsListUpdate as u32)
                     .unwrap();
                 data.pack(buf);
             }

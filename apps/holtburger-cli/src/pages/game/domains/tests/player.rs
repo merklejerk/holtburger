@@ -104,6 +104,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         .bits();
     let snapshot = ClientApplicationSnapshot {
         fellowship: None,
+        friends: None,
         housing: Default::default(),
         connection: None,
         trade: Default::default(),

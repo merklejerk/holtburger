@@ -51,6 +51,7 @@
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
 	import type { ClientActionBar } from "./client-action-bar-state";
+	import type { ClientFriendsState } from "./client-friends-state";
 	import ClientSocialPanel from "./ClientSocialPanel.svelte";
 	import type { ClientPartyState } from "./client-party-state";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
@@ -120,6 +121,7 @@
 	interface Props {
 		/** Session-lifetime party presentation owner. */
 		readonly party: ClientPartyState | null;
+		readonly friends: ClientFriendsState | null;
 		/** User-scoped fixed HUD geometry, independent of open-panel state. */
 		readonly hudLayout: ClientHudLayout;
 		readonly onHudPlacementChange: (
@@ -287,6 +289,7 @@
 	let {
 		hudLayout,
 		party,
+		friends,
 		onHudPlacementChange,
 		onHudReset,
 		spellBarShape,
@@ -1179,7 +1182,10 @@
 				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
 			>
 				{#if panel === "social"}
-					{#if party !== null}<ClientSocialPanel owner={party} />{/if}
+					{#if party !== null && friends !== null}<ClientSocialPanel
+							owner={party}
+							{friends}
+						/>{/if}
 				{:else if panel === "spells"}
 					{#if spells !== null}{#key spells}<ClientSpellsPanel
 								{spells}

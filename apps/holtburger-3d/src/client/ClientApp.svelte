@@ -1727,6 +1727,7 @@
 			{housing}
 			{housingManagement}
 			{party}
+			friends={session?.friends ?? null}
 			onSearchHousing={async (houseType) => {
 				if (session === null) return;
 				try {

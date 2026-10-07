@@ -110,6 +110,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.reset_friends();
         self.world.fellowship = None;
         self.reset_housing();
         if self.progression.clear() {
@@ -307,7 +308,8 @@ impl ClientRuntime {
         ) && let GameMessage::GameEvent(event) = &message
             && matches!(
                 event.event,
-                GameEvent::FellowshipFullUpdate(_)
+                GameEvent::FriendsListUpdate(_)
+                    | GameEvent::FellowshipFullUpdate(_)
                     | GameEvent::FellowshipUpdateFellow(_)
                     | GameEvent::FellowshipQuit(_)
                     | GameEvent::FellowshipDismiss(_)

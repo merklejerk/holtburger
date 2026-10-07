@@ -67,6 +67,7 @@
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
+	import { probeFriends } from "./client-friends-probe";
 	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
 	import { probeClientInventory } from "./client-inventory-probe";
@@ -941,6 +942,7 @@
 		/** Synthetic profiles and payment quotes through production session decoding. */
 		readonly housingProbe: ReturnType<typeof createHousingFixture>;
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
+		readonly probeFriends: () => ReturnType<typeof probeFriends>;
 		readonly probeParty: () => ReturnType<typeof probeParty>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
 		/** Exercise spell membership, artwork reuse, and panel teardown. */
@@ -1131,6 +1133,8 @@
 			appearanceOptions,
 			party: null,
 			partyPreferences: null,
+			friends: null,
+			friendsPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],
@@ -3539,6 +3543,13 @@
 				baseline: emitInteractionBaseline,
 				commands: interactionCommands,
 			}),
+			probeFriends: () =>
+				probeFriends({
+					context: partyProbeContext,
+					session: interactionLifecycle,
+					emit: emitInteractionEvent,
+					commands: interactionCommands,
+				}),
 			probeParty: () =>
 				probeParty({
 					context: partyProbeContext,
@@ -3736,6 +3747,7 @@
 {#if !previewCharacters}
 	<ClientWorldView
 		party={null}
+		friends={null}
 		characterGuid={housingCharacterGuid}
 		{houseCrystal}
 		{housing}

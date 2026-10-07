@@ -129,6 +129,7 @@ export async function probeParty(options: {
 		emit("client-character-preferences-updated", {
 			appearance: { showHelmet: true, showCloak: true },
 			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
 		});
 		for (let attempt = 0; attempt < 2; attempt++) {
 			component = mount(ClientSocialPanel, {
@@ -136,6 +137,7 @@ export async function probeParty(options: {
 				target,
 				props: {
 					owner,
+					friends: session.friends,
 				},
 			});
 			await settle();
@@ -347,7 +349,7 @@ export async function probeParty(options: {
 		component = mount(ClientSocialPanel, {
 			target,
 			context: options.context,
-			props: { owner },
+			props: { owner, friends: session.friends },
 		});
 		await settle();
 		const create = [
@@ -367,20 +369,6 @@ export async function probeParty(options: {
 			target.querySelector<HTMLButtonElement>("#social-party-tab");
 		if (partyTab === null) throw new Error("Missing Party tab");
 		partyTab.focus();
-		for (const key of ["ArrowRight", "ArrowLeft", "Home", "End"]) {
-			partyTab.dispatchEvent(
-				new KeyboardEvent("keydown", {
-					key,
-					code: key,
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-			await tick();
-			require(document.activeElement === partyTab &&
-				partyTab.getAttribute("aria-selected") ===
-					"true", "Tab navigation selected an unavailable Social domain");
-		}
 		create.click();
 		await tick();
 		const dialog = document.querySelector<HTMLDialogElement>(

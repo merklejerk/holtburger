@@ -181,6 +181,9 @@ impl ClientRuntime {
             | ClientCommand::RestoreCharacter(_)
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
+            ClientCommand::AddFriend { name } => self.add_friend(name).await,
+            ClientCommand::RemoveFriend { guid } => self.remove_friend(guid).await,
+
             ClientCommand::Talk(_)
             | ClientCommand::Tell { .. }
             | ClientCommand::ChannelMessage { .. }

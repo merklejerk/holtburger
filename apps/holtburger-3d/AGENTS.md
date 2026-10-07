@@ -82,11 +82,18 @@ target.
   keyboard navigation, equal-width controls, and the gap before content. Use
   `ui-body` once on the panel's outer content wrapper for the standard inset;
   do not add a second padding layer to a nested scroll area or tab body.
-  Feature owners retain selection and decide whether inactive content stays
-  mounted (for example, World's canvas).
-  Fixed-height tabbed windows use `ui-tabbed-panel` to reserve space below the
-  tab strip; ordinary tab content needs `min-height: 0` and `overflow: auto`
-  so it scrolls within that space instead of growing beyond the window.
+  Feature owners retain selection. Use `src/app/UiTabPanel.svelte` for content:
+  inactive tabs stay mounted and hidden/inert, retaining drafts and scrolling.
+  Its default scroll area fits within `ui-tabbed-panel`; canvas or nested scroll
+  layouts set `scroll={false}` and own their internal layout.
+- Declare retained HUD windows using `ClientHudWindow` with a `visible` prop,
+  rather than wrapping them in a visibility conditional or adding mounted-once
+  flags. The shell mounts its content on first opening and retains it on close.
+  Keep resource-owning feature components inside the window's child snippet so
+  their mount work is lazy too. Features receive visibility and stop hidden
+  polling/rendering and dismiss transient dialogs. Domain-bound windows such as
+  trade or vendor interactions may still unmount or key on interaction identity;
+  visibility does not extend the lifetime of a server interaction.
 - When a second real consumer reveals a common shell or behavior, consolidate
   that shared part and migrate the touched consumers together. Keep feature
   state, commands, and UX policy with their feature owners; shared UI belongs

@@ -52,6 +52,7 @@ async function fixture() {
 			party: null,
 			partyPreferences: null,
 			friends: null,
+			squelch: null,
 			friendsPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },

@@ -336,6 +336,10 @@ pub enum ClientHostCommand {
         request_id: String,
         accepted: bool,
     },
+    /// Ignore intents delegate to focused shared command behavior.
+    SubmitClientSquelch {
+        action: crate::client_squelch::ClientSquelchAction,
+    },
     /// Friends mutations use the focused shared command behavior.
     SubmitClientFriends {
         action: crate::client_friends::ClientFriendsAction,
@@ -421,6 +425,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "queue_client_character_motion_event",
     "submit_client_party",
     "submit_client_friends",
+    "submit_client_squelch",
     "set_client_party_updates",
     "send_client_chat",
     "teleport_client_to_map_position",
@@ -963,6 +968,11 @@ pub async fn dispatch_client(
                 .map(|()| HostResponse::Unit)
                 .map_err(application_error)
         }
+        SubmitClientSquelch { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SubmitClientFriends { action } => runtime
             .send_command(action.into())
             .await

@@ -72,7 +72,11 @@ export async function probeFriends(options: {
 			component = mount(ClientSocialPanel, {
 				target,
 				context,
-				props: { owner: party, friends: session.friends },
+				props: {
+					owner: party,
+					friends: session.friends,
+					squelch: session.squelch,
+				},
 			});
 			await settle();
 			const tab = target.querySelector<HTMLButtonElement>(

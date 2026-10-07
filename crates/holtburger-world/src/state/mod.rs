@@ -8,6 +8,7 @@ pub mod mutations;
 mod pose_orientation;
 mod scene_placement;
 pub mod self_movement;
+pub mod squelch;
 pub mod storage;
 #[cfg(test)]
 pub mod tests;

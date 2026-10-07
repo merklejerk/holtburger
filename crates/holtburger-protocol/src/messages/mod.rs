@@ -16,6 +16,7 @@ pub mod movement;
 pub mod network;
 pub mod object;
 pub mod player;
+pub mod squelch;
 pub mod trade;
 pub mod transport;
 pub mod utils;

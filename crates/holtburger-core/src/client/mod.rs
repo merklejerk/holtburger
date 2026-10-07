@@ -61,6 +61,7 @@ pub mod selection_envelope;
 pub mod selection_query;
 mod simulation;
 pub mod spell_inspection;
+mod squelch;
 pub mod trade;
 pub mod types;
 pub mod vendor_transaction;
@@ -363,6 +364,7 @@ impl ClientRuntime {
         ClientApplicationSnapshot {
             fellowship: self.world.fellowship.clone(),
             friends: self.world.friends.clone(),
+            squelch: self.world.squelch.clone(),
             can_teleport_from_map: self.can_teleport_from_map(),
             lifecycle: self.lifecycle(),
             connection: self.connection.snapshot(
@@ -782,6 +784,7 @@ impl ClientRuntime {
         self.publish_entity_facts();
         self.emit_fellowship_state_updated();
         self.emit_friends_state_updated();
+        self.emit_squelch_state_updated();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
         self.emit_dynamic_entity_snapshot();
@@ -828,6 +831,7 @@ impl ClientRuntime {
                 self.emit_progression_guards();
             }
             self.reset_friends();
+            self.reset_squelch();
             self.world.fellowship = None;
             self.emit_fellowship_state_updated();
             self.reset_container_access();
@@ -1279,6 +1283,7 @@ impl ClientRuntime {
                 self.emit_vendor_state_updated();
             }
             WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
+            WorldEvent::SquelchStateUpdated => self.emit_squelch_state_updated(),
             WorldEvent::FellowshipStateUpdated(fellowship) => {
                 let _ = self
                     .client_view_event_tx

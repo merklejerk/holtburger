@@ -111,6 +111,7 @@ impl ClientRuntime {
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
         self.reset_friends();
+        self.begin_squelch();
         self.world.fellowship = None;
         self.reset_housing();
         if self.progression.clear() {
@@ -309,6 +310,7 @@ impl ClientRuntime {
             && matches!(
                 event.event,
                 GameEvent::FriendsListUpdate(_)
+                    | GameEvent::SetSquelchDb(_)
                     | GameEvent::FellowshipFullUpdate(_)
                     | GameEvent::FellowshipUpdateFellow(_)
                     | GameEvent::FellowshipQuit(_)

@@ -182,6 +182,8 @@ impl ClientRuntime {
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
             ClientCommand::AddFriend { name } => self.add_friend(name).await,
+            ClientCommand::AddIgnore { name, scope } => self.add_ignore(name, scope).await,
+            ClientCommand::RemoveIgnore { guid, scope } => self.remove_ignore(guid, scope).await,
             ClientCommand::RemoveFriend { guid } => self.remove_friend(guid).await,
 
             ClientCommand::Talk(_)

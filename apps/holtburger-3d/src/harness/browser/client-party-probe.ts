@@ -138,6 +138,7 @@ export async function probeParty(options: {
 				props: {
 					owner,
 					friends: session.friends,
+					squelch: session.squelch,
 				},
 			});
 			await settle();
@@ -349,7 +350,7 @@ export async function probeParty(options: {
 		component = mount(ClientSocialPanel, {
 			target,
 			context: options.context,
-			props: { owner, friends: session.friends },
+			props: { owner, friends: session.friends, squelch: session.squelch },
 		});
 		await settle();
 		const create = [
@@ -357,8 +358,9 @@ export async function probeParty(options: {
 		].find((button) => button.textContent?.trim() === "Create Party");
 		if (create === undefined)
 			throw new Error("Missing Create Party entry button");
-		require(target.querySelector('input:not([type="checkbox"])') ===
-			null, "Empty party leaked inline creation settings");
+		require(target.querySelector(
+			'#social-party-panel input:not([type="checkbox"])',
+		) === null, "Empty party leaked inline creation settings");
 		require(target
 			.querySelector('[role="tab"][aria-selected="true"]')
 			?.classList.contains("ui-tab") ===

@@ -1,3 +1,4 @@
+import { characterLookupName } from "./client-character-name";
 import {
 	friendsActionSchema,
 	type FriendsAction,
@@ -8,10 +9,6 @@ import {
 /** Bound missing evidence without retrying mutations or inventing a refresh path. */
 export const FRIENDS_UPDATE_WAIT_MS = 5_000;
 
-/** Match presentation intent to ACE's case-insensitive lookup aliases (PlayerManager.cs:521). */
-function friendLookupName(name: string): string {
-	return name.replace(/^\++/, "").toLowerCase();
-}
 /** One local intent; its object identity protects against stale promise completions. */
 interface PendingFriendAction {
 	readonly action: FriendsAction;
@@ -95,8 +92,8 @@ export class ClientFriendsState {
 					(action.kind === "add"
 						? members.some(
 								(member) =>
-									friendLookupName(member.name) ===
-									friendLookupName(action.name),
+									characterLookupName(member.name) ===
+									characterLookupName(action.name),
 							)
 						: !members.some((member) => member.guid === action.guid));
 		if (settled) this.#clearPending();

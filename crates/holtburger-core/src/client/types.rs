@@ -370,6 +370,8 @@ pub struct ClientApplicationSnapshot {
     pub fellowship: Option<FellowshipState>,
     /// Retained friend facts; absent until initial delivery or after retirement.
     pub friends: Option<holtburger_world::state::friends::FriendsState>,
+    /// Retained replacement-only ignore database.
+    pub squelch: Option<holtburger_world::state::squelch::SquelchState>,
     /// Retained housing and pending query state for replacement recovery.
     pub housing: super::housing::HousingSnapshot,
     /// Current character may request map teleport; includes in-world lifecycle admission.
@@ -903,6 +905,11 @@ pub enum ClientViewEvent {
     /// Administrative evidence or uncertainty, independent of panel lifetime.
     HousingManagementFinished(super::housing_management::HousingManagementResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
+    /// Complete ignore replacement, including retirement.
+    SquelchStateUpdated {
+        /// Current character database.
+        squelch: Option<holtburger_world::state::squelch::SquelchState>,
+    },
     /// Replacement projection of the character-owned friend list.
     FriendsStateUpdated {
         /// None denotes unknown/retired rather than a confirmed empty list.
@@ -1154,6 +1161,16 @@ pub enum ClientCommand {
         target: Guid,
     },
     LeaveParty,
+    /// Add a server-resolved all-channel ignore.
+    AddIgnore {
+        name: String,
+        scope: holtburger_world::state::squelch::SquelchScope,
+    },
+    /// Remove only the explicit scope from the retained entry.
+    RemoveIgnore {
+        guid: Guid,
+        scope: holtburger_world::state::squelch::SquelchScope,
+    },
     /// Add a friend by server-resolved character name.
     AddFriend {
         name: String,

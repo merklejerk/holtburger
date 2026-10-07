@@ -1,3 +1,4 @@
+import type { SquelchSnapshot } from "../../client/client-squelch-contract";
 import type {
 	FriendsSnapshot,
 	FriendsPreferences,
@@ -141,6 +142,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"queue_client_character_motion_event",
 	"submit_client_party",
 	"submit_client_friends",
+	"submit_client_squelch",
 	"set_client_party_updates",
 	"send_client_chat",
 	"teleport_client_to_map_position",
@@ -258,6 +260,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-character-preferences-updated",
 	"client-party-updated",
 	"client-friends-updated",
+	"client-squelch-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-entity-health-updated",
@@ -363,6 +366,7 @@ export interface HostEventPayloadMap {
 		friends: FriendsPreferences;
 	};
 	"client-friends-updated": { friends: FriendsSnapshot | null };
+	"client-squelch-updated": { squelch: SquelchSnapshot | null };
 	"client-party-updated": {
 		party: PartySnapshot | null;
 	};

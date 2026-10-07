@@ -1728,6 +1728,7 @@
 			{housingManagement}
 			{party}
 			friends={session?.friends ?? null}
+			squelch={session?.squelch ?? null}
 			onSearchHousing={async (houseType) => {
 				if (session === null) return;
 				try {

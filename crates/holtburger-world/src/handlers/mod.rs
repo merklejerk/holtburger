@@ -6,6 +6,7 @@ pub mod movement;
 pub mod player;
 pub mod properties;
 pub mod routing;
+pub mod squelch;
 pub mod system;
 pub mod trade;
 

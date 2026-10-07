@@ -444,6 +444,8 @@ pub struct ClientCurrentState {
     pub party: Option<crate::client_party::ClientPartySnapshot>,
     /// Last accepted friend list; None until delivery or after retirement.
     pub friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    /// Character-owned ignore facts and basic scope eligibility.
+    pub squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
     /// Locally mirrored visibility preference.
     pub friends_preferences: Option<crate::client_friends::ClientFriendsPreferences>,
     /// Locally mirrored party preferences after character description.
@@ -1003,6 +1005,10 @@ pub enum ClientHostEvent {
         party: crate::client_party::ClientPartyPreferences,
         friends: crate::client_friends::ClientFriendsPreferences,
     },
+    /// Retained character-owned ignore publication.
+    SquelchUpdated {
+        squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
+    },
     /// Retained friend list publication.
     FriendsUpdated {
         friends: Option<crate::client_friends::ClientFriendsSnapshot>,
@@ -1189,6 +1195,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             }),
             party_preferences: snapshot.character_options.map(Into::into),
             friends: snapshot.friends.as_ref().map(Into::into),
+            squelch: snapshot.squelch.as_ref().map(Into::into),
             friends_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
@@ -1365,6 +1372,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
             Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
+        ClientViewEvent::SquelchStateUpdated { squelch } => Some(ClientHostEvent::SquelchUpdated {
+            squelch: squelch.as_ref().map(Into::into),
+        }),
         ClientViewEvent::FriendsStateUpdated { friends } => Some(ClientHostEvent::FriendsUpdated {
             friends: friends.as_ref().map(Into::into),
         }),

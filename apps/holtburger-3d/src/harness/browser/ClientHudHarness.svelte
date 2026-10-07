@@ -67,6 +67,8 @@
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
+	import { ClientPartyState } from "../../client/client-party-state";
+	import { probeSquelch } from "./client-squelch-probe";
 	import { probeFriends } from "./client-friends-probe";
 	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
@@ -942,6 +944,7 @@
 		/** Synthetic profiles and payment quotes through production session decoding. */
 		readonly housingProbe: ReturnType<typeof createHousingFixture>;
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
+		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
 		readonly probeFriends: () => ReturnType<typeof probeFriends>;
 		readonly probeParty: () => ReturnType<typeof probeParty>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
@@ -1134,6 +1137,7 @@
 			party: null,
 			partyPreferences: null,
 			friends: null,
+			squelch: null,
 			friendsPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
@@ -1237,6 +1241,14 @@
 			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
+	// Feed the real Social window as well as the isolated domain probes.
+	const socialParty = new ClientPartyState(
+		interactionLifecycle,
+		(message) => {
+			throw new Error(message);
+		},
+		() => {},
+	);
 	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
 	let bookReader = $state<ClientBookReaderState>({ kind: "idle" });
 	const bookReaderOwner = new ClientBookReader(interactionLifecycle);
@@ -3543,6 +3555,13 @@
 				baseline: emitInteractionBaseline,
 				commands: interactionCommands,
 			}),
+			probeSquelch: () =>
+				probeSquelch({
+					context: partyProbeContext,
+					session: interactionLifecycle,
+					emit: emitInteractionEvent,
+					commands: interactionCommands,
+				}),
 			probeFriends: () =>
 				probeFriends({
 					context: partyProbeContext,
@@ -3725,6 +3744,7 @@
 			interactions.destroy();
 			unsubscribeSelection();
 			selection.destroy();
+			socialParty.destroy();
 			interactionLifecycle.stop();
 			overlayObservation.restore();
 			readMinimapOverlayArcCalls = () => 0;
@@ -3746,8 +3766,9 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
-		party={null}
-		friends={null}
+		party={socialParty}
+		friends={interactionLifecycle.friends}
+		squelch={interactionLifecycle.squelch}
 		characterGuid={housingCharacterGuid}
 		{houseCrystal}
 		{housing}

@@ -70,6 +70,8 @@
 	import { ClientPartyState } from "../../client/client-party-state";
 	import { probeAllegiance } from "./client-allegiance-probe";
 	import { probeSquelch } from "./client-squelch-probe";
+	import { probeOverlayTheme } from "./overlay-theme-probe";
+	import { probeSelectedActions } from "./client-selected-actions-probe";
 	import { probeFriends } from "./client-friends-probe";
 	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
@@ -531,7 +533,8 @@
 		readonly selectedGuid: number | null;
 		readonly selectionAnnouncement: string;
 		readonly selectedEntityHud: null | {
-			readonly interactDisabled: boolean;
+			/** Whether the direct interaction command is currently offered. */
+			readonly interactionAvailable: boolean;
 			readonly name: string;
 		};
 		readonly targetIndicator: null | {
@@ -947,6 +950,12 @@
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
 		readonly probeAllegiance: () => ReturnType<typeof probeAllegiance>;
 		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
+		/** Verify shared surface, backdrop, and density overrides across overlay components. */
+		readonly probeOverlayTheme: () => ReturnType<typeof probeOverlayTheme>;
+		/** Verify selected HUD direct actions and icon-labeled popup commands. */
+		readonly probeSelectedActions: () => ReturnType<
+			typeof probeSelectedActions
+		>;
 		readonly probeFriends: () => ReturnType<typeof probeFriends>;
 		readonly probeParty: () => ReturnType<typeof probeParty>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
@@ -2983,7 +2992,7 @@
 				selectedEntityHud === null
 					? null
 					: {
-							interactDisabled: interactButton?.disabled === true,
+							interactionAvailable: interactButton?.disabled === false,
 							name:
 								selectedEntityHud
 									.querySelector("strong")
@@ -3579,6 +3588,8 @@
 					emit: emitInteractionEvent,
 					commands: interactionCommands,
 				}),
+			probeOverlayTheme: () => probeOverlayTheme(partyProbeContext),
+			probeSelectedActions: () => probeSelectedActions(partyProbeContext),
 			probeFriends: () =>
 				probeFriends({
 					context: partyProbeContext,

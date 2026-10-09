@@ -34,7 +34,7 @@
 	use:dismissDialogOnBackdrop={() => {
 		if (dismissOnBackdrop) onCancel();
 	}}
-	class={`ui-dialog ui-panel ${className}`}
+	class={`ui-dialog ui-overlay-surface ${className}`}
 	tabindex="-1"
 	aria-labelledby={headingId}
 	aria-describedby={describedBy}
@@ -54,20 +54,15 @@
 			max-height: calc(100vh - 2rem);
 			box-sizing: border-box;
 			overflow: auto;
-			padding: 1.25rem;
-			color: var(--ui-color-text);
-		}
-		.ui-dialog::backdrop {
-			background: rgb(0 0 0 / 55%);
+			padding: var(--ui-dialog-padding, var(--ui-overlay-padding));
 		}
 		.ui-dialog :global(.ui-dialog-actions) {
 			display: flex;
 			justify-content: flex-end;
-			gap: 0.75rem;
+			gap: var(--ui-overlay-gap);
 		}
 		h2 {
 			margin-top: 0;
-			font-size: 1.1rem;
 		}
 	}
 </style>

@@ -61,13 +61,13 @@
 </script>
 
 <div
-	class="quantity-overlay"
+	class="quantity-overlay ui-dialog-backdrop"
 	use:dismissDialogOnBackdrop={onCancel}
 	class:inventory-split-overlay={purpose === "split"}
 >
 	<dialog
 		open
-		class="quantity-dialog ui-panel"
+		class="quantity-dialog ui-overlay-surface"
 		class:inventory-split-dialog={purpose === "split"}
 		class:vendor-quantity-dialog={purpose === "buy"}
 		aria-label={`${action} ${request.name}`}
@@ -134,23 +134,21 @@
 			z-index: 5;
 			display: grid;
 			place-items: center;
-			background: color-mix(in srgb, var(--ui-color-shadow) 35%, transparent);
 		}
 		.quantity-dialog {
 			position: relative;
 			margin: 8px;
 			max-width: calc(100% - 16px);
-			color: var(--ui-color-text);
 		}
 		form {
 			display: grid;
-			gap: 12px;
-			padding: 12px;
+			gap: var(--ui-overlay-gap);
+			padding: var(--ui-dialog-padding, var(--ui-overlay-padding));
 		}
 		label {
 			display: flex;
 			align-items: center;
-			gap: 8px;
+			gap: var(--ui-overlay-gap);
 		}
 		input {
 			min-width: 0;
@@ -162,7 +160,7 @@
 		.quantity-actions {
 			display: flex;
 			justify-content: end;
-			gap: 8px;
+			gap: var(--ui-overlay-gap);
 		}
 	}
 </style>

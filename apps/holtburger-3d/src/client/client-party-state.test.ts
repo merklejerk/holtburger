@@ -68,6 +68,7 @@ function fixture() {
 		updates,
 		failure,
 		notice,
+		snapshot: () => party,
 		setParty: (next: PartySnapshot | null) => {
 			party = next;
 		},
@@ -114,20 +115,23 @@ describe("party presentation ownership", () => {
 
 	it("guards duplicate dispatch, retains authoritative facts, and settles from the observed state", () => {
 		const f = fixture();
+		const authoritative = f.snapshot();
+		if (authoritative === null) throw new Error("Missing fixture party");
 		f.owner.request({ kind: "openness", open: true });
 		f.owner.request({ kind: "openness", open: true });
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		expect(f.owner.read().party?.open).toBe(true);
 		expect(f.owner.read().pending).toBe(true);
-		const current = f.owner.read().party;
-		if (current === null) throw new Error("Missing party");
+		expect(f.snapshot()?.open).toBe(false);
 		f.setParty({
-			...current,
-			members: current.members.map((member) => ({
+			...authoritative,
+			members: authoritative.members.map((member) => ({
 				...member,
 				vitals: [1, 2, 3, 4, 5, 6],
 			})),
 		});
+		expect(f.owner.read().pending).toBe(true);
+		f.setParty({ ...authoritative, open: true });
 		expect(f.owner.read().pending).toBe(false);
 		f.owner.destroy();
 	});
@@ -196,6 +200,27 @@ describe("party presentation ownership", () => {
 		expect(f.submit).not.toHaveBeenCalled();
 		f.owner.destroy();
 	});
+	it.each(["hide", "portal"])(
+		"retires destructive review on %s",
+		(transition) => {
+			const f = fixture();
+			f.owner.setVisible(true);
+			f.owner.request({ kind: "dismiss", target: 2 });
+			const question = f.owner.question();
+			if (question === null) throw new Error("Missing confirmation");
+			if (transition === "hide") f.owner.setVisible(false);
+			else
+				f.lifecycle({
+					kind: "portal-space",
+					worldGeneration: 2,
+					cause: "teleport",
+				});
+			expect(f.owner.question()).toBeNull();
+			f.owner.respond(question.requestId, true);
+			expect(f.submit).not.toHaveBeenCalled();
+			f.owner.destroy();
+		},
+	);
 	it("leaves immediately as a member without a confirmation", () => {
 		const f = fixture();
 		const party = f.owner.read().party;

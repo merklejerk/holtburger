@@ -1,6 +1,9 @@
 import { mount, tick, unmount } from "svelte";
 import ClientSocialPanel from "../../client/ClientSocialPanel.svelte";
-import { ClientPartyState } from "../../client/client-party-state";
+import {
+	ClientPartyState,
+	PARTY_DISPLAY_INTERVAL_MS,
+} from "../../client/client-party-state";
 import type { ClientLifecycleSession } from "../../client/client-lifecycle-session";
 import type { SquelchSnapshot } from "../../client/client-squelch-contract";
 
@@ -22,6 +25,13 @@ export async function probeSquelch(options: {
 		},
 		() => {},
 	);
+	// Count real owner reads to verify inactive tabs release their display timer.
+	const readParty = party.read.bind(party);
+	let partyReads = 0;
+	party.read = () => {
+		partyReads++;
+		return readParty();
+	};
 	const target = document.createElement("div");
 	target.className = "ui-theme";
 	target.style.width = "340px";
@@ -77,6 +87,12 @@ export async function probeSquelch(options: {
 			await settle();
 			element<HTMLButtonElement>("#social-ignores-tab").click();
 			await settle();
+			const readsWhileHidden = partyReads;
+			await new Promise((resolve) =>
+				setTimeout(resolve, PARTY_DISPLAY_INTERVAL_MS * 2),
+			);
+			require(partyReads ===
+				readsWhileHidden, "Inactive Party tab continued display polling");
 			const rows = target.querySelectorAll('[aria-label="Ignores"] li');
 			require(rows[0]?.textContent?.includes(
 				pass === 0 ? "Amy" : "+Cara",

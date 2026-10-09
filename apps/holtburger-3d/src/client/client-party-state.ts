@@ -65,9 +65,9 @@ export class ClientPartyState implements LocalDialogSource {
 			if (event.type === "lifecycle") {
 				if (event.lifecycle.kind === "in-world") {
 					if (this.#visible) void this.#updates(true);
-				} else if (event.lifecycle.kind !== "portal-space") {
-					this.#pending = null;
+				} else {
 					this.#clearReview();
+					if (event.lifecycle.kind !== "portal-space") this.#pending = null;
 				}
 			}
 		});
@@ -120,7 +120,8 @@ export class ClientPartyState implements LocalDialogSource {
 		}
 		if (
 			this.#review !== null &&
-			(this.#review.player !== state.playerGuid ||
+			(state.lifecycle?.kind !== "in-world" ||
+				this.#review.player !== state.playerGuid ||
 				this.#review.roster !== this.#roster())
 		)
 			this.#clearReview();
@@ -310,6 +311,7 @@ export class ClientPartyState implements LocalDialogSource {
 	setVisible(visible: boolean): void {
 		if (this.#visible === visible) return;
 		this.#visible = visible;
+		if (!visible) this.#clearReview();
 		if (this.#session.state().lifecycle?.kind === "in-world")
 			void this.#updates(visible);
 	}

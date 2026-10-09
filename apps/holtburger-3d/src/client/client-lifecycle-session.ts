@@ -578,11 +578,7 @@ export class ClientLifecycleSession {
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
 		this.#state = emptyState();
-		this.friends.reset();
-		this.squelch.reset();
-		this.allegiance.reset();
-		this.#party = null;
-		this.#partyPreferences = null;
+		this.#resetSocialState();
 		this.#connection = null;
 		this.characterSheet.reset(null);
 		this.#vendor = null;
@@ -606,11 +602,7 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
-		this.friends.reset();
-		this.squelch.reset();
-		this.allegiance.reset();
-		this.#party = null;
-		this.#partyPreferences = null;
+		this.#resetSocialState();
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
 		this.#dynamicSession.stop();
@@ -1612,11 +1604,7 @@ export class ClientLifecycleSession {
 		if (retiresCharacterDescription) this.characterSheet.reset(null);
 		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
 		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
-			this.friends.reset();
-			this.squelch.reset();
-			this.allegiance.reset();
-			this.#party = null;
-			this.#partyPreferences = null;
+			this.#resetSocialState();
 		}
 		// Initial activation may arrive as portal-space without a separate entering-world event.
 		// Its completion supplies the new character baseline; teleports retain the current one.
@@ -1732,6 +1720,15 @@ export class ClientLifecycleSession {
 		this.#state = { ...this.#state, lifecycle, exit, activeConfirmation: null };
 		this.#emit({ type: "lifecycle", lifecycle });
 		this.#emit({ type: "exit-requested", exit });
+	}
+
+	/** Retire all character-owned Social facts together; portals retain them. */
+	#resetSocialState(): void {
+		this.friends.reset();
+		this.squelch.reset();
+		this.allegiance.reset();
+		this.#party = null;
+		this.#partyPreferences = null;
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {

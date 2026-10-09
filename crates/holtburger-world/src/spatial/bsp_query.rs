@@ -27,7 +27,7 @@ pub struct ShapeContact {
     pub depth: f32,
 }
 
-/// Bounds stationary recovery work across partition depth and scene candidates.
+/// Bounds proposed escape endpoints and containing colliders, independently of BSP depth.
 pub(super) const SOLID_RECOVERY_CANDIDATE_LIMIT: usize = 32;
 
 /// Center occupancy is independent of whether a useful correction can be proposed.
@@ -36,7 +36,7 @@ pub(super) enum SolidRegionRecovery {
     Outside,
     /// Candidate endpoints; an empty list still means the center is occupied.
     Occupied(Vec<Vector3>),
-    /// Classification exceeded the bounded ancestor-plane search.
+    /// The occupied leaf requires more escape candidates than the bounded search admits.
     LimitExceeded,
 }
 
@@ -50,15 +50,20 @@ pub(super) fn placed_solid_recovery_candidates(
     epsilon: f32,
 ) -> SolidRegionRecovery {
     let mut node = &solid.bsp;
-    let mut planes = Vec::new();
+    // Exhaustion discards escape proposals, not occupancy proof. A deeper subtree may still
+    // classify the center as clear, as 0x01002287 does at the 0x8FBF0025 login placement.
+    let mut candidate_planes = Some(Vec::new());
     loop {
         if !node_bounds_reach(node, collider, center, radius) {
             return SolidRegionRecovery::Outside;
         }
         let (plane, positive, negative) = match node {
             BspNode::Leaf(leaf) => {
-                return if leaf.solid == 1 {
-                    SolidRegionRecovery::Occupied(
+                if leaf.solid != 1 {
+                    return SolidRegionRecovery::Outside;
+                }
+                return match candidate_planes {
+                    Some(planes) => SolidRegionRecovery::Occupied(
                         planes
                             .into_iter()
                             .map(|plane: BoundingPlane| {
@@ -66,9 +71,8 @@ pub(super) fn placed_solid_recovery_candidates(
                                 center + plane.normal * depth
                             })
                             .collect(),
-                    )
-                } else {
-                    SolidRegionRecovery::Outside
+                    ),
+                    None => SolidRegionRecovery::LimitExceeded,
                 };
             }
             BspNode::Port(portal) => (
@@ -82,20 +86,22 @@ pub(super) fn placed_solid_recovery_candidates(
                 internal.neg.as_deref(),
             ),
         };
-        if planes.len() == SOLID_RECOVERY_CANDIDATE_LIMIT {
-            return SolidRegionRecovery::LimitExceeded;
-        }
         let plane = transform_plane(plane, collider);
-        let child = if plane.distance_to_point(&center) >= 0.0 {
-            planes.push(BoundingPlane::positive(plane));
-            positive
+        let (boundary, child) = if plane.distance_to_point(&center) >= 0.0 {
+            (BoundingPlane::positive(plane), positive)
         } else {
-            planes.push(BoundingPlane::negative(plane));
-            negative
+            (BoundingPlane::negative(plane), negative)
         };
         let Some(child) = child else {
             return SolidRegionRecovery::Outside;
         };
+        if let Some(planes) = candidate_planes.as_mut() {
+            if planes.len() == SOLID_RECOVERY_CANDIDATE_LIMIT {
+                candidate_planes = None;
+            } else {
+                planes.push(boundary);
+            }
+        }
         node = child;
     }
 }

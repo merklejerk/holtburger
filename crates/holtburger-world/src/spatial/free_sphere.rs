@@ -1188,8 +1188,8 @@ mod tests {
         assert_clear(&scene, result);
     }
 
-    #[test]
-    fn stationary_settle_reports_recovery_unavailable_at_the_partition_work_limit() {
+    /// Adds irrelevant ancestors beyond the escape budget without changing the slab's solid.
+    fn deeply_partitioned_slab() -> PlacedCollider {
         let mut collider = partitioned_slab();
         let original = collider.shape.as_bsp().unwrap();
         let mut bsp = original.bsp.clone();
@@ -1212,9 +1212,14 @@ mod tests {
             box_bounds: original.box_bounds,
             polygons: original.polygons.clone(),
         }));
+        collider
+    }
+
+    #[test]
+    fn stationary_settle_reports_recovery_unavailable_at_the_escape_candidate_limit() {
         assert!(matches!(
             settle_free_sphere(
-                &scene(vec![collider]),
+                &scene(vec![deeply_partitioned_slab()]),
                 config().into(),
                 body(Vector3::new(10.0, 20.05, 5.0)),
                 PhysicalCollisionFilter::ALL
@@ -1222,6 +1227,25 @@ mod tests {
             .unwrap(),
             FreeSphereSettleOutcome::RecoveryUnavailable { .. }
         ));
+    }
+
+    #[test]
+    fn stationary_settle_classifies_clear_centers_beyond_the_escape_candidate_limit() {
+        let scene = scene(vec![deeply_partitioned_slab()]);
+        // The center is outside the slab, but the sphere overlaps its face. Classification must
+        // finish through the deep BSP before ordinary surface settlement separates the sphere.
+        let original = body(Vector3::new(12.5, 20.05, 5.0));
+        let result = settled(
+            settle_free_sphere(
+                &scene,
+                config().into(),
+                original,
+                PhysicalCollisionFilter::ALL,
+            )
+            .unwrap(),
+        );
+        assert!(result.pose.coords.x > original.pose.coords.x);
+        assert_clear(&scene, result);
     }
 
     #[test]

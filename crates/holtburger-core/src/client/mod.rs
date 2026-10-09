@@ -52,6 +52,7 @@ mod messages;
 mod movement;
 pub mod movement_types;
 pub mod object_preview;
+mod party;
 pub mod precise_jump;
 pub mod precise_jump_prediction;
 mod precise_jump_runtime;
@@ -756,16 +757,6 @@ impl ClientRuntime {
                 )
             )
         })
-    }
-
-    fn emit_fellowship_state_updated(&self) {
-        let _ = self
-            .client_view_event_tx
-            .send(ClientViewEvent::FellowshipStateUpdated {
-                player_guid: (self.world.player.guid != Guid::NULL)
-                    .then_some(self.world.player.guid),
-                fellowship: self.world.fellowship.clone(),
-            });
     }
 
     fn emit_vendor_state_updated(&self) {

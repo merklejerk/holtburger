@@ -1,6 +1,6 @@
 # H3D social panel
 
-Status: Party, Friends, Ignores, and Allegiance accepted. All four slices passed scoped code-quality review and automated verification. Final Social cleanup/review remains unstarted.
+Status: Party, Friends, Ignores, and Allegiance accepted. Final Social cleanup and scoped cross-domain review are complete; all planned work is verified.
 
 ## Goal and boundaries
 
@@ -28,9 +28,9 @@ Out of scope:
 
 The Party shortcut becomes the Social window entry. The active tab, row selection, search terms, layout, and local confirmation policy belong to H3D. Persist window placement through the existing HUD settings mechanism. Keep active tab and search session-local initially; additional preference persistence has no demonstrated requirement.
 
-## Ground truth and current implementation
+## Ground truth and original implementation
 
-Paths are relative to the repository root. Reference line numbers describe the investigated revision and may move during implementation.
+Paths are relative to the repository root. Implementation observations in this source inventory describe the original planning baseline, not the finished product. Reference line numbers describe the investigated revision and may move during implementation.
 
 | Source | What it establishes |
 | --- | --- |
@@ -308,7 +308,7 @@ Final cleanup phase:
 - Check no domain owner is destroyed by payload changes or tied to tab mounting.
 - Confirm the management tab never subscribes reactively to raw vital cadence.
 - Reassess any duplicated helpers: extract only proven shared primitives, not a generic state machine.
-- Audit all four Social domains against the ownership table. Party already has focused world semantics and frontend interaction policy; extract its remaining substantial core command implementations from `client/commands.rs` into a focused Party module, preserving command behavior and leaving dispatcher delegation. Remove any duplicate paths exposed by that move. Review lifecycle-session domain retention/composition across all four tabs; consolidate only concrete duplicate ownership or policy, without rebuilding unrelated session infrastructure.
+- Audit all four Social domains against the ownership table. Party already has focused world semantics and frontend interaction policy; extract its remaining substantial core command implementations from `client/commands.rs` into a focused Party module, preserving command behavior and leaving dispatcher delegation. Completed in the final cleanup checkpoint below. Remove any duplicate paths exposed by that move. Review lifecycle-session domain retention/composition across all four tabs; consolidate only concrete duplicate ownership or policy, without rebuilding unrelated session infrastructure.
 - Complete targeted correctness and code-quality review, including retail markers when observable behavior changed.
 - Update this working plan's implementation/check/gate record. Do not stage or commit unless asked.
 
@@ -328,15 +328,15 @@ Final cleanup phase:
 
 ## Definition of done
 
-- [ ] All four slices expose functional UI, commands, incoming state, and current-state recovery.
+- [x] All four slices expose functional UI, commands, incoming state, and current-state recovery.
 - [x] Each slice has passed its automated checks and explicit user manual acceptance gate.
-- [ ] Party management contains no member vital view; shared state remains suitable for the follow-up HUD.
+- [x] Party management contains no member vital view; shared state remains suitable for the follow-up HUD.
 - [x] Ignores defaults to account scope and accurately distinguishes target scope from local ownership.
 - [x] Allegiance displays a partial relationship view and honest XP facts with no administration expansion.
-- [ ] Membership/list optimism never mutates authoritative facts; existing locally mirrored preferences remain explicitly distinct from acknowledged facts. Host queue acceptance is never presented as server acceptance.
-- [ ] Pending UI is bounded, stale local work cannot affect a different character/domain, and closing tabs does not lose sync.
-- [ ] No generic transaction framework, automatic mutation retry, unused metrics, or unsupported guarantees were added.
-- [ ] Relevant lint/type/test/runtime checks pass and cleanup/review is complete.
+- [x] Membership/list optimism never mutates authoritative facts; existing locally mirrored preferences remain explicitly distinct from acknowledged facts. Host queue acceptance is never presented as server acceptance.
+- [x] Pending UI is bounded, stale local work cannot affect a different character/domain, and closing tabs does not lose sync.
+- [x] No generic transaction framework, automatic mutation retry, unused metrics, or unsupported guarantees were added.
+- [x] Relevant lint/type/test/runtime checks pass and cleanup/review is complete.
 
 ## Decisions and acceptance record
 
@@ -350,7 +350,7 @@ Source review resolved option acknowledgement/effects, the replacement-snapshot 
 | Friends | Implemented; focused automated checks, nonvisual browser verification, and scoped ownership/code-quality review passed. | Accepted 2026-10-07 |
 | Ignores | Implemented; automated checks, nonvisual browser verification, and scoped code-quality review passed. | Accepted 2026-10-07 |
 | Allegiance | Implemented; focused tests, nonvisual browser verification, and scoped quality review passed. | Accepted 2026-10-08 |
-| Cleanup/review | Not started | Pending |
+| Cleanup/review | Complete; scoped cross-domain review and targeted regression checks passed. | Complete; user requested commit 2026-10-08 |
 
 ### Party acceptance and code-quality review (2026-10-07)
 
@@ -625,3 +625,19 @@ Verdict: ready within the accumulated Allegiance and inspection-rank scope, with
 Consolidation review retained focused domain owners rather than adding a generic Social sync manager. Rank-title lookup serves both relationship projection and appraisal interpretation in world; H3D retains layout and visibility policy. Friends and Allegiance share presence styles and the existing window/tab/list/dialog primitives. Read completion releases admission only; dispatch acceptance never mutates authoritative relationships. The one query deadline and one visibility interval have separate responsibilities and lifetimes. No additional transactional bookkeeping is warranted.
 
 Final verification: 19 focused Rust Allegiance tests, 22 world inspection tests, the host inspection wire-fixture test, and 74 frontend allegiance/lifecycle/inspection tests pass. App/node/test/Electron checks, TypeScript/dead-code lint, affected host/CLI Clippy with warnings denied, formatting, and whitespace checks pass. Nonvisual Allegiance and focused inspection browser suites pass. The preceding inspection checkpoint records the inherited full-HUD spell-fixture mismatch; this review does not claim that unrelated full suite passed.
+
+### Final Social cleanup and cross-domain review (2026-10-08)
+
+The user authorized the final cleanup after accepting all four tabs. Corrected the earlier conversational claim that Party core extraction was already done: its world permissions had been consolidated, but command bodies still lived in the central dispatcher. Moved the existing Party commands, update-demand forwarding, retained publication and status output into `core::client::party`, alongside their six existing command-path tests. Dispatch admission and wire behavior are unchanged; the central dispatcher delegates. The module introduces no new state or abstraction. The TUI continues to use the same commands.
+
+Consolidated the three identical H3D Social retirement sequences into `ClientLifecycleSession.#resetSocialState`. This is a session composition method, not a new aggregate domain owner or an atomic-publication promise. Portals retain facts and pending actions. Party is still session-lived through the app composition; Friends, Ignores and Allegiance remain dedicated session-owned domains. No owner is reconstructed by payload updates or tab selection.
+
+Corrected one frontend lifetime gap: inactive Party tabs no longer sample their display, and hiding the Party tab/window or entering portal travel dismisses destructive reviews. Creation/handoff drafts retire when the Party tab becomes inactive. Membership and pending commands remain retained. Unit tests cover review cancellation on hide/portal; the Ignores browser probe counts real Party reads and verifies the inactive tab stays idle. Reworked the Party optimism test so unrelated vital updates preserve pending openness and only authoritative openness evidence settles it; the previous test fed the optimistic display back as fake authority.
+
+Verdict: ready within the Social scope; no remaining blocking findings. Review traced all four protocol/world reducers and domain command owners through host action adapters, replacement/incremental projection, stdio publication, strict frontend schemas, session routing/recovery/retirement, domain presentation owners and actual retained window/tab composition. Existing host parity tests exercise each domain's real projection. Authoritative membership remains independent of tab visibility and scene presence. Locally mirrored preferences remain a separate contract. Read completion and queue acceptance never claim mutation acknowledgement. The management view removes vital payloads before publishing cold Svelte state.
+
+Reuse decisions: retain independent domain settlement rules because Party's server roster, Friends' name-resolved add, Ignores' overlapping scopes and Allegiance's supported profile query have different evidence and timing. Reuse existing window, tab, disclosure, capped list, presence and modal primitives. Keep the disabled Tell button as explicitly requested; H3D has no Tell implementation to retire. No generic transaction manager, mutation retry, speculative revision tracking or new dependencies were added. Retained browser probes verify product behavior and remain harness-local. The Party core move is primarily relocation; the small net additions cover comments and demonstrated regression checks.
+
+Verification: 98 focused Social/session/dialog/contract frontend tests, 14 keyboard policy tests and the six relocated Party command tests pass. Cross-domain Rust filters pass for fellowship, friends, squelch and allegiance; 40 host projection tests pass, including replacement/incremental parity for each Social domain. App/node/test/Electron checks report zero Svelte errors/warnings; TypeScript/dead-code lint, protocol/world/core/host/CLI Clippy with warnings denied, formatting and whitespace checks pass. Nonvisual browser suites pass for Party, Friends, Ignores (including retained windows and hidden Party sampling), Allegiance and keyboard ownership. No agent-run visual acceptance or additional live multiplayer test is claimed. General renderer and transport internals remain outside the audit. The previously reproduced broad-HUD spell-fixture mismatch remains outside scope; no full-HUD passing claim is made.
+
+All planned Social slices and the cleanup phase are complete. The user subsequently requested committing the verified cleanup. Existing ACE diagnostics remain untouched and excluded from the commit.

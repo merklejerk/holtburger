@@ -86,7 +86,7 @@
 		members.filter((member) => member.guid !== view.player),
 	);
 	$effect(() => {
-		if (!visible) {
+		if (!visible || selected !== "party") {
 			creationPlayer = null;
 			handoff = null;
 			return;

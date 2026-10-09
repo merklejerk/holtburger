@@ -23,10 +23,13 @@
 	onMount(() => keyboard.activate(dialog));
 </script>
 
-<div class="binding-dialog-overlay" use:dismissDialogOnBackdrop={onCancel}>
+<div
+	class="binding-dialog-overlay ui-dialog-backdrop"
+	use:dismissDialogOnBackdrop={onCancel}
+>
 	<dialog
 		open
-		class="binding-dialog ui-panel"
+		class="binding-dialog ui-overlay-surface"
 		aria-label={`Set key for ${action}`}
 		tabindex="-1"
 		bind:this={dialog}
@@ -71,7 +74,6 @@
 			z-index: 5;
 			display: grid;
 			place-items: center;
-			background: rgb(0 0 0 / 35%);
 		}
 		.binding-dialog {
 			position: relative;
@@ -79,12 +81,11 @@
 			width: min(25rem, calc(100% - 16px));
 			max-height: calc(100% - 16px);
 			margin: 8px;
-			padding: 12px;
+			padding: var(--ui-dialog-padding, var(--ui-overlay-padding));
 			overflow: auto;
-			color: var(--ui-color-text);
 		}
 		p {
-			margin: 12px 0;
+			margin: var(--ui-overlay-padding) 0;
 		}
 		.binding-dialog-conflict {
 			display: flex;
@@ -111,7 +112,7 @@
 			display: flex;
 			flex-wrap: wrap;
 			justify-content: flex-end;
-			gap: 8px;
+			gap: var(--ui-overlay-gap);
 		}
 	}
 </style>

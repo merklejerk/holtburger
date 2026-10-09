@@ -95,7 +95,7 @@
 	{id}
 	popover="manual"
 	role="tooltip"
-	class="inventory-currency-overlay"
+	class="inventory-currency-overlay ui-overlay-surface"
 	onpointerdown={() => escapeContext?.promote()}
 	onpointerenter={cancelClose}
 	onpointerleave={scheduleClose}
@@ -136,15 +136,11 @@
 			position: fixed;
 			inset: auto;
 			margin: 0;
-			padding: 10px;
+			padding: var(--ui-overlay-padding);
 			width: max-content;
 			max-width: min(360px, calc(100vw - 16px));
 			max-height: min(360px, calc(100vh - 16px));
 			overflow: auto;
-			background: var(--ui-color-well);
-			color: var(--ui-color-text);
-			border: 1px solid var(--ui-color-border);
-			border-radius: var(--ui-radius-control);
 		}
 		p,
 		dl {
@@ -159,7 +155,7 @@
 		dt {
 			display: flex;
 			align-items: center;
-			gap: 8px;
+			gap: var(--ui-overlay-gap);
 			flex: 1;
 			min-width: 0;
 		}

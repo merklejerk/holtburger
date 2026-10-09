@@ -7,7 +7,11 @@
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 		type ClientSelectedEntityDisplay,
 	} from "./client-selected-entity-tracking";
-	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import PopupMenu from "../app/PopupMenu.svelte";
+	import MoreActionsIcon from "../assets/icons/hud-more-actions.svg?component";
+	import ClientHudIcon, {
+		type ClientHudIconName,
+	} from "./ClientHudIcon.svelte";
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
@@ -54,6 +58,68 @@
 	let canSplit = $state(false);
 	let canInvite = $state(false);
 	let canSwear = $state(false);
+	/** Eligible selected-entity command; the source remains mounted for follow-up dialogs. */
+	interface SelectedAction {
+		/** Stable menu command identity. */
+		readonly action: "interact" | "swear" | "invite" | "split";
+		/** Visible menu text and accessible direct-button name. */
+		readonly label: string;
+		/** Shared artwork used by the direct button and menu row. */
+		readonly icon: ClientHudIconName;
+		/** Only eligible commands are included in this menu. */
+		readonly disabled: false;
+		/** App-owned command; source anchors follow-up dialogs. */
+		readonly activate: (source: HTMLButtonElement) => void;
+	}
+	const actions = $derived.by(() => {
+		const available: SelectedAction[] = [];
+		if (display.canInteract)
+			available.push({
+				action: "interact",
+				label: display.interactionLabel,
+				icon: display.interactionLabel === "Trade" ? "trade" : "interact",
+				disabled: false,
+				activate: onInteract,
+			});
+		if (canSwear)
+			available.push({
+				action: "swear",
+				label: "Swear allegiance",
+				icon: "leader",
+				disabled: false,
+				activate: onSwear,
+			});
+		if (canInvite)
+			available.push({
+				action: "invite",
+				label: "Invite to party",
+				icon: "invite",
+				disabled: false,
+				activate: onInvite,
+			});
+		if (canSplit)
+			available.push({
+				action: "split",
+				label: "Split stack",
+				icon: "split",
+				disabled: false,
+				activate: onSplit,
+			});
+		return available;
+	});
+	let menuAnchor = $state<HTMLButtonElement | null>(null);
+	$effect(() => {
+		if (actions.length <= 1) menuAnchor = null;
+	});
+
+	function selectMenuAction(source: HTMLButtonElement) {
+		// Capture the mounted trigger before PopupMenu dismisses and clears menuAnchor.
+		return (id: SelectedAction["action"]): void => {
+			const action = actions.find((action) => action.action === id);
+			if (action !== undefined) action.activate(source);
+		};
+	}
+
 	const structureDisplay = $derived(itemStructureDisplay(display.structure));
 	const displayName = $derived(
 		(display.name ?? "Selected Entity") +
@@ -70,6 +136,7 @@
 
 	$effect(() => {
 		const guid = selectedGuid;
+		menuAnchor = null;
 		// Selection identity is cold UI state; the runtime lookup must not own this effect's lifecycle.
 		untrack(() => {
 			display =
@@ -101,40 +168,30 @@
 <section class="selected-entity" aria-label={`Selected entity: ${displayName}`}>
 	<div class="selected-entity__heading ui-hud-group">
 		<div class="selected-entity__actions">
-			<button
-				class="ui-hud-button"
-				type="button"
-				disabled={!display.canInteract}
-				onclick={onInteract}
-				aria-label={display.interactionLabel}
-				title={display.interactionLabel}
-			>
-				<ClientHudIcon
-					name={display.interactionLabel === "Trade" ? "trade" : "interact"}
-				/>
-			</button>
-			{#if canSwear}<button
+			{#if actions.length > 1}
+				<button
 					class="ui-hud-button"
 					type="button"
-					onclick={onSwear}
-					aria-label="Swear allegiance"
-					title="Swear allegiance"><ClientHudIcon name="leader" /></button
-				>{/if}
-			{#if canInvite}<button
-					class="ui-hud-button"
-					type="button"
-					onclick={onInvite}
-					aria-label="Invite to party"
-					title="Invite to party"><ClientHudIcon name="invite" /></button
-				>{/if}
-			{#if canSplit}<button
-					class="ui-hud-button"
-					type="button"
-					onclick={(event) => onSplit(event.currentTarget)}
-					aria-label="Split stack"
+					aria-label="Selected entity actions"
+					title="Selected entity actions"
+					aria-haspopup="menu"
+					aria-expanded={menuAnchor !== null}
+					onclick={(event) => {
+						menuAnchor = menuAnchor === null ? event.currentTarget : null;
+					}}><MoreActionsIcon /></button
 				>
-					<ClientHudIcon name="split" />
-				</button>{/if}
+			{:else}
+				{#each actions as action (action.action)}
+					<button
+						class="ui-hud-button"
+						type="button"
+						aria-label={action.label}
+						title={action.label}
+						onclick={(event) => action.activate(event.currentTarget)}
+						><ClientHudIcon name={action.icon} /></button
+					>
+				{/each}
+			{/if}
 		</div>
 		<strong title={displayName} style:color={display.nameColor}
 			><span>{displayName}</span></strong
@@ -169,6 +226,23 @@
 		</div>
 	{/if}
 </section>
+
+{#if menuAnchor !== null && actions.length > 1}
+	{@const source = menuAnchor}
+	<PopupMenu
+		anchor={source}
+		label="Selected entity actions"
+		items={actions}
+		onselect={selectMenuAction(source)}
+		onclose={() => {
+			menuAnchor = null;
+		}}
+	>
+		{#snippet icon(action: SelectedAction)}
+			<ClientHudIcon name={action.icon} />
+		{/snippet}
+	</PopupMenu>
+{/if}
 
 <style>
 	@layer components {

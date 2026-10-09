@@ -310,16 +310,53 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	);
 	if (await read(`document.querySelector('.client-inventory') !== null`))
 		throw new Error("Inventory shortcut did not close the panel");
-	await read(`new Promise((resolve, reject) => {
+	const selectedAction = await read(`new Promise((resolve, reject) => {
 		const deadline = performance.now() + 1000;
 		const poll = () => {
-			const button = document.querySelector('button[aria-label="Split stack"]');
-			if (button) { button.click(); resolve(); }
-			else if (performance.now() >= deadline) reject(new Error('Selected stack did not expose its split action'));
+			if (document.querySelector('button[aria-label="Selected entity actions"]')) resolve('button[aria-label="Selected entity actions"]');
+			else if (document.querySelector('button[aria-label="Split stack"]')) resolve('button[aria-label="Split stack"]');
+			else if (performance.now() >= deadline) reject(new Error('Selected stack did not expose its actions'));
 			else requestAnimationFrame(poll);
 		};
 		poll();
 	})`);
+	const clickAt = async (position) => {
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...position,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await release(position);
+	};
+	await clickAt(await point(selectedAction));
+	if (selectedAction.includes("Selected entity actions")) {
+		const splitRow =
+			'[role="menu"][aria-label="Selected entity actions"] [role="menuitem"][id$="-split"]';
+		const position = await point(splitRow);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...position,
+			buttons: 0,
+		});
+		if (
+			!(await read(
+				`document.querySelector(${JSON.stringify(splitRow)}).classList.contains('highlighted')`,
+			))
+		)
+			throw new Error(
+				"Hover did not highlight the selected entity split action",
+			);
+		await clickAt(position);
+		if (
+			await read(
+				`document.querySelector('[role="menu"][aria-label="Selected entity actions"]') !== null`,
+			)
+		)
+			throw new Error("Choosing the split action did not dismiss its menu");
+	}
+
 	if (!(await read(`document.querySelector('.client-inventory') !== null`)))
 		throw new Error("Selected stack split action did not open inventory");
 	const allowedSplit = await lastPreview();

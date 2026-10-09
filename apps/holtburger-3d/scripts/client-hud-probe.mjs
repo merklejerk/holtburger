@@ -26,6 +26,20 @@ export async function probeClientHud(
 					})
 				).data;
 
+	const overlayTheme = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeOverlayTheme",
+		[],
+	);
+	if (!overlayTheme?.passed)
+		throw new Error("Overlay theme probe did not pass.");
+	const selectedActions = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSelectedActions",
+		[],
+	);
+	if (!selectedActions?.passed)
+		throw new Error("Selected entity actions probe did not pass.");
 	const targeting = await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTargeting",
@@ -1734,6 +1748,8 @@ export async function probeClientHud(
 		clientInspection,
 		clientBook,
 		clientTargeting: targeting,
+		selectedActions,
+		overlayTheme,
 		connectionBadge,
 		clientInventory: inventory,
 		keyboardPolicy,
@@ -2112,7 +2128,7 @@ function assertClientHudHarness(evidence) {
 	if (
 		evidence.runtime.selectedEntityHud !== null ||
 		evidence.layout.selectedEntityHud?.name !== "Selected Entity" ||
-		evidence.layout.selectedEntityHud.interactDisabled !== true ||
+		evidence.layout.selectedEntityHud.interactionAvailable !== false ||
 		Math.abs(
 			selectedEntityPlacement.left +
 				selectedEntityPlacement.width / 2 -
@@ -2128,7 +2144,7 @@ function assertClientHudHarness(evidence) {
 	}
 	if (
 		evidence.viewportSelected.selectedEntityHud?.name !== "Drudge" ||
-		evidence.viewportSelected.selectedEntityHud.interactDisabled !== false
+		evidence.viewportSelected.selectedEntityHud.interactionAvailable !== true
 	) {
 		throw new Error(
 			`Client HUD selected-entity surface did not present the selected display value with an enabled interaction: ${JSON.stringify(evidence.viewportSelected)}.`,

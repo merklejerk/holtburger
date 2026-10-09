@@ -273,8 +273,21 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			"Native copy transfers selected text from an ordinary unscoped UI surface",
 		);
 
+		// A top-layer dialog must override a click-through ancestor, just like HUD popups.
+		await evaluate(
+			`document.querySelector('#keyboard-modal').parentElement.style.pointerEvents = 'none'`,
+		);
 		await invoke("openModal");
 		assert.equal((await capture()).pointerAllowed, false);
+		assert.equal(
+			await evaluate(`(() => {
+			const editor = document.querySelector('#keyboard-modal-editor');
+			const rect = editor.getBoundingClientRect();
+			return editor.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+		})()`),
+			true,
+			"Modal controls must receive mouse input through a click-through ancestor",
+		);
 		await press("x", "KeyX", 88);
 		assert.equal(
 			(await capture()).presses,
@@ -282,6 +295,9 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			"Modal input cannot reach a containing scope",
 		);
 		await click("#keyboard-modal-editor");
+		await evaluate(
+			`document.querySelector('#keyboard-modal').parentElement.style.removeProperty('pointer-events')`,
+		);
 		await press("w", "KeyW", 87, { text: "w" });
 		assert.equal((await capture()).movement.forward, 0);
 		await press("Escape", "Escape", 27);

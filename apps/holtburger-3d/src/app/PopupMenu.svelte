@@ -10,8 +10,11 @@
 	}
 </script>
 
-<script lang="ts" generics="Action extends string">
-	import { onMount } from "svelte";
+<script
+	lang="ts"
+	generics="Action extends string, Item extends PopupMenuItem<Action>"
+>
+	import { onMount, type Snippet } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	interface Props {
 		/** Trigger rectangle used for placement; the caller owns its expanded/haspopup attributes. */
@@ -19,32 +22,37 @@
 		/** Accessible name of the command menu. */
 		readonly label: string;
 		/** Ordered commands. Their identities must be unique within this menu. */
-		readonly items: readonly PopupMenuItem<Action>[];
+		readonly items: readonly (Item & PopupMenuItem<Action>)[];
+		/** Optional decorative artwork before each command label. */
+		readonly icon?: Snippet<[Item]>;
 		/** Called after dismissal when an enabled command is activated. */
 		readonly onselect: (action: Action) => void;
 		/** The caller unmounts this open menu on dismissal. */
 		readonly onclose: () => void;
 	}
-	let { anchor, label, items, onselect, onclose }: Props = $props();
+	let { anchor, label, items, icon, onselect, onclose }: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	const id = $props.id();
 	let surface: HTMLDivElement;
-	let selected = $state<Action | null>(null);
+	let selected = $state<Item["action"] | null>(null);
 	let closed = false;
 	const enabled = $derived(items.filter((item) => !item.disabled));
 	const active = $derived(
 		enabled.find((item) => item.action === selected) ?? enabled[0] ?? null,
 	);
-	const itemId = (action: Action) => `${id}-${encodeURIComponent(action)}`;
+	const itemId = (action: Item["action"]) =>
+		`${id}-${encodeURIComponent(action)}`;
 	function dismiss() {
 		if (closed) return;
 		closed = true;
 		onclose();
 	}
-	function choose(item: PopupMenuItem<Action>) {
+	function choose(item: Item) {
 		if (closed || item.disabled) return;
+		// Capture the callback before dismissal changes the caller's reactive menu props.
+		const select = onselect;
 		dismiss();
-		onselect(item.action);
+		select(item.action);
 	}
 	function keydown(event: KeyboardEvent) {
 		switch (event.key) {
@@ -120,7 +128,7 @@
 </script>
 
 <div
-	class="popup-menu"
+	class="popup-menu ui-overlay-surface"
 	popover="manual"
 	role="menu"
 	tabindex="-1"
@@ -145,8 +153,15 @@
 			onpointermove={() => {
 				if (!item.disabled) selected = item.action;
 			}}
-			onclick={() => choose(item)}>{item.label}</button
+			onclick={() => choose(item)}
 		>
+			{#if icon}
+				<span class="popup-menu-icon" aria-hidden="true"
+					>{@render icon(item)}</span
+				>
+				<span>{item.label}</span>
+			{:else}{item.label}{/if}
+		</button>
 	{/each}
 </div>
 
@@ -161,11 +176,6 @@
 			max-width: 100vw;
 			max-height: 100vh;
 			overflow: auto;
-			border: 1px solid var(--ui-menu-border-color, var(--ui-color-border));
-			border-radius: var(--ui-radius-control);
-			background: var(--ui-menu-background, var(--ui-color-well));
-			color: var(--ui-menu-color, var(--ui-color-text));
-			box-shadow: var(--ui-menu-shadow, 0 4px 12px #0006);
 			outline: none;
 		}
 		.popup-menu:popover-open {
@@ -173,7 +183,9 @@
 			flex-direction: column;
 		}
 		.popup-menu-item {
-			display: block;
+			display: flex;
+			align-items: center;
+			gap: var(--ui-overlay-gap);
 			width: 100%;
 			flex: none;
 			margin: 0;
@@ -184,15 +196,21 @@
 			color: inherit;
 			font: inherit;
 			text-align: start;
-			cursor: default;
+			cursor: pointer;
+		}
+		.popup-menu-icon {
+			width: var(--ui-overlay-icon-size);
+			height: var(--ui-overlay-icon-size);
+			flex: none;
 		}
 		.popup-menu-item.highlighted {
 			background: var(--ui-menu-highlight-background, var(--ui-color-control));
 			color: var(--ui-menu-highlight-color, var(--ui-color-highlight));
 		}
 		.popup-menu-item:disabled {
+			cursor: default;
 			color: var(--ui-menu-disabled-color, var(--ui-color-muted));
-			opacity: 0.5;
+			opacity: var(--ui-menu-disabled-opacity);
 		}
 	}
 </style>

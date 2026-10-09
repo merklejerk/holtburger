@@ -172,6 +172,11 @@ pub enum HostEvent {
         appearance: crate::client_projection::ClientAppearanceOptions,
         party: crate::client_party::ClientPartyPreferences,
         friends: crate::client_friends::ClientFriendsPreferences,
+        allegiance: crate::client_allegiance::ClientAllegiancePreferences,
+    },
+    /// Partial allegiance publication.
+    ClientAllegianceUpdated {
+        allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
     },
     /// Current character-owned ignore projection.
     ClientSquelchUpdated {
@@ -555,11 +560,16 @@ impl ClientEventSink for StdioEventSink {
                 appearance,
                 party,
                 friends,
+                allegiance,
             } => HostEvent::ClientCharacterPreferencesUpdated {
                 appearance,
                 party,
                 friends,
+                allegiance,
             },
+            crate::client_projection::ClientHostEvent::AllegianceUpdated { allegiance } => {
+                HostEvent::ClientAllegianceUpdated { allegiance }
+            }
             crate::client_projection::ClientHostEvent::SquelchUpdated { squelch } => {
                 HostEvent::ClientSquelchUpdated { squelch }
             }

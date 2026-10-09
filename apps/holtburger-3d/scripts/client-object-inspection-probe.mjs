@@ -338,6 +338,7 @@ export async function probeObjectInspection(
 		assert.match(creature.window.text, /Damage resistance\s*0/);
 		assert.match(creature.window.text, /Maximum health\s*25/);
 		assert.match(creature.window.text, /Test Allegiance/);
+		assert.match(creature.window.text, /Allegiance rank\s*Baroness \(3\)/);
 		assert.match(creature.window.text, /Deaths\s*Never/);
 		assert.doesNotMatch(creature.window.text, /Wield requirements/);
 		const previewIdentity = await read(`(() => {

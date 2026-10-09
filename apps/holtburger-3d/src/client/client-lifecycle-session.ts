@@ -1,3 +1,5 @@
+import { ClientAllegianceState } from "./client-allegiance-state";
+import { allegianceUpdatedSchema } from "./client-allegiance-contract";
 import { ClientSquelchState } from "./client-squelch-state";
 import { squelchUpdatedSchema } from "./client-squelch-contract";
 import { ClientFriendsState } from "./client-friends-state";
@@ -217,6 +219,7 @@ type ClientCommandName = Extract<
 	| "queue_client_character_motion_event"
 	| "submit_client_friends"
 	| "submit_client_squelch"
+	| "submit_client_allegiance"
 	| "submit_client_party"
 	| "set_client_party_updates"
 	| "send_client_chat"
@@ -300,6 +303,7 @@ type ClientEventName = Extract<
 	| "client-character-preferences-updated"
 	| "client-friends-updated"
 	| "client-squelch-updated"
+	| "client-allegiance-updated"
 	| "client-party-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
@@ -517,6 +521,8 @@ export class ClientLifecycleSession {
 	readonly friends: ClientFriendsState;
 	/** Dedicated Ignores projection; the session routes rather than duplicates state. */
 	readonly squelch: ClientSquelchState;
+	/** Allegiance owner keeps interaction policy outside session routing. */
+	readonly allegiance: ClientAllegianceState;
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ClientLifecycleTransport;
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -539,6 +545,9 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.allegiance = new ClientAllegianceState(async (action) => {
+			await this.#transport.invoke("submit_client_allegiance", { action });
+		});
 		this.squelch = new ClientSquelchState(async (action) => {
 			await this.#transport.invoke("submit_client_squelch", { action });
 		});
@@ -571,6 +580,7 @@ export class ClientLifecycleSession {
 		this.#state = emptyState();
 		this.friends.reset();
 		this.squelch.reset();
+		this.allegiance.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
 		this.#connection = null;
@@ -598,6 +608,7 @@ export class ClientLifecycleSession {
 	stop(): void {
 		this.friends.reset();
 		this.squelch.reset();
+		this.allegiance.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
 		for (const unlisten of this.#unlisten ?? []) unlisten();
@@ -1103,6 +1114,13 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-allegiance-updated", (payload) => {
+					this.allegiance.update(
+						allegianceUpdatedSchema.parse(payload).allegiance,
+					);
+				}),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-squelch-updated", (payload) => {
 					this.squelch.update(squelchUpdatedSchema.parse(payload).squelch);
 				}),
@@ -1128,6 +1146,7 @@ export class ClientLifecycleSession {
 						const options = preferences.appearance;
 						this.#partyPreferences = preferences.party;
 						this.friends.updatePreferences(preferences.friends);
+						this.allegiance.updatePreferences(preferences.allegiance);
 						this.#state = { ...this.#state, appearanceOptions: options };
 						this.#emit({ type: "appearance-options", options });
 					},
@@ -1486,6 +1505,12 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		this.allegiance.recover(
+			state.allegiance,
+			state.allegiancePreferences,
+			state.localPlayerGuid,
+			state.lifecycle.kind === "in-world",
+		);
 		this.squelch.recover(
 			state.squelch,
 			state.localPlayerGuid,
@@ -1589,6 +1614,7 @@ export class ClientLifecycleSession {
 		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
 			this.friends.reset();
 			this.squelch.reset();
+			this.allegiance.reset();
 			this.#party = null;
 			this.#partyPreferences = null;
 		}
@@ -1712,12 +1738,17 @@ export class ClientLifecycleSession {
 		if (event.type === "resyncing") {
 			this.friends.setContext(this.#state.playerGuid, false);
 			this.squelch.setContext(this.#state.playerGuid, false);
+			this.allegiance.setContext(this.#state.playerGuid, false);
 		}
 		if (
 			event.type === "lifecycle" ||
 			event.type === "current-state" ||
 			event.type === "local-player-established"
 		) {
+			this.allegiance.setContext(
+				this.#state.playerGuid,
+				this.#state.lifecycle?.kind === "in-world",
+			);
 			this.squelch.setContext(
 				this.#state.playerGuid,
 				this.#state.lifecycle?.kind === "in-world",

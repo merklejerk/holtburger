@@ -2,6 +2,7 @@ use crate::damage::compute_damage_range;
 use crate::entity::Entity;
 use crate::entity_facts::EntityIconAppearance;
 use crate::magic::calculate_mana_time_left;
+use crate::state::allegiance::titles::rank_title;
 use crate::vendor::CoreVendorItem;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
@@ -333,10 +334,40 @@ pub struct CreatureRatings {
     pub life_magic_resistance_rating: Option<i32>,
 }
 
+/// Numeric rank and its optional shared title from one inspection response.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterAllegianceRank {
+    /// Server-disclosed numeric rank, including values without a known title.
+    pub rank: i32,
+    /// Retail title when rank, heritage and gender are all supplied and supported.
+    pub title: Option<String>,
+}
+
+impl CharacterAllegianceRank {
+    fn from_properties(properties: &WorldObjectProperties) -> Option<Self> {
+        let rank = properties.get_int_prop(PropertyInt::AllegianceRank)?;
+        let title = properties
+            .get_int_prop(PropertyInt::HeritageGroup)
+            .zip(properties.get_int_prop(PropertyInt::Gender))
+            .and_then(|(heritage, gender)| {
+                rank_title(
+                    u8::try_from(heritage).ok()?,
+                    u8::try_from(gender).ok()?,
+                    u16::try_from(rank).ok()?,
+                )
+            })
+            .map(str::to_owned);
+        Some(Self { rank, title })
+    }
+}
+
 /// Server-disclosed character affiliation and privacy-controlled personal facts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterDetails {
+    /// Inspected character’s own rank and title; unrelated to patron/monarch titles.
+    pub allegiance_rank: Option<CharacterAllegianceRank>,
     /// Allegiance name, when the character belongs to one.
     pub allegiance_name: Option<String>,
     /// Server-authored patron title and name.
@@ -391,6 +422,7 @@ impl InspectionSupplement {
             life_magic_resistance_rating: properties.get_int_prop(PropertyInt::LifeResistRating),
         };
         let character_details = CharacterDetails {
+            allegiance_rank: CharacterAllegianceRank::from_properties(properties),
             allegiance_name: properties
                 .get_string_prop(PropertyString::AllegianceName)
                 .map(str::to_owned),
@@ -480,7 +512,8 @@ impl CreatureRatings {
 
 impl CharacterDetails {
     fn is_empty(&self) -> bool {
-        self.allegiance_name.is_none()
+        self.allegiance_rank.is_none()
+            && self.allegiance_name.is_none()
             && self.patron.is_none()
             && self.monarch.is_none()
             && self.allegiance_followers.is_none()
@@ -2530,6 +2563,68 @@ mod tests {
                 .expect("character details")
                 .deaths,
             Some(0)
+        );
+    }
+
+    #[test]
+    fn inspection_allegiance_rank_resolves_only_disclosed_supported_title_inputs() {
+        let mut properties = WorldObjectProperties::default();
+        properties.set_int_prop(PropertyInt::AllegianceRank, 3);
+        let details = InspectionSupplement::from_response(&properties, None)
+            .character_details
+            .expect("rank alone retains affiliation details");
+        assert_eq!(
+            details.allegiance_rank,
+            Some(CharacterAllegianceRank {
+                rank: 3,
+                title: None
+            })
+        );
+        properties.set_int_prop(PropertyInt::HeritageGroup, 1);
+        properties.set_int_prop(PropertyInt::Gender, 2);
+        let details = InspectionSupplement::from_response(&properties, None)
+            .character_details
+            .unwrap();
+        assert_eq!(
+            details.allegiance_rank,
+            Some(CharacterAllegianceRank {
+                rank: 3,
+                title: Some("Baroness".into())
+            })
+        );
+        for (property, value) in [
+            (PropertyInt::HeritageGroup, 257),
+            (PropertyInt::HeritageGroup, -1),
+            (PropertyInt::Gender, 258),
+            (PropertyInt::Gender, 0),
+            (PropertyInt::AllegianceRank, -1),
+            (PropertyInt::AllegianceRank, 65_537),
+        ] {
+            let mut unsupported = properties.clone();
+            unsupported.set_int_prop(property, value);
+            let rank = InspectionSupplement::from_response(&unsupported, None)
+                .character_details
+                .unwrap()
+                .allegiance_rank
+                .unwrap();
+            assert_eq!(
+                rank.rank,
+                unsupported
+                    .get_int_prop(PropertyInt::AllegianceRank)
+                    .unwrap()
+            );
+            assert!(
+                rank.title.is_none(),
+                "unsupported {property:?} must not resolve a title"
+            );
+        }
+        let mut missing_rank = WorldObjectProperties::default();
+        missing_rank.set_int_prop(PropertyInt::HeritageGroup, 1);
+        missing_rank.set_int_prop(PropertyInt::Gender, 2);
+        assert!(
+            InspectionSupplement::from_response(&missing_rank, None)
+                .character_details
+                .is_none()
         );
     }
 

@@ -223,10 +223,21 @@
 
 	{#if creature.characterDetails !== null}
 		{@const details = creature.characterDetails}
-		{#if details.allegianceName !== null || details.patron !== null || details.monarch !== null || details.allegianceFollowers !== null || details.fellowship !== null}
+		{#if details.allegianceRank !== null || details.allegianceName !== null || details.patron !== null || details.monarch !== null || details.allegianceFollowers !== null || details.fellowship !== null}
 			<section>
 				<h3>Affiliation</h3>
 				<dl class="inspection-facts">
+					{#if details.allegianceRank !== null}<div>
+							<dt>Allegiance rank</dt>
+							<dd>
+								{#if details.allegianceRank.title !== null}{details
+										.allegianceRank.title} ({formatInspectionNumber(
+										details.allegianceRank.rank,
+									)}){:else}{formatInspectionNumber(
+										details.allegianceRank.rank,
+									)}{/if}
+							</dd>
+						</div>{/if}
 					{#if details.allegianceName !== null}<div>
 							<dt>Allegiance</dt>
 							<dd>{details.allegianceName}</dd>

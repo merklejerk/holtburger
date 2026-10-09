@@ -134,6 +134,7 @@
 						},
 						"maxHealthBonus": 25,
 						"characterDetails": {
+							"allegianceRank": { "rank": 2, "title": "Baronet" },
 							"allegianceName": "Test Allegiance",
 							"patron": null,
 							"monarch": null,

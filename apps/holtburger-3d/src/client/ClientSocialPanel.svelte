@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientAllegiancePanel from "./ClientAllegiancePanel.svelte";
+	import type { ClientAllegianceState } from "./client-allegiance-state";
 	import ClientIgnoresPanel from "./ClientIgnoresPanel.svelte";
 	import type { ClientSquelchState } from "./client-squelch-state";
 	import { onDestroy, untrack } from "svelte";
@@ -18,10 +20,17 @@
 		readonly owner: ClientPartyState;
 		readonly friends: ClientFriendsState;
 		readonly squelch: ClientSquelchState;
+		readonly allegiance: ClientAllegianceState;
 		/** Retained windows hide without discarding tab, scroll, or disclosure state. */
 		readonly visible?: boolean;
 	}
-	const { owner, friends, squelch, visible = true }: Props = $props();
+	const {
+		owner,
+		friends,
+		squelch,
+		allegiance,
+		visible = true,
+	}: Props = $props();
 	// The initial read seeds cold markup; only the mounted display timer publishes later facts.
 	let view = $state(untrack(() => owner.read()));
 	/** The draft belongs to its opening character and retires on lifecycle or party change. */
@@ -39,7 +48,6 @@
 			label: "Allegiance",
 			id: "social-allegiance-tab",
 			panelId: "social-allegiance-panel",
-			disabled: true,
 		},
 		{
 			value: "friends",
@@ -278,6 +286,18 @@
 					</fieldset>
 				</div>
 			</details>
+		</div>
+	</UiTabPanel>
+	<UiTabPanel
+		id="social-allegiance-panel"
+		labelledBy="social-allegiance-tab"
+		active={selected === "allegiance"}
+	>
+		<div class="social-tab">
+			<ClientAllegiancePanel
+				owner={allegiance}
+				visible={visible && selected === "allegiance"}
+			/>
 		</div>
 	</UiTabPanel>
 	<UiTabPanel

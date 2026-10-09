@@ -178,3 +178,6 @@ export const CLIENT_CONNECTION_BADGE_TUNING = {
 	/** Gentle dimming without blinking at packet cadence. */
 	activityFadeMs: 180,
 } as const;
+
+/** Visible Allegiance tab read cadence; hidden presentation produces no requests. */
+export const CLIENT_ALLEGIANCE_REFRESH_INTERVAL_MS = 15_000;

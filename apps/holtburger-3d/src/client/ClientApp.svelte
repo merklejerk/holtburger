@@ -1729,6 +1729,7 @@
 			{party}
 			friends={session?.friends ?? null}
 			squelch={session?.squelch ?? null}
+			allegiance={session?.allegiance ?? null}
 			onSearchHousing={async (houseType) => {
 				if (session === null) return;
 				try {

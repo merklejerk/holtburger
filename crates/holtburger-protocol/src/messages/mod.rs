@@ -1,3 +1,4 @@
+pub mod allegiance;
 pub mod book;
 pub mod character;
 pub mod chat;

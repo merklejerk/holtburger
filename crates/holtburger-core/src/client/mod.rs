@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
+pub mod allegiance;
 mod builder;
 mod busy_operation;
 mod camera;
@@ -158,6 +159,8 @@ pub struct ClientRuntime {
     active_confirmation: Option<ActiveCharacterConfirmation>,
     /// Pending complete home query, independent of inventory busy operations.
     housing_query_deadline: Option<Instant>,
+    /// Outstanding allegiance profile read; domain logic lives in allegiance.
+    allegiance_query_deadline: Option<Instant>,
     /// Ordinary-use intent authorizing one crystal-opening receipt, never a snapshot replay.
     housing_opening: Option<housing::HousingOpening>,
     /// Serialized read-only access/search admission, independent of inventory mutation.
@@ -365,6 +368,7 @@ impl ClientRuntime {
             fellowship: self.world.fellowship.clone(),
             friends: self.world.friends.clone(),
             squelch: self.world.squelch.clone(),
+            allegiance: self.allegiance_snapshot(),
             can_teleport_from_map: self.can_teleport_from_map(),
             lifecycle: self.lifecycle(),
             connection: self.connection.snapshot(
@@ -785,6 +789,7 @@ impl ClientRuntime {
         self.emit_fellowship_state_updated();
         self.emit_friends_state_updated();
         self.emit_squelch_state_updated();
+        self.emit_allegiance_snapshot();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
         self.emit_dynamic_entity_snapshot();
@@ -832,6 +837,7 @@ impl ClientRuntime {
             }
             self.reset_friends();
             self.reset_squelch();
+            self.reset_allegiance();
             self.world.fellowship = None;
             self.emit_fellowship_state_updated();
             self.reset_container_access();
@@ -857,6 +863,9 @@ impl ClientRuntime {
             .client_view_event_tx
             .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
         self.publish_map_teleport_capability();
+        // Swear admission includes lifecycle, so portal return must republish it
+        // even when no new profile arrives and initial-entry recovery is skipped.
+        self.emit_allegiance_snapshot();
         self.emit_character_sheet();
     }
 
@@ -1284,6 +1293,7 @@ impl ClientRuntime {
             }
             WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
             WorldEvent::SquelchStateUpdated => self.emit_squelch_state_updated(),
+            WorldEvent::AllegianceStateUpdated => self.emit_allegiance_snapshot(),
             WorldEvent::FellowshipStateUpdated(fellowship) => {
                 let _ = self
                     .client_view_event_tx

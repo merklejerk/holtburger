@@ -76,7 +76,7 @@
 						<li class="ui-list-row ui-list-row-nowrap">
 							<div class="ui-list-content friend-info">
 								<span
-									class="friend-presence"
+									class="ui-presence"
 									class:online={member.online}
 									role="img"
 									aria-label={member.online ? "Online" : "Offline"}
@@ -157,15 +157,6 @@
 			display: flex;
 			align-items: center;
 			gap: 6px;
-		}
-		.friend-presence {
-			width: 14px;
-			height: 14px;
-			flex-shrink: 0;
-			color: var(--ui-color-muted);
-		}
-		.friend-presence.online {
-			color: var(--ui-color-success);
 		}
 	}
 </style>

@@ -76,6 +76,8 @@ pub struct WorldState {
     pub friends: Option<super::friends::FriendsState>,
     /// Character-owned ignore DB; initialized empty at entry and retired on exit.
     pub squelch: Option<super::squelch::SquelchState>,
+    /// Last received partial allegiance profile for this character.
+    pub allegiance: Option<super::allegiance::AllegianceState>,
     pub trade: Option<TradeState>,
     /// Last published trade revision, retained across negotiations with the same partner.
     pub(crate) trade_revision: u32,
@@ -462,6 +464,7 @@ impl WorldState {
             fellowship: None,
             friends: None,
             squelch: None,
+            allegiance: None,
             trade: None,
             trade_revision: 0,
             world_container: super::WorldContainerState::Closed,

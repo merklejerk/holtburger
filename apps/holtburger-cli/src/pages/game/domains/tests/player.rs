@@ -106,6 +106,12 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         fellowship: None,
         friends: None,
         squelch: None,
+        allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
+            player_guid: None,
+            profile: None,
+            refreshing: false,
+            can_swear: false,
+        },
         housing: Default::default(),
         connection: None,
         trade: Default::default(),

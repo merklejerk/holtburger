@@ -4,6 +4,7 @@ import {
 	probeClientHud,
 	probeClientSettingsTabs,
 } from "./client-hud-probe.mjs";
+import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
 import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
@@ -173,6 +174,19 @@ try {
 			suite: "client-keyboard",
 			passed: true,
 			evidence: result.clientKeyboard,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientInspection) {
+		report = {
+			suite: "client-inspection",
+			passed: true,
+			evidence: result.clientInspection,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientAllegiance) {
+		report = {
+			suite: "client-allegiance",
+			...result.clientAllegiance,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientSquelch) {
@@ -415,6 +429,8 @@ function parseArgs(args) {
 		clientParty: false,
 		clientFriends: false,
 		clientSquelch: false,
+		clientAllegiance: false,
+		clientInspection: false,
 		clientBook: false,
 		clientTrade: false,
 		uiTheme: false,
@@ -563,6 +579,14 @@ function parseArgs(args) {
 			case "--client-trade":
 				parsed.clientHud = true;
 				parsed.clientTrade = true;
+				break;
+			case "--client-inspection":
+				parsed.clientHud = true;
+				parsed.clientInspection = true;
+				break;
+			case "--client-allegiance":
+				parsed.clientHud = true;
+				parsed.clientAllegiance = true;
 				break;
 			case "--client-squelch":
 				parsed.clientHud = true;
@@ -1796,6 +1820,7 @@ Options:
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
+  --client-inspection   Exercise entity inspection windows, disclosed facts, and preview lifetimes.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4364,6 +4389,34 @@ async function runClientHudHarness({ viteUrl }) {
 		if (options.clientTrade) {
 			return {
 				clientTrade: await probeTrade(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientInspection) {
+			// Inspection verifies coexistence with the container fixture established by the full HUD suite.
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeWorldContainer",
+				[],
+			);
+			return {
+				clientInspection: await probeObjectInspection(
+					client,
+					evaluateExpression,
+					null,
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientAllegiance) {
+			return {
+				clientAllegiance: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeAllegiance",
+					[],
+				),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

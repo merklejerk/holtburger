@@ -71,6 +71,7 @@ export async function probeSquelch(options: {
 					owner: party,
 					friends: session.friends,
 					squelch: session.squelch,
+					allegiance: session.allegiance,
 				},
 			});
 			await settle();

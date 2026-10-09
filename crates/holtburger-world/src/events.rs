@@ -241,6 +241,8 @@ pub enum WorldEvent {
     FriendsStateUpdated,
     /// Character ignore DB replaced.
     SquelchStateUpdated,
+    /// Partial allegiance profile or known-node presence changed.
+    AllegianceStateUpdated,
     FellowshipStateUpdated(Option<state::FellowshipState>),
     FellowshipActivity(FellowshipActivity),
     TradeStateUpdated(Option<state::TradeState>),

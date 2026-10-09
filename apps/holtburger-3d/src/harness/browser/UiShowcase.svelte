@@ -404,6 +404,8 @@
 					})}
 					readCanSplit={() => false}
 					readCanInvite={() => false}
+					readCanSwear={() => false}
+					onSwear={() => {}}
 					onInvite={() => {}}
 					onInteract={() => {}}
 					onExamine={() => {}}

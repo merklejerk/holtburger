@@ -238,6 +238,13 @@ export async function probeClientInventory(options: {
 			partyPreferences: null,
 			friends: null,
 			squelch: null,
+			allegiance: {
+				playerGuid: null,
+				profile: null,
+				refreshing: false,
+				canSwear: false,
+			},
+			allegiancePreferences: null,
 			friendsPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },

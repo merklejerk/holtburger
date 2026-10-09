@@ -1794,6 +1794,8 @@
 			onPreciseJumpAim={aimPreciseJump}
 			onPreciseJumpActivate={activatePreciseJump}
 			onPreciseJumpEnter={enterPreciseJump}
+			onSocialNotice={(message) =>
+				toastCenter.publish({ message, tone: "warning" })}
 			onInventoryNotice={(message) =>
 				toastCenter.publish({ message, tone: "status" })}
 			onPickInventoryTarget={(x, y, destination) => {

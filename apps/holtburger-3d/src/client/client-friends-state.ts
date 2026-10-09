@@ -128,8 +128,26 @@ export class ClientFriendsState {
 			feedback: this.#feedback,
 		};
 	}
+	/** HUD admission uses retained membership, independent of panel search/presence filters. */
+	canAdd(guid: number, name: string): boolean {
+		return (
+			this.#enabled &&
+			this.#player !== null &&
+			guid !== this.#player &&
+			name.trim().length > 0 &&
+			!this.#snapshot?.members.some(
+				(member) =>
+					member.guid === guid ||
+					characterLookupName(member.name) === characterLookupName(name.trim()),
+			)
+		);
+	}
 	/** Queue acceptance retains pending presentation until matching current-state evidence. */
-	async request(intent: FriendsAction): Promise<boolean> {
+	async request(
+		intent: FriendsAction,
+		/** Optional caller notice for this request’s current dispatch failure only. */
+		onFailure?: (message: string) => void,
+	): Promise<boolean> {
 		const parsed = friendsActionSchema.safeParse(intent);
 		if (
 			!parsed.success ||
@@ -169,7 +187,9 @@ export class ClientFriendsState {
 						: action.kind === "remove"
 							? "Couldn’t remove friend."
 							: "Couldn’t change your presence setting.";
+				const feedback = this.#feedback;
 				this.#publish();
+				onFailure?.(feedback);
 			}
 			return false;
 		}

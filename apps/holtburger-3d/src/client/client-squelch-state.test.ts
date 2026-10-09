@@ -33,6 +33,55 @@ function setup(
 }
 describe("Ignores presentation owner", () => {
 	afterEach(() => vi.useRealTimers());
+
+	it("notifies only the current dispatch failure after character replacement", async () => {
+		let rejectOld: (error: Error) => void = () => {
+			throw new Error("Old dispatch was not installed");
+		};
+		const submit = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<void>((_resolve, reject) => {
+						rejectOld = reject;
+					}),
+			)
+			.mockRejectedValueOnce(new Error("New dispatch failed"));
+		const owner = setup(submit);
+		const notice = vi.fn();
+		const old = owner.request(
+			{ kind: "add", name: "Cara", scope: "account" },
+			notice,
+		);
+		owner.reset();
+		owner.setContext(99, true);
+		owner.update({ entries: [], legacyAccounts: [], globalCoverage: "none" });
+		expect(
+			await owner.request(
+				{ kind: "add", name: "Cara", scope: "account" },
+				notice,
+			),
+		).toBe(false);
+		expect(notice).toHaveBeenCalledExactlyOnceWith("Couldn’t add ignore.");
+		rejectOld(new Error("Retired dispatch failed"));
+		expect(await old).toBe(false);
+		expect(notice).toHaveBeenCalledTimes(1);
+		owner.destroy();
+	});
+
+	it("checks selected-target eligibility against unfiltered facts", () => {
+		const owner = setup();
+		owner.setSearch("nobody");
+		expect(owner.canIgnoreAccount(amy.guid, amy.name)).toBe(false);
+		expect(owner.canIgnoreAccount(99, "+AMY")).toBe(false);
+		expect(owner.canIgnoreAccount(42, "Self")).toBe(false);
+		expect(owner.canIgnoreAccount(3, " ")).toBe(false);
+		expect(owner.canIgnoreAccount(3, "Cara")).toBe(true);
+		owner.setContext(42, false);
+		expect(owner.canIgnoreAccount(3, "Cara")).toBe(false);
+		owner.destroy();
+	});
+
 	it("retains early replacement through establishment and sorts/filters only presentation", () => {
 		const owner = new ClientSquelchState(async () => {});
 		owner.update(baseline);

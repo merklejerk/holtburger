@@ -3906,6 +3906,9 @@
 		onPreciseJumpEnter={() => {
 			preciseJumpEnterCount += 1;
 		}}
+		onSocialNotice={(message) => {
+			toast = { id: 1, message, tone: "warning" };
+		}}
 		onInventoryNotice={(message) => {
 			toast = { id: 1, message, tone: "status" };
 		}}

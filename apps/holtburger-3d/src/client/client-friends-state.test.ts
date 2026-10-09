@@ -21,6 +21,48 @@ function setup(
 describe("Friends presentation owner", () => {
 	afterEach(() => vi.useRealTimers());
 
+	it("notifies only the current dispatch failure after character replacement", async () => {
+		let rejectOld: (error: Error) => void = () => {
+			throw new Error("Old dispatch was not installed");
+		};
+		const submit = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<void>((_resolve, reject) => {
+						rejectOld = reject;
+					}),
+			)
+			.mockRejectedValueOnce(new Error("New dispatch failed"));
+		const owner = setup(submit);
+		const notice = vi.fn();
+		const old = owner.request({ kind: "add", name: "Cara" }, notice);
+		owner.reset();
+		owner.setContext(99, true);
+		owner.update({ members: [] });
+		expect(await owner.request({ kind: "add", name: "Cara" }, notice)).toBe(
+			false,
+		);
+		expect(notice).toHaveBeenCalledExactlyOnceWith("Couldn’t add friend.");
+		rejectOld(new Error("Retired dispatch failed"));
+		expect(await old).toBe(false);
+		expect(notice).toHaveBeenCalledTimes(1);
+		owner.destroy();
+	});
+
+	it("checks selected-target eligibility against unfiltered facts", () => {
+		const owner = setup();
+		owner.setFilters("nobody", true);
+		expect(owner.canAdd(amy.guid, amy.name)).toBe(false);
+		expect(owner.canAdd(99, "+AMY")).toBe(false);
+		expect(owner.canAdd(42, "Self")).toBe(false);
+		expect(owner.canAdd(3, " ")).toBe(false);
+		expect(owner.canAdd(3, "Cara")).toBe(true);
+		owner.setContext(42, false);
+		expect(owner.canAdd(3, "Cara")).toBe(false);
+		owner.destroy();
+	});
+
 	it("settles an ACE-resolved admin name immediately on its update", async () => {
 		vi.useFakeTimers();
 		const owner = setup();

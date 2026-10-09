@@ -23,6 +23,13 @@
 		readonly readCanSplit: () => boolean;
 		/** Sample app-owned party eligibility alongside the selected display. */
 		readonly readCanInvite: () => boolean;
+		/** Read friend shortcut eligibility without introducing HUD request state. */
+		readonly readCanAddFriend: () => boolean;
+		/** Read account-ignore eligibility from the existing social owner. */
+		readonly readCanIgnoreAccount: () => boolean;
+		/** Dispatch selected-player shortcuts through their app owners. */
+		readonly onAddFriend: () => void;
+		readonly onIgnoreAccount: () => void;
 		/** Sample allegiance-owned swear admission with the selected display. */
 		readonly readCanSwear: () => boolean;
 		/** Server confirmation owns the selected-player swear request. */
@@ -44,6 +51,10 @@
 		readSelectedDisplay,
 		readCanSplit,
 		readCanInvite,
+		readCanAddFriend,
+		readCanIgnoreAccount,
+		onAddFriend,
+		onIgnoreAccount,
 		readCanSwear,
 		onSwear,
 		onInvite,
@@ -57,11 +68,14 @@
 	);
 	let canSplit = $state(false);
 	let canInvite = $state(false);
+	let canAddFriend = $state(false);
+	let canIgnoreAccount = $state(false);
 	let canSwear = $state(false);
 	/** Eligible selected-entity command; the source remains mounted for follow-up dialogs. */
 	interface SelectedAction {
 		/** Stable menu command identity. */
-		readonly action: "interact" | "swear" | "invite" | "split";
+		readonly action:
+			"interact" | "swear" | "invite" | "friend" | "ignore" | "split";
 		/** Visible menu text and accessible direct-button name. */
 		readonly label: string;
 		/** Shared artwork used by the direct button and menu row. */
@@ -96,6 +110,22 @@
 				icon: "invite",
 				disabled: false,
 				activate: onInvite,
+			});
+		if (canAddFriend)
+			available.push({
+				action: "friend",
+				label: "Add friend",
+				icon: "add",
+				disabled: false,
+				activate: onAddFriend,
+			});
+		if (canIgnoreAccount)
+			available.push({
+				action: "ignore",
+				label: "Ignore account",
+				icon: "remove",
+				disabled: false,
+				activate: onIgnoreAccount,
 			});
 		if (canSplit)
 			available.push({
@@ -143,6 +173,8 @@
 				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
 			canSplit = guid !== null && readCanSplit();
 			canInvite = guid !== null && readCanInvite();
+			canAddFriend = guid !== null && readCanAddFriend();
+			canIgnoreAccount = guid !== null && readCanIgnoreAccount();
 			canSwear = guid !== null && readCanSwear();
 		});
 	});
@@ -155,6 +187,8 @@
 					: readSelectedDisplay();
 			canSplit = selectedGuid !== null && readCanSplit();
 			canInvite = selectedGuid !== null && readCanInvite();
+			canAddFriend = selectedGuid !== null && readCanAddFriend();
+			canIgnoreAccount = selectedGuid !== null && readCanIgnoreAccount();
 			canSwear = selectedGuid !== null && readCanSwear();
 		};
 		const interval = window.setInterval(

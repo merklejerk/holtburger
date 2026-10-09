@@ -111,6 +111,10 @@ export async function probeParty(options: {
 			readCanSwear: () => false,
 			onSwear: () => {},
 			readCanInvite: () => owner.canInvite(10),
+			readCanAddFriend: () => false,
+			readCanIgnoreAccount: () => false,
+			onAddFriend: () => {},
+			onIgnoreAccount: () => {},
 			onInvite: () => {
 				if (owner.canInvite(10)) owner.request({ kind: "invite", target: 10 });
 			},

@@ -105,8 +105,31 @@ export class ClientSquelchState {
 			feedback: this.#feedback,
 		};
 	}
+	/** Known account ignores suppress the shortcut regardless of panel filtering.
+	 * Other characters on that account cannot be identified locally; ACE resolves them.
+	 */
+	canIgnoreAccount(guid: number, name: string): boolean {
+		return (
+			this.#enabled &&
+			this.#player !== null &&
+			this.#snapshot !== null &&
+			guid !== this.#player &&
+			name.trim().length > 0 &&
+			!this.#snapshot.entries.some(
+				(entry) =>
+					entry.account &&
+					(entry.guid === guid ||
+						characterLookupName(entry.name) ===
+							characterLookupName(name.trim())),
+			)
+		);
+	}
 	/** Queue acceptance does not claim that a scope was added or removed. */
-	async request(intent: SquelchAction): Promise<boolean> {
+	async request(
+		intent: SquelchAction,
+		/** Optional caller notice for this request’s current dispatch failure only. */
+		onFailure?: (message: string) => void,
+	): Promise<boolean> {
 		const parsed = squelchActionSchema.safeParse(intent);
 		if (
 			!parsed.success ||
@@ -145,7 +168,9 @@ export class ClientSquelchState {
 					action.kind === "add"
 						? "Couldn’t add ignore."
 						: "Couldn’t remove ignore.";
+				const feedback = this.#feedback;
 				this.#publish();
+				onFailure?.(feedback);
 			}
 			return false;
 		}

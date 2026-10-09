@@ -162,43 +162,47 @@ export async function probeAllegiance(options: {
 		);
 		require(list.scrollHeight >
 			list.clientHeight, "Vassal list was not capped and scrollable");
-		for (const row of list.querySelectorAll<HTMLElement>("li")) {
-			const icon = row.querySelector<HTMLElement>(".ui-presence");
-			if (icon === null) throw new Error("Missing relationship presence icon");
-			const bounds = row.getBoundingClientRect();
-			const iconBounds = icon.getBoundingClientRect();
-			const name = row.querySelector<HTMLElement>(".ui-list-name");
-			if (name === null) throw new Error("Missing relationship name");
-			for (const detail of row.querySelectorAll<HTMLElement>(
-				".member-info > .ui-muted",
-			))
-				require(Math.abs(
-					detail.getBoundingClientRect().left -
-						name.getBoundingClientRect().left,
-				) <
-					1, "Relationship details did not align with the name clear of the tree stem");
+		const assertTreeAlignment = () => {
+			for (const row of list.querySelectorAll<HTMLElement>("li")) {
+				const icon = row.querySelector<HTMLElement>(".ui-presence");
+				if (icon === null)
+					throw new Error("Missing relationship presence icon");
+				const bounds = row.getBoundingClientRect();
+				const iconBounds = icon.getBoundingClientRect();
+				const name = row.querySelector<HTMLElement>(".ui-list-name");
+				if (name === null) throw new Error("Missing relationship name");
+				for (const detail of row.querySelectorAll<HTMLElement>(
+					".member-info > .ui-muted",
+				))
+					require(Math.abs(
+						detail.getBoundingClientRect().left -
+							name.getBoundingClientRect().left,
+					) <
+						1, "Relationship details did not align with the name clear of the tree stem");
 
-			if (row.classList.contains("relationship-child")) {
-				const branch = getComputedStyle(row, "::after");
-				require(Math.abs(
-					bounds.top +
-						parseFloat(branch.top) -
-						(iconBounds.top + iconBounds.height / 2),
-				) < 1, "Tree branch did not meet the presence icon vertically");
-				require(Math.abs(
-					bounds.left +
-						parseFloat(branch.left) +
-						parseFloat(branch.width) -
-						iconBounds.left,
-				) < 1, "Tree branch did not meet the presence icon horizontally");
+				if (row.classList.contains("relationship-child")) {
+					const branch = getComputedStyle(row, "::after");
+					require(Math.abs(
+						bounds.top +
+							parseFloat(branch.top) -
+							(iconBounds.top + iconBounds.height / 2),
+					) < 1, "Tree branch did not meet the presence icon vertically");
+					require(Math.abs(
+						bounds.left +
+							parseFloat(branch.left) +
+							parseFloat(branch.width) -
+							iconBounds.left,
+					) < 1, "Tree branch did not meet the presence icon horizontally");
+				}
+				const stem = row.querySelector<HTMLElement>(".relationship-stem");
+				if (stem !== null)
+					require(Math.abs(
+						stem.getBoundingClientRect().left -
+							(iconBounds.left + iconBounds.width / 2),
+					) < 1, "Parent stem did not align with the presence icon");
 			}
-			const stem = row.querySelector<HTMLElement>(".relationship-stem");
-			if (stem !== null)
-				require(Math.abs(
-					stem.getBoundingClientRect().left -
-						(iconBounds.left + iconBounds.width / 2),
-				) < 1, "Parent stem did not align with the presence icon");
-		}
+		};
+		assertTreeAlignment();
 		const tab = element<HTMLElement>("#social-allegiance-panel");
 		require(tab.scrollHeight >
 			tab.clientHeight, "Allegiance tab did not scroll within the window");
@@ -209,6 +213,48 @@ export async function probeAllegiance(options: {
 		assertDepth('li[data-relationship="patron"]', 0);
 		assertDepth("li.self", 1);
 		assertDepth('li[data-relationship="vassal"]', 2);
+		// Exercise independent density changes, rather than only scaling the default tree.
+		const density = {
+			"--ui-inset-padding": "11px",
+			"--ui-list-row-padding-block": "13px",
+			"--ui-list-row-gap": "12px",
+			"--ui-list-detail-gap": "7px",
+			"--ui-list-icon-gap": "9px",
+			"--ui-presence-size": "20px",
+			"--ui-list-tree-indent": "28px",
+			"--ui-icon-action-gap": "10px",
+			"--ui-icon-action-size": "34px",
+			"--ui-icon-action-padding": "5px",
+		};
+		for (const [token, value] of Object.entries(density))
+			target.style.setProperty(token, value);
+		await settle();
+		const themedRow = element<HTMLElement>('li[data-relationship="vassal"]');
+		require(getComputedStyle(themedRow).paddingTop === "13px" &&
+			getComputedStyle(themedRow).columnGap ===
+				"12px", "Management row ignored themed density");
+		require(getComputedStyle(element(".ui-inset")).paddingTop ===
+			"11px", "Management inset ignored themed padding");
+		require(getComputedStyle(element(".ui-presence")).width ===
+			"20px", "Presence marker ignored themed size");
+		require(getComputedStyle(element(".member-info")).rowGap === "7px" &&
+			getComputedStyle(element(".member-info")).columnGap ===
+				"9px", "Relationship details ignored themed spacing");
+		require(getComputedStyle(element(".ui-icon-actions")).columnGap ===
+			"10px" &&
+			getComputedStyle(element(".ui-icon-actions .ui-icon-button")).width ===
+				"34px" &&
+			getComputedStyle(element(".ui-icon-actions .ui-icon-button"))
+				.paddingTop === "5px", "Management actions ignored themed sizing");
+		assertTreeAlignment();
+		// Actions can be taller than the member details without shifting the branches.
+		target.style.setProperty("--ui-icon-action-size", "64px");
+		await settle();
+		assertTreeAlignment();
+		target.style.setProperty(
+			"--ui-icon-action-size",
+			density["--ui-icon-action-size"],
+		);
 		emit("client-allegiance-updated", {
 			allegiance: {
 				...baseline,
@@ -222,6 +268,11 @@ export async function probeAllegiance(options: {
 		assertDepth('li[data-relationship="patron"]', 1);
 		assertDepth("li.self", 2);
 		assertDepth('li[data-relationship="vassal"]', 3);
+		assertTreeAlignment();
+		for (const token of Object.keys(density))
+			target.style.removeProperty(token);
+		await settle();
+		assertTreeAlignment();
 		emit("client-allegiance-updated", {
 			allegiance: {
 				...baseline,
@@ -364,6 +415,7 @@ export async function probeAllegiance(options: {
 			partialRoles: true,
 			relationshipTree: true,
 			branchAlignment: true,
+			themedDensity: true,
 			staleReviewRetired: true,
 			retainedRefreshFacts: true,
 			tabScroll: true,

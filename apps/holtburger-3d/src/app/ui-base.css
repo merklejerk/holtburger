@@ -142,6 +142,18 @@
 		--ui-menu-disabled-opacity: 0.5;
 		/* Shared management lists scroll independently of their surrounding controls. */
 		--ui-list-max-height: 240px;
+		/* Shared list density and tree geometry; themes can vary these independently. */
+		--ui-inset-padding: 8px;
+		--ui-list-row-padding-block: 8px;
+		--ui-list-row-gap: 8px;
+		--ui-list-detail-gap: 4px;
+		--ui-list-icon-gap: 6px;
+		--ui-presence-size: 14px;
+		--ui-list-tree-indent: 14px;
+		/* Compact row actions share sizing across management panels. */
+		--ui-icon-action-gap: 6px;
+		--ui-icon-action-size: 26px;
+		--ui-icon-action-padding: 4px;
 		--ui-icon-rendering: pixelated;
 		/* Spell panel and accordion density; icon size changes display only. */
 		--ui-spell-panel-padding: 8px;
@@ -423,12 +435,12 @@
 	.ui-theme .ui-icon-actions {
 		display: flex;
 		align-items: center;
-		gap: 6px;
+		gap: var(--ui-icon-action-gap);
 	}
 	.ui-theme .ui-icon-actions .ui-icon-button {
-		width: 26px;
-		height: 26px;
-		padding: 4px;
+		width: var(--ui-icon-action-size);
+		height: var(--ui-icon-action-size);
+		padding: var(--ui-icon-action-padding);
 	}
 	/* State rules change defaults, not the property vocabulary. Explicit component
 	   variables are consumed in every state; themes select their values with CSS. */
@@ -540,7 +552,7 @@
 	}
 	/* Management lists share Housing's recessed surface and row treatment. */
 	.ui-theme .ui-inset {
-		padding: 8px;
+		padding: var(--ui-inset-padding);
 		border: 1px solid
 			color-mix(in srgb, var(--ui-color-border) 40%, transparent);
 		background: var(--ui-color-well);
@@ -556,8 +568,8 @@
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 8px;
-		padding: 8px 0;
+		gap: var(--ui-list-row-gap);
+		padding: var(--ui-list-row-padding-block) 0;
 		border-bottom: 1px solid
 			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
 	}
@@ -576,8 +588,8 @@
 	}
 	/* Shared compact character presence for Social relationship and friend rows. */
 	.ui-theme .ui-presence {
-		width: 14px;
-		height: 14px;
+		width: var(--ui-presence-size);
+		height: var(--ui-presence-size);
 		flex-shrink: 0;
 		color: var(--ui-color-muted);
 	}

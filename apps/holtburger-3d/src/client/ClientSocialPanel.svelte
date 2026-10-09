@@ -380,7 +380,7 @@
 		.member-info {
 			display: flex;
 			flex-direction: column;
-			gap: 4px;
+			gap: var(--ui-list-detail-gap);
 			flex: 1;
 			min-width: 0;
 			overflow-wrap: anywhere;
@@ -388,7 +388,7 @@
 		.member-name {
 			display: flex;
 			align-items: center;
-			gap: 6px;
+			gap: var(--ui-list-icon-gap);
 		}
 		.member-leader {
 			width: 16px;

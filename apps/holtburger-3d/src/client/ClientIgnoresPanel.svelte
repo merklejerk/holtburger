@@ -160,7 +160,7 @@
 		}
 		.ignore-info {
 			display: grid;
-			gap: 2px;
+			gap: calc(var(--ui-list-detail-gap) / 2);
 		}
 	}
 </style>

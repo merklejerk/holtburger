@@ -156,7 +156,7 @@
 		.friend-info {
 			display: flex;
 			align-items: center;
-			gap: 6px;
+			gap: var(--ui-list-icon-gap);
 		}
 	}
 </style>

@@ -14,6 +14,8 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 	let split = false;
 	let invite = false;
 	let swear = false;
+	let friend = false;
+	let ignore = false;
 	const calls: string[] = [];
 	const require = (condition: unknown, message: string) => {
 		if (!condition) throw new Error(message);
@@ -32,6 +34,14 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			readCanSplit: () => split,
 			readCanInvite: () => invite,
 			readCanSwear: () => swear,
+			readCanAddFriend: () => friend,
+			readCanIgnoreAccount: () => ignore,
+			onAddFriend: () => {
+				calls.push("friend");
+			},
+			onIgnoreAccount: () => {
+				calls.push("ignore");
+			},
 			onInteract: () => {
 				calls.push("trade");
 			},
@@ -81,14 +91,14 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		button("Trade").click();
 		require(calls.join() === "trade" &&
 			menu() === null, "Single action should execute directly");
-		split = invite = swear = true;
+		split = invite = swear = friend = ignore = true;
 		await sample();
 		await open();
 		const rows = Array.from(
 			target.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
 		);
 		require(rows.map((row) => row.textContent?.trim()).join("|") ===
-			"Trade|Swear allegiance|Invite to party|Split stack", "Menu action labels or order are incorrect");
+			"Trade|Swear allegiance|Invite to party|Add friend|Ignore account|Split stack", "Menu action labels or order are incorrect");
 		require(rows.every(
 			(row) => row.querySelector("svg") !== null,
 		), "Each menu action needs its icon");
@@ -98,6 +108,8 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			"Trade",
 			"Swear allegiance",
 			"Invite to party",
+			"Add friend",
+			"Ignore account",
 			"Split stack",
 		]) {
 			if (menu() === null) await open();
@@ -110,7 +122,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			require(menu() === null, "Choosing an action must close the menu");
 		}
 		require(calls.join() ===
-			"trade,trade,swear,invite,split", "Menu dispatched the wrong actions");
+			"trade,trade,swear,invite,friend,ignore,split", "Menu dispatched the wrong actions");
 		await open();
 		button("Selected entity actions").click();
 		await settle();
@@ -128,7 +140,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		await settle();
 		require(menu() === null, "Escape must dismiss the menu");
 		await open();
-		split = invite = swear = false;
+		split = invite = swear = friend = ignore = false;
 		await sample();
 		require(menu() === null &&
 			button("Trade")

@@ -381,6 +381,10 @@ export async function probeAllegiance(options: {
 				}),
 				readCanSplit: () => false,
 				readCanInvite: () => false,
+				readCanAddFriend: () => false,
+				readCanIgnoreAccount: () => false,
+				onAddFriend: () => {},
+				onIgnoreAccount: () => {},
 				onInvite: () => {},
 				readCanSwear: () => session.allegiance.canSwear(patron.guid),
 				onSwear: () => {

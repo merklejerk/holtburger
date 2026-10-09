@@ -14,6 +14,22 @@ export interface ClientSelectedEntity {
 	readonly presentation: DynamicEntityView | null;
 }
 
+/** Known player identity for app-owned social actions; scene residency is irrelevant. */
+export function selectedPlayerTarget(
+	selected: ClientSelectedEntity | null,
+	playerGuid: number | null,
+): { readonly guid: number; readonly name: string } | null {
+	if (
+		selected === null ||
+		playerGuid === null ||
+		selected.guid === playerGuid ||
+		selected.facts?.description.kind !== "known" ||
+		selected.facts.description.mapCategory !== "player"
+	)
+		return null;
+	return { guid: selected.guid, name: selected.facts.description.name };
+}
+
 /** Join current reads by GUID without caching another copy of selection or entity state. */
 export function clientSelectedEntity(
 	guid: number | null,

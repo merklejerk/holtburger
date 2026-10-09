@@ -32,7 +32,10 @@
 		ClientItemInteractions,
 		ItemInteractionState,
 	} from "./client-item-interactions";
-	import type { ClientSelectedEntity } from "./client-selected-entity";
+	import {
+		selectedPlayerTarget,
+		type ClientSelectedEntity,
+	} from "./client-selected-entity";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 
@@ -188,6 +191,8 @@
 		onPickInventoryTarget: ClientViewportTargetPicker;
 		/** Ordinary inventory refusal feedback. */
 		onInventoryNotice: (message: string) => void;
+		/** Surface social dispatch failures even when the Social panel is closed. */
+		readonly onSocialNotice: (message: string) => void;
 		/** Startup catalog availability for switch classification diagnostics. */
 		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly cameraController: ClientViewportCameraController | null;
@@ -362,6 +367,7 @@
 		onSelectContentsItem,
 		onPickInventoryTarget,
 		onInventoryNotice,
+		onSocialNotice,
 		onInteractEntity,
 		objectInspection,
 		bookReader,
@@ -549,26 +555,47 @@
 	const HUD_PREVIEW_JUMP_EXTENT = 0.45;
 	const HUD_PREVIEW_TOAST_MESSAGE = "Notification preview";
 
-	/** Selection facts identify players; the party owner owns recruitment permissions. */
+	/** App-owned target classification shared by selected-player shortcuts. */
+	function selectedPlayer() {
+		return selectedPlayerTarget(readSelectedEntity(), characterGuid);
+	}
 	function inviteTarget(): number | null {
-		const selected = readSelectedEntity();
-		return selected !== null &&
-			selected.facts?.description.kind === "known" &&
-			selected.facts.description.mapCategory === "player" &&
-			party?.canInvite(selected.guid)
-			? selected.guid
+		const target = selectedPlayer();
+		return target !== null && party?.canInvite(target.guid)
+			? target.guid
 			: null;
 	}
-
-	/** Scene facts establish a player selection; allegiance owns swear admission. */
 	function swearTarget(): number | null {
-		const selected = readSelectedEntity();
-		return selected !== null &&
-			selected.facts?.description.kind === "known" &&
-			selected.facts.description.mapCategory === "player" &&
-			allegiance?.canSwear(selected.guid)
-			? selected.guid
+		const target = selectedPlayer();
+		return target !== null && allegiance?.canSwear(target.guid)
+			? target.guid
 			: null;
+	}
+	function friendTarget() {
+		const target = selectedPlayer();
+		return target !== null && friends?.canAdd(target.guid, target.name)
+			? target
+			: null;
+	}
+	function ignoreTarget() {
+		const target = selectedPlayer();
+		return target !== null &&
+			squelch?.canIgnoreAccount(target.guid, target.name)
+			? target
+			: null;
+	}
+	function addSelectedFriend(): void {
+		const target = friendTarget();
+		if (target !== null)
+			void friends?.request({ kind: "add", name: target.name }, onSocialNotice);
+	}
+	function ignoreSelectedAccount(): void {
+		const target = ignoreTarget();
+		if (target !== null)
+			void squelch?.request(
+				{ kind: "add", name: target.name, scope: "account" },
+				onSocialNotice,
+			);
 	}
 	function canSplitSelectedEntity(): boolean {
 		return (
@@ -1024,6 +1051,10 @@
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
 				readCanSplit={canSplitSelectedEntity}
+				readCanAddFriend={() => friendTarget() !== null}
+				readCanIgnoreAccount={() => ignoreTarget() !== null}
+				onAddFriend={addSelectedFriend}
+				onIgnoreAccount={ignoreSelectedAccount}
 				readCanSwear={() => swearTarget() !== null}
 				onSwear={() => {
 					const guid = swearTarget();

@@ -195,6 +195,12 @@ try {
 			...result.clientSquelch,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientSelectedActions) {
+		report = {
+			suite: "client-selected-actions",
+			...result.clientSelectedActions,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientFriends) {
 		report = {
 			suite: "client-friends",
@@ -428,6 +434,7 @@ function parseArgs(args) {
 		characterSheet: false,
 		clientParty: false,
 		clientFriends: false,
+		clientSelectedActions: false,
 		clientSquelch: false,
 		clientAllegiance: false,
 		clientInspection: false,
@@ -591,6 +598,10 @@ function parseArgs(args) {
 			case "--client-squelch":
 				parsed.clientHud = true;
 				parsed.clientSquelch = true;
+				break;
+			case "--client-selected-actions":
+				parsed.clientHud = true;
+				parsed.clientSelectedActions = true;
 				break;
 			case "--client-friends":
 				parsed.clientHud = true;
@@ -1821,6 +1832,7 @@ Options:
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
   --client-inspection   Exercise entity inspection windows, disclosed facts, and preview lifetimes.
+  --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4426,6 +4438,17 @@ async function runClientHudHarness({ viteUrl }) {
 				clientSquelch: await evaluate(
 					client,
 					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSquelch",
+					[],
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientSelectedActions) {
+			return {
+				clientSelectedActions: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSelectedActions",
 					[],
 				),
 				consoleMessages,

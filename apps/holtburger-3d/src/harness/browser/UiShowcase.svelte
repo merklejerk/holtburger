@@ -404,6 +404,10 @@
 					})}
 					readCanSplit={() => false}
 					readCanInvite={() => false}
+					readCanAddFriend={() => false}
+					readCanIgnoreAccount={() => false}
+					onAddFriend={() => {}}
+					onIgnoreAccount={() => {}}
 					readCanSwear={() => false}
 					onSwear={() => {}}
 					onInvite={() => {}}

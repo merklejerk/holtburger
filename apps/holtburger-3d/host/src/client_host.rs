@@ -286,11 +286,152 @@ mod tests {
         }
     }
 
+    #[test]
+    fn allegiance_projection_recovery_and_typed_actions_share_domain_roles() {
+        use holtburger_core::ClientCommand;
+        use holtburger_core::client::allegiance::AllegianceSnapshot;
+        use holtburger_protocol::messages::{
+            AllegianceChild, AllegianceData, AllegianceNodes, AllegianceTime,
+        };
+        use holtburger_world::state::allegiance::AllegianceState;
+        let member = |guid, name: &str| AllegianceData {
+            guid,
+            name: name.into(),
+            cached_xp: u32::MAX,
+            contributed_xp: u32::MAX,
+            flags: 1,
+            gender: 1,
+            heritage: 1,
+            rank: 3,
+            level: None,
+            loyalty: 100,
+            leadership: 100,
+            time: AllegianceTime::Age {
+                time_online: 0,
+                allegiance_age: 0,
+            },
+        };
+        let patron = Guid(10);
+        let player = Guid(42);
+        let vassal = Guid(11);
+        let allegiance = AllegianceSnapshot {
+            player_guid: Some(player),
+            refreshing: true,
+            can_swear: false,
+            profile: Some(AllegianceState {
+                rank: 3,
+                name: "Allegiance".into(),
+                total_members: 20,
+                total_descendants: 10,
+                nodes: AllegianceNodes::Tree {
+                    monarch: member(patron, "Patron"),
+                    children: vec![
+                        AllegianceChild {
+                            parent: patron,
+                            data: member(player, "Player"),
+                        },
+                        AllegianceChild {
+                            parent: player,
+                            data: member(vassal, "Vassal"),
+                        },
+                    ],
+                },
+            }),
+        };
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected fixture");
+        };
+        snapshot.allegiance = allegiance.clone();
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let Some(ClientHostEvent::AllegianceUpdated {
+            allegiance: incremental,
+        }) = project_client_event(ClientViewEvent::AllegianceUpdated(allegiance))
+        else {
+            panic!("Expected allegiance publication");
+        };
+        let value = serde_json::to_value(&replacement.allegiance).unwrap();
+        assert_eq!(value, serde_json::to_value(incremental).unwrap());
+        assert_eq!(value["playerGuid"], 42);
+        assert_eq!(value["profile"]["selfMember"]["title"], "Baron");
+        assert_eq!(
+            value["profile"]["patron"]["guid"],
+            value["profile"]["monarch"]["guid"]
+        );
+        assert_eq!(value["profile"]["selfMember"]["contributedXp"], u32::MAX);
+        assert_eq!(
+            value["profile"]["selfMember"]["level"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            value["profile"]["directVassals"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(value["profile"]["totalDescendants"], 10);
+        let event = crate::protocol::HostEvent::ClientAllegianceUpdated {
+            allegiance: replacement.allegiance,
+        };
+        let envelope = serde_json::to_value(event).unwrap();
+        assert_eq!(envelope["event"], "client-allegiance-updated");
+        assert_eq!(envelope["payload"]["allegiance"], value);
+        for (json, expected) in [
+            (
+                serde_json::json!({"kind":"refresh"}),
+                ClientCommand::QueryAllegiance,
+            ),
+            (
+                serde_json::json!({"kind":"swear","guid":10}),
+                ClientCommand::SwearAllegiance { target: patron },
+            ),
+            (
+                serde_json::json!({"kind":"break","guid":11}),
+                ClientCommand::Unswear { target: vassal },
+            ),
+            (
+                serde_json::json!({"kind":"showLogons","enabled":true}),
+                ClientCommand::SetCharacterOption {
+                    option: holtburger_common::CharacterOption::ShowAllegianceLogons,
+                    value: true,
+                },
+            ),
+        ] {
+            let action: crate::client_allegiance::ClientAllegianceAction =
+                serde_json::from_value(json).unwrap();
+            match (ClientCommand::from(action), expected) {
+                (ClientCommand::QueryAllegiance, ClientCommand::QueryAllegiance) => {}
+                (
+                    ClientCommand::SwearAllegiance { target },
+                    ClientCommand::SwearAllegiance { target: expected },
+                )
+                | (
+                    ClientCommand::Unswear { target },
+                    ClientCommand::Unswear { target: expected },
+                ) => assert_eq!(target, expected),
+                (
+                    ClientCommand::SetCharacterOption { option, value },
+                    ClientCommand::SetCharacterOption {
+                        option: expected_option,
+                        value: expected_value,
+                    },
+                ) => {
+                    assert_eq!(option, expected_option);
+                    assert_eq!(value, expected_value);
+                }
+                (actual, expected) => panic!("Expected {expected:?}, got {actual:?}"),
+            }
+        }
+    }
+
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
             fellowship: None,
             friends: None,
             squelch: None,
+            allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
+                player_guid: None,
+                profile: None,
+                refreshing: false,
+                can_swear: false,
+            },
             housing: Default::default(),
             connection: None,
             trade: Default::default(),
@@ -952,6 +1093,12 @@ mod tests {
             fellowship: None,
             friends: None,
             squelch: None,
+            allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
+                player_guid: None,
+                profile: None,
+                refreshing: false,
+                can_swear: false,
+            },
             housing: Default::default(),
             connection: None,
             trade: Default::default(),

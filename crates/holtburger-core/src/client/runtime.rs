@@ -96,6 +96,7 @@ impl ClientRuntime {
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
         self.poll_container_close_timeout(now);
         self.poll_housing_query_timeout(now);
+        self.poll_allegiance_query_timeout(now);
         self.poll_housing_information_timeouts(now);
         self.expire_busy_operation(now);
     }

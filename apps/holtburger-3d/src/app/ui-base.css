@@ -565,6 +565,16 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	/* Shared compact character presence for Social relationship and friend rows. */
+	.ui-theme .ui-presence {
+		width: 14px;
+		height: 14px;
+		flex-shrink: 0;
+		color: var(--ui-color-muted);
+	}
+	.ui-theme .ui-presence.online {
+		color: var(--ui-color-success);
+	}
 	.ui-theme .ui-list-actions {
 		margin-inline-start: auto;
 		flex-shrink: 0;

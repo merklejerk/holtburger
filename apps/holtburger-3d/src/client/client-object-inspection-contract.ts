@@ -348,6 +348,10 @@ const creatureInspectionSchema = z
 		maxHealthBonus: i32.nullable(),
 		characterDetails: z
 			.object({
+				allegianceRank: z
+					.object({ rank: i32, title: z.string().nullable() })
+					.strict()
+					.nullable(),
 				allegianceName: z.string().nullable(),
 				patron: z.string().nullable(),
 				monarch: z.string().nullable(),

@@ -1,3 +1,4 @@
+pub use crate::messages::allegiance::*;
 pub use crate::messages::book::actions::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
@@ -25,6 +26,7 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    AllegianceUpdateRequest(Box<AllegianceUpdateRequestActionData>),
     AddFriend(Box<AddFriendActionData>),
     ModifyAccountSquelch(Box<ModifyAccountSquelchActionData>),
     ModifyCharacterSquelch(Box<ModifyCharacterSquelchActionData>),
@@ -169,6 +171,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Tell => {
                     GameAction::Tell(Box::new(TellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::AllegianceUpdateRequest => GameAction::AllegianceUpdateRequest(
+                    Box::new(AllegianceUpdateRequestActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::SwearAllegiance => GameAction::SwearAllegiance(Box::new(
                     SwearAllegianceActionData::unpack(data, offset)?,
                 )),
@@ -466,6 +471,10 @@ impl ProtocolPack for GameActionMessage {
             GameAction::Tell(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Tell as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameAction::AllegianceUpdateRequest(data) => {
+                (GameActionOpcode::AllegianceUpdateRequest as u32).pack(buf);
                 data.pack(buf);
             }
             GameAction::SwearAllegiance(data) => {

@@ -47,6 +47,7 @@ pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mu
             || fellowship::handle_event(state, event, events)
             || friends::handle_event(state, event, events)
             || super::squelch::handle_event(state, event, events)
+            || super::allegiance::handle_event(state, event, events)
             || trade::handle_event(state, event, events)
             || inventory::handle_event(state, event, events)
             || system::handle_event(state, event, events)

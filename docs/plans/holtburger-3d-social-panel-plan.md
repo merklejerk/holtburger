@@ -1,6 +1,6 @@
 # H3D social panel
 
-Status: Party, Friends, and Ignores accepted. Ignores and the shared window/tab consolidation passed scoped code-quality review and automated verification. Allegiance has not started.
+Status: Party, Friends, Ignores, and Allegiance accepted. All four slices passed scoped code-quality review and automated verification. Final Social cleanup/review remains unstarted.
 
 ## Goal and boundaries
 
@@ -97,7 +97,7 @@ The existing core client, command/message dispatchers, and H3D lifecycle session
 | Party | Existing fellowship roster, leadership, and actor capabilities | Party commands and update demand handling | Existing pending actions, creation/handoff dialogs, management tab, and selected-entity invitation |
 | Friends | Records and full/delta/presence reconciliation | Add/remove commands and state publication | Pending rows, search/filter/sort, and disabled Tell affordance |
 | Ignores | Squelch replacement state, scope/category/global facts | Scope-specific mutations and state publication | Scope choice, restriction disclosure, and pending add/remove |
-| Allegiance | Partial relationship profile, presence, and shared relationship eligibility | Swear/break commands, state publication, and bounded profile-read coordination | Relationship/XP presentation, refresh affordance, and destructive review |
+| Allegiance | Partial relationship profile, presence, and shared relationship eligibility | Swear/break commands, state publication, and bounded profile-read coordination | Relationship/XP presentation, visible-tab read cadence, and destructive review |
 
 Use focused domain modules in world, core, and the host, with dedicated frontend contracts/owners/components where behavior warrants them. A module need not become a stateful system object: Party and Friends can use retained world state plus focused core methods; Allegiance has a concrete need for a bounded query owner. Shared option mutation stays on the existing character-option path. No aggregate Social owner should absorb the four domains' state machines.
 
@@ -267,13 +267,13 @@ Deliverables:
 - Decode profile totals, versioned hierarchy, parent links, and flagged node sections. Consume all metadata without inventing meaningful values for ACE's blanked fields.
 - Add focused world allegiance state/handler and core allegiance command/publication modules, with a bounded profile-query owner for the supported refresh path. Route existing swear/break behavior through the same domain methods. Add a typed host adapter and dedicated H3D contract/owner/tab; central dispatchers and lifecycle code delegate rather than holding relationship or query logic. Keep the authoritative profile in world and frontend review/pending policy in H3D.
 - Interpret the payload as monarch/patron/self/direct-vassal context, not a complete member roster. Do not conflate total descendants with direct vassals.
-- Presence notifications can mention undisclosed members: update known profile nodes only, without creating nameless roster entries or a speculative full-roster cache. ACE sends notifications only when `ShowAllegianceLogons` is enabled; expose that existing preference alongside the tab, and state that presence reflects the last snapshot/update when disabled. Do not secretly enable it.
-- Render relationship context, ranks, levels/presence where supplied, counts, and server-reported cached/contributed XP. Preserve gender/heritage where needed for later title lookup; numeric rank is sufficient initially.
+- Presence notifications can mention undisclosed members: update known profile nodes only, without creating nameless roster entries or a speculative full-roster cache. ACE sends notifications only when `ShowAllegianceLogons` is enabled; expose that existing preference alongside the tab. Do not secretly enable it.
+- Render monarch, patron, self, and name-sorted direct vassals in one capped inset relationship tree. Collapse overlapping roles, highlight self, and use a dotted ancestry gap between distinct monarch/patron roles because the intermediate path is undisclosed. Keep row actions trailing. Render ranks, levels/presence where supplied, counts, and server-reported contributed XP. Resolve retail rank titles in a focused shared world lookup using retained heritage, gender and rank; project the optional title for roster names while retaining numeric rank in details.
 - Expose selected-character swear, break from patron, and dismiss direct vassal through existing swear/break commands. Both patron break and direct-vassal dismissal use `BreakAllegiance 0x001E`; no broader boot/admin opcode is required.
 - Reuse server swear confirmation; add app-local review for destructive relationship actions, bound to the reviewed target and current relationship.
-- Refresh on tab entry/manual request and consume unsolicited profile/presence updates. Handle completion/refusal honestly; do not assume ACE maintains retail's visibility subscription behavior.
-- Retain the last profile while a read is pending. Only initial query, explicit refresh, or an observed direct-relationship change needs a read; no periodic XP polling. Close does not issue an extra request: ACE ignores the panel flag and responds even to `false`. Accept unsolicited profiles as current facts; completion releases the read guard, not a mutation transaction. On deadline, retain facts and report that refresh did not complete.
-- Display XP as reported totals. ACE caps node cached/contributed XP at `u32::MAX` and leaves relationship age/time fields unimplemented; do not present exact unlimited lifetime totals or XP rates.
+- Request a profile whenever the Allegiance tab becomes visible and every 15 seconds while visible and available. H3D owns this cadence; core suppresses overlapping reads. Consume unsolicited profile/presence updates; do not assume ACE maintains retail's visibility subscription behavior. No manual refresh control or recurring progress indicator is shown.
+- Retain the last profile while a read is pending. Stop the H3D read timer on hidden tabs/windows, unavailable character state, or retirement. Shared core may also request a profile after an observed direct-relationship change. Close does not issue an extra request: ACE ignores the panel flag and responds even to `false`. Accept unsolicited profiles as current facts; completion releases the read guard, not a mutation transaction. On deadline, retain facts and log diagnostics without a player-facing sync warning.
+- Display contributed XP as reported totals. ACE caps node XP at `u32::MAX` and leaves relationship age/time fields unimplemented; do not present exact unlimited lifetime totals or XP rates.
 - Do not add privileged `AllegianceInfoRequest 0x027B`/response `0x027C` to discover a full roster. No initial consumer needs them.
 
 Automated acceptance:
@@ -289,7 +289,7 @@ Manual gate 4:
 - Swear with a second character; verify accept/decline and relationship updates.
 - Break from patron and dismiss a direct vassal; check both affected clients.
 - Verify monarch/patron/self/vassal layouts, presence, counts, and XP against server evidence.
-- Verify refresh, close/reopen, portal travel, and character switching.
+- Verify quiet visible-tab updates, close/reopen, portal travel, and character switching.
 - Accept or correct the slice before final cleanup.
 
 ## Verification and cleanup
@@ -329,10 +329,10 @@ Final cleanup phase:
 ## Definition of done
 
 - [ ] All four slices expose functional UI, commands, incoming state, and current-state recovery.
-- [ ] Each slice has passed its automated checks and explicit user manual acceptance gate.
+- [x] Each slice has passed its automated checks and explicit user manual acceptance gate.
 - [ ] Party management contains no member vital view; shared state remains suitable for the follow-up HUD.
 - [x] Ignores defaults to account scope and accurately distinguishes target scope from local ownership.
-- [ ] Allegiance displays a partial relationship view and honest XP facts with no administration expansion.
+- [x] Allegiance displays a partial relationship view and honest XP facts with no administration expansion.
 - [ ] Membership/list optimism never mutates authoritative facts; existing locally mirrored preferences remain explicitly distinct from acknowledged facts. Host queue acceptance is never presented as server acceptance.
 - [ ] Pending UI is bounded, stale local work cannot affect a different character/domain, and closing tabs does not lose sync.
 - [ ] No generic transaction framework, automatic mutation retry, unused metrics, or unsupported guarantees were added.
@@ -349,7 +349,7 @@ Source review resolved option acknowledgement/effects, the replacement-snapshot 
 | Party | Implemented; automated checks, nonvisual browser verification, and scoped code-quality review passed. See evidence below. | Accepted 2026-10-07 |
 | Friends | Implemented; focused automated checks, nonvisual browser verification, and scoped ownership/code-quality review passed. | Accepted 2026-10-07 |
 | Ignores | Implemented; automated checks, nonvisual browser verification, and scoped code-quality review passed. | Accepted 2026-10-07 |
-| Allegiance | Not started | Pending |
+| Allegiance | Implemented; focused tests, nonvisual browser verification, and scoped quality review passed. | Accepted 2026-10-08 |
 | Cleanup/review | Not started | Pending |
 
 ### Party acceptance and code-quality review (2026-10-07)
@@ -554,3 +554,74 @@ Consolidation review: common ACE name normalization and compact row styling have
 Maintenance traces covered account removal revealing a partial character restriction, early DB delivery before local player establishment, reopening with preserved nested scroll/drafts/disclosures, and a new category editor consuming retained shared facts instead of reinterpreting masks in H3D. Seam coverage includes ACE readers/writers/manager/login, protocol envelopes, world reduction/classification, core routing/entry/retirement, host action/projection/stdio, transport schemas, lifecycle recovery, frontend reconciliation, actual panel composition, and map harness composition. General transport sequencing, full renderer behavior, and independent live multi-account persistence experiments remain outside this review; user acceptance is recorded without claiming those experiments were performed by the agent.
 
 Final verification is recorded in the commit: focused Rust squelch tests, 143 affected frontend tests, app/node/test/Electron type checks, TypeScript/dead-code lint, Rust clippy, formatting/whitespace checks, and the Ignores browser probe. The preceding shared-window checkpoint also passed 44 input/layout tests and World/Party/keyboard browser suites. Next planned slice is the narrow Allegiance baseline, under its own acceptance gate.
+
+### Allegiance foundation checkpoint (2026-10-07)
+
+The user resumed the implementation goal after accepting Ignores. Phase 4 is in progress, not ready for manual acceptance. Added the profile request, profile update, completion/abort, and presence envelopes. The current hierarchy decoder supports ACE's version 11 and explicitly rejects other hierarchy versions; node decoding supports both flagged level/age records and the historical floating-point online-time branch proven at `acclient.c:459156`. Protocol retains administration metadata for wire parity without presenting ACE's blank fields as available management features.
+
+World now owns retained partial profile replacement, known-node presence reduction, and relationship interpretation by character identity and parent links. Direct vassals remain distinct from total descendants, and undisclosed presence identities do not create speculative members. Focused protocol/world tests pass, including independently assembled wire fixtures, every-prefix truncation checks, empty profiles, monarch/patron role overlap, distinct patrons, direct-vassal links, unknown presence, and preservation of unrelated flags. Core, host, and CLI compile against the new types.
+
+Remaining required work: core publication and character lifetime admission/retirement, bounded refresh coordination and shared swear/break methods; typed host projection/actions and transport contracts; H3D owner/tab and destructive review using the existing UI primitives; focused integration/runtime verification, quality review, and manual gate 4. No feature acceptance or live-server verification is claimed by this checkpoint. Changes are uncommitted.
+
+
+### Allegiance implementation and scoped review (2026-10-07)
+
+The Phase 4 slice is implemented and ready for manual gate 4. It remains uncommitted. The shared protocol adds the five request/reply/presence envelopes and deterministic current-version profile serialization. World owns retained partial profiles, role interpretation, basic swear/break eligibility, presence changes and relationship-link invalidation. Core owns commands, publication, character-lifetime admission/retirement and the single bounded read deadline. The typed host adapter projects the same roles for events and recovery; H3D owns modal review, visibility, display sorting and queue feedback.
+
+The tab uses the existing retained tab/window shell, disclosures, capped inset lists, trailing icon actions and default-cancellable modal shell. Monarch/patron/self role overlap is grouped for display. The selected-player HUD exposes a swear icon when the domain permits requesting it; the existing server confirmation handles recipient acceptance. Patron breaks and direct-vassal dismissal review the named relationship and retire on target/name/character changes or hiding the tab. Refresh retains the last profile, missing completion produces ordinary action feedback without retry, and queue acceptance never changes relationship facts. Presence uses the existing ShowAllegianceLogons preference. XP remains the server's reported, potentially capped values; no age estimates, rates or administration are added.
+
+Review corrections moved relationship eligibility/invalidation from core into world, shared the Friends/Allegiance presence styling, removed unused frontend dispatch fields, and republished lifecycle-dependent swear admission on portal return. The latter has a regression test: a profile published during travel must not leave the HUD action disabled after returning without another profile.
+
+The TUI and H3D route existing swear/break commands through the same focused core methods. A client without a loaded profile can still submit a break target and rely on server permission checks; known profiles admit only patron/direct-vassal targets. H3D reviews require current projected relationships. This keeps the preexisting TUI command usable without imposing H3D's tab-opening policy on it. The query is a single optional deadline managed by the focused core module; no generic transaction or query framework was added.
+
+Verification: protocol/world/core/host allegiance fixtures and behavioral tests pass; 156 affected frontend tests and all 613 core library tests pass. The full core suite required local socket permission for four existing UDP tests; the permitted rerun passed. Type checking reports zero Svelte errors/warnings and app/node/test/Electron checks pass. TypeScript/dead-code lint, affected Rust Clippy with warnings denied, formatting and whitespace checks pass. Nonvisual Chrome Allegiance verification passes six typed actions, initial/manual read behavior, grouped partial roles, stale review retirement, retained refresh facts, tab/list scrolling, remount recovery and selected-HUD swear. Party, Friends and Ignores browser regressions also pass. The accumulated review traces ACE profile/node/control writers, swear/break handlers and shared confirmation, protocol envelopes, world reducers/semantics, core dispatch/entry/retirement/deadline, host projection/action/stdio, strict frontend schemas, session recovery, owner/modal and actual Social/HUD composition. General transport sequencing and independent live multiplayer behavior remain outside this scoped review; no visual acceptance is claimed.
+
+The supported hierarchy layout is ACE/retail version 11; older hierarchy layouts are explicitly rejected rather than guessed. Both current node flags and the historical floating-point online-time encoding are decoded. The visible-tab read policy below supersedes the original initial/manual-read policy. These are bounded baseline decisions, not claims of full historical protocol coverage.
+
+Manual gate 4: use a second character to test swear accept/decline, breaking from patron and dismissing a direct vassal on both affected clients. Check relationship layouts, presence preference and reported XP, quiet visible-tab updates, close/reopen, portal return and character switching. Final Social cleanup and any commit await the user's acceptance/request.
+
+### Allegiance visibility correction (2026-10-07)
+
+At the user’s request, removed the manual Refresh button and the presence refresh explanation. The H3D domain owner now reads immediately on visible activation and every 15 seconds while the tab and window are visible and the character is available. It stops its sole timer on hiding, unavailable context, and retirement. Reopening retains existing facts while obtaining a fresh profile. Incoming events do not restart the cadence. Core retains its existing single-request admission/deadline and relationship invalidation; it does not own frontend visibility or add a subscription manager. Missing completion logs a diagnostic and releases admission without a chat warning; automatic host dispatch failures go to diagnostics and preserve existing player-action feedback.
+
+Verification: 55 focused frontend tests and six core Allegiance tests pass. Nonvisual Chrome verification passes seven typed actions, including fresh reads on tab reactivation and reopening while retaining profile facts. Fake-timer tests cover the visible cadence, outstanding-read suppression, hiding, unavailable context, retirement, and diagnostic-only background dispatch failures. App/node/test/Electron type checks, TypeScript/dead-code lint, core Clippy with warnings denied, Rust formatting, frontend formatting, and whitespace checks pass. Manual gate 4 remains pending; changes remain uncommitted.
+
+### Allegiance copy and XP simplification (2026-10-08)
+
+Removed the tab’s explanatory roster/XP copy and reduced the empty state to “No allegiance.” Removed cached XP from the player summary and vassal tooltips: ACE credits online players immediately and drains offline accrual after login, so this pending balance has little value here. Cached XP remains lossless in protocol/world state but is omitted from the H3D member projection and strict contract now that it has no UI consumer. Contributed XP remains visible.
+
+### Combined Allegiance relationships (2026-10-08)
+
+Combined the context and direct-vassal sections into one capped inset list with tree indentation and connectors. Role overlap uses one row, the local character name is highlighted, and direct vassals remain sorted with trailing dismissal buttons and contributed XP. A dotted gap marks undisclosed monarch-to-patron ancestry. This layout belongs to the H3D component and consumes existing shared roles; no protocol or shared-state changes were required.
+
+Verification: frontend app/node/test/Electron checks pass with zero Svelte errors/warnings; TypeScript lint, formatting and whitespace checks pass. The nonvisual browser probe passes tree depths for patron-as-monarch, distinct monarch/patron, and self-as-monarch, plus sorted/capped scrolling, stale review retirement, existing mutations, remount refresh and HUD swearing. Visual acceptance remains with the user. Changes remain uncommitted.
+
+### Relationship connector alignment (2026-10-08)
+
+Corrected tree geometry after user visual feedback: character names/presence icons occupy the first line; role/rank details follow below. Branches meet the presence icon rather than the center of the entire variable-height row. Parent stems extend from beneath their icons to the next row, joining incoming child/sibling segments into continuous file-tree connectors. The existing dotted ancestry gap remains.
+
+Verification: browser geometry assertions pass for branch/icon horizontal and vertical alignment and parent-stem alignment alongside the existing Allegiance interaction suite. App/node/test/Electron checks, TypeScript lint, formatting and whitespace checks pass. Visual acceptance remains with the user; changes are uncommitted.
+
+Follow-up: relationship details now occupy the name column of a two-column member grid, leaving the presence/stem column clear on every line. Contribution text uses the same grid, removing an extra content wrapper. Browser geometry verification now checks role/rank and contribution alignment with names in addition to connector alignment. The browser suite, frontend type checks, lint, formatting and whitespace checks pass; visual acceptance remains pending.
+
+### Shared allegiance rank titles (2026-10-08)
+
+Added `world::state::allegiance::titles::rank_title`, a stateless lookup of retail titles by wire heritage, gender and rank. All 17 ACE tables match retail; the new 200 male/female table entries were compared against ACE. Shadowbound/Penumbraen share their mapping, and undefined heritage/gender/rank returns no title. Individual table comments cite retail source locations. These are ordinary rank titles, separate from custom officer administration.
+
+The H3D host projects the optional resolved title, and roster names prefix it while retaining numeric rank below. Unknown titles render plain names. The host’s optional aggregate profile is boxed so adding member facts does not enlarge every event frame; serialization remains transparent. No new wire commands or TUI presentation changes were added. Verification: five focused world Allegiance tests (including heritage/gender/rank selection and undefined inputs), the host projection/recovery test, and 55 affected frontend tests pass. The browser suite passes prefixed and absent-title names alongside existing tree geometry and interactions. App/node/test/Electron checks report zero Svelte errors/warnings; TypeScript lint, affected host Clippy with warnings denied, formatting, and whitespace checks pass. Manual visual acceptance remains with the user; changes are uncommitted.
+
+### Inspected character allegiance rank (2026-10-08)
+
+Extended shared inspection character details with one optional rank/title object. World resolves the title using the same allegiance lookup and only the current appraisal response’s disclosed heritage, gender and rank; it does not borrow stale retained entity properties or social-panel facts. Numeric rank survives missing or unsupported title inputs. H3D displays the result under Affiliation, such as “Baroness (3)”, through the existing serialized inspection contract and styles. Patron/monarch strings remain server-authored. No new network commands, sync owner or TUI rendering change was added.
+
+Verification: 22 world inspection tests, the host inspection wire-fixture test, and 19 affected frontend tests pass. Frontend app/node/test/Electron checks report zero Svelte errors/warnings, and TypeScript lint and formatting pass. Affected host/CLI Clippy checks with warnings denied pass. The focused `npm run harness:browser -- --client-inspection --brief` suite passes the new “Baroness (3)” row and existing inspection commands, stale targets, scrolling, coexistence, geometry and lifecycle checks. The new focused option reuses the existing inspection probe and initializes its world-container coexistence fixture. The broad HUD run stopped earlier in its spell search probe: it expects 512 matches for “self frost”, but fixture ID 666 is “Vitae”, yielding 511; this was reproduced with the production search matcher. No spell code or fixture behavior was changed, and no passing full-HUD claim is made. Visual acceptance remains with the user; changes remain uncommitted.
+
+### Allegiance acceptance and final code-quality review (2026-10-08)
+
+The user accepted the Allegiance tab and requested review and commit. Gate 4 is accepted. This records user acceptance, not a claim of additional agent-run live multiplayer or visual testing. The separate final Social cleanup phase remains unstarted.
+
+Verdict: ready within the accumulated Allegiance and inspection-rank scope, with no blocking findings. Reviewed the new and modified files against the preceding Ignores commit, including the lossless current-version protocol, world replacement/presence and relationship semantics, core command admission/read completion/deadline and lifecycle publication, host projection/action/stdio adapters, strict frontend contracts, session recovery/retirement, visible-tab owner, shared UI composition, relationship layout, and inspection response-to-display rank/title path. General transport sequencing, renderer internals, and independent live multiplayer acceptance are outside this review. The existing ACE diagnostic worktree changes are unrelated and excluded.
+
+Consolidation review retained focused domain owners rather than adding a generic Social sync manager. Rank-title lookup serves both relationship projection and appraisal interpretation in world; H3D retains layout and visibility policy. Friends and Allegiance share presence styles and the existing window/tab/list/dialog primitives. Read completion releases admission only; dispatch acceptance never mutates authoritative relationships. The one query deadline and one visibility interval have separate responsibilities and lifetimes. No additional transactional bookkeeping is warranted.
+
+Final verification: 19 focused Rust Allegiance tests, 22 world inspection tests, the host inspection wire-fixture test, and 74 frontend allegiance/lifecycle/inspection tests pass. App/node/test/Electron checks, TypeScript/dead-code lint, affected host/CLI Clippy with warnings denied, formatting, and whitespace checks pass. Nonvisual Allegiance and focused inspection browser suites pass. The preceding inspection checkpoint records the inherited full-HUD spell-fixture mismatch; this review does not claim that unrelated full suite passed.

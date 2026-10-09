@@ -1,3 +1,7 @@
+import type {
+	AllegianceSnapshot,
+	AllegiancePreferences,
+} from "../../client/client-allegiance-contract";
 import type { SquelchSnapshot } from "../../client/client-squelch-contract";
 import type {
 	FriendsSnapshot,
@@ -143,6 +147,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_party",
 	"submit_client_friends",
 	"submit_client_squelch",
+	"submit_client_allegiance",
 	"set_client_party_updates",
 	"send_client_chat",
 	"teleport_client_to_map_position",
@@ -261,6 +266,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-party-updated",
 	"client-friends-updated",
 	"client-squelch-updated",
+	"client-allegiance-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-entity-health-updated",
@@ -364,9 +370,11 @@ export interface HostEventPayloadMap {
 		appearance: ClientAppearanceOptions;
 		party: PartyPreferences;
 		friends: FriendsPreferences;
+		allegiance: AllegiancePreferences;
 	};
 	"client-friends-updated": { friends: FriendsSnapshot | null };
 	"client-squelch-updated": { squelch: SquelchSnapshot | null };
+	"client-allegiance-updated": { allegiance: AllegianceSnapshot };
 	"client-party-updated": {
 		party: PartySnapshot | null;
 	};

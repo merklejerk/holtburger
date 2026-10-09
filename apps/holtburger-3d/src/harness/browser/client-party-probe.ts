@@ -108,6 +108,8 @@ export async function probeParty(options: {
 				canInteract: true,
 			}),
 			readCanSplit: () => false,
+			readCanSwear: () => false,
+			onSwear: () => {},
 			readCanInvite: () => owner.canInvite(10),
 			onInvite: () => {
 				if (owner.canInvite(10)) owner.request({ kind: "invite", target: 10 });
@@ -130,6 +132,7 @@ export async function probeParty(options: {
 			appearance: { showHelmet: true, showCloak: true },
 			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
 		});
 		for (let attempt = 0; attempt < 2; attempt++) {
 			component = mount(ClientSocialPanel, {
@@ -139,6 +142,7 @@ export async function probeParty(options: {
 					owner,
 					friends: session.friends,
 					squelch: session.squelch,
+					allegiance: session.allegiance,
 				},
 			});
 			await settle();
@@ -350,7 +354,12 @@ export async function probeParty(options: {
 		component = mount(ClientSocialPanel, {
 			target,
 			context: options.context,
-			props: { owner, friends: session.friends, squelch: session.squelch },
+			props: {
+				owner,
+				friends: session.friends,
+				squelch: session.squelch,
+				allegiance: session.allegiance,
+			},
 		});
 		await settle();
 		const create = [

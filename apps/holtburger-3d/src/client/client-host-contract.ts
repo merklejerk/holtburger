@@ -1,3 +1,7 @@
+import {
+	allegianceSnapshotSchema,
+	allegiancePreferencesSchema,
+} from "./client-allegiance-contract";
 import { squelchSnapshotSchema } from "./client-squelch-contract";
 import {
 	friendsSnapshotSchema,
@@ -336,6 +340,7 @@ const characterPreferencesSchema = z
 		appearance: clientAppearanceOptionsSchema,
 		party: partyPreferencesSchema,
 		friends: friendsPreferencesSchema,
+		allegiance: allegiancePreferencesSchema,
 	})
 	.strict();
 export function decodeClientCharacterPreferences(value: unknown) {
@@ -381,6 +386,8 @@ const currentStateSchema = z
 		partyPreferences: partyPreferencesSchema.nullable(),
 		friends: friendsSnapshotSchema.nullable(),
 		squelch: squelchSnapshotSchema.nullable(),
+		allegiance: allegianceSnapshotSchema,
+		allegiancePreferences: allegiancePreferencesSchema.nullable(),
 		friendsPreferences: friendsPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,

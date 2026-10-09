@@ -372,6 +372,8 @@ pub struct ClientApplicationSnapshot {
     pub friends: Option<holtburger_world::state::friends::FriendsState>,
     /// Retained replacement-only ignore database.
     pub squelch: Option<holtburger_world::state::squelch::SquelchState>,
+    /// Retained partial allegiance facts and outstanding read progress.
+    pub allegiance: super::allegiance::AllegianceSnapshot,
     /// Retained housing and pending query state for replacement recovery.
     pub housing: super::housing::HousingSnapshot,
     /// Current character may request map teleport; includes in-world lifecycle admission.
@@ -905,6 +907,8 @@ pub enum ClientViewEvent {
     /// Administrative evidence or uncertainty, independent of panel lifetime.
     HousingManagementFinished(super::housing_management::HousingManagementResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
+    /// Shared allegiance facts and bounded refresh progress changed.
+    AllegianceUpdated(super::allegiance::AllegianceSnapshot),
     /// Complete ignore replacement, including retirement.
     SquelchStateUpdated {
         /// Current character database.
@@ -1041,6 +1045,8 @@ pub enum ClientCommand {
     /// Privileged outdoor map request; ACE supplies destination height and building placement.
     TeleportToMapPosition(holtburger_common::position::WorldPosition),
     RecallAllegianceHousing,
+    /// Fetch a fresh partial allegiance profile.
+    QueryAllegiance,
     SwearAllegiance {
         target: Guid,
     },

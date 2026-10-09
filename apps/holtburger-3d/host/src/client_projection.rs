@@ -446,6 +446,10 @@ pub struct ClientCurrentState {
     pub friends: Option<crate::client_friends::ClientFriendsSnapshot>,
     /// Character-owned ignore facts and basic scope eligibility.
     pub squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
+    /// Partial allegiance facts and bounded refresh progress.
+    pub allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
+    /// Locally mirrored presence notification preference.
+    pub allegiance_preferences: Option<crate::client_allegiance::ClientAllegiancePreferences>,
     /// Locally mirrored visibility preference.
     pub friends_preferences: Option<crate::client_friends::ClientFriendsPreferences>,
     /// Locally mirrored party preferences after character description.
@@ -1004,6 +1008,11 @@ pub enum ClientHostEvent {
         appearance: ClientAppearanceOptions,
         party: crate::client_party::ClientPartyPreferences,
         friends: crate::client_friends::ClientFriendsPreferences,
+        allegiance: crate::client_allegiance::ClientAllegiancePreferences,
+    },
+    /// Partial allegiance publication.
+    AllegianceUpdated {
+        allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
     },
     /// Retained character-owned ignore publication.
     SquelchUpdated {
@@ -1196,6 +1205,8 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             party_preferences: snapshot.character_options.map(Into::into),
             friends: snapshot.friends.as_ref().map(Into::into),
             squelch: snapshot.squelch.as_ref().map(Into::into),
+            allegiance: (&snapshot.allegiance).into(),
+            allegiance_preferences: snapshot.character_options.map(Into::into),
             friends_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
@@ -1372,6 +1383,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
             Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
+        ClientViewEvent::AllegianceUpdated(snapshot) => Some(ClientHostEvent::AllegianceUpdated {
+            allegiance: (&snapshot).into(),
+        }),
         ClientViewEvent::SquelchStateUpdated { squelch } => Some(ClientHostEvent::SquelchUpdated {
             squelch: squelch.as_ref().map(Into::into),
         }),
@@ -1391,6 +1405,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 appearance: options.into(),
                 party: options.into(),
                 friends: options.into(),
+                allegiance: options.into(),
             })
         }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
@@ -1629,8 +1644,9 @@ mod tests {
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
     use holtburger_world::inspection::{
-        ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionContext,
-        InspectionSupplement, ObjectInspection, ObjectInspectionOutcome, ObjectInspectionResult,
+        ArmorCoverage, ArmorCoverageValue, CharacterAllegianceRank, CharacterDetails,
+        CreatureRatings, InspectionContext, InspectionSupplement, ObjectInspection,
+        ObjectInspectionOutcome, ObjectInspectionResult,
     };
 
     #[test]
@@ -1972,6 +1988,10 @@ mod tests {
             }),
             max_health_bonus: Some(25),
             character_details: Some(CharacterDetails {
+                allegiance_rank: Some(CharacterAllegianceRank {
+                    rank: 2,
+                    title: Some("Baronet".into()),
+                }),
                 allegiance_name: Some("Test Allegiance".into()),
                 fellowship: Some("Test Fellowship".into()),
                 deaths: Some(0),

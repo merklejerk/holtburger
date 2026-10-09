@@ -428,8 +428,8 @@ pub enum GameActionOpcode {
     SwearAllegiance = 0x001D,
     /// C2S: Break allegiance from a patron/vassal.
     BreakAllegiance = 0x001E,
-    // /// C2S: Request an update of allegiance information.
-    // AllegianceUpdateRequest = 0x001F,
+    /// C2S: Request an update of allegiance information.
+    AllegianceUpdateRequest = 0x001F,
     /// C2S: Add a player to the friends list.
     AddFriend = 0x0018,
     /// C2S: Remove a player from the friends list.
@@ -695,20 +695,20 @@ pub enum GameEventOpcode {
     SetTurbineChatChannels = 0x0295,
 
     // --- Allegiance & Social ---
-    // /// S2C: Allegiance update operation was aborted.
-    // AllegianceUpdateAborted = 0x0003,
-    // /// S2C: Update to allegiance data (vassals, patrons).
-    // AllegianceUpdate = 0x0020,
+    /// S2C: Allegiance update operation was aborted.
+    AllegianceUpdateAborted = 0x0003,
+    /// S2C: Update to allegiance data (vassals, patrons).
+    AllegianceUpdate = 0x0020,
     /// S2C: Full replacement or incremental update of the player's friends list.
     FriendsListUpdate = 0x0021,
     // /// S2C: Detailed information about a character title.
     // CharacterTitle = 0x0029,
     // /// S2C: Update to the current active title.
     // UpdateTitle = 0x002B,
-    // /// S2C: Confirms that an allegiance data update is finished.
-    // AllegianceAllegianceUpdateDone = 0x01C8,
-    // /// S2C: Notifies the player that an allegiance member has logged in.
-    // AllegianceLoginNotification = 0x027A,
+    /// S2C: Confirms that an allegiance data update is finished.
+    AllegianceAllegianceUpdateDone = 0x01C8,
+    /// S2C: Notifies the player that an allegiance member has logged in.
+    AllegianceLoginNotification = 0x027A,
     // /// S2C: Detailed response to an allegiance information request.
     // AllegianceInfoResponse = 0x027C,
 

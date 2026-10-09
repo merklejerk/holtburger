@@ -19,6 +19,10 @@
 		readonly readCanSplit: () => boolean;
 		/** Sample app-owned party eligibility alongside the selected display. */
 		readonly readCanInvite: () => boolean;
+		/** Sample allegiance-owned swear admission with the selected display. */
+		readonly readCanSwear: () => boolean;
+		/** Server confirmation owns the selected-player swear request. */
+		readonly onSwear: () => void;
 		/** Invite the current eligible selection through its party owner. */
 		readonly onInvite: () => void;
 		/** Forward the button edge to the session-owned interaction controller. */
@@ -36,6 +40,8 @@
 		readSelectedDisplay,
 		readCanSplit,
 		readCanInvite,
+		readCanSwear,
+		onSwear,
 		onInvite,
 		onInteract,
 		onExamine,
@@ -47,6 +53,7 @@
 	);
 	let canSplit = $state(false);
 	let canInvite = $state(false);
+	let canSwear = $state(false);
 	const structureDisplay = $derived(itemStructureDisplay(display.structure));
 	const displayName = $derived(
 		(display.name ?? "Selected Entity") +
@@ -69,6 +76,7 @@
 				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
 			canSplit = guid !== null && readCanSplit();
 			canInvite = guid !== null && readCanInvite();
+			canSwear = guid !== null && readCanSwear();
 		});
 	});
 
@@ -80,6 +88,7 @@
 					: readSelectedDisplay();
 			canSplit = selectedGuid !== null && readCanSplit();
 			canInvite = selectedGuid !== null && readCanInvite();
+			canSwear = selectedGuid !== null && readCanSwear();
 		};
 		const interval = window.setInterval(
 			sample,
@@ -104,6 +113,13 @@
 					name={display.interactionLabel === "Trade" ? "trade" : "interact"}
 				/>
 			</button>
+			{#if canSwear}<button
+					class="ui-hud-button"
+					type="button"
+					onclick={onSwear}
+					aria-label="Swear allegiance"
+					title="Swear allegiance"><ClientHudIcon name="leader" /></button
+				>{/if}
 			{#if canInvite}<button
 					class="ui-hud-button"
 					type="button"

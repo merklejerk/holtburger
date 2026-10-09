@@ -1,3 +1,4 @@
+pub mod allegiance;
 pub(crate) mod attachment_lifecycle;
 mod entity_scale;
 pub mod fellowship;

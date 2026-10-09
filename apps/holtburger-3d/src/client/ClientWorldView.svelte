@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientAllegianceState } from "./client-allegiance-state";
 	import type { ClientSquelchState } from "./client-squelch-state";
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
 	import type { HousingSnapshot } from "./client-housing-contract";
@@ -124,6 +125,7 @@
 		readonly party: ClientPartyState | null;
 		readonly friends: ClientFriendsState | null;
 		readonly squelch: ClientSquelchState | null;
+		readonly allegiance: ClientAllegianceState | null;
 		/** User-scoped fixed HUD geometry, independent of open-panel state. */
 		readonly hudLayout: ClientHudLayout;
 		readonly onHudPlacementChange: (
@@ -293,6 +295,7 @@
 		party,
 		friends,
 		squelch,
+		allegiance,
 		onHudPlacementChange,
 		onHudReset,
 		spellBarShape,
@@ -557,6 +560,16 @@
 			: null;
 	}
 
+	/** Scene facts establish a player selection; allegiance owns swear admission. */
+	function swearTarget(): number | null {
+		const selected = readSelectedEntity();
+		return selected !== null &&
+			selected.facts?.description.kind === "known" &&
+			selected.facts.description.mapCategory === "player" &&
+			allegiance?.canSwear(selected.guid)
+			? selected.guid
+			: null;
+	}
 	function canSplitSelectedEntity(): boolean {
 		return (
 			selectedEntityGuid !== null &&
@@ -1011,6 +1024,11 @@
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
 				readCanSplit={canSplitSelectedEntity}
+				readCanSwear={() => swearTarget() !== null}
+				onSwear={() => {
+					const guid = swearTarget();
+					if (guid !== null) void allegiance?.request({ kind: "swear", guid });
+				}}
 				readCanInvite={() => inviteTarget() !== null}
 				onInvite={() => {
 					const target = inviteTarget();
@@ -1160,7 +1178,7 @@
 		{/key}
 	{/if}
 
-	{#if party !== null && friends !== null && squelch !== null}
+	{#if party !== null && friends !== null && squelch !== null && allegiance !== null}
 		{#key party}
 			<ClientHudWindow
 				icon="party"
@@ -1178,6 +1196,7 @@
 					owner={party}
 					{friends}
 					{squelch}
+					{allegiance}
 					visible={activePanel === "social"}
 				/>
 			</ClientHudWindow>

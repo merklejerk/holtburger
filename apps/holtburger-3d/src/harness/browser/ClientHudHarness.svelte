@@ -68,6 +68,7 @@
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
 	import { ClientPartyState } from "../../client/client-party-state";
+	import { probeAllegiance } from "./client-allegiance-probe";
 	import { probeSquelch } from "./client-squelch-probe";
 	import { probeFriends } from "./client-friends-probe";
 	import { probeParty } from "./client-party-probe";
@@ -944,6 +945,7 @@
 		/** Synthetic profiles and payment quotes through production session decoding. */
 		readonly housingProbe: ReturnType<typeof createHousingFixture>;
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
+		readonly probeAllegiance: () => ReturnType<typeof probeAllegiance>;
 		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
 		readonly probeFriends: () => ReturnType<typeof probeFriends>;
 		readonly probeParty: () => ReturnType<typeof probeParty>;
@@ -1138,6 +1140,13 @@
 			partyPreferences: null,
 			friends: null,
 			squelch: null,
+			allegiance: {
+				playerGuid: null,
+				profile: null,
+				refreshing: false,
+				canSwear: false,
+			},
+			allegiancePreferences: null,
 			friendsPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
@@ -1573,6 +1582,7 @@
 								},
 								maxHealthBonus: 25,
 								characterDetails: {
+									allegianceRank: { rank: 3, title: "Baroness" },
 									allegianceName: "Test Allegiance",
 									patron: "Test Patron",
 									monarch: "Test Monarch",
@@ -3555,6 +3565,13 @@
 				baseline: emitInteractionBaseline,
 				commands: interactionCommands,
 			}),
+			probeAllegiance: () =>
+				probeAllegiance({
+					context: partyProbeContext,
+					session: interactionLifecycle,
+					emit: emitInteractionEvent,
+					commands: interactionCommands,
+				}),
 			probeSquelch: () =>
 				probeSquelch({
 					context: partyProbeContext,
@@ -3769,6 +3786,7 @@
 		party={socialParty}
 		friends={interactionLifecycle.friends}
 		squelch={interactionLifecycle.squelch}
+		allegiance={interactionLifecycle.allegiance}
 		characterGuid={housingCharacterGuid}
 		{houseCrystal}
 		{housing}

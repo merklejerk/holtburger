@@ -83,6 +83,61 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("routes allegiance facts, preferences, commands, portal retention and character retirement", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const allegiance = {
+			playerGuid: 42,
+			profile: null,
+			refreshing: true,
+			canSwear: true,
+		};
+		transport.setCurrentState({
+			...currentState(42),
+			allegiance,
+			allegiancePreferences: { showLogons: false },
+		});
+		await session.start();
+		expect(session.allegiance.read().snapshot).toEqual(allegiance);
+		expect(session.allegiance.read().preferences).toEqual({
+			showLogons: false,
+		});
+		transport.emit("client-allegiance-updated", {
+			allegiance: { ...allegiance, refreshing: false },
+		});
+		await session.allegiance.request({ kind: "refresh" });
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_allegiance",
+			args: { action: { kind: "refresh" } },
+		});
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: true, showCloak: true },
+			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: true },
+		});
+		expect(session.allegiance.read().preferences).toEqual({ showLogons: true });
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.allegiance.read().snapshot?.playerGuid).toBe(42);
+		expect(session.allegiance.read().enabled).toBe(false);
+		transport.emit("client-current-state", {
+			...currentState(42),
+			allegiance,
+			allegiancePreferences: { showLogons: true },
+		});
+		expect(session.allegiance.read().snapshot?.refreshing).toBe(true);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 43,
+		});
+		expect(session.allegiance.read().snapshot).toBeNull();
+		await session.stop();
+	});
+
 	it("carries row-targeted previews and unused selected sources through the shared wire fixture", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1443,6 +1498,13 @@ describe("ClientLifecycleSession", () => {
 			partyPreferences: preferences,
 			friends: null,
 			squelch: null,
+			allegiance: {
+				playerGuid: null,
+				profile: null,
+				refreshing: false,
+				canSwear: false,
+			},
+			allegiancePreferences: null,
 			friendsPreferences: null,
 		});
 		await session.start();
@@ -1535,6 +1597,7 @@ describe("ClientLifecycleSession", () => {
 			appearance: { showHelmet: true, showCloak: true },
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
 		});
 		expect(session.friends.read().members).toEqual(friends.members);
 		await session.friends.request({ kind: "appearOffline", enabled: true });
@@ -1576,6 +1639,7 @@ describe("ClientLifecycleSession", () => {
 			appearance: { showHelmet: false, showCloak: true },
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
 		});
 		expect(session.state().appearanceOptions).toEqual({
 			showHelmet: false,
@@ -1617,6 +1681,7 @@ describe("ClientLifecycleSession", () => {
 			appearance: options,
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
 		});
 		transport.emit("client-state-resyncing", null);
 		expect(session.state().appearanceOptions).toBeNull();
@@ -1724,6 +1789,13 @@ function currentState(playerGuid: number): ClientCurrentState {
 		partyPreferences: null,
 		friends: null,
 		squelch: null,
+		allegiance: {
+			playerGuid: null,
+			profile: null,
+			refreshing: false,
+			canSwear: false,
+		},
+		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },

@@ -1,3 +1,4 @@
+pub use crate::messages::allegiance::*;
 pub use crate::messages::book::events::*;
 pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
@@ -28,6 +29,12 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    AllegianceUpdate(Box<AllegianceUpdateEventData>),
+    /// Refresh completion error code; zero denotes success.
+    AllegianceUpdateDone(u32),
+    /// Refresh abortion error code (retail acclient.c:669414).
+    AllegianceUpdateAborted(u32),
+    AllegianceLoginNotification(Box<AllegianceLoginNotificationEventData>),
     FriendsListUpdate(Box<FriendsListUpdateEventData>),
     SetSquelchDb(Box<SetSquelchDbEventData>),
     HouseProfile(Box<HouseProfileEventData>),
@@ -264,6 +271,20 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::QueryItemManaResponse => GameEvent::QueryItemManaResponse(
                     Box::new(QueryItemManaResponseEventData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::AllegianceUpdate => GameEvent::AllegianceUpdate(Box::new(
+                    AllegianceUpdateEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::AllegianceAllegianceUpdateDone => {
+                    GameEvent::AllegianceUpdateDone(u32::unpack(data, offset)?)
+                }
+                GameEventOpcode::AllegianceUpdateAborted => {
+                    GameEvent::AllegianceUpdateAborted(u32::unpack(data, offset)?)
+                }
+                GameEventOpcode::AllegianceLoginNotification => {
+                    GameEvent::AllegianceLoginNotification(Box::new(
+                        AllegianceLoginNotificationEventData::unpack(data, offset)?,
+                    ))
+                }
                 GameEventOpcode::SetSquelchDb => {
                     GameEvent::SetSquelchDb(Box::new(SetSquelchDbEventData::unpack(data, offset)?))
                 }
@@ -575,6 +596,22 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::QueryItemManaResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::QueryItemManaResponse as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::AllegianceUpdate(data) => {
+                (GameEventOpcode::AllegianceUpdate as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::AllegianceUpdateDone(error) => {
+                (GameEventOpcode::AllegianceAllegianceUpdateDone as u32).pack(buf);
+                error.pack(buf);
+            }
+            GameEvent::AllegianceUpdateAborted(error) => {
+                (GameEventOpcode::AllegianceUpdateAborted as u32).pack(buf);
+                error.pack(buf);
+            }
+            GameEvent::AllegianceLoginNotification(data) => {
+                (GameEventOpcode::AllegianceLoginNotification as u32).pack(buf);
                 data.pack(buf);
             }
             GameEvent::SetSquelchDb(data) => {

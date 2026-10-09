@@ -67,6 +67,7 @@ export async function probeFriends(options: {
 			appearance: { showHelmet: true, showCloak: true },
 			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
 		});
 		for (let pass = 0; pass < 2; pass++) {
 			component = mount(ClientSocialPanel, {
@@ -76,6 +77,7 @@ export async function probeFriends(options: {
 					owner: party,
 					friends: session.friends,
 					squelch: session.squelch,
+					allegiance: session.allegiance,
 				},
 			});
 			await settle();

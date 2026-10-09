@@ -112,6 +112,7 @@ impl ClientRuntime {
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
         self.reset_friends();
         self.begin_squelch();
+        self.reset_allegiance();
         self.world.fellowship = None;
         self.reset_housing();
         if self.progression.clear() {
@@ -311,6 +312,10 @@ impl ClientRuntime {
                 event.event,
                 GameEvent::FriendsListUpdate(_)
                     | GameEvent::SetSquelchDb(_)
+                    | GameEvent::AllegianceUpdate(_)
+                    | GameEvent::AllegianceUpdateDone(_)
+                    | GameEvent::AllegianceUpdateAborted(_)
+                    | GameEvent::AllegianceLoginNotification(_)
                     | GameEvent::FellowshipFullUpdate(_)
                     | GameEvent::FellowshipUpdateFellow(_)
                     | GameEvent::FellowshipQuit(_)
@@ -366,6 +371,7 @@ impl ClientRuntime {
         }
         if let GameMessage::GameEvent(event) = &message {
             self.observe_trade_reply(&event.event);
+            self.observe_allegiance_reply(&event.event);
         }
         let previous_container_root = self.world.world_container().root();
 
@@ -394,6 +400,9 @@ impl ClientRuntime {
             self.described_character = Some(description.guid);
         }
         self.handle_world_events(world_events.clone()).await?;
+        if self.state == ClientState::InWorld && self.allegiance_refresh_required(&world_events) {
+            self.query_allegiance().await?;
+        }
         if world_events
             .iter()
             .any(|event| matches!(event, WorldEvent::HousingRefreshRequired))

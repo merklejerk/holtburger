@@ -1,3 +1,4 @@
+pub mod allegiance;
 pub mod fellowship;
 pub mod friends;
 pub mod housing;

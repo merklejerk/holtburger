@@ -397,6 +397,8 @@
 	const MAXIMUM_CHAT_LINES = 250;
 	let entryPending = $state(false);
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
+	/** View-owned inventory modal entry used by gameplay shortcuts. */
+	let worldView = $state<ClientWorldView | null>(null);
 	let cameraController = $state<ClientPresentationCameraController | null>(
 		null,
 	);
@@ -1044,6 +1046,12 @@
 			if (!event.repeat) examineSelectedEntity();
 			return;
 		}
+		if (clientInput.shortcut("splitStack", event) && !event.isComposing) {
+			event.preventDefault();
+			if (!event.repeat && canvasElement !== null)
+				worldView?.splitSelectedEntity(canvasElement);
+			return;
+		}
 		if (selectionInput?.keydown(event, performance.now())) return;
 		if (clientInput.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
@@ -1667,6 +1675,7 @@
 
 	{#if usesWorldPresentation && startupError === null && commandFailure === null}
 		<ClientWorldView
+			bind:this={worldView}
 			itemSession={session}
 			characterSheet={session?.characterSheet ?? null}
 			hudLayout={userSettings.hudLayout}

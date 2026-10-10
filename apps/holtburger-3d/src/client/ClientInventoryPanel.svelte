@@ -7,6 +7,7 @@
 	import ClientQuantityDialog from "./ClientQuantityDialog.svelte";
 	import {
 		ClientInventorySplit,
+		isSplittableInventoryItem,
 		type InventorySplitRequest,
 		type InventorySplitStart,
 	} from "./client-inventory-split";
@@ -24,6 +25,9 @@
 	} from "./client-inventory-state";
 	import ClientContentsSortButton from "./ClientContentsSortButton.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import { presentClientBinding } from "./client-binding-catalog";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import type {
 		ClientAppearanceOption,
@@ -31,6 +35,9 @@
 	} from "./client-host-contract";
 
 	interface Props {
+		/** Accepted bindings and platform vocabulary keep stack hints current after remapping. */
+		readonly input: ClientKeyboardConfiguration;
+		readonly displayPlatform: InputDisplayPlatform;
 		/** Stable session owner; the parent keys this component by that lifetime. */
 		readonly inventory: ClientInventoryState;
 		/** Shared source activation and target acquisition. */
@@ -48,6 +55,8 @@
 		) => Promise<void>;
 	}
 	const {
+		input,
+		displayPlatform,
 		inventory,
 		interactions,
 		selectedGuid,
@@ -57,6 +66,11 @@
 		appearanceOptions,
 		onAppearanceOptionChange,
 	}: Props = $props();
+	const splitActionHint = $derived(
+		input.client.splitStack.length > 0
+			? `${presentClientBinding(input, { kind: "client", action: "splitStack" }, displayPlatform).description} to split`
+			: null,
+	);
 	let view = $state<ClientInventoryView | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
@@ -140,8 +154,6 @@
 			() => selectedGuid,
 			onSelectItem,
 			(guid) => interactions.use(guid, false),
-			(event, guid, cell) =>
-				event.shiftKey && splitOwner?.begin(guid, cell) === true,
 		),
 	);
 	onMount(() => {
@@ -277,6 +289,8 @@
 			}}
 			onSelectItem={selectItem}
 			rootLabel="Main Pack"
+			quantityActionHint={(item) =>
+				!pending && isSplittableInventoryItem(item) ? splitActionHint : null}
 			dimItem={(item) =>
 				!pending &&
 				hoveredEquipmentSlot !== null &&

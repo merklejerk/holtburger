@@ -17,6 +17,8 @@
 		readonly showEquipped?: boolean;
 		/** Entity quantity, independent of artwork; only counts above one are displayed. */
 		readonly count?: number | null;
+		/** Consumer-owned stack action hint; omitted when the action is unavailable. */
+		readonly quantityActionHint?: string | null;
 		/** Optional structure properties; incomplete or full values have no indicator. */
 		readonly structure?: ItemStructure | null;
 		/** Known ordinary-slot occupancy; container capacity takes precedence over structure. */
@@ -63,6 +65,7 @@
 		equipped,
 		showEquipped = true,
 		count,
+		quantityActionHint,
 		structure = null,
 		capacity = null,
 	}: Props = $props();
@@ -75,6 +78,7 @@
 		itemCellPresentation({
 			label,
 			count: itemGuid === null ? null : (count ?? null),
+			quantityActionHint,
 			structure: itemGuid === null ? null : structure,
 			capacity: itemGuid === null ? null : capacity,
 			equipped: itemGuid !== null && equipped,

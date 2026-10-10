@@ -12,6 +12,8 @@
 		readonly capacities: ReadonlyMap<number, ItemCapacity>;
 		readonly iconFor: (guid: number) => UiIconDisplay | undefined;
 		readonly onSelectItem: (guid: number) => void;
+		/** Consumer-owned quantity action hint, evaluated from the prepared item facts. */
+		readonly quantityActionHint?: (item: ClientEntityFacts) => string | null;
 		/** Player inventory supplies Main Pack; external roots keep their own name. */
 		readonly rootLabel: string | null;
 		/** Optional equipment-hover presentation, owned by the inventory panel. */
@@ -28,6 +30,7 @@
 		capacities,
 		iconFor,
 		onSelectItem,
+		quantityActionHint,
 		rootLabel,
 		dimItem,
 		onHoverItem,
@@ -49,6 +52,7 @@
 				equipped={item.location.kind === "equipped"}
 				capacity={capacities.get(item.guid)}
 				label={itemName(item)}
+				quantityActionHint={quantityActionHint?.(item)}
 				structure={item.description.kind === "known"
 					? item.description.structure
 					: null}

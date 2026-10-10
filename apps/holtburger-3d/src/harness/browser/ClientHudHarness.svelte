@@ -948,6 +948,8 @@
 	}
 	const probeInventory = () =>
 		probeClientInventory({
+			readInput: () => userSettings.input,
+			changeInput,
 			emit: emitInteractionEvent,
 			selection,
 			commands: interactionCommands,

@@ -7,6 +7,8 @@ import { CLIENT_TUNING } from "../../client/client-tuning";
 import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 import { INVENTORY_CURRENCIES } from "../../client/client-inventory-currencies";
 import { EQUIPMENT_SLOTS } from "../../client/client-inventory-equipment";
+import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
+import { formatInputBindings } from "../../lib/input/input-presentation";
 
 /** Browser-only fixture record; wire delivery still passes through the real session decoder. */
 function item(
@@ -52,6 +54,11 @@ function item(
 
 /** A repeatable real-session inventory scenario without a content server or runtime assets. */
 export async function probeClientInventory(options: {
+	/** Accepted keyboard settings allow tooltip remapping to use the production update path. */
+	readonly readInput: () => ClientKeyboardConfiguration;
+	readonly changeInput: (
+		input: ClientKeyboardConfiguration,
+	) => ClientKeyboardConfiguration;
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly selection: ClientEntitySelection;
 	/** Persistent inventory maintenance, independent of producer event count. */
@@ -1086,6 +1093,7 @@ export async function probeClientInventory(options: {
 				"Duplicate cells did not share their retained image URL.",
 			);
 		const beforeCounts = options.readPreparedIconCount();
+		const splitHint = `${formatInputBindings(options.readInput().client.splitStack, "windows")} to split`;
 		quantity(20, 2);
 		quantity(22, 20_100);
 		quantity(31, 2000);
@@ -1107,6 +1115,34 @@ export async function probeClientInventory(options: {
 			throw new Error(
 				"Stack quantity is missing from accessible labels/tooltips.",
 			);
+		const previousInput = options.readInput();
+		try {
+			options.changeInput({
+				...previousInput,
+				client: {
+					...previousInput.client,
+					splitStack: [{ key: "F9", ctrl: true }],
+				},
+			});
+			await tick();
+			if (
+				cell(22).title !==
+				"Inventory item 22 (quantity: 20,100, Ctrl + F9 to split)"
+			)
+				throw new Error(
+					"Stack tooltip did not follow the accepted split binding.",
+				);
+			options.changeInput({
+				...previousInput,
+				client: { ...previousInput.client, splitStack: [] },
+			});
+			await tick();
+			if (cell(22).title !== "Inventory item 22 (quantity: 20,100)")
+				throw new Error("Unbound split action retained a keyboard hint.");
+		} finally {
+			options.changeInput(previousInput);
+			await tick();
+		}
 		const packBadges = [
 			...document.querySelectorAll('[data-item-guid="31"] .item-count-overlay'),
 		];
@@ -1167,7 +1203,8 @@ export async function probeClientInventory(options: {
 			await sample();
 			const label = `[${current}/50]`;
 			if (
-				cell(22).title !== `Inventory item 22 (quantity: 20,100) ${label}` ||
+				cell(22).title !==
+					`Inventory item 22 (quantity: 20,100, ${splitHint}) ${label}` ||
 				selectedHeading()?.textContent !== `Inventory item 22 (20,100) ${label}`
 			)
 				throw new Error("Structure values did not reach both item labels.");
@@ -1220,7 +1257,8 @@ export async function probeClientInventory(options: {
 			await sample();
 			if (
 				cell(22).querySelector(".item-cell-meter") !== null ||
-				cell(22).title !== "Inventory item 22 (quantity: 20,100)" ||
+				cell(22).title !==
+					`Inventory item 22 (quantity: 20,100, ${splitHint})` ||
 				selectedHeading()?.textContent !== "Inventory item 22 (20,100)"
 			)
 				throw new Error("Full or incomplete structure retained its indicator.");

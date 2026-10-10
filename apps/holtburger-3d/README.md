@@ -138,8 +138,9 @@ unequipping into sorted contents appends to the selected container. Drag onto an
 equipment row to equip, or from equipment to a contents cell/header to unequip. Core preflights displaced equipment storage and
 sequences the server requests. Failures use existing action feedback.
 
-Shift-click a stack to choose a split amount with a number field or slider. The
-inventory-local dialog opens only after capacity preflight. Splits prefer the
+Select a stack and press Y (configurable under Settings → Input → Split stack),
+or use the selected-item Split stack action, to choose an amount with a number
+field or slider. The inventory-local dialog opens only after capacity preflight. Splits prefer the
 source pack, then main pack and remaining packs in native order; selecting the
 whole quantity is a no-op. Ctrl+Shift+I toggles Electron DevTools; game interactions
 own right-click globally.

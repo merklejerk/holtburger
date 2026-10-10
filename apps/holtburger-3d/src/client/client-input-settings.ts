@@ -38,9 +38,14 @@ const keyboardSettingsBaseSchema = z
 		character: z
 			.record(z.enum(CHARACTER_ACTIONS), bindingListSchema)
 			.readonly(),
-		client: z
-			.record(z.enum(CLIENT_SHORTCUT_ACTIONS), bindingListSchema)
-			.readonly(),
+		client: z.preprocess(
+			// Older saved maps predate split-stack; retain every existing binding, including unbound actions.
+			(value) =>
+				typeof value === "object" && value !== null && !Array.isArray(value)
+					? { splitStack: INPUT_DEFAULTS.client.splitStack, ...value }
+					: value,
+			z.record(z.enum(CLIENT_SHORTCUT_ACTIONS), bindingListSchema).readonly(),
+		),
 		spellBar: z
 			.object({ tabs: digitBindingsSchema, cells: digitBindingsSchema })
 			.strict()

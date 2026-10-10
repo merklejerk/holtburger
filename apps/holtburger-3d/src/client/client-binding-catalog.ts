@@ -72,6 +72,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	interact: "Interact",
 	examine: "Examine",
 	give: "Give selected item",
+	splitStack: "Split stack",
 	toggleCombat: "Toggle combat",
 	toggleAutoRun: "Toggle auto-run",
 	preciseJump: "Aim precise jump",

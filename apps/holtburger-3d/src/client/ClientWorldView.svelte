@@ -605,7 +605,8 @@
 		);
 	}
 
-	function splitSelectedEntity(source: HTMLButtonElement): void {
+	/** Shared entry for the selected-item menu and gameplay keyboard dispatch. */
+	export function splitSelectedEntity(source: HTMLElement): void {
 		if (!canSplitSelectedEntity() || selectedEntityGuid === null) return;
 		requestedInventorySplit = { item: selectedEntityGuid, source };
 		activePanel = "inventory";
@@ -1277,6 +1278,8 @@
 					{#if inventory !== null && itemInteractions !== null}
 						{#key inventory}
 							<ClientInventoryPanel
+								{input}
+								{displayPlatform}
 								interactions={itemInteractions}
 								{inventory}
 								selectedGuid={selectedEntityGuid}

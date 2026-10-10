@@ -8,6 +8,8 @@ export interface ItemCellFacts {
 	readonly label: string;
 	/** Stack quantity; null when absent or unknown. */
 	readonly count: number | null;
+	/** Consumer-owned action hint displayed beside a stack quantity. */
+	readonly quantityActionHint?: string | null;
 	/** Remaining uses or durability supplied by the server. */
 	readonly structure: ItemStructure | null;
 	/** Known container occupancy; takes precedence over structure. */
@@ -43,7 +45,8 @@ export function itemCellPresentation(
 	const count = facts.count !== null && facts.count > 1 ? facts.count : null;
 	let label = facts.label;
 	let meter: ItemCellMeter | null = null;
-	if (count !== null) label += ` (quantity: ${formatQuantity(count)})`;
+	if (count !== null)
+		label += ` (quantity: ${formatQuantity(count)}${facts.quantityActionHint ? `, ${facts.quantityActionHint}` : ""})`;
 	const capacity = facts.capacity;
 	if (capacity !== null) {
 		label += ` [${formatQuantity(capacity.used)} / ${formatQuantity(capacity.max)}]`;

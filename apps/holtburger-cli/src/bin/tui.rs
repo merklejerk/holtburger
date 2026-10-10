@@ -905,7 +905,9 @@ async fn run() -> Result<()> {
                     break;
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
-                    should_quit = true;
+                    // Core ends its event stream after disconnecting; retain the game page
+                    // unless frontend policy requests an exit.
+                    should_quit |= app_state.should_exit_on_disconnect();
                     break;
                 }
             }

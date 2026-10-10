@@ -1,9 +1,8 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
 	import { sameConsumableIdentity } from "./client-action-item";
 	import { useClientInput } from "./client-input-context";
 	import {
-		compactInputHint,
-		formatInputBindings,
 		modifierName,
 		type InputDisplayPlatform,
 	} from "../lib/input/input-presentation";
@@ -188,6 +187,13 @@
 		} else onmenu(operation);
 	}
 	onMount(() => onmount(() => ({ bounds: resolved, preferred: extent })));
+	const focusBinding = $derived(
+		presentClientBinding(
+			input,
+			{ kind: "actionBarFocus", index: focusSlot },
+			displayPlatform,
+		),
+	);
 </script>
 
 <ClientHudPanel
@@ -247,20 +253,15 @@
 		<button
 			type="button"
 			class="action-menu-strip ui-button"
-			aria-label={`Action bar ${sequence} menu (focus: ${formatInputBindings(input.actionBars.focus[focusSlot], displayPlatform)})`}
-			title={`Action bar ${sequence} menu (focus: ${formatInputBindings(input.actionBars.focus[focusSlot], displayPlatform)})`}
+			aria-label={`Action bar ${sequence} menu (focus: ${focusBinding.description})`}
+			title={`Action bar ${sequence} menu (focus: ${focusBinding.description})`}
 			bind:this={menuButton}
 			aria-haspopup="menu"
 			aria-expanded={menuOpen}
 			onclick={() => {
 				menuOpen = !menuOpen;
 			}}
-			><span class="action-menu-hint"
-				>{compactInputHint(
-					input.actionBars.focus[focusSlot],
-					displayPlatform,
-				) ?? "—"}</span
-			></button
+			><span class="action-menu-hint">{focusBinding.hint ?? "—"}</span></button
 		>
 		<div class="action-bar-scroll">
 			<div
@@ -272,19 +273,18 @@
 					{@const content = bar.slots[slot]}
 					{@const item = content === null ? undefined : items.get(content.item)}
 					{@const position = actionCellPosition(bar, slot)}
+					{@const binding = presentClientBinding(
+						input,
+						{ kind: "actionBarCell", index: slot },
+						displayPlatform,
+					)}
 					<div
 						style:grid-row={position.row + 1}
 						style:grid-column={position.column + 1}
 					>
 						<ActionCell
-							bindingHint={compactInputHint(
-								input.actionBars.cells[slot],
-								displayPlatform,
-							)}
-							bindingDescription={formatInputBindings(
-								input.actionBars.cells[slot],
-								displayPlatform,
-							)}
+							bindingHint={binding.hint}
+							bindingDescription={binding.description}
 							alternateModifier={modifierName(
 								input.actionBars.alternate,
 								displayPlatform,

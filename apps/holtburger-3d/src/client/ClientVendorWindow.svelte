@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
 	import { onMount, tick } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
@@ -19,6 +22,9 @@
 	import type { ClientVendorState, VendorView } from "./client-vendor-state";
 
 	interface Props {
+		/** Accepted keyboard settings keep contextual inspection hints reactive. */
+		readonly inputSettings: ClientKeyboardConfiguration;
+		readonly displayPlatform: InputDisplayPlatform;
 		readonly model: ClientVendorState;
 		readonly placement: ClientHudPlacement;
 		readonly viewport: ClientHudViewport;
@@ -26,12 +32,21 @@
 		readonly onExamineItem: (guid: number) => void;
 	}
 	const {
+		inputSettings,
+		displayPlatform,
 		model,
 		placement,
 		viewport,
 		onPlacementChange,
 		onExamineItem,
 	}: Props = $props();
+	const examineShortcut = $derived(
+		presentClientBinding(
+			inputSettings,
+			{ kind: "client", action: "examine" },
+			displayPlatform,
+		),
+	);
 	const { keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const pyreals = { wcid: 273, name: "Pyreals" } as const;
@@ -180,7 +195,7 @@
 											offer.price.kind === "quoted" &&
 											availableCurrency !== undefined &&
 											offer.price.amount > availableCurrency}
-										{@const label = `${cell.name} — ${price}; stock: ${offer.supply === null ? "unlimited" : offer.supply.toLocaleString()}.${unaffordable ? ` Not enough ${current.currency.name} for this offer.` : ""} Double-click or Enter to ${offer.stackable ? "choose a buying quantity" : "buy"}; E or right-click to inspect.`}
+										{@const label = `${cell.name} — ${price}; stock: ${offer.supply === null ? "unlimited" : offer.supply.toLocaleString()}.${unaffordable ? ` Not enough ${current.currency.name} for this offer.` : ""} Double-click or Enter to ${offer.stackable ? "choose a buying quantity" : "buy"}; Examine (${examineShortcut.description}) or right-click to inspect.`}
 										<button
 											type="button"
 											class="vendor-offer-row ui-item-selection"
@@ -283,7 +298,7 @@
 									</h3>
 									<div class="queue-grid">
 										{#each cells as cell (cell.key)}
-											{@const label = `${cell.name}: ${cell.amount.toLocaleString()}, ${cell.total.toLocaleString()} ${currency.name}. Click to select; E or right-click to inspect.`}
+											{@const label = `${cell.name}: ${cell.amount.toLocaleString()}, ${cell.total.toLocaleString()} ${currency.name}. Click to select; Examine (${examineShortcut.description}) or right-click to inspect.`}
 											<div class="queue-entry">
 												<button
 													type="button"

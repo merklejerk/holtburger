@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
 	import { onMount, untrack } from "svelte";
 	import { formatQuantity } from "../app/quantity-format";
 	import { itemStructureDisplay } from "../app/item-structure";
@@ -12,9 +13,15 @@
 	import ClientHudIcon, {
 		type ClientHudIconName,
 	} from "./ClientHudIcon.svelte";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
+		/** Accepted bindings keep tooltip hints current after keyboard remapping. */
+		readonly input: ClientKeyboardConfiguration;
+		/** Platform vocabulary matches the other client HUD shortcut hints. */
+		readonly displayPlatform: InputDisplayPlatform;
 		/** Cold selection identity controlling whether the runtime surface is present. */
 		readonly selectedGuid: number | null;
 		/** Bounded display read kept separate from frame-hot target projection. */
@@ -47,6 +54,8 @@
 	}
 
 	const {
+		input,
+		displayPlatform,
 		selectedGuid,
 		readSelectedDisplay,
 		readCanSplit,
@@ -72,11 +81,8 @@
 	let canIgnoreAccount = $state(false);
 	let canSwear = $state(false);
 	/** Eligible selected-entity command; the source remains mounted for follow-up dialogs. */
-	interface SelectedAction {
-		/** Stable menu command identity. */
-		readonly action:
-			"interact" | "swear" | "invite" | "friend" | "ignore" | "split";
-		/** Visible menu text and accessible direct-button name. */
+	type SelectedAction = {
+		/** Command name used by the accessible direct button and unbound menu rows. */
 		readonly label: string;
 		/** Shared artwork used by the direct button and menu row. */
 		readonly icon: ClientHudIconName;
@@ -84,13 +90,22 @@
 		readonly disabled: false;
 		/** App-owned command; source anchors follow-up dialogs. */
 		readonly activate: (source: HTMLButtonElement) => void;
-	}
+	} &
+		/** Bound actions carry a prepared description for icon tooltips and visible menu labels. */
+		(
+			| { readonly action: "interact"; readonly description: string }
+			| {
+					readonly action: "swear" | "invite" | "friend" | "ignore" | "split";
+					readonly description?: never;
+			  }
+		);
 	const actions = $derived.by(() => {
 		const available: SelectedAction[] = [];
 		if (display.canInteract)
 			available.push({
 				action: "interact",
 				label: display.interactionLabel,
+				description: `${display.interactionLabel} (${presentClientBinding(input, { kind: "client", action: "interact" }, displayPlatform).description})`,
 				icon: display.interactionLabel === "Trade" ? "trade" : "interact",
 				disabled: false,
 				activate: onInteract,
@@ -201,32 +216,30 @@
 
 <section class="selected-entity" aria-label={`Selected entity: ${displayName}`}>
 	<div class="selected-entity__heading ui-hud-group">
-		<div class="selected-entity__actions">
-			{#if actions.length > 1}
+		{#if actions.length > 1}
+			<button
+				class="ui-hud-button"
+				type="button"
+				aria-label="Selected entity actions"
+				title="Selected entity actions"
+				aria-haspopup="menu"
+				aria-expanded={menuAnchor !== null}
+				onclick={(event) => {
+					menuAnchor = menuAnchor === null ? event.currentTarget : null;
+				}}><MoreActionsIcon /></button
+			>
+		{:else}
+			{#each actions as action (action.action)}
 				<button
 					class="ui-hud-button"
 					type="button"
-					aria-label="Selected entity actions"
-					title="Selected entity actions"
-					aria-haspopup="menu"
-					aria-expanded={menuAnchor !== null}
-					onclick={(event) => {
-						menuAnchor = menuAnchor === null ? event.currentTarget : null;
-					}}><MoreActionsIcon /></button
+					aria-label={action.label}
+					title={action.description ?? action.label}
+					onclick={(event) => action.activate(event.currentTarget)}
+					><ClientHudIcon name={action.icon} /></button
 				>
-			{:else}
-				{#each actions as action (action.action)}
-					<button
-						class="ui-hud-button"
-						type="button"
-						aria-label={action.label}
-						title={action.label}
-						onclick={(event) => action.activate(event.currentTarget)}
-						><ClientHudIcon name={action.icon} /></button
-					>
-				{/each}
-			{/if}
-		</div>
+			{/each}
+		{/if}
 		<strong title={displayName} style:color={display.nameColor}
 			><span>{displayName}</span></strong
 		>
@@ -236,6 +249,7 @@
 			disabled={examinePending}
 			onclick={onExamine}
 			aria-label={examinePending ? "Examining selected entity" : "Examine"}
+			title={`${examinePending ? "Examining selected entity" : "Examine"} (${presentClientBinding(input, { kind: "client", action: "examine" }, displayPlatform).description})`}
 			aria-busy={examinePending}
 		>
 			<ClientHudIcon name="examine" />
@@ -266,7 +280,10 @@
 	<PopupMenu
 		anchor={source}
 		label="Selected entity actions"
-		items={actions}
+		items={actions.map((action) => ({
+			...action,
+			label: action.description ?? action.label,
+		}))}
 		onselect={selectMenuAction(source)}
 		onclose={() => {
 			menuAnchor = null;
@@ -294,11 +311,9 @@
 			gap: 4px;
 			align-items: center;
 		}
-		.selected-entity__actions {
-			display: flex;
-			gap: 4px;
-		}
 		.selected-entity__heading strong {
+			/* Keep the name centered when no left-side action is available. */
+			grid-column: 2;
 			font-weight: 600;
 			text-align: center;
 			white-space: nowrap;

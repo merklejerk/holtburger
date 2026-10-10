@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 	import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import type { Snippet } from "svelte";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
@@ -390,6 +391,8 @@
 					]}
 				/>{/snippet}
 			{#snippet target()}<ClientSelectedEntityHud
+					input={INPUT_DEFAULTS}
+					displayPlatform="unknown"
 					selectedGuid={1}
 					readSelectedDisplay={() => ({
 						nameColor:
@@ -444,7 +447,10 @@
 					{viewport}
 					onPlacementChange={(placement) =>
 						(adjustments = { ...adjustments, shortcuts: placement })}
-					bindings={[]}
+					input={{
+						...INPUT_DEFAULTS,
+						client: { ...INPUT_DEFAULTS.client, toggleCombat: [] },
+					}}
 					displayPlatform="unknown"
 					combatMode="peace"
 					combatEnabled={false}

@@ -95,6 +95,48 @@ export async function probeTrade(client, evaluateExpression) {
 		);
 	}
 
+	const inputSettings = await read(`${api}.bindingSettings.read()`);
+	await read(
+		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
+	);
+	await wait(
+		`document.querySelector('[data-trade-item="6002"]')?.title.includes('Examine (F8)')`,
+	);
+	await read(`${api}.selectInventoryItem(6001)`);
+	await read(`document.querySelector('[data-trade-item="6002"]').focus()`);
+	const beforeExamine = await read(
+		`${api}.inventoryDragCommands().filter(entry => entry.command === 'examine_client_entity').length`,
+	);
+	for (const type of ["keyDown", "keyUp"])
+		await client.send("Input.dispatchKeyEvent", {
+			type,
+			key: "e",
+			code: "KeyE",
+			windowsVirtualKeyCode: 69,
+		});
+	if (
+		(await read(
+			`${api}.inventoryDragCommands().filter(entry => entry.command === 'examine_client_entity').length`,
+		)) !== beforeExamine
+	)
+		throw new Error("Trade used the old Examine binding");
+	for (const type of ["keyDown", "keyUp"])
+		await client.send("Input.dispatchKeyEvent", {
+			type,
+			key: "F8",
+			code: "F8",
+			windowsVirtualKeyCode: 119,
+		});
+	const contextualExamine = await read(
+		`${api}.inventoryDragCommands().findLast(entry => entry.command === 'examine_client_entity')`,
+	);
+	if (contextualExamine?.args?.guid !== 6002)
+		throw new Error("Trade Examine did not capture the focused partner cell");
+	await read(`${api}.objectInspectionProbe().end()`);
+	await read(
+		`${api}.bindingSettings.replace(${JSON.stringify(inputSettings)})`,
+	);
+
 	const confirmPoint = await point(".trade-rail .trade-confirm");
 	for (const type of ["mousePressed", "mouseReleased"]) {
 		await client.send("Input.dispatchMouseEvent", {
@@ -232,6 +274,7 @@ export async function probeTrade(client, evaluateExpression) {
 	await read(`${fixture}.close()`);
 	await wait("document.querySelector('[data-trade-panel]') === null");
 	return {
+		contextualExamine,
 		open,
 		add,
 		accept,

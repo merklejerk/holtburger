@@ -1,3 +1,7 @@
+import {
+	readClientBinding,
+	replaceClientBinding,
+} from "../lib/input/client-keyboard-bindings";
 import { describe, expect, it } from "vitest";
 import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
 import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
@@ -8,6 +12,7 @@ import {
 	captureClientBinding,
 	conflictingClientBindings,
 	replaceConflictingClientBindings,
+	presentClientBinding,
 } from "./client-binding-catalog";
 
 function row(id: string) {
@@ -26,6 +31,43 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("covers the independent persisted keyboard address universe", () => {
+		const expected: string[] = [];
+		for (const [group, entries] of Object.entries(CLIENT_KEYBOARD_DEFAULTS)) {
+			for (const [name, value] of Object.entries(entries)) {
+				if (Array.isArray(value)) expected.push(`${group}.${name}`);
+				else if (typeof value === "object")
+					for (const index of Object.keys(value))
+						expected.push(`${group}.${name}.${index}`);
+			}
+		}
+		expect(CLIENT_BINDING_ROWS.map((row) => row.id).sort()).toEqual(
+			expected.sort(),
+		);
+	});
+
+	it("presents current alternatives, empty bindings, and platform modifiers for Select self", () => {
+		const reference = { kind: "client", action: "selectSelf" } as const;
+		const settings = replaceClientBinding(CLIENT_KEYBOARD_DEFAULTS, reference, [
+			{ code: "KeyQ", meta: true },
+			{ key: "é" },
+		]);
+		expect(presentClientBinding(settings, reference, "mac")).toEqual({
+			hint: "⌘Q",
+			description: "Command + Q / é",
+		});
+		expect(
+			presentClientBinding(settings, reference, "windows").description,
+		).toBe("Windows + Q / é");
+		expect(
+			presentClientBinding(
+				replaceClientBinding(settings, reference, []),
+				reference,
+				"linux",
+			),
+		).toEqual({ hint: null, description: "Unbound" });
+	});
+
 	it("shows all spell tabs before spell slots in one Spells group", () => {
 		const groups = CLIENT_BINDING_GROUPS.filter(
 			(group) => group.title === "Spells",
@@ -55,7 +97,10 @@ describe("client binding catalog", () => {
 			CLIENT_BINDING_ROWS.length,
 		);
 		for (const row of CLIENT_BINDING_ROWS) {
-			for (const binding of row.read(CLIENT_KEYBOARD_DEFAULTS)) {
+			for (const binding of readClientBinding(
+				CLIENT_KEYBOARD_DEFAULTS,
+				row.reference,
+			)) {
 				expect(
 					conflictingClientBindings(
 						CLIENT_KEYBOARD_DEFAULTS,
@@ -89,12 +134,15 @@ describe("client binding catalog", () => {
 		const next = replaceConflictingClientBindings(
 			CLIENT_KEYBOARD_DEFAULTS,
 			forward,
-			[...forward.read(CLIENT_KEYBOARD_DEFAULTS), binding],
+			[
+				...readClientBinding(CLIENT_KEYBOARD_DEFAULTS, forward.reference),
+				binding,
+			],
 			conflicts,
 			null,
 		);
-		expect(backward.read(next)).toEqual([]);
-		expect(forward.read(next)).toContainEqual(binding);
+		expect(readClientBinding(next, backward.reference)).toEqual([]);
+		expect(readClientBinding(next, forward.reference)).toContainEqual(binding);
 	});
 
 	it("treats shared cancellation as active inside a focused action bar", () => {
@@ -148,7 +196,11 @@ describe("client binding catalog", () => {
 			alt: false,
 			meta: false,
 		};
-		const settings = second.write(CLIENT_KEYBOARD_DEFAULTS, [legacy]);
+		const settings = replaceClientBinding(
+			CLIENT_KEYBOARD_DEFAULTS,
+			second.reference,
+			[legacy],
+		);
 		const binding = captureClientBinding(ctrlDigitTwo);
 		const conflicts = conflictingClientBindings(
 			settings,
@@ -160,11 +212,11 @@ describe("client binding catalog", () => {
 		const next = replaceConflictingClientBindings(
 			settings,
 			first,
-			[...first.read(settings), binding],
+			[...readClientBinding(settings, first.reference), binding],
 			conflicts,
 			ctrlDigitTwo,
 		);
-		expect(second.read(next)).toEqual([]);
+		expect(readClientBinding(next, second.reference)).toEqual([]);
 	});
 
 	it("distinguishes numpad digits and permits different combat contexts", () => {
@@ -189,7 +241,10 @@ describe("client binding catalog", () => {
 				numpad,
 			),
 		).toEqual([]);
-		const shared = combat.read(CLIENT_KEYBOARD_DEFAULTS)[0];
+		const shared = readClientBinding(
+			CLIENT_KEYBOARD_DEFAULTS,
+			combat.reference,
+		)[0];
 		expect(
 			conflictingClientBindings(CLIENT_KEYBOARD_DEFAULTS, spell, shared, null),
 		).toEqual([]);

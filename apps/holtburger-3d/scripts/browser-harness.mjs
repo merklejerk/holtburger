@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { probeBindingControls } from "./client-binding-controls-probe.mjs";
+import { probeVendor } from "./client-vendor-probe.mjs";
 import {
 	probeCharacterSheet,
 	probeClientHud,
@@ -193,6 +195,18 @@ try {
 		report = {
 			suite: "client-squelch",
 			...result.clientSquelch,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientBindingControls) {
+		report = {
+			suite: "client-binding-controls",
+			...result.clientBindingControls,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientBindings) {
+		report = {
+			suite: "client-bindings",
+			...result.clientBindings,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientSelectedActions) {
@@ -435,6 +449,8 @@ function parseArgs(args) {
 		clientParty: false,
 		clientFriends: false,
 		clientSelectedActions: false,
+		clientBindings: false,
+		clientBindingControls: false,
 		clientSquelch: false,
 		clientAllegiance: false,
 		clientInspection: false,
@@ -598,6 +614,14 @@ function parseArgs(args) {
 			case "--client-squelch":
 				parsed.clientHud = true;
 				parsed.clientSquelch = true;
+				break;
+			case "--client-binding-controls":
+				parsed.clientHud = true;
+				parsed.clientBindingControls = true;
+				break;
+			case "--client-bindings":
+				parsed.clientHud = true;
+				parsed.clientBindings = true;
 				break;
 			case "--client-selected-actions":
 				parsed.clientHud = true;
@@ -1832,6 +1856,8 @@ Options:
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
   --client-inspection   Exercise entity inspection windows, disclosed facts, and preview lifetimes.
+  --client-binding-controls Verify indexed remapping, casts, and contextual vendor Examine.
+  --client-bindings   Verify Settings remapping, shortcut hints, and feature dispatch.
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
@@ -4444,6 +4470,32 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
+		if (options.clientBindingControls) {
+			// Settings composition also establishes the accepted inventory facts used by the caster scenario.
+			const bindings = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeBindings",
+				[],
+			);
+			const controls = await probeBindingControls(client, evaluateExpression);
+			const vendor = await probeVendor(client, evaluateExpression, null);
+			return {
+				clientBindingControls: { ...controls, bindings, vendor },
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientBindings) {
+			return {
+				clientBindings: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeBindings",
+					[],
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientSelectedActions) {
 			return {
 				clientSelectedActions: await evaluate(
@@ -7010,6 +7062,32 @@ async function probeClientHousing(client) {
 			"Auto-filled sources did not display the complete shared quote.",
 		);
 	await verifyPaymentArtwork();
+	const harness = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
+	const inputSettings = await read(`${harness}.bindingSettings.read()`);
+	await read(
+		`${harness}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
+	);
+	await read(`${harness}.selectInventoryItem(${api}.note)`);
+	await read(
+		`document.querySelector('${windowSelector} [data-housing-requirement="273"] button').focus()`,
+	);
+	for (const type of ["keyDown", "keyUp"])
+		await client.send("Input.dispatchKeyEvent", {
+			type,
+			key: "F8",
+			code: "F8",
+			windowsVirtualKeyCode: 119,
+		});
+	const contextualExamine = await read(
+		`${harness}.inventoryDragCommands().findLast(entry => entry.command === 'examine_client_entity')`,
+	);
+	if (contextualExamine?.args?.guid !== manual.operation.item)
+		throw new Error("Housing Examine did not capture its requirement source");
+	await read(`${harness}.objectInspectionProbe().end()`);
+	await read(
+		`${harness}.bindingSettings.replace(${JSON.stringify(inputSettings)})`,
+	);
+
 	await read(
 		`document.querySelector('${windowSelector} [role="tab"][id^="housing-details-"]').click()`,
 	);
@@ -7292,6 +7370,7 @@ async function probeClientHousing(client) {
 		);
 
 	return {
+		contextualExamine,
 		manual,
 		automatic,
 		requirementRows: isolated,

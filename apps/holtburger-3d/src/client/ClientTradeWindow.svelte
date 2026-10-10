@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
@@ -16,6 +19,9 @@
 	import type { ClientTradeState, TradeView } from "./client-trade-state";
 
 	interface Props {
+		/** Accepted keyboard settings keep contextual inspection hints reactive. */
+		readonly inputSettings: ClientKeyboardConfiguration;
+		readonly displayPlatform: InputDisplayPlatform;
 		readonly model: ClientTradeState;
 		/** Shared entity selection also covers the partner’s preview items. */
 		readonly selectedGuid: number | null;
@@ -26,6 +32,8 @@
 		readonly onExamineItem: (guid: number) => void;
 	}
 	const {
+		inputSettings,
+		displayPlatform,
 		model,
 		selectedGuid,
 		placement,
@@ -34,6 +42,13 @@
 		onSelectItem,
 		onExamineItem,
 	}: Props = $props();
+	const examineShortcut = $derived(
+		presentClientBinding(
+			inputSettings,
+			{ kind: "client", action: "examine" },
+			displayPlatform,
+		),
+	);
 	const { keyboard } = useAppInputPolicy();
 	const input = useClientInput();
 	/** Offer markup and artwork refresh only at the inventory display cadence. */
@@ -114,7 +129,7 @@
 								</p>
 							{/if}
 							{#each side.items as cell (cell.guid)}
-								{@const label = `${cell.name}${cell.count > 1 ? ` ×${cell.count.toLocaleString()}` : ""}. E or right-click to inspect.`}
+								{@const label = `${cell.name}${cell.count > 1 ? ` ×${cell.count.toLocaleString()}` : ""}. Examine (${examineShortcut.description}) or right-click to inspect.`}
 								<button
 									type="button"
 									class="trade-cell ui-item-cell ui-item-selection ui-hud-button"

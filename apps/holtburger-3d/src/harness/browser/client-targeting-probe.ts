@@ -8,6 +8,12 @@ import {
 } from "../../client/client-cycle-selection-controller";
 import { ClientSelectionInput } from "../../client/client-selection-input";
 import { AppInput } from "../../lib/input/app-input";
+import {
+	clientInputConfiguration,
+	clientKeyboardSettingsSchema,
+	CLIENT_KEYBOARD_DEFAULTS,
+} from "../../client/client-input-settings";
+import { replaceClientBinding } from "../../lib/input/client-keyboard-bindings";
 import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 import { ClientInputArbiter } from "../../client/client-input-arbiter";
 import { CLIENT_TUNING } from "../../client/client-tuning";
@@ -104,8 +110,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		onAutoRunChanged() {},
 	});
 	let nowMs = 0;
+	const appInput = new AppInput(INPUT_DEFAULTS);
+	const character = appInput.characterContext(() => {});
 	const input = new ClientSelectionInput({
-		input: new AppInput(INPUT_DEFAULTS),
+		input: appInput,
 		selection,
 		cycle,
 		holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
@@ -115,7 +123,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			input.keydown(event, nowMs);
 		},
 		keyup: (event) => input.keyup(event, nowMs),
-		cancel: () => input.cancel(),
+		cancel: () => {
+			input.cancel();
+			character.reset();
+		},
 	});
 	const editor = document.createElement("input");
 	document.body.append(editor);
@@ -232,6 +243,24 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(10, "corpse subset shares reverse non-creature cursor");
 		press("x");
 		expectSelected(1, "self binding");
+		const remappedSelf = clientKeyboardSettingsSchema.parse(
+			replaceClientBinding(
+				CLIENT_KEYBOARD_DEFAULTS,
+				{ kind: "client", action: "selectSelf" },
+				[{ key: "q" }],
+			),
+		);
+		keyboard.cancel();
+		character.replaceBindings(remappedSelf.character);
+		appInput.replaceConfiguration(clientInputConfiguration(remappedSelf));
+		selection.select(3);
+		press("x");
+		expectSelected(3, "old self binding retired");
+		press("q");
+		expectSelected(1, "remapped self without rendered presentation");
+		keyboard.cancel();
+		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
+		appInput.replaceConfiguration(INPUT_DEFAULTS);
 		pointer.acquireViewportPoint(0, 0);
 		const request = requests.at(-1);
 		if (request === undefined)
@@ -335,6 +364,31 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		dispatchHeld("keyup", false, false);
 		keyboard.returnToGame();
 
+		selection.select(3);
+		dispatchHeld("keydown", false, false);
+		const beforeRemap = scans;
+		const remappedCycle = clientKeyboardSettingsSchema.parse(
+			replaceClientBinding(
+				CLIENT_KEYBOARD_DEFAULTS,
+				{ kind: "client", action: "nextCreature" },
+				[{ key: "q" }],
+			),
+		);
+		keyboard.cancel();
+		character.replaceBindings(remappedCycle.character);
+		appInput.replaceConfiguration(clientInputConfiguration(remappedCycle));
+		await waitForHold();
+		expectSelected(3, "configuration replacement cancels hold timer");
+		if (scans !== beforeRemap)
+			throw new Error("Cancelled remap hold scanned candidates");
+		dispatchHeld("keyup", false, false);
+		expectSelected(3, "old key release after remap cannot select");
+		press("q");
+		expectSelected(4, "new cycle binding reaches selection owner");
+		keyboard.cancel();
+		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
+		appInput.replaceConfiguration(INPUT_DEFAULTS);
+
 		// Explicit population measurement, not a general renderer performance claim.
 		const population = 1000;
 		replace(
@@ -355,6 +409,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			passed: true,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 			holdAndFocusChecks: true,
+			remapCancellation: true,
+			remappedSelfWithoutPresentation: true,
 			scans,
 			idleFrames: 3,
 			population,

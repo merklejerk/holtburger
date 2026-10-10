@@ -1,4 +1,9 @@
 <script lang="ts">
+	import {
+		readClientBinding,
+		replaceClientBinding,
+	} from "../lib/input/client-keyboard-bindings";
+
 	import UiTabs from "../app/UiTabs.svelte";
 	import { onMount } from "svelte";
 	import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
@@ -125,7 +130,7 @@
 		witness: InputKeyEvent | null,
 		source: HTMLButtonElement,
 	): void {
-		const proposal = row.write(input, bindings);
+		const proposal = replaceClientBinding(input, row.reference, bindings);
 		const rows = [
 			...new Set(
 				bindings.flatMap((binding) =>
@@ -154,16 +159,16 @@
 	): void {
 		if (bindingDialog?.kind !== "capture") return;
 		if (
-			row
-				.read(input)
-				.some((existing) => clientBindingsOverlap(existing, binding, witness))
+			readClientBinding(input, row.reference).some((existing) =>
+				clientBindingsOverlap(existing, binding, witness),
+			)
 		) {
 			closeBindingDialog();
 			return;
 		}
 		proposeBindings(
 			row,
-			[...row.read(input), binding],
+			[...readClientBinding(input, row.reference), binding],
 			witness,
 			bindingDialog.source,
 		);
@@ -217,7 +222,9 @@
 	): void {
 		proposeBindings(
 			row,
-			row.read(input).filter((_, position) => position !== index),
+			readClientBinding(input, row.reference).filter(
+				(_, position) => position !== index,
+			),
 			null,
 			source,
 		);
@@ -226,17 +233,20 @@
 		row: ClientBindingRow,
 		source: HTMLButtonElement,
 	): void {
-		proposeBindings(row, row.read(CLIENT_KEYBOARD_DEFAULTS), null, source);
+		proposeBindings(
+			row,
+			readClientBinding(CLIENT_KEYBOARD_DEFAULTS, row.reference),
+			null,
+			source,
+		);
 	}
 	function conflictingBindingPills(candidate: Conflict): string[] {
 		return candidate.bindings
 			.filter((binding) =>
 				candidate.rows.some((row) =>
-					row
-						.read(input)
-						.some((other) =>
-							clientBindingsOverlap(binding, other, candidate.witness),
-						),
+					readClientBinding(input, row.reference).some((other) =>
+						clientBindingsOverlap(binding, other, candidate.witness),
+					),
 				),
 			)
 			.map((binding) => formatInputPill(binding, displayPlatform));
@@ -579,7 +589,7 @@
 							<div class="binding-row">
 								<span class="binding-label">{row.label}</span>
 								<div class="binding-keys">
-									{#each row.read(input) as binding, index}
+									{#each readClientBinding(input, row.reference) as binding, index}
 										<button
 											type="button"
 											class="binding-key"

@@ -1,4 +1,16 @@
 import {
+	compactInputHint,
+	formatInputBindings,
+	type InputDisplayPlatform,
+} from "../lib/input/input-presentation";
+import {
+	clientBindingId,
+	readClientBinding,
+	replaceClientBinding,
+	type ClientBindingReference,
+	type ClientBindingId,
+} from "../lib/input/client-keyboard-bindings";
+import {
 	ACTION_BAR_COMMANDS,
 	CHARACTER_ACTIONS,
 	CLIENT_SHORTCUT_ACTIONS,
@@ -16,7 +28,7 @@ import { COMBAT_BREAKPOINTS } from "./client-combat-bar-state";
 
 type BindingContext =
 	"game-peace" | "game-magic" | "game-physical" | "focused-bar" | "chat";
-export type ClientBindingGroup =
+type ClientBindingGroup =
 	| "Movement"
 	| "Targeting & interaction"
 	| "Combat"
@@ -24,20 +36,19 @@ export type ClientBindingGroup =
 	| "Action bars"
 	| "Chat";
 
-/** One editable action with its real dispatch contexts and typed read/write path. */
+/** One editable binding with metadata for settings overlap checks. */
 export interface ClientBindingRow {
-	readonly id: string;
+	readonly id: ClientBindingId;
+	/** Address shared with runtime matching and presentation. */
+	readonly reference: ClientBindingReference;
 	readonly label: string;
 	readonly group: ClientBindingGroup;
+	/** Settings overlap model; runtime scope admission remains with KeyboardInputPolicy. */
 	readonly contexts: readonly BindingContext[];
-	readonly read: (
-		settings: ClientKeyboardConfiguration,
-	) => readonly KeyBinding[];
-	readonly write: (
-		settings: ClientKeyboardConfiguration,
-		bindings: readonly KeyBinding[],
-	) => ClientKeyboardConfiguration;
 }
+
+/** Catalog source metadata; stable identities are generated once at publication. */
+type BindingDefinition = Omit<ClientBindingRow, "id">;
 
 const GAME_CONTEXTS = ["game-peace", "game-magic", "game-physical"] as const;
 const CHARACTER_LABELS: Readonly<Record<CharacterAction, string>> = {
@@ -79,21 +90,16 @@ const ACTION_COMMAND_LABELS: Readonly<
 	confirm: "Activate selected cell",
 };
 
-function characterRow(action: CharacterAction): ClientBindingRow {
+function characterRow(action: CharacterAction): BindingDefinition {
 	return {
-		id: `character.${action}`,
+		reference: { kind: "character", action },
 		label: CHARACTER_LABELS[action],
 		group: "Movement",
 		contexts: GAME_CONTEXTS,
-		read: (settings) => settings.character[action],
-		write: (settings, bindings) => ({
-			...settings,
-			character: { ...settings.character, [action]: bindings },
-		}),
 	};
 }
 
-function clientRow(action: ClientShortcut): ClientBindingRow {
+function clientRow(action: ClientShortcut): BindingDefinition {
 	const chatOnly = action === "chatPreviousPage" || action === "chatNextPage";
 	const group: ClientBindingGroup =
 		action === "toggleAutoRun" || action === "preciseJump"
@@ -109,143 +115,74 @@ function clientRow(action: ClientShortcut): ClientBindingRow {
 			? [...GAME_CONTEXTS, "focused-bar", "chat"]
 			: GAME_CONTEXTS;
 	return {
-		id: `client.${action}`,
+		reference: { kind: "client", action },
 		label: CLIENT_LABELS[action],
 		group,
 		contexts,
-		read: (settings) => settings.client[action],
-		write: (settings, bindings) => ({
-			...settings,
-			client: { ...settings.client, [action]: bindings },
-		}),
 	};
 }
 
 const characterRows = CHARACTER_ACTIONS.map(characterRow);
 const clientRows = CLIENT_SHORTCUT_ACTIONS.map(clientRow);
-const spellTabRows: ClientBindingRow[] = ACTION_SLOT_INDICES.map((index) => ({
-	id: `spellBar.tabs.${index}`,
+const spellTabRows: BindingDefinition[] = ACTION_SLOT_INDICES.map((index) => ({
+	reference: { kind: "spellTab", index },
 	label: `Select spell tab ${(index + 1) % ACTION_SLOT_INDICES.length}`,
 	group: "Spells",
 	contexts: ["game-magic"],
-	read: (settings) => settings.spellBar.tabs[index],
-	write: (settings, bindings) => ({
-		...settings,
-		spellBar: {
-			...settings.spellBar,
-			tabs: { ...settings.spellBar.tabs, [index]: bindings },
-		},
-	}),
 }));
-const spellCasterRow: ClientBindingRow = {
-	id: "spellBar.caster",
+const spellCasterRow: BindingDefinition = {
+	reference: { kind: "spellCaster" },
 	label: "Cast wielded caster spell",
 	group: "Spells",
 	contexts: ["game-magic"],
-	read: (settings) => settings.spellBar.caster,
-	write: (settings, bindings) => ({
-		...settings,
-		spellBar: { ...settings.spellBar, caster: bindings },
-	}),
 };
-const spellSlotRows: ClientBindingRow[] = ACTION_SLOT_INDICES.map((index) => ({
-	id: `spellBar.cells.${index}`,
+const spellSlotRows: BindingDefinition[] = ACTION_SLOT_INDICES.map((index) => ({
+	reference: { kind: "spellCell", index },
 	label: `Cast spell slot ${(index + 1) % ACTION_SLOT_INDICES.length}`,
 	group: "Spells",
 	contexts: ["game-magic"],
-	read: (settings) => settings.spellBar.cells[index],
-	write: (settings, bindings) => ({
-		...settings,
-		spellBar: {
-			...settings.spellBar,
-			cells: { ...settings.spellBar.cells, [index]: bindings },
-		},
-	}),
 }));
-const combatRows: ClientBindingRow[] = [
-	...COMBAT_BREAKPOINT_INDICES.map((index): ClientBindingRow => ({
-		id: `combatBar.breakpoints.${index}`,
+const combatRows: BindingDefinition[] = [
+	...COMBAT_BREAKPOINT_INDICES.map((index): BindingDefinition => ({
+		reference: { kind: "combatBreakpoint", index },
 		label: `Melee power / missile accuracy ${Math.round(COMBAT_BREAKPOINTS[index] * 100)}%`,
 		group: "Combat",
 		contexts: ["game-physical"],
-		read: (settings) => settings.combatBar.breakpoints[index],
-		write: (settings, bindings) => ({
-			...settings,
-			combatBar: {
-				...settings.combatBar,
-				breakpoints: {
-					...settings.combatBar.breakpoints,
-					[index]: bindings,
-				},
-			},
-		}),
 	})),
-	...COMBAT_HEIGHT_INDICES.map((index): ClientBindingRow => ({
-		id: `combatBar.heights.${index}`,
+	...COMBAT_HEIGHT_INDICES.map((index): BindingDefinition => ({
+		reference: { kind: "combatHeight", index },
 		label: ["High", "Medium", "Low"][index] + " attack height",
 		group: "Combat",
 		contexts: ["game-physical"],
-		read: (settings) => settings.combatBar.heights[index],
-		write: (settings, bindings) => ({
-			...settings,
-			combatBar: {
-				...settings.combatBar,
-				heights: { ...settings.combatBar.heights, [index]: bindings },
-			},
-		}),
 	})),
 ];
-const actionBarRows: ClientBindingRow[] = [
-	...ACTION_SLOT_INDICES.map((index): ClientBindingRow => ({
-		id: `actionBars.focus.${index}`,
+const actionBarRows: BindingDefinition[] = [
+	...ACTION_SLOT_INDICES.map((index): BindingDefinition => ({
+		reference: { kind: "actionBarFocus", index },
 		label: `Focus action bar ${(index + 1) % ACTION_SLOT_INDICES.length}`,
 		group: "Action bars",
 		// Focus acquisition precedes game commands; inside a focused bar it intentionally
 		// precedes cell activation, so that overlap is not a configuration error.
 		contexts: GAME_CONTEXTS,
-		read: (settings) => settings.actionBars.focus[index],
-		write: (settings, bindings) => ({
-			...settings,
-			actionBars: {
-				...settings.actionBars,
-				focus: { ...settings.actionBars.focus, [index]: bindings },
-			},
-		}),
 	})),
-	...ACTION_SLOT_INDICES.map((index): ClientBindingRow => ({
-		id: `actionBars.cells.${index}`,
+	...ACTION_SLOT_INDICES.map((index): BindingDefinition => ({
+		reference: { kind: "actionBarCell", index },
 		label: `Activate action cell ${(index + 1) % ACTION_SLOT_INDICES.length}`,
 		group: "Action bars",
 		contexts: ["focused-bar"],
-		read: (settings) => settings.actionBars.cells[index],
-		write: (settings, bindings) => ({
-			...settings,
-			actionBars: {
-				...settings.actionBars,
-				cells: { ...settings.actionBars.cells, [index]: bindings },
-			},
-		}),
 	})),
-	...ACTION_BAR_COMMANDS.map((action): ClientBindingRow => ({
-		id: `actionBars.commands.${action}`,
+	...ACTION_BAR_COMMANDS.map((action): BindingDefinition => ({
+		reference: { kind: "actionBarCommand", action },
 		label: ACTION_COMMAND_LABELS[action],
 		group: "Action bars",
 		contexts: ["focused-bar"],
-		read: (settings) => settings.actionBars.commands[action],
-		write: (settings, bindings) => ({
-			...settings,
-			actionBars: {
-				...settings.actionBars,
-				commands: { ...settings.actionBars.commands, [action]: bindings },
-			},
-		}),
 	})),
 ];
 
 /** Editor order follows runtime ownership rather than object nesting. */
-export const CLIENT_BINDING_GROUPS: readonly {
+const bindingGroups: readonly {
 	readonly title: ClientBindingGroup;
-	readonly rows: readonly ClientBindingRow[];
+	readonly rows: readonly BindingDefinition[];
 }[] = [
 	{
 		title: "Movement",
@@ -275,9 +212,18 @@ export const CLIENT_BINDING_GROUPS: readonly {
 		rows: clientRows.filter((row) => row.group === "Chat"),
 	},
 ];
-export const CLIENT_BINDING_ROWS = CLIENT_BINDING_GROUPS.flatMap(
-	(group) => group.rows,
-);
+export const CLIENT_BINDING_GROUPS: readonly {
+	readonly title: ClientBindingGroup;
+	readonly rows: readonly ClientBindingRow[];
+}[] = bindingGroups.map((group) => ({
+	...group,
+	rows: group.rows.map((row) => ({
+		...row,
+		id: clientBindingId(row.reference),
+	})),
+}));
+export const CLIENT_BINDING_ROWS: readonly ClientBindingRow[] =
+	CLIENT_BINDING_GROUPS.flatMap((group) => group.rows);
 
 /** Capture digit keys by position, keeping the top row and numpad distinct. */
 export function captureClientBinding(event: InputKeyEvent): KeyBinding {
@@ -304,7 +250,7 @@ export function clientBindingsOverlap(
 	);
 }
 
-/** Detect conflicts only where two actions can claim the same actual keyboard event. */
+/** Detect overlaps within the existing Settings context model. */
 export function conflictingClientBindings(
 	settings: ClientKeyboardConfiguration,
 	row: ClientBindingRow,
@@ -315,9 +261,9 @@ export function conflictingClientBindings(
 		(other) =>
 			other.id !== row.id &&
 			other.contexts.some((context) => row.contexts.includes(context)) &&
-			other
-				.read(settings)
-				.some((binding) => clientBindingsOverlap(candidate, binding, witness)),
+			readClientBinding(settings, other.reference).some((binding) =>
+				clientBindingsOverlap(candidate, binding, witness),
+			),
 	);
 }
 
@@ -331,17 +277,43 @@ export function replaceConflictingClientBindings(
 ): ClientKeyboardConfiguration {
 	let next = settings;
 	for (const other of conflicts) {
-		next = other.write(
+		next = replaceClientBinding(
 			next,
-			other
-				.read(next)
-				.filter(
-					(binding) =>
-						!bindings.some((candidate) =>
-							clientBindingsOverlap(candidate, binding, witness),
-						),
-				),
+			other.reference,
+			readClientBinding(next, other.reference).filter(
+				(binding) =>
+					!bindings.some((candidate) =>
+						clientBindingsOverlap(candidate, binding, witness),
+					),
+			),
 		);
 	}
-	return row.write(next, bindings);
+	return replaceClientBinding(next, row.reference, bindings);
+}
+
+const definitions = new Map(CLIENT_BINDING_ROWS.map((row) => [row.id, row]));
+
+/** Resolve metadata by structural identity; an incomplete catalog is an internal error. */
+function clientBindingDefinition(
+	reference: ClientBindingReference,
+): ClientBindingRow {
+	const id = clientBindingId(reference);
+	const definition = definitions.get(id);
+	if (definition === undefined)
+		throw new Error(`Missing client binding definition ${id}`);
+	return definition;
+}
+
+/** Prepared shortcut facts shared by compact markers and full action tooltips. */
+export function presentClientBinding(
+	settings: ClientKeyboardConfiguration,
+	reference: ClientBindingReference,
+	platform: InputDisplayPlatform,
+): { readonly hint: string | null; readonly description: string } {
+	const definition = clientBindingDefinition(reference);
+	const bindings = readClientBinding(settings, definition.reference);
+	return {
+		hint: compactInputHint(bindings, platform),
+		description: formatInputBindings(bindings, platform),
+	};
 }

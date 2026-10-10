@@ -28,7 +28,11 @@ export async function probeClientSpells(
 		}
 		await tick();
 	};
-	const ids = Array.from({ length: 1024 }, (_, i) => i + 1);
+	// Keep the uniform search corpus separate from the authored Vitae fixture.
+	const count = 1024;
+	const ids = Array.from({ length: count }, (_, i) => i + 1)
+		.filter((id) => id !== 666)
+		.concat(count + 2);
 	emit("client-player-spells-updated", { spellIds: [...ids, 999999] });
 	button("Spells");
 	await waitFor(

@@ -1,3 +1,8 @@
+import { readClientBinding } from "./client-keyboard-bindings";
+import {
+	COMBAT_BREAKPOINT_INDICES,
+	COMBAT_HEIGHT_INDICES,
+} from "./input-contract";
 import { INPUT_DEFAULTS } from "./input-defaults";
 import { InputContext, matchesKey } from "./input-context";
 import type {
@@ -39,7 +44,10 @@ export class AppInput {
 		action: keyof InputConfiguration["client"],
 		event: InputKeyEvent,
 	): boolean {
-		return matchesKey(event, this.configuration.client[action]);
+		return matchesKey(
+			event,
+			readClientBinding(this.configuration, { kind: "client", action }),
+		);
 	}
 
 	/** Resolve spell intent only after keyboard ownership admits game input. */
@@ -49,12 +57,23 @@ export class AppInput {
 		| { readonly kind: "tabs" | "cells"; readonly index: InputDigitIndex }
 		| { readonly kind: "caster" }
 		| null {
-		if (matchesKey(event, this.configuration.spellBar.caster))
+		if (
+			matchesKey(
+				event,
+				readClientBinding(this.configuration, { kind: "spellCaster" }),
+			)
+		)
 			return { kind: "caster" };
 		const indices: readonly InputDigitIndex[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 		for (const kind of ["tabs", "cells"] as const) {
 			const index = indices.find((index) =>
-				matchesKey(event, this.configuration.spellBar[kind][index]),
+				matchesKey(
+					event,
+					readClientBinding(this.configuration, {
+						kind: kind === "tabs" ? "spellTab" : "spellCell",
+						index,
+					}),
+				),
 			);
 			if (index !== undefined) return { kind, index };
 		}
@@ -63,38 +82,62 @@ export class AppInput {
 
 	/** Resolve the five physical-combat breakpoint keys after gameplay gains keyboard ownership. */
 	combatBreakpoint(event: InputKeyEvent): CombatBreakpointIndex | null {
-		const indices: readonly CombatBreakpointIndex[] = [0, 1, 2, 3, 4];
+		const indices = COMBAT_BREAKPOINT_INDICES;
 		return (
 			indices.find((index) =>
-				matchesKey(event, this.configuration.combatBar.breakpoints[index]),
+				matchesKey(
+					event,
+					readClientBinding(this.configuration, {
+						kind: "combatBreakpoint",
+						index,
+					}),
+				),
 			) ?? null
 		);
 	}
 
 	/** Resolve the three top-to-bottom physical attack-height keys. */
 	combatHeight(event: InputKeyEvent): CombatHeightIndex | null {
-		const indices: readonly CombatHeightIndex[] = [0, 1, 2];
+		const indices = COMBAT_HEIGHT_INDICES;
 		return (
 			indices.find((index) =>
-				matchesKey(event, this.configuration.combatBar.heights[index]),
+				matchesKey(
+					event,
+					readClientBinding(this.configuration, {
+						kind: "combatHeight",
+						index,
+					}),
+				),
 			) ?? null
 		);
 	}
 
 	/** Resolve a numbered bar's focus chord using the shared installation configuration. */
 	actionBarFocus(index: InputDigitIndex, event: InputKeyEvent): boolean {
-		return matchesKey(event, this.configuration.actionBars.focus[index]);
+		return matchesKey(
+			event,
+			readClientBinding(this.configuration, { kind: "actionBarFocus", index }),
+		);
 	}
 	/** Resolve direct activation of a cell within the currently focused bar. */
 	actionBarCell(index: InputDigitIndex, event: InputKeyEvent): boolean {
-		return matchesKey(event, this.configuration.actionBars.cells[index]);
+		return matchesKey(
+			event,
+			readClientBinding(this.configuration, { kind: "actionBarCell", index }),
+		);
 	}
 	/** Resolve scoped command intent without assigning keyboard ownership. */
 	actionBarCommand(
 		action: keyof InputConfiguration["actionBars"]["commands"],
 		event: InputKeyEvent,
 	): boolean {
-		return matchesKey(event, this.configuration.actionBars.commands[action]);
+		return matchesKey(
+			event,
+			readClientBinding(this.configuration, {
+				kind: "actionBarCommand",
+				action,
+			}),
+		);
 	}
 	/** Return spatial navigation intent, independent of browser key names. */
 	actionBarDirection(event: InputKeyEvent): ActionBarDirection | null {

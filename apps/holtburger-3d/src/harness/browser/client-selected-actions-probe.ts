@@ -1,3 +1,4 @@
+import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 import { mount, tick, unmount } from "svelte";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
@@ -24,6 +25,15 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		target,
 		context,
 		props: {
+			input: {
+				...INPUT_DEFAULTS,
+				client: {
+					...INPUT_DEFAULTS.client,
+					interact: [{ key: "f", ctrl: true }],
+					examine: [],
+				},
+			},
+			displayPlatform: "windows",
 			selectedGuid: 1,
 			readSelectedDisplay: () => ({
 				...EMPTY_CLIENT_SELECTED_DISPLAY,
@@ -86,8 +96,12 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		await settle();
 		require(target.querySelectorAll("button").length ===
 			1, "No-action selection should retain only Examine");
+		require(button("Examine").title ===
+			"Examine (Unbound)", "Examine tooltip must describe its configured empty binding");
 		interact = true;
 		await sample();
+		require(button("Trade").title ===
+			"Trade (Ctrl + f)", "Direct interaction tooltip must use the configured shortcut");
 		button("Trade").click();
 		require(calls.join() === "trade" &&
 			menu() === null, "Single action should execute directly");
@@ -98,14 +112,17 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			target.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
 		);
 		require(rows.map((row) => row.textContent?.trim()).join("|") ===
-			"Trade|Swear allegiance|Invite to party|Add friend|Ignore account|Split stack", "Menu action labels or order are incorrect");
+			"Trade (Ctrl + f)|Swear allegiance|Invite to party|Add friend|Ignore account|Split stack", "Menu action labels or order are incorrect");
+		require(rows.every(
+			(row) => !row.hasAttribute("title"),
+		), "Labeled menu actions should not have redundant tooltips");
 		require(rows.every(
 			(row) => row.querySelector("svg") !== null,
 		), "Each menu action needs its icon");
 		require(button("Examine")
 			.isConnected, "Examine must remain outside the menu");
 		for (const label of [
-			"Trade",
+			"Trade (Ctrl + f)",
 			"Swear allegiance",
 			"Invite to party",
 			"Add friend",

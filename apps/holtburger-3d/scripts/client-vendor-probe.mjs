@@ -88,6 +88,31 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		`${api}.objectInspectionProbe().snapshot().state.kind === 'ready'`,
 	);
 	await read(`${api}.objectInspectionProbe().end()`);
+	const inputSettings = await read(`${api}.bindingSettings.read()`);
+	await read(
+		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
+	);
+	await wait(
+		`document.querySelector(${JSON.stringify(offer)})?.title.includes('Examine (F8)')`,
+	);
+	await read(`document.querySelector(${JSON.stringify(offer)}).focus()`);
+	for (const type of ["keyDown", "keyUp"])
+		await client.send("Input.dispatchKeyEvent", {
+			type,
+			key: "F8",
+			code: "F8",
+			windowsVirtualKeyCode: 119,
+		});
+	const remappedExamine = await read(
+		`${api}.inventoryDragCommands().findLast(entry => entry.command === 'examine_client_entity')`,
+	);
+	if (remappedExamine?.args?.guid !== 7001)
+		throw new Error("Remapped vendor Examine did not capture the offer");
+	await read(`${api}.objectInspectionProbe().end()`);
+	await read(
+		`${api}.bindingSettings.replace(${JSON.stringify(inputSettings)})`,
+	);
+
 	const offerInspectionsBefore = await read(
 		`${api}.inventoryDragCommands().filter((entry) => entry.command === 'examine_client_entity').length`,
 	);

@@ -891,7 +891,7 @@
 
 	{#if actionBars !== null && spells !== null && (spellBarEnabled || (hudMode === "layout" && combatMode !== "melee" && combatMode !== "missile"))}
 		<ClientSpellBar
-			input={input.spellBar}
+			{input}
 			{displayPlatform}
 			{spells}
 			{inventory}
@@ -913,7 +913,7 @@
 	{#if combatMode === "melee" || combatMode === "missile"}
 		<ClientCombatBar
 			{inventory}
-			input={input.combatBar}
+			{input}
 			{displayPlatform}
 			placement={hudLayout.combatBar}
 			editable={hudMode === "layout"}
@@ -1049,6 +1049,8 @@
 				changeHudPlacement("selectedEntity", placement)}
 		>
 			<ClientSelectedEntityHud
+				{input}
+				{displayPlatform}
 				selectedGuid={selectedEntityGuid}
 				readCanSplit={canSplitSelectedEntity}
 				readCanAddFriend={() => friendTarget() !== null}
@@ -1086,7 +1088,7 @@
 		{viewport}
 		onPlacementChange={(placement) =>
 			changeHudPlacement("shortcuts", placement)}
-		bindings={input.client.toggleCombat}
+		{input}
 		{displayPlatform}
 		{combatMode}
 		{combatEnabled}
@@ -1112,6 +1114,8 @@
 	{#if trade !== null}
 		{#key trade}
 			<ClientTradeWindow
+				inputSettings={input}
+				{displayPlatform}
 				model={trade}
 				selectedGuid={selectedEntityGuid}
 				placement={hudLayout.trade}
@@ -1126,6 +1130,8 @@
 	{#if vendor !== null}
 		{#key vendor}
 			<ClientVendorWindow
+				inputSettings={input}
+				{displayPlatform}
 				model={vendor}
 				placement={hudLayout.vendor}
 				{viewport}

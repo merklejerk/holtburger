@@ -19,6 +19,7 @@
 		CombatBreakpointIndex,
 		CombatHeightIndex,
 		InputDigitIndex,
+		ClientKeyboardConfiguration,
 	} from "../../lib/input/input-contract";
 	import {
 		COMBAT_BREAKPOINTS,
@@ -54,6 +55,9 @@
 		ClientViewportTargetResult,
 	} from "../../client/client-pointer-selection-controller";
 	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+	import { entityFacts } from "../../client/client-entity-mirror.test-support";
+	import { probeClientBindings } from "./client-binding-probe";
+	import { clientKeyboardSettingsSchema } from "../../client/client-input-settings";
 	import { clientInputConfiguration } from "../../client/client-input-settings";
 	import { AppInput } from "../../lib/input/app-input";
 	import { provideClientInput } from "../../client/client-input-context";
@@ -172,6 +176,55 @@
 	const clientInput = provideClientInput(
 		new AppInput(clientInputConfiguration(untrack(() => userSettings.input))),
 	);
+	const characterInput = clientInput.characterContext(() => {});
+	function changeInput(input: ClientKeyboardConfiguration) {
+		const accepted = clientKeyboardSettingsSchema.parse(input);
+		keyboard.cancel();
+		characterInput.replaceBindings(accepted.character);
+		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+		userSettings = { ...userSettings, input: accepted };
+		return accepted;
+	}
+	async function probeBindings() {
+		const targeting = await probeClientTargeting(keyboard);
+		const previous = userSettings.input;
+		emitInteractionEvent("client-entity-facts-changed", {
+			projectileSupply: null,
+			worldContainer: null,
+			upserts: [91, 95].map((guid) =>
+				entityFacts(guid, {
+					ownedByPlayer: true,
+					location: {
+						kind: "contained",
+						parentGuid: 1,
+						slot: { kind: "pending" },
+					},
+				}),
+			),
+			removed: [],
+		});
+		const fixture = beginItemUseProbe();
+		fixture.select(91);
+
+		try {
+			await fixture.ready();
+			const bindings = await probeClientBindings({
+				context: partyProbeContext,
+				keyboard,
+				initial: previous,
+				accept: changeInput,
+				interact: () => itemInteractions.interactSelected(false),
+				submissions: () =>
+					interactionCommands.filter(
+						(command) => command.command === "submit_client_item_use",
+					).length,
+			});
+			return { ...bindings, targeting };
+		} finally {
+			fixture.destroy();
+			changeInput(previous);
+		}
+	}
 	let characterSettings = $state.raw<ReturnType<
 		typeof createDefaultClientCharacterSettings
 	> | null>(createDefaultClientCharacterSettings());
@@ -369,6 +422,8 @@
 	};
 	let releaseCombatKeys: (() => void) | null = null;
 	const combatBarProbe = {
+		/** Runtime tuning used by indexed binding assertions. */
+		breakpoints: COMBAT_BREAKPOINTS,
 		/** Supply enters through the production semantic mirror, not component-local state. */
 		supply: async (supply: ProjectileSupply) => {
 			emitInteractionEvent("client-entity-facts-changed", {
@@ -741,10 +796,14 @@
 					itemInteractions.cancel()
 				)
 					event.preventDefault();
+				else characterInput.apply(event, true);
 			},
-			keyup: () => {},
+			keyup: (event) => {
+				characterInput.apply(event, false);
+			},
 			cancel: () => {
 				itemInteractions.cancelTargeting();
+				characterInput.reset();
 			},
 		});
 		const fixture = {
@@ -952,6 +1011,13 @@
 		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
 		/** Verify shared surface, backdrop, and density overrides across overlay components. */
 		readonly probeOverlayTheme: () => ReturnType<typeof probeOverlayTheme>;
+		/** Verify accepted Settings changes, shortcut presentation, and feature dispatch. */
+		readonly probeBindings: typeof probeBindings;
+		/** Accepted settings seam for focused browser remapping scenarios. */
+		readonly bindingSettings: {
+			read: () => ClientKeyboardConfiguration;
+			replace: typeof changeInput;
+		};
 		/** Verify selected HUD direct actions and icon-labeled popup commands. */
 		readonly probeSelectedActions: () => ReturnType<
 			typeof probeSelectedActions
@@ -3589,6 +3655,8 @@
 					commands: interactionCommands,
 				}),
 			probeOverlayTheme: () => probeOverlayTheme(partyProbeContext),
+			probeBindings,
+			bindingSettings: { read: () => userSettings.input, replace: changeInput },
 			probeSelectedActions: () => probeSelectedActions(partyProbeContext),
 			probeFriends: () =>
 				probeFriends({
@@ -3831,10 +3899,7 @@
 		onGraphicsChange={(graphics) =>
 			(userSettings = { ...userSettings, graphics })}
 		onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
-		onInputChange={(input) => {
-			clientInput.replaceConfiguration(clientInputConfiguration(input));
-			userSettings = { ...userSettings, input };
-		}}
+		onInputChange={changeInput}
 		onInspectionPreviewHeightChange={(previewHeight) =>
 			(userSettings = {
 				...userSettings,

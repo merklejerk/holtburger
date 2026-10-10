@@ -1,15 +1,12 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
 	import { onDestroy, untrack } from "svelte";
 	import {
 		COMBAT_BREAKPOINT_INDICES,
 		COMBAT_HEIGHT_INDICES,
 		type ClientKeyboardConfiguration,
 	} from "../lib/input/input-contract";
-	import {
-		compactInputHint,
-		formatInputBindings,
-		type InputDisplayPlatform,
-	} from "../lib/input/input-presentation";
+	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
 	import { AMMUNITION_SLOT } from "./client-inventory-equipment";
@@ -134,7 +131,7 @@
 		/** Session-owned world facts, available independently of inventory-panel visibility. */
 		readonly inventory: ClientInventoryState | null;
 		/** Accepted physical-combat shortcuts. */
-		readonly input: ClientKeyboardConfiguration["combatBar"];
+		readonly input: ClientKeyboardConfiguration;
 		readonly displayPlatform: InputDisplayPlatform;
 		readonly placement: ClientHudPlacement;
 		readonly editable: boolean;
@@ -444,17 +441,19 @@
 		>
 			{#each COMBAT_HEIGHT_INDICES as index}
 				{@const height = COMBAT_HEIGHTS[index]}
+				{@const binding = presentClientBinding(
+					input,
+					{ kind: "combatHeight", index },
+					displayPlatform,
+				)}
 				<button
 					type="button"
 					class="height {height}"
 					class:selected={profile.height === height}
-					data-shortcut={compactInputHint(
-						input.heights[index],
-						displayPlatform,
-					) ?? ""}
+					data-shortcut={binding.hint ?? ""}
 					disabled={!enabled}
-					aria-label={`${height[0].toUpperCase()}${height.slice(1)} attack (${formatInputBindings(input.heights[index], displayPlatform)})`}
-					title={`${height[0].toUpperCase()}${height.slice(1)} attack — ${formatInputBindings(input.heights[index], displayPlatform)}`}
+					aria-label={`${height[0].toUpperCase()}${height.slice(1)} attack (${binding.description})`}
+					title={`${height[0].toUpperCase()}${height.slice(1)} attack — ${binding.description}`}
 					aria-pressed={profile.height === height}
 					onclick={() => onProfileSelect({ ...profile, height })}
 				></button>
@@ -463,22 +462,26 @@
 
 		{#each COMBAT_BREAKPOINT_INDICES as index}
 			{@const marker = breakpointMarkers[index]}
+			{@const binding = presentClientBinding(
+				input,
+				{ kind: "combatBreakpoint", index },
+				displayPlatform,
+			)}
 			{@const percent = Math.round(COMBAT_BREAKPOINTS[index] * 100)}
 			{@const setting =
 				profile.kind === "melee" ? "Melee power" : "Missile accuracy"}
 			<span
 				class="breakpoint breakpoint-{index + 1}"
 				role="img"
-				aria-label={`${setting} ${percent}%. Key: ${formatInputBindings(input.breakpoints[index], displayPlatform)}`}
-				title={`${setting}: ${percent}%\nKey: ${formatInputBindings(input.breakpoints[index], displayPlatform)}`}
+				aria-label={`${setting} ${percent}%. Key: ${binding.description}`}
+				title={`${setting}: ${percent}%\nKey: ${binding.description}`}
 				style:left={`${marker.left}px`}
 				style:top={`${marker.top}px`}
 				style:width={`${GAUGE_TUNING.breakpointLabelSize}px`}
 				style:height={`${GAUGE_TUNING.breakpointLabelSize}px`}
 				style:--breakpoint-outward-x={`${marker.outwardX}px`}
 				style:--breakpoint-outward-y={`${marker.outwardY}px`}
-				>{compactInputHint(input.breakpoints[index], displayPlatform) ??
-					""}</span
+				>{binding.hint ?? ""}</span
 			>
 		{/each}
 		{#if remaining !== null && profile.kind === "missile"}

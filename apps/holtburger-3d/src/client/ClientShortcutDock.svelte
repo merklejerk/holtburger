@@ -53,12 +53,10 @@
 </script>
 
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
 	import type { ClientCombatMode } from "./client-host-contract";
-	import type { KeyBinding } from "../lib/input/input-contract";
-	import {
-		formatInputBindings,
-		type InputDisplayPlatform,
-	} from "../lib/input/input-presentation";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudTray from "./ClientHudTray.svelte";
 	import {
@@ -76,7 +74,7 @@
 		readonly viewport: ClientHudViewport;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Accepted stance shortcut alternatives. */
-		readonly bindings: readonly KeyBinding[];
+		readonly input: ClientKeyboardConfiguration;
 		readonly displayPlatform: InputDisplayPlatform;
 		/** Server-confirmed stance, independent of the active panel. */
 		readonly combatMode: ClientCombatMode;
@@ -95,7 +93,7 @@
 		editable,
 		viewport,
 		onPlacementChange,
-		bindings,
+		input,
 		displayPlatform,
 		shortcuts,
 		activePanel,
@@ -122,6 +120,13 @@
 				: defaults.preferredHeight,
 		};
 	});
+	const combatShortcut = $derived(
+		presentClientBinding(
+			input,
+			{ kind: "client", action: "toggleCombat" },
+			displayPlatform,
+		),
+	);
 	const orientation = $derived(hudTrayOrientation(trayPlacement));
 </script>
 
@@ -146,14 +151,14 @@
 				type="button"
 				class="ui-hud-button"
 				title={combat
-					? `Combat stance: ${combatMode}. Toggle peace/combat (${formatInputBindings(bindings, displayPlatform)})`
+					? `Combat stance: ${combatMode}. Toggle peace/combat (${combatShortcut.description})`
 					: panel === null
 						? `${shortcut.label} (stub)`
 						: panel === "debug"
 							? "Client diagnostics"
 							: shortcut.label}
 				aria-label={combat
-					? `${shortcut.label} (${formatInputBindings(bindings, displayPlatform)})`
+					? `${shortcut.label} (${combatShortcut.description})`
 					: shortcut.label}
 				aria-pressed={combat
 					? combatActive

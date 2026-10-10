@@ -1,15 +1,12 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
 	import { tick, untrack } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type {
 		ClientKeyboardConfiguration,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
-	import {
-		compactInputHint,
-		formatInputBindings,
-		type InputDisplayPlatform,
-	} from "../lib/input/input-presentation";
+	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import {
 		SPELL_BAR_INDICES,
@@ -37,7 +34,7 @@
 	} from "./client-inventory-equipment";
 	interface Props {
 		/** Accepted spell shortcuts for visible hints and full descriptions. */
-		input: ClientKeyboardConfiguration["spellBar"];
+		input: ClientKeyboardConfiguration;
 		displayPlatform: InputDisplayPlatform;
 		/** Retained HUD anchors; natural extent is derived from measured theme geometry. */
 		placement: ClientHudPlacement;
@@ -135,10 +132,11 @@
 	): { hint: string | null; description: string } | null {
 		const index = SPELL_BAR_INDICES.find((numbered) => numbered === slot);
 		if (index === undefined) return null;
-		return {
-			hint: compactInputHint(input.cells[index], displayPlatform),
-			description: formatInputBindings(input.cells[index], displayPlatform),
-		};
+		return presentClientBinding(
+			input,
+			{ kind: "spellCell", index },
+			displayPlatform,
+		);
 	}
 	let cellsViewport: HTMLDivElement;
 	let scrollHandle = $state<HTMLInputElement>();
@@ -312,10 +310,11 @@
 				<div class="caster-spell" data-caster-spell={caster.spell}>
 					<SpellCell
 						address={null}
-						shortcut={{
-							hint: compactInputHint(input.caster, displayPlatform),
-							description: formatInputBindings(input.caster, displayPlatform),
-						}}
+						shortcut={presentClientBinding(
+							input,
+							{ kind: "spellCaster" },
+							displayPlatform,
+						)}
 						spell={caster.spell}
 						label={`${row?.name ?? `Spell ${caster.spell}`} (${caster.name})${row?.artwork.kind === "failed" ? `: ${row.artwork.detail}` : ""}`}
 						display={row?.artwork.kind === "icon"
@@ -332,20 +331,22 @@
 			<div class="spell-shortcuts">
 				<div class="spell-tabs" role="group" aria-label="Spell bar tabs">
 					{#each SPELL_BAR_INDICES as tab}
+						{@const binding = presentClientBinding(
+							input,
+							{ kind: "spellTab", index: tab },
+							displayPlatform,
+						)}
 						<button
 							type="button"
 							class="ui-hud-button"
-							aria-label={`Spell tab ${(tab + 1) % 10} (${formatInputBindings(input.tabs[tab], displayPlatform)})`}
-							title={`Spell tab ${(tab + 1) % 10} — ${formatInputBindings(input.tabs[tab], displayPlatform)}`}
+							aria-label={`Spell tab ${(tab + 1) % 10} (${binding.description})`}
+							title={`Spell tab ${(tab + 1) % 10} — ${binding.description}`}
 							aria-pressed={configuration.selected === tab}
 							onclick={() => {
 								keyboard.returnToGame();
 								onSelectTab(tab);
 							}}
-							><span class="spell-tab-hint"
-								>{compactInputHint(input.tabs[tab], displayPlatform) ??
-									"—"}</span
-							></button
+							><span class="spell-tab-hint">{binding.hint ?? "—"}</span></button
 						>
 					{/each}
 				</div>

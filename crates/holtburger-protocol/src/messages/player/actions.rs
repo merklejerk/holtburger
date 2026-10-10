@@ -229,6 +229,27 @@ impl ProtocolPack for RemovePlayerPermissionActionData {
     }
 }
 
+/// Request a displayed character title (retail acclient.c:668249).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitleSetActionData {
+    /// Numeric title ID; eligibility is decided by the server.
+    pub title_id: u32,
+}
+
+impl ProtocolUnpack for TitleSetActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Some(Self {
+            title_id: u32::unpack(data, offset)?,
+        })
+    }
+}
+
+impl ProtocolPack for TitleSetActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.title_id.pack(writer);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -172,6 +172,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"query_client_spell_inspection",
 	"evaluate_client_progression",
 	"submit_client_progression",
+	"set_client_character_title",
 	"respond_to_client_confirmation",
 	"start_client_camera",
 	"set_client_camera_intent",

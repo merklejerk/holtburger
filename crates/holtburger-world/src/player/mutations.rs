@@ -314,6 +314,8 @@ impl PlayerState {
         secondary_attribute_table: &holtburger_dat::file_type::SecondaryAttributeTable,
         _events: &mut Vec<WorldEvent>,
     ) {
+        // PlayerDescription begins a new registry baseline even for the same GUID.
+        self.character_titles = None;
         self.guid = data.guid;
         self.enchantments.replace(&data.enchantments);
 

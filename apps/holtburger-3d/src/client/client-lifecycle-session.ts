@@ -246,6 +246,7 @@ type ClientCommandName = Extract<
 	| "query_client_spell_inspection"
 	| "evaluate_client_progression"
 	| "submit_client_progression"
+	| "set_client_character_title"
 	| "submit_client_item_use"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
@@ -570,6 +571,12 @@ export class ClientLifecycleSession {
 		this.characterSheet = new ClientCharacterSheetState(
 			(requestId, intents) => this.evaluateProgression(requestId, intents),
 			(quote) => this.submitProgression(quote),
+			async (character, titleId) => {
+				await this.#transport.invoke("set_client_character_title", {
+					character,
+					titleId,
+				});
+			},
 		);
 		this.mirror = mirror;
 		this.#dynamicSession = new DynamicEntitySession(

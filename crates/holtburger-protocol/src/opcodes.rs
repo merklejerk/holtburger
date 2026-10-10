@@ -476,8 +476,8 @@ pub enum GameActionOpcode {
     // ClearAllegianceOfficers = 0x02A7,
     /// C2S: Recall the character to their allegiance hometown.
     RecallAllegianceHometown = 0x02AB,
-    // /// C2S: Select an active character title.
-    // TitleSet = 0x002C,
+    /// C2S: Select an active character title.
+    TitleSet = 0x002C,
     /// C2S: Query the current health of a selected creature or player.
     /// Also updates the server-side selected target used for follow-up health heartbeats.
     QueryHealth = 0x01BF,
@@ -703,10 +703,10 @@ pub enum GameEventOpcode {
     AllegianceUpdate = 0x0020,
     /// S2C: Full replacement or incremental update of the player's friends list.
     FriendsListUpdate = 0x0021,
-    // /// S2C: Detailed information about a character title.
-    // CharacterTitle = 0x0029,
-    // /// S2C: Update to the current active title.
-    // UpdateTitle = 0x002B,
+    /// S2C: Initial selected title and earned-title registry.
+    CharacterTitle = 0x0029,
+    /// S2C: Grant a title and optionally select it.
+    UpdateTitle = 0x002B,
     /// S2C: Confirms that an allegiance data update is finished.
     AllegianceAllegianceUpdateDone = 0x01C8,
     /// S2C: Notifies the player that an allegiance member has logged in.

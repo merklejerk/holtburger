@@ -908,6 +908,75 @@ impl ProtocolUnpack for PlayerDescriptionEventData {
     }
 }
 
+/// Server-owned earned-title table (retail acclient.c:474660 skips the version).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharacterTitleEventData {
+    /// Wire version retained losslessly; retail does not reject unknown versions.
+    pub version: u32,
+    /// Currently displayed title; zero denotes no selected title.
+    pub selected_id: u32,
+    /// Earned title IDs, including IDs unknown to local content.
+    pub title_ids: Vec<u32>,
+}
+
+impl ProtocolUnpack for CharacterTitleEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let version = u32::unpack(data, offset)?;
+        let selected_id = u32::unpack(data, offset)?;
+        let count = u32::unpack(data, offset)? as usize;
+        // Bound the count before allocating or walking an untrusted list.
+        if count > data.len().checked_sub(*offset)? / 4 {
+            return None;
+        }
+        let title_ids = (0..count)
+            .map(|_| u32::unpack(data, offset))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            version,
+            selected_id,
+            title_ids,
+        })
+    }
+}
+
+impl ProtocolPack for CharacterTitleEventData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.version.pack(writer);
+        self.selected_id.pack(writer);
+        u32::try_from(self.title_ids.len())
+            .expect("title count exceeds wire size")
+            .pack(writer);
+        for id in &self.title_ids {
+            id.pack(writer);
+        }
+    }
+}
+
+/// Earn a title and optionally display it (retail acclient.c:384221).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateTitleEventData {
+    /// Newly granted or selected title ID.
+    pub title_id: u32,
+    /// Wire boolean occupies a complete 32-bit word.
+    pub set_as_display: bool,
+}
+
+impl ProtocolUnpack for UpdateTitleEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Some(Self {
+            title_id: u32::unpack(data, offset)?,
+            set_as_display: bool::unpack(data, offset)?,
+        })
+    }
+}
+
+impl ProtocolPack for UpdateTitleEventData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.title_id.pack(writer);
+        self.set_as_display.pack(writer);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::test_fixtures;

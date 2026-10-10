@@ -1,10 +1,11 @@
 //! Complete, character-scoped progression facts for client presentation.
 
 use holtburger_common::Guid;
-use holtburger_common::properties::{PropertyInt64, PropertyString};
+use holtburger_common::properties::{PropertyInt, PropertyInt64, PropertyString};
 use holtburger_world::WorldState;
 use holtburger_world::progression::StatTarget;
 use holtburger_world::stats::{Attribute, CharacterLevelInfo, Resistances, Skill, Vital};
+use serde::Serialize;
 
 /// One skill and its authored descriptive content.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +16,25 @@ pub struct ClientCharacterSkill {
     pub available_in_eor: bool,
 }
 
+/// One earned title with optional localized content; unknown IDs remain selectable.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClientCharacterTitle {
+    /// Server-reported title identity.
+    pub id: u32,
+    /// Localized name, absent when content does not resolve this ID.
+    pub name: Option<String>,
+}
+
+/// Complete title-selection facts, absent until the initial registry is received.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterTitleSelection {
+    /// Current server selection or optimistic selection; zero denotes none.
+    pub selected_id: u32,
+    /// Earned title entries, with presentation ordering left to the frontend.
+    pub entries: Vec<ClientCharacterTitle>,
+}
+
 /// Atomic character facts; absent until this character's description is complete.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientCharacterSheet {
@@ -23,6 +43,8 @@ pub struct ClientCharacterSheet {
     pub name: Option<String>,
     /// Selected localized title using the shared character inspection rules.
     pub title: Option<String>,
+    /// Complete server-reported registry with the current, possibly optimistic selection.
+    pub title_selection: Option<ClientCharacterTitleSelection>,
     /// Server-owned luminance storage capacity; absence means capacity is not known.
     pub maximum_luminance: Option<u64>,
     pub level: CharacterLevelInfo,
@@ -74,6 +96,21 @@ impl ClientCharacterSheet {
                     &entity.properties,
                     &world.character_titles,
                 )
+            }),
+            title_selection: world.player.character_titles.as_ref().map(|titles| {
+                ClientCharacterTitleSelection {
+                    selected_id: world
+                        .player_int_property(PropertyInt::CharacterTitleId)
+                        .expect("received title registry requires a selected-title property")
+                        as u32,
+                    entries: titles
+                        .iter()
+                        .map(|&id| ClientCharacterTitle {
+                            id,
+                            name: world.character_titles.title(id).map(str::to_owned),
+                        })
+                        .collect(),
+                }
             }),
             maximum_luminance: world
                 .player_int64_property(PropertyInt64::MaximumLuminance)

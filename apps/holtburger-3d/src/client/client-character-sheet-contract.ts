@@ -169,6 +169,25 @@ export const characterSheetSchema = z
 		/** Server-owned identity and localized selected character title. */
 		name: z.string().nullable(),
 		title: z.string().nullable(),
+		/** Null until the server supplies its initial earned-title registry. */
+		titleSelection: z
+			.object({
+				/** Current server or optimistic title ID; zero denotes none. */
+				selectedId: u32,
+				/** Server-reported earned titles; presentation ordering stays local. */
+				entries: z.array(
+					z
+						.object({
+							/** Numeric title identity retained even when content is unknown. */
+							id: u32,
+							/** Localized content; null represents an unresolved ID. */
+							name: z.string().nullable(),
+						})
+						.strict(),
+				),
+			})
+			.strict()
+			.nullable(),
 		/** Exact luminance capacity; null means it has not been provided. */
 		maximumLuminance: decimal.nullable(),
 		level: z

@@ -1792,6 +1792,7 @@ export async function probeCharacterSheet(
 		const sheet = {
 			character: ${characterGuid},
 			name: 'Delulu', title: 'Adventurer', maximumLuminance: '1000000',
+            titleSelection: { selectedId: 1, entries: [{ id: 42, name: 'Warrior' }, { id: 1, name: 'Adventurer' }, { id: 999, name: null }, { id: 0, name: null }] },
 			level: { level: 200, currentXp: '9007199254740993', unspentXp: '9007199254740993', unspentSkillPoints: 2, availableLuminance: '250000', nextLevelXp: '9007199254741993', xpIntoLevel: '100', xpForNextLevel: '1000' },
 			attributes: [
 				{ attr_type: 'StrengthAttr', ranks: 1, start: 10, spent_xp: 100, next_rank_xp: 300, base: 11, current: 13, breakdown: formula },
@@ -1837,13 +1838,73 @@ export async function probeCharacterSheet(
 	})()`,
 	);
 	await delay(250);
+	const titles = await evaluateExpression(
+		client,
+		`(() => {
+        const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+        const select = document.querySelector('select[aria-label="Character title"]');
+        if (!select || select.disabled || select.value !== '1') throw new Error('Initial title selection is missing.');
+        const labels = [...select.options].map((option) => option.textContent.trim());
+        if (JSON.stringify(labels) !== JSON.stringify(['Adventurer', 'Unknown title (ID 999)', 'Warrior'])) throw new Error('Title entries were not localized, sorted, or zero-filtered.');
+        select.value = '42';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const requests = harness.inventoryDragCommands().filter((entry) => entry.command === 'set_client_character_title');
+        if (requests.length !== 1 || requests[0].args.character !== ${characterGuid} || requests[0].args.titleId !== 42) throw new Error('Title selection did not dispatch the captured character and title.');
+        return { initial: true, dispatched: true };
+    })()`,
+	);
+	await delay(250);
+	await evaluateExpression(
+		client,
+		`(() => {
+        const select = document.querySelector('select[aria-label="Character title"]');
+        if (select.value !== '42' || select.disabled) throw new Error('Optimistic title selection was not retained without confirmation.');
+        if (document.querySelector('.character-sheet .character-title')) throw new Error('Optimistic title selection left a contradictory title readout.');
+        globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setCharacterSheet(globalThis.__CHARACTER_SHEET_PROBE_BASE__);
+    })()`,
+	);
+	await delay(250);
+	await evaluateExpression(
+		client,
+		`(() => {
+        if (document.querySelector('select[aria-label="Character title"]').value !== '1') throw new Error('Server title replacement did not reconcile selection.');
+    })()`,
+	);
+
+	for (const [selection, expected, disabled] of [
+		[null, "Loading titles…", true],
+		[{ selectedId: 0, entries: [] }, "No earned titles", true],
+		[
+			{ selectedId: 777, entries: [{ id: 1, name: "Adventurer" }] },
+			"Current title (ID 777)",
+			false,
+		],
+	]) {
+		await evaluateExpression(
+			client,
+			`globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setCharacterSheet({ ...globalThis.__CHARACTER_SHEET_PROBE_BASE__, titleSelection: ${JSON.stringify(selection)} })`,
+		);
+		await delay(250);
+		await evaluateExpression(
+			client,
+			`(() => {
+            const select = document.querySelector('select[aria-label="Character title"]');
+            if (select.disabled !== ${disabled} || select.selectedOptions[0].textContent.trim() !== ${JSON.stringify(expected)}) throw new Error('Unavailable, empty, or unlisted title state silently selected a title.');
+        })()`,
+		);
+	}
+	await evaluateExpression(
+		client,
+		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setCharacterSheet(globalThis.__CHARACTER_SHEET_PROBE_BASE__)",
+	);
+	await delay(250);
 	const first = await evaluateExpression(
 		client,
 		`(async () => {
 		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (!panel || !panel.textContent.includes('9,007,199,254,740,993')) throw new Error('Character panel lost exact XP.');
-		if (panel.querySelector('.character-name')?.textContent !== 'Delulu' || panel.querySelector('.character-title')?.textContent !== 'Adventurer') throw new Error('Character identity is missing.');
+		if (panel.querySelector('.character-name')?.textContent !== 'Delulu' || panel.querySelector('select[aria-label="Character title"]')?.selectedOptions[0]?.textContent.trim() !== 'Adventurer') throw new Error('Character identity is missing.');
 		if (panel.querySelector('progress[aria-label="Level experience"]')?.value !== 10 || panel.querySelector('progress[aria-label="Luminance capacity"]')?.value !== 25) throw new Error('Character progress bars did not reflect authoritative balances.');
 		const headings = [...panel.querySelectorAll(':scope > h2')].map((heading) => heading.textContent.trim());
 		if (!headings.includes('Specialized') || headings.includes('Trained') || headings.includes('Skills')) throw new Error('Specialized skills did not have their own major section.');
@@ -2099,7 +2160,7 @@ export async function probeCharacterSheet(
 		`(() => {
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel && !panel.textContent.includes('Waiting for character details')) throw new Error('Retired character details remained visible in the panel.');
-		return { ...${JSON.stringify(neutral)}, retired: true };
+		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, retired: true };
 	})()`,
 	);
 }

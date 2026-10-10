@@ -6093,3 +6093,154 @@ fn trade_preview_baseline_retains_pending_and_nonspatial_offer_identities() {
     assert!(!facts.owned_by_player);
     assert!(!facts.can_offer_trade);
 }
+
+#[test]
+fn character_titles_replace_grant_and_select_through_private_retention() {
+    use holtburger_protocol::messages::{CharacterTitleEventData, UpdateTitleEventData};
+    let mut state = WorldState::synthetic();
+    let player = Guid(1);
+    state.seed_local_player_entity(player, "Player", WorldPosition::default());
+    assert!(state.player.character_titles.is_none());
+    let mut events = Vec::new();
+    let mut apply = |state: &mut WorldState, event| {
+        events.extend(
+            state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: player,
+                sequence: 1,
+                event,
+            }))),
+        );
+    };
+    apply(
+        &mut state,
+        GameEvent::CharacterTitle(Box::new(CharacterTitleEventData {
+            version: 1,
+            selected_id: 42,
+            title_ids: vec![42, 42, 999],
+        })),
+    );
+    assert_eq!(
+        state
+            .player
+            .character_titles
+            .as_ref()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![42, 999]
+    );
+    apply(
+        &mut state,
+        GameEvent::UpdateTitle(Box::new(UpdateTitleEventData {
+            title_id: 1000,
+            set_as_display: false,
+        })),
+    );
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(42)
+    );
+    apply(
+        &mut state,
+        GameEvent::UpdateTitle(Box::new(UpdateTitleEventData {
+            title_id: 1000,
+            set_as_display: true,
+        })),
+    );
+    apply(
+        &mut state,
+        GameEvent::UpdateTitle(Box::new(UpdateTitleEventData {
+            title_id: 1000,
+            set_as_display: true,
+        })),
+    );
+    assert_eq!(state.player.character_titles.as_ref().unwrap().len(), 3);
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(1000)
+    );
+    // Recreate the public object with no title; the private title survives.
+    state.handle_message(&GameMessage::ObjectCreate(Box::new(
+        ObjectDescriptionData::with_guid(player),
+    )));
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(1000)
+    );
+    apply(
+        &mut state,
+        GameEvent::CharacterTitle(Box::new(CharacterTitleEventData {
+            version: 1,
+            selected_id: 0,
+            title_ids: vec![],
+        })),
+    );
+    assert!(state.player.character_titles.as_ref().unwrap().is_empty());
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(0)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::PlayerTitlesUpdated))
+    );
+}
+
+#[test]
+fn character_titles_reset_with_description_and_ignore_other_characters() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(1);
+    let mut description = PlayerDescriptionEventData {
+        guid: player_guid,
+        sequence: 1,
+        name: "Player".to_string(),
+        wee_type: 1,
+        pos: Some(WorldPosition::default()),
+        properties: WorldObjectProperties::default(),
+        positions: std::collections::BTreeMap::new(),
+        attributes: std::collections::BTreeMap::new(),
+        skills: std::collections::BTreeMap::new(),
+        enchantments: Vec::new(),
+        spells: std::collections::BTreeMap::new(),
+        has_health: true,
+        options1: CharacterOptions1::empty(),
+        options2: CharacterOptions2::empty(),
+        shortcuts: Vec::new(),
+        hotbar_spells: Vec::new(),
+        desired_comps: Vec::new(),
+        spellbook_filters: 0,
+        gameplay_options: Vec::new(),
+        inventory: Vec::new(),
+        equipped_objects: Vec::new(),
+    };
+    state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: player_guid,
+        sequence: 1,
+        event: GameEvent::PlayerDescription(Box::new(description.clone())),
+    })));
+    for next_character in [player_guid, Guid(2)] {
+        state.player.character_titles = Some([42].into_iter().collect());
+        description.guid = next_character;
+        state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: next_character,
+            sequence: 2,
+            event: GameEvent::PlayerDescription(Box::new(description.clone())),
+        })));
+        assert!(state.player.character_titles.is_none());
+    }
+    let events = state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid(99),
+        sequence: 3,
+        event: GameEvent::CharacterTitle(Box::new(
+            holtburger_protocol::messages::CharacterTitleEventData {
+                version: 1,
+                selected_id: 999,
+                title_ids: vec![999],
+            },
+        )),
+    })));
+    assert!(state.player.character_titles.is_none());
+    assert!(events.is_empty());
+}

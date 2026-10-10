@@ -25,7 +25,35 @@ export class ClientCharacterSheetState {
 			intents: readonly ProgressionIntent[],
 		) => Promise<void>,
 		private readonly submit: (quote: ProgressionQuote) => Promise<void>,
+		private readonly sendTitle: (
+			character: number,
+			titleId: number,
+		) => Promise<void>,
 	) {}
+
+	/** Immediate display selection; subsequent snapshots win without confirmation tracking. */
+	async selectTitle(titleId: number): Promise<void> {
+		const sheet = this.#sheet;
+		if (
+			sheet === null ||
+			sheet.titleSelection === null ||
+			sheet.titleSelection.selectedId === titleId
+		)
+			return;
+		this.#sheet = {
+			...sheet,
+			titleSelection: { ...sheet.titleSelection, selectedId: titleId },
+		};
+		this.#feedback = null;
+		this.#revision++;
+		try {
+			await this.sendTitle(sheet.character, titleId);
+		} catch (error) {
+			if (this.#sheet?.character !== sheet.character) return;
+			this.#feedback = `Title selection send failed: ${error instanceof Error ? error.message : String(error)}`;
+			this.#revision++;
+		}
+	}
 
 	read(): {
 		readonly revision: number;

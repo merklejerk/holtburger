@@ -16,6 +16,20 @@ use holtburger_protocol::messages::movement::{
 use std::time::Instant;
 
 impl WorldState {
+    /// Apply a server selection or optimistic local selection through the private property path.
+    pub fn set_player_character_title(&mut self, title_id: u32) -> WorldEvent {
+        // PropertyInt stores the same 32 wire bits in a signed slot.
+        let update = PropertyUpdate::Int(PropertyInt::CharacterTitleId, title_id as i32);
+        self.player_entity_mut()
+            .expect("title selection requires a described player entity")
+            .set_property(update.clone());
+        self.player.property_retention.observe(&update);
+        WorldEvent::PropertiesUpdated {
+            guid: self.player.guid,
+            updates: vec![update],
+        }
+    }
+
     pub(crate) fn authoritative_body_id_for_guid(&self, guid: Guid) -> Option<SpatialBodyId> {
         if guid == Guid::NULL {
             return None;

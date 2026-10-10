@@ -3,7 +3,7 @@ use crate::stats;
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
 use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 pub struct SkillBase {
@@ -281,6 +281,8 @@ pub struct PlayerState {
     pub spells: BTreeMap<u32, f32>,
     /// Complete server-backed character preferences retained from PlayerDescription.
     pub character_options: PlayerCharacterOptions,
+    /// Server-reported earned IDs; None means the initial table has not arrived.
+    pub character_titles: Option<BTreeSet<u32>>,
     /// Content of the 8 spellbook hotbars (Organization). Each inner vec corresponds to a UI hotbar.
     pub hotbar_spells: Vec<Vec<u32>>,
     /// Desired material component counts retained from PlayerDescription.
@@ -324,6 +326,7 @@ impl PlayerState {
             enchantments: PlayerEnchantments::default(),
             spells: BTreeMap::new(),
             character_options: PlayerCharacterOptions::default(),
+            character_titles: None,
             hotbar_spells: vec![Vec::new(); 8],
             desired_comps: Vec::new(),
             spellbook_filters: 0,

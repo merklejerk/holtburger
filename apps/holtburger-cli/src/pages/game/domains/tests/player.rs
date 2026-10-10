@@ -11,6 +11,7 @@ fn character_sheet(guid: Guid) -> ClientCharacterSheet {
         character: guid,
         name: Some("Player".into()),
         title: None,
+        title_selection: None,
         maximum_luminance: None,
         level: CharacterLevelInfo {
             level: 10,

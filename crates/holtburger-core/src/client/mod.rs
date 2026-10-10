@@ -82,7 +82,9 @@ pub use camera::{
 pub use camera_service::ClientCameraInputHandle;
 use camera_service::ClientCameraService;
 use character_selection::CharacterSelectionState;
-pub use character_sheet::{ClientCharacterSheet, ClientCharacterSkill};
+pub use character_sheet::{
+    ClientCharacterSheet, ClientCharacterSkill, ClientCharacterTitle, ClientCharacterTitleSelection,
+};
 use movement::MovementSystem;
 pub use precise_jump_runtime::{
     PreciseJumpActionSequence, PreciseJumpAimRequest, PreciseJumpAimSequence,
@@ -833,6 +835,7 @@ impl ClientRuntime {
             if self.progression.clear() {
                 self.emit_progression_guards();
             }
+            self.world.player.character_titles = None;
             self.reset_friends();
             self.reset_squelch();
             self.reset_allegiance();
@@ -909,7 +912,8 @@ impl ClientRuntime {
         }
         matches!(
             event,
-            WorldEvent::PlayerInfo(_)
+            WorldEvent::PlayerTitlesUpdated
+                | WorldEvent::PlayerInfo(_)
                 | WorldEvent::DerivedStatsUpdated(_)
                 | WorldEvent::LevelInfoUpdated(_)
                 | WorldEvent::AttributeUpdated(_)

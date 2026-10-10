@@ -64,6 +64,8 @@ pub enum GameEvent {
     HouseTransaction(Box<HouseTransactionEventData>),
     UpdateHar(Box<HouseAccess>),
     AvailableHouses(Box<HouseAvailableHouses>),
+    CharacterTitle(Box<CharacterTitleEventData>),
+    UpdateTitle(Box<UpdateTitleEventData>),
     PlayerDescription(Box<PlayerDescriptionEventData>),
     PingResponse(Box<PingResponseEventData>),
     ViewContents(Box<ViewContentsEventData>),
@@ -139,6 +141,12 @@ impl ProtocolUnpack for GameEventMessage {
 
         let event = match event_op {
             Some(op) => match op {
+                GameEventOpcode::CharacterTitle => GameEvent::CharacterTitle(Box::new(
+                    CharacterTitleEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::UpdateTitle => {
+                    GameEvent::UpdateTitle(Box::new(UpdateTitleEventData::unpack(data, offset)?))
+                }
                 GameEventOpcode::PlayerDescription => GameEvent::PlayerDescription(Box::new(
                     PlayerDescriptionEventData::unpack(target, sequence, data, offset)?,
                 )),
@@ -412,6 +420,14 @@ impl ProtocolPack for GameEventMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.event {
+            GameEvent::CharacterTitle(data) => {
+                (GameEventOpcode::CharacterTitle as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::UpdateTitle(data) => {
+                (GameEventOpcode::UpdateTitle as u32).pack(buf);
+                data.pack(buf);
+            }
             GameEvent::PlayerDescription(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::PlayerDescription as u32)
                     .unwrap();

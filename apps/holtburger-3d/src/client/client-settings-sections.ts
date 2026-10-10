@@ -21,6 +21,8 @@ export const clientUserSectionSchemas = {
 	graphics: userShape.graphics,
 	audio: userShape.audio,
 	ui: userShape.ui,
+	clockFormat: userShape.clockFormat,
+	environmentOverrides: userShape.environmentOverrides,
 	input: userShape.input,
 	inspection: userShape.inspection,
 } as const;

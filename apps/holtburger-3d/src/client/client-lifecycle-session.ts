@@ -353,7 +353,6 @@ export interface ClientConnectionObservation {
 export interface ClientLifecycleSessionState {
 	readonly lifecycle: ClientLifecycle | null;
 	readonly playerGuid: number | null;
-	readonly serverTime: number | null;
 	readonly worldGeneration: number;
 	readonly worldName: string | null;
 	readonly playerName: string | null;
@@ -535,6 +534,11 @@ export class ClientLifecycleSession {
 	#state: ClientLifecycleSessionState = emptyState();
 	/** Transport samples stay imperative; only the mounted badge polls them. */
 	#connection: ClientConnectionObservation | null = null;
+	/** Receipt-owned clock survives delayed presentation mounts, but never session stop. */
+	#serverClock: {
+		readonly serverTime: number;
+		readonly receivedAtMs: number;
+	} | null = null;
 	#vendor: VendorSnapshot = null;
 	#housing: HousingSnapshot = emptyHousing();
 	#trade: TradeSnapshot = { trade: null, pending_items: [] };
@@ -577,6 +581,7 @@ export class ClientLifecycleSession {
 	/** Install every authority listener, then request one atomic replacement snapshot. */
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
+		this.#serverClock = null;
 		this.#state = emptyState();
 		this.#resetSocialState();
 		this.#connection = null;
@@ -593,6 +598,7 @@ export class ClientLifecycleSession {
 				},
 			});
 		} catch (error) {
+			this.#serverClock = null;
 			for (const unlisten of siblingUnlisteners) unlisten();
 			this.#unlisten = null;
 			this.#dynamicSession.stop();
@@ -602,6 +608,7 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.#serverClock = null;
 		this.#resetSocialState();
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
@@ -628,6 +635,14 @@ export class ClientLifecycleSession {
 	/** Read the latest lifecycle facts without exposing the host transport or protocol types. */
 	state(): ClientLifecycleSessionState {
 		return this.#state;
+	}
+
+	/** Extrapolate the synchronized observation with browser monotonic time only. */
+	readServerTime(timeMs: number): number | null {
+		const anchor = this.#serverClock;
+		return anchor === null
+			? null
+			: anchor.serverTime + (timeMs - anchor.receivedAtMs) / 1000;
 	}
 
 	/** Observe accepted lifecycle, time, dynamic, correction, and terminal updates. */
@@ -1497,6 +1512,10 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		this.#serverClock =
+			state.serverTime === null
+				? null
+				: { serverTime: state.serverTime, receivedAtMs: performance.now() };
 		this.allegiance.recover(
 			state.allegiance,
 			state.allegiancePreferences,
@@ -1531,7 +1550,6 @@ export class ClientLifecycleSession {
 			...this.#state,
 			lifecycle: state.lifecycle,
 			playerGuid: state.localPlayerGuid,
-			serverTime: state.serverTime,
 			worldGeneration: state.worldGeneration,
 			worldName: state.worldName,
 			playerName: state.playerName,
@@ -1658,7 +1676,7 @@ export class ClientLifecycleSession {
 
 	#receiveServerTime(payload: unknown): void {
 		const { time } = decodeClientServerTime(payload);
-		this.#state = { ...this.#state, serverTime: time };
+		this.#serverClock = { serverTime: time, receivedAtMs: performance.now() };
 		this.#emit({ type: "server-time", time });
 	}
 
@@ -1763,7 +1781,6 @@ function emptyState(): ClientLifecycleSessionState {
 	return {
 		lifecycle: null,
 		playerGuid: null,
-		serverTime: null,
 		worldGeneration: 0,
 		worldName: null,
 		playerName: null,

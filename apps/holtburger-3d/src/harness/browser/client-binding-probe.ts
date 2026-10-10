@@ -154,7 +154,8 @@ export async function probeClientBindings(options: {
 		const splitRow = Array.from(
 			target.querySelectorAll<HTMLElement>(".binding-row"),
 		).find(
-			(row) => row.querySelector(".binding-label")?.textContent === "Split stack",
+			(row) =>
+				row.querySelector(".binding-label")?.textContent === "Split stack",
 		);
 		const splitKey = splitRow?.querySelector<HTMLButtonElement>(".binding-key");
 		if (splitKey === undefined || splitKey === null)
@@ -165,12 +166,9 @@ export async function probeClientBindings(options: {
 		press("F10", "F10");
 		await tick();
 		await click("Selected entity actions");
-		require(
-			Array.from(target.querySelectorAll('[role="menuitem"]')).some(
-				(item) => item.textContent?.trim() === "Split stack (F10)",
-			),
-			"Split-stack menu hint did not update after remapping",
-		);
+		require(Array.from(target.querySelectorAll('[role="menuitem"]')).some(
+			(item) => item.textContent?.trim() === "Split stack (F10)",
+		), "Split-stack menu hint did not update after remapping");
 		await click("Selected entity actions");
 		await click("Restore default keys for Split stack");
 		return {

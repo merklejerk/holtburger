@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 	import { ClientHousingManagementState } from "../../client/client-housing-management-state";
 	import {
 		emptyHousing,
@@ -91,6 +92,17 @@
 	} from "../../client/client-dialogs";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { probeBrowserInput } from "./input-browser-probe";
+	import { probeClientEnvironment } from "./client-environment-probe";
+	import {
+		bindClientPresentationEnvironment,
+		clientWeatherPresets,
+		createClientServerEnvironmentSource,
+	} from "../../client/client-environment";
+	import {
+		clientEnvironmentFixture,
+		ENVIRONMENT_FIXTURE_DAY_SECONDS,
+	} from "../../client/client-environment.test-support";
+	import type { ClientEnvironmentOverrides } from "../../client/client-environment-settings";
 	import {
 		getAllContexts,
 		mount,
@@ -167,6 +179,16 @@
 	} from "../../client/client-settings-defaults";
 
 	let spellBar = $state(initialSpellBar());
+	const environmentRegion = clientEnvironmentFixture();
+	let environmentSeconds: number | null = ENVIRONMENT_FIXTURE_DAY_SECONDS * 1.9;
+	const environmentServer = createClientServerEnvironmentSource(
+		environmentRegion,
+		() => environmentSeconds,
+	);
+	environmentServer.refresh(0);
+	const environmentPresets = clientWeatherPresets(environmentRegion);
+	/** Binding is imperative; only its cold mismatch message enters markup. */
+	let environmentIssue = $state<string | null>(null);
 	let userSettings = $state.raw(
 		createDefaultClientUserSettings(
 			{ width: window.innerWidth, height: window.innerHeight },
@@ -176,6 +198,23 @@
 	const clientInput = provideClientInput(
 		new AppInput(clientInputConfiguration(untrack(() => userSettings.input))),
 	);
+	// Initialize the imperative binding once; controls replace it without reactive reconstruction.
+	let environmentBinding = bindClientPresentationEnvironment(
+		environmentServer,
+		environmentRegion,
+		untrack(() => userSettings.environmentOverrides),
+	);
+	function changeEnvironmentOverrides(
+		environmentOverrides: ClientEnvironmentOverrides,
+	): void {
+		userSettings = { ...userSettings, environmentOverrides };
+		environmentBinding = bindClientPresentationEnvironment(
+			environmentServer,
+			environmentRegion,
+			environmentOverrides,
+		);
+		environmentIssue = environmentBinding.issue;
+	}
 	const characterInput = clientInput.characterContext(() => {});
 	function changeInput(input: ClientKeyboardConfiguration) {
 		const accepted = clientKeyboardSettingsSchema.parse(input);
@@ -969,6 +1008,8 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Deterministic production environment controls/readout integration. */
+		readonly probeEnvironment: () => ReturnType<typeof probeClientEnvironment>;
 		/** Replace housing without mounting a new World panel or replaying crystal intent. */
 		readonly setHousing: (snapshot: unknown) => void;
 		/** Match core retirement followed by a new character's complete replacement state. */
@@ -3540,6 +3581,29 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeEnvironment: () =>
+				probeClientEnvironment({
+					setServerTime: (seconds) => {
+						environmentSeconds = seconds;
+						environmentServer.refresh(performance.now());
+					},
+					readPresentation: () => environmentBinding.source.read(),
+					placeMinimapAtBottom: () => {
+						userSettings = {
+							...userSettings,
+							hudLayout: {
+								...userSettings.hudLayout,
+								minimap: {
+									...userSettings.hudLayout.minimap,
+									vertical: { alignment: "end", offset: 0 },
+									horizontal: { alignment: "start", offset: 0 },
+									preferredWidth: CLIENT_UI_DEFAULTS.minimap.minSize,
+									preferredHeight: CLIENT_UI_DEFAULTS.minimap.minSize,
+								},
+							},
+						};
+					},
+				}),
 			setHousing: (snapshot) => {
 				emitInteractionEvent(
 					"client-housing-updated",
@@ -3896,6 +3960,14 @@
 		onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
 		graphics={userSettings.graphics}
 		ui={userSettings.ui}
+		clockFormat={userSettings.clockFormat}
+		environmentOverrides={userSettings.environmentOverrides}
+		weatherPresets={environmentPresets}
+		{environmentIssue}
+		readServerEnvironment={() => environmentServer.readout()}
+		onClockFormatChange={(clockFormat) =>
+			(userSettings = { ...userSettings, clockFormat })}
+		onEnvironmentOverridesChange={changeEnvironmentOverrides}
 		input={userSettings.input}
 		textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
 		onGraphicsChange={(graphics) =>

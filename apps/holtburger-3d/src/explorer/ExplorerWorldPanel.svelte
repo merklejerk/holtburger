@@ -11,7 +11,7 @@
 		type ExplorerRadiusKind,
 	} from "./explorer-residency-radius";
 	import { parseResidenceInput } from "./world-input";
-	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
+	import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 	import ToggleField from "../app/ToggleField.svelte";
@@ -35,11 +35,9 @@
 		readonly readPhysicalCameraStatus: () => PhysicalFlyStatus | null;
 		readonly physicalCameraError: string | null;
 		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
-		readonly environmentSelection: ExplorerEnvironmentSelection;
+		readonly environmentSelection: SceneEnvironmentSelection;
 		readonly dayGroupNames: readonly string[];
-		readonly updateEnvironment: (
-			selection: ExplorerEnvironmentSelection,
-		) => void;
+		readonly updateEnvironment: (selection: SceneEnvironmentSelection) => void;
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;

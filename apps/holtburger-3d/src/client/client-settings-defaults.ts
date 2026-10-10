@@ -15,6 +15,10 @@ import { CLIENT_TUNING } from "./client-tuning";
 import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy";
 import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
+import {
+	CLIENT_CLOCK_FORMAT_DEFAULT,
+	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
+} from "./client-environment-settings";
 
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
 export const CLIENT_AUDIO_DEFAULTS = {
@@ -44,6 +48,8 @@ export function createDefaultClientUserSettings(
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
 		input: structuredClone(CLIENT_KEYBOARD_DEFAULTS),
+		clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,
+		environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
 		inspection: {
 			previewHeight: CLIENT_TUNING.objectPreview.height.initial,
 		},

@@ -104,7 +104,13 @@ try {
 		}
 	}
 	let report;
-	if (options.clientSettingsTabs) {
+	if (options.clientEnvironment) {
+		report = {
+			suite: "client-environment",
+			evidence: result.clientEnvironment,
+			browserErrors,
+		};
+	} else if (options.clientSettingsTabs) {
 		report = {
 			suite: "client-settings-tabs",
 			passed: true,
@@ -442,6 +448,7 @@ function parseArgs(args) {
 		clientHousing: false,
 		clientHud: false,
 		clientSettingsTabs: false,
+		clientEnvironment: false,
 		clientKeyboard: false,
 		clientConnection: false,
 		clientAudio: false,
@@ -566,6 +573,10 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--client-environment":
+				parsed.clientHud = true;
+				parsed.clientEnvironment = true;
+				break;
 			case "--client-audio":
 				parsed.clientHud = true;
 				parsed.clientAudio = true;
@@ -1854,6 +1865,7 @@ Options:
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
+  --client-environment Verify true minimap time/weather, local overrides, and footer placement.
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
   --client-inspection   Exercise entity inspection windows, disclosed facts, and preview lifetimes.
   --client-binding-controls Verify indexed remapping, casts, and contextual vendor Examine.
@@ -4347,6 +4359,20 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientEnvironment) {
+			const probe = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeEnvironment",
+				[],
+			);
+			if (!probe?.passed)
+				throw new Error("Client environment probe did not pass.");
+			return {
+				clientEnvironment: probe,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientKeyboard)
 			return {
 				clientKeyboard: await probeKeyboardPolicy(client, evaluateExpression),

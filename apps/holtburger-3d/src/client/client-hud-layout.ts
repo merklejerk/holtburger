@@ -159,6 +159,29 @@ export function resolveClientHudSquarePlacement(
 	};
 }
 
+/** Keep centered footer overhang within the same usable viewport as the minimap disc. */
+export function resolveClientMinimapPlacement(
+	placement: ClientHudPlacement,
+	viewport: ClientHudViewport,
+	minimumSize: number,
+	footerWidth: number,
+): ResolvedClientHudPlacement {
+	const disc = resolveClientHudSquarePlacement(
+		placement,
+		viewport,
+		minimumSize,
+	);
+	// If the footer alone exceeds the viewport, centering is the most reachable constrained layout.
+	const inset = Math.max(
+		0,
+		(Math.min(footerWidth, viewport.width) - disc.width) / 2,
+	);
+	return {
+		...disc,
+		left: clamp(disc.left, inset, viewport.width - disc.width - inset),
+	};
+}
+
 /** Capture the closest viewport reference without changing the rendered axis geometry. */
 function anchorAxis(
 	start: number,

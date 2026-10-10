@@ -136,6 +136,12 @@
 		clientUiSettingsSchema,
 	} from "./client-settings-contract";
 	import type { ClientUserSettingsPatch } from "./client-settings-sections";
+	import {
+		clientClockFormatSchema,
+		clientEnvironmentOverridesSchema,
+		type ClientEnvironmentOverrides,
+	} from "./client-environment-settings";
+	import type { ClientWeatherPreset } from "./client-environment";
 	import type {
 		ClientHudLayout,
 		ClientHudPlacement,
@@ -404,6 +410,9 @@
 	);
 	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
 	let presentationSession: ClientPresentationSession | null = null;
+	/** Cold content catalog and validation issue consumed by Settings. */
+	let weatherPresets = $state<readonly ClientWeatherPreset[]>([]);
+	let environmentIssue = $state<string | null>(null);
 	const objectPreviewService: ClientObjectPreviewService = {
 		open: (request) => {
 			const presentation = presentationSession;
@@ -500,6 +509,13 @@
 	}
 	function changeUi(ui: ClientUiSettings): void {
 		changeUserSection("ui", clientUiSettingsSchema.parse(ui));
+	}
+	function changeEnvironmentOverrides(
+		overrides: ClientEnvironmentOverrides,
+	): void {
+		const accepted = clientEnvironmentOverridesSchema.parse(overrides);
+		changeUserSection("environmentOverrides", accepted);
+		presentationSession?.setEnvironmentOverrides(accepted);
 	}
 	function changeInput(input: ClientKeyboardConfiguration): void {
 		const accepted = clientKeyboardSettingsSchema.parse(input);
@@ -1227,6 +1243,15 @@
 			hostTransport: currentTransport,
 			session: currentSession,
 			onError: reportPresentationError,
+			onWeatherPresets: (presets) => {
+				if (!cancelled) weatherPresets = presets;
+			},
+			onEnvironmentIssue: (issue) => {
+				if (cancelled || issue === environmentIssue) return;
+				environmentIssue = issue;
+				if (issue !== null)
+					toastCenter.publish({ message: issue, tone: "warning" });
+			},
 			onTextureFilteringCapabilities: (capabilities) => {
 				textureFilteringCapabilities = capabilities;
 				if (capabilities !== null) applyFrameGraphics(userSettings.graphics);
@@ -1238,6 +1263,10 @@
 		presentation.setFrameSettings(untrack(() => frameSettings));
 		// Audio preferences are initialization snapshots, never presentation lifecycle dependencies.
 		presentation.setAudioSettings(untrack(() => userSettings.audio));
+		// Cold preferences seed a new owner once; edits use the live setter above.
+		presentation.setEnvironmentOverrides(
+			untrack(() => userSettings.environmentOverrides),
+		);
 		presentation.setSceneInterestRadii(
 			clientSceneInterestRadii(
 				untrack(() => userSettings.graphics.viewDistance),
@@ -1313,6 +1342,8 @@
 
 		return () => {
 			cancelled = true;
+			weatherPresets = [];
+			environmentIssue = null;
 			window.cancelAnimationFrame(frameHandle);
 			void presentation.destroy().catch((error: unknown) => {
 				// The route is already leaving, so keep teardown failure visible to diagnostics
@@ -1695,6 +1726,15 @@
 			onAudioChange={changeAudio}
 			graphics={userSettings.graphics}
 			ui={userSettings.ui}
+			clockFormat={userSettings.clockFormat}
+			environmentOverrides={userSettings.environmentOverrides}
+			{weatherPresets}
+			{environmentIssue}
+			readServerEnvironment={() =>
+				presentationSession?.readServerEnvironment() ?? null}
+			onClockFormatChange={(format) =>
+				changeUserSection("clockFormat", clientClockFormatSchema.parse(format))}
+			onEnvironmentOverridesChange={changeEnvironmentOverrides}
 			input={userSettings.input}
 			{textureFilteringCapabilities}
 			onGraphicsChange={changeGraphics}

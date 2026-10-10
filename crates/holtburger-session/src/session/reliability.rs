@@ -12,6 +12,22 @@ use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
 use std::time::Instant;
 
 impl Session {
+    /// A server empty-ack makes these packets unrecoverable, not a connection failure.
+    pub(crate) fn accept_retransmit_rejections(&mut self, sequences: &[u32]) {
+        // Retail SharedNet::HandleEmptyAck (acclient.c:356127) removes rejected IDs from
+        // its NAK list and keeps receiving. Our ordered packet adapter must also release
+        // those confirmed holes; game-event ordering independently owns missing events.
+        log::warn!(
+            "Server rejected retransmit for S2C sequences: {:?}; continuing past unavailable packets",
+            sequences
+        );
+        self.rejected_server_sequences
+            .extend(sequences.iter().copied().filter(|sequence| {
+                is_newer_u32(*sequence, self.last_server_seq)
+                    && !self.pending_server_packets.contains_key(sequence)
+            }));
+    }
+
     pub(crate) fn maybe_cache_packet(
         &mut self,
         header: &PacketHeader,
@@ -134,7 +150,6 @@ impl Session {
 
     pub(crate) fn send_request_retransmit(&mut self, received_sequence: u32) -> Result<()> {
         let desired_sequence = self.last_server_seq.wrapping_add(1);
-        let bottom = desired_sequence.wrapping_add(1);
         let missing_span = received_sequence.wrapping_sub(desired_sequence);
 
         if !is_newer_u32(received_sequence, desired_sequence)
@@ -148,16 +163,21 @@ impl Session {
         }
 
         let mut needed_sequences = Vec::with_capacity(MAX_RETRANSMIT_SEQUENCE_IDS);
-        needed_sequences.push(desired_sequence);
-        let mut sequence = bottom;
+        let mut sequence = desired_sequence;
         while sequence != received_sequence {
-            if !self.pending_server_packets.contains_key(&sequence) {
+            if !self.pending_server_packets.contains_key(&sequence)
+                && !self.rejected_server_sequences.contains(&sequence)
+            {
                 needed_sequences.push(sequence);
                 if needed_sequences.len() >= MAX_RETRANSMIT_SEQUENCE_IDS {
                     break;
                 }
             }
             sequence = sequence.wrapping_add(1);
+        }
+
+        if needed_sequences.is_empty() {
+            return Ok(());
         }
 
         let mut payload = Vec::with_capacity(4 + (needed_sequences.len() * 4));

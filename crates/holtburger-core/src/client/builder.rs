@@ -197,6 +197,7 @@ impl ClientRuntimeBuilder {
         Ok(ClientRuntime {
             session,
             world: WorldState::new(world_bootstrap),
+            event_ordering: None,
             connection: Default::default(),
             progression: Default::default(),
             active_confirmation: None,
@@ -259,6 +260,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let mut client = ClientRuntime {
         session: Session::new_test(),
         world: WorldState::synthetic(),
+        event_ordering: None,
         connection: Default::default(),
         progression: Default::default(),
         active_confirmation: None,

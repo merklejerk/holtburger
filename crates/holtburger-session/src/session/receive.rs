@@ -103,10 +103,7 @@ impl Session {
             && let Some(sequences) =
                 self.read_sequence_list(header.flags, &data, packet_flags::REJECT_RETRANSMIT)
         {
-            log::warn!(
-                "Server rejected retransmit for S2C sequences: {:?}",
-                sequences
-            );
+            self.accept_retransmit_rejections(&sequences);
         }
 
         if header.flags & packet_flags::ENCRYPTED_CHECKSUM != 0
@@ -141,10 +138,7 @@ impl Session {
             && let Some(sequences) =
                 self.read_sequence_list(header.flags, data, packet_flags::REJECT_RETRANSMIT)
         {
-            log::warn!(
-                "Server rejected retransmit for S2C sequences: {:?}",
-                sequences
-            );
+            self.accept_retransmit_rejections(&sequences);
         }
 
         Ok(())
@@ -215,12 +209,25 @@ impl Session {
     }
 
     fn take_pending_server_packet(&mut self) -> Option<ReceivedPacket> {
-        let expected = self.next_expected_server_sequence();
-        self.pending_server_packets.remove(&expected)
+        loop {
+            let expected = self.next_expected_server_sequence();
+            // A received packet wins over a rejection that crossed it in flight.
+            if let Some(packet) = self.pending_server_packets.remove(&expected) {
+                self.rejected_server_sequences.remove(&expected);
+                return Some(packet);
+            }
+            if !self.rejected_server_sequences.remove(&expected) {
+                return None;
+            }
+            self.last_server_seq = expected;
+            self.has_server_seq = true;
+        }
     }
 
     fn finalize_ordered_server_packet(&mut self, packet: &ReceivedPacket) -> Result<()> {
         if self.should_order_server_packet(&packet.header) {
+            self.rejected_server_sequences
+                .remove(&packet.header.sequence);
             self.last_server_seq = packet.header.sequence;
             self.has_server_seq = true;
         }

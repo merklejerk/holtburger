@@ -123,6 +123,8 @@ impl ClientRuntime {
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
+        // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.
+        self.event_ordering = Some(super::event_ordering::GameEventOrdering::new(player_guid));
         self.described_character = None;
         self.refresh_spell_inspection_context();
         self.start_world_activation_with_reset(
@@ -283,6 +285,27 @@ impl ClientRuntime {
             self.message_counter += 1;
         }
 
+        if data.starts_with(
+            &(holtburger_protocol::opcodes::GameOpcode::GameEvent as u32).to_le_bytes(),
+        ) {
+            let header = GameEventHeader::unpack(data, &mut 4)
+                .ok_or_else(|| anyhow::anyhow!("Truncated game-event ordering header"))?;
+            if let Some(ordering) = &mut self.event_ordering
+                && header.target == ordering.target()
+            {
+                let ready = ordering.receive(header.sequence, data, Instant::now())?;
+                let mut events = Vec::new();
+                for data in ready {
+                    events.extend(self.handle_ordered_message(&data).await?);
+                }
+                return Ok(events);
+            }
+        }
+        self.handle_ordered_message(data).await
+    }
+
+    /// Only ordered character events or independent messages may mutate client authority.
+    async fn handle_ordered_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
         let mut offset = 0;
         let message = <GameMessage as ProtocolUnpack>::unpack(data, &mut offset);
         if message.is_none() {
@@ -419,6 +442,7 @@ impl ClientRuntime {
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
+                self.event_ordering = None;
                 self.clear_busy_operation();
                 self.reset_housing();
                 self.described_character = None;

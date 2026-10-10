@@ -102,7 +102,8 @@ pub fn describe_entity_use(world: &impl WorldContextExt, guid: Guid) -> Option<E
     // RETAIL DIVERGENCE: acclient.c:413273 emits a locked notice from missing OPENABLE.
     // ACE key/lockpick updates Locked without refreshing that flag. Census: direct uses of
     // non-owned pack-slot/capacity containers; creatures and owned inventory were excluded.
-    // Omitting this prediction removes stale warnings; server rejection feedback still applies.
+    // Omitting this prediction removes stale warnings; core correlates chest lock-failure
+    // sounds with pending uses, while server text still supplies other rejection feedback.
     Some(EntityUseFeedback::Using { name })
 }
 

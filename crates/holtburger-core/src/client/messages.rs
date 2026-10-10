@@ -848,13 +848,16 @@ impl ClientRuntime {
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
                 Ok(())
             }
-            GameMessage::PlaySound(data) => self.route_entity_cue(
-                data.target,
-                super::entity_cues::PendingEntityCue::Sound {
-                    sound_id: data.sound_id,
-                    volume: data.volume,
-                },
-            ),
+            GameMessage::PlaySound(data) => {
+                self.observe_use_sound(data.target, data.sound_id);
+                self.route_entity_cue(
+                    data.target,
+                    super::entity_cues::PendingEntityCue::Sound {
+                        sound_id: data.sound_id,
+                        volume: data.volume,
+                    },
+                )
+            }
             GameMessage::PlayScript(data) => self.route_entity_cue(
                 data.target,
                 super::entity_cues::PendingEntityCue::Script {

@@ -1123,6 +1123,8 @@
 		readonly measureDoorBar: typeof measureDoorBar;
 		/** Exercise health presentation and use dispatch through production session owners. */
 		readonly probeSelectedInteractions: typeof probeSelectedInteractions;
+		/** Verify action warning presentation independently of selected-entity fixtures. */
+		readonly probeActionFeedback: typeof probeActionFeedback;
 		/** Verify default and pointer focus across production vital bars. */
 		readonly probeCharacterVitals: typeof probeCharacterVitals;
 		readonly probeConnectionBadge: typeof probeConnectionBadge;
@@ -2123,6 +2125,25 @@
 					throw new Error("Action feedback did not reach the warning toast.");
 				}
 			}
+			emitInteractionEvent("client-action-feedback", {
+				message: "The Iron Chest is locked",
+				tone: "warning",
+			});
+			emitInteractionEvent("client-action-feedback", {
+				message: "Using the Iron Chest",
+				tone: "progress",
+			});
+			await tick();
+			const lockWarning = Array.from(
+				document.querySelectorAll('.client-toast[role="alert"]'),
+			).find(
+				(element) => element.textContent?.trim() === "The Iron Chest is locked",
+			);
+			if (
+				center.snapshot()?.message !== "The Iron Chest is locked" ||
+				lockWarning === undefined
+			)
+				throw new Error("Use progress replaced the chest lock warning.");
 			emitInteractionEvent("client-action-feedback", {
 				message: "Attuned item.",
 				tone: "status",
@@ -3852,6 +3873,7 @@
 			probeInteractableMarker,
 			measureDoorBar,
 			probeSelectedInteractions,
+			probeActionFeedback,
 			probeCharacterVitals,
 			probeConnectionBadge,
 			previewCharacterSelection: () => {

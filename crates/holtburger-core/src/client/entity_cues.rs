@@ -1,12 +1,31 @@
-//! Ordering adapter for server entity cues that arrive before their target entity.
+//! Server entity-cue feedback and ordering for cues that arrive before their target entity.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use holtburger_common::Guid;
+use holtburger_common::properties::{WeenieType, WorldObjectExt};
 
-use super::{ClientRuntime, ClientViewEvent};
+use super::{ClientRuntime, ClientViewEvent, PendingBusyOperation, PendingOperation};
+use crate::{ActionResultReason, ActionResultSource};
+
+/// ACE.Entity/Enum/Sound.cs: sound-table key shared by locked chests, doors, and denied storage.
+const OPEN_FAIL_DUE_TO_LOCK_SOUND: u32 = 0x94;
+
+/// Broadcast sound has no actor identity; matching a live use of this chest is best effort.
+fn matches_pending_chest_lock_failure(
+    pending: &PendingBusyOperation,
+    guid: Guid,
+    sound_id: u32,
+    kind: Option<WeenieType>,
+    now: Instant,
+) -> bool {
+    sound_id == OPEN_FAIL_DUE_TO_LOCK_SOUND
+        && kind == Some(WeenieType::Chest)
+        && pending.deadline > now
+        && matches!(pending.operation, PendingOperation::Use { source } if source == guid)
+}
 
 /// Retail keeps its missing-object placeholder, including queued network blobs, for 25 seconds.
 /// See `CObjectMaint::AddObjectToBeDestroyed` in `acclient.c`.
@@ -67,6 +86,31 @@ impl ClientEntityCueInbox {
 }
 
 impl ClientRuntime {
+    /// Interpret at packet receipt, before scene admission can delay sound playback past UseDone.
+    pub(super) fn observe_use_sound(&mut self, guid: Guid, sound_id: u32) {
+        let Some(pending) = self.active_busy_operation.as_ref() else {
+            return;
+        };
+        let Some(entity) = self.world.entities.get(guid) else {
+            return;
+        };
+        let kind = entity.wcid.and_then(|wcid| {
+            self.world
+                .weenie_types
+                .as_ref()
+                .and_then(|types| types.get(wcid))
+        });
+        if matches_pending_chest_lock_failure(pending, guid, sound_id, kind, Instant::now()) {
+            // ACE Chest.cs sends this cue on lock rejection. Storage.cs uses the same key for
+            // permission denial, so unknown types, storage, and doors retain server feedback.
+            // Another player's simultaneous use of the same chest can produce a false match.
+            self.emit_action_result(
+                ActionResultSource::Client,
+                ActionResultReason::General(format!("The {} is locked", entity.name())),
+            );
+        }
+    }
+
     /// Routes one cue when its entity has usable scene placement, or retains it until admission.
     pub(super) fn route_entity_cue(&mut self, guid: Guid, cue: PendingEntityCue) -> Result<()> {
         if matches!(
@@ -142,6 +186,62 @@ mod tests {
     };
     use holtburger_world::entity::Entity;
     use holtburger_world::{WorldEvent, spatial::RuntimeBodyResetCause};
+
+    #[test]
+    fn lock_failure_requires_a_live_direct_use_of_the_same_known_chest() {
+        let guid = Guid(7);
+        let now = Instant::now();
+        let pending = PendingBusyOperation {
+            operation: PendingOperation::Use { source: guid },
+            deadline: now + super::super::BUSY_OPERATION_TIMEOUT,
+            pending_error: None,
+        };
+        let matches = |pending: &PendingBusyOperation, target, sound, kind, time| {
+            matches_pending_chest_lock_failure(pending, target, sound, kind, time)
+        };
+        assert!(matches(
+            &pending,
+            guid,
+            OPEN_FAIL_DUE_TO_LOCK_SOUND,
+            Some(WeenieType::Chest),
+            now
+        ));
+        for kind in [None, Some(WeenieType::Door), Some(WeenieType::Storage)] {
+            assert!(!matches(
+                &pending,
+                guid,
+                OPEN_FAIL_DUE_TO_LOCK_SOUND,
+                kind,
+                now
+            ));
+        }
+        assert!(!matches(
+            &pending,
+            Guid(8),
+            OPEN_FAIL_DUE_TO_LOCK_SOUND,
+            Some(WeenieType::Chest),
+            now
+        ));
+        assert!(!matches(&pending, guid, 0, Some(WeenieType::Chest), now));
+        assert!(!matches(
+            &pending,
+            guid,
+            OPEN_FAIL_DUE_TO_LOCK_SOUND,
+            Some(WeenieType::Chest),
+            pending.deadline
+        ));
+        let targeted = PendingBusyOperation {
+            operation: PendingOperation::UseWithTarget,
+            ..pending
+        };
+        assert!(!matches(
+            &targeted,
+            guid,
+            OPEN_FAIL_DUE_TO_LOCK_SOUND,
+            Some(WeenieType::Chest),
+            now
+        ));
+    }
 
     #[tokio::test]
     async fn wire_sound_repeats_preserve_packet_gain_and_admitted_world_identity() {

@@ -230,10 +230,12 @@ pub enum ClientVitalKind {
     Mana,
 }
 
-/// App-owned urgency for ephemeral action feedback.
+/// App-owned presentation class for ephemeral action feedback.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientActionFeedbackTone {
+    /// Use/approach progress may yield to an active warning without losing a terminal result.
+    Progress,
     Status,
     Warning,
 }
@@ -244,7 +246,7 @@ pub enum ClientActionFeedbackTone {
 pub struct ClientActionFeedback {
     /// Shared formatted message, including any server-supplied parameter.
     pub message: String,
-    /// Presentation urgency chosen by the app's host projection.
+    /// Presentation class chosen by the app's host projection.
     pub tone: ClientActionFeedbackTone,
 }
 
@@ -1501,7 +1503,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::EntityUseFeedback(feedback) => {
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                 message: format_entity_use_feedback(&feedback),
-                tone: ClientActionFeedbackTone::Status,
+                tone: ClientActionFeedbackTone::Progress,
             }))
         }
         ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
@@ -2141,27 +2143,24 @@ mod tests {
     #[test]
     fn local_use_reports_progress_without_predicting_server_rejection() {
         use holtburger_world::interaction::EntityUseFeedback;
-        for (feedback, expected, warning) in [
+        for (feedback, expected) in [
             (
                 EntityUseFeedback::Using {
                     name: "Chest".into(),
                 },
                 "Using the Chest",
-                false,
             ),
             (
                 EntityUseFeedback::Using {
                     name: "Door".into(),
                 },
                 "Using the Door",
-                false,
             ),
             (
                 EntityUseFeedback::Approaching {
                     name: "Drudge".into(),
                 },
                 "Approaching Drudge",
-                false,
             ),
         ] {
             let Some(ClientHostEvent::ActionFeedback(result)) =
@@ -2169,10 +2168,12 @@ mod tests {
             else {
                 panic!("Missing use notice");
             };
-            assert_eq!(result.message, expected);
             assert_eq!(
-                matches!(result.tone, ClientActionFeedbackTone::Warning),
-                warning
+                serde_json::to_value(result).unwrap(),
+                serde_json::json!({
+                    "message": expected,
+                    "tone": "progress",
+                })
             );
         }
     }

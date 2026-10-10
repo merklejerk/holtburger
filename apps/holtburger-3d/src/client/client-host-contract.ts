@@ -134,8 +134,8 @@ const actionFeedbackSchema = z
 	.object({
 		/** Human-readable result, formatted by the host using shared game-message semantics. */
 		message: z.string().trim().min(1),
-		/** Urgency consumed by the existing toast component. */
-		tone: z.enum(["status", "warning"]),
+		/** Progress yields to warnings; status and warning results replace previous feedback. */
+		tone: z.enum(["progress", "status", "warning"]),
 	})
 	.strict();
 

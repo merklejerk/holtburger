@@ -87,4 +87,34 @@ describe("ClientToastCenter", () => {
 			"destroyed",
 		);
 	});
+
+	it("keeps warnings visible across progress notices without extending their expiry", () => {
+		const { center, scheduler } = fixture();
+		center.publish({ message: "The Iron Chest is locked", tone: "warning" });
+		center.publish({ message: "Using the Iron Chest", tone: "progress" });
+		expect(center.snapshot()?.message).toBe("The Iron Chest is locked");
+		expect(scheduler.cancelled).toEqual([]);
+		expect(scheduler.delays).toEqual([CLIENT_TOAST_DURATION_MS]);
+		scheduler.fire(1);
+		center.publish({ message: "Using the Door", tone: "progress" });
+		expect(center.snapshot()?.message).toBe("Using the Door");
+	});
+
+	it("allows server status feedback to replace a warning", () => {
+		const { center, scheduler } = fixture();
+		center.publish({ message: "The Iron Chest is locked", tone: "warning" });
+		center.publish({ message: "The door is locked!", tone: "status" });
+		expect(center.snapshot()?.message).toBe("The door is locked!");
+		expect(scheduler.cancelled).toEqual([1]);
+	});
+
+	it("allows a new warning to replace an earlier warning", () => {
+		const { center, scheduler } = fixture();
+		center.publish({ message: "The Iron Chest is locked", tone: "warning" });
+		center.publish({ message: "You're too busy!", tone: "warning" });
+		expect(center.snapshot()?.message).toBe("You're too busy!");
+		expect(scheduler.cancelled).toEqual([1]);
+		scheduler.fire(1);
+		expect(center.snapshot()?.message).toBe("You're too busy!");
+	});
 });

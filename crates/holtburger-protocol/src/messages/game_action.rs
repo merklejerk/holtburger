@@ -102,6 +102,7 @@ pub enum GameAction {
     RaiseSkill(Box<RaiseSkillActionData>),
     TrainSkill(Box<TrainSkillActionData>),
     SetSingleCharacterOption(Box<SetSingleCharacterOptionActionData>),
+    TitleSet(Box<TitleSetActionData>),
     GiveObjectRequest(Box<GiveObjectRequestActionData>),
     CastTargetedSpell(Box<CastTargetedSpellActionData>),
     CastUntargetedSpell(Box<CastUntargetedSpellActionData>),
@@ -304,6 +305,9 @@ impl ProtocolUnpack for GameActionMessage {
                 }
                 GameActionOpcode::TrainSkill => {
                     GameAction::TrainSkill(Box::new(TrainSkillActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::TitleSet => {
+                    GameAction::TitleSet(Box::new(TitleSetActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::SetSingleCharacterOption => GameAction::SetSingleCharacterOption(
                     Box::new(SetSingleCharacterOptionActionData::unpack(data, offset)?),
@@ -690,6 +694,10 @@ impl ProtocolPack for GameActionMessage {
             GameAction::TrainSkill(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::TrainSkill as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TitleSet(data) => {
+                (GameActionOpcode::TitleSet as u32).pack(buf);
                 data.pack(buf);
             }
             GameAction::SetSingleCharacterOption(data) => {

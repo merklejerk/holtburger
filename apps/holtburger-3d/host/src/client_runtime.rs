@@ -219,6 +219,14 @@ pub enum ClientHostCommand {
         #[serde(rename = "pageIndex")]
         page_index: u32,
     },
+    /// Select a title for the captured character; eligibility remains server-owned.
+    SetClientCharacterTitle {
+        /// Character identity admitted by core.
+        character: holtburger_common::Guid,
+        /// Numeric selection, independent of local content resolution.
+        #[serde(rename = "titleId")]
+        title_id: u32,
+    },
     /// Read-only spell examination against current character facts.
     QueryClientSpellInspection {
         query: holtburger_core::client::spell_inspection::SpellInspectionQuery,
@@ -420,6 +428,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "query_client_spell_inspection",
     "evaluate_client_progression",
     "submit_client_progression",
+    "set_client_character_title",
     "start_client",
     "request_client_current_state",
     "refresh_client_housing",
@@ -834,6 +843,17 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        SetClientCharacterTitle {
+            character,
+            title_id,
+        } => runtime
+            .send_command(ClientCommand::SetCharacterTitle {
+                character,
+                title_id,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SetClientAppearanceOption { option, enabled } => runtime
             .send_command(ClientCommand::SetCharacterOption {
                 option: option.into(),
@@ -1144,6 +1164,27 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn character_title_command_requires_character_and_numeric_title() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "set_client_character_title", "character": 1, "titleId": 999,
+        }))
+        .unwrap();
+        assert!(matches!(
+            command,
+            ClientHostCommand::SetClientCharacterTitle {
+                character: holtburger_common::Guid(1),
+                title_id: 999
+            }
+        ));
+        for invalid in [
+            serde_json::json!({ "command": "set_client_character_title", "titleId": 1 }),
+            serde_json::json!({ "command": "set_client_character_title", "character": 1, "titleId": -1 }),
+        ] {
+            assert!(serde_json::from_value::<ClientHostCommand>(invalid).is_err());
+        }
     }
 
     #[test]

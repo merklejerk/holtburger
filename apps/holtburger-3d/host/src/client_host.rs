@@ -670,6 +670,7 @@ mod tests {
             character: Guid(1),
             name: Some("Test Character".into()),
             title: None,
+            title_selection: None,
             maximum_luminance: None,
             level: holtburger_world::stats::CharacterLevelInfo {
                 level: 999,

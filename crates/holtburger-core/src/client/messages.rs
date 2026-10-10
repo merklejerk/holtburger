@@ -126,6 +126,7 @@ impl ClientRuntime {
         // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.
         self.event_ordering = Some(super::event_ordering::GameEventOrdering::new(player_guid));
         self.described_character = None;
+        self.world.player.character_titles = None;
         self.refresh_spell_inspection_context();
         self.start_world_activation_with_reset(
             ClientWorldActivationState::InitialEntry,

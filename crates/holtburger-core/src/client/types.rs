@@ -1231,6 +1231,13 @@ pub enum ClientCommand {
         attack_height: AttackHeight,
         accuracy_level: f32,
     },
+    /// Optimistically select a title for the captured character; the server owns eligibility.
+    SetCharacterTitle {
+        /// Character identity used for lifecycle admission.
+        character: Guid,
+        /// Requested title ID without client ownership validation.
+        title_id: u32,
+    },
     SetCharacterOption {
         option: CharacterOption,
         value: bool,

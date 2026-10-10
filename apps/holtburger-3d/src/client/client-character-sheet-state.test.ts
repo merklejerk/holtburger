@@ -17,6 +17,7 @@ function sheet(character = 7, ranks = 1): CharacterSheet {
 		character,
 		name: "Test Character",
 		title: null,
+		titleSelection: null,
 		maximumLuminance: null,
 		level: {
 			level: 10,
@@ -103,6 +104,7 @@ describe("ClientCharacterSheetState", () => {
 		const owner = new ClientCharacterSheetState(
 			async () => {},
 			async () => {},
+			async () => {},
 		);
 		owner.reset(admin);
 		expect(owner.read().sheet?.level.currentXp).toBe("18446744073709551615");
@@ -118,7 +120,11 @@ describe("ClientCharacterSheetState", () => {
 			},
 		);
 		const submit = vi.fn(async () => undefined);
-		const owner = new ClientCharacterSheetState(evaluate, submit);
+		const owner = new ClientCharacterSheetState(
+			evaluate,
+			submit,
+			async () => {},
+		);
 		owner.reset(sheet());
 		const firstRequest = evaluate.mock.calls.at(0)?.[0];
 		if (firstRequest === undefined) throw new Error("missing quote request");
@@ -145,7 +151,11 @@ describe("ClientCharacterSheetState", () => {
 			},
 		);
 		const submit = vi.fn(async () => undefined);
-		const owner = new ClientCharacterSheetState(evaluate, submit);
+		const owner = new ClientCharacterSheetState(
+			evaluate,
+			submit,
+			async () => {},
+		);
 		owner.reset(sheet());
 		const oldRequest = evaluate.mock.calls.at(0)?.[0];
 		if (oldRequest === undefined) throw new Error("missing quote request");
@@ -163,7 +173,11 @@ describe("ClientCharacterSheetState", () => {
 				expect(intents.length).toBeGreaterThan(0);
 			},
 		);
-		const owner = new ClientCharacterSheetState(evaluate, async () => {});
+		const owner = new ClientCharacterSheetState(
+			evaluate,
+			async () => {},
+			async () => {},
+		);
 		const before = sheet();
 		owner.reset(before);
 		const firstRequest = evaluate.mock.calls.at(-1)?.[0];
@@ -184,7 +198,11 @@ describe("ClientCharacterSheetState", () => {
 
 	it("updates row guards without repricing unchanged purchase facts", () => {
 		const evaluate = vi.fn(async () => {});
-		const owner = new ClientCharacterSheetState(evaluate, async () => {});
+		const owner = new ClientCharacterSheetState(
+			evaluate,
+			async () => {},
+			async () => {},
+		);
 		const initial = sheet();
 		owner.reset(initial);
 		const requests = evaluate.mock.calls.length;
@@ -204,6 +222,7 @@ describe("ClientCharacterSheetState", () => {
 			async () => {
 				throw new Error("bridge closed");
 			},
+			async () => {},
 		);
 		owner.reset(sheet());
 		await owner.purchase(quote());
@@ -223,6 +242,7 @@ describe("ClientCharacterSheetState", () => {
 			const owner = new ClientCharacterSheetState(
 				async () => undefined,
 				() => submission,
+				async () => {},
 			);
 			owner.reset(sheet());
 			const purchase = owner.purchase(quote());
@@ -236,4 +256,49 @@ describe("ClientCharacterSheetState", () => {
 			expect(owner.read().revision).toBe(revision);
 		},
 	);
+});
+
+describe("optimistic title selection", () => {
+	const titles = {
+		selectedId: 1,
+		entries: [
+			{ id: 1, name: "Adventurer" },
+			{ id: 42, name: null },
+		],
+	};
+	it("updates immediately, sends identity once, and accepts server reconciliation", async () => {
+		const send = vi.fn(async () => {});
+		const owner = new ClientCharacterSheetState(
+			async () => {},
+			async () => {},
+			send,
+		);
+		owner.reset({ ...sheet(), titleSelection: titles });
+		const selection = owner.selectTitle(42);
+		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(42);
+		expect(send).toHaveBeenCalledWith(7, 42);
+		await selection;
+		await owner.selectTitle(42);
+		expect(send).toHaveBeenCalledTimes(1);
+		owner.replace({ ...sheet(), titleSelection: titles });
+		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(1);
+		owner.reset(sheet(8));
+		expect(owner.read().sheet?.titleSelection).toBeNull();
+	});
+	it("reports invocation errors without rolling back or locking selection", async () => {
+		const send = vi.fn(async () => {
+			throw new Error("host unavailable");
+		});
+		const owner = new ClientCharacterSheetState(
+			async () => {},
+			async () => {},
+			send,
+		);
+		owner.reset({ ...sheet(), titleSelection: titles });
+		await owner.selectTitle(42);
+		expect(owner.read().feedback).toContain("host unavailable");
+		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(42);
+		await owner.selectTitle(1);
+		expect(send).toHaveBeenCalledTimes(2);
+	});
 });

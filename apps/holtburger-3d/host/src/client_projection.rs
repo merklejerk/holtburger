@@ -550,6 +550,8 @@ pub struct ClientCharacterSheetWire {
     /// Server identity and localized selected title for the progression summary.
     pub name: Option<String>,
     pub title: Option<String>,
+    /// Shared registry and current optimistic/server selection.
+    pub title_selection: Option<holtburger_core::ClientCharacterTitleSelection>,
     /// Exact decimal capacity, absent when the server has not provided it.
     pub maximum_luminance: Option<String>,
     pub level: ClientCharacterLevelWire,
@@ -569,6 +571,7 @@ impl From<&holtburger_core::ClientCharacterSheet> for ClientCharacterSheetWire {
             character: sheet.character,
             name: sheet.name.clone(),
             title: sheet.title.clone(),
+            title_selection: sheet.title_selection.clone(),
             maximum_luminance: sheet.maximum_luminance.map(|value| value.to_string()),
             level: (&sheet.level).into(),
             attributes: sheet.attributes.clone(),
@@ -1672,6 +1675,13 @@ mod tests {
             character,
             name: Some("Test Character".into()),
             title: Some("Adventurer".into()),
+            title_selection: Some(holtburger_core::ClientCharacterTitleSelection {
+                selected_id: 999,
+                entries: vec![holtburger_core::ClientCharacterTitle {
+                    id: 999,
+                    name: None,
+                }],
+            }),
             maximum_luminance: Some(large_xp),
             level: CharacterLevelInfo {
                 current_xp: large_xp,
@@ -1689,6 +1699,10 @@ mod tests {
         let projected = serde_json::to_value(ClientCharacterSheetWire::from(&sheet)).unwrap();
         assert_eq!(projected["name"], "Test Character");
         assert_eq!(projected["title"], "Adventurer");
+        assert_eq!(
+            projected["titleSelection"],
+            serde_json::json!({ "selectedId": 999, "entries": [{ "id": 999, "name": null }] })
+        );
         assert_eq!(projected["maximumLuminance"], large_xp.to_string());
         assert_eq!(projected["level"]["currentXp"], large_xp.to_string());
         assert_eq!(projected["level"]["unspentXp"], large_xp.to_string());

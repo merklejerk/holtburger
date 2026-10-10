@@ -1824,6 +1824,7 @@ function characterSheet(
 		character,
 		name: "Test Character",
 		title: null,
+		titleSelection: null,
 		maximumLuminance: null,
 		level: {
 			level: 10,

@@ -62,6 +62,23 @@
 	});
 
 	const sheet = $derived(display.sheet);
+	const titleSelection = $derived(sheet?.titleSelection ?? null);
+	const titleEntries = $derived(
+		(titleSelection?.entries ?? [])
+			.filter((entry) => entry.id !== 0)
+			.toSorted(
+				(a, b) => titleLabel(a).localeCompare(titleLabel(b)) || a.id - b.id,
+			),
+	);
+	const selectedTitleListed = $derived(
+		titleEntries.some((entry) => entry.id === titleSelection?.selectedId),
+	);
+	function titleLabel(entry: {
+		readonly id: number;
+		readonly name: string | null;
+	}): string {
+		return entry.name ?? `Unknown title (ID ${entry.id})`;
+	}
 	const skills = $derived(
 		(sheet?.skills ?? [])
 			.filter((row) => row.availableInEor)
@@ -452,8 +469,35 @@
 				</div>
 				<div class="identity-text">
 					<strong class="character-name">{sheet.name ?? "Character"}</strong
-					>{#if sheet.title}<span class="character-title">{sheet.title}</span
+					>{#if titleSelection === null && sheet.title}<span
+							class="character-title">{sheet.title}</span
 						>{/if}
+					<label
+						>Title
+						<select
+							class="ui-input"
+							aria-label="Character title"
+							value={titleSelection?.selectedId ?? 0}
+							disabled={titleSelection === null || titleEntries.length === 0}
+							onchange={(event) =>
+								void owner.selectTitle(Number(event.currentTarget.value))}
+						>
+							{#if titleSelection === null}
+								<option value={0} disabled>Loading titles…</option>
+							{:else if !selectedTitleListed}
+								<option value={titleSelection.selectedId} disabled>
+									{titleEntries.length === 0
+										? "No earned titles"
+										: titleSelection.selectedId === 0
+											? "No title selected"
+											: `Current title (ID ${titleSelection.selectedId})`}
+								</option>
+							{/if}
+							{#each titleEntries as entry (entry.id)}
+								<option value={entry.id}>{titleLabel(entry)}</option>
+							{/each}
+						</select>
+					</label>
 				</div>
 			</div>
 			{#if BigInt(sheet.level.xpForNextLevel) > 0n}

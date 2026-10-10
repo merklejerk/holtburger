@@ -87,9 +87,9 @@ pub use client::{
     PreciseJumpTransactionRejection,
 };
 pub use client::{
-    ClientCharacterSheet, ClientCharacterSkill, ClientProgressionEvaluation,
-    ClientProgressionFeedback, ClientProgressionQuote, ClientProgressionRejection,
-    ClientProgressionUnavailable,
+    ClientCharacterSheet, ClientCharacterSkill, ClientCharacterTitle,
+    ClientCharacterTitleSelection, ClientProgressionEvaluation, ClientProgressionFeedback,
+    ClientProgressionQuote, ClientProgressionRejection, ClientProgressionUnavailable,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
 pub use client::{

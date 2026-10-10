@@ -225,6 +225,31 @@ pub(crate) fn handle_event(
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
+        GameEvent::CharacterTitle(data) => {
+            if event.target == state.player.guid
+                && state.player.guid != holtburger_common::Guid::NULL
+            {
+                state.player.character_titles = Some(data.title_ids.iter().copied().collect());
+                events.push(state.set_player_character_title(data.selected_id));
+                events.push(WorldEvent::PlayerTitlesUpdated);
+            }
+            true
+        }
+        GameEvent::UpdateTitle(data) => {
+            if event.target == state.player.guid
+                && state.player.guid != holtburger_common::Guid::NULL
+            {
+                // A grant before the initial table does not claim a complete registry.
+                if let Some(titles) = &mut state.player.character_titles {
+                    titles.insert(data.title_id);
+                }
+                if data.set_as_display {
+                    events.push(state.set_player_character_title(data.title_id));
+                }
+                events.push(WorldEvent::PlayerTitlesUpdated);
+            }
+            true
+        }
         GameEvent::PlayerDescription(data) => {
             if data.guid != state.player.guid {
                 state.close_world_container();

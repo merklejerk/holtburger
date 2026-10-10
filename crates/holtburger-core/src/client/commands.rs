@@ -205,6 +205,7 @@ impl ClientRuntime {
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
             | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::SetCharacterTitle { .. }
             | ClientCommand::SetCharacterOption { .. }
             | ClientCommand::Recall(_)
             | ClientCommand::TeleportToMapPosition(_)
@@ -673,6 +674,30 @@ impl ClientRuntime {
                     .await
             }
             ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
+            ClientCommand::SetCharacterTitle {
+                character,
+                title_id,
+            } => {
+                if character != self.world.player.guid
+                    || self.described_character != Some(character)
+                    || !matches!(self.state, ClientState::InWorld)
+                {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(
+                            "Title selection requires the current ready character".into(),
+                        ),
+                    );
+                    return Ok(());
+                }
+                self.send_game_action(GameAction::TitleSet(Box::new(TitleSetActionData {
+                    title_id,
+                })))
+                .await?;
+                let event = self.world.set_player_character_title(title_id);
+                self.handle_world_event(&event);
+                Ok(())
+            }
             ClientCommand::SetCharacterOption { option, value } => {
                 log::info!(">>> Setting character option {:?} to {}", option, value);
                 self.set_character_option(option, value).await
@@ -1109,6 +1134,75 @@ mod tests {
             )]),
         });
         client
+    }
+
+    #[tokio::test]
+    async fn character_title_selection_is_optimistic_and_server_reconciled() {
+        let mut client = build_test_client();
+        let character = Guid(1);
+        client
+            .world
+            .seed_local_player_entity(character, "Player", WorldPosition::default());
+        client.described_character = Some(character);
+        client.world.player.character_titles = Some([1].into_iter().collect());
+        client.world.set_player_character_title(1);
+        let mut views = client.subscribe_client_view_events();
+        // Core does not enforce registry membership or require local title content.
+        client
+            .handle_command(ClientCommand::SetCharacterTitle {
+                character,
+                title_id: 999,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(
+            client
+                .world
+                .player_int_property(PropertyInt::CharacterTitleId),
+            Some(999)
+        );
+        let mut published = false;
+        while let Ok(event) = views.try_recv() {
+            if let ClientViewEvent::CharacterSheetUpdated(Some(sheet)) = event {
+                assert_eq!(sheet.title_selection.unwrap().selected_id, 999);
+                published = true;
+            }
+        }
+        assert!(published);
+        let event = client.world.set_player_character_title(1);
+        client.handle_world_event(&event);
+        assert_eq!(
+            client
+                .character_sheet()
+                .unwrap()
+                .title_selection
+                .as_ref()
+                .unwrap()
+                .selected_id,
+            1
+        );
+        client
+            .handle_command(ClientCommand::SetCharacterTitle {
+                character: Guid(999),
+                title_id: 42,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        client.state = ClientState::EnteringWorld;
+        client
+            .handle_command(ClientCommand::SetCharacterTitle {
+                character,
+                title_id: 42,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        client.state = ClientState::Disconnected;
+        client.send_status_event();
+        assert!(client.world.player.character_titles.is_none());
+        assert!(client.character_sheet().unwrap().title_selection.is_none());
     }
 
     #[tokio::test]

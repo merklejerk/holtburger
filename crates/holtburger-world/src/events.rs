@@ -51,6 +51,8 @@ pub enum FellowshipActivity {
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
+    /// The active character's earned-title registry changed.
+    PlayerTitlesUpdated,
     /// Accepted effective-home facts, including an authoritative absence.
     HousingHomeUpdated {
         /// Retained accepted facts after this packet.

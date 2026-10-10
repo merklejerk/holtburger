@@ -8,6 +8,7 @@ use crate::client::precise_jump_runtime::{
     PreciseJumpAimRequest, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
     PreciseJumpEvaluation, PreciseJumpTransactionFeedback,
 };
+use crate::client::recall::RecallDestination;
 use crate::client::selection_query::{EntitySelectionQueryRequest, EntitySelectionQueryResult};
 use holtburger_common::properties::DamageType;
 use holtburger_common::{CharacterOption, ConfirmationType, Guid};
@@ -378,6 +379,8 @@ pub struct ClientApplicationSnapshot {
     pub housing: super::housing::HousingSnapshot,
     /// Current character may request map teleport; includes in-world lifecycle admission.
     pub can_teleport_from_map: bool,
+    /// Recall choices filtered only by disclosed permanent prerequisites.
+    pub recall_destinations: Vec<RecallDestination>,
     /// Latest transport rates and live health; absent before the first interval.
     pub connection: Option<super::connection::ConnectionSample>,
     /// Complete P2P negotiation level recovered with its semantic item records.
@@ -732,6 +735,8 @@ pub enum ClientViewEvent {
     LifecycleChanged(ClientLifecycleState),
     /// Character permission or lifecycle changed map-teleport admission.
     MapTeleportCapabilityChanged(bool),
+    /// Replacement list of recall choices after character facts or lifecycle change.
+    RecallDestinationsChanged(Vec<RecallDestination>),
     /// Ordered jump gesture result used only to reconcile optimistic client presentation.
     CharacterMotionFeedback(ClientCharacterMotionFeedback),
     /// Latest correlated precise-jump hover evaluation; older pointer samples are replaceable.
@@ -1028,6 +1033,7 @@ pub enum ClientCommand {
     },
     RestoreCharacter(Guid),
     EnterWorld,
+    /// User chat text; recognized retail recall commands dispatch travel instead of speech.
     Talk(String),
     Tell {
         target: String,
@@ -1039,12 +1045,10 @@ pub enum ClientCommand {
     },
     Emote(String),
     SoulEmote(String),
-    RecallLifestone,
-    TeleportToPklArena,
-    TeleportToMarketplace,
+    /// Attempt one standard recall; ACE decides final acceptance.
+    Recall(RecallDestination),
     /// Privileged outdoor map request; ACE supplies destination height and building placement.
     TeleportToMapPosition(holtburger_common::position::WorldPosition),
-    RecallAllegianceHousing,
     /// Fetch a fresh partial allegiance profile.
     QueryAllegiance,
     SwearAllegiance {

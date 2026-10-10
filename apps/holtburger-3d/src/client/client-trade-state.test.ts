@@ -42,6 +42,7 @@ async function fixture() {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		recallDestinations: [],
 		housing: emptyHousing(),
 		localPlayerGuid: PLAYER,
 		serverTime: 1,

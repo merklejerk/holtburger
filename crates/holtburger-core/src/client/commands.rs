@@ -1,3 +1,4 @@
+use super::recall::RecallDestination;
 use crate::client::progression::{
     ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,
     ClientProgressionRejection,
@@ -205,11 +206,8 @@ impl ClientRuntime {
             | ClientCommand::Sell { .. }
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterOption { .. }
-            | ClientCommand::RecallLifestone
-            | ClientCommand::TeleportToPklArena
-            | ClientCommand::TeleportToMarketplace
+            | ClientCommand::Recall(_)
             | ClientCommand::TeleportToMapPosition(_)
-            | ClientCommand::RecallAllegianceHousing
             | ClientCommand::SwearAllegiance { .. }
             | ClientCommand::Unswear { .. }
             | ClientCommand::Suicide
@@ -447,10 +445,20 @@ impl ClientRuntime {
 
     async fn handle_chat_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::Talk(text) => {
-                log::info!(">>> You say: \"{}\"", text);
-                self.send_talk(&text).await
-            }
+            ClientCommand::Talk(text) => match RecallDestination::from_chat(&text) {
+                Ok(Some(destination)) => self.recall(destination).await,
+                Ok(None) => {
+                    log::info!(">>> You say: \"{}\"", text);
+                    self.send_talk(&text).await
+                }
+                Err(error) => {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(error.to_string()),
+                    );
+                    Ok(())
+                }
+            },
             ClientCommand::Tell { target, message } => {
                 log::info!(">>> You tell {}, \"{}\"", target, message);
                 self.send_game_action(GameAction::Tell(Box::new(TellActionData {
@@ -683,34 +691,9 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::RecallLifestone => {
-                log::info!(">>> Recalling to lifestone");
-                self.send_game_action(GameAction::TeleToLifestone(Box::new(
-                    TeleToLifestoneActionData,
-                )))
-                .await
-            }
-            ClientCommand::TeleportToPklArena => {
-                log::info!(">>> Teleporting to PKL arena");
-                self.send_game_action(GameAction::TeleToPklArena(Box::new(
-                    TeleToPklArenaActionData,
-                )))
-                .await
-            }
-            ClientCommand::TeleportToMarketplace => {
-                log::info!(">>> Teleporting to marketplace");
-                self.send_game_action(GameAction::TeleToMarketPlace(Box::new(
-                    TeleToMarketPlaceActionData,
-                )))
-                .await
-            }
+            ClientCommand::Recall(destination) => self.recall(destination).await,
             ClientCommand::TeleportToMapPosition(position) => {
                 self.teleport_to_map_position(position).await
-            }
-            ClientCommand::RecallAllegianceHousing => {
-                log::info!(">>> Recalling to allegiance housing");
-                self.send_game_action(GameAction::TeleToMansion(Box::new(TeleToMansionActionData)))
-                    .await
             }
             ClientCommand::SwearAllegiance { target } => self.swear_allegiance(target).await,
             ClientCommand::Unswear { target } => self.break_allegiance(target).await,
@@ -1975,32 +1958,6 @@ mod tests {
             .unwrap();
 
         assert!(client.active_busy_operation.is_none());
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn teleport_to_pkl_arena_sends_game_action() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::TeleportToPklArena)
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn teleport_to_marketplace_sends_game_action() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::TeleportToMarketplace)
-            .await
-            .unwrap();
-
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
     }

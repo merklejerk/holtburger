@@ -23,6 +23,7 @@
 	import SelectTextIcon from "../assets/icons/hud-select-text.svg?component";
 	import AddIcon from "../assets/icons/hud-add.svg?component";
 	import EyeIcon from "../assets/icons/hud-eye.svg?component";
+	import TeleportIcon from "../assets/icons/hud-teleport.svg?component";
 	import ResetIcon from "../assets/icons/hud-reset.svg?component";
 	import LockedIcon from "../assets/icons/hud-locked.svg?component";
 	import UnlockedIcon from "../assets/icons/hud-unlocked.svg?component";
@@ -65,6 +66,8 @@
 		| "add"
 		/** Eye for toggling map label visibility. */
 		| "eye"
+		/** Portal and arrow for standard recall actions. */
+		| "teleport"
 		| "reset"
 		| "locked"
 		| "unlocked"
@@ -108,6 +111,7 @@
 		add: AddIcon,
 		eye: EyeIcon,
 		reset: ResetIcon,
+		teleport: TeleportIcon,
 		locked: LockedIcon,
 		unlocked: UnlockedIcon,
 		leader: LeaderIcon,

@@ -672,6 +672,9 @@
 		.settings-section select {
 			width: 100%;
 		}
+		.settings-section input[type="range"] {
+			margin-inline: 0;
+		}
 		.settings-section p {
 			margin: 0;
 		}

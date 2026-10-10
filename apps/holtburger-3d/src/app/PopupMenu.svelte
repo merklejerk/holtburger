@@ -108,8 +108,12 @@
 			event.target instanceof Node &&
 			!surface.contains(event.target) &&
 			!anchor.contains(event.target)
-		)
+		) {
+			// A dismissal press belongs to the menu, not the canvas gesture beneath it.
+			event.preventDefault();
+			event.stopImmediatePropagation();
 			dismiss();
+		}
 	}
 	onMount(() => {
 		surface.showPopover();
@@ -118,11 +122,12 @@
 		const observer = new ResizeObserver(position);
 		observer.observe(surface);
 		window.addEventListener("resize", dismiss);
-		document.addEventListener("pointerdown", outsidePointer, true);
+		// Run before document-level input ownership can dismiss the menu and start a game press.
+		window.addEventListener("pointerdown", outsidePointer, true);
 		return () => {
 			observer.disconnect();
 			window.removeEventListener("resize", dismiss);
-			document.removeEventListener("pointerdown", outsidePointer, true);
+			window.removeEventListener("pointerdown", outsidePointer, true);
 		};
 	});
 </script>

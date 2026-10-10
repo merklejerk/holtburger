@@ -18,6 +18,19 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 	let friend = false;
 	let ignore = false;
 	const calls: string[] = [];
+	// Match the viewport's press/release contract: releases select only after a press.
+	const viewport = document.createElement("canvas");
+	viewport.dataset.gameViewport = "";
+	target.append(viewport);
+	let viewportPressed = false;
+	let viewportSelections = 0;
+	viewport.addEventListener("pointerdown", () => {
+		viewportPressed = true;
+	});
+	viewport.addEventListener("pointerup", () => {
+		if (viewportPressed) viewportSelections += 1;
+		viewportPressed = false;
+	});
 	const require = (condition: unknown, message: string) => {
 		if (!condition) throw new Error(message);
 	};
@@ -141,15 +154,34 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		require(calls.join() ===
 			"trade,trade,swear,invite,friend,ignore,split", "Menu dispatched the wrong actions");
 		await open();
+		const triggerPress = new PointerEvent("pointerdown", {
+			bubbles: true,
+			cancelable: true,
+		});
+		button("Selected entity actions").dispatchEvent(triggerPress);
+		await settle();
+		require(menu() !==
+			null, "Trigger press must leave the menu open for its click to toggle it closed");
 		button("Selected entity actions").click();
 		await settle();
 		require(menu() === null, "Trigger must toggle the menu closed");
 		await open();
-		document.body.dispatchEvent(
-			new PointerEvent("pointerdown", { bubbles: true }),
-		);
+		const dismissalPress = new PointerEvent("pointerdown", {
+			bubbles: true,
+			cancelable: true,
+		});
+		viewport.dispatchEvent(dismissalPress);
 		await settle();
 		require(menu() === null, "Outside pointer must dismiss the menu");
+		viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+		require(dismissalPress.defaultPrevented &&
+			!viewportPressed &&
+			viewportSelections ===
+				0, "Menu dismissal must consume the press without starting viewport selection");
+		viewport.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+		viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+		require(viewportSelections ===
+			1, "The next viewport gesture must select normally after dismissal");
 		await open();
 		menu()?.dispatchEvent(
 			new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),

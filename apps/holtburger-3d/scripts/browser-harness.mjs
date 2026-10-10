@@ -219,6 +219,7 @@ try {
 		report = {
 			suite: "client-selected-actions",
 			...result.clientSelectedActions,
+			actionFeedback: result.clientActionFeedback,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientFriends) {
@@ -4531,6 +4532,11 @@ async function runClientHudHarness({ viteUrl }) {
 				clientSelectedActions: await evaluate(
 					client,
 					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSelectedActions",
+					[],
+				),
+				clientActionFeedback: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeActionFeedback",
 					[],
 				),
 				consoleMessages,

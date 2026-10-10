@@ -830,8 +830,13 @@ describe("ClientLifecycleSession", () => {
 			message: "You're too busy!",
 			tone: "warning",
 		});
+		transport.emit("client-action-feedback", {
+			message: "Using the Iron Chest",
+			tone: "progress",
+		});
 		expect(feedback).toEqual([
 			{ message: "You're too busy!", tone: "warning" },
+			{ message: "Using the Iron Chest", tone: "progress" },
 		]);
 		expect(() =>
 			transport.emit("client-action-feedback", {
@@ -850,7 +855,7 @@ describe("ClientLifecycleSession", () => {
 			message: "Late",
 			tone: "warning",
 		});
-		expect(feedback).toHaveLength(1);
+		expect(feedback).toHaveLength(2);
 	});
 
 	it("installs every listener before requesting the initial replacement state", async () => {

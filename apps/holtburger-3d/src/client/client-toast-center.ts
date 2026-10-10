@@ -1,5 +1,5 @@
-/** Visual urgency of one ephemeral client notice. */
-export type ClientToastTone = "status" | "warning";
+/** Presentation class; progress is neutral and yields to active warnings. */
+export type ClientToastTone = "progress" | "status" | "warning";
 
 /** Complete cold-UI snapshot rendered by the client toast overlay. */
 export interface ClientToast {
@@ -18,7 +18,7 @@ export const CLIENT_TOAST_DURATION_MS = 2_500;
 
 type ClientToastListener = (toast: ClientToast | null) => void;
 
-/** Owns one latest-wins ephemeral toast; it is intentionally not an application event queue. */
+/** Owns one ephemeral toast; warnings retain their duration across use/approach progress. */
 export class ClientToastCenter {
 	readonly #durationMs: number;
 	readonly #scheduler: ClientToastScheduler;
@@ -56,6 +56,8 @@ export class ClientToastCenter {
 		this.#assertActive();
 		if (input.message.trim().length === 0)
 			throw new Error("Client toast message must not be empty.");
+		// Progress notices must not erase a refusal before the user can read it.
+		if (this.#current?.tone === "warning" && input.tone === "progress") return;
 		this.#cancelExpiry();
 		const toast: ClientToast = {
 			id: this.#nextId++,

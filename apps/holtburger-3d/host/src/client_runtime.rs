@@ -356,6 +356,10 @@ pub enum ClientHostCommand {
     SetClientPartyUpdates {
         enabled: bool,
     },
+    /// Standard recall attempt; ACE validates binding and temporary blockers.
+    RecallClient {
+        destination: holtburger_core::client::recall::RecallDestination,
+    },
     SendClientChat {
         message: String,
     },
@@ -433,6 +437,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_allegiance",
     "set_client_party_updates",
     "send_client_chat",
+    "recall_client",
     "teleport_client_to_map_position",
     "toggle_client_combat_mode",
     "set_client_appearance_option",
@@ -730,7 +735,7 @@ impl ClientHostRuntime {
         self.send_command(ClientCommand::Disconnect).await
     }
 
-    /// Send one ordinary local-speech message through core's existing chat command path.
+    /// Submit chat text; core recognizes retail recall commands before ordinary speech.
     pub async fn send_chat(&self, message: String) -> Result<()> {
         if message.trim().is_empty() {
             bail!("client chat message must contain visible text");
@@ -998,6 +1003,11 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        RecallClient { destination } => runtime
+            .send_command(ClientCommand::Recall(destination))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SendClientChat { message } => runtime
             .send_chat(message)
             .await
@@ -1072,6 +1082,27 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recall_command_decodes_the_frontend_destination_identity() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "recall_client", "destination": "allegiance-hometown"
+        }))
+        .unwrap();
+        assert!(matches!(
+            command,
+            ClientHostCommand::RecallClient {
+                destination: holtburger_core::client::recall::RecallDestination::AllegianceHometown
+            }
+        ));
+        assert!(CLIENT_COMMAND_NAMES.contains(&"recall_client"));
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "recall_client", "destination": "somewhere"
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn housing_information_commands_decode_frontend_payloads() {

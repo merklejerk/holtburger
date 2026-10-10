@@ -474,8 +474,8 @@ pub enum GameActionOpcode {
     // ListAllegianceOfficers = 0x02A6,
     // /// C2S: Remove all officers from their positions.
     // ClearAllegianceOfficers = 0x02A7,
-    // /// C2S: Recall the character to their allegiance hometown.
-    // RecallAllegianceHometown = 0x02AB,
+    /// C2S: Recall the character to their allegiance hometown.
+    RecallAllegianceHometown = 0x02AB,
     // /// C2S: Select an active character title.
     // TitleSet = 0x002C,
     /// C2S: Query the current health of a selected creature or player.
@@ -538,12 +538,14 @@ pub enum GameActionOpcode {
     // --- Movement (Extra) ---
     /// C2S: Teleport to a PK-Lite arena.
     TeleToPklArena = 0x0026,
-    // /// C2S: Teleport to a PK arena.
-    // TeleToPkArena = 0x0027,
+    /// C2S: Teleport to a PK arena.
+    TeleToPkArena = 0x0027,
     /// C2S: Teleport to the character's attuned Lifestone.
     TeleToLifestone = 0x0063,
     /// C2S: Privileged map teleport; ACE accepts admin, arch, or PSR characters.
     AdvocateTeleport = 0x00D6,
+    /// C2S: Teleport to the character or account house.
+    TeleToHouse = 0x0262,
     /// C2S: Teleport to the allegiance mansion or villa.
     TeleToMansion = 0x0278,
     /// C2S: Teleport to the Marketplace.

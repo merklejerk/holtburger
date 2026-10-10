@@ -458,6 +458,8 @@ pub struct ClientCurrentState {
     pub housing: holtburger_core::client::housing::HousingSnapshot,
     /// Core-derived current permission and lifecycle admission for map teleport.
     pub can_teleport_from_map: bool,
+    /// Core-filtered standard recall attempts.
+    pub recall_destinations: Vec<holtburger_core::client::recall::RecallDestination>,
     /// Shared transport observation, absent before the first completed interval.
     pub connection: Option<holtburger_core::client::connection::ConnectionSample>,
     /// Server-confirmed P2P offers, atomically recovered with their item descriptions.
@@ -967,6 +969,8 @@ pub enum ClientHostEvent {
     InventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     EntityCollisionDisabled(bool),
     MapTeleportCapabilityChanged(bool),
+    /// Replacement recall choices derived from disclosed character facts.
+    RecallDestinationsChanged(Vec<holtburger_core::client::recall::RecallDestination>),
     CurrentState(Box<ClientCurrentState>),
     /// The receiver lost events and is awaiting the existing application replacement.
     StateResyncing,
@@ -1210,6 +1214,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             friends_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
+            recall_destinations: snapshot.recall_destinations.clone(),
             known_spells: snapshot.known_spells.clone(),
             trade: snapshot.trade.clone(),
             enchantments: snapshot
@@ -1243,6 +1248,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::HousingUpdated(housing) => Some(ClientHostEvent::HousingUpdated(housing)),
         ClientViewEvent::HousingCrystalReceived(crystal) => {
             Some(ClientHostEvent::HousingCrystalReceived(crystal))
+        }
+        ClientViewEvent::RecallDestinationsChanged(destinations) => {
+            Some(ClientHostEvent::RecallDestinationsChanged(destinations))
         }
         ClientViewEvent::MapTeleportCapabilityChanged(allowed) => {
             Some(ClientHostEvent::MapTeleportCapabilityChanged(allowed))

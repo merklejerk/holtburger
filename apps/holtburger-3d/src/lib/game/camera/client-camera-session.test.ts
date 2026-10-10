@@ -316,6 +316,7 @@ function currentState(): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		recallDestinations: [],
 		housing: emptyHousing(),
 		localPlayerGuid: PLAYER_GUID,
 		entities: playerEntitySnapshot(PLAYER_GUID),

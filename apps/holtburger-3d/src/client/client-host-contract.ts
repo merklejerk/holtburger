@@ -41,6 +41,19 @@ export type ClientMapPosition = z.infer<typeof clientMapPositionSchema>;
 /** Core-owned cold admission; consumers do not interpret character permission flags. */
 export const mapTeleportCapabilitySchema = z.boolean();
 
+/** Stable core recall identities; this list describes the wire contract, not eligibility. */
+export const recallDestinationSchema = z.enum([
+	"lifestone",
+	"marketplace",
+	"house",
+	"allegiance-housing",
+	"allegiance-hometown",
+	"pk-arena",
+	"pk-lite-arena",
+]);
+export type RecallDestination = z.infer<typeof recallDestinationSchema>;
+export const recallDestinationsSchema = z.array(recallDestinationSchema);
+
 /** Server-confirmed stance consumed by the shortcut dock. */
 const combatModeSchema = z.enum([
 	"unknown",
@@ -371,6 +384,7 @@ const currentStateSchema = z
 	.object({
 		housing: housingSnapshotSchema,
 		canTeleportFromMap: z.boolean(),
+		recallDestinations: recallDestinationsSchema,
 		connection: connectionSampleSchema.nullable(),
 		entityCollisionDisabled: z.boolean(),
 		lifecycle: lifecycleSchema,

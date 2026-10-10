@@ -101,6 +101,8 @@ pub enum HostEvent {
     ClientEntityCollisionDisabled(bool),
     /// Cold permission edge owned by core.
     ClientMapTeleportCapabilityChanged(bool),
+    /// Replacement standard recall choices derived by core.
+    ClientRecallDestinationsChanged(Vec<holtburger_core::client::recall::RecallDestination>),
     /// Shared transport rates, reliability, and health for client HUD consumers.
     ClientConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
@@ -458,6 +460,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::EntityCollisionDisabled(disabled) => {
                 HostEvent::ClientEntityCollisionDisabled(disabled)
+            }
+            crate::client_projection::ClientHostEvent::RecallDestinationsChanged(destinations) => {
+                HostEvent::ClientRecallDestinationsChanged(destinations)
             }
             crate::client_projection::ClientHostEvent::MapTeleportCapabilityChanged(allowed) => {
                 HostEvent::ClientMapTeleportCapabilityChanged(allowed)

@@ -98,6 +98,7 @@
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 	import type { ClientObjectInspectionState } from "./client-object-inspection";
 	import type {
+		RecallDestination,
 		ClientAttackProfile,
 		ClientMapPosition,
 		ClientCombatMode,
@@ -233,6 +234,10 @@
 		readonly onSearchHousing: (houseType: number) => Promise<void>;
 		/** Shared core admission and app-owned request feedback. */
 		readonly canTeleportFromMap: boolean;
+		/** Core-filtered recall attempts, independent of privileged map teleport. */
+		readonly recallDestinations: readonly RecallDestination[];
+		/** Dispatch the selected standard recall through the app shell. */
+		readonly onRecall: (destination: RecallDestination) => Promise<void>;
 		readonly onTeleportToMapPosition: (
 			position: ClientMapPosition,
 		) => Promise<void>;
@@ -381,6 +386,8 @@
 		onRefreshHousing,
 		onSearchHousing,
 		canTeleportFromMap,
+		recallDestinations,
+		onRecall,
 		onTeleportToMapPosition,
 		readDiagnostics,
 		readSelectedEntity,
@@ -1264,6 +1271,8 @@
 					{onRefreshHousing}
 					{onSearchHousing}
 					{canTeleportFromMap}
+					{recallDestinations}
+					{onRecall}
 					{onTeleportToMapPosition}
 					visible={activePanel === "world"}
 					readFrame={readMinimapFrame}

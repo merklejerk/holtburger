@@ -88,6 +88,9 @@ pub enum GameAction {
     QueryHealth(Box<QueryHealthActionData>),
     QueryItemMana(Box<QueryItemManaActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
+    TeleToHouse(Box<TeleToHouseActionData>),
+    TeleToPkArena(Box<TeleToPkArenaActionData>),
+    RecallAllegianceHometown(Box<RecallAllegianceHometownActionData>),
     TeleToLifestone(Box<TeleToLifestoneActionData>),
     TeleToPklArena(Box<TeleToPklArenaActionData>),
     TeleToMarketPlace(Box<TeleToMarketPlaceActionData>),
@@ -263,6 +266,15 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
                     LoginCompleteActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::TeleToHouse => {
+                    GameAction::TeleToHouse(Box::new(TeleToHouseActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::TeleToPkArena => GameAction::TeleToPkArena(Box::new(
+                    TeleToPkArenaActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RecallAllegianceHometown => GameAction::RecallAllegianceHometown(
+                    Box::new(RecallAllegianceHometownActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::TeleToLifestone => GameAction::TeleToLifestone(Box::new(
                     TeleToLifestoneActionData::unpack(data, offset)?,
                 )),
@@ -612,6 +624,21 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::LoginComplete(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::LoginComplete as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TeleToHouse(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToHouse as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TeleToPkArena(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToPkArena as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RecallAllegianceHometown(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RecallAllegianceHometown as u32)
                     .unwrap();
                 data.pack(buf);
             }

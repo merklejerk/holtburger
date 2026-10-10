@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PopupMenu from "../app/PopupMenu.svelte";
+	import { RECALL_LABELS } from "./client-recall";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
@@ -10,7 +12,10 @@
 	import { onMount, untrack } from "svelte";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import { trackWorldMapGesture } from "../lib/game/world-map/pointer-gesture";
-	import type { ClientMapPosition } from "./client-host-contract";
+	import type {
+		ClientMapPosition,
+		RecallDestination,
+	} from "./client-host-contract";
 	import {
 		WorldMapOwner,
 		type WorldMapState,
@@ -37,6 +42,10 @@
 		readonly source: WorldMapSource;
 		/** Core admission is rechecked at release and command dispatch. */
 		readonly canTeleportFromMap: boolean;
+		/** Attempts offered by core; the server validates undisclosed prerequisites. */
+		readonly recallDestinations: readonly RecallDestination[];
+		/** Dispatch the selected standard recall through the app shell. */
+		readonly onRecall: (destination: RecallDestination) => Promise<void>;
 		/** App shell owns visible request-error feedback. */
 		readonly onTeleportToMapPosition: (
 			position: ClientMapPosition,
@@ -54,6 +63,8 @@
 		onSearchHousing,
 		source,
 		canTeleportFromMap,
+		recallDestinations,
+		onRecall,
 		onTeleportToMapPosition,
 		visible,
 		readFrame,
@@ -93,6 +104,19 @@
 		searchSelection = { character: characterGuid, type };
 		if (type !== 0) void onSearchHousing(type);
 	}
+
+	let recallAnchor = $state<HTMLButtonElement | null>(null);
+	const recallItems = $derived(
+		recallDestinations.map((action) => ({
+			action,
+			label: RECALL_LABELS[action],
+			disabled: false,
+		})),
+	);
+	$effect(() => {
+		if (!visible || activeTab !== "world" || recallDestinations.length === 0)
+			recallAnchor = null;
+	});
 
 	let canvas: HTMLCanvasElement;
 	let playerMarker: SVGGElement;
@@ -422,6 +446,20 @@
 				>
 
 				<button
+					class="ui-hud-button world-map-recall"
+					type="button"
+					aria-label="Recall destinations"
+					aria-haspopup="menu"
+					aria-expanded={recallAnchor !== null}
+					title="Recall destinations"
+					disabled={recallDestinations.length === 0}
+					onclick={(event) => {
+						recallAnchor = recallAnchor === null ? event.currentTarget : null;
+						if (recallAnchor !== null && housing.home.kind === "unqueried")
+							void onRefreshHousing();
+					}}><ClientHudIcon name="teleport" /></button
+				>
+				<button
 					class="ui-hud-button world-map-labels"
 					type="button"
 					aria-label="Show settlement labels"
@@ -502,6 +540,20 @@
 	</UiTabPanel>
 </div>
 
+{#if recallAnchor !== null}
+	<PopupMenu
+		anchor={recallAnchor}
+		label="Recall destinations"
+		items={recallItems}
+		onselect={(destination) => {
+			void onRecall(destination);
+		}}
+		onclose={() => {
+			recallAnchor = null;
+		}}
+	/>
+{/if}
+
 <style>
 	@layer components {
 		.world-map-page {
@@ -526,6 +578,13 @@
 			display: flex;
 			align-items: center;
 			gap: 6px;
+		}
+		.world-map-recall {
+			position: absolute;
+			top: 8px;
+			right: 8px;
+			width: 30px;
+			height: 30px;
 		}
 		.world-map-labels,
 		.world-map-reset {

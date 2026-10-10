@@ -1746,6 +1746,43 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.calls).toHaveLength(1);
 	});
 
+	it("dispatches recall identities and recovers choices from replacement state", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const choices: string[][] = [];
+		session.subscribe((event) => {
+			if (event.type === "recall-destinations")
+				choices.push([...event.destinations]);
+			if (event.type === "current-state")
+				choices.push(event.state.recallDestinations);
+		});
+		transport.setCurrentState({
+			...currentState(1),
+			recallDestinations: ["lifestone", "marketplace"],
+		});
+		await session.start();
+		transport.emit("client-recall-destinations-changed", [
+			"lifestone",
+			"pk-arena",
+		]);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			recallDestinations: ["lifestone", "house"],
+		});
+		expect(choices).toEqual([
+			["lifestone", "marketplace"],
+			["lifestone", "pk-arena"],
+			["lifestone", "house"],
+		]);
+		await session.recall("allegiance-hometown");
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "recall_client",
+			args: { destination: "allegiance-hometown" },
+		});
+		session.stop();
+	});
+
 	it("submits finite map points and forwards authoritative permission edges", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1819,6 +1856,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		lifecycle: { kind: "in-world" },
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
+		recallDestinations: [],
 		housing: emptyHousing(),
 		localPlayerGuid: playerGuid,
 		entities: playerEntitySnapshot(playerGuid),

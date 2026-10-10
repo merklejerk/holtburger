@@ -58,6 +58,7 @@ pub mod precise_jump;
 pub mod precise_jump_prediction;
 mod precise_jump_runtime;
 pub mod progression;
+pub mod recall;
 mod runtime;
 pub mod runtime_body_view_cache;
 pub mod selection_envelope;
@@ -152,6 +153,8 @@ enum PublishedCharacterMotionCapabilities {
 pub struct ClientRuntime {
     /// Last published cold map-teleport admission, for edge-only notification.
     published_map_teleport_capability: bool,
+    /// Last published recall choices, used to suppress identical cold events.
+    published_recall_destinations: Vec<recall::RecallDestination>,
     pub session: Session,
     /// Shared traffic baseline and rates, independent of world replacement.
     connection: connection::ConnectionSampler,
@@ -374,6 +377,7 @@ impl ClientRuntime {
             squelch: self.world.squelch.clone(),
             allegiance: self.allegiance_snapshot(),
             can_teleport_from_map: self.can_teleport_from_map(),
+            recall_destinations: self.recall_destinations(),
             lifecycle: self.lifecycle(),
             connection: self.connection.snapshot(
                 Instant::now(),
@@ -857,6 +861,7 @@ impl ClientRuntime {
             .client_view_event_tx
             .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
         self.publish_map_teleport_capability();
+        self.publish_recall_destinations();
         // Swear admission includes lifecycle, so portal return must republish it
         // even when no new profile arrives and initial-entry recovery is skipped.
         self.emit_allegiance_snapshot();
@@ -916,6 +921,7 @@ impl ClientRuntime {
     /// Reconcile once against final world facts after all events from one packet.
     fn finish_character_world_events(&mut self, sheet_changed: bool) {
         self.publish_map_teleport_capability();
+        self.publish_recall_destinations();
         if self.progression.reconcile(&self.world) {
             self.emit_progression_guards();
         } else if sheet_changed {

@@ -155,6 +155,8 @@
 		readonly onStateChange: (state: MinimapState) => void;
 		/** Apply one completed marker click, or clear selection for an empty click. */
 		readonly onSelectEntity: (guid: number | null) => void;
+		/** Let the mode-owned notice surface confirm a successful clipboard write. */
+		readonly onCoordinatesCopied?: () => void;
 		/** Mode-owned content beneath the shared coordinate readout. */
 		readonly footer?: Snippet;
 		/** Complete below-disc footprint, consumed by client placement and anchoring. */
@@ -169,6 +171,7 @@
 		resizable,
 		onStateChange,
 		onSelectEntity,
+		onCoordinatesCopied,
 		footer,
 		onFooterExtentChange,
 	}: Props = $props();
@@ -181,7 +184,9 @@
 	let coneElement = $state<SVGPathElement | null>(null);
 	let northGroup = $state<SVGGElement | null>(null);
 	let freeAnchorElement = $state<SVGCircleElement | null>(null);
-	let coordinatesElement = $state<HTMLSpanElement | null>(null);
+	let coordinatesElement = $state<HTMLButtonElement | null>(null);
+	/** Clipboard failures are cold user-action feedback, independent of the map frame. */
+	let clipboardError = $state<string | null>(null);
 	let footerElement = $state<HTMLDivElement | null>(null);
 	let tooltip = $state<BlipTooltip | null>(null);
 	/** Cold markup projection; cursor-rate pan coordinates remain in imperative `minimapPanState`. */
@@ -194,7 +199,10 @@
 	let minimapPanGesture: MinimapPanGesture | null = null;
 	let breadcrumbTrail: MinimapBreadcrumbTrail = EMPTY_MINIMAP_BREADCRUMB_TRAIL;
 	let cancelPointerGesture: (() => void) | null = null;
+	/** Clipboard promises cannot be cancelled; late completions must not notify a retired shell. */
+	let destroyed = false;
 	onDestroy(() => {
+		destroyed = true;
 		cancelPointerGesture?.();
 		cancelMinimapPan();
 	});
@@ -602,13 +610,34 @@
 			freeAnchorElement.setAttribute("cy", String(subjectY));
 		}
 		if (coordinatesElement) {
-			coordinatesElement.textContent = overlay
+			coordinatesElement.disabled = overlay === null;
+			const coordinates = overlay
 				? formatWorldMapCoordinates({
 						x: overlay.view.center.worldX,
 						z: overlay.view.center.worldZ,
 					})
 				: "";
+			coordinatesElement.textContent = coordinates;
+			coordinatesElement.setAttribute(
+				"aria-label",
+				coordinates === ""
+					? "Copy minimap coordinates"
+					: `Copy minimap coordinates: ${coordinates}`,
+			);
 		}
+	}
+
+	/** Copy the displayed snapshot so movement during the write cannot change its meaning. */
+	async function copyCoordinates(text: string): Promise<void> {
+		clipboardError = null;
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch (error) {
+			if (destroyed) return;
+			clipboardError = `Clipboard write failed: ${error instanceof Error ? error.message : String(error)}`;
+			return;
+		}
+		if (!destroyed) onCoordinatesCopied?.();
 	}
 
 	function beginMinimapPan(event: PointerEvent): void {
@@ -793,7 +822,7 @@
 	aria-label="Minimap"
 >
 	<!--
-		The round frame owns wheel zoom. Outside it, only the layout controls take input;
+		The round frame owns wheel zoom. Outside it, layout controls and the coordinates take input;
 		the remaining square corners stay transparent to the scene behind.
 	-->
 	<div
@@ -880,8 +909,20 @@
 		/>
 	{/if}
 	<div bind:this={footerElement} class="minimap-footer">
-		<span bind:this={coordinatesElement} class="minimap-coordinates ui-readout"
-		></span>
+		<button
+			bind:this={coordinatesElement}
+			type="button"
+			class="minimap-coordinates ui-hud-button ui-readout"
+			disabled
+			aria-label="Copy minimap coordinates"
+			title="Copy coordinates"
+			onclick={(event) => copyCoordinates(event.currentTarget.innerText)}
+		></button>
+		{#if clipboardError !== null}
+			<span class="minimap-copy-error ui-error" role="status"
+				>{clipboardError}</span
+			>
+		{/if}
 		{#if footer}{@render footer()}{/if}
 	</div>
 </section>
@@ -890,7 +931,7 @@
 	@layer components {
 		.minimap {
 			position: absolute;
-			/* Only the frame and layout controls take input; unused corners belong to the scene. */
+			/* Interactive surfaces and controls take input; unused corners belong to the scene. */
 			pointer-events: none;
 			user-select: none;
 		}
@@ -999,10 +1040,14 @@
 		}
 
 		.minimap-coordinates {
+			pointer-events: auto;
 			padding: 4px 10px;
 			font-variant-numeric: tabular-nums;
 			line-height: 1.15;
 			white-space: nowrap;
+		}
+		.minimap-copy-error {
+			max-width: 240px;
 		}
 	}
 </style>

@@ -4360,6 +4360,10 @@ async function runClientHudHarness({ viteUrl }) {
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
 		if (options.clientEnvironment) {
+			await client.send("Browser.grantPermissions", {
+				origin: new URL(pageUrl).origin,
+				permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+			});
 			const probe = await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeEnvironment",

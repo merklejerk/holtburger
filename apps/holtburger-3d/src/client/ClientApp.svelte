@@ -1847,6 +1847,11 @@
 				toastCenter.publish({ message, tone: "warning" })}
 			onInventoryNotice={(message) =>
 				toastCenter.publish({ message, tone: "status" })}
+			onCoordinatesCopied={() =>
+				toastCenter.publish({
+					message: "Coordinates copied to clipboard.",
+					tone: "status",
+				})}
 			onPickInventoryTarget={(x, y, destination) => {
 				if (pointerSelection === null)
 					destination.commit({

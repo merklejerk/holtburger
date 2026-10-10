@@ -37,6 +37,7 @@ pub mod entity_facts;
 mod entity_visual_facts;
 pub mod equipment_plan;
 mod equipment_runtime;
+mod event_ordering;
 mod friends;
 pub mod housing;
 pub mod housing_execution;
@@ -155,6 +156,8 @@ pub struct ClientRuntime {
     /// Shared traffic baseline and rates, independent of world replacement.
     connection: connection::ConnectionSampler,
     pub world: WorldState,
+    /// Character-scoped game-event delivery, before decoding and world mutation.
+    event_ordering: Option<event_ordering::GameEventOrdering>,
     /// Character advancement admission and duplicate suppression for this runtime.
     progression: progression::ProgressionState,
     active_confirmation: Option<ActiveCharacterConfirmation>,

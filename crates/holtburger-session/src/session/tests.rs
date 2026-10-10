@@ -1016,6 +1016,90 @@ async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
     );
 }
 
+#[tokio::test]
+async fn rejected_packet_recovery_releases_later_messages() {
+    let mut session = Session::new_test();
+    session.has_server_seq = true;
+    let rejection = build_transport_packet(
+        PacketHeader {
+            sequence: 4,
+            flags: packet_flags::REJECT_RETRANSMIT,
+            ..Default::default()
+        },
+        &[1_u32.to_le_bytes(), 2_u32.to_le_bytes()].concat(),
+    );
+    session.transport = Box::new(ScriptedTransport::new(
+        vec![build_single_fragment_packet(3, &[3]), rejection],
+        session.server_addr,
+    ));
+    let events = session.recv_message().await.unwrap();
+    assert!(matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[3]));
+    assert_eq!(session.last_server_seq, 3);
+    assert!(session.recv_message().await.unwrap().is_empty());
+    assert_eq!(session.last_server_seq, 4);
+    assert!(session.rejected_server_sequences.is_empty());
+}
+
+#[tokio::test]
+async fn future_rejection_does_not_skip_an_unresolved_earlier_packet() {
+    let mut session = Session::new_test();
+    session.has_server_seq = true;
+    let rejection = build_transport_packet(
+        PacketHeader {
+            sequence: 6,
+            flags: packet_flags::REJECT_RETRANSMIT,
+            ..Default::default()
+        },
+        &[1_u32.to_le_bytes(), 4_u32.to_le_bytes()].concat(),
+    );
+    session.transport = Box::new(ScriptedTransport::new(
+        vec![
+            build_single_fragment_packet(5, &[5]),
+            rejection,
+            build_single_fragment_packet(2, &[2]),
+            build_single_fragment_packet(3, &[3]),
+        ],
+        session.server_addr,
+    ));
+    for expected in [2, 3, 5] {
+        let events = session.recv_message().await.unwrap();
+        assert!(
+            matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[expected])
+        );
+        assert_eq!(session.last_server_seq, u32::from(expected));
+    }
+    assert!(session.recv_message().await.unwrap().is_empty());
+    assert_eq!(session.last_server_seq, 6);
+}
+
+#[tokio::test]
+async fn received_packets_win_over_crossed_retransmit_rejections() {
+    let mut session = Session::new_test();
+    session.has_server_seq = true;
+    let rejection = build_transport_packet(
+        PacketHeader {
+            sequence: 4,
+            flags: packet_flags::REJECT_RETRANSMIT,
+            ..Default::default()
+        },
+        &[
+            3_u32.to_le_bytes(),
+            1_u32.to_le_bytes(),
+            2_u32.to_le_bytes(),
+            3_u32.to_le_bytes(),
+        ]
+        .concat(),
+    );
+    session.transport = Box::new(ScriptedTransport::new(
+        vec![build_single_fragment_packet(3, &[3]), rejection],
+        session.server_addr,
+    ));
+    let events = session.recv_message().await.unwrap();
+    assert!(matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[3]));
+    assert_eq!(session.last_server_seq, 3);
+    assert!(session.rejected_server_sequences.is_empty());
+}
+
 /// ACE NetworkSession.SendBundle keeps UIQueue messages ordered when stock spans packets.
 /// Datagram reordering must not let the terminal UseDone overtake sale receipts or refresh.
 #[tokio::test]

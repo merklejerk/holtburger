@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::messages::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -102,6 +102,8 @@ pub struct Session {
     pub has_server_seq: bool,
     pub fragment_reassembler: HashMap<u32, PendingMessage>,
     pub(crate) pending_server_packets: BTreeMap<u32, ReceivedPacket>,
+    /// Server-confirmed unavailable packets; ordered receive skips only these missing stamps.
+    pub(crate) rejected_server_sequences: BTreeSet<u32>,
     pub(crate) pending_control_packets: Vec<PendingControlPacket>,
     pub(crate) last_request_retransmit_time: Option<Instant>,
     pub(crate) cached_packets: BTreeMap<u32, CachedPacket>,

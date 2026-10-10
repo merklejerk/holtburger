@@ -20,6 +20,25 @@ use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 
+/// Ordering prefix shared by supported and unsupported game-event payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameEventHeader {
+    /// Object whose event stream owns this stamp; null targets are unordered.
+    pub target: Guid,
+    /// Server-assigned event stamp, independent of transport packet sequence.
+    pub sequence: u32,
+}
+
+impl ProtocolUnpack for GameEventHeader {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target = Guid::unpack(data, offset)?;
+        let bytes = data.get(*offset..offset.checked_add(4)?)?;
+        let sequence = LittleEndian::read_u32(bytes);
+        *offset += 4;
+        Some(Self { target, sequence })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameEventMessage {
     pub target: Guid,
@@ -109,13 +128,12 @@ pub enum GameEvent {
 
 impl ProtocolUnpack for GameEventMessage {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let target = Guid::unpack(data, offset)?;
-        if *offset + 8 > data.len() {
+        let GameEventHeader { target, sequence } = GameEventHeader::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let event_type_raw = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
+        let event_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
 
         let event_op = GameEventOpcode::from_repr(event_type_raw);
 

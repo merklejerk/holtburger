@@ -163,6 +163,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         lifecycle: ClientLifecycleState::InWorld,
         entity_collision_disabled: false,
         can_teleport_from_map: false,
+        recall_destinations: Vec::new(),
         local_player_guid: Some(guid),
         server_time: None,
         world_generation: 1,

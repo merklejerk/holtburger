@@ -112,6 +112,9 @@ import {
 	clientEntityDeltaSchema,
 } from "./client-entity-mirror";
 import {
+	recallDestinationSchema,
+	recallDestinationsSchema,
+	type RecallDestination,
 	decodeClientCurrentState,
 	clientMapPositionSchema,
 	type ClientMapPosition,
@@ -224,6 +227,7 @@ type ClientCommandName = Extract<
 	| "set_client_party_updates"
 	| "send_client_chat"
 	| "teleport_client_to_map_position"
+	| "recall_client"
 	| "toggle_client_combat_mode"
 	| "set_client_appearance_option"
 	| "cast_client_spell"
@@ -283,6 +287,7 @@ type ClientEventName = Extract<
 	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
 	| "client-map-teleport-capability-changed"
+	| "client-recall-destinations-changed"
 	| "client-lifecycle-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
@@ -437,6 +442,10 @@ export type ClientLifecycleSessionEvent =
 	  }
 	| { readonly type: "entity-collision-disabled"; readonly disabled: boolean }
 	| { readonly type: "map-teleport-capability"; readonly allowed: boolean }
+	| {
+			readonly type: "recall-destinations";
+			readonly destinations: readonly RecallDestination[];
+	  }
 	| { readonly type: "dynamic-sound-cue"; readonly cue: ClientDynamicSoundCue }
 	| {
 			readonly type: "confirmation";
@@ -916,12 +925,19 @@ export class ClientLifecycleSession {
 	async setPartyUpdates(enabled: boolean): Promise<void> {
 		await this.#transport.invoke("set_client_party_updates", { enabled });
 	}
-	/** Send one ordinary local-speech message. */
+	/** Submit chat text, including retail recall commands. */
 	async sendChat(message: string): Promise<void> {
 		if (message.trim().length === 0) {
 			throw new Error("Chat message must contain visible text.");
 		}
 		await this.#transport.invoke("send_client_chat", { message });
+	}
+
+	/** Attempt a standard recall without predicting server acceptance. */
+	async recall(destination: RecallDestination): Promise<void> {
+		await this.#transport.invoke("recall_client", {
+			destination: recallDestinationSchema.parse(destination),
+		});
 	}
 
 	/** Submit one map point; server updates establish the actual teleport outcome. */
@@ -1173,6 +1189,15 @@ export class ClientLifecycleSession {
 				}),
 				await this.#transport.listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
+				),
+				await this.#transport.listen(
+					"client-recall-destinations-changed",
+					(payload) => {
+						this.#emit({
+							type: "recall-destinations",
+							destinations: recallDestinationsSchema.parse(payload),
+						});
+					},
 				),
 				await this.#transport.listen(
 					"client-map-teleport-capability-changed",

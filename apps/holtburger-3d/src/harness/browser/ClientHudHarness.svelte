@@ -1203,6 +1203,7 @@
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
+			recallDestinations: [],
 			housing: emptyHousing(),
 			localPlayerGuid: playerGuid,
 			serverTime: 10,
@@ -4010,6 +4011,8 @@
 		{readMinimapFrame}
 		worldMapSource={worldMapFixture.source}
 		{canTeleportFromMap}
+		recallDestinations={[]}
+		onRecall={async () => {}}
 		onTeleportToMapPosition={(position) =>
 			interactionLifecycle.teleportToMapPosition(position)}
 		{readDiagnostics}

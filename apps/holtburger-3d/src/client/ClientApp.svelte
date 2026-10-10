@@ -101,6 +101,7 @@
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
+		RecallDestination,
 		ClientCombatMode,
 		ClientMapPosition,
 		ClientAttackProfile,
@@ -206,6 +207,8 @@
 	let entityCollisionDisabled = $state(false);
 	/** Cold core admission consumed by the World panel's click gesture. */
 	let canTeleportFromMap = $state(false);
+	/** Core-filtered standard recall attempts, replaced after event loss. */
+	let recallDestinations = $state<readonly RecallDestination[]>([]);
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
 	);
@@ -739,6 +742,9 @@
 			case "entity-collision-disabled":
 				entityCollisionDisabled = event.disabled;
 				return;
+			case "recall-destinations":
+				recallDestinations = event.destinations;
+				return;
 			case "map-teleport-capability":
 				canTeleportFromMap = event.allowed;
 				return;
@@ -754,6 +760,7 @@
 			case "current-state":
 				housing = event.state.housing;
 				canTeleportFromMap = event.state.canTeleportFromMap;
+				recallDestinations = event.state.recallDestinations;
 				enchantments = session?.state().enchantments ?? null;
 				acceptCharacterGuid(event.state.localPlayerGuid);
 				combatMode = event.state.combatMode;
@@ -787,11 +794,15 @@
 				return;
 			case "resyncing":
 				canTeleportFromMap = false;
+				recallDestinations = [];
 				enchantments = null;
 				appearanceOptions = null;
 				return;
 			case "lifecycle":
-				if (event.lifecycle.kind !== "in-world") canTeleportFromMap = false;
+				if (event.lifecycle.kind !== "in-world") {
+					canTeleportFromMap = false;
+					recallDestinations = [];
+				}
 				enchantments = session?.state().enchantments ?? null;
 				appearanceOptions = session?.state().appearanceOptions ?? null;
 				if (event.lifecycle.kind !== "in-world") {
@@ -966,6 +977,15 @@
 			message,
 			CLIENT_TUNING.chat.sentHistoryLimit,
 		);
+	}
+
+	async function recall(destination: RecallDestination): Promise<void> {
+		try {
+			if (session === null) throw new Error("Client session unavailable.");
+			await session.recall(destination);
+		} catch (error) {
+			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+		}
 	}
 
 	async function teleportToMapPosition(
@@ -1648,6 +1668,7 @@
 			session = null;
 			housing = emptyHousing();
 			canTeleportFromMap = false;
+			recallDestinations = [];
 			hostTransport = null;
 		};
 	});
@@ -1756,6 +1777,8 @@
 				}
 			}}
 			{canTeleportFromMap}
+			{recallDestinations}
+			onRecall={recall}
 			onTeleportToMapPosition={teleportToMapPosition}
 			{readDiagnostics}
 			{readSelectedEntity}

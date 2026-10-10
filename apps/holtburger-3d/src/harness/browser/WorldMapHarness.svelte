@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { emptyHousing } from "../../client/client-housing-contract";
+	import {
+		recallDestinationSchema,
+		type RecallDestination,
+	} from "../../client/client-host-contract";
 	import { onMount, tick } from "svelte";
 	import ClientWorldPanel from "../../client/ClientWorldPanel.svelte";
 	import ClientHudWindow from "../../client/ClientHudWindow.svelte";
@@ -26,6 +30,7 @@
 	let visible = $state(true);
 	let canTeleportFromMap = $state(false);
 	const mapTeleports: { x: number; z: number }[] = [];
+	const recalls: RecallDestination[] = [];
 	let mounted = $state(true);
 	let panel = $state<{ readOwner(): WorldMapOwner | null }>();
 	let opens = 0,
@@ -471,6 +476,36 @@
 		const state = owner().read();
 		if (state.kind !== "ready")
 			throw new Error("Image is not ready for control checks.");
+		const recallButton = document.querySelector<HTMLButtonElement>(
+			'button[aria-label="Recall destinations"]',
+		);
+		if (!recallButton || recallButton.disabled)
+			throw new Error("Recall control is unavailable despite offered choices.");
+		for (const destination of recallDestinationSchema.options) {
+			recallButton.click();
+			await tick();
+			const index = recallDestinationSchema.options.indexOf(destination);
+			const item = document.querySelectorAll<HTMLButtonElement>(
+				'[role="menu"][aria-label="Recall destinations"] [role="menuitem"]',
+			)[index];
+			if (!item) throw new Error(`Missing recall menu item: ${destination}.`);
+			item.click();
+			await tick();
+			if (recalls.at(-1) !== destination)
+				throw new Error(
+					`Recall menu dispatched the wrong destination: ${destination}.`,
+				);
+			if (recallButton.getAttribute("aria-expanded") !== "false")
+				throw new Error("Recall selection did not dismiss the menu.");
+		}
+		recallButton.click();
+		await tick();
+		await visibility(false);
+		if (
+			document.querySelector('[role="menu"][aria-label="Recall destinations"]')
+		)
+			throw new Error("Recall menu survived panel dismissal.");
+		await visibility(true);
 		const { bounds } = state.manifest;
 		owner().setView({
 			centerX: bounds.minX - 100000,
@@ -586,6 +621,7 @@
 			throw new Error("Fit margin showed terrain coordinates.");
 		surface.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
 		return {
+			recalls: [...recalls],
 			clamped: view,
 			reset: resetView,
 			centerTooltip,
@@ -747,6 +783,10 @@
 			bind:this={panel}
 			{source}
 			{canTeleportFromMap}
+			recallDestinations={recallDestinationSchema.options}
+			onRecall={async (destination) => {
+				recalls.push(destination);
+			}}
 			onTeleportToMapPosition={async (position) => {
 				mapTeleports.push(position);
 			}}

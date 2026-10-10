@@ -52,6 +52,7 @@ import type { PossessionEventOutcome } from "../../explorer/explorer-entity-poss
 import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session";
 import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
 import type {
+	RecallDestination,
 	ClientCurrentState,
 	ClientConnectionSample,
 	ClientCombatMode,
@@ -151,6 +152,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"set_client_party_updates",
 	"send_client_chat",
 	"teleport_client_to_map_position",
+	"recall_client",
 	"toggle_client_combat_mode",
 	"set_client_appearance_option",
 	"cast_client_spell",
@@ -244,6 +246,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-entity-facts-changed",
 	"client-entity-collision-disabled",
 	"client-map-teleport-capability-changed",
+	"client-recall-destinations-changed",
 	"client-lifecycle-changed",
 	"client-connection-updated",
 	"client-character-motion-capabilities-updated",
@@ -352,6 +355,7 @@ export interface HostEventPayloadMap {
 	"client-entity-facts-changed": ClientEntityDelta;
 	"client-entity-collision-disabled": boolean;
 	"client-map-teleport-capability-changed": boolean;
+	"client-recall-destinations-changed": RecallDestination[];
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-connection-updated": ClientConnectionSample;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;

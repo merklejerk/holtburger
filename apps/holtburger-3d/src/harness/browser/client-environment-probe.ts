@@ -38,6 +38,54 @@ export async function probeClientEnvironment(
 		readText() === "21:36" && readWeather() === "Rainy",
 		"Initial minimap server environment mismatch.",
 	);
+	const coordinates = document.querySelector<HTMLButtonElement>(
+		'button[aria-label^="Copy minimap coordinates"]',
+	);
+	if (
+		coordinates === null ||
+		coordinates.disabled ||
+		coordinates.innerText === ""
+	)
+		throw new Error("Minimap coordinates copy action is unavailable.");
+	const displayedCoordinates = coordinates.innerText;
+	assert(
+		getComputedStyle(coordinates).pointerEvents === "auto",
+		"Coordinates do not accept pointer input.",
+	);
+	coordinates.click();
+	await settle();
+	assert(
+		(await navigator.clipboard.readText()) === displayedCoordinates,
+		"Minimap copy did not write exactly the displayed coordinates.",
+	);
+	const copyToast = document.querySelector(".client-toast");
+	assert(
+		copyToast?.textContent?.trim() === "Coordinates copied to clipboard." &&
+			copyToast.getAttribute("role") === "status",
+		"Successful minimap copy did not show its confirmation toast.",
+	);
+	const writeText = navigator.clipboard.writeText;
+	try {
+		navigator.clipboard.writeText = async () => {
+			throw new Error("Permission denied.");
+		};
+		coordinates.click();
+		await settle();
+		assert(
+			document
+				.querySelector(".minimap-copy-error")
+				?.textContent?.includes("Permission denied.") === true,
+			"Minimap copy failure was hidden.",
+		);
+	} finally {
+		navigator.clipboard.writeText = writeText;
+	}
+	coordinates.click();
+	await settle();
+	assert(
+		document.querySelector(".minimap-copy-error") === null,
+		"Successful clipboard retry retained an error.",
+	);
 	document
 		.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')
 		?.click();
@@ -166,6 +214,7 @@ export async function probeClientEnvironment(
 		passed: true,
 		sourceIsolation: true,
 		controls: true,
+		clipboard: true,
 		rollover: true,
 		unavailable: true,
 		footer: {

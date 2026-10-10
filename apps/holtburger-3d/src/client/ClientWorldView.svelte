@@ -216,6 +216,8 @@
 		onInventoryNotice: (message: string) => void;
 		/** Surface social dispatch failures even when the Social panel is closed. */
 		readonly onSocialNotice: (message: string) => void;
+		/** Shell-owned confirmation after the minimap clipboard write succeeds. */
+		readonly onCoordinatesCopied: () => void;
 		/** Startup catalog availability for switch classification diagnostics. */
 		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly cameraController: ClientViewportCameraController | null;
@@ -398,6 +400,7 @@
 		onPickInventoryTarget,
 		onInventoryNotice,
 		onSocialNotice,
+		onCoordinatesCopied,
 		onInteractEntity,
 		objectInspection,
 		bookReader,
@@ -910,6 +913,7 @@
 				minimapFooterExtent = extent;
 		}}
 		{onSelectEntity}
+		{onCoordinatesCopied}
 	>
 		{#snippet footer()}<ClientMinimapEnvironment
 				readEnvironment={readServerEnvironment}

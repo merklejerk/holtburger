@@ -4051,6 +4051,13 @@
 		onInventoryNotice={(message) => {
 			toast = { id: 1, message, tone: "status" };
 		}}
+		onCoordinatesCopied={() => {
+			toast = {
+				id: 2,
+				message: "Coordinates copied to clipboard.",
+				tone: "status",
+			};
+		}}
 		onPickInventoryTarget={(_x, _y, destination) => {
 			if (inventoryWorldResult === null)
 				pendingInventoryWorldPick = destination;

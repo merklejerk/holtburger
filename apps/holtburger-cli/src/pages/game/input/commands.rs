@@ -2,6 +2,7 @@ use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
 use crate::scripting::{DiscoverableScriptSource, discoverable_scripts, script_directory};
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
+use holtburger_core::client::recall::RecallDestination;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::context::normalize_name_for_lookup;
@@ -566,6 +567,20 @@ impl GameState {
     pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
 
+        match RecallDestination::from_chat(command) {
+            Ok(Some(destination)) => {
+                result.commands.push(ClientCommand::Recall(destination));
+                result.merge(self.finish_input_command_submission(command));
+                return result.with_redraw(true);
+            }
+            Err(error) => {
+                self.chat.log(ChatMessageTags::error(), error.to_string());
+                result.merge(self.finish_input_command_submission(command));
+                return result.with_redraw(true);
+            }
+            Ok(None) => {}
+        }
+
         if command.trim() == "/version" {
             self.chat
                 .log(ChatMessageTags::system(), crate::version::display_version());
@@ -917,18 +932,10 @@ impl GameState {
                 result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
-            "/ls" | "/lifestone" => {
-                result.commands.push(ClientCommand::RecallLifestone);
-                result.merge(self.finish_input_command_submission(command));
-                result.with_redraw(true)
-            }
             "/arena" => {
-                result.commands.push(ClientCommand::TeleportToPklArena);
-                result.merge(self.finish_input_command_submission(command));
-                result.with_redraw(true)
-            }
-            "/mp" => {
-                result.commands.push(ClientCommand::TeleportToMarketplace);
+                result
+                    .commands
+                    .push(ClientCommand::Recall(RecallDestination::PkLiteArena));
                 result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
@@ -938,7 +945,9 @@ impl GameState {
                 result.with_redraw(true)
             }
             "/hq" => {
-                result.commands.push(ClientCommand::RecallAllegianceHousing);
+                result
+                    .commands
+                    .push(ClientCommand::Recall(RecallDestination::AllegianceHousing));
                 result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
@@ -1046,6 +1055,29 @@ mod tests {
     }
 
     #[test]
+    fn retail_recall_subcommands_dispatch_from_the_input_bar() {
+        for (command, destination) in [
+            ("/hou re", RecallDestination::House),
+            (
+                "/house mansion_recall",
+                RecallDestination::AllegianceHousing,
+            ),
+            ("/all ho", RecallDestination::AllegianceHometown),
+            ("/pkarena", RecallDestination::PkArena),
+        ] {
+            let mut state = GameState::new(Guid(0x50000001), "Player".into(), "World".into());
+            state.view.focused_pane = FocusedPane::Input;
+            state.chat_input.input.set_text(command);
+            state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+            let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(result.commands.len(), 1);
+            assert!(
+                matches!(result.commands.first(), Some(ClientCommand::Recall(actual)) if *actual == destination)
+            );
+        }
+    }
+
+    #[test]
     fn arena_command_dispatches_pkl_teleport() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -1057,7 +1089,7 @@ mod tests {
 
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::TeleportToPklArena)
+            Some(ClientCommand::Recall(RecallDestination::PkLiteArena))
         ));
     }
 
@@ -1187,7 +1219,7 @@ mod tests {
 
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::TeleportToMarketplace)
+            Some(ClientCommand::Recall(RecallDestination::Marketplace))
         ));
     }
 

@@ -93,9 +93,9 @@
 	} &
 		/** Bound actions carry a prepared description for icon tooltips and visible menu labels. */
 		(
-			| { readonly action: "interact"; readonly description: string }
+			| { readonly action: "interact" | "split"; readonly description: string }
 			| {
-					readonly action: "swear" | "invite" | "friend" | "ignore" | "split";
+					readonly action: "swear" | "invite" | "friend" | "ignore";
 					readonly description?: never;
 			  }
 		);
@@ -146,6 +146,7 @@
 			available.push({
 				action: "split",
 				label: "Split stack",
+				description: `Split stack (${presentClientBinding(input, { kind: "client", action: "splitStack" }, displayPlatform).description})`,
 				icon: "split",
 				disabled: false,
 				activate: onSplit,

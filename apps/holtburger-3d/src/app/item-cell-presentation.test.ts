@@ -13,6 +13,15 @@ const item: ItemCellFacts = {
 };
 
 describe("item cell presentation", () => {
+	it("places a consumer's configured action beside the stack quantity", () => {
+		expect(
+			itemCellPresentation({
+				...item,
+				count: 20,
+				quantityActionHint: "Ctrl + F9 to split",
+			}).label,
+		).toBe("Tool (quantity: 20, Ctrl + F9 to split)");
+	});
 	it("combines exact quantity, remaining uses, and equipment status", () => {
 		expect(
 			itemCellPresentation({

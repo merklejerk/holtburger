@@ -1,4 +1,5 @@
 import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
@@ -7,6 +8,7 @@ import { CLIENT_TUNING } from "../../client/client-tuning";
 
 /** Exercise action eligibility, menu artwork, dispatch, and dismissal in a real browser. */
 export async function probeSelectedActions(context: Map<unknown, unknown>) {
+	const splitLabel = `Split stack (${formatInputBindings(INPUT_DEFAULTS.client.splitStack, "windows")})`;
 	const target = document.createElement("div");
 	target.className = "ui-theme";
 	target.style.cssText = `position: fixed; top: 0; left: 0; pointer-events: none; width: ${CLIENT_UI_DEFAULTS.selectedEntity.size.width}px; height: ${CLIENT_UI_DEFAULTS.selectedEntity.size.height}px;`;
@@ -125,7 +127,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			target.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
 		);
 		require(rows.map((row) => row.textContent?.trim()).join("|") ===
-			"Trade (Ctrl + f)|Swear allegiance|Invite to party|Add friend|Ignore account|Split stack", "Menu action labels or order are incorrect");
+			`Trade (Ctrl + f)|Swear allegiance|Invite to party|Add friend|Ignore account|${splitLabel}`, "Menu action labels or order are incorrect");
 		require(rows.every(
 			(row) => !row.hasAttribute("title"),
 		), "Labeled menu actions should not have redundant tooltips");
@@ -140,7 +142,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			"Invite to party",
 			"Add friend",
 			"Ignore account",
-			"Split stack",
+			splitLabel,
 		]) {
 			if (menu() === null) await open();
 			const row = Array.from(

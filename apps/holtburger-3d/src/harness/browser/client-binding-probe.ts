@@ -151,11 +151,34 @@ export async function probeClientBindings(options: {
 			'button[aria-label="Examine"]',
 		)?.title ===
 			`Examine (${formatInputBindings(CLIENT_KEYBOARD_DEFAULTS.client.examine, "windows")})`, "Restore-all did not update the HUD");
+		const splitRow = Array.from(
+			target.querySelectorAll<HTMLElement>(".binding-row"),
+		).find(
+			(row) => row.querySelector(".binding-label")?.textContent === "Split stack",
+		);
+		const splitKey = splitRow?.querySelector<HTMLButtonElement>(".binding-key");
+		if (splitKey === undefined || splitKey === null)
+			throw new Error("Missing split-stack default binding");
+		splitKey.click();
+		await tick();
+		await click("Add key for Split stack");
+		press("F10", "F10");
+		await tick();
+		await click("Selected entity actions");
+		require(
+			Array.from(target.querySelectorAll('[role="menuitem"]')).some(
+				(item) => item.textContent?.trim() === "Split stack (F10)",
+			),
+			"Split-stack menu hint did not update after remapping",
+		);
+		await click("Selected entity actions");
+		await click("Restore default keys for Split stack");
 		return {
 			passed: true,
 			original,
 			remapped: "Trade (e)",
 			oldKeyStopped: true,
+			splitStackRemapped: true,
 			featureSubmissions: options.submissions() - before,
 		};
 	} finally {

@@ -275,23 +275,60 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			"Submission optimistically changed authoritative equipment display",
 		);
 
-	// Shift+click preflights capacity before opening a panel-local amount dialog.
-	const shiftClick = async (selector = target) => {
-		const location = await point(selector);
-		for (const type of ["mousePressed", "mouseReleased"])
+	// Selected-item splitting preflights capacity before opening the amount dialog.
+	const startSplit = async () => {
+		const selectedAction = await read(`new Promise((resolve, reject) => {
+			const deadline = performance.now() + 1000;
+			const poll = () => {
+				if (document.querySelector('button[aria-label="Selected entity actions"]')) resolve('button[aria-label="Selected entity actions"]');
+				else if (document.querySelector('button[aria-label="Split stack"]')) resolve('button[aria-label="Split stack"]');
+				else if (performance.now() >= deadline) reject(new Error('Selected stack did not expose its actions'));
+				else requestAnimationFrame(poll);
+			};
+			poll();
+		})`);
+		const clickAt = async (position) => {
 			await client.send("Input.dispatchMouseEvent", {
-				type,
-				...location,
+				type: "mousePressed",
+				...position,
 				button: "left",
-				buttons: type === "mousePressed" ? 1 : 0,
+				buttons: 1,
 				clickCount: 1,
-				modifiers: 8,
 			});
+			await release(position);
+		};
+		await clickAt(await point(selectedAction));
+		if (selectedAction.includes("Selected entity actions")) {
+			const splitRow =
+				'[role="menu"][aria-label="Selected entity actions"] [role="menuitem"][id$="-split"]';
+			const position = await point(splitRow);
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				...position,
+				buttons: 0,
+			});
+			if (
+				!(await read(
+					`document.querySelector(${JSON.stringify(splitRow)}).classList.contains('highlighted')`,
+				))
+			)
+				throw new Error(
+					"Hover did not highlight the selected entity split action",
+				);
+			await clickAt(position);
+			if (
+				await read(
+					`document.querySelector('[role="menu"][aria-label="Selected entity actions"]') !== null`,
+				)
+			)
+				throw new Error("Choosing the split action did not dismiss its menu");
+		}
 		return lastPreview();
 	};
-	const deniedSplit = await shiftClick();
+	await read(`${api}.selectInventoryItem(94)`);
+	const deniedSplit = await startSplit();
 	if (deniedSplit.intent.target.kind !== "split")
-		throw new Error("Shift+click did not preflight splitting");
+		throw new Error("Selected-item action did not preflight splitting");
 	await reply(deniedSplit.sequence, {
 		kind: "rejected",
 		reason: "No open inventory slots",
@@ -304,58 +341,12 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		))
 	)
 		throw new Error("No-space split rejection did not use a toast");
-	await read(`document.querySelector(${JSON.stringify(target)}).click()`);
 	await read(
 		`document.querySelector('button[aria-label="Inventory"]').click()`,
 	);
 	if (await read(`document.querySelector('.client-inventory') !== null`))
 		throw new Error("Inventory shortcut did not close the panel");
-	const selectedAction = await read(`new Promise((resolve, reject) => {
-		const deadline = performance.now() + 1000;
-		const poll = () => {
-			if (document.querySelector('button[aria-label="Selected entity actions"]')) resolve('button[aria-label="Selected entity actions"]');
-			else if (document.querySelector('button[aria-label="Split stack"]')) resolve('button[aria-label="Split stack"]');
-			else if (performance.now() >= deadline) reject(new Error('Selected stack did not expose its actions'));
-			else requestAnimationFrame(poll);
-		};
-		poll();
-	})`);
-	const clickAt = async (position) => {
-		await client.send("Input.dispatchMouseEvent", {
-			type: "mousePressed",
-			...position,
-			button: "left",
-			buttons: 1,
-			clickCount: 1,
-		});
-		await release(position);
-	};
-	await clickAt(await point(selectedAction));
-	if (selectedAction.includes("Selected entity actions")) {
-		const splitRow =
-			'[role="menu"][aria-label="Selected entity actions"] [role="menuitem"][id$="-split"]';
-		const position = await point(splitRow);
-		await client.send("Input.dispatchMouseEvent", {
-			type: "mouseMoved",
-			...position,
-			buttons: 0,
-		});
-		if (
-			!(await read(
-				`document.querySelector(${JSON.stringify(splitRow)}).classList.contains('highlighted')`,
-			))
-		)
-			throw new Error(
-				"Hover did not highlight the selected entity split action",
-			);
-		await clickAt(position);
-		if (
-			await read(
-				`document.querySelector('[role="menu"][aria-label="Selected entity actions"]') !== null`,
-			)
-		)
-			throw new Error("Choosing the split action did not dismiss its menu");
-	}
+	await startSplit();
 
 	if (!(await read(`document.querySelector('.client-inventory') !== null`)))
 		throw new Error("Selected stack split action did not open inventory");
@@ -414,7 +405,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		)
 	)
 		throw new Error("Split submission retained the modal");
-	const cancelSplit = await shiftClick();
+	const cancelSplit = await startSplit();
 	await reply(cancelSplit.sequence, { kind: "split", max_amount: 20 });
 	const beforeCancel = (await submissions()).length;
 	await client.send("Input.dispatchKeyEvent", {
@@ -435,13 +426,13 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	)
 		throw new Error("Split cancellation submitted or retained the dialog");
 
-	const checkingSelection = await shiftClick();
+	const checkingSelection = await startSplit();
 	await read(`${api}.selectInventoryItem(91)`);
 	await reply(checkingSelection.sequence, { kind: "split", max_amount: 20 });
 	if (await read(`document.querySelector('.inventory-split-dialog') !== null`))
 		throw new Error("Selection change admitted a late split preview");
 	await read(`${api}.selectInventoryItem(94)`);
-	const editingSelection = await shiftClick();
+	const editingSelection = await startSplit();
 	await reply(editingSelection.sequence, { kind: "split", max_amount: 20 });
 	await read(`${api}.selectInventoryItem(91)`);
 	if (
@@ -451,7 +442,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	)
 		throw new Error("Selection change did not cancel the split modal");
 	await read(`${api}.selectInventoryItem(94)`);
-	const panelClose = await shiftClick();
+	const panelClose = await startSplit();
 	await reply(panelClose.sequence, { kind: "split", max_amount: 20 });
 	await read(
 		`document.querySelector('button[aria-label="Close Inventory"]').click()`,

@@ -13,6 +13,7 @@ import type { KeyBinding } from "./input-contract";
 const addresses: readonly ClientBindingReference[] = [
 	{ kind: "character", action: "forward" },
 	{ kind: "client", action: "selectSelf" },
+	{ kind: "client", action: "splitStack" },
 	{ kind: "spellTab", index: 9 },
 	{ kind: "spellCell", index: 9 },
 	{ kind: "spellCaster" },

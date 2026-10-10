@@ -8,12 +8,6 @@ export function bindContentsActivation(
 	selectedGuid: () => number | null,
 	onSelect: (guid: number) => void,
 	activate: (guid: number) => void,
-	/** Panel-owned modified clicks can consume the sequence before ordinary activation. */
-	consumeClick?: (
-		event: MouseEvent,
-		guid: number,
-		cell: HTMLElement,
-	) => boolean,
 ): () => void {
 	const abort = new AbortController();
 	let consumedClickSequence = false;
@@ -31,12 +25,6 @@ export function bindContentsActivation(
 			if (cell === null) return;
 			const guid = Number(cell.dataset.itemGuid);
 			if (event.detail <= 1) consumedClickSequence = false;
-			if (consumeClick?.(event, guid, cell) === true) {
-				consumedClickSequence = true;
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				return;
-			}
 			const state = interactions.snapshot();
 			if (event.detail > 1 || state.kind === "acquiring") {
 				event.preventDefault();

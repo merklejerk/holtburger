@@ -81,6 +81,10 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Give the selected inventory item to the previous selected recipient. */
 		give: [{ key: "g", ctrl: false, alt: false, meta: false }],
+		/** Open the quantity dialog for the selected owned stack. */
+		splitStack: [
+			{ key: "y", shift: false, ctrl: false, alt: false, meta: false },
+		],
 		/** Toggle persistent forward movement while gameplay owns the keyboard. */
 		toggleAutoRun: [{ key: "q", ctrl: false, alt: false, meta: false }],
 		/** Enter the aimed jump interaction. */

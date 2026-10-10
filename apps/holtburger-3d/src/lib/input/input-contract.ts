@@ -82,6 +82,7 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 	"interact",
 	"examine",
 	"give",
+	"splitStack",
 	"toggleCombat",
 	"toggleAutoRun",
 	"preciseJump",

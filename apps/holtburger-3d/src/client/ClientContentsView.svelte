@@ -26,6 +26,8 @@
 		readonly iconFor: (guid: number) => UiIconDisplay | undefined;
 		/** Returns false when target acquisition consumed a navigation click. */
 		readonly onSelectItem: (guid: number) => boolean;
+		/** Panel-owned quantity actions; external contents do not offer inventory splitting. */
+		readonly quantityActionHint?: (item: ClientEntityFacts) => string | null;
 		/** Optional equipment-hover presentation, owned by the inventory panel. */
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
 		/** Optional item hover identity for inventory-owned equipment affordances. */
@@ -45,6 +47,7 @@
 		capacities,
 		iconFor,
 		onSelectItem,
+		quantityActionHint,
 		dimItem,
 		onHoverItem,
 		onTakePack,
@@ -86,6 +89,9 @@
 					count={index !== 0 && item?.description.kind === "known"
 						? item.description.stackCount
 						: null}
+					quantityActionHint={index !== 0 && item !== null
+						? quantityActionHint?.(item)
+						: null}
 					label={index === 0 && rootLabel !== null
 						? rootLabel
 						: item === null
@@ -112,6 +118,7 @@
 			{capacities}
 			{iconFor}
 			{onSelectItem}
+			{quantityActionHint}
 			{rootLabel}
 			{dimItem}
 			{onHoverItem}

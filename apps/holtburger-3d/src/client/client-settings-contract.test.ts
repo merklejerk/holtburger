@@ -11,10 +11,33 @@ import {
 	createDefaultClientUserSettings,
 } from "./client-settings-defaults";
 import { hudTrayOrientation, rotateHudTray } from "./client-hud-tray-layout";
+import {
+	CLIENT_KEYBOARD_DEFAULTS,
+	clientKeyboardSettingsSchema,
+} from "./client-input-settings";
 
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("adds split-stack to older keyboard maps while retaining customized keys", () => {
+		const { splitStack, ...olderClient } = CLIENT_KEYBOARD_DEFAULTS.client;
+		const previous = {
+			...CLIENT_KEYBOARD_DEFAULTS,
+			client: { ...olderClient, examine: [{ key: "F9" }] },
+		};
+		expect(clientKeyboardSettingsSchema.parse(previous).client).toEqual({
+			...previous.client,
+			splitStack,
+		});
+		for (const binding of [[], [{ key: "F10", ctrl: true }]]) {
+			expect(
+				clientKeyboardSettingsSchema.parse({
+					...previous,
+					client: { ...previous.client, splitStack: binding },
+				}).client.splitStack,
+			).toEqual(binding);
+		}
+	});
 	it("uses the declared initial audio mix", () => {
 		expect(createDefaultClientUserSettings(viewport, 8).audio).toEqual(
 			CLIENT_AUDIO_DEFAULTS,

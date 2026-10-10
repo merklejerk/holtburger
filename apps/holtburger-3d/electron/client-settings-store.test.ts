@@ -9,6 +9,12 @@ import {
 	createDefaultClientUserSettings,
 } from "../src/client/client-settings-defaults";
 import { clientSettingsCollectionSchema } from "../src/client/client-settings-sections";
+import {
+	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
+	MINUTES_PER_GAME_DAY,
+} from "../src/client/client-environment-settings";
+import { clientEnvironmentFixture } from "../src/client/client-environment.test-support";
+import { clientWeatherPresets } from "../src/client/client-environment";
 
 const initialWindow = {
 	normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -29,6 +35,44 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("adds environment sections to an older profile without losing fonts or graphics", async () => {
+		const path = await temporarySettingsPath();
+		const defaults = createDefaultClientUserSettings(
+			{ width: 1440, height: 900 },
+			8,
+		);
+		const store = new ClientSettingsStore(path, initialWindow);
+		await store.load();
+		await store.saveUserPatch({
+			sections: { ui: defaults.ui, graphics: defaults.graphics },
+		});
+		expect(
+			store.readUser("persisted").sections.environmentOverrides,
+		).toBeUndefined();
+		const preset = clientWeatherPresets(clientEnvironmentFixture())[0];
+		if (preset === undefined) throw new Error("Fixture preset missing.");
+		const environmentOverrides = {
+			time: { kind: "fixed" as const, minuteOfDay: MINUTES_PER_GAME_DAY / 2 },
+			weather: preset.choice,
+		};
+		await store.saveUserPatch({
+			sections: { clockFormat: "12-hour", environmentOverrides },
+		});
+		const loaded = new ClientSettingsStore(path, initialWindow);
+		await loaded.load();
+		expect(loaded.readUser("persisted").sections).toMatchObject({
+			ui: defaults.ui,
+			graphics: defaults.graphics,
+			clockFormat: "12-hour",
+			environmentOverrides,
+		});
+		await loaded.saveUserPatch({
+			sections: { environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT },
+		});
+		expect(loaded.readUser("persisted").sections.environmentOverrides).toEqual(
+			CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
+		);
+	});
 	it("round-trips the audio mix and resets it to declared defaults", async () => {
 		const path = await temporarySettingsPath();
 		const store = new ClientSettingsStore(path, initialWindow);

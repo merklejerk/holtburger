@@ -1452,12 +1452,14 @@ export async function probeClientHud(
 			};
 			panel.querySelector('#settings-tab-ui').click();
 			await frame();
-			const fonts = panel.querySelectorAll('#settings-section-ui select');
+			const fonts = [...panel.querySelectorAll('#settings-section-ui label')]
+				.filter((label) => label.firstChild?.textContent.trim().endsWith(' font'))
+				.map((label) => label.querySelector('select'));
 			if (fonts.length !== 3) throw new Error('UI font roles are missing');
 			fonts[0].value = 'serif';
 			fonts[0].dispatchEvent(new Event('change', { bubbles: true }));
 			await frame();
-			if (panel.querySelector('#settings-section-ui select').value !== 'serif') throw new Error('UI font edit did not stick');
+			if (fonts[0].value !== 'serif') throw new Error('UI font edit did not stick');
 			if ([...panel.querySelectorAll('#settings-section-ui input[type="range"]')].some((range) => !range.disabled)) throw new Error('Planned scaling controls are active');
 			panel.querySelector('#settings-tab-input').click();
 			await frame();

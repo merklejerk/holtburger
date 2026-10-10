@@ -5,6 +5,12 @@
 	} from "../lib/input/client-keyboard-bindings";
 
 	import UiTabs from "../app/UiTabs.svelte";
+	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
+	import type {
+		ClientClockFormat,
+		ClientEnvironmentOverrides,
+	} from "./client-environment-settings";
+	import type { ClientWeatherPreset } from "./client-environment";
 	import { onMount } from "svelte";
 	import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 	import ClientBindingDialog from "./ClientBindingDialog.svelte";
@@ -54,6 +60,15 @@
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
+		/** User-owned environment presentation choices and cold content catalog. */
+		readonly clockFormat: ClientClockFormat;
+		readonly environmentOverrides: ClientEnvironmentOverrides;
+		readonly weatherPresets: readonly ClientWeatherPreset[];
+		readonly environmentIssue: string | null;
+		readonly onClockFormatChange: (format: ClientClockFormat) => void;
+		readonly onEnvironmentOverridesChange: (
+			overrides: ClientEnvironmentOverrides,
+		) => void;
 		readonly input: ClientKeyboardConfiguration;
 		readonly displayPlatform: InputDisplayPlatform;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
@@ -70,6 +85,12 @@
 		onAudioChange,
 		graphics,
 		ui,
+		clockFormat,
+		environmentOverrides,
+		weatherPresets,
+		environmentIssue,
+		onClockFormatChange,
+		onEnvironmentOverridesChange,
 		input,
 		displayPlatform,
 		textureFilteringCapabilities,
@@ -492,44 +513,73 @@
 				aria-labelledby="settings-tab-ui"
 				class="settings-section"
 			>
-				{#each fontRoles as role}
-					<label
-						>{role.label} font
-						<select
-							value={ui.fonts[role.id]}
-							onchange={(event) =>
-								onUiChange({
-									...ui,
-									fonts: {
-										...ui.fonts,
-										[role.id]: event.currentTarget.value as ClientFontFamily,
-									},
-								})}
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Time and weather</summary>
+					<div class="settings-section ui-disclosure-body">
+						<ClientEnvironmentSettings
+							{clockFormat}
+							overrides={environmentOverrides}
+							presets={weatherPresets}
+							issue={environmentIssue}
+							{onClockFormatChange}
+							onOverridesChange={onEnvironmentOverridesChange}
+						/>
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Fonts</summary>
+					<div class="settings-section ui-disclosure-body">
+						{#each fontRoles as role}
+							<label
+								>{role.label} font
+								<select
+									value={ui.fonts[role.id]}
+									onchange={(event) =>
+										onUiChange({
+											...ui,
+											fonts: {
+												...ui.fonts,
+												[role.id]: event.currentTarget
+													.value as ClientFontFamily,
+											},
+										})}
+								>
+									{#each CLIENT_FONT_FAMILY_OPTIONS as family}
+										<option value={family}>{fontFamilyLabels[family]}</option>
+									{/each}
+								</select>
+							</label>
+						{/each}
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Scaling</summary>
+					<div class="settings-section ui-disclosure-body">
+						<label
+							>Text scaling (planned)
+							<input type="range" min="50" max="200" value="100" disabled />
+						</label>
+						<label
+							>Icon scaling (planned)
+							<input type="range" min="50" max="200" value="100" disabled />
+						</label>
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>HUD layout</summary>
+					<div class="settings-section ui-disclosure-body">
+						<button
+							type="button"
+							class="ui-button"
+							disabled={!canResetHudPlacements}
+							onclick={onResetHudPlacements}>Reset HUD placements</button
 						>
-							{#each CLIENT_FONT_FAMILY_OPTIONS as family}
-								<option value={family}>{fontFamilyLabels[family]}</option>
-							{/each}
-						</select>
-					</label>
-				{/each}
-				<label
-					>Text scaling (planned)
-					<input type="range" min="50" max="200" value="100" disabled />
-				</label>
-				<label
-					>Icon scaling (planned)
-					<input type="range" min="50" max="200" value="100" disabled />
-				</label>
-				<button
-					type="button"
-					class="ui-button"
-					disabled={!canResetHudPlacements}
-					onclick={onResetHudPlacements}>Reset HUD placements</button
-				>
-				<p class="ui-muted">
-					Repositions windows and this character’s action bars without clearing
-					their contents.
-				</p>
+						<p class="ui-muted">
+							Repositions windows and this character’s action bars without
+							clearing their contents.
+						</p>
+					</div>
+				</details>
 			</div>
 		{:else}
 			<div

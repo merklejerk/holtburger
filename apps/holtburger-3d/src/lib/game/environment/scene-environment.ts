@@ -21,8 +21,8 @@ export const UNAUTHORED_LIGHTING = {
 	sunDirection: { x: 0.5, y: 0, z: 0.8 },
 } as const;
 
-/** Explorer-owned inputs selecting one static regional presentation state. */
-export interface ExplorerEnvironmentSelection {
+/** Frontend inputs selecting one static regional presentation state. */
+export interface SceneEnvironmentSelection {
 	/** Absolute regional calendar day; it may span multiple authored years. */
 	readonly dayIndex: number;
 	/** Normalized regional day fraction in [0, 1). */
@@ -106,14 +106,14 @@ export interface ResolvedSceneEnvironment {
 	readonly lighting: ResolvedSceneLighting;
 }
 
-/** Resolve Explorer-selected static sky state using retail's cyclic keyframe rules. */
+/** Resolve frontend-selected static sky state using retail's cyclic keyframe rules. */
 export function resolveSceneEnvironment(
 	activeRegion: ActiveRegionSource,
-	selection: ExplorerEnvironmentSelection,
+	selection: SceneEnvironmentSelection,
 ): ResolvedSceneEnvironment {
 	if (!Number.isInteger(selection.dayIndex) || selection.dayIndex < 0) {
 		throw new Error(
-			"Explorer environment day index must be a non-negative integer.",
+			"Scene environment day index must be a non-negative integer.",
 		);
 	}
 	if (
@@ -122,7 +122,7 @@ export function resolveSceneEnvironment(
 		selection.timeOfDay >= 1
 	) {
 		throw new Error(
-			"Explorer environment time of day must be normalized to [0, 1).",
+			"Scene environment time of day must be normalized to [0, 1).",
 		);
 	}
 	const sky = activeRegion.data.sky;
@@ -225,7 +225,7 @@ function resolveLighting(keyframes: {
 
 function resolveDayGroupIndex(
 	activeRegion: ActiveRegionSource,
-	selection: ExplorerEnvironmentSelection,
+	selection: SceneEnvironmentSelection,
 ): number {
 	const count = activeRegion.data.sky?.dayGroups.length ?? 0;
 	if (selection.dayGroupOverride !== null) {
@@ -234,9 +234,7 @@ function resolveDayGroupIndex(
 			selection.dayGroupOverride < 0 ||
 			selection.dayGroupOverride >= count
 		) {
-			throw new Error(
-				"Explorer day-group override is outside the active region.",
-			);
+			throw new Error("Scene day-group override is outside the active region.");
 		}
 		return selection.dayGroupOverride;
 	}

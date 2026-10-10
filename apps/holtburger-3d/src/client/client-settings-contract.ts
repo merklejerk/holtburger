@@ -12,6 +12,10 @@ import {
 	CLIENT_GRAPHICS_RANGES,
 } from "./client-settings-values.js";
 import { clientKeyboardSettingsSchema } from "./client-input-settings.js";
+import {
+	clientClockFormatSchema,
+	clientEnvironmentOverridesSchema,
+} from "./client-environment-settings.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
@@ -164,6 +168,8 @@ export const clientUserSettingsSchema = z
 		graphics: clientGraphicsSettingsSchema,
 		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,
+		clockFormat: clientClockFormatSchema,
+		environmentOverrides: clientEnvironmentOverridesSchema,
 		input: clientKeyboardSettingsSchema,
 		inspection: z
 			.object({

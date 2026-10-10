@@ -43,8 +43,21 @@
 	import { onMount, untrack } from "svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import Minimap from "../app/Minimap.svelte";
+	import ClientMinimapEnvironment from "./ClientMinimapEnvironment.svelte";
+	import type {
+		ClientClockFormat,
+		ClientEnvironmentOverrides,
+	} from "./client-environment-settings";
+	import type {
+		ClientEnvironmentReadout,
+		ClientWeatherPreset,
+	} from "./client-environment";
 	import type { FrameRates } from "../app/frame-rate-sampler";
-	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
+	import type {
+		MinimapFrame,
+		MinimapState,
+		MinimapFooterExtent,
+	} from "../app/minimap-frame";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientCharacterSheetPanel from "./ClientCharacterSheetPanel.svelte";
 	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
@@ -108,7 +121,7 @@
 	import {
 		anchorClientHudPlacement,
 		createClientHudLayout,
-		resolveClientHudSquarePlacement,
+		resolveClientMinimapPlacement,
 		type ClientHudLayout,
 		type ClientHudPlacement,
 		type ClientHudViewport,
@@ -154,6 +167,16 @@
 		/** User graphics snapshot and focused edit operation. */
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
+		/** Cold environment controls; the readout pulls exclusively from the server source. */
+		readonly clockFormat: ClientClockFormat;
+		readonly environmentOverrides: ClientEnvironmentOverrides;
+		readonly weatherPresets: readonly ClientWeatherPreset[];
+		readonly environmentIssue: string | null;
+		readonly readServerEnvironment: () => ClientEnvironmentReadout | null;
+		readonly onClockFormatChange: (format: ClientClockFormat) => void;
+		readonly onEnvironmentOverridesChange: (
+			overrides: ClientEnvironmentOverrides,
+		) => void;
 		readonly input: ClientKeyboardConfiguration;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
@@ -315,6 +338,13 @@
 		onAudioChange,
 		graphics,
 		ui,
+		clockFormat,
+		environmentOverrides,
+		weatherPresets,
+		environmentIssue,
+		readServerEnvironment,
+		onClockFormatChange,
+		onEnvironmentOverridesChange,
 		input,
 		textureFilteringCapabilities,
 		onGraphicsChange,
@@ -533,11 +563,21 @@
 			createClientHudLayout(CLIENT_UI_DEFAULTS, viewport, shortcuts.length),
 		);
 	}
+	/** Cold measured geometry: updated on footer/font changes, never scene cadence. */
+	let minimapFooterExtent = $state<MinimapFooterExtent>({
+		width: 0,
+		height: 0,
+	});
+	const minimapViewport = $derived({
+		...viewport,
+		height: Math.max(0, viewport.height - minimapFooterExtent.height),
+	});
 	const resolvedMapPlacement = $derived(
-		resolveClientHudSquarePlacement(
+		resolveClientMinimapPlacement(
 			hudLayout.minimap,
-			viewport,
+			minimapViewport,
 			CLIENT_UI_DEFAULTS.minimap.minSize,
+			minimapFooterExtent.width,
 		),
 	);
 	const minimap = $derived<MinimapState>({
@@ -668,7 +708,7 @@
 			: hudLayout.minimap.preferredWidth;
 		const minimapPlacement = anchorClientHudPlacement(
 			{ left: next.left, top: next.top, width: next.size, height: next.size },
-			viewport,
+			minimapViewport,
 			{ width: preferredSize, height: preferredSize },
 		);
 		changeHudPlacement("minimap", minimapPlacement);
@@ -862,8 +902,20 @@
 		resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
 		editable={hudMode === "layout"}
 		onStateChange={updateMinimap}
+		onFooterExtentChange={(extent) => {
+			if (
+				extent.width !== minimapFooterExtent.width ||
+				extent.height !== minimapFooterExtent.height
+			)
+				minimapFooterExtent = extent;
+		}}
 		{onSelectEntity}
-	/>
+	>
+		{#snippet footer()}<ClientMinimapEnvironment
+				readEnvironment={readServerEnvironment}
+				{clockFormat}
+			/>{/snippet}
+	</Minimap>
 	{#if actionBars !== null && inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
 		{#key inventory}
 			<ClientActionBars
@@ -1307,6 +1359,12 @@
 						onSelectTab={(tab) => (settingsTab = tab)}
 						{onGraphicsChange}
 						{onUiChange}
+						{clockFormat}
+						{environmentOverrides}
+						{weatherPresets}
+						{environmentIssue}
+						{onClockFormatChange}
+						{onEnvironmentOverridesChange}
 						{onInputChange}
 						canResetHudPlacements={resetActionBars !== null}
 						onResetHudPlacements={resetHudPlacements}

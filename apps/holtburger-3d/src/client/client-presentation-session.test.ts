@@ -35,10 +35,20 @@ import type {
 	SceneActivationStatus,
 } from "../lib/game/runtime/scene-availability";
 import type { DynamicEntityRealizationDisposition } from "../lib/game/runtime/dynamic-entity-presentation";
+import { ClientPresentationSession } from "./client-presentation-session";
 import {
-	ClientPresentationSession,
-	resolveClientEnvironmentSelection,
-} from "./client-presentation-session";
+	clientWeatherPresets,
+	CLIENT_ENVIRONMENT_INTERVAL_MS,
+} from "./client-environment";
+import {
+	clientEnvironmentFixture,
+	ENVIRONMENT_FIXTURE_DAY_SECONDS,
+} from "./client-environment.test-support";
+import {
+	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
+	MINUTES_PER_GAME_DAY,
+} from "./client-environment-settings";
+import type { ResolvedSceneEnvironment } from "../lib/game/environment/scene-environment";
 import type { ClientLifecycleTransport } from "./client-lifecycle-session";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { CLIENT_TUNING } from "./client-tuning";
@@ -56,31 +66,60 @@ import { projectClientTargetIndicator } from "./client-target-indicator";
 import previewFixture from "./fixtures/object-preview-wire.json";
 import { decodeObjectPreviewResult } from "./client-object-preview-contract";
 
-describe("resolveClientEnvironmentSelection", () => {
-	it("uses synchronized portal-year time and the archive calendar offset", () => {
-		const source = activeRegion({
-			dayLength: 100,
-			zeroTimeOfYear: 25,
-		});
-
-		expect(resolveClientEnvironmentSelection(source, 75)).toEqual({
-			dayGroupOverride: null,
-			dayIndex: 1,
-			timeOfDay: 0,
-		});
-	});
-
-	it("rejects a server time before the archive calendar", () => {
-		expect(() =>
-			resolveClientEnvironmentSelection(
-				activeRegion({ dayLength: 100, zeroTimeOfYear: 0 }),
-				-1,
-			),
-		).toThrow("precedes");
-	});
-});
-
 describe("ClientPresentationSession", () => {
+	it("keeps the server readout true while applying pending and live overrides without replacing the owner", async () => {
+		const now = vi.spyOn(performance, "now").mockReturnValue(0);
+		const transport = new FakeClientTransport({
+			...currentState(0x0101_0001),
+			serverTime: ENVIRONMENT_FIXTURE_DAY_SECONDS * 1.9,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		const runtime = new FakePresentationRuntime();
+		const region = clientEnvironmentFixture();
+		const preset = clientWeatherPresets(region)[0];
+		if (preset === undefined) throw new Error("Fixture preset missing.");
+		let created = 0;
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => {
+				created += 1;
+				return fakeOwner(runtime, region);
+			},
+		});
+		try {
+			await lifecycle.start();
+			presentation.setEnvironmentOverrides({
+				time: { kind: "fixed", minuteOfDay: MINUTES_PER_GAME_DAY / 2 },
+				weather: preset.choice,
+			});
+			await presentation.start();
+			expect(presentation.readServerEnvironment()?.weather?.name).toBe("Rainy");
+			expect(runtime.environments.at(-1)?.sky?.dayGroupName).toBe("Sunny");
+			const fixed = runtime.environments.at(-1);
+			now.mockReturnValue(ENVIRONMENT_FIXTURE_DAY_SECONDS * 0.2 * 1000);
+			presentation.frame(performance.now());
+			expect(presentation.readServerEnvironment()?.dayFraction).toBeCloseTo(
+				0.1,
+			);
+			expect(presentation.readServerEnvironment()?.weather?.name).toBe("Sunny");
+			expect(runtime.environments.at(-1)).toEqual(fixed);
+			now.mockReturnValue(performance.now() + CLIENT_ENVIRONMENT_INTERVAL_MS);
+			presentation.setEnvironmentOverrides(
+				CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
+			);
+			expect(
+				runtime.environments.at(-1)?.sky?.objects[0]?.orientation,
+			).not.toEqual(fixed?.sky?.objects[0]?.orientation);
+			expect(created).toBe(1);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+			now.mockRestore();
+		}
+		expect(presentation.readServerEnvironment()).toBeNull();
+	});
 	it("decorates an opened corpse nameplate from semantic entity facts", async () => {
 		const playerGuid = 0x0101_0001;
 		const corpseGuid = 0x8000_0010;
@@ -1660,7 +1699,11 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.audioListeners.push(listener);
 	}
 
-	setSceneEnvironment(): void {}
+	/** Applied runtime inputs prove composition independently of the HUD display path. */
+	readonly environments: ResolvedSceneEnvironment[] = [];
+	setSceneEnvironment(environment: ResolvedSceneEnvironment): void {
+		this.environments.push(environment);
+	}
 
 	setViewerEntity(guid: number | null): void {
 		this.viewerLightGuid = guid;

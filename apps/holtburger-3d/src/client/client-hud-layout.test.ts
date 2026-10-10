@@ -7,6 +7,7 @@ import {
 	resizeClientPanelRectangle,
 	resolveClientHudPlacement,
 	resolveClientHudSquarePlacement,
+	resolveClientMinimapPlacement,
 } from "./client-hud-layout";
 
 import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
@@ -14,6 +15,33 @@ import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 const PANEL_MINIMUM = { width: 280, height: 240 };
 
 describe("client HUD layout", () => {
+	it.each(["start", "end"] as const)(
+		"keeps a wide minimap footer reachable at the %s edge without enlarging the disc",
+		(alignment) => {
+			const size = CLIENT_UI_DEFAULTS.minimap.minSize;
+			const viewport = { width: size * 4, height: size * 3 };
+			const footerWidth = size * 2;
+			const rectangle = resolveClientMinimapPlacement(
+				{
+					horizontal: { alignment, offset: 0 },
+					vertical: { alignment: "end", offset: 0 },
+					preferredWidth: size,
+					preferredHeight: size,
+				},
+				viewport,
+				size,
+				footerWidth,
+			);
+			const overhang = (footerWidth - size) / 2;
+			expect(rectangle.width).toBe(size);
+			expect(rectangle.height).toBe(size);
+			expect(rectangle.top + rectangle.height).toBe(viewport.height);
+			expect(rectangle.left - overhang).toBeGreaterThanOrEqual(0);
+			expect(rectangle.left + size + overhang).toBeLessThanOrEqual(
+				viewport.width,
+			);
+		},
+	);
 	it("builds each configured surface through the placement resolver", () => {
 		const viewport = { width: 1344, height: 820 };
 		const shortcutCount = 8;

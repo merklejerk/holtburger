@@ -115,7 +115,7 @@
 	import { presentExplorerPortalFrame } from "./explorer-portal-presentation";
 	import {
 		resolveSceneEnvironment,
-		type ExplorerEnvironmentSelection,
+		type SceneEnvironmentSelection,
 	} from "../lib/game/environment/scene-environment";
 	import { resolveDayFraction } from "../lib/game/environment/game-clock";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
@@ -347,7 +347,7 @@
 
 	let textureFilteringCapabilities =
 		$state<TextureFilteringCapabilities | null>(null);
-	let environmentSelection = $state<ExplorerEnvironmentSelection>({
+	let environmentSelection = $state<SceneEnvironmentSelection>({
 		dayIndex: EXPLORER_TUNING.environment.defaultDayIndex,
 		timeOfDay: EXPLORER_TUNING.environment.defaultTimeOfDay,
 		dayGroupOverride: EXPLORER_TUNING.environment.defaultDayGroupOverride,
@@ -374,7 +374,7 @@
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	function updateEnvironment(selection: ExplorerEnvironmentSelection): void {
+	function updateEnvironment(selection: SceneEnvironmentSelection): void {
 		environmentSelection = selection;
 		applyEnvironment();
 	}

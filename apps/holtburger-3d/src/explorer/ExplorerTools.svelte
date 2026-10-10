@@ -10,7 +10,7 @@
 	import ExplorerRendererPanel from "./ExplorerRendererPanel.svelte";
 	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-presentation-runtime";
 	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
-	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
+	import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type {
 		EnvCellRenderMode,
 		RendererFrameDiagnosticsSnapshot,
@@ -75,11 +75,9 @@
 		readonly readPhysicalCameraStatus: () => PhysicalFlyStatus | null;
 		readonly physicalCameraError: string | null;
 		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
-		readonly environmentSelection: ExplorerEnvironmentSelection;
+		readonly environmentSelection: SceneEnvironmentSelection;
 		readonly dayGroupNames: readonly string[];
-		readonly updateEnvironment: (
-			selection: ExplorerEnvironmentSelection,
-		) => void;
+		readonly updateEnvironment: (selection: SceneEnvironmentSelection) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */

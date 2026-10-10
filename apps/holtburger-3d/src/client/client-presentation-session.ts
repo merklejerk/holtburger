@@ -17,11 +17,21 @@ import {
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
 import { CLIENT_TUNING } from "./client-tuning";
-import { resolveDayFraction } from "../lib/game/environment/game-clock";
+import type { ResolvedSceneEnvironment } from "../lib/game/environment/scene-environment";
 import {
-	resolveSceneEnvironment,
-	type ResolvedSceneEnvironment,
-} from "../lib/game/environment/scene-environment";
+	bindClientPresentationEnvironment,
+	clientWeatherPresets,
+	createClientServerEnvironmentSource,
+	CLIENT_ENVIRONMENT_INTERVAL_MS,
+	type ClientEnvironmentReadout,
+	type ClientEnvironmentSource,
+	type ClientServerEnvironmentSource,
+	type ClientWeatherPreset,
+} from "./client-environment";
+import {
+	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
+	type ClientEnvironmentOverrides,
+} from "./client-environment-settings";
 import {
 	createLandblockWorldOrigin,
 	normalizeLandblockOwner,
@@ -375,6 +385,10 @@ export interface ClientPresentationSessionDependencies {
 	readonly canvas: HTMLCanvasElement;
 	readonly hostTransport: HostTransport;
 	readonly onError?: (error: unknown) => void;
+	/** Cold preset catalog published when content is installed or retired. */
+	readonly onWeatherPresets?: (presets: readonly ClientWeatherPreset[]) => void;
+	/** Saved-content mismatch is a settings issue, not a terminal rendering failure. */
+	readonly onEnvironmentIssue?: (issue: string | null) => void;
 	readonly onTextureFilteringCapabilities?: (
 		capabilities: TextureFilteringCapabilities | null,
 	) => void;
@@ -419,6 +433,17 @@ export class ClientPresentationSession {
 	/** Client-only diagnostic observer; absent from ordinary non-debug composition. */
 	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	#owner: ClientPresentationOwner | null = null;
+	/** Source composition owns one server sample; the adapter retains no resolved output. */
+	#environmentSources: {
+		readonly server: ClientServerEnvironmentSource;
+		presentation: ClientEnvironmentSource;
+	} | null = null;
+	/** Cold preferences are retained across asynchronous owner construction. */
+	#environmentOverrides: ClientEnvironmentOverrides =
+		CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT;
+	#lastEnvironmentAtMs = Number.NEGATIVE_INFINITY;
+	readonly #onWeatherPresets: ClientPresentationSessionDependencies["onWeatherPresets"];
+	readonly #onEnvironmentIssue: ClientPresentationSessionDependencies["onEnvironmentIssue"];
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
 	/** Latest user mix, retained while browser resources are being constructed. */
 	#audioSettings: ClientAudioSettings = CLIENT_AUDIO_DEFAULTS;
@@ -460,6 +485,8 @@ export class ClientPresentationSession {
 
 	constructor(dependencies: ClientPresentationSessionDependencies) {
 		this.#session = dependencies.session;
+		this.#onWeatherPresets = dependencies.onWeatherPresets;
+		this.#onEnvironmentIssue = dependencies.onEnvironmentIssue;
 		this.#canvas = dependencies.canvas;
 		this.#hostTransport = dependencies.hostTransport;
 		this.#onError = dependencies.onError ?? (() => undefined);
@@ -509,6 +536,18 @@ export class ClientPresentationSession {
 	/** Current presentation status consumed by the client shell's notice policy. */
 	status(): ClientPresentationStatus {
 		return this.#status;
+	}
+
+	/** True server display facts; this capability is never routed through the override adapter. */
+	readServerEnvironment(): ClientEnvironmentReadout | null {
+		return this.#environmentSources?.server.readout() ?? null;
+	}
+
+	/** Replace only the local presentation binding; the server source and runtime survive. */
+	setEnvironmentOverrides(overrides: ClientEnvironmentOverrides): void {
+		this.#environmentOverrides = overrides;
+		this.#bindEnvironment();
+		this.#applyEnvironment();
 	}
 
 	/** Pull one coherent radar frame from the same presentation facts the world scene draws. */
@@ -905,6 +944,8 @@ export class ClientPresentationSession {
 			this.#setStatus("error", this.#terminalPresentationError);
 			return { rendered: false, status: this.#status };
 		}
+		if (timeMs - this.#lastEnvironmentAtMs >= CLIENT_ENVIRONMENT_INTERVAL_MS)
+			this.#refreshEnvironment(timeMs);
 		if (this.#session.mirror.isAwaitingSnapshot()) {
 			this.#setStatus("awaiting-snapshot");
 			return { rendered: false, status: this.#status };
@@ -1159,6 +1200,9 @@ export class ClientPresentationSession {
 		);
 		const owner = this.#owner;
 		this.#owner = null;
+		this.#environmentSources = null;
+		this.#onWeatherPresets?.([]);
+		this.#onEnvironmentIssue?.(null);
 		this.#pendingEntityCues.length = 0;
 		if (owner !== null)
 			await attempt("presentation-owner", () => owner.destroy());
@@ -1195,6 +1239,13 @@ export class ClientPresentationSession {
 			}
 			this.#applyAudioSettings(owner);
 			this.#owner = owner;
+			const server = createClientServerEnvironmentSource(
+				owner.activeRegion,
+				(timeMs) => this.#session.readServerTime(timeMs),
+			);
+			this.#environmentSources = { server, presentation: server };
+			this.#onWeatherPresets?.(clientWeatherPresets(owner.activeRegion));
+			this.#bindEnvironment();
 			this.#onTextureFilteringCapabilities?.(
 				owner.textureFilteringCapabilities ?? null,
 			);
@@ -1210,11 +1261,15 @@ export class ClientPresentationSession {
 				lifecycle?.kind !== "in-world" &&
 				lifecycle?.kind !== "portal-space"
 			) {
+				this.#owner = null;
+				this.#environmentSources = null;
+				this.#onWeatherPresets?.([]);
+				this.#onEnvironmentIssue?.(null);
 				await owner.destroy();
 				this.#status = { kind: "stopped", diagnostic: null };
 				return;
 			}
-			this.#applyServerEnvironment(this.#session.state().serverTime);
+			this.#refreshEnvironment(performance.now());
 			await this.#requestDynamicSnapshotReplacement(
 				this.#session.mirror.entities(),
 			);
@@ -1275,7 +1330,7 @@ export class ClientPresentationSession {
 				});
 				return;
 			case "server-time":
-				this.#applyServerEnvironment(event.time);
+				this.#refreshEnvironment(performance.now());
 				return;
 			case "presentation-discontinuity":
 				this.#receivePresentationDiscontinuity(event.discontinuity);
@@ -1294,7 +1349,7 @@ export class ClientPresentationSession {
 
 	#receiveCurrentState(state: ClientCurrentState): void {
 		this.#playerGuid = state.localPlayerGuid;
-		this.#applyServerEnvironment(state.serverTime);
+		this.#refreshEnvironment(performance.now());
 	}
 
 	#receiveDynamic(event: DynamicEntityEvent, receivedAtMs: number): void {
@@ -1849,18 +1904,35 @@ export class ClientPresentationSession {
 		if (owner !== null) owner.runtime.clearSceneInterest();
 	}
 
-	#applyServerEnvironment(serverTime: number | null): void {
+	#bindEnvironment(): void {
 		const owner = this.#owner;
-		if (owner === null || serverTime === null) return;
-		const selection = resolveClientEnvironmentSelection(
+		const sources = this.#environmentSources;
+		if (owner === null || sources === null) return;
+		const binding = bindClientPresentationEnvironment(
+			sources.server,
 			owner.activeRegion,
-			serverTime,
+			this.#environmentOverrides,
 		);
-		// The client protocol currently publishes no weather/player-option override. Authored sky
-		// weather therefore remains the explicit renderer default; wall-clock time is never used.
-		owner.runtime.setSceneEnvironment(
-			resolveSceneEnvironment(owner.activeRegion, selection),
-		);
+		sources.presentation = binding.source;
+		this.#onEnvironmentIssue?.(binding.issue);
+	}
+
+	#refreshEnvironment(timeMs: number): void {
+		const owner = this.#owner;
+		const sources = this.#environmentSources;
+		if (owner === null || sources === null) return;
+		sources.server.refresh(timeMs);
+		this.#lastEnvironmentAtMs = timeMs;
+		this.#applyEnvironment();
+	}
+
+	/** Renderer application is shared by cold binding changes and server-source refresh. */
+	#applyEnvironment(): void {
+		const owner = this.#owner;
+		const sources = this.#environmentSources;
+		if (owner === null || sources === null) return;
+		const sample = sources.presentation.read();
+		if (sample !== null) owner.runtime.setSceneEnvironment(sample.environment);
 	}
 
 	#setStatus(
@@ -1876,30 +1948,6 @@ export class ClientPresentationSession {
 		this.#setStatus("error", errorMessage(error));
 		this.#onError(error);
 	}
-}
-
-/** Convert ACE's synchronized portal-year clock into the region resolver's day selection. */
-export function resolveClientEnvironmentSelection(
-	activeRegion: ActiveRegionSource,
-	serverTime: number,
-): {
-	readonly dayIndex: number;
-	readonly timeOfDay: number;
-	readonly dayGroupOverride: null;
-} {
-	if (!Number.isFinite(serverTime)) {
-		throw new Error("Client server time must be finite.");
-	}
-	const { dayLength, zeroTimeOfYear } = activeRegion.data.calendar;
-	const elapsed = serverTime + zeroTimeOfYear;
-	if (elapsed < 0) {
-		throw new Error("Client server time precedes the active-region calendar.");
-	}
-	return {
-		dayIndex: Math.floor(elapsed / dayLength),
-		timeOfDay: resolveDayFraction(elapsed, dayLength),
-		dayGroupOverride: null,
-	};
 }
 
 function clientSceneInterestTarget(

@@ -56,7 +56,6 @@ class FakeInspectionSession {
 		return {
 			lifecycle: { kind: "in-world" },
 			playerGuid: 0x5000_0001,
-			serverTime: null,
 			worldGeneration: 1,
 			worldName: null,
 			playerName: null,

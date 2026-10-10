@@ -1,4 +1,4 @@
-import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
+import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 import type {
 	FrameSettings,
 	RendererFrameDiagnosticsSnapshot,
@@ -49,7 +49,7 @@ export interface ExplorerFrameDiagnosticReport {
 		readonly yawRadians: number;
 	} | null;
 	readonly capturedAt: string;
-	readonly environment: ExplorerEnvironmentSelection;
+	readonly environment: SceneEnvironmentSelection;
 	readonly frame: RendererFrameDiagnosticsSnapshot;
 	readonly frameSettings: FrameSettings;
 	readonly sceneInterest: ExplorerSceneInterestSnapshot | null;
@@ -63,7 +63,7 @@ export interface ExplorerFrameDiagnosticReportInput {
 	readonly camera: FreeFlyCameraState | null;
 	readonly cameraLocation: ExplorerCameraLocation | null;
 	readonly capturedAt: string;
-	readonly environment: ExplorerEnvironmentSelection;
+	readonly environment: SceneEnvironmentSelection;
 	readonly frame: RendererFrameDiagnosticsSnapshot;
 	readonly frameSettings: FrameSettings;
 	readonly sceneInterest: ExplorerSceneInterestSnapshot | null;

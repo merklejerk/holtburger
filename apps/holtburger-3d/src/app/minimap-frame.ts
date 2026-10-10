@@ -31,6 +31,14 @@ export type MinimapSubject =
 			readonly anchor: MapAnchor;
 	  };
 
+/** Complete below-disc geometry, reported by the shared footer to its placement owner. */
+export interface MinimapFooterExtent {
+	/** Full centered footer width, including any overhang beyond the disc. */
+	readonly width: number;
+	/** Space below the disc, including padding and gaps between readout rows. */
+	readonly height: number;
+}
+
 /** Minimap geometry and view choices, owned by whichever shell mounts the widget. */
 export interface MinimapState {
 	readonly left: number;

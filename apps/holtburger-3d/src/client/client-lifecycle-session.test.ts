@@ -17,7 +17,7 @@ import {
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import inspectionFixture from "./fixtures/object-inspection-wire.json";
 
 import { landblockVector3 } from "../lib/assets/ac-frame";
@@ -83,6 +83,52 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("discards time observed during a failed startup before allowing a retry", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const invoke = vi
+			.spyOn(transport, "invoke")
+			.mockImplementationOnce(async () => {
+				transport.emit("client-server-time-updated", { time: 300 });
+				expect(session.readServerTime(performance.now())).not.toBeNull();
+				throw new Error("Snapshot request failed.");
+			});
+		try {
+			await expect(session.start()).rejects.toThrow("Snapshot request failed.");
+			expect(session.readServerTime(performance.now())).toBeNull();
+			await session.start();
+			expect(session.readServerTime(performance.now())).not.toBeNull();
+		} finally {
+			session.stop();
+			invoke.mockRestore();
+		}
+	});
+	it("anchors synchronized time at receipt, advances across late mounts, and clears on stop", async () => {
+		const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+		try {
+			const transport = new FakeClientTransport();
+			const session = new ClientLifecycleSession(transport);
+			expect(session.readServerTime(1000)).toBeNull();
+			await session.start();
+			const baseline = session.readServerTime(1000);
+			if (baseline === null) throw new Error("Fixture time missing.");
+			expect(session.readServerTime(21_000)).toBe(baseline + 20);
+			now.mockReturnValue(21_000);
+			transport.emit("client-server-time-updated", { time: 300 });
+			expect(session.readServerTime(26_000)).toBe(305);
+			transport.setCurrentState({
+				...currentState(0x5000_0001),
+				serverTime: null,
+			});
+			await session.requestCurrentState();
+			expect(session.readServerTime(26_000)).toBeNull();
+			transport.emit("client-server-time-updated", { time: 400 });
+			session.stop();
+			expect(session.readServerTime(26_000)).toBeNull();
+		} finally {
+			now.mockRestore();
+		}
+	});
 	it("routes allegiance facts, preferences, commands, portal retention and character retirement", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1329,7 +1375,6 @@ describe("ClientLifecycleSession", () => {
 
 		expect(session.state()).toMatchObject({
 			lifecycle: { kind: "exiting", cause: "server-disconnect" },
-			serverTime: 12.5,
 			worldGeneration: 4,
 			playerGuid: 9,
 			playerName: "Mira",

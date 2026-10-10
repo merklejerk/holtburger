@@ -28,6 +28,12 @@
 		audio={defaults.audio}
 		graphics={defaults.graphics}
 		ui={defaults.ui}
+		clockFormat={defaults.clockFormat}
+		environmentOverrides={defaults.environmentOverrides}
+		weatherPresets={[]}
+		environmentIssue={null}
+		onClockFormatChange={() => undefined}
+		onEnvironmentOverridesChange={() => undefined}
 		{input}
 		displayPlatform="windows"
 		textureFilteringCapabilities={null}

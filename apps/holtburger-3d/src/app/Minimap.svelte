@@ -40,7 +40,7 @@
 
 <script lang="ts">
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
-	import { onDestroy, onMount } from "svelte";
+	import { onDestroy, onMount, type Snippet } from "svelte";
 	import LayoutControls from "./LayoutControls.svelte";
 
 	import { trackPointerGesture } from "./pointer-gesture";
@@ -67,6 +67,7 @@
 		minimapViewDiameter,
 		sameMinimapGpuDrawState,
 		type MinimapFrame,
+		type MinimapFooterExtent,
 		type MinimapGpuDrawState,
 		type MinimapState,
 		type MinimapSubject,
@@ -154,6 +155,10 @@
 		readonly onStateChange: (state: MinimapState) => void;
 		/** Apply one completed marker click, or clear selection for an empty click. */
 		readonly onSelectEntity: (guid: number | null) => void;
+		/** Mode-owned content beneath the shared coordinate readout. */
+		readonly footer?: Snippet;
+		/** Complete below-disc footprint, consumed by client placement and anchoring. */
+		readonly onFooterExtentChange?: (extent: MinimapFooterExtent) => void;
 	}
 
 	const {
@@ -164,6 +169,8 @@
 		resizable,
 		onStateChange,
 		onSelectEntity,
+		footer,
+		onFooterExtentChange,
 	}: Props = $props();
 
 	/** No faster than this; only the expensive WebGL map picture is cadence-limited. */
@@ -175,6 +182,7 @@
 	let northGroup = $state<SVGGElement | null>(null);
 	let freeAnchorElement = $state<SVGCircleElement | null>(null);
 	let coordinatesElement = $state<HTMLSpanElement | null>(null);
+	let footerElement = $state<HTMLDivElement | null>(null);
 	let tooltip = $state<BlipTooltip | null>(null);
 	/** Cold markup projection; cursor-rate pan coordinates remain in imperative `minimapPanState`. */
 	let minimapDetached = $state(false);
@@ -192,6 +200,14 @@
 	});
 
 	onMount(() => {
+		const element = footerElement;
+		const observer = new ResizeObserver(() => {
+			if (element !== null) {
+				const { width, height } = element.getBoundingClientRect();
+				onFooterExtentChange?.({ width, height });
+			}
+		});
+		if (element !== null) observer.observe(element);
 		let frameHandle: number | undefined;
 		let lastGpuAttemptedAt = Number.NEGATIVE_INFINITY;
 		let lastGpuDrawn: MinimapGpuDrawState | null = null;
@@ -225,6 +241,7 @@
 		};
 		frameHandle = window.requestAnimationFrame(step);
 		return () => {
+			observer.disconnect();
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			renderer?.destroy();
 			renderer = null;
@@ -862,8 +879,11 @@
 			onresize={beginResize}
 		/>
 	{/if}
-	<span bind:this={coordinatesElement} class="minimap-coordinates ui-readout"
-	></span>
+	<div bind:this={footerElement} class="minimap-footer">
+		<span bind:this={coordinatesElement} class="minimap-coordinates ui-readout"
+		></span>
+		{#if footer}{@render footer()}{/if}
+	</div>
 </section>
 
 <style>
@@ -966,16 +986,23 @@
 			cursor: pointer;
 		}
 
-		.minimap-coordinates {
+		.minimap-footer {
 			position: absolute;
 			top: 100%;
 			left: 50%;
-			margin-top: 10px;
+			padding-top: 10px;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: 4px;
+			transform: translateX(-50%);
+		}
+
+		.minimap-coordinates {
 			padding: 4px 10px;
 			font-variant-numeric: tabular-nums;
 			line-height: 1.15;
 			white-space: nowrap;
-			transform: translateX(-50%);
 		}
 	}
 </style>

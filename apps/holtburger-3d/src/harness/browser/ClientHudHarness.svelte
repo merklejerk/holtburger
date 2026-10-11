@@ -988,8 +988,10 @@
 		activeItemUseProbe = fixture;
 		return fixture;
 	}
-	const probeInventory = () =>
-		probeClientInventory({
+	const probeInventory = () => {
+		// The inventory baseline has no enchantments; clear the retained HUD fixture too.
+		enchantments = null;
+		return probeClientInventory({
 			readInput: () => userSettings.input,
 			changeInput,
 			emit: emitInteractionEvent,
@@ -1007,6 +1009,7 @@
 				zooms: zoomDeltas.length,
 			}),
 		});
+	};
 
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;

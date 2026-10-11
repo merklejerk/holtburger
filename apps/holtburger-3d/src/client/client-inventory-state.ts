@@ -186,6 +186,14 @@ export class ClientInventoryState {
 			: read.level.projectileSupply;
 	}
 
+	/** Local-player world ratio for bounded HUD sampling, without sorting inventory contents. */
+	readBurden(): number | null {
+		this.#refresh();
+		if (this.#pending) return null;
+		const description = this.#baseline?.membership?.root.description;
+		return description?.kind === "known" ? description.burden : null;
+	}
+
 	cycleSort(): void {
 		this.#sortMode = nextContentsSortMode(this.#sortMode);
 		this.#view = null;

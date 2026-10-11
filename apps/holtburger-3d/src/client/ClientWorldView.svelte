@@ -1012,17 +1012,18 @@
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} {readConnection} />
 	</ClientHudPanel>
-	{#if hudMode === "layout" || enchantmentKinds.beneficial || enchantmentKinds.harmful}
-		<ClientStatusTray
-			placement={hudLayout.statusTray}
-			editable={hudMode === "layout"}
-			{viewport}
-			kinds={enchantmentKinds}
-			onOpenEnchantments={openEnchantments}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("statusTray", placement)}
-		/>
-	{/if}
+	<ClientStatusTray
+		placement={hudLayout.statusTray}
+		editable={hudMode === "layout"}
+		{viewport}
+		{inventory}
+		kinds={enchantmentKinds}
+		onOpenEnchantments={openEnchantments}
+		onOpenInventory={() => (activePanel = "inventory")}
+		onPlacementChange={(placement) =>
+			changeHudPlacement("statusTray", placement)}
+	/>
+
 	{#if jumpChargeActive || hudMode === "layout"}
 		<ClientHudPanel
 			label="Jump power"

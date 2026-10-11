@@ -394,10 +394,14 @@ export async function probeClientInventory(options: {
 		[null, "pending", "…"],
 		[0, "normal", "0%"],
 		[0.73, "normal", "73%"],
+		[0.99, "normal", "99%"],
 		[1, "burdened", "100%"],
 		[1.5, "burdened", "150%"],
+		[1.99, "burdened", "199%"],
 		[2, "overburdened", "200%"],
 		[3, "overburdened", "300%"],
+		[1.25, "burdened", "125%"],
+		[0.5, "normal", "50%"],
 		[null, "pending", "…"],
 	] as const) {
 		update({
@@ -412,6 +416,30 @@ export async function probeClientInventory(options: {
 				`Burden: ${burden === null ? "Loading" : label}`
 		)
 			throw new Error(`Inventory burden did not display ${level}: ${label}.`);
+		const warning = document.querySelector<HTMLButtonElement>(".burden-icon");
+		const encumbered = level === "burdened" || level === "overburdened";
+		if (encumbered) {
+			const severity =
+				level === "overburdened" ? "Heavily encumbered" : "Encumbered";
+			if (
+				warning === null ||
+				warning.dataset.level !== level ||
+				!warning.title.startsWith(`${severity} — ${label} burden`) ||
+				!warning.title.includes("Click to open Inventory.") ||
+				(warning.querySelector(".burden-severity") !== null) !==
+					(level === "overburdened")
+			)
+				throw new Error(
+					`HUD burden warning did not display ${severity}: ${label}.`,
+				);
+		} else if (
+			warning !== null ||
+			document.querySelector('[aria-label="Status tray"]') !== null
+		) {
+			throw new Error(
+				"Unencumbered/unknown burden left an empty status tray visible.",
+			);
+		}
 		if (level !== "pending") {
 			const knob =
 				level === "normal"
@@ -430,6 +458,23 @@ export async function probeClientInventory(options: {
 			);
 		}
 	}
+	// Warning maintenance must remain active while the retained Inventory window is closed.
+	button("Close Inventory").click();
+	update({
+		...playerRecord,
+		description: { ...playerRecord.description, burden: 2.15 },
+	});
+	await sample();
+	const closedPanelWarning =
+		document.querySelector<HTMLButtonElement>(".burden-icon");
+	if (closedPanelWarning?.dataset.level !== "overburdened")
+		throw new Error("HUD burden did not update while Inventory was closed.");
+	closedPanelWarning.click();
+	await sample();
+	if (button("Inventory").getAttribute("aria-pressed") !== "true")
+		throw new Error("HUD burden warning did not open Inventory.");
+	update(playerRecord);
+	await sample();
 	const firstMainItem = () =>
 		document
 			.querySelector('[data-container-guid="1"] .contents-grid .item-grid-cell')
@@ -1731,6 +1776,8 @@ export async function probeClientInventory(options: {
 	await sample();
 
 	return {
+		burdenWarnings: true,
+		burdenWarningOpensInventory: true,
 		equipmentHover: true,
 		dropSelectionPreserved: true,
 		equipmentStrip: true,

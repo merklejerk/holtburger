@@ -59,6 +59,9 @@ import type {
 import { generateTerrain } from "../terrain/terrain-generator";
 import { validateTerrainGenerationValues } from "../terrain/terrain-generation-validation";
 import { compileTerrainCompositionTable } from "../terrain/composition-table";
+import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/client-tuning";
+import type { CombatEffectInstance } from "../systems/combat-effects-system";
+import { SceneGraph } from "../scene";
 import { resolveTerrainMaterialTable } from "../terrain/terrain-materials";
 import { resolveTerrainTextureFacts } from "../terrain/types";
 import {
@@ -1098,6 +1101,163 @@ describe("GamePresentationRuntime server sounds", () => {
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {
+	it.each([false, true])(
+		"anchors combat text at the mesh center inside an inflated culling envelope (critical: %s)",
+		async (criticalHit) => {
+			const meshHeight = 2;
+			const envelopeHeight = 100;
+			const raisedFrame = Mat4.identity();
+			raisedFrame.m42 = envelopeHeight;
+			let instances: readonly CombatEffectInstance[] = [];
+			const runtime = await buildSpawnRuntime(
+				{ load: async () => appearanceVisual(meshHeight) },
+				{
+					...ANIMATION_SOURCE,
+					async loadAnimation(id) {
+						return {
+							id,
+							frameCount: 2,
+							partCount: 1,
+							hooks: [],
+							positionFrames: [],
+							partFrames: [raisedFrame, Mat4.identity()],
+						};
+					},
+				},
+				testRenderer({
+					combatEffects: {
+						create: () => ({
+							setAppearance: vi.fn(),
+							refreshFontAtlas: vi.fn(),
+							submit: (value) => {
+								instances = [...value];
+							},
+							clear() {},
+							release() {},
+						}),
+					},
+				}),
+			);
+			onTestFinished(() => runtime.destroy());
+			const publishedHeights: number[] = [];
+			const updateBounds = SceneGraph.prototype.updateBounds;
+			const publishBounds = vi
+				.spyOn(SceneGraph.prototype, "updateBounds")
+				.mockImplementation(function (this: SceneGraph, nodeId, bounds) {
+					// The producer reuses its AABB scratch; retain the scalar at publication time.
+					if (bounds !== null) publishedHeights.push(bounds.max.y);
+					updateBounds.call(this, nodeId, bounds);
+				});
+			onTestFinished(() => publishBounds.mockRestore());
+			const entity = spawnedEntity(7, 3);
+			if (entity.placement.kind !== "world")
+				throw new Error("Fixture requires world placement.");
+			await runtime.replaceDynamicEntitySnapshot([entity]);
+			// Verify the fixture really publishes the oversized envelope that caused offscreen feedback.
+			expect(publishedHeights.some((height) => height >= envelopeHeight)).toBe(
+				true,
+			);
+			runtime.acceptCombatOutcome(
+				{ kind: "damage", amount: 17, criticalHit },
+				7,
+				CLIENT_COMBAT_EFFECTS_TUNING,
+				100,
+			);
+			expect(instances).toHaveLength(1);
+			const placement = instances[0].placement;
+			if (placement.kind !== "world")
+				throw new Error("Expected captured world placement.");
+			expect(placement.position[1]).toBeCloseTo(
+				entity.placement.pose.coords.z + meshHeight * 0.5,
+			);
+		},
+	);
+
+	it("keeps captured combat placement after removal, ages without drawing, and releases before renderer teardown", async () => {
+		let instances: readonly CombatEffectInstance[] = [];
+		const release = vi.fn();
+		const create = vi.fn(() => ({
+			setAppearance: vi.fn(),
+			refreshFontAtlas: vi.fn(),
+			submit: (value: readonly CombatEffectInstance[]) => {
+				instances = [...value];
+			},
+			clear: () => {
+				instances = [];
+			},
+			release,
+		}));
+		const runtime = await buildSpawnRuntime(
+			{
+				load: async () => ({
+					...spawnedVisual(),
+					localBounds: new AABB3(new Vec3(-1, -1, 0), new Vec3(1, 1, 2)),
+				}),
+			},
+			ANIMATION_SOURCE,
+			testRenderer({
+				combatEffects: { create },
+				destroy: async () => {
+					expect(release).toHaveBeenCalledTimes(1);
+				},
+			}),
+		);
+		onTestFinished(() => runtime.destroy());
+		expect(create).not.toHaveBeenCalled();
+		const entity = spawnedEntity(7, 3);
+		await runtime.replaceDynamicEntitySnapshot([entity]);
+		const now = vi.spyOn(performance, "now").mockReturnValue(100);
+		onTestFinished(() => now.mockRestore());
+		const tuning = {
+			...CLIENT_COMBAT_EFFECTS_TUNING,
+			lifetimeMs: 100,
+			popMs: 20,
+			fadeMs: 30,
+		};
+		runtime.acceptCombatOutcome(
+			{ kind: "damage", amount: 9999, criticalHit: true },
+			7,
+			tuning,
+			100,
+		);
+		expect(create).toHaveBeenCalledTimes(1);
+		expect(instances).toHaveLength(1);
+		const captured = instances[0].placement;
+		expect(captured.kind).toBe("world");
+		if (captured.kind !== "world")
+			throw new Error("Expected captured world placement.");
+		expect(captured.scopes).toEqual([{ kind: "outdoor" }]);
+		runtime.removeDynamicEntity(7, 3);
+		now.mockReturnValue(110);
+		runtime.pollPortalTransitionLoading();
+		expect(instances[0].progress).toBe(0);
+		runtime.advanceCombatEffects(110);
+		expect(instances[0].progress).toBeCloseTo(10 / tuning.lifetimeMs);
+		expect(instances[0].placement).toEqual(captured);
+		expect(instances[0].profile).toBe("critical");
+		runtime.acceptCombatOutcome(
+			{ kind: "damage", amount: 9999, criticalHit: false },
+			7,
+			tuning,
+			110,
+		);
+		expect(instances[1].placement).toEqual({ kind: "unplaced" });
+		expect(instances[1].profile).toBe("damage");
+		now.mockReturnValue(210);
+		runtime.pollPortalTransitionLoading();
+		runtime.advanceCombatEffects(210);
+		expect(instances).toHaveLength(0);
+		runtime.acceptCombatOutcome({ kind: "evaded" }, null, tuning, 210);
+		expect(instances[0].profile).toBe("avoidance");
+		runtime.clearCombatEffects();
+		expect(instances).toHaveLength(0);
+		expect(release).not.toHaveBeenCalled();
+		await runtime.destroy();
+		expect(release).toHaveBeenCalledTimes(1);
+		runtime.acceptCombatOutcome({ kind: "evaded" }, null, tuning, 211);
+		expect(create).toHaveBeenCalledTimes(1);
+	});
+
 	it("resolves and executes a live script cue for the installed generation", async () => {
 		const tableId = "0x34000001" as DatAssetId;
 		const scriptId = "0x33000001" as DatAssetId;

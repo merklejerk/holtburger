@@ -1,3 +1,4 @@
+import type { ClientCombatOutcome } from "../../client/client-host-contract";
 import type {
 	ContractsSnapshot,
 	ContractMembershipChange,
@@ -282,6 +283,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-combat-status-updated",
 	"client-entity-health-updated",
 	"client-chat-message",
+	"client-combat-outcome",
 	"client-action-feedback",
 	"client-transient-string",
 	"client-popup-string",
@@ -404,6 +406,7 @@ export interface HostEventPayloadMap {
 	};
 	"client-progression-feedback": ProgressionFeedback;
 	"client-chat-message": ClientChatMessage;
+	"client-combat-outcome": ClientCombatOutcome;
 	"client-action-feedback": ClientActionFeedback;
 	"client-transient-string": ClientServerText;
 	"client-popup-string": ClientServerText;

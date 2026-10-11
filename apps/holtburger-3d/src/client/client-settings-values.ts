@@ -22,3 +22,26 @@ export const CLIENT_FONT_FAMILY_CSS: Readonly<
 	serif: 'Georgia, "Times New Roman", serif',
 	mono: '"Courier New", monospace',
 };
+
+/** Fixed recovery buffer prevents warning flicker near the user's threshold. */
+export const CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT = 5;
+/** Remaining-vital percentage limits apply to each vital's glow and veins. */
+export const CLIENT_VITAL_WARNING_PERCENT = {
+	initial: 20,
+	minimum: 1,
+	maximum: 100 - CLIENT_VITAL_WARNING_RECOVERY_MARGIN_PERCENT,
+	step: 1,
+} as const;
+
+/** Canonical vital order and labels for the warning controls and policy. */
+export const CLIENT_VITAL_WARNING_KINDS = [
+	{ kind: "health", label: "Health" },
+	{ kind: "stamina", label: "Stamina" },
+	{ kind: "mana", label: "Mana" },
+] as const;
+/** Absence defaults for independently saved vital percentages. */
+export const CLIENT_VITAL_WARNING_THRESHOLDS = {
+	health: CLIENT_VITAL_WARNING_PERCENT.initial,
+	stamina: CLIENT_VITAL_WARNING_PERCENT.initial,
+	mana: CLIENT_VITAL_WARNING_PERCENT.initial,
+} as const;

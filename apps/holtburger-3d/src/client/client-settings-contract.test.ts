@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import {
 	clientAudioSettingsSchema,
+	clientUiSettingsSchema,
 	clientCharacterSettingsSchema,
 	clientUserSettingsSchema,
 } from "./client-settings-contract";
@@ -16,9 +17,49 @@ import {
 	clientKeyboardSettingsSchema,
 } from "./client-input-settings";
 
+import {
+	CLIENT_VITAL_WARNING_PERCENT,
+	CLIENT_VITAL_WARNING_THRESHOLDS,
+} from "./client-settings-values";
+
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("adds warning thresholds to older UI profiles while preserving font choices", () => {
+		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
+		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({
+			fonts,
+			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
+		});
+	});
+	it.each(["health", "stamina", "mana"] as const)(
+		"validates and preserves the %s threshold",
+		(kind) => {
+			const fonts = { body: "theme", heading: "theme", mono: "theme" } as const;
+			for (const value of [
+				CLIENT_VITAL_WARNING_PERCENT.minimum - 1,
+				CLIENT_VITAL_WARNING_PERCENT.maximum + 1,
+				12.5,
+				NaN,
+				Infinity,
+			]) {
+				expect(
+					clientUiSettingsSchema.safeParse({
+						fonts,
+						vitalWarningThresholds: {
+							...CLIENT_VITAL_WARNING_THRESHOLDS,
+							[kind]: value,
+						},
+					}).success,
+				).toBe(false);
+			}
+			const vitalWarningThresholds = { health: 35, stamina: 15, mana: 25 };
+			expect(
+				clientUiSettingsSchema.parse({ fonts, vitalWarningThresholds })
+					.vitalWarningThresholds,
+			).toEqual(vitalWarningThresholds);
+		},
+	);
 	it("adds split-stack to older keyboard maps while retaining customized keys", () => {
 		const { splitStack, ...olderClient } = CLIENT_KEYBOARD_DEFAULTS.client;
 		const previous = {

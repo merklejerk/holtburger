@@ -38,6 +38,17 @@
 		--ui-color-health: #dc796a;
 		--ui-color-stamina: #dfbd63;
 		--ui-color-mana: #87bddd;
+		/* Vital warnings inherit the vital palette. Opacities are fixed while active. */
+		--ui-vital-warning-health-opacity: 0.6;
+		--ui-vital-warning-stamina-opacity: 0.5;
+		--ui-vital-warning-mana-opacity: 0.5;
+		/* Vein opacity and pulse trough multiply the selected vital's opacity. */
+		--ui-vital-warning-vein-opacity: 0.85;
+		--ui-vital-warning-pulse-duration: 1800ms;
+		--ui-vital-warning-pulse-minimum-opacity: 0.55;
+		/* Corner width/height relative to the viewport; gradient's transparent stop. */
+		--ui-vital-warning-vein-corner-size: 32%;
+		--ui-vital-warning-glow-clear-extent: 55%;
 		/* Spell shortcuts have their own palette and backing opacity, independent of vitals. */
 		--ui-spell-bar-color: #87bddd;
 		--ui-spell-cell-background-opacity: 27%;

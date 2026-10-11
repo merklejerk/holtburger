@@ -37,6 +37,8 @@
 	} from "./client-settings-contract";
 	import {
 		CLIENT_FONT_FAMILY_OPTIONS,
+		CLIENT_VITAL_WARNING_PERCENT,
+		CLIENT_VITAL_WARNING_KINDS,
 		CLIENT_GRAPHICS_RANGES,
 		type ClientFontFamily,
 	} from "./client-settings-values";
@@ -553,8 +555,39 @@
 					</div>
 				</details>
 				<details class="ui-disclosure ui-disclosure-section" open>
-					<summary>Scaling</summary>
+					<summary>Vital warnings</summary>
 					<div class="settings-section ui-disclosure-body">
+						{#each CLIENT_VITAL_WARNING_KINDS as vital}
+							<label
+								>{vital.label} threshold: {ui.vitalWarningThresholds[
+									vital.kind
+								]}%
+								<input
+									type="range"
+									aria-label={`${vital.label} warning threshold`}
+									min={CLIENT_VITAL_WARNING_PERCENT.minimum}
+									max={CLIENT_VITAL_WARNING_PERCENT.maximum}
+									step={CLIENT_VITAL_WARNING_PERCENT.step}
+									value={ui.vitalWarningThresholds[vital.kind]}
+									oninput={(event) =>
+										onUiChange({
+											...ui,
+											vitalWarningThresholds: {
+												...ui.vitalWarningThresholds,
+												[vital.kind]: event.currentTarget.valueAsNumber,
+											},
+										})}
+								/>
+							</label>
+						{/each}
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Scaling</summary>
+					<div
+						id="settings-ui-scaling"
+						class="settings-section ui-disclosure-body"
+					>
 						<label
 							>Text scaling (planned)
 							<input type="range" min="50" max="200" value="100" disabled />

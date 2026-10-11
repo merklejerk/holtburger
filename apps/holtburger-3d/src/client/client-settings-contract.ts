@@ -1,4 +1,5 @@
 import { z } from "zod";
+
 import {
 	normalizeSpellTab,
 	SPELL_BAR_INDICES,
@@ -9,6 +10,8 @@ import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes.js
 import { TEXTURE_FILTERING_POLICIES } from "../lib/game/renderer/texture-filtering-policy.js";
 import {
 	CLIENT_FONT_FAMILY_OPTIONS,
+	CLIENT_VITAL_WARNING_PERCENT,
+	CLIENT_VITAL_WARNING_THRESHOLDS,
 	CLIENT_GRAPHICS_RANGES,
 } from "./client-settings-values.js";
 import { clientKeyboardSettingsSchema } from "./client-input-settings.js";
@@ -121,9 +124,34 @@ export type ClientGraphicsSettings = z.infer<
 	typeof clientGraphicsSettingsSchema
 >;
 
-/** User-scoped font roles; scaling remains an intentionally disabled UI control. */
+/** Each vital's remaining-percentage threshold activates its glow and veins together. */
+const vitalWarningPercentSchema = z
+	.number()
+	.int()
+	.min(CLIENT_VITAL_WARNING_PERCENT.minimum)
+	.max(CLIENT_VITAL_WARNING_PERCENT.maximum);
+const clientVitalWarningThresholdsSchema = z
+	.object({
+		/** Remaining health percentage that activates the warning. */
+		health: vitalWarningPercentSchema,
+		/** Remaining stamina percentage that activates the warning. */
+		stamina: vitalWarningPercentSchema,
+		/** Remaining mana percentage that activates the warning. */
+		mana: vitalWarningPercentSchema,
+	})
+	.strict()
+	.readonly();
+export type ClientVitalWarningThresholds = z.infer<
+	typeof clientVitalWarningThresholdsSchema
+>;
+
+/** User-scoped fonts and vital warning thresholds; scaling remains planned. */
 export const clientUiSettingsSchema = z
 	.object({
+		/** Profiles without warnings get the same thresholds as first-run settings. */
+		vitalWarningThresholds: clientVitalWarningThresholdsSchema.default(
+			CLIENT_VITAL_WARNING_THRESHOLDS,
+		),
 		fonts: z
 			.object({
 				body: z.enum(CLIENT_FONT_FAMILY_OPTIONS),

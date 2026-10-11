@@ -60,6 +60,7 @@
 		MinimapState,
 		MinimapFooterExtent,
 	} from "../app/minimap-frame";
+	import ClientVitalWarningOverlay from "./ClientVitalWarningOverlay.svelte";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientCharacterSheetPanel from "./ClientCharacterSheetPanel.svelte";
 	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
@@ -302,6 +303,8 @@
 		/** Imperative transport display reader, independent of world presentation. */
 		readonly readConnection: () => ClientConnectionObservation | null;
 		readonly vitals: readonly ClientVital[];
+		/** Lifecycle-owned permission to present critical-vital warnings. */
+		readonly vitalWarningsEnabled: boolean;
 		readonly appearanceOptions: ClientAppearanceOptions | null;
 		readonly onAppearanceOptionChange: (
 			option: ClientAppearanceOption,
@@ -433,6 +436,7 @@
 		playerName,
 		worldName,
 		vitals,
+		vitalWarningsEnabled,
 		readConnection,
 		appearanceOptions,
 		onAppearanceOptionChange,
@@ -893,6 +897,13 @@
 		onlostpointercapture={cancelViewportPointer}
 		onwheel={handleWheel}
 	></canvas>
+	{#key characterGuid}
+		<ClientVitalWarningOverlay
+			{vitals}
+			enabled={vitalWarningsEnabled}
+			thresholds={ui.vitalWarningThresholds}
+		/>
+	{/key}
 	<ClientTargetIndicator
 		readFrame={readTargetIndicatorFrame}
 		selectedGuid={selectedEntityGuid}

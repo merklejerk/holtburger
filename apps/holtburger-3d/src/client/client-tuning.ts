@@ -38,6 +38,10 @@ const CLIENT_PORTAL_TRANSITION = {
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
+	/** Critical-vital arbitration; theme tokens own screen-edge appearance. */
+	vitalWarning: {
+		selectionMargin: 0.03,
+	},
 	/** One-second journal countdown resolution; independent of scene cadence. */
 	journal: {
 		displayIntervalMs: 1_000,

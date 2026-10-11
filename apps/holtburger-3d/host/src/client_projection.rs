@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 
 use holtburger_common::{CharacterOption, Guid, stats::VitalType};
-use holtburger_core::client::types::{ChatChannelKind, ChatSpeakerKind, CombatFeedback};
+use holtburger_core::client::types::{
+    ChatChannelKind, ChatSpeakerKind, CombatFeedback, CombatOutcomeContext,
+    ServerTextCombatOutcomeKind,
+};
 use holtburger_core::errors::{
     format_action_result_message, format_entity_use_feedback, format_weenie_error,
     is_actually_weenie_error,
@@ -22,6 +25,34 @@ use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::book::BookData;
 use holtburger_world::stats::Vital;
 use serde::Serialize;
+
+/// Confirmed outgoing combat outcome consumed by h3d's combat effects owner.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientCombatOutcomeKindWire {
+    /// Confirmed amount and critical styling, including zero damage.
+    Damage { amount: u32, critical_hit: bool },
+    /// Explicit defender evasion; not an inferred absence of damage.
+    Evaded,
+    /// Explicit spell resistance; distinct from physical evasion.
+    Resisted,
+}
+
+/// Producer identity and attribution accompany one transient outcome.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatOutcomeWire {
+    /// Generation stamped at core receipt, not transport publication.
+    pub world_generation: u64,
+    /// Read-only best-effort attribution from the shared combat owner.
+    pub attribution: holtburger_core::client::types::CombatOutcomeAttribution,
+    /// Narrow presentation payload; complete combat facts remain in core feedback.
+    pub outcome: ClientCombatOutcomeKindWire,
+}
 
 /// Reader facts projected from retained world book data; editing metadata stays server-side.
 #[derive(Debug, Clone, Serialize)]
@@ -1065,6 +1096,11 @@ pub enum ClientHostEvent {
     },
     ActionFeedback(ClientActionFeedback),
     ChatMessage(ClientChatMessageWire),
+    /// Adapter expands one confirmed outcome into chat and visual feedback in order.
+    CombatFeedback {
+        chat: ClientChatMessageWire,
+        outcome: ClientCombatOutcomeWire,
+    },
     DynamicEntity(DynamicEntityEvent),
     DynamicScriptCue(ClientDynamicScriptCue),
     DynamicSoundCue(ClientDynamicSoundCue),
@@ -1534,9 +1570,33 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::TransientString { message })
         }
         ClientViewEvent::PopupString { message } => Some(ClientHostEvent::PopupString { message }),
-        ClientViewEvent::ServerMessage { message, chat_type } => Some(
-            ClientHostEvent::ChatMessage(project_server_message(message, chat_type)),
-        ),
+        ClientViewEvent::ServerMessage {
+            message,
+            chat_type,
+            combat_outcome,
+        } => {
+            let visual = combat_outcome.map(|outcome| {
+                (
+                    outcome.context,
+                    match outcome.kind {
+                        ServerTextCombatOutcomeKind::Damage {
+                            amount,
+                            critical_hit,
+                        } => ClientCombatOutcomeKindWire::Damage {
+                            amount,
+                            critical_hit,
+                        },
+                        ServerTextCombatOutcomeKind::Resisted => {
+                            ClientCombatOutcomeKindWire::Resisted
+                        }
+                    },
+                )
+            });
+            Some(project_chat_with_outcome(
+                project_server_message(message, chat_type),
+                visual,
+            ))
+        }
         ClientViewEvent::Chat {
             speaker, message, ..
         } => {
@@ -1580,9 +1640,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 message: text,
             }))
         }
-        ClientViewEvent::CombatFeedback(feedback) => {
-            project_combat_feedback(feedback).map(ClientHostEvent::ChatMessage)
-        }
+        ClientViewEvent::CombatFeedback(feedback) => project_combat_feedback_event(feedback),
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
         ClientViewEvent::DynamicSoundCue(cue) => Some(ClientHostEvent::DynamicSoundCue(cue)),
         ClientViewEvent::DynamicScriptCue(cue) => Some(ClientHostEvent::DynamicScriptCue(cue)),
@@ -1616,9 +1674,51 @@ fn project_server_message(message: String, chat_type: ChatMessageTypeId) -> Clie
     }
 }
 
+/// Preserve one projection per core event while the transport adapter handles fan-out.
+fn project_combat_feedback_event(feedback: CombatFeedback) -> Option<ClientHostEvent> {
+    let chat = project_combat_feedback(&feedback)?;
+    let visual = match &feedback {
+        CombatFeedback::AttackerNotification {
+            context,
+            damage,
+            critical_hit,
+            ..
+        } => Some((
+            *context,
+            ClientCombatOutcomeKindWire::Damage {
+                amount: *damage,
+                critical_hit: *critical_hit,
+            },
+        )),
+        CombatFeedback::EvasionAttackerNotification { context, .. } => {
+            Some((*context, ClientCombatOutcomeKindWire::Evaded))
+        }
+        _ => None,
+    };
+    Some(project_chat_with_outcome(chat, visual))
+}
+
+/// One shared composite construction keeps generation/attribution intact for both sources.
+fn project_chat_with_outcome(
+    chat: ClientChatMessageWire,
+    visual: Option<(CombatOutcomeContext, ClientCombatOutcomeKindWire)>,
+) -> ClientHostEvent {
+    match visual {
+        Some((context, outcome)) => ClientHostEvent::CombatFeedback {
+            chat,
+            outcome: ClientCombatOutcomeWire {
+                world_generation: context.world_generation,
+                attribution: context.attribution,
+                outcome,
+            },
+        },
+        None => ClientHostEvent::ChatMessage(chat),
+    }
+}
+
 /// Projects shared player-facing combat feedback; attack lifecycle edges remain diagnostics only.
-fn project_combat_feedback(feedback: CombatFeedback) -> Option<ClientChatMessageWire> {
-    combat_feedback_message(&feedback).map(|message| {
+fn project_combat_feedback(feedback: &CombatFeedback) -> Option<ClientChatMessageWire> {
+    combat_feedback_message(feedback).map(|message| {
         let (message, emphasized) = message.into_text_and_emphasis();
         ClientChatMessageWire::Combat {
             message,
@@ -2507,6 +2607,7 @@ mod tests {
     #[test]
     fn combat_typed_server_message_remains_filterable_combat() {
         let projected = project_client_event(ClientViewEvent::ServerMessage {
+            combat_outcome: None,
             message: "You enter combat.".to_string(),
             chat_type: ChatMessageType::Combat.into(),
         });
@@ -2526,6 +2627,10 @@ mod tests {
     fn combat_damage_projects_as_a_typed_chat_line() {
         let projected = project_client_event(ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackerNotification {
+                context: holtburger_core::client::types::CombatOutcomeContext {
+                    world_generation: 0,
+                    attribution: holtburger_core::client::types::CombatOutcomeAttribution::Unplaced,
+                },
                 defender_name: "Drudge".to_string(),
                 damage_type: DamageType::SLASH,
                 health_percent: 0.25,
@@ -2535,18 +2640,29 @@ mod tests {
             },
         ));
 
-        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Combat {
-            message,
-            emphasized,
-        })) = projected
+        let Some(ClientHostEvent::CombatFeedback {
+            chat:
+                ClientChatMessageWire::Combat {
+                    message,
+                    emphasized,
+                },
+            outcome,
+        }) = projected
         else {
-            panic!("combat damage should project to the chat contract");
+            panic!("combat damage should project to chat and outcome contracts");
         };
         assert_eq!(
             message,
             "You hit Drudge for 37 slashing damage. Critical hit. [Recklessness, Sneak Attack]"
         );
         assert!(emphasized);
+        assert!(matches!(
+            outcome.outcome,
+            ClientCombatOutcomeKindWire::Damage {
+                amount: 37,
+                critical_hit: true
+            }
+        ));
     }
 
     #[test]

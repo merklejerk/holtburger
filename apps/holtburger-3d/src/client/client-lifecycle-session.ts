@@ -1,3 +1,7 @@
+import {
+	decodeClientCombatOutcome,
+	type ClientCombatOutcome,
+} from "./client-host-contract";
 import { ClientContractsState } from "./client-contracts-state";
 import {
 	contractsUpdatedSchema,
@@ -324,6 +328,7 @@ type ClientEventName = Extract<
 	| "client-combat-status-updated"
 	| "client-entity-health-updated"
 	| "client-chat-message"
+	| "client-combat-outcome"
 	| "client-transient-string"
 	| "client-popup-string"
 	| "client-confirmation-updated"
@@ -499,6 +504,11 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "vitals"; readonly vitals: readonly ClientVital[] }
 	| { readonly type: "entity-health"; readonly health: ClientEntityHealth }
 	| { readonly type: "chat"; readonly message: ClientChatMessage }
+	| {
+			readonly type: "combat-outcome";
+			readonly outcome: ClientCombatOutcome;
+			readonly receivedAtMs: number;
+	  }
 	| {
 			/** Server notice or popup; presentation owns dismissal and expiry. */
 			readonly type: "transient-string" | "popup-string";
@@ -1518,6 +1528,23 @@ export class ClientLifecycleSession {
 					),
 				);
 			}
+			unlisteners.push(
+				await this.#transport.listen("client-combat-outcome", (payload) => {
+					const outcome = decodeClientCombatOutcome(payload);
+					const receivedAtMs = performance.now();
+					if (
+						this.mirror.isAwaitingSnapshot() ||
+						outcome.worldGeneration !== this.#state.worldGeneration
+					) {
+						return;
+					}
+					this.#emit({
+						type: "combat-outcome",
+						outcome,
+						receivedAtMs,
+					});
+				}),
+			);
 			unlisteners.push(
 				await this.#transport.listen("client-chat-message", (payload) =>
 					this.#receiveChat(payload),

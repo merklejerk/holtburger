@@ -1151,3 +1151,29 @@ export function decodeClientPresentationTick(
 		);
 	return { dynamic, camera: wire.camera };
 }
+
+/** Narrow, confirmed combat feedback; identity uncertainty is explicit on the wire. */
+const combatOutcomeSchema = z
+	.object({
+		worldGeneration: z.number().int().nonnegative().safe(),
+		attribution: z.discriminatedUnion("kind", [
+			z.object({ kind: z.literal("attributed"), target: guid }).strict(),
+			z.object({ kind: z.literal("unplaced") }).strict(),
+		]),
+		outcome: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("damage"),
+					amount: guid,
+					criticalHit: z.boolean(),
+				})
+				.strict(),
+			z.object({ kind: z.literal("evaded") }).strict(),
+			z.object({ kind: z.literal("resisted") }).strict(),
+		]),
+	})
+	.strict();
+export type ClientCombatOutcome = z.infer<typeof combatOutcomeSchema>;
+export function decodeClientCombatOutcome(value: unknown): ClientCombatOutcome {
+	return combatOutcomeSchema.parse(value);
+}

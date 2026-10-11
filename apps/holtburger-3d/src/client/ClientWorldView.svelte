@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
 	import ClientJournalPanel from "./ClientJournalPanel.svelte";
 	import type { ClientContractsState } from "./client-contracts-state";
 	import type { ClientAllegianceState } from "./client-allegiance-state";
@@ -171,6 +172,10 @@
 		/** User graphics snapshot and focused edit operation. */
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
+		readonly combatIndicators: ClientCombatIndicatorSettings;
+		readonly onCombatIndicatorsChange: (
+			settings: ClientCombatIndicatorSettings,
+		) => void;
 		/** Cold environment controls; the readout pulls exclusively from the server source. */
 		readonly clockFormat: ClientClockFormat;
 		readonly environmentOverrides: ClientEnvironmentOverrides;
@@ -360,6 +365,8 @@
 		textureFilteringCapabilities,
 		onGraphicsChange,
 		onUiChange,
+		combatIndicators,
+		onCombatIndicatorsChange,
 		onInputChange,
 		hudMode,
 		onHudModeChange,
@@ -1401,6 +1408,8 @@
 						onSelectTab={(tab) => (settingsTab = tab)}
 						{onGraphicsChange}
 						{onUiChange}
+						{combatIndicators}
+						{onCombatIndicatorsChange}
 						{clockFormat}
 						{environmentOverrides}
 						{weatherPresets}

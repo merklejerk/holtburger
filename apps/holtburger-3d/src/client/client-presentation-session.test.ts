@@ -1060,6 +1060,72 @@ describe("ClientPresentationSession", () => {
 		},
 	);
 
+	it.each([
+		{ kind: "damage", amount: 0, criticalHit: false },
+		{ kind: "damage", amount: 37, criticalHit: true },
+		{ kind: "evaded" },
+		{ kind: "resisted" },
+	] as const)(
+		"forwards decoded $kind once and clears it on resync or discontinuity",
+		async (outcome) => {
+			const state = currentState(0x0101_0001);
+			const transport = new FakeClientTransport(state);
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			const runtime = new FakePresentationRuntime();
+			const presentation = new ClientPresentationSession({
+				canvas: fakeCanvas(),
+				hostTransport: {} as never,
+				session: lifecycle,
+				ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			});
+			await presentation.start();
+			try {
+				const confirmed = {
+					worldGeneration: state.worldGeneration,
+					attribution: { kind: "attributed", target: 42 },
+					outcome,
+				};
+				transport.emit("client-combat-outcome", confirmed);
+				expect(runtime.combatOutcomes).toHaveLength(1);
+				runtime.realizationDisposition = "deferred";
+				expect(presentation.frame(1000).rendered).toBe(false);
+				expect(runtime.combatAdvanceTimes.at(-1)).toBe(1000);
+				expect(runtime.combatOutcomes[0].slice(0, 2)).toEqual([
+					confirmed.outcome,
+					42,
+				]);
+				transport.emit("client-combat-outcome", {
+					...confirmed,
+					worldGeneration: state.worldGeneration + 1,
+				});
+				expect(runtime.combatOutcomes).toHaveLength(1);
+				transport.emit("client-presentation-discontinuity", {
+					worldGeneration: state.worldGeneration,
+					kind: "forced-reposition",
+				});
+				expect(runtime.combatClearCount).toBe(1);
+				transport.emit("client-presentation-discontinuity", {
+					worldGeneration: state.worldGeneration + 1,
+					kind: "forced-reposition",
+				});
+				expect(runtime.combatClearCount).toBe(2);
+				transport.emit("client-combat-outcome", confirmed);
+				expect(runtime.combatOutcomes).toHaveLength(1);
+				transport.emit("client-state-resyncing", null);
+				expect(runtime.combatClearCount).toBe(3);
+				transport.emit("client-combat-outcome", {
+					...confirmed,
+					worldGeneration: state.worldGeneration + 1,
+				});
+				expect(runtime.combatOutcomes).toHaveLength(1);
+			} finally {
+				await presentation.destroy();
+				lifecycle.stop();
+			}
+		},
+	);
+
 	it("replaces snapshots, forwards authority batches, and follows residency targets", async () => {
 		const transport = new FakeClientTransport(currentState(0x0101_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -1802,6 +1868,24 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		return this.envCellScopeAvailable;
 	}
 
+	readonly combatOutcomes: Parameters<
+		ClientPresentationRuntime["acceptCombatOutcome"]
+	>[] = [];
+	combatClearCount = 0;
+	readonly combatAdvanceTimes: number[] = [];
+	advanceCombatEffects(nowMs: number): void {
+		this.combatAdvanceTimes.push(nowMs);
+	}
+	acceptCombatOutcome(
+		...args: Parameters<ClientPresentationRuntime["acceptCombatOutcome"]>
+	): void {
+		this.combatOutcomes.push(args);
+	}
+	setCombatEffectsAppearance(): void {}
+	refreshCombatEffectsFontAtlas(): void {}
+	clearCombatEffects(): void {
+		this.combatClearCount++;
+	}
 	tick(): void {}
 
 	render(): PortalTransitionPresentationReceipt | null {

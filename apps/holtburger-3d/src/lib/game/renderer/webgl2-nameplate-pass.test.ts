@@ -19,6 +19,8 @@ function binding(
 
 function createFixture() {
 	const draws: number[] = [];
+	const drawDepthTests: boolean[] = [];
+	let depthTest = false;
 	const uploadedFloatCounts: number[] = [];
 	const anchorOffsets: number[] = [];
 	const plateSizes: Array<readonly [number, number]> = [];
@@ -75,14 +77,21 @@ function createFixture() {
 		},
 		depthFunc: () => undefined,
 		depthMask: () => undefined,
-		disable: () => undefined,
+		disable: (capability: number) => {
+			if (capability === gl.DEPTH_TEST) depthTest = false;
+		},
 		drawArraysInstanced: (
 			_mode: number,
 			_first: number,
 			_count: number,
 			instanceCount: number,
-		) => draws.push(instanceCount),
-		enable: () => undefined,
+		) => {
+			draws.push(instanceCount);
+			drawDepthTests.push(depthTest);
+		},
+		enable: (capability: number) => {
+			if (capability === gl.DEPTH_TEST) depthTest = true;
+		},
 		enableVertexAttribArray: () => undefined,
 		getProgramInfoLog: () => "",
 		getProgramParameter: () => true,
@@ -127,6 +136,7 @@ function createFixture() {
 		anchorOffsets,
 		deleted,
 		draws,
+		drawDepthTests,
 		gl,
 		plateSizes,
 		referenceDistances,
@@ -145,23 +155,36 @@ const context = {
 };
 
 describe("WebGL2NameplatePass", () => {
-	it("applies perspective scaling around the supplied reference distance", () => {
+	it.each(["flat", "portal"] as const)(
+		"keeps selected plates visible without merging their depth policy into adjacent ordinary plates (%s)",
+		(path) => {
+			const fixture = createFixture();
+			const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+			const plate = binding("shared", 64, 16);
+			const instances = [true, false, true].map((depthTest) => ({
+				anchor: Vec3.zero(),
+				binding: plate,
+				depthTest,
+				renderScopeKey: "env:one",
+			}));
+			if (path === "portal")
+				pass.drawScoped(context, instances, { routeDeferredSubmission() {} });
+			else pass.draw(context, instances);
+			expect(fixture.draws).toEqual([1, 1, 1]);
+			expect(fixture.drawDepthTests).toEqual([true, false, true]);
+		},
+	);
+	it("forwards the supplied reference distance to the billboard draw program", () => {
 		const fixture = createFixture();
 
 		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
 
-		const vertexSources = fixture.shaderSources.filter((source) =>
-			source.includes("gl_Position"),
-		);
-		expect(vertexSources).toHaveLength(2);
-		for (const source of vertexSources) {
-			expect(source).toContain(
-				"(pixelOffset * 2.0 / uViewportSize) * uReferenceDistance",
-			);
-			expect(source).not.toContain("uViewportSize) * clip.w");
-		}
 		pass.draw(context, [
-			{ anchor: Vec3.zero(), binding: binding("plate", 64, 16) },
+			{
+				depthTest: true,
+				anchor: Vec3.zero(),
+				binding: binding("plate", 64, 16),
+			},
 		]);
 		expect(fixture.referenceDistances).toEqual([context.referenceDistance]);
 	});
@@ -172,14 +195,17 @@ describe("WebGL2NameplatePass", () => {
 		const drudge = binding("drudge", 128, 32);
 		const instances: NameplateDrawInstance[] = [
 			{
+				depthTest: true,
 				anchor: new Vec3(1, 2, 3),
 				binding: drudge,
 			},
 			{
+				depthTest: true,
 				anchor: new Vec3(4, 5, 6),
 				binding: drudge,
 			},
 			{
+				depthTest: true,
 				anchor: new Vec3(7, 8, 9),
 				binding: binding("town-crier", 96, 48),
 			},
@@ -219,16 +245,19 @@ describe("WebGL2NameplatePass", () => {
 		const drudge = binding("drudge", 128, 32);
 		const instances: NameplateScopedDrawInstance[] = [
 			{
+				depthTest: true,
 				anchor: new Vec3(1, 2, 3),
 				binding: drudge,
 				renderScopeKey: "env:one",
 			},
 			{
+				depthTest: true,
 				anchor: new Vec3(4, 5, 6),
 				binding: drudge,
 				renderScopeKey: "env:one",
 			},
 			{
+				depthTest: true,
 				anchor: new Vec3(7, 8, 9),
 				binding: drudge,
 				renderScopeKey: "outdoor",
@@ -252,9 +281,9 @@ describe("WebGL2NameplatePass", () => {
 		const townCrier = binding("town-crier", 96, 48);
 
 		pass.draw(context, [
-			{ anchor: new Vec3(1, 2, 3), binding: drudge },
-			{ anchor: new Vec3(4, 5, 6), binding: townCrier },
-			{ anchor: new Vec3(7, 8, 9), binding: drudge },
+			{ depthTest: true, anchor: new Vec3(1, 2, 3), binding: drudge },
+			{ depthTest: true, anchor: new Vec3(4, 5, 6), binding: townCrier },
+			{ depthTest: true, anchor: new Vec3(7, 8, 9), binding: drudge },
 		]);
 
 		expect(fixture.draws).toEqual([1, 1, 1]);

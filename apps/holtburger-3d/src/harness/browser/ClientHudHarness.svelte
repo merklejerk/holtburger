@@ -4018,6 +4018,9 @@
 		onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
 		graphics={userSettings.graphics}
 		ui={userSettings.ui}
+		combatIndicators={userSettings.combatIndicators}
+		onCombatIndicatorsChange={(combatIndicators) =>
+			(userSettings = { ...userSettings, combatIndicators })}
 		clockFormat={userSettings.clockFormat}
 		environmentOverrides={userSettings.environmentOverrides}
 		weatherPresets={environmentPresets}

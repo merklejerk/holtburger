@@ -890,8 +890,8 @@ export class DynamicEntitySystem<
 		if (visualPlacement === undefined) return null;
 		const parts: DynamicEntitySelectionPart[] = [];
 		for (const part of entity.renderable.parts) {
-			if (part.renderState.translucency === 1 || part.geometryData === null)
-				continue;
+			// Selection follows posed geometry even when an effect makes the part fully transparent.
+			if (part.geometryData === null) continue;
 			const ranges = part.depthDrawUnits.filter(
 				(range) => range.retailVisibility === "normally-visible",
 			);

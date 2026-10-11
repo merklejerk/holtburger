@@ -123,7 +123,7 @@ export class DynamicDepthPreparations {
 		return prepared;
 	}
 
-	/** Prepare all visible spans (including transparent and alpha-test) for the selection mask. */
+	/** Prepare authored-visible spans regardless of current opacity for the selection mask. */
 	prepareSelection(
 		nodeId: SceneNodeId,
 		showRetailHiddenGeometry: boolean,
@@ -160,10 +160,11 @@ export class DynamicDepthPreparations {
 				);
 			// Shadow passes omit non-opaque spans (alpha-test, transparent, and additive)
 			// because depth-only shaders cannot evaluate texture cutouts or alpha blend factors.
-			// Selection mask passes retain all visible spans so outlines include translucent parts.
+			// Selection keeps current-pose geometry through fades, including fully transparent parts.
 			if (
-				(opaqueOnly && range.source.ordering !== "opaque") ||
-				part.frameInstance.color.a === 0 ||
+				(opaqueOnly &&
+					(range.source.ordering !== "opaque" ||
+						part.frameInstance.color.a === 0)) ||
 				!retainsRetailGeometry(
 					range.source.retailVisibility,
 					showRetailHiddenGeometry,

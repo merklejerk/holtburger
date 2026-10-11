@@ -213,4 +213,18 @@ describe("DynamicDepthPreparations", () => {
 		expect(shadow?.selectedPartCount).toBe(1);
 		expect(selection?.selectedPartCount).toBe(3);
 	});
+	it("retains fully transparent parts for selection while omitting them from shadows", () => {
+		const { pass, parts } = fixture();
+		for (const part of parts) part.frameInstance.color.a = 0;
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		const selection = pass.prepareSelection(NODE_ID, false);
+		expect(selection?.ranges).toEqual([
+			{ indexStart: 0, indexCount: 6, cullFace: "back" },
+			{ indexStart: 9, indexCount: 3, cullFace: "front" },
+		]);
+		expect(selection?.selectedPartCount).toBe(3);
+		expect(selection?.selectedTriangleCount).toBe(3);
+		expect(pass.prepareSelection(NODE_ID, false)).toBe(selection);
+		pass.beginFrame();
+	});
 });

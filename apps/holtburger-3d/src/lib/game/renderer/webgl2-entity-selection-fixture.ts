@@ -380,8 +380,9 @@ function selectionInput(
 	sourceToLandblock.m41 = translationX;
 	const parts = [
 		{
-			renderState: { translucency: 0, textureVelocity: [0, 0] as const },
-			frameInstance: { color: { a: 1, b: 1, g: 1, r: 1 }, sourceToLandblock },
+			// Every rigid fixture draw proves outline and pose tracking survive complete transparency.
+			renderState: { translucency: 1, textureVelocity: [0, 0] as const },
+			frameInstance: { color: { a: 0, b: 1, g: 1, r: 1 }, sourceToLandblock },
 		},
 	];
 	const depths = new DynamicDepthPreparations(
@@ -394,7 +395,7 @@ function selectionInput(
 	);
 	const selection = pass.prepare(
 		{ nodeId: NODE_ID, shape },
-		depths.prepare(NODE_ID, false),
+		depths.prepareSelection(NODE_ID, false),
 	);
 	// Place the selected entity after another root to exercise the nonzero base-row contract.
 	poses.upload(

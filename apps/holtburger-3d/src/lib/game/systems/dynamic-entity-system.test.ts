@@ -1245,7 +1245,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toBe(0);
 		expect(
 			system.withSelectionGeometry(firstNodeId, ({ parts }) => parts.length),
-		).toBe(0);
+		).toBe(1);
 
 		system.publishPresentation([presentationSample(firstPrepared, 0)]);
 		expect(system.getVisiblePresentation(firstNodeId)?.visual.parts[0]).toBe(

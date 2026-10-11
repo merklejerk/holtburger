@@ -371,6 +371,8 @@ pub struct ClientApplicationSnapshot {
     pub fellowship: Option<FellowshipState>,
     /// Retained friend facts; absent until initial delivery or after retirement.
     pub friends: Option<holtburger_world::state::friends::FriendsState>,
+    /// Resolved contract journal, with durations aged at snapshot production.
+    pub contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
     /// Retained replacement-only ignore database.
     pub squelch: Option<holtburger_world::state::squelch::SquelchState>,
     /// Retained partial allegiance facts and outstanding read progress.
@@ -919,6 +921,13 @@ pub enum ClientViewEvent {
         /// Current character database.
         squelch: Option<holtburger_world::state::squelch::SquelchState>,
     },
+    /// Journal replacement facts after a tracker mutation or lifecycle change.
+    ContractsStateUpdated {
+        /// None outside character lifetime; active empty is a snapshot with no rows.
+        contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    },
+    /// Live registry activity; login, recovery, and retirement do not replay it.
+    ContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
     /// Replacement projection of the character-owned friend list.
     FriendsStateUpdated {
         /// None denotes unknown/retired rather than a confirmed empty list.
@@ -1184,6 +1193,11 @@ pub enum ClientCommand {
     /// Add a friend by server-resolved character name.
     AddFriend {
         name: String,
+    },
+    /// Remove tracking without resetting quest progress.
+    AbandonContract {
+        /// Stable registry identity.
+        id: u32,
     },
     /// Remove a friend by retained identity.
     RemoveFriend {

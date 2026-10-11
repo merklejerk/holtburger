@@ -1,7 +1,7 @@
+import { formatDuration } from "../app/duration-format";
 import { describe, expect, it } from "vitest";
 import {
 	formatInspectionDamageTypes,
-	formatInspectionDuration,
 	formatInspectionEffect,
 	formatInspectionImbuedEffects,
 	formatInspectionNumber,
@@ -37,11 +37,11 @@ describe("object inspection formatting", () => {
 	});
 
 	it("omits mana-duration seconds at one hour and above", () => {
-		expect(formatInspectionDuration(27_450)).toBe("7h 37m");
-		expect(formatInspectionDuration(3_630)).toBe("1h");
-		expect(formatInspectionDuration(3_599)).toBe("59m 59s");
-		expect(formatInspectionDuration(2_220)).toBe("37m");
-		expect(formatInspectionDuration(30)).toBe("30s");
+		expect(formatDuration(27_450)).toBe("7h 37m");
+		expect(formatDuration(3_630)).toBe("1h");
+		expect(formatDuration(3_599)).toBe("59m 59s");
+		expect(formatDuration(2_220)).toBe("37m");
+		expect(formatDuration(30)).toBe("30s");
 	});
 
 	it("prefers word boundaries while bounding uninterrupted descriptions", () => {

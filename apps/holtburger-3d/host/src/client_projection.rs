@@ -446,6 +446,8 @@ pub struct ClientCurrentState {
     pub party: Option<crate::client_party::ClientPartySnapshot>,
     /// Last accepted friend list; None until delivery or after retirement.
     pub friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    /// Shared resolved contract facts; None outside a character lifetime.
+    pub contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
     /// Character-owned ignore facts and basic scope eligibility.
     pub squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
     /// Partial allegiance facts and bounded refresh progress.
@@ -1027,6 +1029,13 @@ pub enum ClientHostEvent {
     SquelchUpdated {
         squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
     },
+    /// Complete journal publication with currently aged durations.
+    ContractsUpdated {
+        /// None outside character lifetime; an empty snapshot is an active empty journal.
+        contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    },
+    /// Live authoritative membership activity, absent from recovery snapshots.
+    ContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
     /// Retained friend list publication.
     FriendsUpdated {
         friends: Option<crate::client_friends::ClientFriendsSnapshot>,
@@ -1213,6 +1222,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             }),
             party_preferences: snapshot.character_options.map(Into::into),
             friends: snapshot.friends.as_ref().map(Into::into),
+            contracts: snapshot.contracts.clone(),
             squelch: snapshot.squelch.as_ref().map(Into::into),
             allegiance: (&snapshot.allegiance).into(),
             allegiance_preferences: snapshot.character_options.map(Into::into),
@@ -1402,6 +1412,12 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::SquelchStateUpdated { squelch } => Some(ClientHostEvent::SquelchUpdated {
             squelch: squelch.as_ref().map(Into::into),
         }),
+        ClientViewEvent::ContractsStateUpdated { contracts } => {
+            Some(ClientHostEvent::ContractsUpdated { contracts })
+        }
+        ClientViewEvent::ContractMembershipChanged(change) => {
+            Some(ClientHostEvent::ContractMembershipChanged(change))
+        }
         ClientViewEvent::FriendsStateUpdated { friends } => Some(ClientHostEvent::FriendsUpdated {
             friends: friends.as_ref().map(Into::into),
         }),

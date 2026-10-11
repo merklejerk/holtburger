@@ -1,6 +1,7 @@
 pub mod animation;
 pub mod char_gen;
 pub mod chat_pose_table;
+pub mod contract_table;
 pub mod degrade_info;
 pub mod did_mapper;
 pub mod enum_mapper;
@@ -27,6 +28,7 @@ pub mod xp_table;
 pub use animation::Animation;
 pub use char_gen::CharGen;
 pub use chat_pose_table::{ChatEmoteData, ChatPoseTable};
+pub use contract_table::{ContractDefinition, ContractPosition, ContractTable};
 pub use degrade_info::{DegradeBand, DegradeOrientation, GfxObjDegradeInfo};
 pub use did_mapper::{DidMapper, NumberedEnumMap};
 pub use enum_mapper::EnumMapper;

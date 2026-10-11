@@ -1,3 +1,4 @@
+import { matchesSearchTerms, textSearchWords } from "../app/text-search";
 import type { SpellDetails } from "../app/spell-references";
 
 /** Typed frontend pill identities; shared classification fields remain the source facts. */
@@ -44,11 +45,6 @@ export const SPELL_FILTER_OPTIONS = [
 	["level:8", "Level VIII", "level"],
 ] as const;
 
-/** Normalize identically for names and queries; punctuation separates words. */
-export function spellSearchWords(text: string): readonly string[] {
-	return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-}
-
 /** Precomputed search data for one reference publication, independent of icons. */
 export interface SpellSearchEntry {
 	/** Normalized name words, created once per reference publication. */
@@ -73,19 +69,7 @@ export function spellSearchEntry(
 		if (classification.damage !== null) tags.add(classification.damage);
 		if (classification.fellowship) tags.add("fellowship");
 	}
-	return { words: spellSearchWords(name), tags };
-}
-
-/** Characters may be skipped within a word, but may never cross word boundaries. */
-function subsequence(term: string, word: string): boolean {
-	const remaining = term[Symbol.iterator]();
-	let next = remaining.next();
-	for (const character of word) {
-		if (character !== next.value) continue;
-		next = remaining.next();
-		if (next.done) return true;
-	}
-	return false;
+	return { words: textSearchWords(name), tags };
 }
 
 /** Group selected pills once per query change, using the same categories as their colors. */
@@ -110,6 +94,6 @@ export function matchesSpellSearch(
 ): boolean {
 	return (
 		groups.every((tags) => tags.some((tag) => entry.tags.has(tag))) &&
-		terms.every((term) => entry.words.some((word) => subsequence(term, word)))
+		matchesSearchTerms(entry.words, terms)
 	);
 }

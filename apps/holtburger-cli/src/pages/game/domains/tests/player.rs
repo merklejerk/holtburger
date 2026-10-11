@@ -106,6 +106,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
     let snapshot = ClientApplicationSnapshot {
         fellowship: None,
         friends: None,
+        contracts: None,
         squelch: None,
         allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
             player_guid: None,

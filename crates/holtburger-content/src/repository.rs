@@ -327,6 +327,13 @@ impl ContentRepository {
         Ok(SoulEmoteCatalog::from_asset(&chat_pose_table))
     }
 
+    /// Parses static contract definitions once for shared runtime interpretation.
+    pub fn read_contract_catalog(&self) -> Result<crate::ContractCatalog> {
+        let table =
+            self.read_asset::<holtburger_dat::file_type::ContractTable>("contract table")?;
+        crate::ContractCatalog::from_table(table).context("failed to assemble contract catalog")
+    }
+
     /// Loads and joins the portal and language records used by retail character-title display.
     pub fn read_character_title_catalog(&self) -> Result<crate::CharacterTitleCatalog> {
         let mapper = self

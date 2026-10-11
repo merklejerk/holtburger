@@ -138,6 +138,7 @@ export async function probeWorldContainer(options: {
 			lifecycle: { kind: "in-world" },
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
+			recallDestinations: [],
 			housing: emptyHousing(),
 			localPlayerGuid: 1,
 			serverTime: 10,
@@ -151,6 +152,7 @@ export async function probeWorldContainer(options: {
 			party: null,
 			partyPreferences: null,
 			friends: null,
+			contracts: null,
 			squelch: null,
 			allegiance: {
 				playerGuid: null,

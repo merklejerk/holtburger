@@ -80,6 +80,9 @@ impl ClientRuntimeBuilder {
         let character_titles = content
             .read_character_title_catalog()
             .context("failed to load character-title catalog for client runtime")?;
+        let contracts = content
+            .read_contract_catalog()
+            .context("failed to load contract catalog for client runtime")?;
         let motion_sequences = content
             .read_motion_sequence_catalog()
             .context("failed to build the motion contract for client runtime")?;
@@ -87,15 +90,17 @@ impl ClientRuntimeBuilder {
             .read_soul_emote_catalog()
             .context("failed to load soul emote catalog for client runtime")?;
 
-        self.world_bootstrap = Some(Arc::new(WorldBootstrap::new(
-            skill_table,
-            secondary_attribute_table,
-            spell_table,
-            xp_table,
-            character_titles,
-            motion_sequences,
-            soul_emote_catalog,
-        )));
+        self.world_bootstrap = Some(Arc::new(WorldBootstrap {
+            weenie_types: None,
+            skill_table: Arc::new(skill_table),
+            secondary_attribute_table: Arc::new(secondary_attribute_table),
+            spell_table: Arc::new(spell_table),
+            xp_table: Arc::new(xp_table),
+            character_titles: Arc::new(character_titles),
+            contracts: Arc::new(contracts),
+            motion_sequences: Arc::new(motion_sequences),
+            soul_emote_catalog: Arc::new(soul_emote_catalog),
+        }));
 
         Ok(())
     }
@@ -324,12 +329,8 @@ mod tests {
         DatFileType, EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
         ResourceSource,
     };
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use tempfile::tempdir;
-
-    fn repo_assets_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-    }
 
     const TEST_MOTION_TABLE_ID: u32 = 0x0900_0001;
     const TEST_ANIMATION_ID: u32 = 0x0300_0003;
@@ -411,32 +412,25 @@ mod tests {
         }
     }
 
-    fn write_hba(path: &Path, ids: &[u32]) -> bool {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping core builder fixture test; missing repo-local {}",
-                source_path.display()
-            );
-            return false;
-        }
-
-        let source = match HbaReader::open(&source_path) {
-            Ok(source) => source,
-            Err(error) => panic!(
-                "core builder fixture test requires repo-local {} to be a valid HBA v2 fixture: {}",
-                source_path.display(),
-                error
-            ),
-        };
-
+    fn write_hba(path: &Path, ids: &[u32]) {
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 
         for id in ids {
-            let data = source
-                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, *id)
-                .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
+            let mut data = id.to_le_bytes().to_vec();
+            match *id {
+                SkillTable::FILE_ID => data.extend_from_slice(&[0; 4]),
+                SpellTable::FILE_ID => data.extend_from_slice(&[0; 8]),
+                XpTable::FILE_ID => {
+                    data.extend_from_slice(&[0; 20]);
+                    for value in [10u32, 20, 30, 40] {
+                        data.extend_from_slice(&value.to_le_bytes());
+                    }
+                    data.extend_from_slice(&50u64.to_le_bytes());
+                    data.extend_from_slice(&60u32.to_le_bytes());
+                }
+                _ => panic!("unsupported synthetic bootstrap asset {id:#010x}"),
+            }
             writer
                 .add(
                     EOR_PORTAL_NAMESPACE,
@@ -451,11 +445,9 @@ mod tests {
             (EOR_PORTAL_NAMESPACE, EnumMapper::FILE_ID),
             (EOR_LANGUAGE_NAMESPACE, StringTable::FILE_ID),
         ] {
-            let data = source
-                .get_file_in_namespace(namespace, id)
-                .unwrap_or_else(|_| {
-                    panic!("repo assets.hba should contain {namespace}:0x{id:08X}")
-                });
+            let mut data = id.to_le_bytes().to_vec();
+            data.extend_from_slice(&0u32.to_le_bytes());
+            data.extend_from_slice(&[0, 0]); // metadata byte and compressed empty count
             writer
                 .add(namespace, id, DatFileType::from_id(id) as u32, data)
                 .expect("character-title content test HBA entry should be added");
@@ -493,9 +485,20 @@ mod tests {
             )
             .expect("secondary attribute table test HBA entry should be added");
 
-        writer.write(path).expect("test HBA should be written");
+        let mut contracts = holtburger_dat::file_type::ContractTable::FILE_ID
+            .to_le_bytes()
+            .to_vec();
+        contracts.extend_from_slice(&[0, 0, 32, 0]);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                holtburger_dat::file_type::ContractTable::FILE_ID,
+                DatFileType::Table as u32,
+                contracts,
+            )
+            .expect("contract fixture should be added");
 
-        true
+        writer.write(path).expect("test HBA should be written");
     }
 
     fn mounted_archive(archive: Arc<HbaReader>) -> Arc<dyn ResourceSource> {
@@ -528,12 +531,10 @@ mod tests {
     fn runtime_builder_load_assets_reads_bootstrap_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
         let bundle_path = dir.path().join("bundle.hba");
-        if !write_hba(
+        write_hba(
             &bundle_path,
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
-        ) {
-            return;
-        }
+        );
 
         // The motion contract is built from the repository's resource index, which only an
         // archive-backed repository populates.
@@ -549,8 +550,9 @@ mod tests {
             .build_with_session(Session::new_test())
             .expect("runtime builder should build after loading assets");
 
-        assert!(!client.world.skill_table.skill_base_hash.is_empty());
-        assert!(!client.world.spell_catalog.spells.is_empty());
+        assert_eq!(client.world.skill_table.id, SkillTable::FILE_ID);
+        assert_eq!(client.world.xp_table.attribute_xp_list, vec![10]);
+        assert_eq!(client.world.xp_table.character_level_xp_list, vec![50]);
         assert!(client.world.soul_emote_catalog.is_known_token("wave"));
         let walk = client
             .world
@@ -571,9 +573,7 @@ mod tests {
     fn runtime_builder_load_assets_fails_when_repository_is_missing_required_asset() {
         let dir = tempdir().expect("tempdir should be created");
         let bundle_path = dir.path().join("bundle.hba");
-        if !write_hba(&bundle_path, &[SpellTable::FILE_ID, XpTable::FILE_ID]) {
-            return;
-        }
+        write_hba(&bundle_path, &[SpellTable::FILE_ID, XpTable::FILE_ID]);
 
         let archive = Arc::new(HbaReader::open(&bundle_path).expect("test HBA should open"));
         let repository = ContentRepository::from_mounts(vec![mounted_archive(archive)]);

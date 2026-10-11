@@ -480,3 +480,43 @@ inspectors discard older correlated replies. Requested component artwork survive
 collapse, with character-model leases retired on context changes and display leases
 protecting images until their DOM is replaced. Component icons use retail's exact
 opaque-white to opaque-black transform. Inventory availability shading is not included.
+
+## Contracts journal
+
+The Journal dock shortcut opens a retained, searchable contracts list with status
+icons and expandable authored details. Definitions arrive through shared content;
+server trackers own membership and progress. The session owner retains controls
+and timer receipt anchors while hidden, and character changes clear local row
+state. The panel polls display facts only while visible. Removal uses the existing
+confirmation owner and keeps the row until the server deletes it; quest progress
+is retained. This is the contracts log, without the retail personal notebook.
+
+Status icon pills use the shared spellbook/enchantments styling. Selected statuses
+form a union, search narrows that union, and no selected statuses shows all contracts.
+
+In progress uses a circled-arrow status icon; the quill identifies the Journal.
+Accepted incremental additions/removals during active play produce journal
+toasts even while the panel is closed. World classifies membership transitions,
+core suppresses login activity, and h3d owns wording and short burst summaries.
+Full tables, recovery, duplicate updates, progress changes, and retirement do
+not announce membership changes. Removal dispatch alone never announces success.
+Activity is ephemeral and is not replayed after missed events or reconnection.
+
+The World map has a default-on Contracts icon toggle. It shows the selected
+outdoor contact and, while In progress, an outdoor quest-area point. Contacts use
+person icons; areas and exactly coincident groups use diamond-and-dot markers.
+The Journal shortcut and Contracts toggle use a quill icon, matching ACE's
+contract-acceptance message. Hover reveals
+name, status, role/NPC, and map coordinates; crowded lists scroll within the map.
+There are no persistent contract labels or area radii. Positions use the original
+authored offsets; Journal search/filter controls never affect map membership.
+The toggle survives panel/tab closure and resets to on for a new character. Hidden or
+disabled layers stop display sampling; expiry refreshes tooltip status without
+rebuilding marker geometry.
+
+Run `npm run harness:browser -- --client-contracts --brief` for nonvisual checks
+of the production Journal/World windows, dialogs, filters, timers, contract
+marker projection/grouping/tooltips, hidden cadence, and authoritative deletion.
+The shared synthetic payload fixture is also verified against Rust sidecar
+serialization and the TypeScript schema. Live acquisition/relogin verification
+requires credentials for the existing noninteractive client probe.

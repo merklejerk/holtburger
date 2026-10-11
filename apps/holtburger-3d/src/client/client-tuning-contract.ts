@@ -41,6 +41,15 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 
 /** Exhaustive client-owned tuning contract used to drive authoring completion. */
 export interface ClientTuning {
+	/** Journal pulls display facts only while its window is visible. */
+	readonly journal: {
+		/** Fixed presentation window for summarizing bursts of accepted membership changes. */
+		readonly membershipToastBatchMs: number;
+		/** Visible Journal/map tooltip countdown refresh interval. */
+		readonly displayIntervalMs: number;
+		/** Fixed CSS-pixel side of contract map icons and their hover footprint. */
+		readonly mapMarkerSizeCssPixels: number;
+	};
 	/** Screen-space density of available housing area markers. */
 	readonly housingSearch: {
 		/** CSS-pixel width of a bucket merging available housing areas. */

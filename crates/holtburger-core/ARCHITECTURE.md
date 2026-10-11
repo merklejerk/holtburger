@@ -423,3 +423,19 @@ inventory/combat requests until their final request is sent. Pack exchange confi
 its first move and revalidates the target before sending the second. Frontend sort policy selects the semantic intent; core
 has no knowledge of display sorting or pointer gestures. Existing action feedback
 reports failures, while accepted world state drives frontend contents and equipment.
+
+### Contracts journal
+
+World classifies incremental membership activity once. Core forwards
+`ContractMembershipChanged` only while InWorld, keeping entering-world login
+hydration silent. Full-table publication, recovery reads, and retirement do not
+create or replay activity. Frontends choose notification wording and presentation;
+the Journal panel is not a notification owner.
+
+`client/contracts.rs` initializes an empty character registry before login
+trackers, publishes world's resolved snapshots for events and recovery, and
+clears facts on character retirement. Tracker events use existing character
+identity/sequence admission; portals retain the registry. `AbandonContract`
+requires an active in-world character and retained ID, sends the protocol action,
+and leaves membership unchanged until a server deletion. There is no pending
+mutation, rollback, timeout, or retry owner for this command.

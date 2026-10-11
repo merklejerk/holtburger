@@ -187,6 +187,7 @@ impl ClientRuntime {
             ClientCommand::AddIgnore { name, scope } => self.add_ignore(name, scope).await,
             ClientCommand::RemoveIgnore { guid, scope } => self.remove_ignore(guid, scope).await,
             ClientCommand::RemoveFriend { guid } => self.remove_friend(guid).await,
+            ClientCommand::AbandonContract { id } => self.abandon_contract(id).await,
 
             ClientCommand::Talk(_)
             | ClientCommand::Tell { .. }

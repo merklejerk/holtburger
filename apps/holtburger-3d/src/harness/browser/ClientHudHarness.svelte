@@ -77,6 +77,9 @@
 	import { probeSquelch } from "./client-squelch-probe";
 	import { probeOverlayTheme } from "./overlay-theme-probe";
 	import { probeSelectedActions } from "./client-selected-actions-probe";
+	import type { ContractsSnapshot } from "../../client/client-contracts-contract";
+	import { probeContractMap } from "./client-contracts-map-probe";
+	import { probeContracts } from "./client-contracts-probe";
 	import { probeFriends } from "./client-friends-probe";
 	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
@@ -1065,6 +1068,8 @@
 		readonly probeSelectedActions: () => ReturnType<
 			typeof probeSelectedActions
 		>;
+		readonly probeContractMap: () => ReturnType<typeof probeContractMap>;
+		readonly probeContracts: () => ReturnType<typeof probeContracts>;
 		readonly probeFriends: () => ReturnType<typeof probeFriends>;
 		readonly probeParty: () => ReturnType<typeof probeParty>;
 		readonly probeWorldContainer: () => ReturnType<typeof probeWorldContainer>;
@@ -1240,7 +1245,10 @@
 	}[] = [];
 	let canTeleportFromMap = $state(false);
 	/** Establish actual session facts for the mounted HUD and its interaction probes. */
-	function emitInteractionBaseline(playerGuid = 1): void {
+	function emitInteractionBaseline(
+		playerGuid = 1,
+		contracts: ContractsSnapshot | null = null,
+	): void {
 		const playerName = playerGuid === 1 ? "Wayfarer" : "Wayfarer II";
 		emitInteractionEvent("client-current-state", {
 			lifecycle: { kind: "in-world" },
@@ -1260,6 +1268,7 @@
 			party: null,
 			partyPreferences: null,
 			friends: null,
+			contracts,
 			squelch: null,
 			allegiance: {
 				playerGuid: null,
@@ -3475,6 +3484,9 @@
 		const unbindHousingDialogs = housingDialogs.bindLocal(
 			housingManagementOwner,
 		);
+		const unbindContractDialogs = housingDialogs.bindLocal(
+			interactionLifecycle.contracts,
+		);
 		const unsubscribeHousingDialogs = housingDialogs.subscribe((value) => {
 			dialogPresentation = value;
 		});
@@ -3746,6 +3758,24 @@
 			probeBindings,
 			bindingSettings: { read: () => userSettings.input, replace: changeInput },
 			probeSelectedActions: () => probeSelectedActions(partyProbeContext),
+			probeContractMap: () =>
+				probeContractMap({
+					session: interactionLifecycle,
+					emit: emitInteractionEvent,
+					baseline: emitInteractionBaseline,
+					commands: interactionCommands,
+				}),
+			probeContracts: () =>
+				probeContracts({
+					session: interactionLifecycle,
+					emit: emitInteractionEvent,
+					commands: interactionCommands,
+					baseline: emitInteractionBaseline,
+					inputAllowed: () => keyboard.gameActive,
+					onToast: (next) => {
+						toast = next;
+					},
+				}),
 			probeFriends: () =>
 				probeFriends({
 					context: partyProbeContext,
@@ -3912,6 +3942,7 @@
 			trade = null;
 			vendorOwner.destroy();
 			unbindHousingDialogs();
+			unbindContractDialogs();
 			unsubscribeHousingDialogs();
 			housingDialogs.destroy();
 			if (dialogOwner === housingDialogs) dialogOwner = null;
@@ -3953,6 +3984,7 @@
 	<ClientWorldView
 		party={socialParty}
 		friends={interactionLifecycle.friends}
+		contracts={interactionLifecycle.contracts}
 		squelch={interactionLifecycle.squelch}
 		allegiance={interactionLifecycle.allegiance}
 		characterGuid={housingCharacterGuid}

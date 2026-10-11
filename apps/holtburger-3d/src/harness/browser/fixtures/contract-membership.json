@@ -1,0 +1,4 @@
+[
+	{ "kind": "added", "id": 1, "name": "Same quest" },
+	{ "kind": "removed", "id": 99, "name": null }
+]

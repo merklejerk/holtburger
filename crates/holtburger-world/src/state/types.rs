@@ -60,6 +60,8 @@ pub struct WorldState {
     pub spell_catalog: Arc<SpellCatalog>,
     /// Localized static character titles consumed by inspection construction.
     pub character_titles: Arc<CharacterTitleCatalog>,
+    /// Immutable contract definitions used by shared tracker interpretation.
+    pub contract_catalog: Arc<holtburger_content::ContractCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
     pub motion_sequences: Arc<MotionSequenceCatalog>,
     /// Authored-motion playback for every entity this client simulates.
@@ -74,6 +76,8 @@ pub struct WorldState {
     pub fellowship: Option<FellowshipState>,
     /// Last accepted friend list; None until initial delivery or after character retirement.
     pub friends: Option<super::friends::FriendsState>,
+    /// Character journal; active entry initializes an empty registry.
+    pub contracts: Option<super::contracts::ContractsState>,
     /// Character-owned ignore DB; initialized empty at entry and retired on exit.
     pub squelch: Option<super::squelch::SquelchState>,
     /// Last received partial allegiance profile for this character.
@@ -455,6 +459,7 @@ impl WorldState {
             secondary_attribute_table: Arc::clone(&bootstrap.secondary_attribute_table),
             spell_catalog: bootstrap.spell_catalog(),
             character_titles: Arc::clone(&bootstrap.character_titles),
+            contract_catalog: Arc::clone(&bootstrap.contracts),
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
             motion_sequences: Arc::clone(&bootstrap.motion_sequences),
             motion_runtimes: MotionRuntimeRegistry::new(),
@@ -463,6 +468,7 @@ impl WorldState {
             vendor: None,
             fellowship: None,
             friends: None,
+            contracts: None,
             squelch: None,
             allegiance: None,
             trade: None,

@@ -1,3 +1,9 @@
+import { ClientContractsState } from "./client-contracts-state";
+import {
+	contractsUpdatedSchema,
+	contractMembershipChangeSchema,
+	type ContractMembershipChange,
+} from "./client-contracts-contract";
 import { ClientAllegianceState } from "./client-allegiance-state";
 import { allegianceUpdatedSchema } from "./client-allegiance-contract";
 import { ClientSquelchState } from "./client-squelch-state";
@@ -221,6 +227,7 @@ type ClientCommandName = Extract<
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "submit_client_friends"
+	| "submit_client_contracts"
 	| "submit_client_squelch"
 	| "submit_client_allegiance"
 	| "submit_client_party"
@@ -308,6 +315,8 @@ type ClientEventName = Extract<
 	| "client-player-enchantments-updated"
 	| "client-character-preferences-updated"
 	| "client-friends-updated"
+	| "client-contracts-updated"
+	| "client-contract-membership-changed"
 	| "client-squelch-updated"
 	| "client-allegiance-updated"
 	| "client-party-updated"
@@ -380,6 +389,10 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| {
+			readonly type: "contract-membership-change";
+			readonly change: ContractMembershipChange;
+	  }
 	| { readonly type: "book-opened"; readonly receipt: ClientBookOpened }
 	| { readonly type: "book-updated"; readonly book: ClientBook }
 	| { readonly type: "housing-updated"; readonly housing: HousingSnapshot }
@@ -528,6 +541,8 @@ export class ClientLifecycleSession {
 	readonly characterSheet: ClientCharacterSheetState;
 	/** Dedicated Friends owner; the session only routes transport and lifecycle. */
 	readonly friends: ClientFriendsState;
+	/** Character-owned journal read model and local controls. */
+	readonly contracts: ClientContractsState;
 	/** Dedicated Ignores projection; the session routes rather than duplicates state. */
 	readonly squelch: ClientSquelchState;
 	/** Allegiance owner keeps interaction policy outside session routing. */
@@ -568,6 +583,12 @@ export class ClientLifecycleSession {
 		this.friends = new ClientFriendsState(async (action) => {
 			await this.#transport.invoke("submit_client_friends", { action });
 		});
+		this.contracts = new ClientContractsState(
+			async (action) => {
+				await this.#transport.invoke("submit_client_contracts", { action });
+			},
+			() => performance.now(),
+		);
 		this.characterSheet = new ClientCharacterSheetState(
 			(requestId, intents) => this.evaluateProgression(requestId, intents),
 			(quote) => this.submitProgression(quote),
@@ -599,7 +620,7 @@ export class ClientLifecycleSession {
 		if (this.#unlisten !== null) return;
 		this.#serverClock = null;
 		this.#state = emptyState();
-		this.#resetSocialState();
+		this.#resetCharacterLists();
 		this.#connection = null;
 		this.characterSheet.reset(null);
 		this.#vendor = null;
@@ -625,7 +646,7 @@ export class ClientLifecycleSession {
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
 		this.#serverClock = null;
-		this.#resetSocialState();
+		this.#resetCharacterLists();
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
 		this.#dynamicSession.stop();
@@ -1156,6 +1177,24 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-contracts-updated", (payload) => {
+					this.contracts.update(
+						contractsUpdatedSchema.parse(payload).contracts,
+					);
+				}),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-contract-membership-changed",
+					(payload) => {
+						this.#emit({
+							type: "contract-membership-change",
+							change: contractMembershipChangeSchema.parse(payload),
+						});
+					},
+				),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-friends-updated", (payload) => {
 					this.friends.update(friendsUpdatedSchema.parse(payload).friends);
 				}),
@@ -1559,6 +1598,11 @@ export class ClientLifecycleSession {
 			state.localPlayerGuid,
 			state.lifecycle.kind === "in-world",
 		);
+		this.contracts.recover(
+			state.contracts,
+			state.localPlayerGuid,
+			state.lifecycle.kind === "in-world",
+		);
 		this.friends.recover(
 			state.friends,
 			state.friendsPreferences,
@@ -1654,7 +1698,7 @@ export class ClientLifecycleSession {
 		if (retiresCharacterDescription) this.characterSheet.reset(null);
 		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
 		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
-			this.#resetSocialState();
+			this.#resetCharacterLists();
 		}
 		// Initial activation may arrive as portal-space without a separate entering-world event.
 		// Its completion supplies the new character baseline; teleports retain the current one.
@@ -1772,9 +1816,10 @@ export class ClientLifecycleSession {
 		this.#emit({ type: "exit-requested", exit });
 	}
 
-	/** Retire all character-owned Social facts together; portals retain them. */
-	#resetSocialState(): void {
+	/** Retire character-owned journal and social facts together; portals retain them. */
+	#resetCharacterLists(): void {
 		this.friends.reset();
+		this.contracts.reset();
 		this.squelch.reset();
 		this.allegiance.reset();
 		this.#party = null;
@@ -1784,6 +1829,7 @@ export class ClientLifecycleSession {
 	#emit(event: ClientLifecycleSessionEvent): void {
 		if (event.type === "resyncing") {
 			this.friends.setContext(this.#state.playerGuid, false);
+			this.contracts.setContext(this.#state.playerGuid, false);
 			this.squelch.setContext(this.#state.playerGuid, false);
 			this.allegiance.setContext(this.#state.playerGuid, false);
 		}
@@ -1797,6 +1843,10 @@ export class ClientLifecycleSession {
 				this.#state.lifecycle?.kind === "in-world",
 			);
 			this.squelch.setContext(
+				this.#state.playerGuid,
+				this.#state.lifecycle?.kind === "in-world",
+			);
+			this.contracts.setContext(
 				this.#state.playerGuid,
 				this.#state.lifecycle?.kind === "in-world",
 			);

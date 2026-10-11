@@ -62,6 +62,7 @@
 		| "settings"
 		| "world"
 		| "social"
+		| "journal"
 		| "spells"
 		| "enchantments"
 		| "characterSheet"

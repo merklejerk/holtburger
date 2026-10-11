@@ -1,4 +1,8 @@
 import type {
+	ContractsSnapshot,
+	ContractMembershipChange,
+} from "../../client/client-contracts-contract";
+import type {
 	AllegianceSnapshot,
 	AllegiancePreferences,
 } from "../../client/client-allegiance-contract";
@@ -147,6 +151,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"queue_client_character_motion_event",
 	"submit_client_party",
 	"submit_client_friends",
+	"submit_client_contracts",
 	"submit_client_squelch",
 	"submit_client_allegiance",
 	"set_client_party_updates",
@@ -269,6 +274,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-character-preferences-updated",
 	"client-party-updated",
 	"client-friends-updated",
+	"client-contracts-updated",
+	"client-contract-membership-changed",
 	"client-squelch-updated",
 	"client-allegiance-updated",
 	"client-combat-mode-updated",
@@ -378,6 +385,8 @@ export interface HostEventPayloadMap {
 		allegiance: AllegiancePreferences;
 	};
 	"client-friends-updated": { friends: FriendsSnapshot | null };
+	"client-contracts-updated": { contracts: ContractsSnapshot | null };
+	"client-contract-membership-changed": ContractMembershipChange;
 	"client-squelch-updated": { squelch: SquelchSnapshot | null };
 	"client-allegiance-updated": { allegiance: AllegianceSnapshot };
 	"client-party-updated": {

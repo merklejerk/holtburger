@@ -110,7 +110,11 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        let player_guid = self.character_selection.character_id.ok_or_else(|| {
+            anyhow::anyhow!("cannot enter the world without a selected character")
+        })?;
         self.reset_friends();
+        self.begin_contracts();
         self.begin_squelch();
         self.reset_allegiance();
         self.world.fellowship = None;
@@ -120,9 +124,6 @@ impl ClientRuntime {
         }
         self.reset_container_access();
         self.clear_busy_operation();
-        let player_guid = self.character_selection.character_id.ok_or_else(|| {
-            anyhow::anyhow!("cannot enter the world without a selected character")
-        })?;
         // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.
         self.event_ordering = Some(super::event_ordering::GameEventOrdering::new(player_guid));
         self.described_character = None;
@@ -334,7 +335,9 @@ impl ClientRuntime {
         ) && let GameMessage::GameEvent(event) = &message
             && matches!(
                 event.event,
-                GameEvent::FriendsListUpdate(_)
+                GameEvent::SendClientContractTrackerTable(_)
+                    | GameEvent::SendClientContractTracker(_)
+                    | GameEvent::FriendsListUpdate(_)
                     | GameEvent::SetSquelchDb(_)
                     | GameEvent::AllegianceUpdate(_)
                     | GameEvent::AllegianceUpdateDone(_)

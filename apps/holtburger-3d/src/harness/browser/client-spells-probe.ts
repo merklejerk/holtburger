@@ -1,7 +1,7 @@
+import { textSearchWords } from "../../app/text-search";
 import { tick } from "svelte";
 import {
 	spellSearchEntry,
-	spellSearchWords,
 	matchesSpellSearch,
 } from "../../client/client-spell-search";
 
@@ -97,7 +97,7 @@ export async function probeClientSpells(
 			// Separate input tasks so the synthetic loop does not manufacture one long task.
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			const matchingStart = performance.now();
-			const terms = spellSearchWords(query);
+			const terms = textSearchWords(query);
 			entries.filter((entry) => matchesSpellSearch(entry, terms, []));
 			matchingTimings.push(performance.now() - matchingStart);
 			const start = performance.now();

@@ -57,6 +57,8 @@ export interface ClientUiDefaults {
 	readonly spells: Omit<ClientUiPanel, "resizable">;
 	/** Character social management window. */
 	readonly social: Omit<ClientUiPanel, "resizable">;
+	/** Retained contracts journal with independently expandable rows. */
+	readonly journal: Omit<ClientUiPanel, "resizable">;
 	/** Independent active-enchantments floating window. */
 	readonly enchantments: Omit<ClientUiPanel, "resizable">;
 	/** Character progression window, distinct from the always-visible HUD. */

@@ -48,6 +48,7 @@
 	} from "../lib/host/weenie-catalog-capability";
 	import ClientMessageDialog from "./ClientMessageDialog.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
+	import { ClientContractNotifications } from "./client-contract-notifications";
 	import {
 		ClientDialogs,
 		type ClientDialogPresentation,
@@ -449,6 +450,14 @@
 			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
 		},
 	});
+	const contractNotifications = new ClientContractNotifications({
+		publish: (message) => toastCenter.publish({ message, tone: "status" }),
+		batchMs: CLIENT_TUNING.journal.membershipToastBatchMs,
+		scheduler: {
+			cancel: (handle) => window.clearTimeout(handle),
+			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+		},
+	});
 	if (startupSettingsIssue !== null)
 		toastCenter.publish({
 			message: `Settings issue: ${startupSettingsIssue}`,
@@ -748,6 +757,7 @@
 	}
 
 	function receive(event: ClientLifecycleSessionEvent): void {
+		contractNotifications.receive(event);
 		switch (event.type) {
 			case "housing-updated":
 				housing = event.housing;
@@ -845,6 +855,8 @@
 				return;
 			case "transient-string":
 				toastCenter.publish({ message: event.message, tone: "status" });
+				return;
+			case "contract-membership-change":
 				return;
 			case "action-feedback":
 				toastCenter.publish(event.feedback);
@@ -1553,6 +1565,7 @@
 		dialogs = dialogOwner;
 		const unbindHousingDialogs = dialogOwner.bindLocal(housingManagementOwner);
 		const unbindPartyDialogs = dialogOwner.bindLocal(partyOwner);
+		const unbindContractDialogs = dialogOwner.bindLocal(owner.contracts);
 		const unsubscribeDialogs = dialogOwner.subscribe(
 			(value) => (dialogPresentation = value),
 		);
@@ -1651,6 +1664,7 @@
 			partyOwner.destroy();
 			party = null;
 			unbindPartyDialogs();
+			unbindContractDialogs();
 			housingManagementOwner.destroy();
 			housingManagement = null;
 			houseCrystalOwner.destroy();
@@ -1676,6 +1690,7 @@
 			if (objectInspectionOwner === inspectionOwner)
 				objectInspectionOwner = null;
 			objectInspection = { kind: "idle" };
+			contractNotifications.reset();
 			toastCenter.destroy();
 			unsubscribePrecise();
 			unsubscribeSelection();
@@ -1798,6 +1813,7 @@
 			{housingManagement}
 			{party}
 			friends={session?.friends ?? null}
+			contracts={session?.contracts ?? null}
 			squelch={session?.squelch ?? null}
 			allegiance={session?.allegiance ?? null}
 			onSearchHousing={async (houseType) => {

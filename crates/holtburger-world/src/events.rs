@@ -241,6 +241,10 @@ pub enum WorldEvent {
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
     /// The retained character friend list changed.
     FriendsStateUpdated,
+    /// Contract membership/stage/timer observation changed.
+    ContractsStateUpdated,
+    /// Accepted incremental membership change; table replacement is silent.
+    ContractMembershipChanged(state::contracts::ContractMembershipChange),
     /// Character ignore DB replaced.
     SquelchStateUpdated,
     /// Partial allegiance profile or known-node presence changed.

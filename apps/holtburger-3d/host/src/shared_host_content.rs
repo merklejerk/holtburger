@@ -125,20 +125,25 @@ impl SharedHostContent {
             .read_character_title_catalog()
             .context("failed to load character-title catalog for client bootstrap")?;
         let motion_catalog = self.motion_catalog.as_ref().clone();
+        let contracts = self
+            .repository
+            .read_contract_catalog()
+            .context("failed to load contract catalog for client bootstrap")?;
         let soul_emote_catalog = self
             .repository
             .read_soul_emote_catalog()
             .context("failed to load soul emote catalog for client bootstrap")?;
-        let mut bootstrap = WorldBootstrap::new(
-            skill_table,
-            secondary_attribute_table,
-            spell_table,
-            xp_table,
-            character_titles,
-            motion_catalog,
-            soul_emote_catalog,
-        );
-        bootstrap.weenie_types = self.weenie_catalog.types();
+        let bootstrap = WorldBootstrap {
+            weenie_types: self.weenie_catalog.types(),
+            skill_table: Arc::new(skill_table),
+            secondary_attribute_table: Arc::new(secondary_attribute_table),
+            spell_table: Arc::new(spell_table),
+            xp_table: Arc::new(xp_table),
+            character_titles: Arc::new(character_titles),
+            contracts: Arc::new(contracts),
+            motion_sequences: Arc::new(motion_catalog),
+            soul_emote_catalog: Arc::new(soul_emote_catalog),
+        };
         let bootstrap = Arc::new(bootstrap);
         *cached = Some(Arc::clone(&bootstrap));
         Ok(bootstrap)

@@ -222,6 +222,12 @@ try {
 			actionFeedback: result.clientActionFeedback,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientContracts) {
+		report = {
+			suite: "client-contracts",
+			...result.clientContracts,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientFriends) {
 		report = {
 			suite: "client-friends",
@@ -456,6 +462,7 @@ function parseArgs(args) {
 		characterSheet: false,
 		clientParty: false,
 		clientFriends: false,
+		clientContracts: false,
 		clientSelectedActions: false,
 		clientBindings: false,
 		clientBindingControls: false,
@@ -638,6 +645,10 @@ function parseArgs(args) {
 			case "--client-selected-actions":
 				parsed.clientHud = true;
 				parsed.clientSelectedActions = true;
+				break;
+			case "--client-contracts":
+				parsed.clientHud = true;
+				parsed.clientContracts = true;
 				break;
 			case "--client-friends":
 				parsed.clientHud = true;
@@ -1656,6 +1667,7 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print summary evidence (the default for --client-hud).
+  --client-contracts    Exercise Journal and outdoor contract map markers, tooltips, timers, and removal.
   --client-book         Exercise the book reader through the client HUD fixture.
   --full-report         Print complete diagnostic evidence, including HUD snapshots.
   --particle-sao-report-only
@@ -4539,6 +4551,90 @@ async function runClientHudHarness({ viteUrl }) {
 					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeActionFeedback",
 					[],
 				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientContracts) {
+			const map = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeContractMap",
+				[],
+			);
+			const result = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeContracts",
+				[],
+			);
+			await evaluateExpression(
+				client,
+				`document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="World"]').click()`,
+			);
+			await delay(50);
+			const toggleSelector =
+				'section.hud-window[aria-label="World"] button[aria-label="Show contracts"]';
+			await evaluateExpression(
+				client,
+				`document.querySelector(${JSON.stringify(toggleSelector)}).focus()`,
+			);
+			for (const type of ["keyDown", "keyUp"])
+				await client.send("Input.dispatchKeyEvent", {
+					type,
+					key: "Enter",
+					code: "Enter",
+					windowsVirtualKeyCode: 13,
+					text: type === "keyDown" ? "\r" : undefined,
+				});
+			await delay(50);
+			if (
+				(await evaluateExpression(
+					client,
+					`document.querySelector(${JSON.stringify(toggleSelector)}).getAttribute('aria-pressed')`,
+				)) !== "false"
+			)
+				throw new Error("Contracts map toggle did not respond to native Enter");
+			map.keyboardToggle = true;
+			await evaluateExpression(
+				client,
+				`document.querySelector('section.hud-window[aria-label="World"] button[aria-label="Close World"]').click()`,
+			);
+			await evaluateExpression(
+				client,
+				`document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Journal"]').click()`,
+			);
+			await delay(50);
+			const selector = 'section.hud-window[aria-label="Journal"] details';
+			await evaluateExpression(
+				client,
+				`(() => {
+                    const summary = document.querySelector(${JSON.stringify(selector + " summary")});
+                    globalThis.__journalKeyboardEvidence = [];
+                    for (const name of ["keydown", "keyup", "click"]) summary.addEventListener(name, event => globalThis.__journalKeyboardEvidence.push({ name, key: event.key, prevented: event.defaultPrevented }));
+                    summary.focus();
+                    return document.activeElement.tagName;
+                })()`,
+			);
+			for (const type of ["keyDown", "keyUp"]) {
+				await client.send("Input.dispatchKeyEvent", {
+					type,
+					key: "Enter",
+					code: "Enter",
+					windowsVirtualKeyCode: 13,
+					text: type === "keyDown" ? "\r" : undefined,
+				});
+			}
+			await delay(50);
+			if (
+				!(await evaluateExpression(
+					client,
+					`document.querySelector(${JSON.stringify(selector)}).open`,
+				))
+			)
+				throw new Error(
+					`Journal disclosure did not respond to native Enter activation: ${JSON.stringify(await evaluateExpression(client, `({ active: document.activeElement.tagName, evidence: globalThis.__journalKeyboardEvidence, open: document.querySelector(${JSON.stringify(selector)}).open })`))}`,
+				);
+			return {
+				clientContracts: { ...result, keyboardDisclosure: true, map },
 				consoleMessages,
 				state: { error: null, ready: true },
 			};
@@ -8332,6 +8428,12 @@ async function probeClientWorldMap(client) {
 			`Array.from(document.querySelectorAll('[data-housing-search-areas]'), node => ({areas:node.dataset.housingSearchAreas, x:node.transform.baseVal.getItem(0).matrix.e, y:node.transform.baseVal.getItem(0).matrix.f}))`,
 		);
 	const beforePan = await clusterPositions();
+	const mapCursor = () =>
+		read(
+			`getComputedStyle(document.querySelector('[aria-label="World terrain map"]')).cursor`,
+		);
+	if ((await mapCursor()) !== "grab")
+		throw new Error("Idle world map did not expose the pan hand cursor.");
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mousePressed",
 		...mapCenter,
@@ -8346,6 +8448,10 @@ async function probeClientWorldMap(client) {
 		button: "left",
 		buttons: 1,
 	});
+	if ((await mapCursor()) !== "grabbing")
+		throw new Error(
+			"Dragging world map did not expose the closed hand cursor.",
+		);
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mouseReleased",
 		x: mapCenter.x + 10,
@@ -8354,6 +8460,8 @@ async function probeClientWorldMap(client) {
 		buttons: 0,
 		clickCount: 1,
 	});
+	if ((await mapCursor()) !== "grab")
+		throw new Error("World map cursor did not recover after pointer release.");
 	await delay(50);
 	const afterPan = await clusterPositions();
 	const stablePan =

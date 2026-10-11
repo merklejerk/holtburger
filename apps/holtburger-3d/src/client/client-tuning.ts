@@ -38,6 +38,12 @@ const CLIENT_PORTAL_TRANSITION = {
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
+	/** One-second journal countdown resolution; independent of scene cadence. */
+	journal: {
+		displayIntervalMs: 1_000,
+		mapMarkerSizeCssPixels: 18,
+		membershipToastBatchMs: 150,
+	},
 	/** Marker clustering stays in CSS pixels independently of render density. */
 	housingSearch: { clusterSpacingCssPixels: 28 },
 	chat: {

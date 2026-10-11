@@ -1,9 +1,9 @@
+import { textSearchWords } from "../app/text-search";
 import type { SpellRow } from "./client-spells";
 import type { ResolvedEnchantments } from "./client-enchantments-contract";
 import {
 	matchesSpellSearch,
 	spellFilterGroups,
-	spellSearchWords,
 	type SpellSearch,
 } from "./client-spell-search";
 
@@ -183,7 +183,7 @@ export function projectEnchantmentSections(
 			instance,
 		]),
 	);
-	const terms = spellSearchWords(search.text);
+	const terms = textSearchWords(search.text);
 	const pills = spellFilterGroups(search.tags);
 	const row = (key: Group["effective"]): EnchantmentDisplayRow => {
 		const instance = instances.get(enchantmentKey(key));
@@ -203,7 +203,7 @@ export function projectEnchantmentSections(
 		if (item.spell?.details !== null && item.spell?.details !== undefined)
 			tags.add(`school:${item.spell.details.school}`);
 		return matchesSpellSearch(
-			{ words: [...statWords, ...spellSearchWords(rowName(item))], tags },
+			{ words: [...statWords, ...textSearchWords(rowName(item))], tags },
 			terms,
 			pills,
 		);
@@ -222,7 +222,7 @@ export function projectEnchantmentSections(
 		let section = sections.get(id);
 		if (section === undefined) {
 			const label = enchantmentStatLabel(group.affectedStat, group.statName);
-			section = { label, words: spellSearchWords(label), groups: [] };
+			section = { label, words: textSearchWords(label), groups: [] };
 			sections.set(id, section);
 		}
 		const effective = row(group.effective);
@@ -243,7 +243,7 @@ export function projectEnchantmentSections(
 	);
 	if (vitae.length > 0) {
 		const label = "Vitae penalty";
-		const words = spellSearchWords(label);
+		const words = textSearchWords(label);
 		const groups = vitae.flatMap((instance): EnchantmentDisplayGroup[] => {
 			const effective = row(instance.key);
 			return matches(effective, words)

@@ -775,6 +775,7 @@
 		onPlacementChange={(value) => (placement = value)}
 	>
 		<ClientWorldPanel
+			contracts={null}
 			characterGuid={1}
 			housingManagement={null}
 			housing={emptyHousing()}

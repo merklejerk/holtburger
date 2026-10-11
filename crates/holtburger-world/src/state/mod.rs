@@ -1,5 +1,6 @@
 pub mod allegiance;
 pub(crate) mod attachment_lifecycle;
+pub mod contracts;
 mod entity_scale;
 pub mod fellowship;
 pub mod friends;

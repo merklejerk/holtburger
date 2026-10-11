@@ -67,6 +67,7 @@ async function fixture() {
 		party: null,
 		partyPreferences: null,
 		friends: null,
+		contracts: null,
 		squelch: null,
 		allegiance: {
 			playerGuid: null,

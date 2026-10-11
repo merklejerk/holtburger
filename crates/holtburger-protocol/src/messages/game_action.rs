@@ -2,6 +2,7 @@ pub use crate::messages::allegiance::*;
 pub use crate::messages::book::actions::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
+pub use crate::messages::contracts::*;
 pub use crate::messages::fellowship::actions::*;
 pub use crate::messages::friends::*;
 pub use crate::messages::housing::*;
@@ -26,6 +27,9 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    /// Contract registry wire operation.
+    AbandonContract(Box<AbandonContractActionData>),
+
     AllegianceUpdateRequest(Box<AllegianceUpdateRequestActionData>),
     AddFriend(Box<AddFriendActionData>),
     ModifyAccountSquelch(Box<ModifyAccountSquelchActionData>),
@@ -134,6 +138,9 @@ impl ProtocolUnpack for GameActionMessage {
 
         let action_data = match action_op {
             Some(op) => match op {
+                GameActionOpcode::AbandonContract => GameAction::AbandonContract(Box::new(
+                    AbandonContractActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::AdvocateTeleport => GameAction::AdvocateTeleport(Box::new(
                     AdvocateTeleportActionData::unpack(data, offset)?,
                 )),
@@ -424,6 +431,10 @@ impl ProtocolPack for GameActionMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.action {
+            GameAction::AbandonContract(data) => {
+                (GameActionOpcode::AbandonContract as u32).pack(buf);
+                data.pack(buf);
+            }
             GameAction::AdvocateTeleport(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::AdvocateTeleport as u32)
                     .unwrap();

@@ -127,7 +127,9 @@ impl ChatState {
             | ClientViewEvent::PopupString { message } => {
                 self.log(ChatMessageTags::system(), message.clone());
             }
-            ClientViewEvent::ServerMessage { message, chat_type } => {
+            ClientViewEvent::ServerMessage {
+                message, chat_type, ..
+            } => {
                 self.log(chat_message_tags(*chat_type), message.clone());
             }
             ClientViewEvent::Chat {
@@ -875,6 +877,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message: "You enter combat.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Combat.into(),
             },
@@ -892,6 +895,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message: "Welcome to Asheron's Call.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Broadcast.into(),
             },
@@ -911,6 +915,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message: "Buff Dude has granted you access to their home's storage.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Tell.into(),
             },
@@ -951,6 +956,11 @@ mod tests {
         chat.handle_event(
             &holtburger_core::ClientViewEvent::CombatFeedback(
                 CombatFeedback::AttackerNotification {
+                    context: holtburger_core::client::types::CombatOutcomeContext {
+                        world_generation: 0,
+                        attribution:
+                            holtburger_core::client::types::CombatOutcomeAttribution::Unplaced,
+                    },
                     defender_name: "Drudge".to_string(),
                     damage_type: DamageType::SLASH,
                     health_percent: 0.25,

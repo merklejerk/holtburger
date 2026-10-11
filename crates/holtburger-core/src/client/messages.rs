@@ -604,10 +604,13 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::AttackerNotification(data) => {
+                    let context =
+                        self.attribute_combat_outcome(&data.defender_name, Instant::now());
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(
                             crate::client::types::CombatFeedback::AttackerNotification {
+                                context,
                                 defender_name: data.defender_name.clone(),
                                 damage_type: data.damage_type,
                                 health_percent: data.health_percent,
@@ -635,10 +638,13 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::EvasionAttackerNotification(data) => {
+                    let context =
+                        self.attribute_combat_outcome(&data.defender_name, Instant::now());
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(
                             crate::client::types::CombatFeedback::EvasionAttackerNotification {
+                                context,
                                 defender_name: data.defender_name.clone(),
                             },
                         ));
@@ -746,6 +752,7 @@ impl ClientRuntime {
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::ServerMessage {
+                            combat_outcome: None,
                             message: message.clone(),
                             chat_type: (ChatMessageType::System as u32).into(),
                         });
@@ -871,9 +878,15 @@ impl ClientRuntime {
             ),
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
+                let combat_outcome = self.interpret_server_combat_text(
+                    data.chat_type.into(),
+                    &data.message,
+                    Instant::now(),
+                );
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerMessage {
+                        combat_outcome,
                         message: data.message.clone(),
                         chat_type: data.chat_type.into(),
                     });

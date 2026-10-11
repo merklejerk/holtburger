@@ -13,6 +13,9 @@ if (import.meta.hot) {
 /** Bundled themes and caller-supplied themes use the same stylesheet URL boundary. */
 export const defaultUiThemeUrl = holtburgerStandardUrl;
 
+/** Cold notification after a complete stylesheet selection has become active. */
+export const UI_THEME_CHANGED_EVENT = "holtburger-ui-theme-changed";
+
 /** Document-owned stylesheets; switching appearance never owns component lifetime. */
 export function createUiThemeLoader(owner: Document) {
 	let active: HTMLLinkElement[] = [];
@@ -53,6 +56,7 @@ export function createUiThemeLoader(owner: Document) {
 				for (const link of staged) link.media = "all";
 				for (const link of active) link.remove();
 				active = staged;
+				owner.dispatchEvent(new Event(UI_THEME_CHANGED_EVENT));
 			};
 			const result = queue.then(update);
 			// A failed request is reported to its caller but must not poison subsequent selections.

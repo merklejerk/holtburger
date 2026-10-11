@@ -1,4 +1,10 @@
 <script lang="ts">
+	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
+	import {
+		CombatEffectsRuntimeProbe,
+		type CombatEffectsRuntimeProof,
+	} from "./combat-effects-runtime-probe";
+	import type { CombatEffectsFixtureResult } from "../../lib/game/renderer/webgl2-combat-effects-fixture";
 	import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 	import { APP_INPUT } from "../../lib/input/app-input";
@@ -568,6 +574,7 @@
 			physicalMode: "pose-only" | "integrated",
 		) => Promise<readonly DynamicEntityView[]>;
 		/** Install a deterministic catalog-independent population through the shared dynamic runtime. */
+		readonly probeRuntimeCombatEffects: () => Promise<void>;
 		readonly installSyntheticNameplateWorkload: (
 			workload: SyntheticNameplateWorkload,
 		) => Promise<readonly DynamicEntityView[]>;
@@ -788,6 +795,8 @@
 		readonly outdoorPssm: WebGL2PssmFixtureResult | null;
 		/** Real-browser selected-mask, compositor, resize, and teardown evidence. */
 		readonly entitySelection: WebGL2EntitySelectionFixtureResult | null;
+		readonly combatEffects: CombatEffectsFixtureResult | null;
+		readonly combatEffectsRuntime: CombatEffectsRuntimeProof | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		/** One read-only observation for every profile transport request. */
@@ -1113,6 +1122,9 @@
 	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
 		null;
 	let outdoorPssm: WebGL2PssmFixtureResult | null = null;
+	let combatEffects: CombatEffectsFixtureResult | null = null;
+	let combatEffectsRuntime: CombatEffectsRuntimeProof | null = null;
+	const combatEffectsRuntimeProbe = new CombatEffectsRuntimeProbe();
 	let entitySelection: WebGL2EntitySelectionFixtureResult | null = null;
 	let ready = false;
 	const fixture = query.get("fixture");
@@ -2242,6 +2254,16 @@
 		}
 		spawnedEntities = entities;
 		return entities;
+	}
+
+	async function probeRuntimeCombatEffects(): Promise<void> {
+		const entities = await installSyntheticNameplateWorkload("svg-icon");
+		const entity = entities[0];
+		if (!runtime || !entity)
+			throw new Error("Combat fixture requires an installed target.");
+		combatEffectsRuntime = await combatEffectsRuntimeProbe.run(runtime, entity);
+		await probeCombatEffectsAppearance();
+		spawnedEntities = [];
 	}
 
 	async function probeSyntheticNameplateLifecycle(): Promise<{
@@ -3952,6 +3974,8 @@
 				if (fixture === "outdoor-pssm") {
 					outdoorPssm = device.probeOutdoorPssm();
 				}
+				if (fixture === "combat-effects")
+					combatEffects = device.probeCombatEffects();
 				if (fixture === "entity-selection") {
 					entitySelection = device.probeEntitySelection();
 				}
@@ -3996,6 +4020,8 @@
 					{
 						buildRenderer: async (world) => {
 							renderer = await device!.buildRenderer(world);
+							if (fixture === "combat-effects")
+								combatEffectsRuntimeProbe.attach(renderer);
 							return renderer;
 						},
 						resources: device.resources,
@@ -4439,6 +4465,7 @@
 					spawnExplorerEntityFleet,
 					installSyntheticNameplateWorkload,
 					probeSyntheticNameplateLifecycle,
+					probeRuntimeCombatEffects,
 					probeSpawnedEntitySelection,
 					probeObjectPreviewLifecycle,
 					objectPreviewDiagnostics,
@@ -4481,6 +4508,8 @@
 							entityShadowResources: frameDiagnostics?.entityShadows ?? null,
 							dynamicResources: frameDiagnostics?.dynamicResources ?? null,
 							entitySelection,
+							combatEffects,
+							combatEffectsRuntime,
 							compiledObjectDraws:
 								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,

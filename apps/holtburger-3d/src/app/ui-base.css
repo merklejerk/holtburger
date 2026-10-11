@@ -63,6 +63,11 @@
 		--ui-spell-scrollbar-thumb-opacity: 18%;
 		--ui-spell-scrollbar-hover-track-opacity: 25%;
 		--ui-spell-scrollbar-hover-thumb-opacity: 70%;
+		/* World combat text appearance; optional --ui-combat-text-font overrides the UI body role. */
+		--ui-combat-text-damage-color: #ffffff;
+		--ui-combat-text-critical-color: #ffb833;
+		--ui-combat-text-avoidance-color: #a6b3bf;
+		--ui-combat-text-size: 28px;
 		--ui-font-body: Arial, Helvetica, sans-serif;
 		--ui-font-heading: Georgia, "Times New Roman", serif;
 		--ui-font-mono: "Courier New", monospace;

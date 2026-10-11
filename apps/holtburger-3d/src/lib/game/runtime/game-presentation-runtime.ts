@@ -1,4 +1,12 @@
 import {
+	CombatEffectsSystem,
+	type CombatEffectOutcome,
+	type CombatEffectPlacement,
+	type CombatEffectsTuning,
+	type CombatEffectsAppearance,
+} from "../systems/combat-effects-system";
+import { transformPoint3 } from "../math/matrices";
+import {
 	resolveHumanoidBodyLayout,
 	type HumanoidBodyLayout,
 } from "../animation/humanoid-body-layout";
@@ -20,6 +28,7 @@ import type { DecodedStaticPresentation } from "../../assets/decode-static-sourc
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import { animationHookCommand } from "../../assets/decode-animation-record";
 import type { CommitPipeline, LandblockLayerCommit } from "../commit/types";
+
 import type {
 	EnvCellMaterializationDiagnostics,
 	EnvCellMaterializationPlan,
@@ -769,6 +778,7 @@ export class GamePresentationRuntime {
 	readonly #physicsScriptTables: PhysicsScriptTableRepository;
 	readonly #particleEmitters: ParticleEmitterRepository;
 	readonly #particles: ParticleSystem;
+	#combatEffects: CombatEffectsSystem | null = null;
 	readonly #soundTables: SoundTableRepository;
 	readonly #particleMeshes: ParticleMeshCache;
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
@@ -3848,6 +3858,73 @@ export class GamePresentationRuntime {
 		};
 	}
 
+	/** Snapshot the realized mesh center and physical membership once; never retain node/GPU identity. */
+	#combatEffectPlacement(guid: number): CombatEffectPlacement {
+		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId;
+		if (nodeId === undefined) return { kind: "unplaced" };
+		// Scene bounds include animation sweeps and particle reach; anchor to the current mesh instead.
+		const bounds = this.#dynamics.getPublishedRigidPresentationBounds(nodeId);
+		const placement = this.#scene.getResolvedPlacement(nodeId);
+		const membership = this.#scene.getResolvedSpatialMembership(nodeId);
+		if (bounds === null || placement === undefined || membership === undefined)
+			return { kind: "unplaced" };
+		const origin = createLandblockWorldOrigin(placement.landblockId);
+		const center = transformPoint3(
+			placement.localToLandblock,
+			new Vec3(
+				(bounds.min.x + bounds.max.x) * 0.5,
+				(bounds.min.y + bounds.max.y) * 0.5,
+				(bounds.min.z + bounds.max.z) * 0.5,
+			),
+		).add(origin);
+		return {
+			kind: "world",
+			position: sceneVector3([center.x, center.y, center.z]),
+			scopes: membership.scopes.map((scope) => ({ ...scope })),
+		};
+	}
+
+	/** App-local entry point: correlation is already decided in core, placement is cosmetic. */
+	acceptCombatOutcome(
+		outcome: CombatEffectOutcome,
+		target: number | null,
+		tuning: CombatEffectsTuning,
+		nowMs: number,
+	): void {
+		if (this.#destroyed) return;
+		if (this.#combatEffects === null) {
+			const capability = this.#renderer?.combatEffects;
+			if (!capability)
+				throw new Error("Client renderer cannot present combat effects.");
+			this.#combatEffects = new CombatEffectsSystem(tuning, capability);
+		}
+		const placement =
+			target === null
+				? { kind: "unplaced" as const }
+				: this.#combatEffectPlacement(target);
+
+		this.#combatEffects.accept(outcome, placement, nowMs);
+	}
+
+	/** Cold appearance updates preserve the effects owner and current logical instances. */
+	setCombatEffectsAppearance(appearance: CombatEffectsAppearance): void {
+		this.#combatEffects?.setAppearance(appearance);
+	}
+
+	refreshCombatEffectsFontAtlas(): void {
+		this.#combatEffects?.refreshFontAtlas();
+	}
+
+	/** World discontinuity/resync clears transient work without allocating any resources. */
+	clearCombatEffects(): void {
+		this.#combatEffects?.clear();
+	}
+
+	/** Cosmetic time advances independently of scene readiness or world simulation. */
+	advanceCombatEffects(nowMs: number): void {
+		this.#combatEffects?.advance(nowMs);
+	}
+
 	/** Borrow one realized entity's current posed CPU geometry for an exact interaction query. */
 	withSpawnedEntitySelectionGeometry<T>(
 		guid: number,
@@ -4128,6 +4205,8 @@ export class GamePresentationRuntime {
 		]);
 		await Promise.allSettled([...this.#realizationContinuations]);
 		await Promise.allSettled([...this.#dynamicCuePreparations.values()]);
+		this.#combatEffects?.dispose();
+		this.#combatEffects = null;
 		await this.#renderer?.destroy();
 		this.#renderer = null;
 		this.#portalTransitionAssets = null;

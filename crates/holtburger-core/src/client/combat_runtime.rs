@@ -9,6 +9,7 @@ use super::types::{
 };
 use super::{ClientRuntime, ClientState};
 use anyhow::Result;
+use holtburger_common::properties::{PropertyString, WorldObjectExt, WorldObjectPropertyAccessors};
 use holtburger_common::{CharacterOption, Guid, Vector3};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::MotionStance;
@@ -93,12 +94,14 @@ fn melee_request_admitted(distance: f32, path: CombatStaticPath, stalled: bool) 
 struct PreparedSpellCast {
     /// Canonical spell identifier after stripping the frontend marker bit.
     spell_id: u32,
+    /// Catalog identity captured during validated preparation for named feedback correlation.
+    spell_name: String,
     /// Actual recipient after resolving self-target and untargeted spell routes.
     target: Option<Guid>,
 }
 
 impl PreparedSpellCast {
-    fn into_action(self) -> GameAction {
+    fn to_action(&self) -> GameAction {
         match self.target {
             Some(target) => GameAction::CastTargetedSpell(Box::new(CastTargetedSpellActionData {
                 target,
@@ -401,7 +404,7 @@ impl ClientRuntime {
         let effect = self.combat_engagement.next_effect(now, ready);
         match effect {
             Some(CombatControlEffect::Attack(engagement)) => {
-                self.send_targeted_attack(engagement.target, engagement.profile)
+                self.send_targeted_attack(engagement.target, engagement.profile, now)
                     .await?;
                 self.melee_approach_state = None;
             }
@@ -422,8 +425,9 @@ impl ClientRuntime {
         &mut self,
         target: Guid,
         profile: ClientAttackProfile,
+        now: Instant,
     ) -> Result<()> {
-        match profile {
+        let result = match profile {
             ClientAttackProfile::Melee { height, power } => {
                 log::info!(
                     ">>> Shared melee engagement on 0x{:08X} ({:?}, power {:.2})",
@@ -456,7 +460,68 @@ impl ClientRuntime {
                 )))
                 .await
             }
+        };
+        result?;
+        let name = self
+            .world
+            .entities
+            .get(target)
+            .and_then(|entity| entity.get_string_prop(PropertyString::Name));
+        self.combat_attribution.sent(target, name, now);
+        Ok(())
+    }
+
+    /// Resolve correlation once while authoritative attack and retained entity facts coexist.
+    pub(super) fn attribute_combat_outcome(
+        &mut self,
+        name: &str,
+        now: Instant,
+    ) -> super::types::CombatOutcomeContext {
+        let matching = self
+            .world
+            .entities
+            .entities
+            .values()
+            .filter(|entity| {
+                entity.is_creature() && entity.get_string_prop(PropertyString::Name) == Some(name)
+            })
+            .map(|entity| entity.guid);
+        super::types::CombatOutcomeContext {
+            world_generation: self.world_generation,
+            attribution: self.combat_attribution.resolve(name, matching, now),
         }
+    }
+
+    /// Interpret network text once; unsupported messages carry no cosmetic companion.
+    pub(super) fn interpret_server_combat_text(
+        &mut self,
+        chat_type: ChatMessageTypeId,
+        message: &str,
+        now: Instant,
+    ) -> Option<super::types::ServerTextCombatOutcome> {
+        let parsed = super::server_combat_text::recognize(chat_type, message)?;
+        let matching = self
+            .world
+            .entities
+            .entities
+            .values()
+            .filter(|entity| {
+                entity.is_creature()
+                    && entity.get_string_prop(PropertyString::Name) == Some(parsed.defender_name)
+            })
+            .map(|entity| entity.guid);
+        Some(super::types::ServerTextCombatOutcome {
+            context: super::types::CombatOutcomeContext {
+                world_generation: self.world_generation,
+                attribution: self.combat_attribution.resolve_text(
+                    parsed.defender_name,
+                    parsed.source,
+                    matching,
+                    now,
+                ),
+            },
+            kind: parsed.kind,
+        })
     }
 
     pub(super) fn observe_combat_feedback(&mut self, feedback: &CombatFeedback, now: Instant) {
@@ -465,6 +530,9 @@ impl ClientRuntime {
             CombatFeedback::AttackCommenced => self.combat_engagement.attack_commenced(),
             CombatFeedback::AttackDone { error } => {
                 self.combat_engagement.attack_done(*error, now);
+                if self.combat_engagement.sent_engagement().is_none() {
+                    self.combat_attribution.retire(now);
+                }
             }
             _ => {}
         }
@@ -480,6 +548,7 @@ impl ClientRuntime {
     pub(super) fn reset_combat_engagement(&mut self) {
         let previous = self.combat_engagement.status();
         self.combat_engagement.reset();
+        self.combat_attribution.clear();
         self.combat_approach_drive_active = false;
         self.melee_approach_state = None;
         self.emit_combat_status_if_changed(previous);
@@ -673,7 +742,11 @@ impl ClientRuntime {
         if self.world.player.guid == Guid::NULL {
             return Err("Character identity has not arrived yet.");
         }
-        Ok(PreparedSpellCast { spell_id, target })
+        Ok(PreparedSpellCast {
+            spell_id,
+            spell_name: spell.name.clone(),
+            target,
+        })
     }
 
     async fn cast_spell(&mut self, spell_id: u32, aim: SpellCastAim) -> Result<()> {
@@ -690,7 +763,19 @@ impl ClientRuntime {
             self.reject_combat_request("Wait for the current action to finish.");
             return Ok(());
         }
-        let result = self.send_game_action(action.into_action()).await;
+        let target = action
+            .target
+            .filter(|target| *target != self.world.player.guid);
+        let result = self.send_game_action(action.to_action()).await;
+        if let (Ok(()), Some(target)) = (&result, target) {
+            let name = self
+                .world
+                .entities
+                .get(target)
+                .and_then(|entity| entity.get_string_prop(PropertyString::Name));
+            self.combat_attribution
+                .sent_cast(target, name, &action.spell_name, Instant::now());
+        }
         if result.is_err() {
             self.clear_busy_operation();
         }
@@ -769,6 +854,303 @@ mod tests {
             ..Default::default()
         });
         world
+    }
+
+    /// Exercise the production wire decoder and message intake rather than bypassing recognition.
+    async fn receive_text(
+        client: &mut ClientRuntime,
+        channel: u32,
+        text: &str,
+    ) -> Option<super::super::types::ServerTextCombatOutcome> {
+        use holtburger_protocol::traits::ProtocolPack;
+        let mut bytes = Vec::new();
+        GameMessage::ServerMessage(Box::new(ServerMessageData {
+            message: text.into(),
+            chat_type: channel,
+        }))
+        .pack(&mut bytes);
+        let mut events = client.subscribe_client_view_events();
+        client.handle_message(&bytes).await.unwrap();
+        let ClientViewEvent::ServerMessage {
+            message,
+            chat_type,
+            combat_outcome,
+        } = events.try_recv().unwrap()
+        else {
+            panic!("expected one server message");
+        };
+        assert_eq!(message, text);
+        assert_eq!(chat_type.raw(), channel);
+        while let Ok(event) = events.try_recv() {
+            assert!(
+                !matches!(
+                    event,
+                    ClientViewEvent::ServerMessage { .. } | ClientViewEvent::CombatFeedback(_)
+                ),
+                "duplicate combat/chat publication: {event:?}"
+            );
+        }
+        combat_outcome
+    }
+
+    #[tokio::test]
+    async fn network_text_preserves_unplaced_confirmations_and_unsupported_chat() {
+        use super::super::types::CombatOutcomeAttribution;
+        let mut client = client(0);
+        for (channel, text) in [
+            (
+                ChatMessageType::Magic as u32,
+                "You burn Drudge for 0 points with Flame.",
+            ),
+            (
+                ChatMessageType::Magic as u32,
+                "With Harm Other VII you drain 12 points of health from Drudge.",
+            ),
+            (
+                ChatMessageType::Magic as u32,
+                "You scar Drudge for 42 points of periodic nether damage!",
+            ),
+            (
+                ChatMessageType::Magic as u32,
+                "With Surge of Affliction you drain 42 points of health from Drudge!",
+            ),
+            (
+                ChatMessageType::CombatSelf as u32,
+                "You bleed Drudge for 1 points of periodic health damage!",
+            ),
+            (ChatMessageType::Magic as u32, "Drudge resists your spell"),
+        ] {
+            let outcome = receive_text(&mut client, channel, text).await.unwrap();
+            assert_eq!(
+                outcome.context.attribution,
+                CombatOutcomeAttribution::Unplaced
+            );
+        }
+        for (channel, text) in [
+            (
+                ChatMessageType::Magic as u32,
+                "With Heal Other you restore 12 points of health to Drudge.",
+            ),
+            (
+                ChatMessageType::Magic as u32,
+                "With Drain Mana you drain 12 points of mana from Drudge.",
+            ),
+            (
+                ChatMessageType::Magic as u32,
+                "You gain 12 points of health due to casting Drain Health on Drudge.",
+            ),
+            (
+                ChatMessageType::Magic as u32,
+                "Drudge burns you for 12 points with Flame.",
+            ),
+            (ChatMessageType::Magic as u32, "You fail to affect Drudge."),
+            (ChatMessageType::Combat as u32, "Drudge resists your spell"),
+            (999, "Drudge resists your spell"),
+        ] {
+            assert!(receive_text(&mut client, channel, text).await.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_cast_and_completed_busy_flow_through_network_text_once_until_reset() {
+        use super::super::types::{CombatOutcomeAttribution, ServerTextCombatOutcomeKind};
+        let mut client = client(0);
+        client
+            .world
+            .entities
+            .insert(holtburger_world::entity::Entity::new(
+                Guid(2),
+                "Drudge".into(),
+                WorldPosition::default(),
+            ));
+        let aim = SpellCastAim::Normal {
+            selection: Some(Guid(2)),
+        };
+        client.cast_spell(42, aim).await.unwrap();
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        for (text, kind) in [
+            (
+                "You burn Drudge for 0 points with Test Spell.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 0,
+                    critical_hit: false,
+                },
+            ),
+            (
+                "Critical hit! You burn Drudge for 37 points with Test Spell.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 37,
+                    critical_hit: true,
+                },
+            ),
+            (
+                "Drudge resists your spell",
+                ServerTextCombatOutcomeKind::Resisted,
+            ),
+            (
+                "You burn Drudge for 7 points of periodic nether damage!",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 7,
+                    critical_hit: false,
+                },
+            ),
+            (
+                "You burn Drudge for 7 points of periodic nether damage!",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 7,
+                    critical_hit: false,
+                },
+            ),
+        ] {
+            let outcome = receive_text(&mut client, ChatMessageType::Magic as u32, text)
+                .await
+                .unwrap();
+            assert_eq!(outcome.kind, kind);
+            assert_eq!(
+                outcome.context.attribution,
+                CombatOutcomeAttribution::Attributed { target: Guid(2) }
+            );
+            assert_eq!(outcome.context.world_generation, client.world_generation);
+        }
+        let generation = client.world_generation;
+        client.bump_world_generation();
+        let outcome = receive_text(
+            &mut client,
+            ChatMessageType::Magic as u32,
+            "Drudge resists your spell",
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.context.world_generation, generation + 1);
+        assert_eq!(
+            outcome.context.attribution,
+            CombatOutcomeAttribution::Unplaced
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_busy_failed_self_and_untargeted_casts_do_not_supply_defender_hints() {
+        use super::super::types::CombatOutcomeAttribution;
+        for mode in ["rejected", "busy", "failed", "self", "untargeted"] {
+            let mut client = client(0);
+            client
+                .world
+                .entities
+                .insert(holtburger_world::entity::Entity::new(
+                    Guid(2),
+                    "Drudge".into(),
+                    WorldPosition::default(),
+                ));
+            if mode == "busy" {
+                client.arm_busy_operation(super::super::PendingOperation::SpellCast {
+                    target: Some(Guid(3)),
+                });
+            }
+            if mode == "failed" {
+                client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+                    .await
+                    .unwrap();
+            }
+            let aim = match mode {
+                "untargeted" => SpellCastAim::Untargeted,
+                "self" => SpellCastAim::Normal {
+                    selection: Some(Guid(1)),
+                },
+                _ => SpellCastAim::Normal {
+                    selection: Some(Guid(2)),
+                },
+            };
+            let result = client
+                .cast_spell(if mode == "rejected" { 99 } else { 42 }, aim)
+                .await;
+            assert_eq!(result.is_err(), mode == "failed");
+            let outcome = receive_text(
+                &mut client,
+                ChatMessageType::Magic as u32,
+                "You burn Drudge for 1 points with Test Spell.",
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                outcome.context.attribution,
+                CombatOutcomeAttribution::Unplaced,
+                "{mode}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_physical_send_attributes_feedback_and_generation_reset_invalidates_it() {
+        use super::super::types::CombatOutcomeAttribution;
+        let mut client = client(0);
+        client
+            .world
+            .entities
+            .insert(holtburger_world::entity::Entity::new(
+                Guid(2),
+                "Drudge".into(),
+                WorldPosition::default(),
+            ));
+        let now = Instant::now();
+        client
+            .send_targeted_attack(
+                Guid(2),
+                ClientAttackProfile::Melee {
+                    height: AttackHeight::Medium,
+                    power: 0.5,
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        let context = client.attribute_combat_outcome("Drudge", now);
+        assert_eq!(context.world_generation, client.world_generation);
+        assert_eq!(
+            context.attribution,
+            CombatOutcomeAttribution::Attributed { target: Guid(2) }
+        );
+        client.bump_world_generation();
+        let after = client.attribute_combat_outcome("Drudge", now);
+        assert_eq!(after.world_generation, context.world_generation + 1);
+        assert_eq!(after.attribution, CombatOutcomeAttribution::Unplaced);
+    }
+
+    #[tokio::test]
+    async fn failed_physical_send_never_establishes_attribution_context() {
+        use super::super::types::CombatOutcomeAttribution;
+        let mut client = client(0);
+        client
+            .world
+            .entities
+            .insert(holtburger_world::entity::Entity::new(
+                Guid(2),
+                "Drudge".into(),
+                WorldPosition::default(),
+            ));
+        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+            .await
+            .unwrap();
+        let now = Instant::now();
+        assert!(
+            client
+                .send_targeted_attack(
+                    Guid(2),
+                    ClientAttackProfile::Melee {
+                        height: AttackHeight::Medium,
+                        power: 0.5
+                    },
+                    now
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            client.attribute_combat_outcome("Drudge", now).attribution,
+            CombatOutcomeAttribution::Unplaced
+        );
     }
 
     #[test]
@@ -1068,7 +1450,7 @@ mod tests {
             let client = client(flags);
             let prepared = client.prepare_spell_cast(0x8000_002a, aim).unwrap();
             assert_eq!(prepared.target, expected);
-            let action = prepared.into_action();
+            let action = prepared.to_action();
             match (action, expected) {
                 (GameAction::CastTargetedSpell(data), Some(target)) => {
                     assert_eq!(data.target, target);
@@ -1271,7 +1653,7 @@ mod tests {
                     }
                 )
                 .unwrap()
-                .into_action(),
+                .to_action(),
             GameAction::CastUntargetedSpell(_)
         ));
     }

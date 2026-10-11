@@ -1,3 +1,8 @@
+import type {
+	CombatEffectOutcome,
+	CombatEffectsAppearance,
+	CombatEffectsTuning,
+} from "../lib/game/systems/combat-effects-system";
 import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import {
 	clientAudioSettingsSchema,
@@ -16,7 +21,7 @@ import {
 } from "../lib/assets/ac-frame";
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
-import { CLIENT_TUNING } from "./client-tuning";
+import { CLIENT_TUNING, CLIENT_COMBAT_EFFECTS_TUNING } from "./client-tuning";
 import type { ResolvedSceneEnvironment } from "../lib/game/environment/scene-environment";
 import {
 	bindClientPresentationEnvironment,
@@ -341,6 +346,18 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	hasEnvCellScope(residency: ResolvedSceneOrigin): boolean;
 	/** Commit pending loading artifacts without advancing live world presentation. */
 	pollPortalTransitionLoading(): void;
+	/** Forward confirmed outcomes and reset transient visual state. */
+	acceptCombatOutcome(
+		outcome: CombatEffectOutcome,
+		target: number | null,
+		tuning: CombatEffectsTuning,
+		nowMs: number,
+	): void;
+	clearCombatEffects(): void;
+	setCombatEffectsAppearance(appearance: CombatEffectsAppearance): void;
+	refreshCombatEffectsFontAtlas(): void;
+	/** Age transient visuals even when scene readiness holds the ordinary tick. */
+	advanceCombatEffects(nowMs: number): void;
 	tick(): void;
 	clearPresentation(): void;
 	/** Present portal space without requiring or advancing a committed world view. */
@@ -446,6 +463,7 @@ export class ClientPresentationSession {
 	readonly #onEnvironmentIssue: ClientPresentationSessionDependencies["onEnvironmentIssue"];
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
 	/** Latest user mix, retained while browser resources are being constructed. */
+	#combatEffectsTuning: CombatEffectsTuning = CLIENT_COMBAT_EFFECTS_TUNING;
 	#audioSettings: ClientAudioSettings = CLIENT_AUDIO_DEFAULTS;
 	#sceneInterestRadii: SceneInterestRadii = clientSceneInterestRadii(
 		CLIENT_GRAPHICS_DEFAULTS.viewDistance,
@@ -880,6 +898,15 @@ export class ClientPresentationSession {
 	}
 
 	/** Retain cold preferences during construction and update the live owner without rebuilding it. */
+	setCombatEffectsAppearance(appearance: CombatEffectsAppearance): void {
+		this.#combatEffectsTuning = { ...this.#combatEffectsTuning, ...appearance };
+		this.#owner?.runtime.setCombatEffectsAppearance(appearance);
+	}
+
+	refreshCombatEffectsFontAtlas(): void {
+		this.#owner?.runtime.refreshCombatEffectsFontAtlas();
+	}
+
 	setAudioSettings(settings: ClientAudioSettings): void {
 		this.#audioSettings = clientAudioSettingsSchema.parse(settings);
 		if (this.#owner !== null) this.#applyAudioSettings(this.#owner);
@@ -940,6 +967,7 @@ export class ClientPresentationSession {
 		if (this.#destroyed || owner === null) {
 			return { rendered: false, status: this.#status };
 		}
+		owner.runtime.advanceCombatEffects(timeMs);
 		if (this.#terminalPresentationError !== null) {
 			this.#setStatus("error", this.#terminalPresentationError);
 			return { rendered: false, status: this.#status };
@@ -1292,6 +1320,26 @@ export class ClientPresentationSession {
 	#receive(event: ClientLifecycleSessionEvent): void {
 		if (this.#destroyed) return;
 		switch (event.type) {
+			case "combat-outcome":
+				if (
+					this.#session.mirror.isAwaitingSnapshot() ||
+					event.outcome.worldGeneration !==
+						this.#session.state().worldGeneration
+				) {
+					return;
+				}
+				this.#owner?.runtime.acceptCombatOutcome(
+					event.outcome.outcome,
+					event.outcome.attribution.kind === "attributed"
+						? event.outcome.attribution.target
+						: null,
+					this.#combatEffectsTuning,
+					event.receivedAtMs,
+				);
+				return;
+			case "resyncing":
+				this.#owner?.runtime.clearCombatEffects();
+				return;
 			case "current-state":
 				this.#receiveCurrentState(event.state);
 				this.#reconcileEntityNameplates();
@@ -1467,6 +1515,7 @@ export class ClientPresentationSession {
 	#receivePresentationDiscontinuity(
 		discontinuity: ClientPresentationDiscontinuity,
 	): void {
+		this.#owner?.runtime.clearCombatEffects();
 		void this.camera.stop().catch((error: unknown) => this.#reportError(error));
 		this.#cameraTarget = null;
 		this.#cameraProjection = null;

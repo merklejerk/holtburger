@@ -918,6 +918,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             damage,
             critical_hit,
             attack_conditions,
+            ..
         }) => Some(ScriptEvent::CombatFeedback(
             ScriptCombatFeedback::AttackerNotification {
                 defender_name: defender_name.clone(),
@@ -949,6 +950,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
         )),
         ClientViewEvent::CombatFeedback(CombatFeedback::EvasionAttackerNotification {
             defender_name,
+            ..
         }) => Some(ScriptEvent::CombatFeedback(
             ScriptCombatFeedback::EvasionAttackerNotification {
                 defender_name: defender_name.clone(),

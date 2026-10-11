@@ -1,3 +1,5 @@
+import { WebGL2CombatEffects } from "./webgl2-combat-effects";
+import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
 import { OCEAN_BACKDROP_BOUNDS } from "../terrain/ocean-backdrop";
 import { frustumIntersectsAABB } from "../math/frustum";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
@@ -699,6 +701,8 @@ interface PreparedEntityAnalyticShadows {
 
 interface PreparedNameplateCandidate {
 	readonly anchor: Vec3;
+	/** Only selection bypasses scene depth; hover merely guarantees population inclusion. */
+	readonly depthTest: boolean;
 	readonly distanceSquared: number;
 	readonly identity: string;
 	readonly required: boolean;
@@ -707,11 +711,13 @@ interface PreparedNameplateCandidate {
 }
 
 interface MutableNameplateDrawInstance extends NameplateDrawInstance {
+	depthTest: boolean;
 	anchor: Vec3;
 	binding: NameplateTextureBinding;
 }
 
 interface MutableNameplateScopedDrawInstance extends NameplateScopedDrawInstance {
+	depthTest: boolean;
 	anchor: Vec3;
 	binding: NameplateTextureBinding;
 	renderScopeKey: string;
@@ -974,6 +980,7 @@ export class WebGL2Renderer implements Renderer {
 	readonly #transparentCenterScratch = new Vec3(0, 0, 0);
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
+	readonly #combatEffectAdapters = new Set<WebGL2CombatEffects>();
 	/** Context-local object compiler shared by world and isolated renderer implementations. */
 	readonly #objectDrawCompiler: WebGL2ObjectDrawCompiler;
 	/** Appearance resources follow template leases, not current visibility. */
@@ -1419,6 +1426,12 @@ export class WebGL2Renderer implements Renderer {
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
 			this.#drawFrameContent(input, profile);
+			for (const adapter of this.#combatEffectAdapters)
+				adapter.drawLane(
+					this.#canvas.width,
+					this.#canvas.height,
+					this.#renderScale,
+				);
 			return Object.freeze({
 				portalTransitionReceipt: portalTransitionPresentationReceipt(
 					input.portalTransition,
@@ -2126,6 +2139,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
 		this.#drawNameplates(view, pipeline);
+		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator?.trajectory) {
 			this.#drawWorldTrajectory(view, indicator.trajectory, {
@@ -2157,6 +2171,8 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	async destroy(): Promise<void> {
+		for (const adapter of this.#combatEffectAdapters) adapter.release();
+		this.#combatEffectAdapters.clear();
 		this.#dynamicDepths.beginFrame();
 		this.#dynamicOpaqueRanges.beginFrame();
 		this.#dynamicAdditiveRanges.beginFrame();
@@ -2783,6 +2799,7 @@ export class WebGL2Renderer implements Renderer {
 							);
 							nameplates.push({
 								anchor,
+								depthTest: this.#frameSelectionTarget?.nodeId !== nodeId,
 								distanceSquared,
 								identity: facts.identity,
 								required,
@@ -3375,12 +3392,24 @@ export class WebGL2Renderer implements Renderer {
 			arena.viewHighWaterMark;
 	}
 
-	/**
-	 * Region-scoped celestial sky residency.
-	 *
-	 * Installed once per region load; the resource set is fixed for that region's lifetime, so
-	 * there is no incremental path and no per-frame residency work.
-	 */
+	/** Each combat subsystem leases one independently disposable draw adapter. */
+	readonly combatEffects: RendererCombatEffectsCapability = {
+		create: (tuning) => {
+			const adapter = new WebGL2CombatEffects(this.#gl, tuning);
+			this.#combatEffectAdapters.add(adapter);
+			return {
+				setAppearance: (appearance) => adapter.setAppearance(appearance),
+				refreshFontAtlas: () => adapter.refreshFontAtlas(),
+				submit: (instances) => adapter.submit(instances),
+				clear: () => adapter.clear(),
+				release: () => {
+					adapter.release();
+					this.#combatEffectAdapters.delete(adapter);
+				},
+			};
+		},
+	};
+
 	/**
 	 * Authored particle residency and per-frame source submission.
 	 *
@@ -3414,6 +3443,12 @@ export class WebGL2Renderer implements Renderer {
 		},
 	};
 
+	/**
+	 * Region-scoped celestial sky residency.
+	 *
+	 * Installed once per region load; the resource set is fixed for that region's lifetime, so
+	 * there is no incremental path and no per-frame residency work.
+	 */
 	readonly sky: RendererSkyCapability = {
 		clear: () => {
 			this.#skyPass?.destroy();
@@ -3665,6 +3700,7 @@ export class WebGL2Renderer implements Renderer {
 			1.0,
 		);
 		this.#drawNameplates(view, null);
+		this.#drawCombatEffects(view, null, null);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator?.trajectory)
 			this.#drawWorldTrajectory(view, indicator.trajectory, null);
@@ -3721,6 +3757,32 @@ export class WebGL2Renderer implements Renderer {
 		this.#reconciledNameplateViewerIdentity = viewerEntityIdentity;
 	}
 
+	#drawCombatEffects(
+		view: PreparedView,
+		routing: WebGL2PortalScopeAtlasPipeline | null,
+		visibility: DynamicRenderDomainSelection | null,
+	): void {
+		for (const adapter of this.#combatEffectAdapters)
+			adapter.drawWorld({
+				clipFromAnchor: mat4ToFloat32Array(
+					view.clipFromAnchor,
+					this.#matrixScratch,
+				),
+				anchorLandblockId: view.anchorLandblockId,
+				width: this.#frameWidth,
+				height: this.#frameHeight,
+				density: this.#renderScale,
+				routing,
+				selectedScope: (scope) =>
+					visibility
+						? visibility.selectedRenderDomainOrdinal(scopeKey(scope))
+						: scope.kind === "outdoor" ||
+							  scope.envCellId === view.camera.placement.envCellId
+							? 0
+							: null,
+			});
+	}
+
 	#drawNameplates(
 		view: PreparedView,
 		portalRouting: WebGL2PortalScopeAtlasPipeline | null,
@@ -3749,11 +3811,13 @@ export class WebGL2Renderer implements Renderer {
 					if (instance === undefined) {
 						this.#scopedNameplateDrawScratch.push({
 							anchor: candidate.anchor,
+							depthTest: candidate.depthTest,
 							binding,
 							renderScopeKey,
 						});
 					} else {
 						instance.anchor = candidate.anchor;
+						instance.depthTest = candidate.depthTest;
 						instance.binding = binding;
 						instance.renderScopeKey = renderScopeKey;
 					}
@@ -3774,10 +3838,12 @@ export class WebGL2Renderer implements Renderer {
 				if (instance === undefined) {
 					this.#nameplateDrawScratch.push({
 						anchor: candidate.anchor,
+						depthTest: candidate.depthTest,
 						binding,
 					});
 				} else {
 					instance.anchor = candidate.anchor;
+					instance.depthTest = candidate.depthTest;
 					instance.binding = binding;
 				}
 				instanceCount += 1;

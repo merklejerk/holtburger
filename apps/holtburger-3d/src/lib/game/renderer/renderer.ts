@@ -1,3 +1,4 @@
+import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
 import type { BakedDrawMergeCensus } from "./baked-draw-merge-census";
 import type { LandblockOwnerId } from "../game-types";
 import type { RenderExtent } from "./render-extent";
@@ -882,6 +883,8 @@ export interface Renderer {
 	readonly sky?: RendererSkyCapability;
 	/** Authored particle residency and submission, absent on backends that cannot draw them. */
 	readonly particles?: RendererParticleCapability;
+	/** Resource lease and transient submissions owned by the app-local combat effects system. */
+	readonly combatEffects?: RendererCombatEffectsCapability;
 	/** Install the already prepared authored portal visual, when this backend can draw it. */
 	installPortalTransitionVisual?(visual: PortalTransitionVisual): void;
 	/** Draw portal space without a committed world view or any world-system advancement. */

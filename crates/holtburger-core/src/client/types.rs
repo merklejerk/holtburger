@@ -564,6 +564,43 @@ pub enum CharacterManagementOperation {
     Restore,
 }
 
+/// Best-effort identity correlation for name-only outgoing server feedback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum CombatOutcomeAttribution {
+    /// Exactly one known attack target matches without a retained-creature ambiguity veto.
+    Attributed { target: Guid },
+    /// Feedback is confirmed but its defender identity cannot be established reliably.
+    Unplaced,
+}
+
+/// Producer-stamped context travels with outgoing outcomes; consumers never rederive it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CombatOutcomeContext {
+    /// World generation in which core received this outcome.
+    pub world_generation: u64,
+    /// Conservative correlation computed by the combat attribution owner.
+    pub attribution: CombatOutcomeAttribution,
+}
+
+/// Confirmed outgoing health damage or explicit resistance interpreted from server text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerTextCombatOutcomeKind {
+    /// Server-reported amount; only a leading critical token establishes critical styling.
+    Damage { amount: u32, critical_hit: bool },
+    /// Explicit outgoing spell resistance, independent of whether it dealt damage.
+    Resisted,
+}
+
+/// Host-consumed semantic companion to the unchanged server chat message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerTextCombatOutcome {
+    /// Attribution and generation computed once at network receipt.
+    pub context: CombatOutcomeContext,
+    /// Confirmed cosmetic facts, independent of attribution availability.
+    pub kind: ServerTextCombatOutcomeKind,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CombatFeedback {
     AttackDone {
@@ -571,6 +608,8 @@ pub enum CombatFeedback {
     },
     AttackCommenced,
     AttackerNotification {
+        /// Correlation and lifecycle identity for this outgoing outcome.
+        context: CombatOutcomeContext,
         defender_name: String,
         damage_type: DamageType,
         health_percent: f64,
@@ -588,6 +627,8 @@ pub enum CombatFeedback {
         attack_conditions: AttackConditions,
     },
     EvasionAttackerNotification {
+        /// Correlation and lifecycle identity for this outgoing outcome.
+        context: CombatOutcomeContext,
         defender_name: String,
     },
     EvasionDefenderNotification {
@@ -961,6 +1002,8 @@ pub enum ClientViewEvent {
     ServerMessage {
         message: String,
         chat_type: ChatMessageTypeId,
+        /// Network-only interpretation consumed by the 3D host; local messages use None.
+        combat_outcome: Option<ServerTextCombatOutcome>,
     },
     Chat {
         speaker: ChatSpeaker,

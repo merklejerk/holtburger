@@ -1,0 +1,9 @@
+/* Diagnostic theme fixture: exercise the production stylesheet boundary and CSS color syntax. */
+@layer overrides {
+	#combat-theme-probe {
+		--ui-combat-text-damage-color: rgb(18, 35, 52);
+		--ui-combat-text-critical-color: #abcdef;
+		--ui-combat-text-avoidance-color: #654321;
+		--ui-combat-text-size: 32px;
+	}
+}

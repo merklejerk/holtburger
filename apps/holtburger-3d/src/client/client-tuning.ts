@@ -1,3 +1,4 @@
+import type { CombatEffectsTuning } from "../lib/game/systems/combat-effects-system";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
 import { hexRgba } from "../lib/frontend-color";
@@ -8,6 +9,30 @@ import type {
 	ClientTuning,
 } from "./client-tuning-contract";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout";
+
+/** Floating combat text policy; values are intentionally editable without changing tests. */
+export const CLIENT_COMBAT_EFFECTS_TUNING = {
+	maximumActive: 32,
+	lifetimeMs: 1_000,
+	popMs: 220,
+	fadeMs: 300,
+	popScale: 1.25,
+	criticalPopScale: 1.65,
+	worldRise: 0.8,
+	screenRise: 48,
+	spreadPixels: 18,
+	font: "sans-serif",
+	fontSize: 28,
+	outlineWidth: 2,
+	criticalOutlineWidth: 3.5,
+	criticalLabelScale: 0.48,
+	criticalLabelGap: 4,
+	colors: {
+		damage: [1, 1, 1],
+		avoidance: [0.65, 0.7, 0.75],
+		critical: [1, 0.72, 0.2],
+	},
+} as const satisfies CombatEffectsTuning;
 
 const CLIENT_DIAGNOSTICS = {
 	/** Smoothing window used by the client frame-rate readout. */

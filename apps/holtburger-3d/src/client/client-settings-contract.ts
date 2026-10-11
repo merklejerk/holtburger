@@ -20,6 +20,8 @@ import {
 	clientEnvironmentOverridesSchema,
 } from "./client-environment-settings.js";
 
+import { clientCombatIndicatorSettingsSchema } from "./client-combat-indicator-settings.js";
+
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
 	.number()
@@ -197,6 +199,7 @@ export const clientUserSettingsSchema = z
 		graphics: clientGraphicsSettingsSchema,
 		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,
+		combatIndicators: clientCombatIndicatorSettingsSchema,
 		clockFormat: clientClockFormatSchema,
 		environmentOverrides: clientEnvironmentOverridesSchema,
 		input: clientKeyboardSettingsSchema,

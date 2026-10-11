@@ -21,6 +21,8 @@ import {
 	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
 } from "./client-environment-settings";
 
+import { CLIENT_COMBAT_INDICATOR_DEFAULTS } from "./client-combat-indicator-settings";
+
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
 export const CLIENT_AUDIO_DEFAULTS = {
 	masterVolume: 1,
@@ -49,6 +51,7 @@ export function createDefaultClientUserSettings(
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
+		combatIndicators: CLIENT_COMBAT_INDICATOR_DEFAULTS,
 		input: structuredClone(CLIENT_KEYBOARD_DEFAULTS),
 		clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,
 		environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,

@@ -134,6 +134,7 @@ impl ClientRuntime {
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message,
                 chat_type: (ChatMessageType::System as u32).into(),
             });

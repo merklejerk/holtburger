@@ -215,6 +215,8 @@ pub enum HostEvent {
     },
     ClientActionFeedback(crate::client_projection::ClientActionFeedback),
     ClientChatMessage(crate::client_projection::ClientChatMessageWire),
+    /// Structured confirmed combat feedback for transient visual effects.
+    ClientCombatOutcome(crate::client_projection::ClientCombatOutcomeWire),
     ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
     /// Server positional effect with source and world generation.
     ClientDynamicSoundCue(holtburger_core::ClientDynamicSoundCue),
@@ -444,6 +446,10 @@ impl ClientEventSink for StdioEventSink {
         event: crate::client_projection::ClientHostEvent,
     ) -> anyhow::Result<()> {
         let event = match event {
+            crate::client_projection::ClientHostEvent::CombatFeedback { chat, outcome } => {
+                self.send(HostEvent::ClientChatMessage(chat))?;
+                return self.send(HostEvent::ClientCombatOutcome(outcome));
+            }
             crate::client_projection::ClientHostEvent::HousingManagementFinished(result) => {
                 HostEvent::ClientHousingManagementFinished(result)
             }
@@ -891,6 +897,128 @@ mod tests {
                 result: Ok(DecodedResponse::Binary(payload))
             } if payload == vec![0, 1, 255, 254]
         ));
+    }
+
+    #[test]
+    fn combat_projection_publishes_chat_then_confirmed_outcome_with_producer_identity() {
+        use holtburger_core::client::types::{
+            CombatFeedback, CombatOutcomeAttribution, CombatOutcomeContext,
+        };
+        let projected = crate::client_projection::project_client_event(
+            holtburger_core::ClientViewEvent::CombatFeedback(
+                CombatFeedback::EvasionAttackerNotification {
+                    context: CombatOutcomeContext {
+                        world_generation: 17,
+                        attribution: CombatOutcomeAttribution::Attributed {
+                            target: holtburger_common::Guid(42),
+                        },
+                    },
+                    defender_name: "Drudge".into(),
+                },
+            ),
+        )
+        .unwrap();
+        let (sender, receiver) = mpsc::sync_channel(2);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let ProtocolFrame::Event {
+            event: HostEvent::ClientChatMessage(_),
+        } = receiver.recv().unwrap()
+        else {
+            panic!("chat must be published first");
+        };
+        let ProtocolFrame::Event {
+            event: HostEvent::ClientCombatOutcome(outcome),
+        } = receiver.recv().unwrap()
+        else {
+            panic!("structured outcome must be published second");
+        };
+        assert_eq!(
+            serde_json::to_value(outcome).unwrap(),
+            serde_json::json!({
+                "worldGeneration": 17,
+                "attribution": { "kind": "attributed", "target": 42 },
+                "outcome": { "kind": "evaded" },
+            })
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn server_text_projection_preserves_chat_and_publishes_one_typed_companion() {
+        use holtburger_core::client::types::{
+            CombatOutcomeAttribution, CombatOutcomeContext, ServerTextCombatOutcome,
+            ServerTextCombatOutcomeKind,
+        };
+        for (message, kind) in [
+            (
+                "You burn Drudge for 0 points with Flame.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 0,
+                    critical_hit: false,
+                },
+            ),
+            (
+                "Critical hit! You burn Drudge for 37 points with Flame.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 37,
+                    critical_hit: true,
+                },
+            ),
+            (
+                "Drudge resists your spell",
+                ServerTextCombatOutcomeKind::Resisted,
+            ),
+        ] {
+            let projected = crate::client_projection::project_client_event(
+                holtburger_core::ClientViewEvent::ServerMessage {
+                    message: message.into(),
+                    chat_type: holtburger_protocol::messages::ChatMessageType::Magic.into(),
+                    combat_outcome: Some(ServerTextCombatOutcome {
+                        context: CombatOutcomeContext {
+                            world_generation: 17,
+                            attribution: CombatOutcomeAttribution::Unplaced,
+                        },
+                        kind,
+                    }),
+                },
+            )
+            .unwrap();
+            let (sender, receiver) = mpsc::sync_channel(2);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event {
+                event: HostEvent::ClientChatMessage(chat),
+            } = receiver.recv().unwrap()
+            else {
+                panic!("original chat first");
+            };
+            assert!(
+                matches!(chat, crate::client_projection::ClientChatMessageWire::System { message: original } if original == message)
+            );
+            let ProtocolFrame::Event {
+                event: HostEvent::ClientCombatOutcome(outcome),
+            } = receiver.recv().unwrap()
+            else {
+                panic!("one outcome second");
+            };
+            let expected = match kind {
+                ServerTextCombatOutcomeKind::Damage {
+                    amount,
+                    critical_hit,
+                } => {
+                    serde_json::json!({ "kind": "damage", "amount": amount, "criticalHit": critical_hit })
+                }
+                ServerTextCombatOutcomeKind::Resisted => serde_json::json!({ "kind": "resisted" }),
+            };
+            assert_eq!(
+                serde_json::to_value(outcome).unwrap(),
+                serde_json::json!({ "worldGeneration": 17, "attribution": { "kind": "unplaced" }, "outcome": expected })
+            );
+            assert!(receiver.try_recv().is_err());
+        }
     }
 
     #[test]

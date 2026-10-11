@@ -414,6 +414,57 @@ try {
 	if (options.fixture === "outdoor-pssm") {
 		assertOutdoorPssmFixture(result.state.outdoorPssm);
 	}
+	if (options.fixture === "combat-effects") {
+		const runtimeProof = result.state.combatEffectsRuntime;
+		if (
+			!runtimeProof ||
+			!runtimeProof.retainedPlacement ||
+			!runtimeProof.missingTargetUnplaced ||
+			!runtimeProof.criticalProfile ||
+			!runtimeProof.resistProfile ||
+			!runtimeProof.resetCleared ||
+			!runtimeProof.hiddenExpired ||
+			runtimeProof.leaseCount !== 1
+		) {
+			throw new Error(
+				`Combat runtime fixture failed: ${JSON.stringify(runtimeProof)}`,
+			);
+		}
+		const proof = result.state.combatEffects;
+		if (
+			!proof ||
+			proof.worldPixels <= 0 ||
+			!proof.colorUpdateReusedAtlas ||
+			!proof.typographyUpdateReusedResources ||
+			!proof.liveAppearancePreserved ||
+			proof.worldDraws !== 1 ||
+			proof.laneDraws !== 1 ||
+			proof.criticalGlyphCount !== 3 ||
+			!proof.lazyAllocation ||
+			!proof.sharedAtlas ||
+			proof.rebasedPixels !== proof.worldPixels ||
+			proof.criticalPixels <= proof.worldPixels ||
+			proof.resistWorldPixels <= 0 ||
+			proof.resistLanePixels <= 0 ||
+			proof.resistGlyphCount !== 1 ||
+			!proof.resistSharedAtlas ||
+			proof.portalVisiblePixels !== proof.worldPixels ||
+			proof.lanePixels <= 0 ||
+			proof.criticalLanePixels <= 0 ||
+			!proof.repeatedLifecycleReleased ||
+			!proof.programFailureCleaned ||
+			proof.hiddenScopePixels !== 0 ||
+			proof.portalOccludedPixels !== 0 ||
+			proof.expiredPixels !== 0 ||
+			proof.resetPixels !== 0 ||
+			!proof.resourcesReleased ||
+			!proof.allocationFailureCleaned
+		) {
+			throw new Error(
+				`Combat effects fixture failed: ${JSON.stringify(proof)}`,
+			);
+		}
+	}
 	if (options.fixture === "entity-selection") {
 		assertEntitySelectionFixture(result.state.entitySelection);
 	}
@@ -1240,13 +1291,14 @@ function parseArgs(args) {
 					![
 						"blended",
 						"entity-selection",
+						"combat-effects",
 						"instanced",
 						"outdoor-pssm",
 						"portal-scope-atlas",
 					].includes(parsed.fixture)
 				) {
 					throw new Error(
-						"--fixture must be blended, entity-selection, instanced, outdoor-pssm, or portal-scope-atlas.",
+						"--fixture must be blended, combat-effects, entity-selection, instanced, outdoor-pssm, or portal-scope-atlas.",
 					);
 				}
 				break;
@@ -2173,6 +2225,8 @@ function briefHarnessReport(result) {
 	const staticObjects = result.state.staticObjects;
 	const authoredDynamics = result.state.authoredDynamics;
 	return {
+		combatEffects: result.state.combatEffects,
+		combatEffectsRuntime: result.state.combatEffectsRuntime,
 		objectPreviewBenchmark: result.objectPreviewBenchmark,
 		measuredFrameThroughput: result.measuredFrameThroughput,
 		portalTraversalSurvey: result.portalTraversalSurvey,
@@ -4947,6 +5001,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.frameMode],
 			);
 			await waitForFrameMode(client, options.frameMode);
+		}
+		if (options.fixture === "combat-effects") {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeRuntimeCombatEffects",
+				[],
+			);
 		}
 		let nameplateWorkload = null;
 		if (options.nameplateWorkload !== null) {

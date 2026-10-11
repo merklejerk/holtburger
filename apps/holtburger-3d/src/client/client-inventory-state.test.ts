@@ -115,6 +115,40 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("persistent inventory state", () => {
+	it("withholds burden during recovery and replaces it with the new player baseline", () => {
+		const f = fixture();
+		const acceptPlayer = (guid: number, burden: number | null) => {
+			const player = entityFacts(guid);
+			if (player.description.kind !== "known")
+				throw new Error("Known fixture required.");
+			f.mirror.commit(
+				f.mirror.prepareSnapshot(
+					{
+						projectileSupply: { kind: "not-applicable" },
+						worldContainer: { kind: "closed" },
+						entities: [
+							{ ...player, description: { ...player.description, burden } },
+						],
+					},
+					guid,
+				),
+			);
+		};
+		acceptPlayer(1, 2.15);
+		expect(f.model.readBurden()).toBe(2.15);
+		f.mirror.awaitSnapshot();
+		expect(f.model.readBurden()).toBeNull();
+		acceptPlayer(4, 1.25);
+		expect(f.model.readBurden()).toBe(1.25);
+		f.changeLifecycle({ kind: "entering-world", characterGuid: 4 });
+		expect(f.model.readBurden()).toBeNull();
+		f.changeLifecycle({ kind: "in-world" });
+		expect(f.model.readBurden()).toBe(1.25);
+		acceptPlayer(4, null);
+		expect(f.model.readBurden()).toBeNull();
+		f.destroy();
+	});
+
 	it("moves shared artwork between contents and repeated equipment rows without eviction", async () => {
 		const f = fixture();
 		const armor = item(2, 10);

@@ -464,6 +464,8 @@
 			<ClientStatusTray
 				placement={layout.statusTray}
 				kinds={{ beneficial: true, harmful: true }}
+				inventory={null}
+				onOpenInventory={() => {}}
 				onOpenEnchantments={() => {}}
 				{editable}
 				{viewport}

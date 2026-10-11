@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { presentClientBurden } from "./client-burden-presentation";
 	import BurdenIcon from "../assets/icons/burden.svg?component";
 	import { bindContentsActivation } from "./client-contents-activation";
 	import type { ClientItemInteractions } from "./client-item-interactions";
@@ -124,9 +125,8 @@
 			? rootDescription.burden
 			: null,
 	);
-	const burdenText = $derived(
-		burden === null ? "…" : `${Math.round(burden * 100)}%`,
-	);
+	const burdenPresentation = $derived(presentClientBurden(burden));
+	const burdenText = $derived(burdenPresentation.percent);
 	let panel: HTMLDivElement;
 
 	let sampleNow: (() => void) | null = null;
@@ -330,13 +330,7 @@
 						role="img"
 						aria-label={`Burden: ${burden === null ? "Loading" : burdenText}`}
 						title="Burden"
-						data-level={burden === null
-							? "pending"
-							: burden >= 2
-								? "overburdened"
-								: burden >= 1
-									? "burdened"
-									: "normal"}
+						data-level={burdenPresentation.level}
 					>
 						<BurdenIcon />
 						<span>{burdenText}</span>

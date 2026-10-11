@@ -24,6 +24,7 @@ pub mod character_motion;
 mod character_selection;
 mod character_sheet;
 pub mod collision;
+mod combat_attribution;
 mod combat_engagement;
 pub mod combat_feedback;
 mod combat_runtime;
@@ -64,6 +65,7 @@ mod runtime;
 pub mod runtime_body_view_cache;
 pub mod selection_envelope;
 pub mod selection_query;
+mod server_combat_text;
 mod simulation;
 pub mod spell_inspection;
 mod squelch;
@@ -214,6 +216,8 @@ pub struct ClientRuntime {
     movement: MovementSystem,
     /// Single owner of desired targeted combat and ACE repeat-sequence requests.
     combat_engagement: combat_engagement::CombatEngagementRuntime,
+    /// Correlates name-only outcomes with successfully sent attacks and casts.
+    combat_attribution: combat_attribution::CombatOutcomeAttributor,
     /// Validated shared combat policy selected by the runtime composition.
     combat_tuning: combat_tuning::ClientCombatTuning,
     /// Whether combat currently owns the client-directed movement lease.
@@ -488,6 +492,7 @@ impl ClientRuntime {
     }
 
     pub(crate) fn bump_world_generation(&mut self) -> u64 {
+        self.combat_attribution.clear();
         self.world_generation = self.world_generation.saturating_add(1);
         self.precise_jump.invalidate();
         self.world_generation

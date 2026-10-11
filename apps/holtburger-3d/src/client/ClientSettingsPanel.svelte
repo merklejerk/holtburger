@@ -1,10 +1,12 @@
 <script lang="ts">
+	import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
 	import {
 		readClientBinding,
 		replaceClientBinding,
 	} from "../lib/input/client-keyboard-bindings";
 
 	import UiTabs from "../app/UiTabs.svelte";
+	import ClientCombatIndicatorSettingsPanel from "./ClientCombatIndicatorSettings.svelte";
 	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
 	import type {
 		ClientClockFormat,
@@ -62,6 +64,10 @@
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
+		readonly combatIndicators: ClientCombatIndicatorSettings;
+		readonly onCombatIndicatorsChange: (
+			settings: ClientCombatIndicatorSettings,
+		) => void;
 		/** User-owned environment presentation choices and cold content catalog. */
 		readonly clockFormat: ClientClockFormat;
 		readonly environmentOverrides: ClientEnvironmentOverrides;
@@ -100,6 +106,8 @@
 		onSelectTab,
 		onGraphicsChange,
 		onUiChange,
+		combatIndicators,
+		onCombatIndicatorsChange,
 		onInputChange,
 		canResetHudPlacements,
 		onResetHudPlacements,
@@ -598,6 +606,10 @@
 						</label>
 					</div>
 				</details>
+				<ClientCombatIndicatorSettingsPanel
+					settings={combatIndicators}
+					onChange={onCombatIndicatorsChange}
+				/>
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>HUD layout</summary>
 					<div class="settings-section ui-disclosure-body">

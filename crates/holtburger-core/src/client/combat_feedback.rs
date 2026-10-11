@@ -34,6 +34,7 @@ pub fn combat_feedback_message(feedback: &CombatFeedback) -> Option<CombatFeedba
             damage,
             critical_hit,
             attack_conditions,
+            ..
         } => Some(CombatFeedbackMessage {
             text: format!(
                 "You hit {} for {} {} damage.{}{}",
@@ -65,7 +66,7 @@ pub fn combat_feedback_message(feedback: &CombatFeedback) -> Option<CombatFeedba
             ),
             emphasized: *health_percent > COMBAT_EMPHASIS_DAMAGE_FRACTION || *critical_hit,
         }),
-        CombatFeedback::EvasionAttackerNotification { defender_name } => Some(
+        CombatFeedback::EvasionAttackerNotification { defender_name, .. } => Some(
             unemphasized_message(format!("{} evaded your attack.", defender_name)),
         ),
         CombatFeedback::EvasionDefenderNotification { attacker_name } => Some(
@@ -125,6 +126,10 @@ mod tests {
     #[test]
     fn damage_summary_preserves_authored_semantics() {
         let message = combat_feedback_message(&CombatFeedback::AttackerNotification {
+            context: crate::client::types::CombatOutcomeContext {
+                world_generation: 0,
+                attribution: crate::client::types::CombatOutcomeAttribution::Unplaced,
+            },
             defender_name: "Drudge".to_string(),
             damage_type: DamageType::SLASH,
             health_percent: 0.25,
@@ -145,6 +150,10 @@ mod tests {
     #[test]
     fn damage_emphasis_requires_over_ten_percent_or_a_critical_hit() {
         let message_at_threshold = combat_feedback_message(&CombatFeedback::AttackerNotification {
+            context: crate::client::types::CombatOutcomeContext {
+                world_generation: 0,
+                attribution: crate::client::types::CombatOutcomeAttribution::Unplaced,
+            },
             defender_name: "Drudge".to_string(),
             damage_type: DamageType::SLASH,
             health_percent: COMBAT_EMPHASIS_DAMAGE_FRACTION,
@@ -155,6 +164,10 @@ mod tests {
         .expect("damage feedback should produce a message");
         let message_over_threshold =
             combat_feedback_message(&CombatFeedback::AttackerNotification {
+                context: crate::client::types::CombatOutcomeContext {
+                    world_generation: 0,
+                    attribution: crate::client::types::CombatOutcomeAttribution::Unplaced,
+                },
                 defender_name: "Drudge".to_string(),
                 damage_type: DamageType::SLASH,
                 health_percent: COMBAT_EMPHASIS_DAMAGE_FRACTION + f64::EPSILON,
@@ -164,6 +177,10 @@ mod tests {
             })
             .expect("damage feedback should produce a message");
         let critical_message = combat_feedback_message(&CombatFeedback::AttackerNotification {
+            context: crate::client::types::CombatOutcomeContext {
+                world_generation: 0,
+                attribution: crate::client::types::CombatOutcomeAttribution::Unplaced,
+            },
             defender_name: "Drudge".to_string(),
             damage_type: DamageType::SLASH,
             health_percent: 0.01,

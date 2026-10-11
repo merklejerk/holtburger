@@ -1,3 +1,7 @@
+import {
+	runCombatEffectsFixture,
+	type CombatEffectsFixtureResult,
+} from "./webgl2-combat-effects-fixture";
 import { WebGL2Renderer } from "./webgl2-renderer";
 import { RenderWorld } from "./render-world";
 import { WebGL2ResourceManager } from "./webgl2-resource-manager";
@@ -216,6 +220,12 @@ export class WebGL2Device {
 	probeOutdoorPssm(): WebGL2PssmFixtureResult {
 		this.#assertReady();
 		return runWebGL2PssmFixture(this.#gl);
+	}
+
+	/** Focused numeric proof for combat glyph drawing, visibility, and resource teardown. */
+	probeCombatEffects(): CombatEffectsFixtureResult {
+		this.#assertReady();
+		return runCombatEffectsFixture(this.#gl);
 	}
 
 	/** Prove selected-mask drawing, presentation, resize, and teardown on this browser context. */

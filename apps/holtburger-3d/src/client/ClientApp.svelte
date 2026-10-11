@@ -1,4 +1,10 @@
 <script lang="ts">
+	import {
+		clientCombatIndicatorSettingsSchema,
+		type ClientCombatIndicatorSettings,
+	} from "./client-combat-indicator-settings";
+	import { observeCombatEffectsAppearance } from "./client-combat-effects-appearance";
+	import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
 	import { ClientPartyState } from "./client-party-state";
 	import { ClientHousingManagementState } from "./client-housing-management-state";
 	import {
@@ -519,6 +525,31 @@
 		userSettings = { ...userSettings, hudLayout: layout };
 		userSettingsPersistence.publish({ hudPlacements: layout });
 	}
+	// Cold appearance snapshot seeds replacement presentations; updates never recreate their owners.
+	let combatAppearance: CombatEffectsAppearance | null = null;
+	function observeCombatAppearance(
+		element: HTMLElement,
+		settings: ClientCombatIndicatorSettings,
+	) {
+		return observeCombatEffectsAppearance(
+			element,
+			settings,
+			(appearance) => {
+				combatAppearance = appearance;
+				presentationSession?.setCombatEffectsAppearance(appearance);
+			},
+			() => presentationSession?.refreshCombatEffectsFontAtlas(),
+		);
+	}
+	function changeCombatIndicators(
+		settings: ClientCombatIndicatorSettings,
+	): void {
+		changeUserSection(
+			"combatIndicators",
+			clientCombatIndicatorSettingsSchema.parse(settings),
+		);
+	}
+
 	function changeUi(ui: ClientUiSettings): void {
 		changeUserSection("ui", clientUiSettingsSchema.parse(ui));
 	}
@@ -1307,6 +1338,8 @@
 		presentation.setFieldOfView(
 			untrack(() => userSettings.graphics.verticalFovDegrees),
 		);
+		if (combatAppearance !== null)
+			presentation.setCombatEffectsAppearance(combatAppearance);
 		const currentFrameRateSampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
@@ -1722,6 +1755,7 @@
 
 <div
 	class="client-font-scope"
+	use:observeCombatAppearance={userSettings.combatIndicators}
 	style:--ui-font-body={fontCss(userSettings.ui.fonts.body)}
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
@@ -1762,6 +1796,8 @@
 			onAudioChange={changeAudio}
 			graphics={userSettings.graphics}
 			ui={userSettings.ui}
+			combatIndicators={userSettings.combatIndicators}
+			onCombatIndicatorsChange={changeCombatIndicators}
 			clockFormat={userSettings.clockFormat}
 			environmentOverrides={userSettings.environmentOverrides}
 			{weatherPresets}

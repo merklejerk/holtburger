@@ -1,3 +1,4 @@
+import { BILLBOARD_CLIP_GLSL } from "./billboard-clip-glsl";
 import {
 	linkWebGL2Program,
 	requireWebGL2Uniform,
@@ -17,6 +18,8 @@ export interface NameplateDrawInstance {
 	/** Anchor-relative bottom-center position. */
 	readonly anchor: Vec3;
 	readonly binding: NameplateTextureBinding;
+	/** Selected entity plates overlay scene geometry; ordinary and hovered plates test depth. */
+	readonly depthTest: boolean;
 }
 
 export interface NameplateScopedDrawInstance extends NameplateDrawInstance {
@@ -175,7 +178,6 @@ export class WebGL2NameplatePass {
 			this.#anchorScratch.subarray(0, floatCount),
 			gl.STREAM_DRAW,
 		);
-		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.LEQUAL);
 		gl.depthMask(false);
 		gl.disable(gl.CULL_FACE);
@@ -200,6 +202,7 @@ export class WebGL2NameplatePass {
 				if (
 					next === undefined ||
 					next.binding !== first.binding ||
+					next.depthTest !== first.depthTest ||
 					(routing &&
 						(!("renderScopeKey" in next) ||
 							next.renderScopeKey !== renderScopeKey))
@@ -208,6 +211,8 @@ export class WebGL2NameplatePass {
 				endInstance += 1;
 			}
 			const count = endInstance - firstInstance;
+			if (first.depthTest) gl.enable(gl.DEPTH_TEST);
+			else gl.disable(gl.DEPTH_TEST);
 			gl.vertexAttribPointer(
 				ANCHOR_ATTRIBUTE,
 				3,
@@ -277,10 +282,11 @@ uniform vec2 uPlateSize;
 uniform float uReferenceDistance;
 uniform vec2 uViewportSize;
 out vec2 vUv;
+${BILLBOARD_CLIP_GLSL}
 void main() {
 	vec4 clip = uNameplateClipFromAnchor * vec4(aAnchor, 1.0);
 	vec2 pixelOffset = vec2(aCorner.x * uPlateSize.x, aCorner.y * uPlateSize.y);
-	clip.xy += (pixelOffset * 2.0 / uViewportSize) * uReferenceDistance;
+	clip = offsetBillboardClip(clip, pixelOffset, uViewportSize, uReferenceDistance);
 	gl_Position = clip;
 	vUv = vec2(aCorner.x + 0.5, 1.0 - aCorner.y);
 }`;

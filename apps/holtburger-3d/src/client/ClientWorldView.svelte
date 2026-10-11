@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientJournalPanel from "./ClientJournalPanel.svelte";
+	import type { ClientContractsState } from "./client-contracts-state";
 	import type { ClientAllegianceState } from "./client-allegiance-state";
 	import type { ClientSquelchState } from "./client-squelch-state";
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
@@ -141,6 +143,7 @@
 		/** Session-lifetime party presentation owner. */
 		readonly party: ClientPartyState | null;
 		readonly friends: ClientFriendsState | null;
+		readonly contracts: ClientContractsState | null;
 		readonly squelch: ClientSquelchState | null;
 		readonly allegiance: ClientAllegianceState | null;
 		/** User-scoped fixed HUD geometry, independent of open-panel state. */
@@ -329,6 +332,7 @@
 		hudLayout,
 		party,
 		friends,
+		contracts,
 		squelch,
 		allegiance,
 		onHudPlacementChange,
@@ -1264,6 +1268,7 @@
 					changeHudPlacement("world", placement)}
 			>
 				<ClientWorldPanel
+					{contracts}
 					source={worldMapSource}
 					{characterGuid}
 					{housing}
@@ -1306,7 +1311,30 @@
 		{/key}
 	{/if}
 
-	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social"}
+	{#if contracts !== null}
+		{#key contracts}
+			<ClientHudWindow
+				icon="journal"
+				title="Journal"
+				visible={activePanel === "journal"}
+				placement={hudLayout.journal}
+				minWidth={CLIENT_UI_DEFAULTS.journal.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.journal.minSize.height}
+				{viewport}
+				onClose={() => (activePanel = null)}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("journal", placement)}
+			>
+				<ClientJournalPanel
+					owner={contracts}
+					visible={activePanel === "journal"}
+					onNotice={onSocialNotice}
+				/>
+			</ClientHudWindow>
+		{/key}
+	{/if}
+
+	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social" && activePanel !== "journal"}
 		{@const panel = activePanel}
 		{#key panel}
 			<ClientHudWindow

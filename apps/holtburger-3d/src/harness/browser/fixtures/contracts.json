@@ -1,0 +1,133 @@
+{
+	"contracts": {
+		"rows": [
+			{
+				"kind": "resolved",
+				"id": 1,
+				"name": "Same quest",
+				"description": "Authored quest notes.",
+				"status": {
+					"kind": "available"
+				},
+				"contact": {
+					"role": "start",
+					"name": "Fred",
+					"location": {
+						"kind": "outdoor",
+						"latitude": -1.2,
+						"longitude": 3.4,
+						"position": {
+							"landblockId": 2155872257,
+							"coords": {
+								"x": 6.0,
+								"y": 12.0,
+								"z": 25.0
+							},
+							"rotation": {
+								"w": 1.0,
+								"x": 0.0,
+								"y": 0.0,
+								"z": 0.0
+							}
+						}
+					}
+				},
+				"area": {
+					"kind": "missing"
+				},
+				"deadline": null
+			},
+			{
+				"kind": "resolved",
+				"id": 2,
+				"name": "Same quest",
+				"description": "Authored quest notes.",
+				"status": {
+					"kind": "inProgress",
+					"progress": "7 Wins"
+				},
+				"contact": {
+					"role": "end",
+					"name": "Bob",
+					"location": {
+						"kind": "indoor",
+						"cellId": 3663003904
+					}
+				},
+				"area": {
+					"kind": "outdoor",
+					"latitude": 0.1,
+					"longitude": 0.2,
+					"position": {
+						"landblockId": 2155872266,
+						"coords": {
+							"x": 36.0,
+							"y": 42.0,
+							"z": 50.0
+						},
+						"rotation": {
+							"w": 0.5,
+							"x": 0.5,
+							"y": 0.5,
+							"z": 0.5
+						}
+					}
+				},
+				"deadline": {
+					"kind": "running",
+					"remainingSeconds": 60.0
+				}
+			},
+			{
+				"kind": "resolved",
+				"id": 3,
+				"name": "Quest 3",
+				"description": "Authored quest notes.",
+				"status": {
+					"kind": "completed"
+				},
+				"contact": null,
+				"area": {
+					"kind": "missing"
+				},
+				"deadline": {
+					"kind": "finished"
+				}
+			},
+			{
+				"kind": "resolved",
+				"id": 4,
+				"name": "Quest 4",
+				"description": "Authored quest notes.",
+				"status": {
+					"kind": "waitingToRepeat",
+					"remainingSeconds": 120.0
+				},
+				"contact": null,
+				"area": {
+					"kind": "missing"
+				},
+				"deadline": null
+			},
+			{
+				"kind": "resolved",
+				"id": 5,
+				"name": "Quest 5",
+				"description": "Authored quest notes.",
+				"status": {
+					"kind": "inProgress",
+					"progress": null
+				},
+				"contact": null,
+				"area": {
+					"kind": "missing"
+				},
+				"deadline": null
+			},
+			{
+				"kind": "unresolved",
+				"id": 99
+			}
+		]
+	}
+}

@@ -1,5 +1,6 @@
 use crate::file_type::{
-    CharGen, ChatPoseTable, DatFileType, EnumMapper, SkillTable, SpellTable, StringTable, XpTable,
+    CharGen, ChatPoseTable, ContractTable, DatFileType, EnumMapper, SkillTable, SpellTable,
+    StringTable, XpTable,
 };
 use crate::{EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
@@ -63,6 +64,7 @@ impl StripperManifest {
         for file_id in [
             CharGen::FILE_ID,
             ChatPoseTable::FILE_ID,
+            ContractTable::FILE_ID,
             SkillTable::FILE_ID,
             SpellTable::FILE_ID,
             XpTable::FILE_ID,
@@ -173,6 +175,11 @@ mod tests {
     #[test]
     fn micro_manifest_keeps_the_required_table_ids() {
         let manifest = StripperManifest::micro();
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            ContractTable::FILE_ID,
+            DatFileType::Table
+        ));
 
         assert!(manifest.should_keep_entry(
             EOR_PORTAL_NAMESPACE,

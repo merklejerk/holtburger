@@ -1,8 +1,11 @@
 use crate::spell::SpellCatalog;
-use holtburger_content::{CharacterTitleCatalog, MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_content::{
+    CharacterTitleCatalog, ContractCatalog, MotionSequenceCatalog, SoulEmoteCatalog,
+};
 use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
+/// Parsed immutable game reference data assembled by content-owning callers.
 #[derive(Debug, Clone)]
 pub struct WorldBootstrap {
     /// Optional parsed static template classifications; never a source of live useability.
@@ -14,50 +17,33 @@ pub struct WorldBootstrap {
     pub xp_table: Arc<XpTable>,
     /// Localized static character titles used by shared inspection semantics.
     pub character_titles: Arc<CharacterTitleCatalog>,
+    /// Immutable quest contract definitions and parsed progress formats.
+    pub contracts: Arc<ContractCatalog>,
     pub motion_sequences: Arc<MotionSequenceCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
 }
 
 impl WorldBootstrap {
-    pub fn new(
-        skill_table: SkillTable,
-        secondary_attribute_table: SecondaryAttributeTable,
-        spell_table: SpellTable,
-        xp_table: XpTable,
-        character_titles: CharacterTitleCatalog,
-        motion_sequences: MotionSequenceCatalog,
-        soul_emote_catalog: SoulEmoteCatalog,
-    ) -> Self {
-        Self {
-            weenie_types: None,
-            skill_table: Arc::new(skill_table),
-            secondary_attribute_table: Arc::new(secondary_attribute_table),
-            spell_table: Arc::new(spell_table),
-            xp_table: Arc::new(xp_table),
-            character_titles: Arc::new(character_titles),
-            motion_sequences: Arc::new(motion_sequences),
-            soul_emote_catalog: Arc::new(soul_emote_catalog),
-        }
-    }
-
     pub fn spell_catalog(&self) -> Arc<SpellCatalog> {
         Arc::new(self.spell_table.as_ref().clone().into())
     }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic() -> Self {
-        Self::new(
-            SkillTable::default(),
-            SecondaryAttributeTable::synthetic(),
-            SpellTable {
+        Self {
+            weenie_types: None,
+            skill_table: Arc::new(SkillTable::default()),
+            secondary_attribute_table: Arc::new(SecondaryAttributeTable::synthetic()),
+            spell_table: Arc::new(SpellTable {
                 id: SpellTable::FILE_ID,
                 spells: Default::default(),
                 spell_sets: Default::default(),
-            },
-            XpTable::default(),
-            CharacterTitleCatalog::default(),
-            MotionSequenceCatalog::default(),
-            SoulEmoteCatalog::default(),
-        )
+            }),
+            xp_table: Arc::new(XpTable::default()),
+            character_titles: Arc::new(CharacterTitleCatalog::default()),
+            contracts: Arc::new(ContractCatalog::default()),
+            motion_sequences: Arc::new(MotionSequenceCatalog::default()),
+            soul_emote_catalog: Arc::new(SoulEmoteCatalog::default()),
+        }
     }
 }

@@ -425,6 +425,7 @@ mod tests {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
             fellowship: None,
             friends: None,
+            contracts: None,
             squelch: None,
             allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
                 player_guid: None,
@@ -1094,6 +1095,7 @@ mod tests {
         let snapshot = ClientApplicationSnapshot {
             fellowship: None,
             friends: None,
+            contracts: None,
             squelch: None,
             allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
                 player_guid: None,

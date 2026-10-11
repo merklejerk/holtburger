@@ -291,6 +291,7 @@ export function createClientHudLayout(
 		book: place(defaults.book),
 		spells: place(defaults.spells),
 		social: place(defaults.social),
+		journal: place(defaults.journal),
 		enchantments: place(defaults.enchantments),
 		characterSheet: place(defaults.characterSheet),
 		debug: place(defaults.debug),

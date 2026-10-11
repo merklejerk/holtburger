@@ -3,6 +3,7 @@ pub mod book;
 pub mod character;
 pub mod chat;
 pub mod combat;
+pub mod contracts;
 pub mod effects;
 pub mod fellowship;
 pub mod friends;

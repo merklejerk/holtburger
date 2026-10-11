@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatDuration } from "../app/duration-format";
 	import type { SpellReference } from "../app/spell-references";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import type { HexRgbaColor } from "../lib/frontend-color";
@@ -12,7 +13,6 @@
 	} from "./client-object-inspection-contract";
 	import {
 		formatInspectionDamageTypes,
-		formatInspectionDuration,
 		formatInspectionEffect,
 		formatInspectionImbuedEffects,
 		formatInspectionNumber,
@@ -261,7 +261,7 @@
 								: ` / ${formatInspectionNumber(item.mana.max)}`}{item.mana
 								.secondsLeft === null
 								? ""
-								: ` (${formatInspectionDuration(item.mana.secondsLeft)} left)`}
+								: ` (${formatDuration(item.mana.secondsLeft)} left)`}
 						</dd>
 					</div>{/if}
 				{#if item.stack !== null}<div>

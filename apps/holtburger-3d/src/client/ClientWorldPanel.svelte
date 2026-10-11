@@ -1,4 +1,8 @@
 <script lang="ts">
+	import type { ClientContractsState } from "./client-contracts-state";
+	import { ContractMapOverlay } from "./client-contracts-map-overlay";
+	import { CLIENT_TUNING } from "./client-tuning";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import { RECALL_LABELS } from "./client-recall";
 	import UiTabs from "../app/UiTabs.svelte";
@@ -32,6 +36,8 @@
 	import { HousingSearchOverlay } from "./client-housing-search-overlay";
 
 	interface Props {
+		/** Session-owned unfiltered facts, independent of Journal window state. */
+		readonly contracts: ClientContractsState | null;
 		/** Cold character identity resets the search filter independently of transport lifetime. */
 		readonly characterGuid: number | null;
 		readonly housing: HousingSnapshot;
@@ -56,6 +62,7 @@
 		readonly readFrame: () => MinimapFrame;
 	}
 	const {
+		contracts,
 		characterGuid,
 		housing,
 		housingManagement,
@@ -69,6 +76,7 @@
 		visible,
 		readFrame,
 	}: Props = $props();
+	const { keyboard } = useAppInputPolicy();
 	let searchRoot: SVGGElement;
 	let searchOverlay: HousingSearchOverlay | null = null;
 	/** Filter intent belongs to a character, even while the transport/map survives. */
@@ -118,6 +126,56 @@
 			recallAnchor = null;
 	});
 
+	let contractRoot: SVGGElement;
+	/** Cold mount identity ensures default-on facts are prepared after the SVG owner exists. */
+	let contractOverlay = $state.raw<ContractMapOverlay | null>(null);
+	/** Defaults on for each character; panel/tab closure retains that character's choice. */
+	let contractsChoice = $state<{ character: number | null; enabled: boolean }>({
+		character: null,
+		enabled: false,
+	});
+	const showContracts = $derived(
+		contractsChoice.character === characterGuid && contractsChoice.enabled,
+	);
+	$effect(() => {
+		contractsChoice = {
+			character: characterGuid,
+			enabled: characterGuid !== null,
+		};
+		clearHover();
+	});
+	$effect(() => {
+		const source = contracts;
+		const overlay = contractOverlay;
+		if (
+			source === null ||
+			overlay === null ||
+			!visible ||
+			activeTab !== "world" ||
+			!showContracts
+		) {
+			overlay?.clear();
+			drawTooltip();
+			return;
+		}
+		const refresh = () => {
+			overlay.setFacts(source.readFacts());
+			drawOverlays();
+		};
+		refresh();
+		const unsubscribe = source.subscribeFacts(refresh);
+		const timer = setInterval(() => {
+			overlay.refreshTooltips(source.readFacts());
+			drawTooltip();
+		}, CLIENT_TUNING.journal.displayIntervalMs);
+		return () => {
+			unsubscribe();
+			clearInterval(timer);
+			overlay.clear();
+			drawTooltip();
+		};
+	});
+
 	let canvas: HTMLCanvasElement;
 	let playerMarker: SVGGElement;
 	let homeMarker: SVGGElement;
@@ -157,6 +215,7 @@
 	}
 
 	onMount(() => {
+		contractOverlay = new ContractMapOverlay(contractRoot);
 		const settlements = new WorldMapSettlementOverlay(
 			settlementRoot,
 			WORLD_MAP_SETTLEMENTS,
@@ -184,6 +243,8 @@
 			unsubscribeDraw();
 			mounted.destroy();
 			settlements.destroy();
+			contractOverlay?.clear();
+			contractOverlay = null;
 			searchOverlay?.destroy();
 			searchOverlay = null;
 			settlementOverlay = null;
@@ -210,9 +271,11 @@
 		if (view) {
 			settlementOverlay?.draw(view, canvas.clientWidth, canvas.clientHeight);
 			searchOverlay?.draw(view, canvas.clientWidth, canvas.clientHeight);
+			contractOverlay?.draw(view, canvas.clientWidth, canvas.clientHeight);
 		} else {
 			settlementOverlay?.clear();
 			searchOverlay?.clear();
+			contractOverlay?.hide();
 		}
 		resetButton.hidden = !owner.readView() || owner.isResetView();
 		drawTooltip();
@@ -252,9 +315,14 @@
 		const settlement =
 			position && settlementOverlay ? settlementOverlay.hit(x, y) : null;
 		if (!position) return;
-		positionTooltip.textContent = settlement
-			? `${settlement.name} · ${formatWorldMapCoordinates({ x: settlement.position[0], z: settlement.position[2] })}`
-			: formatWorldMapCoordinates(position);
+		const contractText = contractOverlay?.hit(x, y);
+		const text = contractText
+			? contractText
+			: settlement
+				? `${settlement.name} · ${formatWorldMapCoordinates({ x: settlement.position[0], z: settlement.position[2] })}`
+				: formatWorldMapCoordinates(position);
+		if (positionTooltip.textContent !== text)
+			positionTooltip.textContent = text;
 		// Flip away from the lower/right edges so the tooltip stays inside the surface.
 		const left =
 			x + 12 + positionTooltip.offsetWidth <= rect.width
@@ -378,7 +446,10 @@
 	}
 </script>
 
-<div class="world-panel ui-body ui-tabbed-panel">
+<div
+	class="world-panel ui-body ui-tabbed-panel"
+	use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+>
 	<UiTabs
 		label="World tabs"
 		{tabs}
@@ -397,7 +468,14 @@
 					bind:this={canvas}
 					aria-label="World terrain map"
 					onpointermove={moveHover}
-					onpointerleave={clearHover}
+					onpointerleave={(event) => {
+						if (
+							event.relatedTarget instanceof Node &&
+							positionTooltip.contains(event.relatedTarget)
+						)
+							return;
+						clearHover();
+					}}
 					onpointerdown={pan}
 					onwheel={zoom}
 				></canvas>
@@ -412,6 +490,7 @@
 						bind:this={settlementRoot}
 						class="world-settlements ui-world-map-settlements"
 					/>
+					<g bind:this={contractRoot} class="world-contracts" />
 					<g
 						bind:this={playerMarker}
 						class="world-player-target"
@@ -460,6 +539,20 @@
 					}}><ClientHudIcon name="teleport" /></button
 				>
 				<button
+					class="ui-hud-button world-map-contracts"
+					type="button"
+					aria-label="Show contracts"
+					aria-pressed={showContracts}
+					title="Show contracts"
+					disabled={contracts === null || characterGuid === null}
+					onclick={() => {
+						contractsChoice = {
+							character: characterGuid,
+							enabled: !showContracts,
+						};
+					}}><ClientHudIcon name="journal" /></button
+				>
+				<button
 					class="ui-hud-button world-map-labels"
 					type="button"
 					aria-label="Show settlement labels"
@@ -487,6 +580,7 @@
 				<div
 					bind:this={positionTooltip}
 					class="world-map-tooltip ui-tooltip"
+					onpointerleave={clearHover}
 					role="tooltip"
 					hidden
 				></div>
@@ -586,6 +680,7 @@
 			width: 30px;
 			height: 30px;
 		}
+		.world-map-contracts,
 		.world-map-labels,
 		.world-map-reset {
 			position: absolute;
@@ -594,6 +689,12 @@
 			height: 30px;
 			display: grid;
 			place-items: center;
+		}
+		.world-map-contracts {
+			left: 46px;
+		}
+		.world-contracts {
+			color: var(--ui-color-accent);
 		}
 		.world-map-labels {
 			left: 8px;
@@ -607,8 +708,12 @@
 		}
 		.world-map-tooltip {
 			position: absolute;
-			pointer-events: none;
-			white-space: nowrap;
+			pointer-events: auto;
+			white-space: pre-line;
+			max-width: calc(100% - 16px);
+			max-height: calc(100% - 16px);
+			overflow: auto;
+			overflow-wrap: anywhere;
 		}
 		.world-map-surface {
 			position: relative;
@@ -621,6 +726,12 @@
 			width: 100%;
 			height: 100%;
 			touch-action: none;
+		}
+		canvas {
+			cursor: grab;
+		}
+		canvas:active {
+			cursor: grabbing;
 		}
 		.world-map-overlay {
 			pointer-events: none;

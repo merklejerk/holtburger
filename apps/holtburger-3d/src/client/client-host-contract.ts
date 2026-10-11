@@ -1,3 +1,4 @@
+import { contractsSnapshotSchema } from "./client-contracts-contract";
 import {
 	allegianceSnapshotSchema,
 	allegiancePreferencesSchema,
@@ -399,6 +400,7 @@ const currentStateSchema = z
 		party: partySnapshotSchema.nullable(),
 		partyPreferences: partyPreferencesSchema.nullable(),
 		friends: friendsSnapshotSchema.nullable(),
+		contracts: contractsSnapshotSchema.nullable(),
 		squelch: squelchSnapshotSchema.nullable(),
 		allegiance: allegianceSnapshotSchema,
 		allegiancePreferences: allegiancePreferencesSchema.nullable(),

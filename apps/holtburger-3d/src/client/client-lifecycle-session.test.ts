@@ -1,4 +1,6 @@
 import type { PartySnapshot } from "./client-party-contract";
+import membershipFixture from "../harness/browser/fixtures/contract-membership.json";
+import { contractMembershipChangeSchema } from "./client-contracts-contract";
 import housingPreviewWireFixture from "./fixtures/housing-preview-wire.json";
 import housingManagementWireFixture from "./fixtures/housing-management-wire.json";
 import housingWireFixture from "./fixtures/housing-wire.json";
@@ -83,6 +85,43 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("forwards typed membership activity without deriving it from snapshots or recovery", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const changes: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "contract-membership-change")
+				changes.push(event.change);
+		});
+		await session.start();
+		transport.emit("client-contracts-updated", {
+			contracts: { rows: [{ kind: "unresolved", id: 99 }] },
+		});
+		transport.emit("client-current-state", currentState(1));
+		expect(changes).toEqual([]);
+		for (const value of membershipFixture)
+			transport.emit("client-contract-membership-changed", value);
+		expect(changes).toEqual(
+			membershipFixture.map((value) =>
+				contractMembershipChangeSchema.parse(value),
+			),
+		);
+		expect(() =>
+			transport.emit("client-contract-membership-changed", {
+				kind: "removed",
+				id: -1,
+				name: null,
+			}),
+		).toThrow();
+		expect(() =>
+			transport.emit("client-contract-membership-changed", {
+				kind: "updated",
+				id: 1,
+				name: "Quest",
+			}),
+		).toThrow();
+		session.stop();
+	});
 	it("discards time observed during a failed startup before allowing a retry", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1547,6 +1586,7 @@ describe("ClientLifecycleSession", () => {
 			party,
 			partyPreferences: preferences,
 			friends: null,
+			contracts: null,
 			squelch: null,
 			allegiance: {
 				playerGuid: null,
@@ -1877,6 +1917,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		party: null,
 		partyPreferences: null,
 		friends: null,
+		contracts: null,
 		squelch: null,
 		allegiance: {
 			playerGuid: null,

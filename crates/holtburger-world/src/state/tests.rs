@@ -1,6 +1,4 @@
 use super::*;
-use binrw::BinRead;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,14 +32,16 @@ use holtburger_common::{
 use holtburger_content::collision_pose::CollisionPoseLibrary;
 use holtburger_content::{
     ColliderScale, CollisionBall, CollisionShape, MotionHook, MotionHookDirection,
-    MotionHookEffect, MotionSequenceCatalog, SoulEmoteCatalog,
+    MotionHookEffect, MotionSequenceCatalog,
 };
 use holtburger_dat::file_type::{
-    Animation, MotionTable, SkillTable, SpellTable, XpTable, animation::AnimationFlags,
+    Animation, MotionTable, SkillTable, SpellTable, XpTable,
+    animation::AnimationFlags,
     setup_model::AnimationFrame,
+    skill_table::{SkillBase, SkillFormula},
+    spell_table::SpellBase,
 };
 use holtburger_dat::graphics::Frame;
-use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
@@ -60,53 +60,6 @@ use holtburger_protocol::messages::{
     FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
 use holtburger_protocol::traits::ProtocolPack;
-use tempfile::tempdir;
-
-fn repo_assets_hba_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-}
-
-fn write_micro_portal_hba(path: &Path) -> bool {
-    let source_path = repo_assets_hba_path();
-    if !source_path.is_file() {
-        eprintln!(
-            "skipping assets fixture test; missing repo-local {}",
-            source_path.display()
-        );
-        return false;
-    }
-    let source = match HbaReader::open(&source_path) {
-        Ok(source) => source,
-        Err(error) => panic!(
-            "repo-local {} must be a valid HBA v2 fixture for this test: {}",
-            source_path.display(),
-            error
-        ),
-    };
-
-    let mut writer = HbaWriter::new();
-    writer.set_compression(false);
-
-    for id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
-        let data = source
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, id)
-            .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
-        writer
-            .add(
-                EOR_PORTAL_NAMESPACE,
-                id,
-                DatFileType::from_id(id) as u32,
-                data,
-            )
-            .expect("micro table should be added to test HBA");
-    }
-
-    writer
-        .write(path)
-        .expect("micro portal.hba should be written");
-
-    true
-}
 
 fn motion_catalog_with_table(
     motion_table_id: u32,
@@ -1333,46 +1286,63 @@ fn derived_skill_refresh_reads_current_player_augmentation_properties() {
 }
 
 #[test]
-fn test_micro_portal_bundle_supports_runtime_table_lookups() {
-    let dir = tempdir().expect("tempdir should be created");
-    let portal_path = dir.path().join("bundle.hba");
-    if !write_micro_portal_hba(&portal_path) {
-        return;
-    }
-
-    let archive = HbaReader::open(&portal_path).expect("micro portal.hba should open");
-    let skill_table = SkillTable::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, SkillTable::FILE_ID)
-            .expect("micro bundle should contain skill table"),
-    ))
-    .expect("skill table should parse");
-    let spell_table = SpellTable::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, SpellTable::FILE_ID)
-            .expect("micro bundle should contain spell table"),
-    ))
-    .expect("spell table should parse");
-    let xp_table = XpTable::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, XpTable::FILE_ID)
-            .expect("micro bundle should contain XP table"),
-    ))
-    .expect("XP table should parse");
-
-    let mut state = WorldState::new(Arc::new(WorldBootstrap::new(
-        skill_table,
-        holtburger_dat::file_type::SecondaryAttributeTable::synthetic(),
-        spell_table,
-        xp_table,
-        holtburger_content::CharacterTitleCatalog::default(),
-        MotionSequenceCatalog::default(),
-        SoulEmoteCatalog::default(),
-    )));
-
-    assert!(!state.skill_table.skill_base_hash.is_empty());
-    assert!(!state.xp_table.character_level_xp_list.is_empty());
-    assert!(!state.spell_catalog.spells.is_empty());
+fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
+    const SPELL_ID: u32 = 7;
+    const SPELL_NAME: &str = "Fixture spell";
+    const TRAINED_COST: i32 = 4;
+    const SPECIALIZED_COST: i32 = 8;
+    let skill_id = SkillType::HeavyWeapons as u32;
+    let mut bootstrap = WorldBootstrap::synthetic();
+    bootstrap.xp_table = Arc::new(XpTable {
+        level_count: 2,
+        character_level_xp_list: vec![0, 0, 100],
+        ..XpTable::default()
+    });
+    bootstrap.spell_table = Arc::new(SpellTable {
+        id: SpellTable::FILE_ID,
+        spells: [(
+            SPELL_ID,
+            SpellBase {
+                name: SPELL_NAME.into(),
+                description: "Authored description".into(),
+                base_mana: 10,
+                ..SpellBase::default()
+            },
+        )]
+        .into(),
+        spell_sets: Default::default(),
+    });
+    bootstrap.skill_table = Arc::new(SkillTable {
+        id: SkillTable::FILE_ID,
+        skill_base_hash: [(
+            skill_id,
+            SkillBase {
+                description: "Fixture skill".into(),
+                _align1: (),
+                name: "Heavy weapons".into(),
+                _align2: (),
+                icon_id: 0,
+                trained_cost: TRAINED_COST,
+                specialized_cost: SPECIALIZED_COST,
+                category: 0,
+                chargen_use: 0,
+                min_level: 0,
+                formula: SkillFormula {
+                    w: 0,
+                    x: 0,
+                    y: 0,
+                    z: 1,
+                    attr1: 0,
+                    attr2: 0,
+                },
+                upper_bound: 0.0,
+                lower_bound: 0.0,
+                learn_mod: 0.0,
+            },
+        )]
+        .into(),
+    });
+    let mut state = WorldState::new(Arc::new(bootstrap));
 
     let player_guid = Guid(0x5000_0101);
     state.seed_local_player_entity(player_guid, "Player", WorldPosition::default());
@@ -1401,47 +1371,20 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     assert_eq!(level_info.available_luminance, 42);
     assert!(level_info.xp_for_next_level > 0);
 
-    let (spell_id, expected_name) = state
-        .spell_catalog
-        .spells
-        .iter()
-        .find(|(_, info)| {
-            !info.name.is_empty()
-                && (!info.description.is_empty() || info.base_mana > 0 || info.power > 0)
-        })
-        .map(|(id, info)| (*id, info.name.clone()))
-        .expect("micro spell catalog should expose at least one detailed spell");
-
     let resolved_name = state
-        .resolve_spell_name(spell_id)
-        .expect("spell name should resolve from the micro bundle");
+        .resolve_spell_name(SPELL_ID)
+        .expect("spell name should resolve from bootstrap");
     let resolved_info = state
-        .resolve_spell_info(spell_id)
-        .expect("spell details should resolve from the micro bundle");
+        .resolve_spell_info(SPELL_ID)
+        .expect("spell details should resolve from bootstrap");
 
-    assert_eq!(resolved_name, expected_name);
-    assert_eq!(resolved_info.name, expected_name);
+    assert_eq!(resolved_name, SPELL_NAME);
+    assert_eq!(resolved_info.name, SPELL_NAME);
     assert!(
         !resolved_info.description.is_empty()
             || resolved_info.base_mana > 0
             || resolved_info.power > 0
     );
-
-    let (skill_id, expected_costs) = state
-        .skill_table
-        .skill_base_hash
-        .iter()
-        .find_map(|(id, base)| {
-            crate::stats::SkillType::from_repr(*id)
-                .filter(|_| base.trained_cost > 0 || base.specialized_cost > 0)
-                .map(|skill| {
-                    (
-                        skill as u32,
-                        (base.trained_cost as u32, base.specialized_cost as u32),
-                    )
-                })
-        })
-        .expect("micro skill table should expose a trainable skill");
 
     let mut events = Vec::new();
     state.player.update_skill(
@@ -1471,7 +1414,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
     assert_eq!(
         (updated_skill.trained_cost, updated_skill.specialized_cost),
-        expected_costs
+        (TRAINED_COST as u32, SPECIALIZED_COST as u32)
     );
     assert!(updated_skill.trained_cost > 0 || updated_skill.specialized_cost > 0);
 }

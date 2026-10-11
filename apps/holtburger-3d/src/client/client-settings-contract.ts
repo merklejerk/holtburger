@@ -64,6 +64,7 @@ const clientHudLayoutSchema = z
 		chat: hudPlacementSchema,
 		spells: hudPlacementSchema,
 		social: hudPlacementSchema,
+		journal: hudPlacementSchema,
 		enchantments: hudPlacementSchema,
 		characterSheet: hudPlacementSchema,
 		inventory: hudPlacementSchema,

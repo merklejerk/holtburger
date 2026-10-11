@@ -30,6 +30,7 @@ mod combat_runtime;
 pub mod combat_tuning;
 mod commands;
 pub mod connection;
+mod contracts;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
@@ -376,6 +377,7 @@ impl ClientRuntime {
         ClientApplicationSnapshot {
             fellowship: self.world.fellowship.clone(),
             friends: self.world.friends.clone(),
+            contracts: self.contracts_snapshot(),
             squelch: self.world.squelch.clone(),
             allegiance: self.allegiance_snapshot(),
             can_teleport_from_map: self.can_teleport_from_map(),
@@ -788,6 +790,7 @@ impl ClientRuntime {
         self.publish_entity_facts();
         self.emit_fellowship_state_updated();
         self.emit_friends_state_updated();
+        self.emit_contracts_state_updated();
         self.emit_squelch_state_updated();
         self.emit_allegiance_snapshot();
         self.emit_vendor_state_updated();
@@ -837,6 +840,7 @@ impl ClientRuntime {
             }
             self.world.player.character_titles = None;
             self.reset_friends();
+            self.reset_contracts();
             self.reset_squelch();
             self.reset_allegiance();
             self.world.fellowship = None;
@@ -1296,6 +1300,14 @@ impl ClientRuntime {
                 self.emit_vendor_state_updated();
             }
             WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
+            WorldEvent::ContractsStateUpdated => self.emit_contracts_state_updated(),
+            WorldEvent::ContractMembershipChanged(change) => {
+                if self.state == ClientState::InWorld {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ContractMembershipChanged(change.clone()));
+                }
+            }
             WorldEvent::SquelchStateUpdated => self.emit_squelch_state_updated(),
             WorldEvent::AllegianceStateUpdated => self.emit_allegiance_snapshot(),
             WorldEvent::FellowshipStateUpdated(fellowship) => {

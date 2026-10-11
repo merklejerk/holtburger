@@ -970,6 +970,30 @@
 }
 
 @layer components {
+	/* Additive filters share the spellbook's pill geometry and pressed tint. */
+	.ui-theme .ui-filter-pill {
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+		border: 1px solid var(--filter-color, var(--ui-color-accent));
+		background: color-mix(
+			in srgb,
+			var(--filter-color, var(--ui-color-accent)) var(--ui-spell-filter-tint),
+			var(--ui-color-well)
+		);
+		border-radius: var(--ui-spell-filter-pill-radius);
+		padding: var(--ui-spell-filter-pill-padding);
+	}
+	.ui-theme .ui-filter-pill[aria-pressed="true"] {
+		background: color-mix(
+			in srgb,
+			var(--filter-color, var(--ui-color-accent))
+				var(--ui-spell-filter-active-tint),
+			var(--ui-color-well)
+		);
+		outline: 1px solid var(--filter-color, var(--ui-color-accent));
+	}
+
 	/* One surface recipe for interactive popovers and native/panel-scoped dialogs.
 	   Optional --ui-overlay-* overrides resolve here so local palettes remain live. */
 	.ui-theme .ui-overlay-surface {

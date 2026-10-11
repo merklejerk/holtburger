@@ -352,6 +352,11 @@ pub enum ClientHostCommand {
     SubmitClientSquelch {
         action: crate::client_squelch::ClientSquelchAction,
     },
+    /// Journal mutations use server-confirmed shared command behavior.
+    SubmitClientContracts {
+        /// App-owned removal intent; queueing does not change membership.
+        action: crate::client_contracts::ClientContractsAction,
+    },
     /// Friends mutations use the focused shared command behavior.
     SubmitClientFriends {
         action: crate::client_friends::ClientFriendsAction,
@@ -442,6 +447,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "queue_client_character_motion_event",
     "submit_client_party",
     "submit_client_friends",
+    "submit_client_contracts",
     "submit_client_squelch",
     "submit_client_allegiance",
     "set_client_party_updates",
@@ -1004,6 +1010,11 @@ pub async fn dispatch_client(
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
         SubmitClientSquelch { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientContracts { action } => runtime
             .send_command(action.into())
             .await
             .map(|()| HostResponse::Unit)

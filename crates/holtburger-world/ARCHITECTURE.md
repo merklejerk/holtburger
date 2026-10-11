@@ -650,3 +650,25 @@ Invalid crystal facts emit a separate rejection, so they cannot retire a home qu
 Changed home identity and explicit ownership transitions invalidate named access through
 one world-owned epoch. The epoch is local admission evidence, not a wire request ID.
 World owns no query deadline, window policy, confirmation, or transaction retry.
+
+## Contract tracker facts
+
+`state/contracts.rs` owns the character's tracker registry and monotonic receipt
+anchors. Full tables replace membership; deltas upsert/remove by ID. The
+reducer returns Added/Removed only for actual membership transitions. The handler
+publishes those as ephemeral `ContractMembershipChanged` facts with the authored
+name or an unresolved ID. Progress updates, duplicate deletion, and full tables
+publish no membership activity; snapshots retain no activity history. The immutable
+bootstrap contract catalog retains full static definitions. One resolver joins
+these facts at an explicit time and supplies status, authored counter text,
+repeat/deadline roles, stage-selected contact, and retail cell-based locations for
+both events and recovery. Outdoor locations also carry the original authored
+`WorldPosition` (cell, local origin, and orientation); Journal labels must not be
+used to reconstruct precise geometry. Static catalog assembly rejects nonfinite
+position components with definition/role/component context. A missing definition yields an unresolved identity;
+other contracts remain usable, and the unresolved entry remains removable.
+
+Core owns character admission, empty-login initialization, retirement, publication,
+and abandonment dispatch. Portal travel does not clear contract facts. Frontends
+own ordering, filtering, icons, expansion, confirmation, and visible countdown
+cadence. World does not own pending removal or periodic timer publication.

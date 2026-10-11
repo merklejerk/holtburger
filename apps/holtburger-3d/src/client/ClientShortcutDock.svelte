@@ -9,7 +9,8 @@
 		| "settings"
 		| "characterSheet"
 		| "world"
-		| "social";
+		| "social"
+		| "journal";
 
 	function systemPanel(icon: ClientHudIconName): ClientSystemPanel | null {
 		if (icon === "party") return "social";
@@ -19,7 +20,8 @@
 				  icon === "debug" ||
 				  icon === "spells" ||
 				  icon === "settings" ||
-				  icon === "world"
+				  icon === "world" ||
+				  icon === "journal"
 				? icon
 				: null;
 	}

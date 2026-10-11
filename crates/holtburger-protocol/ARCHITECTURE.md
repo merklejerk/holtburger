@@ -19,6 +19,7 @@ Protocol structs are grouped by domain to keep files logically separated and man
 - `magic`: Spellcasting requests, spellbook synchronization, and enchantment indicators.
 - `movement`: Local XYZ/heading position updates, multi-cell teleports, and physical jump vectors.
 - `object`: "Semantic Deltas" representing spawning entities, updating float/int properties, or despawning entities out of local distance.
+- `contracts`: tracker tables/deltas and abandonment; typed stages preserve a wire-safe counter and remaining-duration fields. See [contracts wire layouts](../../docs/messages.md#contracts-journal).
 - `housing`: lossless crystal/home/payment contracts, implicit-home management actions, versioned HAR guest tables, and available-area search. See [housing wire layouts](../../docs/messages.md#housing).
 
 ### 3. Serialization Layer ([src/messages/utils.rs](src/messages/utils.rs))

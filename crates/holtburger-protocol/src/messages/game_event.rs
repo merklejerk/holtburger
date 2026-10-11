@@ -3,6 +3,7 @@ pub use crate::messages::book::events::*;
 pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
+pub use crate::messages::contracts::*;
 pub use crate::messages::fellowship::events::*;
 pub use crate::messages::friends::*;
 pub use crate::messages::housing::*;
@@ -48,6 +49,11 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    /// Contract registry wire operation.
+    SendClientContractTrackerTable(Box<ContractTrackerTable>),
+    /// Contract registry wire operation.
+    SendClientContractTracker(Box<ContractTrackerUpdate>),
+
     AllegianceUpdate(Box<AllegianceUpdateEventData>),
     /// Refresh completion error code; zero denotes success.
     AllegianceUpdateDone(u32),
@@ -141,6 +147,14 @@ impl ProtocolUnpack for GameEventMessage {
 
         let event = match event_op {
             Some(op) => match op {
+                GameEventOpcode::SendClientContractTrackerTable => {
+                    GameEvent::SendClientContractTrackerTable(Box::new(
+                        ContractTrackerTable::unpack(data, offset)?,
+                    ))
+                }
+                GameEventOpcode::SendClientContractTracker => GameEvent::SendClientContractTracker(
+                    Box::new(ContractTrackerUpdate::unpack(data, offset)?),
+                ),
                 GameEventOpcode::CharacterTitle => GameEvent::CharacterTitle(Box::new(
                     CharacterTitleEventData::unpack(data, offset)?,
                 )),
@@ -420,6 +434,14 @@ impl ProtocolPack for GameEventMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.event {
+            GameEvent::SendClientContractTrackerTable(data) => {
+                (GameEventOpcode::SendClientContractTrackerTable as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::SendClientContractTracker(data) => {
+                (GameEventOpcode::SendClientContractTracker as u32).pack(buf);
+                data.pack(buf);
+            }
             GameEvent::CharacterTitle(data) => {
                 (GameEventOpcode::CharacterTitle as u32).pack(buf);
                 data.pack(buf);

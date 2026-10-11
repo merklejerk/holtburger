@@ -1,3 +1,4 @@
+import { textSearchWords } from "../app/text-search";
 import { describe, expect, it } from "vitest";
 import {
 	matchesSpellSearch as matchesGroupedSpellSearch,
@@ -5,7 +6,6 @@ import {
 	type SpellFilterTag,
 	type SpellSearchEntry,
 	spellSearchEntry,
-	spellSearchWords,
 } from "./client-spell-search";
 import type { SpellDetails } from "../app/spell-references";
 
@@ -95,7 +95,7 @@ describe("spell discovery matching", () => {
 			},
 		});
 		expect(
-			matchesSpellSearch(entry, spellSearchWords("harm"), [
+			matchesSpellSearch(entry, textSearchWords("harm"), [
 				"direct",
 				"acid",
 				"harmful",
@@ -127,22 +127,19 @@ describe("spell discovery matching", () => {
 		).toBe(true);
 		expect(matchesSpellSearch(entry, [], ["fire", "school:1"])).toBe(false);
 		expect(
-			matchesSpellSearch(entry, spellSearchWords("frost"), [
-				"acid",
-				"school:2",
-			]),
+			matchesSpellSearch(entry, textSearchWords("frost"), ["acid", "school:2"]),
 		).toBe(false);
 		expect(matchesSpellSearch(entry, [], ["self-target", "harmful"])).toBe(
 			false,
 		);
 		expect(
-			matchesSpellSearch(entry, spellSearchWords("PROT acid"), [
+			matchesSpellSearch(entry, textSearchWords("PROT acid"), [
 				"school:2",
 				"level:7",
 				"acid",
 			]),
 		).toBe(true);
-		expect(matchesSpellSearch(entry, spellSearchWords("acid zz"), [])).toBe(
+		expect(matchesSpellSearch(entry, textSearchWords("acid zz"), [])).toBe(
 			false,
 		);
 		expect(matchesSpellSearch(entry, [], ["school:2", "school:1"])).toBe(true);
@@ -152,21 +149,21 @@ describe("spell discovery matching", () => {
 	});
 	it("matches abbreviations within words and treats repeated terms as redundant", () => {
 		const entry = spellSearchEntry("Armor Other", null);
-		expect(matchesSpellSearch(entry, spellSearchWords("amr oth"), [])).toBe(
+		expect(matchesSpellSearch(entry, textSearchWords("amr oth"), [])).toBe(
 			true,
 		);
-		expect(matchesSpellSearch(entry, spellSearchWords("armor armor"), [])).toBe(
+		expect(matchesSpellSearch(entry, textSearchWords("armor armor"), [])).toBe(
 			true,
 		);
-		expect(matchesSpellSearch(entry, spellSearchWords("armoth"), [])).toBe(
+		expect(matchesSpellSearch(entry, textSearchWords("armoth"), [])).toBe(
 			false,
 		);
 	});
 	it("handles punctuation, Unicode, empty input, and absent metadata", () => {
-		expect(spellSearchWords(" Élan's—Acid! ")).toEqual(["élan", "s", "acid"]);
+		expect(textSearchWords(" Élan's—Acid! ")).toEqual(["élan", "s", "acid"]);
 		const entry = spellSearchEntry("Spell 999", null);
-		expect(matchesSpellSearch(entry, spellSearchWords("..."), [])).toBe(true);
-		expect(matchesSpellSearch(entry, spellSearchWords("99"), [])).toBe(true);
+		expect(matchesSpellSearch(entry, textSearchWords("..."), [])).toBe(true);
+		expect(matchesSpellSearch(entry, textSearchWords("99"), [])).toBe(true);
 		expect(matchesSpellSearch(entry, [], ["acid"])).toBe(false);
 	});
 });

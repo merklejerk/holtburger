@@ -1,9 +1,9 @@
 <script lang="ts">
+	import { textSearchWords } from "../app/text-search";
 	import { onMount, tick, untrack } from "svelte";
 	import {
 		SPELL_FILTER_OPTIONS,
 		spellSearchEntry,
-		spellSearchWords,
 		spellFilterGroups,
 		matchesSpellSearch,
 		type SpellSearch,
@@ -63,7 +63,7 @@
 		})),
 	);
 	const filterGroups = $derived(spellFilterGroups(search.tags));
-	const terms = $derived(spellSearchWords(search.text));
+	const terms = $derived(textSearchWords(search.text));
 	const visibleRows = $derived(
 		indexedRows
 			.filter(({ entry }) => matchesSpellSearch(entry, terms, filterGroups))
@@ -192,9 +192,9 @@
 				{#each SPELL_FILTER_OPTIONS as [tag, label, category]}
 					<button
 						type="button"
+						class="ui-filter-pill"
 						data-filter-category={category}
 						aria-pressed={search.tags.includes(tag)}
-						class:active={search.tags.includes(tag)}
 						onclick={() => {
 							search = {
 								...search,
@@ -365,7 +365,7 @@
 			flex: 1;
 		}
 		.spell-controls input,
-		.spell-controls button {
+		.spell-controls button:not(.ui-filter-pill) {
 			font: inherit;
 			color: inherit;
 			background: var(--ui-color-well);
@@ -413,24 +413,7 @@
 		[data-filter-category="level"] {
 			--filter-color: var(--ui-spell-filter-level-color);
 		}
-		.filter-pills button {
-			border-color: var(--filter-color);
-			background: color-mix(
-				in srgb,
-				var(--filter-color) var(--ui-spell-filter-tint),
-				var(--ui-color-well)
-			);
-			border-radius: var(--ui-spell-filter-pill-radius);
-			padding: var(--ui-spell-filter-pill-padding);
-		}
-		.filter-pills button.active {
-			background: color-mix(
-				in srgb,
-				var(--filter-color) var(--ui-spell-filter-active-tint),
-				var(--ui-color-well)
-			);
-			outline: 1px solid var(--filter-color);
-		}
+
 		ul {
 			list-style: none;
 			margin: 0;

@@ -580,8 +580,8 @@ pub enum GameActionOpcode {
     // ChessMovePass = 0x026D,
     // /// C2S: Propose or accept a chess stalemate.
     // ChessStalemate = 0x026E,
-    // /// C2S: Forfeit an active quest contract.
-    // AbandonContract = 0x0316,
+    /// C2S: Remove a quest contract from the journal.
+    AbandonContract = 0x0316,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
@@ -819,11 +819,10 @@ pub enum GameEventOpcode {
     // AdminQueryPluginResponse = 0x02B3,
 
     // --- Contract Tracker ---
-    // /// S2C: Sends the full contract tracker table defined by the server.
-    // SendClientContractTrackerTable = 0x0314,
-    // /// S2C: Updates specific contract tracker progress data.
-    // SendClientContractTracker = 0x0315,
-
+    /// S2C: Sends the full contract tracker table defined by the server.
+    SendClientContractTrackerTable = 0x0314,
+    /// S2C: Updates specific contract tracker progress data.
+    SendClientContractTracker = 0x0315,
     // --- Miscellaneous ---
     // /// S2C: Opens the character barber (customization) UI.
     // StartBarber = 0x0075,

@@ -302,9 +302,9 @@
 			{#each visibleFilters as [tag, label, category]}
 				<button
 					type="button"
+					class="ui-filter-pill"
 					data-filter-category={category}
 					aria-pressed={search.tags.includes(tag)}
-					class:active={search.tags.includes(tag)}
 					onclick={() => toggleTag(tag)}>{label}</button
 				>
 			{/each}
@@ -439,7 +439,7 @@
 			min-width: 0;
 		}
 		.controls input,
-		.controls button {
+		.controls button:not(.ui-filter-pill) {
 			font: inherit;
 			color: inherit;
 			background: var(--ui-color-well);
@@ -477,24 +477,7 @@
 		[data-filter-category="school"] {
 			--filter-color: var(--ui-spell-filter-school-color);
 		}
-		.filter-pills button[data-filter-category] {
-			border-color: var(--filter-color);
-			background: color-mix(
-				in srgb,
-				var(--filter-color) var(--ui-spell-filter-tint),
-				var(--ui-color-well)
-			);
-			border-radius: var(--ui-spell-filter-pill-radius);
-			padding: var(--ui-spell-filter-pill-padding);
-		}
-		.filter-pills button.active[data-filter-category] {
-			background: color-mix(
-				in srgb,
-				var(--filter-color) var(--ui-spell-filter-active-tint),
-				var(--ui-color-well)
-			);
-			outline: 1px solid var(--filter-color);
-		}
+
 		.sort-line {
 			justify-content: space-between;
 		}

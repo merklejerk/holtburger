@@ -806,3 +806,71 @@ HousePayment,HouseAccess,GuestInfo}.cs`, `Player_House.cs`, `SlumLord.cs`, `Hous
 `239914` (profile window), and `383610` (initial housing query). The implemented
 codecs and checked-in synthetic fixtures are in `messages/housing/`; live ACE trace
 verification is tracked separately in the housing implementation plan.
+
+### Contracts journal
+
+Contract definitions are static client content; these messages carry a character's
+tracked IDs and server-computed progress. All numeric fields below are little-endian.
+
+| Direction / opcode | Message | Body |
+| --- | --- | --- |
+| S2C `0x0314` | SendClientContractTrackerTable | count u16, bucket count u16, then count entries of key u32 and ContractTracker |
+| S2C `0x0315` | SendClientContractTracker | ContractTracker, delete bool32, set-as-display bool32 |
+| C2S `0x0316` | AbandonContract | contract ID u32 |
+
+S2C bodies use the ordinary game-event envelope (target GUID and event sequence);
+C2S uses the game-action envelope. The bucket count is hash metadata, not another
+collection. Each keyed ID must equal the tracker's embedded ID. A full table replaces
+membership, including an explicitly empty table. An incremental deletion removes by
+ID; it does not insert an unknown ID. Set-as-display is retained on the wire, but h3d
+currently has no pinning/display-selection UX.
+
+ContractTracker occupies 28 bytes:
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | u32 | definition version |
+| 4 | u32 | contract ID |
+| 8 | u32 | stage |
+| 12 | f64 | deadline seconds remaining |
+| 20 | f64 | repeat seconds remaining |
+
+Stages are 1 Available, 2 In progress, 3 Done or pending repeat, and 4 or above
+an in-progress counter of `stage - 4`. Stage zero is invalid. Counter packing
+requires `count <= u32::MAX - 4`. Version is preserved; neither retail's unpacker
+nor this layout establishes a version-equality requirement with static definitions.
+
+Despite ACE's `TimeWhenDone` / `TimeWhenRepeats` names, timers are remaining
+seconds, not timestamps. Finite negative values represent expired/sentinel
+outcomes; nonfinite values are rejected. Record a monotonic receipt anchor and
+subtract elapsed seconds. Stage 3 with an originally positive repeat duration
+waits while remaining time is positive, then becomes Available. Without an
+originally positive duration, it is Completed only if the static repeat flag is
+empty; otherwise it is Available. A deadline is shown only when the definition
+has a timer flag. Expiry means Finished for that deadline, independently of quest
+status. Counter text comes from the authored progress description, not a universal
+percentage or inferred target.
+
+Static definitions are in portal record `0x0E00001D`. The record contains its u32
+ID, count u16, bucket count u16, then count entries: ID key u32; version u32;
+contract ID u32; eleven aligned String16L values (name, description, progress
+format, start NPC, end NPC, stamped flag, started flag, finished flag, progress
+flag, timer flag, repeat flag); three 32-byte Positions (start NPC, end NPC,
+quest area). Position is cell u32, x/y/z f32, quaternion w/x/y/z f32. Each string
+ends at a four-byte boundary. Preserve full positions even though retail journal
+labels derive coordinates from the terrain cell ID. Duplicate names are valid;
+identity is the contract ID.
+
+ACE omits the full tracker table on login when the character registry is empty.
+Clients must establish an empty baseline at character entry, retain it across
+portals, and clear it on character retirement. Abandonment erases tracking only;
+quest flags/progress remain. Queue acceptance is not deletion confirmation. A
+client can leave the row until the authoritative incremental deletion arrives,
+without an optimistic mutation or acknowledgement timer.
+
+Ground truth: `ACE/Source/ACE.Server/Network/Structure/ContractTracker.cs`, the
+corresponding GameEvent/GameAction writers, `WorldObjects/Managers/ContractManager.cs`,
+`Player_Networking.cs`, `Managers/QuestManager.cs`,
+`ACE/Source/ACE.DatLoader/{FileTypes/ContractTable,Entity/Contract}.cs`, and retail
+`acclient.c:201079` (status), `201271` (contacts/deadline), `380182` / `380249`
+(receipt anchors), `431336` (tracker unpack), and `432424` (definition unpack).

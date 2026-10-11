@@ -193,3 +193,12 @@ never opens files. Environment variables remain host inputs; Explorer fuzzy sear
 remains app-local. The catalog is optional: network door flags remain authoritative
 without it, while native switch classification needs a known WCID. Authored
 ItemUseable belongs to Explorer catalog preparation; live entities use received state.
+
+### Contract catalog ([src/contracts.rs](src/contracts.rs))
+
+`ContentRepository::read_contract_catalog` loads portal `0x0E00001D` through the
+ordinary typed resource path. The catalog preserves each complete definition and
+parses authored progress text once into literal text or one integer substitution.
+Unsupported formatting fails bootstrap with the contract ID and format text.
+World uses this immutable lookup to interpret server trackers; no per-row host
+content fetch or app-owned duplicate catalog is needed.

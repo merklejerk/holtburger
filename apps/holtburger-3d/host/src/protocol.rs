@@ -184,6 +184,13 @@ pub enum HostEvent {
     ClientSquelchUpdated {
         squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
     },
+    /// Resolved journal facts following a server tracker change.
+    ClientContractsUpdated {
+        /// None outside character lifetime; an empty snapshot is an active empty journal.
+        contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    },
+    /// Transient live membership change; never included in current-state recovery.
+    ClientContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
     /// Current friend list projection.
     ClientFriendsUpdated {
         friends: Option<crate::client_friends::ClientFriendsSnapshot>,
@@ -577,6 +584,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::SquelchUpdated { squelch } => {
                 HostEvent::ClientSquelchUpdated { squelch }
+            }
+            crate::client_projection::ClientHostEvent::ContractsUpdated { contracts } => {
+                HostEvent::ClientContractsUpdated { contracts }
+            }
+            crate::client_projection::ClientHostEvent::ContractMembershipChanged(change) => {
+                HostEvent::ClientContractMembershipChanged(change)
             }
             crate::client_projection::ClientHostEvent::FriendsUpdated { friends } => {
                 HostEvent::ClientFriendsUpdated { friends }

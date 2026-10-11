@@ -16,10 +16,11 @@ export async function probeDialogBackdrops(context: Map<unknown, unknown>) {
 	const target = document.createElement("div");
 	target.className = "ui-theme";
 	target.style.cssText =
-		"position: fixed; inset: 20px; width: 400px; height: 300px;";
+		"position: fixed; inset: 20px; width: min(400px, calc(100vw - 40px)); height: 300px;";
 	document.body.append(target);
 	let component: ReturnType<typeof mount> | null = null;
 	const verified: string[] = [];
+	const sizes: Record<string, { width: number; height: number }> = {};
 	let cancellations = 0;
 	const cancel = () => {
 		cancellations++;
@@ -34,6 +35,14 @@ export async function probeDialogBackdrops(context: Map<unknown, unknown>) {
 		const backdrop = dialog.matches(":modal") ? dialog : dialog.parentElement;
 		if (backdrop === null) throw new Error(`Missing ${label} backdrop`);
 		const bounds = dialog.getBoundingClientRect();
+		sizes[label] = { width: bounds.width, height: bounds.height };
+		if (label !== "texture-inspection") {
+			require(bounds.left >= 0 &&
+				bounds.right <=
+					window.innerWidth, `${label} extends beyond the viewport`);
+			require(dialog.scrollWidth <=
+				dialog.clientWidth, `${label} requires horizontal scrolling`);
+		}
 		const inside = {
 			clientX: bounds.left + bounds.width / 2,
 			clientY: bounds.top + bounds.height / 2,
@@ -83,6 +92,20 @@ export async function probeDialogBackdrops(context: Map<unknown, unknown>) {
 			{
 				label: "message",
 				value: { kind: "popup", id: 41, text: "Server message" },
+			},
+			{
+				label: "long-message",
+				value: {
+					kind: "popup",
+					id: 42,
+					text: "A longer server message that should wrap at the readable width limit. ".repeat(
+						20,
+					),
+				},
+			},
+			{
+				label: "unbroken-message",
+				value: { kind: "popup", id: 43, text: "x".repeat(500) },
 			},
 			{
 				label: "local-confirmation",
@@ -230,7 +253,7 @@ export async function probeDialogBackdrops(context: Map<unknown, unknown>) {
 			},
 		});
 		await exercise("texture-inspection");
-		return { passed: true, verified };
+		return { passed: true, verified, sizes };
 	} finally {
 		if (component !== null) await unmount(component);
 		target.remove();

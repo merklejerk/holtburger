@@ -105,7 +105,6 @@
 		.client-message-input {
 			display: grid;
 			gap: 0.5rem;
-			margin-bottom: 1rem;
 		}
 	}
 </style>

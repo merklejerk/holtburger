@@ -78,7 +78,8 @@
 		.binding-dialog {
 			position: relative;
 			box-sizing: border-box;
-			width: min(25rem, calc(100% - 16px));
+			width: fit-content;
+			max-width: min(25rem, calc(100% - 16px));
 			max-height: calc(100% - 16px);
 			margin: 8px;
 			padding: var(--ui-dialog-padding, var(--ui-overlay-padding));

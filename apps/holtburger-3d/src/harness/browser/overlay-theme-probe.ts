@@ -103,7 +103,7 @@ export async function probeOverlayTheme(context: Map<unknown, unknown>) {
 		require(getComputedStyle(element(".ui-dialog h2")).color ===
 			"rgb(44, 55, 66)", "Modal heading ignored overlay foreground");
 		backdrop(".ui-dialog", "::backdrop");
-		require(getComputedStyle(element(".ui-dialog")).paddingTop ===
+		require(getComputedStyle(element(".ui-dialog-body")).paddingTop ===
 			"17px", "Modal ignored dialog padding");
 		await clear();
 		component = mount(ClientBindingDialog, {

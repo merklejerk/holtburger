@@ -43,26 +43,49 @@
 		onCancel();
 	}}
 >
-	<h2 id={headingId}>{title}</h2>
-	{@render children()}
+	<header class="ui-frame">
+		<h2 id={headingId}>{title}</h2>
+	</header>
+	<div class="ui-dialog-body ui-body">
+		{@render children()}
+	</div>
 </dialog>
 
 <style>
 	@layer components {
 		.ui-dialog {
-			width: min(34rem, calc(100vw - 2rem));
+			width: fit-content;
+			min-width: min(18rem, calc(100vw - 2rem));
+			max-width: min(34rem, calc(100vw - 2rem));
 			max-height: calc(100vh - 2rem);
 			box-sizing: border-box;
 			overflow: auto;
+			padding: 0;
+		}
+		.ui-dialog-body {
+			/* The theme resets paragraph margins, so the shell owns separation. */
+			display: grid;
+			gap: var(--ui-overlay-gap);
 			padding: var(--ui-dialog-padding, var(--ui-overlay-padding));
+		}
+		.ui-dialog:has(:global(input), :global(select)) {
+			/* Editors keep a useful working width even before a draft or error exists. */
+			min-width: min(22rem, calc(100vw - 2rem));
 		}
 		.ui-dialog :global(.ui-dialog-actions) {
 			display: flex;
+			flex-wrap: wrap;
 			justify-content: flex-end;
 			gap: var(--ui-overlay-gap);
+			/* Separate the decision controls from prose and form fields. */
+			margin-top: var(--ui-overlay-gap);
 		}
 		h2 {
-			margin-top: 0;
+			margin: 0;
+			font: inherit;
+		}
+		.ui-dialog-body > :global(p) {
+			margin: 0;
 		}
 	}
 </style>

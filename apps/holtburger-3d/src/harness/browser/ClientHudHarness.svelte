@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { probeVitalWarnings } from "./client-vital-warning-probe";
+	import type { ClientVital } from "../../client/client-host-contract";
 	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 	import { ClientHousingManagementState } from "../../client/client-housing-management-state";
 	import {
@@ -181,6 +183,12 @@
 		createDefaultClientUserSettings,
 	} from "../../client/client-settings-defaults";
 
+	let warningVitals = $state<readonly ClientVital[]>([
+		{ kind: "health", current: 1_555, maximum: 12_555 },
+		{ kind: "stamina", current: 210, maximum: 245 },
+		{ kind: "mana", current: 1_302, maximum: 4_100 },
+	]);
+	let vitalWarningsEnabled = $state(true);
 	let spellBar = $state(initialSpellBar());
 	const environmentRegion = clientEnvironmentFixture();
 	let environmentSeconds: number | null = ENVIRONMENT_FIXTURE_DAY_SECONDS * 1.9;
@@ -1014,6 +1022,8 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Runtime overlay checks using real CSS and viewport hit testing. */
+		readonly probeVitalWarnings: () => ReturnType<typeof probeVitalWarnings>;
 		/** Deterministic production environment controls/readout integration. */
 		readonly probeEnvironment: () => ReturnType<typeof probeClientEnvironment>;
 		/** Replace housing without mounting a new World panel or replaying crystal intent. */
@@ -3618,6 +3628,27 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeVitalWarnings: async () => {
+				const previousVitals = warningVitals;
+				const previousEnabled = vitalWarningsEnabled;
+				const previousUi = userSettings.ui;
+				try {
+					return await probeVitalWarnings(
+						(values, enabled) => {
+							warningVitals = values;
+							vitalWarningsEnabled = enabled;
+						},
+						() => userSettings.ui.vitalWarningThresholds,
+					);
+				} finally {
+					vitalWarningsEnabled = false;
+					await tick();
+					warningVitals = previousVitals;
+					userSettings = { ...userSettings, ui: previousUi };
+					vitalWarningsEnabled = previousEnabled;
+					await tick();
+				}
+			},
 			probeEnvironment: () =>
 				probeClientEnvironment({
 					setServerTime: (seconds) => {
@@ -4178,11 +4209,8 @@
 		onShowRetailHiddenGeometryChange={() => undefined}
 		playerName="Alice"
 		worldName="ACE Emulator"
-		vitals={[
-			{ kind: "health", current: 1_555, maximum: 12_555 },
-			{ kind: "stamina", current: 210, maximum: 245 },
-			{ kind: "mana", current: 1_302, maximum: 4_100 },
-		]}
+		{vitalWarningsEnabled}
+		vitals={warningVitals}
 		{jumpChargeActive}
 		readJumpExtent={() => jumpExtent}
 		{toast}

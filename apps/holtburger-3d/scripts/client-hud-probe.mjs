@@ -1460,7 +1460,7 @@ export async function probeClientHud(
 			fonts[0].dispatchEvent(new Event('change', { bubbles: true }));
 			await frame();
 			if (fonts[0].value !== 'serif') throw new Error('UI font edit did not stick');
-			if ([...panel.querySelectorAll('#settings-section-ui input[type="range"]')].some((range) => !range.disabled)) throw new Error('Planned scaling controls are active');
+			if ([...panel.querySelectorAll('#settings-ui-scaling input[type="range"]')].some((range) => !range.disabled)) throw new Error('Planned scaling controls are active');
 			panel.querySelector('#settings-tab-input').click();
 			await frame();
 			const movement = panel.querySelector('#settings-section-input .binding-group');

@@ -1,3 +1,4 @@
+import { CLIENT_VITAL_WARNING_THRESHOLDS } from "./client-settings-values";
 import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 import { CLIENT_CHAT_FILTER_TAGS } from "./client-chat-policy";
 import {
@@ -45,6 +46,7 @@ export function createDefaultClientUserSettings(
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
+			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
 		input: structuredClone(CLIENT_KEYBOARD_DEFAULTS),

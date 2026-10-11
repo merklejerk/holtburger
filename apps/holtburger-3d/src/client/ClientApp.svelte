@@ -1872,6 +1872,7 @@
 			{playerName}
 			{worldName}
 			{vitals}
+			vitalWarningsEnabled={lifecycle.kind === "in-world"}
 			readConnection={() => session?.connectionSample() ?? null}
 			{appearanceOptions}
 			onAppearanceOptionChange={setAppearanceOption}

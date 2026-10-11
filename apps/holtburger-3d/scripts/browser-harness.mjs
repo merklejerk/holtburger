@@ -104,7 +104,13 @@ try {
 		}
 	}
 	let report;
-	if (options.clientEnvironment) {
+	if (options.clientVitals) {
+		report = {
+			suite: "client-vitals",
+			evidence: result.clientVitals,
+			browserErrors,
+		};
+	} else if (options.clientEnvironment) {
 		report = {
 			suite: "client-environment",
 			evidence: result.clientEnvironment,
@@ -456,6 +462,7 @@ function parseArgs(args) {
 		clientHud: false,
 		clientSettingsTabs: false,
 		clientEnvironment: false,
+		clientVitals: false,
 		clientKeyboard: false,
 		clientConnection: false,
 		clientAudio: false,
@@ -581,6 +588,10 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--client-vitals":
+				parsed.clientHud = true;
+				parsed.clientVitals = true;
+				break;
 			case "--client-environment":
 				parsed.clientHud = true;
 				parsed.clientEnvironment = true;
@@ -1878,6 +1889,7 @@ Options:
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
+  --client-vitals      Verify vital priority, pulse, reduced motion, recovery, and input passthrough.
   --client-environment Verify true minimap time/weather, local overrides, and footer placement.
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
   --client-inspection   Exercise entity inspection windows, disclosed facts, and preview lifetimes.
@@ -4372,6 +4384,26 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientVitals) {
+			const probes = [];
+			for (const value of ["no-preference", "reduce"]) {
+				await client.send("Emulation.setEmulatedMedia", {
+					features: [{ name: "prefers-reduced-motion", value }],
+				});
+				probes.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeVitalWarnings",
+						[],
+					),
+				);
+			}
+			return {
+				clientVitals: probes,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientEnvironment) {
 			await client.send("Browser.grantPermissions", {
 				origin: new URL(pageUrl).origin,

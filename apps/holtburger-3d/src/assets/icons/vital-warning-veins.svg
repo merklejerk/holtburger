@@ -1,0 +1,44 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 320 240"
+	preserveAspectRatio="none"
+	aria-hidden="true"
+	style="
+		display: block;
+		width: 100%;
+		height: 100%;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	"
+>
+	<!-- Branches enter from the edges and taper toward the clear viewport center. -->
+	<g stroke-width="3" opacity="0.7">
+		<path d="M-8 22C20 25 24 44 46 52S63 80 86 93" />
+		<path d="M104-8C102 19 118 31 123 51S146 69 152 84" />
+		<path d="M-8 136C17 128 29 140 47 151S56 180 71 195" />
+	</g>
+	<g stroke-width="1.5" opacity="0.6">
+		<path
+			d="M28 37C48 32 55 44 72 41S96 48 109 52M49 57C42 76 52 92 48 107M69 81C89 75 95 89 108 87M86 93C93 108 89 119 102 129"
+		/>
+		<path
+			d="M106 22C90 31 89 45 79 51M122 47C143 39 151 47 167 43S190 49 205 47M140 71C133 84 142 96 139 109M152 84C170 92 170 107 182 113"
+		/>
+		<path
+			d="M24 133C30 113 22 109 31 94M45 149C60 138 73 148 85 142M55 168C42 174 46 190 36 199M71 195C80 198 81 215 91 221"
+		/>
+	</g>
+	<g stroke-width="0.7" opacity="0.4">
+		<path
+			d="M74 41L79 30 94 26M49 91L63 100 65 117M105 88L115 96 130 98M95 117L110 114 119 122"
+		/>
+		<path
+			d="M91 39L79 33 68 37M159 45L165 29 180 23M139 100L124 107 120 120M173 103L190 100 202 108"
+		/>
+		<path
+			d="M28 112L40 105 42 89M73 145L78 128 90 121M43 184L27 178 18 185M81 211L98 205 109 211"
+		/>
+	</g>
+</svg>

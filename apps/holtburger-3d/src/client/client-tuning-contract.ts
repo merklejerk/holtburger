@@ -1,3 +1,4 @@
+import type { ClientVitalWarningTuning } from "./client-vital-warning";
 import type { CycleSelectionPolicy } from "./client-cycle-selection-controller";
 import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { HexRgbaColor } from "../lib/frontend-color";
@@ -41,6 +42,8 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 
 /** Exhaustive client-owned tuning contract used to drive authoring completion. */
 export interface ClientTuning {
+	/** Screen-edge warnings are client presentation policy only. */
+	readonly vitalWarning: ClientVitalWarningTuning;
 	/** Journal pulls display facts only while its window is visible. */
 	readonly journal: {
 		/** Fixed presentation window for summarizing bursts of accepted membership changes. */

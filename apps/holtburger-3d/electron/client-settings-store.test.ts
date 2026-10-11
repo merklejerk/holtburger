@@ -35,6 +35,23 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("persists independent vital warning thresholds in the existing UI section", async () => {
+		const path = await temporarySettingsPath();
+		const defaults = createDefaultClientUserSettings(
+			{ width: 1440, height: 900 },
+			8,
+		);
+		const ui = {
+			...defaults.ui,
+			vitalWarningThresholds: { health: 35, stamina: 15, mana: 25 },
+		};
+		const store = new ClientSettingsStore(path, initialWindow);
+		await store.load();
+		await store.saveUserPatch({ sections: { ui } });
+		const loaded = new ClientSettingsStore(path, initialWindow);
+		await loaded.load();
+		expect(loaded.readUser("persisted").sections.ui).toEqual(ui);
+	});
 	it("adds environment sections to an older profile without losing fonts or graphics", async () => {
 		const path = await temporarySettingsPath();
 		const defaults = createDefaultClientUserSettings(

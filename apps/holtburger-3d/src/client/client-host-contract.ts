@@ -310,7 +310,7 @@ const clientCharacterMotionFeedbackSchema = z
 	})
 	.strict();
 
-/** Opaque core receipt plus the exact server question. */
+/** Opaque core receipt plus the host-formatted question. */
 const confirmationSchema = z
 	.object({
 		requestId: z

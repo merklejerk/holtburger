@@ -116,6 +116,7 @@ export async function probeAllegiance(options: {
 			context,
 			props: {
 				owner: party,
+				onSelectEntity: () => {},
 				friends: session.friends,
 				squelch: session.squelch,
 				allegiance: session.allegiance,

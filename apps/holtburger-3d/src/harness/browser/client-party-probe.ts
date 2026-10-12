@@ -19,6 +19,10 @@ const SCENARIO_MEMBER_COUNT = 9;
 /** Real browser component lifetime and strict session events with synthetic server facts. */
 export async function probeParty(options: {
 	readonly session: ClientLifecycleSession;
+	/** Exercise the same target selection owner as the application. */
+	readonly onSelectEntity: (guid: number) => void;
+	/** Observe the accepted target after clicks settle through the production owner. */
+	readonly selectedGuid: () => number | null;
 	/** Production input policy inherited by explicitly mounted probe components. */
 	readonly context: Map<unknown, unknown>;
 	readonly emit: (event: string, payload: unknown) => void;
@@ -127,10 +131,24 @@ export async function probeParty(options: {
 			onSplit: () => {},
 		},
 	});
-	const inviteButton = () =>
-		hudTarget.querySelector<HTMLButtonElement>(
-			'[aria-label="Invite to party"]',
+	const inviteButton = async () => {
+		const menu = hudTarget.querySelector<HTMLButtonElement>(
+			'[aria-label="Selected entity actions"][aria-haspopup="menu"]',
 		);
+		if (menu !== null && menu.getAttribute("aria-expanded") !== "true") {
+			menu.click();
+			await tick();
+		}
+		return (
+			hudTarget.querySelector<HTMLButtonElement>(
+				'[aria-label="Invite to party"]',
+			) ??
+			[
+				...hudTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+			].find((button) => button.textContent?.trim() === "Invite to party") ??
+			null
+		);
+	};
 
 	let component: ReturnType<typeof mount> | null = null;
 	try {
@@ -147,6 +165,7 @@ export async function probeParty(options: {
 				target,
 				props: {
 					owner,
+					onSelectEntity: options.onSelectEntity,
 					friends: session.friends,
 					squelch: session.squelch,
 					allegiance: session.allegiance,
@@ -164,6 +183,25 @@ export async function probeParty(options: {
 			require(hudTarget.querySelector('[aria-label="Trade"] svg') !== null &&
 				hudTarget.querySelector('[aria-label="Trade"]')?.textContent?.trim() ===
 					"", "Trade was not an icon button");
+
+			const selectMember = (guid: number) => {
+				const button = target.querySelector<HTMLButtonElement>(
+					`[aria-label="Select Player ${guid}"]`,
+				);
+				if (button === null) throw new Error("Missing roster selection button");
+				button.click();
+			};
+			selectMember(7);
+			await settle();
+			require(options.selectedGuid() ===
+				7, "Roster click did not select a known teammate");
+			selectMember(2);
+			await settle();
+			require(options.selectedGuid() ===
+				7, "Unknown roster target displaced the known selection");
+			selectMember(1);
+			await settle();
+			require(options.selectedGuid() === 1, "Roster click did not select self");
 
 			const readOpenness = () => {
 				const input = [...target.querySelectorAll("label")]
@@ -236,7 +274,8 @@ export async function probeParty(options: {
 				require(tabs.getBoundingClientRect().top ===
 					tabsTop, "Content scrolling moved the Social tabs");
 				panel.scrollTop = 0;
-				require(inviteButton() === null, "Full party retained HUD recruitment");
+				require((await inviteButton()) ===
+					null, "Full party retained HUD recruitment");
 				const roster = target.querySelector<HTMLUListElement>(
 					'[aria-label="Party members"]',
 				);
@@ -262,6 +301,8 @@ export async function probeParty(options: {
 				owner.respond(question.requestId, false);
 				promote.click();
 				await settle();
+				require(options.selectedGuid() ===
+					1, "Roster management changed target selection");
 				const promotion = commands.findLast(
 					(call) => call.command === "submit_client_party",
 				);
@@ -288,11 +329,11 @@ export async function probeParty(options: {
 					?.querySelector("strong")
 					?.textContent?.trim() ===
 					"Player 2", "Leader marker did not follow authoritative promotion");
-				require(roster.querySelector("button") ===
+				require(roster.querySelector(".ui-icon-actions button") ===
 					null, "Nonleader retained roster management actions");
 				require(!target.textContent?.includes("Disband") &&
 					!target.textContent?.includes("Allow members to invite") &&
-					inviteButton() ===
+					(await inviteButton()) ===
 						null, "Closed-party member retained unauthorized management controls");
 				require(target.textContent?.includes("Leave party") ===
 					true, "Member lost the permitted leave action");
@@ -307,7 +348,7 @@ export async function probeParty(options: {
 					},
 				});
 				await settle();
-				require(inviteButton() !==
+				require((await inviteButton()) !==
 					null, "Open-party member lost HUD recruitment");
 				emit("client-party-updated", {
 					party: {
@@ -327,13 +368,13 @@ export async function probeParty(options: {
 				require(!target.textContent?.includes(
 					"Allow members to invite",
 				), "Locked party exposed a forbidden openness change");
-				require(inviteButton() !==
+				require((await inviteButton()) !==
 					null, "Locked party lost the server-controlled HUD rejoin path");
 				emit("client-party-updated", {
 					party: { ...memberParty, leader: null },
 				});
 				await settle();
-				require(roster.querySelector("button") === null &&
+				require(roster.querySelector(".ui-icon-actions button") === null &&
 					!target.textContent?.includes("Disband") &&
 					!target.textContent?.includes(
 						"Allow members to invite",
@@ -363,6 +404,7 @@ export async function probeParty(options: {
 			context: options.context,
 			props: {
 				owner,
+				onSelectEntity: options.onSelectEntity,
 				friends: session.friends,
 				squelch: session.squelch,
 				allegiance: session.allegiance,
@@ -522,9 +564,18 @@ export async function probeParty(options: {
 		});
 		await settle();
 
+		const closeStart = commands.length;
 		await unmount(component);
 		component = null;
-		const hudInvite = inviteButton();
+		await settle();
+		require(!commands
+			.slice(closeStart)
+			.some(
+				(call) =>
+					call.command === "set_client_party_updates" &&
+					call.args?.enabled === false,
+			), "Closing Social disabled the active combat HUD subscription");
+		const hudInvite = await inviteButton();
 		if (hudInvite === null)
 			throw new Error("HUD lost invitation when Social closed");
 		hudInvite.click();
@@ -534,21 +585,17 @@ export async function probeParty(options: {
 				"Party invitation sent.",
 			]), "HUD invitation did not report submission exactly once");
 
+		emit("client-party-updated", { party: null });
+		await settle();
 		const calls = commands.slice(start);
 		require(calls.filter((call) => call.command === "submit_client_party")
 			.length === 9, "DOM actions did not dispatch exactly once");
 		const demand = calls
 			.filter((call) => call.command === "set_client_party_updates")
 			.map((call) => call.args?.enabled);
-		require(JSON.stringify(demand) ===
-			JSON.stringify([
-				true,
-				false,
-				true,
-				false,
-				true,
-				false,
-			]), "Mounted tab demand did not retire on unmount");
+		require(demand.includes(true) &&
+			demand.at(-1) ===
+				false, "Party updates did not retire after both HUD and Social released demand");
 		require(failures.length === 0, `Party failures: ${failures.join(", ")}`);
 		return {
 			passed: true,

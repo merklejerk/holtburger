@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CLIENT_HUD_VITALS } from "./client-hud-vitals";
 	import ClientConnectionBadge from "./ClientConnectionBadge.svelte";
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import type { ClientVital } from "./client-host-contract";
@@ -13,11 +14,6 @@
 	}
 
 	const { playerName, worldName, vitals, readConnection }: Props = $props();
-	const bars = [
-		{ kind: "health", label: "Health" },
-		{ kind: "mana", label: "Mana" },
-		{ kind: "stamina", label: "Stamina" },
-	] as const;
 	let focusedKind = $state<ClientVital["kind"]>("health");
 
 	function vital(kind: ClientVital["kind"]): ClientVital | undefined {
@@ -50,7 +46,7 @@
 		aria-label="Character vitals"
 		onpointerleave={() => (focusedKind = "health")}
 	>
-		{#each bars as bar}
+		{#each CLIENT_HUD_VITALS as bar}
 			{@const value = vital(bar.kind)}
 			<div
 				class={`vital ui-meter ui-meter--${bar.kind}`}

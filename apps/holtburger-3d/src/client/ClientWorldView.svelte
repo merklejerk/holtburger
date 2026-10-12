@@ -334,6 +334,8 @@
 		/** Clear world hover and invalidate in-flight acquisition on surface exit. */
 		readonly onViewportHoverClear: () => void;
 		readonly onMaintainEntitySelection: () => void;
+		/** Party roster acquisition requires known local entity facts. */
+		readonly onSelectPartyMember: (guid: number) => void;
 		readonly onSelectEntity: (guid: number | null) => void;
 		readonly chatMessages: readonly ClientChatLine[];
 		/** App-session input recall entries, independent of received chat lines. */
@@ -469,6 +471,7 @@
 		onViewportHoverClear,
 		onMaintainEntitySelection,
 		onSelectEntity,
+		onSelectPartyMember,
 		chatMessages,
 		sentChatHistory,
 		onSendChat,
@@ -1045,6 +1048,7 @@
 	{#if partyHudPresent || hudMode === "layout"}
 		<ClientPartyHud
 			{readPartyHudDisplay}
+			onSelectEntity={onSelectPartyMember}
 			preview={!partyHudPresent}
 			placement={hudLayout.partyHud}
 			editable={hudMode === "layout"}
@@ -1346,6 +1350,7 @@
 			>
 				<ClientSocialPanel
 					owner={party}
+					onSelectEntity={onSelectPartyMember}
 					{friends}
 					{squelch}
 					{allegiance}

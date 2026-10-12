@@ -2467,7 +2467,10 @@
 		const scroll = grid.parentElement;
 		if (scroll === null)
 			throw new Error("Party screenshot scroll area is missing");
-		if (scroll.scrollHeight > scroll.clientHeight)
+		if (
+			scroll.scrollHeight > scroll.clientHeight ||
+			scroll.scrollWidth > scroll.clientWidth
+		)
 			throw new Error("Party screenshot would clip teammates");
 		const rect = panel.getBoundingClientRect();
 		return {
@@ -2495,7 +2498,7 @@
 				name: index === 0 ? "Player" : `Teammate ${index}`,
 				level: 10,
 				canManage: index !== 0,
-				vitals: [100, 100, 100, 100, 100, 100],
+				vitals: [25, 50, 75, 100, 100, 100],
 			})),
 			name: "Combat fixture",
 			shareXp: true,
@@ -2522,6 +2525,15 @@
 			const geometry = partyScreenshotGeometry();
 			if (rows().length !== PARTY_HUD_PREVIEW.members.length)
 				throw new Error("Missing full-party layout preview");
+			const previewMember = document.querySelector<HTMLButtonElement>(
+				".party-hud .party-member",
+			);
+			if (previewMember === null || !previewMember.disabled)
+				throw new Error("Layout preview admitted party target selection");
+			const previewSelection = selection.selectedGuid();
+			previewMember.click();
+			if (selection.selectedGuid() !== previewSelection)
+				throw new Error("Layout preview changed target selection");
 			if (!document.querySelector('[aria-label="Party HUD"] .layout-move'))
 				throw new Error("Party HUD missing placement controls");
 			const panel = () => {
@@ -2593,6 +2605,22 @@
 					throw new Error(
 						`Party HUD column mismatch: ${actualColumns} at ${columns}`,
 					);
+				const scroll = grid().parentElement;
+				if (scroll === null) throw new Error("Missing party scroll area");
+				const rowCount = Math.ceil(rows().length / actualColumns);
+				const contentHeight =
+					rowCount * geometry.cellSize.height + (rowCount - 1) * geometry.gap;
+				if (
+					contentHeight <= scroll.clientHeight &&
+					scroll.scrollHeight > scroll.clientHeight
+				)
+					throw new Error(
+						"Fitting party cells introduced a vertical scrollbar",
+					);
+				if (scroll.scrollWidth > scroll.clientWidth)
+					throw new Error(
+						"Fitting party cells introduced a horizontal scrollbar",
+					);
 				if (
 					[...rows()].some(
 						(row) =>
@@ -2635,6 +2663,48 @@
 			await settle();
 			if (rows().length !== snapshot.members.length - 1)
 				throw new Error("Off-scene party members missing");
+			const clickMember = (guid: number) => {
+				const button = panel().querySelector<HTMLButtonElement>(
+					`[aria-label="Select Teammate ${guid - 1}"]`,
+				);
+				if (button === null)
+					throw new Error("Missing party HUD selection button");
+				return button;
+			};
+			const ownBars = [
+				...document.querySelectorAll('.character-hud [role="meter"]'),
+			].map((meter) => meter.getAttribute("aria-label"));
+			const teammateBars = [
+				...clickMember(7).querySelectorAll('[role="meter"]'),
+			];
+			if (
+				ownBars.length !== 3 ||
+				teammateBars.some(
+					(meter, index) =>
+						meter.getAttribute("aria-label") !==
+						`Teammate 6: ${ownBars[index]}`,
+				)
+			)
+				throw new Error("Party vital order differs from character vitals");
+			if (
+				JSON.stringify(
+					teammateBars.map((meter) => meter.getAttribute("aria-valuenow")),
+				) !== JSON.stringify(["25", "75", "50"])
+			)
+				throw new Error("Party vital order changed wire tuple meaning");
+			const vital = clickMember(7).querySelector<HTMLElement>(
+				".party-member__vital",
+			);
+			if (vital === null) throw new Error("Missing clickable party vital");
+			selection.select(null);
+			vital.click();
+			await settle();
+			if (selection.selectedGuid() !== 7)
+				throw new Error("Party vital click did not select a known teammate");
+			clickMember(2).click();
+			await settle();
+			if (selection.selectedGuid() !== 7)
+				throw new Error("Off-scene teammate displaced the known selection");
 			if ([...rows()].some((row) => row.textContent?.includes("Player")))
 				throw new Error("Self appeared in teammate HUD");
 			if (document.querySelector(".party-hud .party-member__leader"))
@@ -2671,6 +2741,8 @@
 			const overrides = {
 				"--ui-party-cell-width": "calc(7rem + 10px)",
 				"--ui-party-health-height": "1rem",
+				"--ui-party-mana-height": "6px",
+				"--ui-party-stamina-height": "10px",
 				"--ui-party-grid-gap": "0.5rem",
 				"--ui-party-scrollbar-allowance": "200px",
 				"--ui-party-name-font-size": "13px",
@@ -2688,9 +2760,16 @@
 				await settle();
 				const themed = partyScreenshotGeometry();
 				const rem = Number.parseFloat(getComputedStyle(root).fontSize);
+				const themedHealth =
+					panel().querySelector<HTMLElement>(".ui-meter--health");
+				const themedCell = panel().querySelector<HTMLElement>(".party-member");
+				if (themedHealth === null || themedCell === null)
+					throw new Error("Missing themed party cell");
 				if (
 					themed.cellSize.width !== rem * 7 + 10 ||
-					themed.cellSize.height === geometry.cellSize.height ||
+					themed.cellSize.height !==
+						themedCell.getBoundingClientRect().height ||
+					themedHealth.getBoundingClientRect().height !== rem ||
 					themed.gap !== rem / 2
 				)
 					throw new Error(
@@ -2727,6 +2806,19 @@
 					throw new Error(
 						"Party resize minimum did not follow the active theme",
 					);
+				for (const kind of ["mana", "stamina"] as const) {
+					const meter = panel().querySelector<HTMLElement>(
+						`.ui-meter--${kind}`,
+					);
+					if (
+						meter === null ||
+						meter.getBoundingClientRect().height !==
+							Number.parseFloat(overrides[`--ui-party-${kind}-height`])
+					)
+						throw new Error(
+							`Party ${kind} row did not follow its own theme height`,
+						);
+				}
 				const name = panel().querySelector<HTMLElement>(".party-member__name");
 				const leader = panel().querySelector<HTMLElement>(
 					".party-member__leader",
@@ -4239,6 +4331,8 @@
 				}),
 			probeParty: () =>
 				probeParty({
+					onSelectEntity: (guid) => selection.selectKnownEntity(guid),
+					selectedGuid: () => selection.selectedGuid(),
 					context: partyProbeContext,
 					session: interactionLifecycle,
 					emit: emitInteractionEvent,
@@ -4604,6 +4698,7 @@
 		onMaintainEntitySelection={() => {
 			selectionMaintenanceCount += 1;
 		}}
+		onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
 		onSelectEntity={selectEntity}
 		debugEnabled={true}
 		{unrestrictedUse}

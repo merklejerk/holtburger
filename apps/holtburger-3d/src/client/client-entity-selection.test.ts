@@ -22,6 +22,73 @@ import type { ClientEntitySelectionQueryRequest } from "./client-host-contract";
 import type { ClientSelectedEntityTrackingStatus } from "./client-selection-tracking";
 
 describe("ClientEntitySelection", () => {
+	it("acquires known roster identities and leaves unknown or unplaced targets unchanged", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		selection.selectKnownEntity(7);
+		expect(selection.selectedGuid()).toBe(7);
+		selection.selectKnownEntity(999);
+		expect(selection.selectedGuid()).toBe(7);
+		lifecycle.update(
+			[
+				{ ...entityFacts(8), description: { kind: "pending" } },
+				{ ...entityFacts(9), scenePlacement: "unavailable" },
+			],
+			[],
+		);
+		selection.selectKnownEntity(8);
+		selection.selectKnownEntity(9);
+		expect(selection.selectedGuid()).toBe(7);
+		selection.selectKnownEntity(1);
+		expect(selection.selectedGuid()).toBe(1);
+		selection.destroy();
+	});
+
+	it("uses the existing retention distance when acquiring known roster targets", () => {
+		const lifecycle = new FakeLifecycle();
+		const presentation = new FakePresentation();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => presentation,
+		});
+		selection.selectKnownEntity(7);
+		presentation.trackingStatus = {
+			kind: "tracked",
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE + 1,
+		};
+		selection.selectKnownEntity(8);
+		expect(selection.selectedGuid()).toBe(7);
+		presentation.trackingStatus = {
+			kind: "tracked",
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		};
+		selection.selectKnownEntity(8);
+		expect(selection.selectedGuid()).toBe(8);
+		selection.destroy();
+	});
+
+	it("unavailable roster clicks supersede pending acquisition without clearing the target", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		selection.select(7);
+		const pending = selection.beginAcquisition("external");
+		selection.selectKnownEntity(999);
+		selection.commitAcquisition(pending, 8);
+		expect(selection.selectedGuid()).toBe(7);
+		lifecycle.entities.awaitSnapshot();
+		selection.selectKnownEntity(8);
+		expect(selection.selectedGuid()).toBe(7);
+		selection.destroy();
+		selection.selectKnownEntity(8);
+		expect(selection.selectedGuid()).toBe(7);
+	});
+
 	it("retains exactly one distinct selection and retires history on removal or clear", () => {
 		const lifecycle = new FakeLifecycle();
 		const selection = new ClientEntitySelection({

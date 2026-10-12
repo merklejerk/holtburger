@@ -96,6 +96,23 @@ export class ClientEntitySelection {
 		this.commitAcquisition(this.beginAcquisition("external"), guid);
 	}
 
+	/** Acquire a roster target only from known local facts, leaving unavailable targets unchanged. */
+	selectKnownEntity(guid: number): void {
+		if (this.#destroyed) return;
+		const intent = this.beginAcquisition("external");
+		const read = this.#lifecycle.entities.read();
+		if (read.kind === "pending") return;
+		const entity = read.level.entities.get(guid);
+		if (
+			entity?.description.kind !== "known" ||
+			(guid !== read.level.playerGuid &&
+				entity.scenePlacement === "unavailable") ||
+			this.#beyondRetentionDistance(guid)
+		)
+			return;
+		this.commitAcquisition(intent, guid);
+	}
+
 	/** Select the authoritative local identity, including when it is not realized. */
 	selectSelf(): void {
 		if (this.#destroyed) return;
@@ -147,12 +164,16 @@ export class ClientEntitySelection {
 		// identity through that gap; unavailable placement is not entity removal,
 		// and the renderer's previous distance cannot retire an unplaced selection.
 		if (entity.scenePlacement === "unavailable") return;
+		if (this.#beyondRetentionDistance(guid)) this.#publish(null);
+	}
+
+	/** Acquisition and retention share the same measured distance boundary. */
+	#beyondRetentionDistance(guid: number): boolean {
 		const status = this.#presentation()?.selectedEntityTrackingStatus(guid);
-		if (
+		return (
 			status?.kind === "tracked" &&
 			status.distance > OUTDOOR_LANDBLOCK_WORLD_SIZE
-		)
-			this.#publish(null);
+		);
 	}
 
 	destroy(): void {

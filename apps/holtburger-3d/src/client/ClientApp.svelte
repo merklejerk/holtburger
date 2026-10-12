@@ -1997,6 +1997,7 @@
 				pointerSelection?.acquireViewportHover(clientX, clientY)}
 			onViewportHoverClear={() => pointerSelection?.clearViewportHover()}
 			onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
+			onSelectPartyMember={(guid) => entitySelection?.selectKnownEntity(guid)}
 			onSelectEntity={(guid) => entitySelection?.select(guid)}
 			{chatMessages}
 			{sentChatHistory}

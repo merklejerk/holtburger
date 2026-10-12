@@ -18,6 +18,8 @@
 	interface Props {
 		/** Session-lifetime owner survives window dismissal. */
 		readonly owner: ClientPartyState;
+		/** Ordinary world target selection; management actions remain independent. */
+		readonly onSelectEntity: (guid: number) => void;
 		readonly friends: ClientFriendsState;
 		readonly squelch: ClientSquelchState;
 		readonly allegiance: ClientAllegianceState;
@@ -26,6 +28,7 @@
 	}
 	const {
 		owner,
+		onSelectEntity,
 		friends,
 		squelch,
 		allegiance,
@@ -173,8 +176,14 @@
 						<ul class="ui-scroll-list party-roster" aria-label="Party members">
 							{#each members as entry (entry.guid)}
 								<li class="ui-list-row">
-									<div class="member-info">
-										<div class="member-name">
+									<button
+										type="button"
+										class="member-info"
+										aria-label={`Select ${entry.name}`}
+										disabled={!view.enabled}
+										onclick={() => onSelectEntity(entry.guid)}
+									>
+										<span class="member-name">
 											{#if entry.guid === view.party.leader}
 												<span
 													class="member-leader"
@@ -190,9 +199,9 @@
 													? " (you)"
 													: ""}</strong
 											>
-										</div>
+										</span>
 										<span class="ui-muted">Level {entry.level}</span>
-									</div>
+									</button>
 									{#if entry.canManage}
 										<div class="ui-icon-actions">
 											<button
@@ -378,12 +387,23 @@
 			margin: 0;
 		}
 		.member-info {
+			/* Native activation semantics, with the appearance of ordinary roster text. */
+			border: 0;
+			background: transparent;
+			color: inherit;
+			padding: 0;
+			cursor: pointer;
+			text-align: start;
 			display: flex;
 			flex-direction: column;
 			gap: var(--ui-list-detail-gap);
 			flex: 1;
 			min-width: 0;
 			overflow-wrap: anywhere;
+		}
+		.member-info:disabled {
+			color: var(--ui-color-muted);
+			cursor: default;
 		}
 		.member-name {
 			display: flex;

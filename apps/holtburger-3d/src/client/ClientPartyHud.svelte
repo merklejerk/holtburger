@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CLIENT_HUD_VITALS } from "./client-hud-vitals";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import type {
@@ -20,6 +21,8 @@
 		readonly readPartyHudDisplay: () => PartyHudDisplay | null;
 		/** Layout-only placeholder; the parent owns live subscription demand. */
 		readonly preview: boolean;
+		/** Select through the app-owned target identity owner. */
+		readonly onSelectEntity: (guid: number) => void;
 		/** Saved window geometry remains independent of themed cell dimensions. */
 		readonly placement: ClientHudPlacement;
 		/** Usable game viewport, allowing the shared shell to fit themed minima. */
@@ -34,6 +37,7 @@
 	const {
 		readPartyHudDisplay,
 		preview,
+		onSelectEntity,
 		placement,
 		viewport,
 		editable,
@@ -53,11 +57,12 @@
 	}
 	let party = $state<PartyHudDisplay | null>(null);
 	const display = $derived(preview ? PARTY_HUD_PREVIEW : party);
-	const bars = [
-		{ kind: "health", label: "Health", current: 0, maximum: 3 },
-		{ kind: "stamina", label: "Stamina", current: 1, maximum: 4 },
-		{ kind: "mana", label: "Mana", current: 2, maximum: 5 },
-	] as const;
+	/** Host tuple indices describe wire facts independently of the shared display order. */
+	const vitalIndices = {
+		health: { current: 0, maximum: 3 },
+		mana: { current: 2, maximum: 5 },
+		stamina: { current: 1, maximum: 4 },
+	} as const;
 
 	$effect(() => {
 		if (preview) return;
@@ -97,8 +102,14 @@
 			>
 				{#if display !== null}
 					{#each display.members as member (member.guid)}
-						<div class="party-member ui-hud-surface">
-							<div class="party-member__name ui-readout" title={member.name}>
+						<button
+							type="button"
+							class="party-member ui-hud-button ui-hud-surface"
+							aria-label={`Select ${member.name}`}
+							disabled={preview || editable}
+							onclick={() => onSelectEntity(member.guid)}
+						>
+							<span class="party-member__name ui-readout" title={member.name}>
 								{#if member.guid === display.leader}
 									<span
 										class="party-member__leader"
@@ -108,14 +119,15 @@
 									>
 								{/if}
 								<strong>{member.name}</strong>
-							</div>
-							{#each bars as bar}
+							</span>
+							{#each CLIENT_HUD_VITALS as bar}
 								{@const value = partyVitalDisplay(
-									member.vitals[bar.current],
-									member.vitals[bar.maximum],
+									member.vitals[vitalIndices[bar.kind].current],
+									member.vitals[vitalIndices[bar.kind].maximum],
 								)}
-								<div
+								<span
 									class={`party-member__vital ui-meter ui-meter--${bar.kind}`}
+									style:height={`var(--ui-party-${bar.kind}-height)`}
 									role="meter"
 									aria-label={`${member.name}: ${bar.label}`}
 									aria-valuemin="0"
@@ -128,9 +140,9 @@
 											class="vital-fill"
 											style:width={`${value.percent}%`}
 										></span>{/if}
-								</div>
+								</span>
 							{/each}
-						</div>
+						</button>
 					{/each}
 				{/if}
 			</section>
@@ -188,12 +200,16 @@
 			scrollbar-gutter: auto;
 		}
 		.party-member {
+			padding: 0;
+			text-align: start;
 			min-width: 0;
 			display: grid;
-			grid-template-rows:
-				var(--ui-party-name-height) var(--ui-party-health-height)
-				var(--ui-party-stamina-height) var(--ui-party-mana-height);
+			grid-template-rows: var(--ui-party-name-height);
 			gap: var(--ui-party-vital-gap);
+		}
+		.party-member::before {
+			/* Fixed grid cells own their full extent; button backing must not enlarge scrollable overflow. */
+			inset: 0;
 		}
 		.party-member__name {
 			display: flex;
@@ -218,7 +234,6 @@
 			height: 100%;
 		}
 		.party-member__vital {
-			height: auto;
 			min-height: 0;
 		}
 	}

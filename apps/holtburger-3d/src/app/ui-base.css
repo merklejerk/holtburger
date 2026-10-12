@@ -86,6 +86,19 @@
 		--ui-hud-background-color: #00000044;
 		/* Spacing between independent icon actions in HUD strips. */
 		--ui-hud-icon-gap: 5px;
+		/* Party HUD density. Row heights and three internal gaps determine the cell height. */
+		--ui-party-cell-width: 100px;
+		--ui-party-name-height: 18px;
+		--ui-party-health-height: 32px;
+		--ui-party-stamina-height: 8px;
+		--ui-party-mana-height: 8px;
+		--ui-party-vital-gap: 3px;
+		--ui-party-grid-gap: 4px;
+		/* Native scrollbar room affects the live minimum editable width. */
+		--ui-party-scrollbar-allowance: 32px;
+		--ui-party-name-font-size: var(--ui-font-size-micro);
+		--ui-party-name-gap: 4px;
+		--ui-party-leader-icon-size: 12px;
 		/* Combat gauge paint; geometry and hit targets remain component-owned. */
 		--ui-combat-idle-opacity: 0.5;
 		--ui-combat-emphasis-duration: 0.25s;

@@ -15,7 +15,7 @@ vi.mock("./client-settings-transport", () => ({
 }));
 afterEach(() => vi.unstubAllGlobals());
 
-it("composes the Journal default with older saved placements at the real entry point", async () => {
+it("composes new HUD defaults with older saved placements at the real entry point", async () => {
 	const viewport = { width: 1440, height: 900 };
 	vi.stubGlobal("window", {
 		innerWidth: viewport.width,
@@ -35,7 +35,11 @@ it("composes the Journal default with older saved placements at the real entry p
 	expect(mount).toHaveBeenCalledOnce();
 	expect(mount.mock.calls[0]?.[1]).toMatchObject({
 		initialUserSettings: {
-			hudLayout: { inventory, journal: defaults.hudLayout.journal },
+			hudLayout: {
+				inventory,
+				journal: defaults.hudLayout.journal,
+				partyHud: defaults.hudLayout.partyHud,
+			},
 		},
 	});
 	expect(bridge.resetUser).not.toHaveBeenCalled();

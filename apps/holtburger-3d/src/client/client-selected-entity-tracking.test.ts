@@ -118,6 +118,12 @@ async function fixture() {
 			],
 		},
 	});
+	// Finish session recovery before observing selection-owned commands.
+	await vi.waitFor(() =>
+		expect(invoke).toHaveBeenCalledWith("set_client_party_updates", {
+			enabled: false,
+		}),
+	);
 	invoke.mockClear();
 	return {
 		invoke,

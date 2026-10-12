@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientPartyHud from "./ClientPartyHud.svelte";
+	import type { PartyHudDisplay } from "./client-party-hud";
 	import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
 	import ClientJournalPanel from "./ClientJournalPanel.svelte";
 	import type { ClientContractsState } from "./client-contracts-state";
@@ -43,7 +45,7 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 
 	import { useClientInput } from "./client-input-context";
-	import { onMount, untrack } from "svelte";
+	import { onMount, onDestroy, untrack } from "svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import Minimap from "../app/Minimap.svelte";
 	import ClientMinimapEnvironment from "./ClientMinimapEnvironment.svelte";
@@ -144,6 +146,10 @@
 	interface Props {
 		/** Session-lifetime party presentation owner. */
 		readonly party: ClientPartyState | null;
+		/** Session-owned cold visibility fact; vitals remain imperative. */
+		readonly partyHudPresent: boolean;
+		readonly readPartyHudDisplay: () => PartyHudDisplay | null;
+		readonly onPartyHudDemand: (enabled: boolean) => void;
 		readonly friends: ClientFriendsState | null;
 		readonly contracts: ClientContractsState | null;
 		readonly squelch: ClientSquelchState | null;
@@ -339,6 +345,9 @@
 	let {
 		hudLayout,
 		party,
+		partyHudPresent,
+		readPartyHudDisplay,
+		onPartyHudDemand,
 		friends,
 		contracts,
 		squelch,
@@ -577,6 +586,9 @@
 	let settingsTab = $state<SettingsTab>("graphics");
 	/** One selected-HUD request retained only until the inventory panel accepts it. */
 	let requestedInventorySplit = $state<InventorySplitStart | null>(null);
+	$effect(() => onPartyHudDemand(partyHudPresent));
+	onDestroy(() => onPartyHudDemand(false));
+
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
@@ -1030,6 +1042,19 @@
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} {readConnection} />
 	</ClientHudPanel>
+	{#if partyHudPresent || hudMode === "layout"}
+		<ClientPartyHud
+			{readPartyHudDisplay}
+			preview={!partyHudPresent}
+			placement={hudLayout.partyHud}
+			editable={hudMode === "layout"}
+			resizable={CLIENT_UI_DEFAULTS.partyHud.resizable}
+			{viewport}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("partyHud", placement)}
+		/>
+	{/if}
+
 	<ClientStatusTray
 		placement={hudLayout.statusTray}
 		editable={hudMode === "layout"}

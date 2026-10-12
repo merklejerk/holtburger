@@ -215,6 +215,37 @@ Edit the theme CSS and click **Reload theme** to preserve the current UI state.
 See the [UI style guide](UI_STYLE_GUIDE.md) for configuration, recipes, extension
 rules, semantic visualization exceptions, accessibility, and browser verification.
 
+### Party HUD dimensions
+
+The party HUD reads `--ui-party-*` properties from the active theme. Defaults live in
+`src/app/ui-base.css`; overrides belong in the theme stylesheet. For example:
+
+```css
+:root {
+	--ui-party-cell-width: 120px;
+	--ui-party-name-height: 18px;
+	--ui-party-health-height: 24px;
+	--ui-party-stamina-height: 6px;
+	--ui-party-mana-height: 6px;
+	--ui-party-vital-gap: 3px;
+	--ui-party-grid-gap: 6px;
+	--ui-party-name-font-size: 12px;
+	--ui-party-name-gap: 4px;
+	--ui-party-leader-icon-size: 12px;
+	--ui-party-scrollbar-allowance: 32px;
+}
+```
+
+Cell height is derived from the four row heights plus three vital gaps, so bar and
+spacing edits stay consistent. CSS lengths such as `rem` and `calc()` are supported.
+Cell dimensions and minimum resize bounds update with the theme; the saved window
+position and preferred size remain user layout preferences. The four-column cap is
+app behavior. Health, stamina, mana, and backing colors use the existing shared theme hooks.
+
+Capture the real component with eight synthetic teammates using
+`npm run harness:browser -- --client-party-screenshots /tmp/party-hud --viewport-height 1000`.
+The screenshot fixture reads the active theme dimensions too.
+
 ## Development
 
 Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:

@@ -167,6 +167,8 @@ export interface ClientTuning {
 		readonly doubleClickSuppressionMs: number;
 		readonly displayIntervalMs: number;
 	};
+	/** Bounded fellowship vital sampling, independent of network publication. */
+	readonly partyHud: { readonly displayIntervalMs: number };
 	/** Selected-entity HUD display policy. */
 	readonly selectedEntityHud: {
 		/** Selected healing-kit name accent. */

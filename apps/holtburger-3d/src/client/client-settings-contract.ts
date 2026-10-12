@@ -63,6 +63,7 @@ const statusTrayPlacementSchema = hudPlacementSchema.refine(
 const clientHudLayoutSchema = z
 	.object({
 		character: hudPlacementSchema,
+		partyHud: hudPlacementSchema,
 		statusTray: statusTrayPlacementSchema,
 		spellBar: hudPlacementSchema,
 		combatBar: hudPlacementSchema,

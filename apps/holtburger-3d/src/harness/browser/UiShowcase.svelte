@@ -49,6 +49,7 @@
 	/** Production HUD surfaces whose component inputs do not require a GPU owner. */
 	type HudSurface = Exclude<
 		keyof ClientHudLayout,
+		| "partyHud"
 		| "statusTray"
 		| "minimap"
 		| "inventory"

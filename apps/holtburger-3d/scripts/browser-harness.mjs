@@ -11,7 +11,7 @@ import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -104,7 +104,13 @@ try {
 		}
 	}
 	let report;
-	if (options.clientVitals) {
+	if (options.clientPartyScreenshotDirectory !== null) {
+		report = {
+			suite: "party-hud-screenshots",
+			screenshots: result.partyHudScreenshots,
+			browserErrors,
+		};
+	} else if (options.clientVitals) {
 		report = {
 			suite: "client-vitals",
 			evidence: result.clientVitals,
@@ -514,6 +520,7 @@ function parseArgs(args) {
 		clientSettingsTabs: false,
 		clientEnvironment: false,
 		clientVitals: false,
+		clientPartyScreenshotDirectory: null,
 		clientKeyboard: false,
 		clientConnection: false,
 		clientAudio: false,
@@ -639,6 +646,12 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--client-party-screenshots":
+				parsed.clientHud = true;
+				parsed.clientPartyScreenshotDirectory = resolve(
+					requireValue(args, ++index, arg),
+				);
+				break;
 			case "--client-vitals":
 				parsed.clientHud = true;
 				parsed.clientVitals = true;
@@ -1932,6 +1945,7 @@ Options:
   --ui-theme           Review CSS themes over the live world, bright/dark backdrops, override
                        removal, filter fallback, and a replacement fixture; verify contrast and input.
                        With --screenshot, also writes <path>.<variant>.png.
+  --client-party-screenshots <dir> Capture the real party HUD at one through four columns.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
   --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
@@ -4438,6 +4452,42 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientPartyScreenshotDirectory !== null) {
+			await mkdir(options.clientPartyScreenshotDirectory, { recursive: true });
+			// Isolate the real party surface for crops; its production styling remains untouched.
+			await evaluateExpression(
+				client,
+				`(() => {
+				const style = document.createElement("style");
+				style.textContent = '.hud-panel:not([aria-label="Party HUD"]), .minimap { visibility: hidden !important; }';
+				document.head.append(style);
+			})()`,
+			);
+			const screenshots = [];
+			for (const columns of [1, 2, 3, 4]) {
+				const clip = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.showPartyHud",
+					[columns],
+				);
+				const capture = await client.send("Page.captureScreenshot", {
+					format: "png",
+					captureBeyondViewport: false,
+					clip,
+				});
+				const path = join(
+					options.clientPartyScreenshotDirectory,
+					`party-${columns}-columns.png`,
+				);
+				await writeFile(path, Buffer.from(capture.data, "base64"));
+				screenshots.push({ columns, path });
+			}
+			return {
+				partyHudScreenshots: screenshots,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientVitals) {
 			const probes = [];
 			for (const value of ["no-preference", "reduce"]) {
@@ -4452,6 +4502,13 @@ async function runClientHudHarness({ viteUrl }) {
 					),
 				);
 			}
+			probes.push(
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probePartyHud",
+					[],
+				),
+			);
 			return {
 				clientVitals: probes,
 				consoleMessages,

@@ -1,4 +1,8 @@
 import {
+	ClientPartyUpdates,
+	type PartyUpdateConsumer,
+} from "./client-party-updates";
+import {
 	decodeClientCombatOutcome,
 	type ClientCombatOutcome,
 } from "./client-host-contract";
@@ -469,6 +473,8 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "confirmation";
 			readonly confirmation: ClientConfirmation | null;
 	  }
+	| { readonly type: "party-hud-presence"; readonly present: boolean }
+	| { readonly type: "party-updates-failed"; readonly message: string }
 	| { readonly type: "entities" }
 	| { readonly type: "resyncing" }
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
@@ -564,6 +570,9 @@ export class ClientLifecycleSession {
 	readonly entities = new ClientEntityMirror();
 	readonly #dynamicSession: DynamicEntitySession;
 	#unlisten: readonly (() => void)[] | null = null;
+	readonly #partyUpdates: ClientPartyUpdates;
+	/** Cold visibility fact; vital updates never notify the UI graph. */
+	#partyHudPresent = false;
 	#party: PartySnapshot | null = null;
 	#partyPreferences: PartyPreferences | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
@@ -584,6 +593,13 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.#partyUpdates = new ClientPartyUpdates(
+			async (enabled) => {
+				await transport.invoke("set_client_party_updates", { enabled });
+			},
+			(error) =>
+				this.#emit({ type: "party-updates-failed", message: String(error) }),
+		);
 		this.allegiance = new ClientAllegianceState(async (action) => {
 			await this.#transport.invoke("submit_client_allegiance", { action });
 		});
@@ -655,6 +671,7 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.#partyUpdates.stop();
 		this.#serverClock = null;
 		this.#resetCharacterLists();
 		for (const unlisten of this.#unlisten ?? []) unlisten();
@@ -975,8 +992,13 @@ export class ClientLifecycleSession {
 			action: partyActionSchema.parse(action),
 		});
 	}
-	async setPartyUpdates(enabled: boolean): Promise<void> {
-		await this.#transport.invoke("set_client_party_updates", { enabled });
+	/** Surface demand is combined before any server request is sent. */
+	setPartyUpdateDemand(consumer: PartyUpdateConsumer, enabled: boolean): void {
+		this.#partyUpdates.setDemand(consumer, enabled);
+	}
+	/** Presence is computed by the session that owns player and roster identity. */
+	partyHudPresent(): boolean {
+		return this.#partyHudPresent;
 	}
 	/** Submit chat text, including retail recall commands. */
 	async sendChat(message: string): Promise<void> {
@@ -1215,6 +1237,7 @@ export class ClientLifecycleSession {
 						.object({ party: partySnapshotSchema.nullable() })
 						.strict()
 						.parse(payload).party;
+					this.#updatePartyHudPresence();
 				}),
 			);
 			unlisteners.push(
@@ -1851,10 +1874,23 @@ export class ClientLifecycleSession {
 		this.allegiance.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
+		this.#updatePartyHudPresence();
+	}
+
+	#updatePartyHudPresence(): void {
+		const player = this.#state.playerGuid;
+		const present =
+			player !== null &&
+			this.#party !== null &&
+			this.#party.members.some((member) => member.guid !== player);
+		if (present === this.#partyHudPresent) return;
+		this.#partyHudPresent = present;
+		this.#emit({ type: "party-hud-presence", present });
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {
 		if (event.type === "resyncing") {
+			this.#partyUpdates.setActive(false, true);
 			this.friends.setContext(this.#state.playerGuid, false);
 			this.contracts.setContext(this.#state.playerGuid, false);
 			this.squelch.setContext(this.#state.playerGuid, false);
@@ -1865,6 +1901,12 @@ export class ClientLifecycleSession {
 			event.type === "current-state" ||
 			event.type === "local-player-established"
 		) {
+			this.#updatePartyHudPresence();
+			this.#partyUpdates.setActive(
+				this.#state.playerGuid !== null &&
+					this.#state.lifecycle?.kind === "in-world",
+				event.type === "current-state",
+			);
 			this.allegiance.setContext(
 				this.#state.playerGuid,
 				this.#state.lifecycle?.kind === "in-world",

@@ -40,9 +40,8 @@ function fixture() {
 	const submit = vi
 		.fn<(action: PartyAction) => Promise<void>>()
 		.mockResolvedValue(undefined);
-	const updates = vi
-		.fn<(enabled: boolean) => Promise<void>>()
-		.mockResolvedValue(undefined);
+	const updates =
+		vi.fn<(consumer: "management" | "hud", enabled: boolean) => void>();
 	const failure = vi.fn<(message: string) => void>();
 	const notice = vi.fn<(message: string) => void>();
 	const owner = new ClientPartyState(
@@ -51,7 +50,7 @@ function fixture() {
 			partySnapshot: () => party,
 			partyPreferences: () => preferences,
 			submitParty: submit,
-			setPartyUpdates: updates,
+			setPartyUpdateDemand: updates,
 			subscribe: (listener) => {
 				listeners.add(listener);
 				return () => {
@@ -364,7 +363,7 @@ describe("party presentation ownership", () => {
 		expect(f.submit).toHaveBeenCalledOnce();
 		f.owner.destroy();
 	});
-	it("retains pending intent through portal travel and reapplies active demand", () => {
+	it("retains pending intent through portal travel while the session owns demand recovery", () => {
 		const f = fixture();
 		f.owner.setVisible(true);
 		f.owner.request({ kind: "openness", open: true });
@@ -375,7 +374,7 @@ describe("party presentation ownership", () => {
 		});
 		f.lifecycle({ kind: "in-world" });
 		expect(f.owner.read().pending).toBe(true);
-		expect(f.updates.mock.calls).toEqual([[true], [true]]);
+		expect(f.updates.mock.calls).toEqual([["management", true]]);
 		f.owner.destroy();
 	});
 });

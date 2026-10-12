@@ -18,7 +18,7 @@ type PartySession = Pick<
 	| "partySnapshot"
 	| "partyPreferences"
 	| "submitParty"
-	| "setPartyUpdates"
+	| "setPartyUpdateDemand"
 	| "subscribe"
 > & {
 	state(): Pick<
@@ -62,13 +62,9 @@ export class ClientPartyState implements LocalDialogSource {
 		this.#unsubscribe = session.subscribe((event) => {
 			if (event.type === "current-state" || event.type === "resyncing")
 				this.#clearReview();
-			if (event.type === "lifecycle") {
-				if (event.lifecycle.kind === "in-world") {
-					if (this.#visible) void this.#updates(true);
-				} else {
-					this.#clearReview();
-					if (event.lifecycle.kind !== "portal-space") this.#pending = null;
-				}
+			if (event.type === "lifecycle" && event.lifecycle.kind !== "in-world") {
+				this.#clearReview();
+				if (event.lifecycle.kind !== "portal-space") this.#pending = null;
 			}
 		});
 	}
@@ -312,16 +308,9 @@ export class ClientPartyState implements LocalDialogSource {
 		if (this.#visible === visible) return;
 		this.#visible = visible;
 		if (!visible) this.#clearReview();
-		if (this.#session.state().lifecycle?.kind === "in-world")
-			void this.#updates(visible);
+		this.#session.setPartyUpdateDemand("management", visible);
 	}
-	async #updates(enabled: boolean): Promise<void> {
-		try {
-			await this.#session.setPartyUpdates(enabled);
-		} catch (error) {
-			if (!this.#disposed) this.#failure(String(error));
-		}
-	}
+
 	destroy(): void {
 		this.setVisible(false);
 		this.#disposed = true;

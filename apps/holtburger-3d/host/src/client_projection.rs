@@ -287,7 +287,7 @@ pub struct ClientActionFeedback {
 pub struct ClientConfirmation {
     /// Decimal receipt preserves all u64 bits across JavaScript.
     pub request_id: String,
-    /// Server-authored question, without protocol-specific confirmation families.
+    /// App-formatted question; protocol-specific confirmation families stay in the host.
     pub text: String,
 }
 
@@ -295,7 +295,16 @@ impl From<&holtburger_core::ActiveCharacterConfirmation> for ClientConfirmation 
     fn from(value: &holtburger_core::ActiveCharacterConfirmation) -> Self {
         Self {
             request_id: value.request_id.to_string(),
-            text: value.text.clone(),
+            text: match value.confirmation_type {
+                // ACE's Fellowship.AddFellowshipMember sends only the inviter's name.
+                holtburger_common::ConfirmationType::Fellowship => {
+                    format!(
+                        "{} has invited you to join their party. Accept?",
+                        value.text
+                    )
+                }
+                _ => value.text.clone(),
+            },
         }
     }
 }

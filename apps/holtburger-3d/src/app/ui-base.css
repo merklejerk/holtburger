@@ -89,7 +89,7 @@
 		/* Party HUD density. Row heights and three internal gaps determine the cell height. */
 		--ui-party-cell-width: 100px;
 		--ui-party-name-height: 18px;
-		--ui-party-health-height: 32px;
+		--ui-party-health-height: 16px;
 		--ui-party-stamina-height: 8px;
 		--ui-party-mana-height: 8px;
 		--ui-party-vital-gap: 3px;

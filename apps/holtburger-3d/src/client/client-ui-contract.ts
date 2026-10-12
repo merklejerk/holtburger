@@ -45,6 +45,8 @@ export interface ClientUiPanel extends ClientUiPlacement {
 export interface ClientUiDefaults {
 	/** Player identity and vitals. */
 	readonly character: ClientUiPanel;
+	/** Combat-focused roster; its minimum extent follows resolved CSS theme dimensions. */
+	readonly partyHud: Omit<ClientUiPanel, "minSize">;
 	/** Persistent condition and connection indicators, independently positioned. */
 	readonly statusTray: ClientUiPanel;
 	/** Tabbed combat spell shortcuts; a custom button toggles the strip arrangement. */

@@ -175,6 +175,7 @@ export const CLIENT_TUNING = {
 		/** Mounted inventory display cadence, independent of host publication. */
 		displayIntervalMs: 250,
 	},
+	partyHud: { displayIntervalMs: 200 },
 	selectedEntityHud: {
 		/** TUI-inspired item accents where no 3D category color exists. */
 		healingKitColor: hexRgba("#f0abfcff"),

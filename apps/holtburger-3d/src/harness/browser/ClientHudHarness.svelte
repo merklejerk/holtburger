@@ -1,4 +1,11 @@
 <script lang="ts">
+	import {
+		PARTY_HUD_PREVIEW,
+		PARTY_HUD_MAXIMUM_COLUMNS,
+		readPartyHudGeometry,
+		presentPartyHud,
+	} from "../../client/client-party-hud";
+	import type { PartySnapshot } from "../../client/client-party-contract";
 	import { probeVitalWarnings } from "./client-vital-warning-probe";
 	import type { ClientVital } from "../../client/client-host-contract";
 	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
@@ -189,6 +196,7 @@
 		{ kind: "mana", current: 1_302, maximum: 4_100 },
 	]);
 	let vitalWarningsEnabled = $state(true);
+	let partyHudPresent = $state(false);
 	let spellBar = $state(initialSpellBar());
 	const environmentRegion = clientEnvironmentFixture();
 	let environmentSeconds: number | null = ENVIRONMENT_FIXTURE_DAY_SECONDS * 1.9;
@@ -1022,6 +1030,10 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** DOM/lifecycle checks for the production party HUD, without visual acceptance. */
+		readonly probePartyHud: typeof probePartyHud;
+		/** Prepare the production HUD with a full synthetic roster for literal screenshots. */
+		readonly showPartyHud: typeof showPartyHud;
 		/** Runtime overlay checks using real CSS and viewport hit testing. */
 		readonly probeVitalWarnings: () => ReturnType<typeof probeVitalWarnings>;
 		/** Deterministic production environment controls/readout integration. */
@@ -2351,6 +2363,410 @@
 		};
 	}
 
+	/** Read capture geometry from the same CSS probe used by the production resize boundary. */
+	function partyScreenshotGeometry() {
+		const probe = document.querySelector<HTMLElement>(
+			".party-hud-theme-metrics",
+		);
+		if (probe === null) throw new Error("Party theme metric probe is missing");
+		const gap = Number.parseFloat(getComputedStyle(probe).rowGap);
+		if (!Number.isFinite(gap))
+			throw new Error("Party screenshot grid gap must resolve to a CSS length");
+		return { ...readPartyHudGeometry(probe), gap };
+	}
+
+	async function showPartyHud(columns: number) {
+		if (
+			!Number.isInteger(columns) ||
+			columns < 1 ||
+			columns > PARTY_HUD_MAXIMUM_COLUMNS
+		)
+			throw new Error("Party screenshot columns must be between one and four");
+		emitInteractionBaseline();
+		const teammates = [
+			["Aelwyn Stormweaver", 216, 120, 72],
+			["Borin Ironhand", 108, 144, 36],
+			["Cerys", 168, 64, 114],
+			["Dain", 60, 104, 60],
+			["Elora", 240, 88, 96],
+			["Fenric", 144, 32, 54],
+			["Galen", 192, 136, 18],
+			["Hestia", 84, 96, 84],
+		] as const;
+		const party: PartySnapshot = {
+			name: "Screenshot party",
+			leader: 2,
+			shareXp: true,
+			evenShare: true,
+			open: false,
+			locked: false,
+			capabilities: {
+				isLeader: false,
+				canRecruit: false,
+				canChangeOpenness: false,
+			},
+			members: [
+				{
+					guid: 1,
+					name: "Player",
+					level: 10,
+					canManage: false,
+					vitals: [240, 160, 120, 240, 160, 120],
+				},
+				...teammates.map(
+					(
+						[name, health, stamina, mana],
+						index,
+					): PartySnapshot["members"][number] => ({
+						guid: index + 2,
+						name,
+						level: 10,
+						canManage: false,
+						vitals: [health, stamina, mana, 240, 160, 120],
+					}),
+				),
+			],
+		};
+		emitInteractionEvent("client-party-updated", { party });
+		hudMode = "runtime";
+		vitalWarningsEnabled = false;
+		await tick();
+		const geometry = partyScreenshotGeometry();
+		const rows = Math.ceil(teammates.length / columns);
+		userSettings = {
+			...userSettings,
+			hudLayout: {
+				...userSettings.hudLayout,
+				partyHud: {
+					horizontal: { alignment: "start", offset: 400 },
+					vertical: { alignment: "start", offset: 32 },
+					preferredWidth:
+						columns * geometry.cellSize.width +
+						(columns - 1) * geometry.gap +
+						geometry.scrollbarAllowance,
+					preferredHeight:
+						rows * geometry.cellSize.height + (rows - 1) * geometry.gap,
+				},
+			},
+		};
+		await new Promise<void>((resolve) =>
+			setTimeout(resolve, CLIENT_TUNING.partyHud.displayIntervalMs * 2),
+		);
+		const panel = document.querySelector<HTMLElement>(
+			'[aria-label="Party HUD"]',
+		);
+		const grid = panel?.querySelector<HTMLElement>(".party-hud");
+		if (panel === null || grid === null || grid === undefined)
+			throw new Error("Party screenshot surface is missing");
+		if (grid.querySelectorAll(".party-member").length !== teammates.length)
+			throw new Error("Party screenshot does not contain eight teammates");
+		if (
+			getComputedStyle(grid).gridTemplateColumns.split(" ").length !== columns
+		)
+			throw new Error("Party screenshot has the wrong column count");
+		const scroll = grid.parentElement;
+		if (scroll === null)
+			throw new Error("Party screenshot scroll area is missing");
+		if (scroll.scrollHeight > scroll.clientHeight)
+			throw new Error("Party screenshot would clip teammates");
+		const rect = panel.getBoundingClientRect();
+		return {
+			x: rect.x,
+			y: rect.y,
+			width: rect.width,
+			height: rect.height,
+			scale: 2,
+		};
+	}
+
+	async function probePartyHud() {
+		const previousMode = hudMode;
+		const previousParty = interactionLifecycle.partySnapshot();
+		const previousPlacement = userSettings.hudLayout.partyHud;
+		const settle = () =>
+			new Promise<void>((resolve) =>
+				setTimeout(resolve, CLIENT_TUNING.partyHud.displayIntervalMs * 2),
+			);
+		const rows = () => document.querySelectorAll(".party-hud .party-member");
+		const snapshot: PartySnapshot = {
+			leader: 1,
+			members: Array.from({ length: 9 }, (_, index) => ({
+				guid: index + 1,
+				name: index === 0 ? "Player" : `Teammate ${index}`,
+				level: 10,
+				canManage: index !== 0,
+				vitals: [100, 100, 100, 100, 100, 100],
+			})),
+			name: "Combat fixture",
+			shareXp: true,
+			evenShare: true,
+			open: false,
+			locked: false,
+			capabilities: {
+				isLeader: true,
+				canRecruit: false,
+				canChangeOpenness: true,
+			},
+		};
+		const replace = (party: PartySnapshot | null) =>
+			emitInteractionEvent("client-party-updated", { party });
+		try {
+			hudMode = "runtime";
+			replace(null);
+			await settle();
+			if (rows().length !== 0)
+				throw new Error("Party HUD visible without membership");
+			const commandStart = interactionCommands.length;
+			hudMode = "layout";
+			await settle();
+			const geometry = partyScreenshotGeometry();
+			if (rows().length !== PARTY_HUD_PREVIEW.members.length)
+				throw new Error("Missing full-party layout preview");
+			if (!document.querySelector('[aria-label="Party HUD"] .layout-move'))
+				throw new Error("Party HUD missing placement controls");
+			const panel = () => {
+				const element = document.querySelector<HTMLElement>(
+					'[aria-label="Party HUD"]',
+				);
+				if (element === null) throw new Error("Missing party HUD surface");
+				return element;
+			};
+			const grid = () => {
+				const element = panel().querySelector<HTMLElement>(".party-hud");
+				if (element === null) throw new Error("Missing party HUD grid");
+				return element;
+			};
+			const resize = panel().querySelector<HTMLButtonElement>(".layout-resize");
+			if (resize === null) throw new Error("Missing party HUD resize handle");
+			const start = userSettings.hudLayout.partyHud;
+			const bounds = resize.getBoundingClientRect();
+			const point = {
+				clientX: bounds.left + bounds.width / 2,
+				clientY: bounds.top + bounds.height / 2,
+				pointerId: 73,
+				bubbles: true,
+			};
+			resize.dispatchEvent(
+				new PointerEvent("pointerdown", { ...point, button: 0, buttons: 1 }),
+			);
+			window.dispatchEvent(
+				new PointerEvent("pointermove", {
+					...point,
+					clientX: point.clientX + geometry.cellSize.width,
+					clientY: point.clientY + geometry.cellSize.height,
+					buttons: 1,
+				}),
+			);
+			window.dispatchEvent(
+				new PointerEvent("pointerup", { ...point, button: 0 }),
+			);
+			await tick();
+			if (
+				userSettings.hudLayout.partyHud.preferredWidth <=
+					start.preferredWidth ||
+				userSettings.hudLayout.partyHud.preferredHeight <= start.preferredHeight
+			)
+				throw new Error("Party HUD resize did not update retained placement");
+			for (
+				let columns = 1;
+				columns <= PARTY_HUD_MAXIMUM_COLUMNS + 1;
+				columns++
+			) {
+				userSettings = {
+					...userSettings,
+					hudLayout: {
+						...userSettings.hudLayout,
+						partyHud: {
+							...start,
+							preferredWidth:
+								columns * geometry.cellSize.width +
+								(columns - 1) * geometry.gap +
+								geometry.scrollbarAllowance,
+							preferredHeight: geometry.cellSize.height * 4 + geometry.gap * 3,
+						},
+					},
+				};
+				await settle();
+				const actualColumns =
+					getComputedStyle(grid()).gridTemplateColumns.split(" ").length;
+				if (actualColumns !== Math.min(columns, PARTY_HUD_MAXIMUM_COLUMNS))
+					throw new Error(
+						`Party HUD column mismatch: ${actualColumns} at ${columns}`,
+					);
+				if (
+					[...rows()].some(
+						(row) =>
+							row.getBoundingClientRect().height !== geometry.cellSize.height ||
+							row.getBoundingClientRect().width !== geometry.cellSize.width,
+					)
+				)
+					throw new Error("Resizing changed the fixed party cell dimensions");
+			}
+			userSettings = {
+				...userSettings,
+				hudLayout: {
+					...userSettings.hudLayout,
+					partyHud: {
+						...start,
+						preferredHeight: geometry.cellSize.height,
+					},
+				},
+			};
+			await settle();
+			const scroll = panel().querySelector<HTMLElement>(".party-hud-scroll");
+			if (scroll === null || scroll.scrollHeight <= scroll.clientHeight)
+				throw new Error("Short party HUD did not allow scrolling");
+			if (
+				interactionCommands
+					.slice(commandStart)
+					.some(
+						(call) =>
+							call.command === "set_client_party_updates" &&
+							call.args?.enabled === true,
+					)
+			)
+				throw new Error("Layout preview requested live updates");
+			hudMode = "runtime";
+			replace({ ...snapshot, members: snapshot.members.slice(0, 1) });
+			await settle();
+			if (rows().length !== 0)
+				throw new Error("Solo party HUD visible during play");
+			replace(snapshot);
+			await settle();
+			if (rows().length !== snapshot.members.length - 1)
+				throw new Error("Off-scene party members missing");
+			if ([...rows()].some((row) => row.textContent?.includes("Player")))
+				throw new Error("Self appeared in teammate HUD");
+			if (document.querySelector(".party-hud .party-member__leader"))
+				throw new Error("Self leadership marked a teammate");
+			replace({ ...snapshot, leader: 2 });
+			await settle();
+			if (!document.querySelector(".party-hud .party-member__leader"))
+				throw new Error("Missing teammate leader marker");
+			if (
+				document.querySelectorAll(".party-hud [role=meter]").length !==
+				(snapshot.members.length - 1) * 3
+			)
+				throw new Error("Missing party vital bars");
+			replace({
+				...snapshot,
+				members: snapshot.members.map((member) => ({
+					...member,
+					vitals: [0, 0, 0, 0, 100, 100],
+				})),
+			});
+			await settle();
+			if (
+				document
+					.querySelector(".party-hud [role=meter]")
+					?.getAttribute("aria-valuetext") !== "Unavailable"
+			)
+				throw new Error("Zero maximum displayed as known health");
+			replace({ ...snapshot, members: snapshot.members.slice(0, 1) });
+			await settle();
+			if (rows().length !== 0)
+				throw new Error("Party HUD survived final other-member departure");
+			replace({ ...snapshot, leader: 2 });
+			await settle();
+			const overrides = {
+				"--ui-party-cell-width": "calc(7rem + 10px)",
+				"--ui-party-health-height": "1rem",
+				"--ui-party-grid-gap": "0.5rem",
+				"--ui-party-scrollbar-allowance": "200px",
+				"--ui-party-name-font-size": "13px",
+				"--ui-party-leader-icon-size": "14px",
+			} as const;
+			const root = document.documentElement;
+			const previous = Object.keys(overrides).map((key) => ({
+				key,
+				value: root.style.getPropertyValue(key),
+				priority: root.style.getPropertyPriority(key),
+			}));
+			try {
+				for (const [key, value] of Object.entries(overrides))
+					root.style.setProperty(key, value);
+				await settle();
+				const themed = partyScreenshotGeometry();
+				const rem = Number.parseFloat(getComputedStyle(root).fontSize);
+				if (
+					themed.cellSize.width !== rem * 7 + 10 ||
+					themed.cellSize.height === geometry.cellSize.height ||
+					themed.gap !== rem / 2
+				)
+					throw new Error(
+						"Party theme geometry did not resolve changed CSS lengths",
+					);
+				userSettings = {
+					...userSettings,
+					hudLayout: {
+						...userSettings.hudLayout,
+						partyHud: { ...start, preferredWidth: 1000, preferredHeight: 400 },
+					},
+				};
+				await settle();
+				if (
+					getComputedStyle(grid()).gridTemplateColumns.split(" ").length >
+					PARTY_HUD_MAXIMUM_COLUMNS
+				)
+					throw new Error(
+						"Themed scrollbar allowance exceeded the party column cap",
+					);
+				userSettings = {
+					...userSettings,
+					hudLayout: {
+						...userSettings.hudLayout,
+						partyHud: { ...start, preferredWidth: 1, preferredHeight: 1 },
+					},
+				};
+				await settle();
+				const rect = panel().getBoundingClientRect();
+				if (
+					rect.width !== themed.cellSize.width + themed.scrollbarAllowance ||
+					rect.height !== themed.cellSize.height
+				)
+					throw new Error(
+						"Party resize minimum did not follow the active theme",
+					);
+				const name = panel().querySelector<HTMLElement>(".party-member__name");
+				const leader = panel().querySelector<HTMLElement>(
+					".party-member__leader",
+				);
+				if (
+					name === null ||
+					getComputedStyle(name).fontSize !==
+						overrides["--ui-party-name-font-size"]
+				)
+					throw new Error("Party name font did not follow the theme");
+				if (
+					leader === null ||
+					leader.getBoundingClientRect().width !==
+						Number.parseFloat(overrides["--ui-party-leader-icon-size"])
+				)
+					throw new Error("Party leader artwork did not follow the theme");
+			} finally {
+				for (const { key, value, priority } of previous) {
+					if (value === "") root.style.removeProperty(key);
+					else root.style.setProperty(key, value, priority);
+				}
+				await settle();
+			}
+			return {
+				passed: true,
+				teammates: snapshot.members.length - 1,
+				themeGeometry: true,
+				themeResizeMinimum: true,
+			};
+		} finally {
+			replace(previousParty);
+			userSettings = {
+				...userSettings,
+				hudLayout: { ...userSettings.hudLayout, partyHud: previousPlacement },
+			};
+			hudMode = previousMode;
+			await settle();
+		}
+	}
+
 	async function probeConnectionBadge() {
 		const settle = () =>
 			new Promise<void>((resolve) =>
@@ -3610,6 +4026,10 @@
 		probeBrowserInput(keyboard, inputGate);
 		const unsubscribePanelAuthority = interactionLifecycle.subscribe(
 			(event) => {
+				if (event.type === "party-hud-presence")
+					partyHudPresent = event.present;
+				if (event.type === "party-updates-failed")
+					throw new Error(event.message);
 				if (event.type === "housing-updated") housing = event.housing;
 				if (event.type === "current-state") {
 					housing = event.state.housing;
@@ -3940,6 +4360,8 @@
 			probeActionFeedback,
 			probeCharacterVitals,
 			probeConnectionBadge,
+			probePartyHud,
+			showPartyHud,
 			previewCharacterSelection: () => {
 				previewCharacters = true;
 			},
@@ -4016,6 +4438,14 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		{partyHudPresent}
+		readPartyHudDisplay={() =>
+			presentPartyHud(
+				interactionLifecycle.partySnapshot(),
+				interactionLifecycle.state().playerGuid,
+			)}
+		onPartyHudDemand={(enabled) =>
+			interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
 		party={socialParty}
 		friends={interactionLifecycle.friends}
 		contracts={interactionLifecycle.contracts}

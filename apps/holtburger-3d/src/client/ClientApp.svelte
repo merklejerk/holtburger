@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { presentPartyHud } from "./client-party-hud";
 	import {
 		clientCombatIndicatorSettingsSchema,
 		type ClientCombatIndicatorSettings,
@@ -373,6 +374,7 @@
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
 	let housingManagement = $state<ClientHousingManagementState | null>(null);
 	let party = $state<ClientPartyState | null>(null);
+	let partyHudPresent = $state(false);
 	let housing = $state<HousingSnapshot>(emptyHousing());
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
@@ -790,6 +792,12 @@
 	function receive(event: ClientLifecycleSessionEvent): void {
 		contractNotifications.receive(event);
 		switch (event.type) {
+			case "party-hud-presence":
+				partyHudPresent = event.present;
+				return;
+			case "party-updates-failed":
+				toastCenter.publish({ message: event.message, tone: "warning" });
+				return;
 			case "housing-updated":
 				housing = event.housing;
 				return;
@@ -1528,6 +1536,7 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		partyHudPresent = owner.partyHudPresent();
 		const inspectionOwner = new ClientObjectInspection(owner, (message) =>
 			toastCenter.publish({ message, tone: "warning" }),
 		);
@@ -1778,6 +1787,16 @@
 		<ClientWorldView
 			bind:this={worldView}
 			itemSession={session}
+			{partyHudPresent}
+			readPartyHudDisplay={() =>
+				session === null
+					? null
+					: presentPartyHud(
+							session.partySnapshot(),
+							session.state().playerGuid,
+						)}
+			onPartyHudDemand={(enabled) =>
+				session?.setPartyUpdateDemand("hud", enabled)}
 			characterSheet={session?.characterSheet ?? null}
 			hudLayout={userSettings.hudLayout}
 			onHudPlacementChange={changeHudPlacement}

@@ -629,7 +629,11 @@ describe("ClientLifecycleSession", () => {
 		expect(closed.level.worldContainer.kind).toBe("closed");
 		expect(closed.level.entities.has(child)).toBe(false);
 		await session.closeContainer(root);
-		expect(transport.invocations.at(-1)).toEqual({
+		expect(
+			transport.invocations
+				.filter((call) => call.command === "close_client_container")
+				.at(-1),
+		).toEqual({
 			command: "close_client_container",
 			args: { guid: root },
 		});
@@ -683,7 +687,11 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-current-state", currentState(1));
 		transport.calls.length = 0;
 		await session.toggleCombatMode();
-		expect(transport.calls).toEqual(["invoke:toggle_client_combat_mode"]);
+		expect(
+			transport.calls.filter(
+				(call) => call === "invoke:toggle_client_combat_mode",
+			),
+		).toEqual(["invoke:toggle_client_combat_mode"]);
 		expect(session.state().combatMode).toBe("peace");
 		transport.emit("client-combat-mode-updated", { mode: "missile" });
 		expect(session.state().combatMode).toBe("missile");
@@ -903,9 +911,14 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls.at(-1)).toBe("invoke:request_client_current_state");
+		const requestIndex = transport.calls.indexOf(
+			"invoke:request_client_current_state",
+		);
+		expect(requestIndex).toBeGreaterThan(0);
 		expect(
-			transport.calls.slice(0, -1).every((call) => call.startsWith("listen:")),
+			transport.calls
+				.slice(0, requestIndex)
+				.every((call) => call.startsWith("listen:")),
 		).toBe(true);
 		for (const name of [
 			"client-current-state",
@@ -1551,6 +1564,58 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
 	});
 
+	it("publishes party HUD presence only when another member appears or leaves", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(1));
+		const session = new ClientLifecycleSession(transport);
+		const presence: boolean[] = [];
+		session.subscribe((event) => {
+			if (event.type === "party-hud-presence") presence.push(event.present);
+		});
+		await session.start();
+		const members: PartySnapshot["members"] = [1, 2].map((guid) => ({
+			guid,
+			name: `Member ${guid}`,
+			level: 10,
+			canManage: guid !== 1,
+			vitals: [10, 10, 10, 20, 20, 20],
+		}));
+		const party: PartySnapshot = {
+			name: "Raid",
+			leader: 1,
+			shareXp: true,
+			evenShare: true,
+			open: false,
+			locked: false,
+			capabilities: {
+				isLeader: true,
+				canRecruit: true,
+				canChangeOpenness: true,
+			},
+			members: members.slice(0, 1),
+		};
+		transport.emit("client-party-updated", { party });
+		expect(session.partyHudPresent()).toBe(false);
+		const joined = { ...party, members: members.slice(0, 2) };
+		transport.emit("client-party-updated", { party: joined });
+		expect(session.partyHudPresent()).toBe(true);
+		transport.emit("client-party-updated", {
+			party: {
+				...joined,
+				members: joined.members.map((member) => ({
+					...member,
+					vitals: [0, 0, 0, 100, 100, 100],
+				})),
+			},
+		});
+		expect(presence).toEqual([true]);
+		transport.emit("client-party-updated", { party });
+		expect(presence).toEqual([true, false]);
+		transport.emit("client-party-updated", { party: joined });
+		session.stop();
+		expect(presence).toEqual([true, false, true, false]);
+	});
+
 	it("recovers party without a sibling event, preserves early hydration through revelation, and retires it on stop", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1821,7 +1886,11 @@ describe("ClientLifecycleSession", () => {
 			["lifestone", "house"],
 		]);
 		await session.recall("allegiance-hometown");
-		expect(transport.invocations.at(-1)).toEqual({
+		expect(
+			transport.invocations
+				.filter((call) => call.command === "recall_client")
+				.at(-1),
+		).toEqual({
 			command: "recall_client",
 			args: { destination: "allegiance-hometown" },
 		});

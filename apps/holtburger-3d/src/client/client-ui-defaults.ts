@@ -35,6 +35,13 @@ export const CLIENT_UI_DEFAULTS = {
 		minSize: { width: 250, height: 60 },
 		resizable: true,
 	},
+	partyHud: {
+		anchor: "top-left",
+		offset: { x: 16, y: 140 },
+		// Initial window preference; live minimum dimensions are theme-owned.
+		size: { width: 236, height: 312 },
+		resizable: true,
+	},
 	statusTray: {
 		anchor: "top-left",
 		offset: { x: 16, y: 96 },

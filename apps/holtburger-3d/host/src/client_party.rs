@@ -25,7 +25,7 @@ impl From<PlayerCharacterOptions> for ClientPartyPreferences {
     }
 }
 
-/// Retained roster plus vital detail for the future independently paced combat HUD.
+/// Retained roster plus vital detail for independently paced management and combat surfaces.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientPartySnapshot {

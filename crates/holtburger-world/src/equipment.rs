@@ -107,6 +107,16 @@ impl EquipmentFacts {
         (allowed.bits().count_ones() == 1).then_some(allowed)
     }
 
+    /// UI target compatibility shares offhand admission with explicit location resolution.
+    /// Apparel retains its full coverage; this does not establish server wield requirements.
+    pub fn compatible_locations(self) -> EquipMask {
+        if self.resolve_location(EquipMask::SHIELD).is_some() {
+            self.valid_locations | EquipMask::SHIELD
+        } else {
+            self.valid_locations
+        }
+    }
+
     /// Preferred-side request shared by equipment execution and alternate-side UI availability.
     /// Ordinary jewelry keeps both candidates so conflict planning can choose a free side.
     pub fn preferred_side_request(self, alternate: bool) -> EquipMask {

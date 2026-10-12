@@ -39,7 +39,7 @@
 		let nextAttentionBack = false;
 		let nextAttentionForward = false;
 		for (const [index, cell] of Array.from(cells?.children ?? []).entries()) {
-			if (!indexes.has(index)) continue;
+			if (!indexes.has(index) || cell.getClientRects().length === 0) continue;
 			const rect = cell.getBoundingClientRect();
 			const start = orientation === "horizontal" ? rect.left : rect.top;
 			const end = orientation === "horizontal" ? rect.right : rect.bottom;
@@ -77,6 +77,7 @@
 		if (direction === "up") candidates.reverse();
 		// Choose the nearest cell extending beyond the requested edge, including a clipped cell.
 		for (const cell of candidates) {
+			if (cell.getClientRects().length === 0) continue;
 			const rect = cell.getBoundingClientRect();
 			const distance =
 				orientation === "horizontal"

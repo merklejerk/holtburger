@@ -1,3 +1,4 @@
+import { filterDraggedEquipment } from "./client-equipment-strip-filter";
 import type { ClientTradeState } from "./client-trade-state";
 import type {
 	ClientHouseCrystalState,
@@ -447,7 +448,7 @@ export class ClientItemDrag {
 		this.#target(false);
 	};
 
-	/** Dim blocked contents targets and mirror the equipment location-mask hint. */
+	/** Dim blocked contents targets and filter equipment using the drag source. */
 	#dimDropCandidates(): void {
 		const gesture = this.#gesture;
 		if (
@@ -482,22 +483,12 @@ export class ClientItemDrag {
 			} else delete cell.dataset.inventoryDimmed;
 		}
 		const source = this.#worldEntity(gesture.source.item);
-		const locations =
-			source?.description.kind === "known"
+		filterDraggedEquipment(
+			this.#root,
+			source?.ownedByPlayer && source.description.kind === "known"
 				? source.description.equipLocations
-				: null;
-		for (const row of this.#root.querySelectorAll<HTMLElement>(
-			"[data-equipment-slot]",
-		)) {
-			if (source?.description.kind !== "known")
-				delete row.dataset.inventoryDimmed;
-			else
-				row.dataset.inventoryDimmed = String(
-					!source.ownedByPlayer ||
-						locations === null ||
-						(locations & Number(row.dataset.equipmentSlot)) === 0,
-				);
-		}
+				: null,
+		);
 	}
 
 	#clearDimming(): void {
@@ -1078,6 +1069,7 @@ export class ClientItemDrag {
 		}
 	}
 	#finishGesture(): void {
+		filterDraggedEquipment(this.#root, undefined);
 		this.#clearDimming();
 		this.#gesture = null;
 		this.#housingGesture = null;

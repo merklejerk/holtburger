@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { equipmentStripFilter } from "./client-equipment-strip-filter";
 	import type { ItemCapacity } from "../app/item-capacity";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
@@ -18,7 +19,7 @@
 		readonly onSelectItem: (guid: number) => void;
 		/** Cold pointer interaction; the panel owns dimming of incompatible contents. */
 		readonly onHoverSlot: (mask: number | null) => void;
-		/** Allowed locations for the hovered item; null means known non-equippable. */
+		/** Established target compatibility for the hovered item; absent compatibility keeps all rows. */
 		readonly hoveredEquipLocations: number | null | undefined;
 	}
 	const {
@@ -32,9 +33,11 @@
 		hoveredEquipLocations,
 	}: Props = $props();
 	const updating = $derived(pending || equipment.pending);
+
 	const attentionIndexes = $derived(
 		new Set(
 			equipment.rows.flatMap(({ slot }, index) =>
+				!updating &&
 				hoveredEquipLocations !== undefined &&
 				hoveredEquipLocations !== null &&
 				(hoveredEquipLocations & slot.mask) !== 0
@@ -45,7 +48,14 @@
 	);
 </script>
 
-<div class="equipment-strip" aria-busy={updating}>
+<div
+	class="equipment-strip"
+	aria-busy={updating}
+	use:equipmentStripFilter={{
+		locations: updating ? undefined : hoveredEquipLocations,
+		rows: equipment.rows,
+	}}
+>
 	<ItemGridStrip {attentionIndexes}>
 		{#each equipment.rows as { slot, item } (slot.mask)}
 			{@const description = item?.description}
@@ -54,11 +64,6 @@
 			<div
 				class="equipment-row"
 				data-equipment-slot={slot.mask}
-				data-hover-dimmed={hoveredEquipLocations !== undefined &&
-				(hoveredEquipLocations === null ||
-					(hoveredEquipLocations & slot.mask) === 0)
-					? "true"
-					: undefined}
 				role="group"
 				aria-label={slot.label}
 				onpointerenter={() => onHoverSlot(slot.mask)}
@@ -97,8 +102,10 @@
 					var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
 			);
 		}
-		.equipment-row:global([data-inventory-dimmed="true"]),
-		.equipment-row[data-hover-dimmed="true"] {
+		.equipment-row:global([hidden]) {
+			display: none;
+		}
+		.equipment-row:global([data-hover-dimmed="true"]) {
 			opacity: var(--ui-item-dimmed-opacity, 0.3);
 		}
 		.equipment-row {

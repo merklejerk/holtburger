@@ -147,6 +147,56 @@ async function fixture() {
 }
 
 describe("shared frontend item interaction flow", () => {
+	it("equips carried equipment from ordinary Use and selected-item interaction while preserving wielded activation", async () => {
+		const f = await fixture();
+		const equip = vi
+			.spyOn(f.lifecycle, "equipItem")
+			.mockResolvedValue(undefined);
+		const source = entityFacts(2, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "item", index: 0 },
+			},
+		});
+		if (source.description.kind !== "known")
+			throw new Error("Known fixture required");
+		const equipment: ClientEntityFacts = {
+			...source,
+			description: {
+				...source.description,
+				equipLocations: CASTER_EQUIP_MASK,
+				useCapability: "targeted",
+			},
+		};
+		const publish = (item: ClientEntityFacts) =>
+			f.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				worldContainer: null,
+				upserts: [item],
+				removed: [],
+			});
+		publish(equipment);
+		f.interactions.use(2, false);
+		f.select(2);
+		f.interactions.interactSelected(false);
+		expect(equip.mock.calls).toEqual([
+			[2, false],
+			[2, false],
+		]);
+		expect(f.submit).not.toHaveBeenCalled();
+		expect(f.interactions.snapshot().kind).toBe("idle");
+		publish({
+			...equipment,
+			location: { kind: "equipped", wearerGuid: 1, mask: CASTER_EQUIP_MASK },
+		});
+		f.interactions.use(2, false);
+		expect(equip).toHaveBeenCalledTimes(2);
+		expect(f.interactions.snapshot().kind).toBe("acquiring");
+		f.destroy();
+	});
+
 	it("casts an equipped item's unlearned spell using the selected target and rejects stale equipment", async () => {
 		const f = await fixture();
 		const source = entityFacts(2);

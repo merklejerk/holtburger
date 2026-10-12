@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use holtburger_common::{
     Guid,
     properties::{
-        EquipMask, PropertyBool, PropertyDataId, PropertyInt, PropertyString, WeenieType,
-        WorldObjectExt, WorldObjectPropertyAccessors,
+        PropertyBool, PropertyDataId, PropertyInt, PropertyString, WeenieType, WorldObjectExt,
+        WorldObjectPropertyAccessors,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -305,6 +305,7 @@ impl WorldState {
                 let weenie_type = entity
                     .wcid
                     .and_then(|wcid| self.weenie_types.as_ref().and_then(|types| types.get(wcid)));
+                let equipment = crate::equipment::EquipmentFacts::from_entity(entity).ok();
                 EntityDescription::Known {
                     name: name.to_owned(),
                     stack_count: entity.is_stackable().then(|| entity.stack_size()),
@@ -320,25 +321,20 @@ impl WorldState {
                         entity.usable_flags(),
                     ),
                     item_type: item_type.bits(),
-                    has_alternate_equip_side: crate::equipment::EquipmentFacts::from_entity(entity)
-                        .is_ok_and(|facts| {
-                            facts.preferred_side_request(false)
-                                != facts.preferred_side_request(true)
-                        }),
+                    has_alternate_equip_side: equipment.is_some_and(|facts| {
+                        facts.preferred_side_request(false) != facts.preferred_side_request(true)
+                    }),
                     use_capability: crate::item_use::item_use_capability(entity),
                     built_in_spell: entity.spell().filter(|id| *id != Guid::NULL).map(|id| id.0),
                     consumable: crate::item_use::consumable_facts(entity),
+                    // Apparel target hints need declared coverage, not the clothing priority
+                    // required for replacement planning. Incomplete conflict facts must not
+                    // make a known equippable item lose its equipment action classification.
                     equip_locations: entity
                         .get_int_prop(PropertyInt::ValidLocations)
                         .map(|mask| {
-                            let mask = mask as u32;
-                            // ACE Player_Inventory.cs:DoHandleActionGetAndWieldItem allows
-                            // exactly MeleeWeapon in the Shield location for dual wielding.
-                            if mask == EquipMask::MELEE_WEAPON.bits() {
-                                mask | EquipMask::SHIELD.bits()
-                            } else {
-                                mask
-                            }
+                            equipment
+                                .map_or(mask as u32, |facts| facts.compatible_locations().bits())
                         }),
                     object_flags: entity.flags.bits(),
                     wcid: entity.wcid,
@@ -564,6 +560,16 @@ mod tests {
                 .set_int_prop(PropertyInt::ValidLocations, valid.bits() as i32);
             assert_eq!(locations(&world), Some(expected.bits()));
         }
+        let weapon = world.entities.get_mut(guid).unwrap();
+        weapon.set_int_prop(
+            PropertyInt::ValidLocations,
+            EquipMask::MELEE_WEAPON.bits() as i32,
+        );
+        weapon.set_int_prop(
+            PropertyInt::CombatUse,
+            holtburger_common::properties::CombatUse::TwoHanded as i32,
+        );
+        assert_eq!(locations(&world), Some(EquipMask::MELEE_WEAPON.bits()));
     }
 
     #[test]

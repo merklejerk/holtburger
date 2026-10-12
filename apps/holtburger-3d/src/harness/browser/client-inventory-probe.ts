@@ -1650,6 +1650,9 @@ export async function probeClientInventory(options: {
 	equipmentViewport.dispatchEvent(new Event("scroll"));
 	cell(remoteCompatible.guid).dispatchEvent(new PointerEvent("pointerenter"));
 	await tick();
+
+	if (equipment.querySelector(".equipment-row[hidden]") !== null)
+		throw new Error("Equipment hover collapsed a slot");
 	const hoverDimmedRows = equipment.querySelectorAll(
 		'.equipment-row[data-hover-dimmed="true"]',
 	);

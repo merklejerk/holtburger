@@ -197,6 +197,17 @@ export class ClientItemInteractions implements LocalDialogSource {
 		this.cancel();
 		const item = this.#item(source);
 		if (item === null) return;
+		// Ordinary use equips carried equipment; wielded items retain authored activation.
+		if (
+			!unrestricted &&
+			item.location.kind === "contained" &&
+			bindingAction(item)?.kind === "equipment"
+		) {
+			void this.#session
+				.equipItem(source, false)
+				.catch((error: unknown) => this.#failure(String(error)));
+			return;
+		}
 		const capability = item.description.useCapability;
 		if (capability === "targeted") {
 			this.#beginAcquisition();

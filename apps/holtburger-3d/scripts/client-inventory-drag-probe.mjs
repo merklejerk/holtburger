@@ -38,6 +38,9 @@ export async function probeInventoryDrag(client, evaluateExpression) {
             throw new Error('Drag fixture point is covered: ' + ${JSON.stringify(selector)});
         return point;
 	})()`);
+	const dragThreshold = await read(
+		"import('/src/client/client-tuning.ts').then(({ CLIENT_TUNING }) => CLIENT_TUNING.inventory.dragThresholdCssPixels)",
+	);
 	const source =
 		'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="91"]';
 	const target =
@@ -55,6 +58,14 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		});
 		if ((await read(`${api}.capture().selectedGuid`)) !== selected)
 			throw new Error("Pointer press changed selection before dragging");
+		// Begin the gesture before measuring a target whose layout filtering can change.
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: from.x + dragThreshold + 1,
+			y: from.y,
+			button: "left",
+			buttons: 1,
+		});
 		const to = await point(targetSelector);
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseMoved",
@@ -95,11 +106,11 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error(
 			`Drag artwork is not visible beside the pointer: ${JSON.stringify({ ghost, position })}`,
 		);
-	const dimming = await read(
-		`Array.from(document.querySelectorAll('[data-equipment-slot]'), (row) => ({ label: row.getAttribute('aria-label'), dimmed: row.dataset.inventoryDimmed }))`,
+	const equipmentRows = await read(
+		`Array.from(document.querySelectorAll('[data-equipment-slot]'), (row) => ({ label: row.getAttribute('aria-label'), hidden: row.hidden, dimmed: row.dataset.hoverDimmed }))`,
 	);
-	const candidates = dimming
-		.filter((row) => row.dimmed === "false")
+	const candidates = equipmentRows
+		.filter((row) => !row.hidden)
 		.map((row) => row.label)
 		.sort();
 	if (
@@ -109,17 +120,15 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error(
 			"Inventory armor drag did not preserve only candidate equipment rows",
 		);
-	if (dimming.some((row) => row.dimmed === undefined))
-		throw new Error(
-			"Inventory armor drag left equipment rows without a dimming decision",
-		);
+	if (equipmentRows.some((row) => row.dimmed !== undefined))
+		throw new Error("Hover dimming overrode active equipment drag filtering");
 	const hovered = await lastPreview();
 	if (hovered.intent.target.kind !== "item")
 		throw new Error("Native drag did not use positional item targeting");
 	await reply(hovered.sequence, { kind: "move" });
 	await release(position);
 	if (await read(`document.querySelector('[data-inventory-dimmed]') !== null`))
-		throw new Error("Equipment dimming survived pointer release");
+		throw new Error("Contents dimming survived pointer release");
 	const dropped = await lastPreview();
 	if (dropped.sequence === hovered.sequence)
 		throw new Error("Drop reused its hover preview");
@@ -185,10 +194,10 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	const cancelledPosition = await begin(target, source);
 	if (
 		!(await read(
-			`Array.from(document.querySelectorAll('[data-equipment-slot]')).every(row => row.dataset.inventoryDimmed === 'true')`,
+			`Array.from(document.querySelectorAll('[data-equipment-slot]')).every(row => !row.hidden)`,
 		))
 	)
-		throw new Error("Non-equippable item drag left equipment slots undimmed");
+		throw new Error("Non-equippable item drag collapsed equipment slots");
 	const cancelled = await lastPreview();
 	await client.send("Input.dispatchKeyEvent", {
 		type: "keyDown",
@@ -241,7 +250,21 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			"Multi-slot displaced armor did not highlight both occupied rows",
 		);
 	await release(equipmentPosition);
-	await reply((await lastPreview()).sequence, {
+	const equipmentDrop = await lastPreview();
+	if (
+		JSON.stringify(equipmentDrop.intent.target) !==
+		JSON.stringify(equipmentHover.intent.target)
+	)
+		throw new Error("Restoring equipment rows changed the released target");
+	if (
+		(await read(
+			`Array.from(document.querySelectorAll('[data-equipment-slot]')).filter(row => !row.hidden).length`,
+		)) !== 2
+	)
+		throw new Error(
+			"Equipment filtering ended before the release preview completed",
+		);
+	await reply(equipmentDrop.sequence, {
 		kind: "equip",
 		displaced: [95],
 	});

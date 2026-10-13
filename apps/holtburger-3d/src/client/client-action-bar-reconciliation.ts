@@ -36,7 +36,12 @@ export function reconcileActionBars(
 	for (const bar of bars)
 		for (const slot of ACTION_SLOT_INDICES) {
 			const content = bar.slots[slot];
-			if (content === null || content.replacement === null) continue;
+			if (
+				content === null ||
+				content.kind === "loadout" ||
+				content.replacement === null
+			)
+				continue;
 			const identity = content.replacement;
 			const current = entities.get(content.item);
 			if (current?.ownedByPlayer) {

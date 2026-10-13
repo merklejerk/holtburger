@@ -95,9 +95,6 @@ export async function probeItemUse(client, evaluateExpression) {
 			await read(
 				`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence: query.sequence, eligible })})`,
 			);
-			const cursor = await read(
-				`getComputedStyle(document.querySelector(${JSON.stringify(selector)})).cursor`,
-			);
 			const asset = eligible
 				? "combine-cursor-eligible.svg"
 				: "combine-cursor-ineligible.svg";
@@ -108,7 +105,18 @@ export async function probeItemUse(client, evaluateExpression) {
 			const color = [...svg.matchAll(/stroke="([^"]+)"/g)].at(-1)?.[1];
 			assert.ok(color, "Cursor asset supplies a foreground color");
 			// Vite embeds small SVG cursors as data URLs, so inspect the rendered color.
-			assert.ok(decodeURIComponent(cursor).includes(color), cursor);
+			// Eligibility is accepted by the interaction owner before the cold UI
+			// publishes its cursor cue. Observe that publication instead of its pending predecessor.
+			await read(`(async () => {
+                const deadline = performance.now() + 5000;
+                let cursor;
+                while (performance.now() < deadline) {
+                    cursor = getComputedStyle(document.querySelector(${JSON.stringify(selector)})).cursor;
+                    if (decodeURIComponent(cursor).includes(${JSON.stringify(color)})) return;
+                    await new Promise(requestAnimationFrame);
+                }
+                throw new Error('Target eligibility cursor did not update: ' + cursor);
+            })()`);
 			assert.equal((await state()).kind, "acquiring");
 		};
 		await hover(food, true);

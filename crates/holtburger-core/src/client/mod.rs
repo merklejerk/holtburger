@@ -39,6 +39,7 @@ pub mod entity_facts;
 mod entity_visual_facts;
 pub mod equipment_plan;
 mod equipment_runtime;
+pub mod equipment_set;
 mod event_ordering;
 mod friends;
 pub mod housing;
@@ -186,8 +187,12 @@ pub struct ClientRuntime {
     closing_containers: std::collections::BTreeMap<Guid, Instant>,
     /// Bounded successful-open history used only by corpse-selection conveniences.
     opened_corpses: world_container::OpenedCorpseHistory,
-    /// Single owner of equipment mutations and their authoritative confirmations.
+    /// Single-item replacement owner, retaining its existing receipt-dependent progression.
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
+    /// One peace prerequisite plus bounded recent equipment-set error attribution.
+    equipment_set: equipment_set::EquipmentSetState,
+    /// One successfully sent stance request; mode updates retire it, never equipment receipts.
+    pending_combat_mode: Option<holtburger_protocol::messages::combat::CombatMode>,
     /// Outstanding P2P item acknowledgments shared by all frontends.
     trade_additions: HashMap<Guid, Instant>,
     /// Dependent pack exchange waiting to send its second insertion.
@@ -488,6 +493,8 @@ impl ClientRuntime {
         self.reset_housing();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("Client is exiting; the last request may still complete");
+        self.equipment_set = Default::default();
+        self.pending_combat_mode = None;
         self.exit_cause = Some(cause);
     }
 
@@ -510,6 +517,8 @@ impl ClientRuntime {
         self.reset_combat_engagement();
         self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
         self.stop_equipment_change("World lifecycle changed; the last request may still complete");
+        self.equipment_set = Default::default();
+        self.pending_combat_mode = None;
         let generation = self.bump_world_generation();
         let phase = match cause {
             ClientWorldActivationState::InitialEntry => ClientWorldActivationPhase::InitialEntry,
@@ -1285,6 +1294,13 @@ impl ClientRuntime {
                     .send(ClientViewEvent::ServerTimeUpdated { time: *time });
             }
             WorldEvent::CombatModeUpdated(mode) => {
+                // ACE reports peace when a requested combat family is unavailable. Otherwise
+                // only the requested mode settles admission; unrelated modes cannot retire it.
+                if self.pending_combat_mode == Some(*mode)
+                    || *mode == holtburger_protocol::messages::combat::CombatMode::NonCombat
+                {
+                    self.pending_combat_mode = None;
+                }
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CombatModeUpdated { mode: *mode });

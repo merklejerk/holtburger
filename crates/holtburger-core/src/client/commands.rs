@@ -92,7 +92,27 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        if (self.equipment_operation.is_some() || self.pack_exchange.is_some())
+        match &cmd {
+            ClientCommand::GetAndWield { item, .. }
+            | ClientCommand::SplitToWield { item, .. }
+            | ClientCommand::MoveItem { item, .. }
+            | ClientCommand::Split { item, .. }
+            | ClientCommand::Drop(item)
+            | ClientCommand::Get(item) => self.equipment_set.supersede_item(*item),
+            ClientCommand::SubmitInventory(intent) => {
+                self.equipment_set.supersede_item(intent.item)
+            }
+            ClientCommand::Stack {
+                source,
+                destination,
+                ..
+            } => {
+                self.equipment_set.supersede_item(*source);
+                self.equipment_set.supersede_item(*destination);
+            }
+            _ => {}
+        }
+        if (self.equipment_change_pending() || self.pack_exchange.is_some())
             && matches!(
                 cmd,
                 ClientCommand::Drop(_)
@@ -132,6 +152,7 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::ApplyEquipmentSet(bindings) => self.apply_equipment_set(bindings).await,
             ClientCommand::SubmitHousingManagement(request) => {
                 self.submit_housing_management(request).await
             }
@@ -354,6 +375,23 @@ impl ClientRuntime {
     }
 
     pub(super) async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
+        let requested_mode = match &action {
+            GameAction::ChangeCombatMode(data) => Some(data.mode),
+            _ => None,
+        };
+        if let Some(mode) = requested_mode
+            && let Some(pending) = self.pending_combat_mode
+        {
+            // ACE can omit a reply for a redundant combat request (Creature_Combat.cs:67).
+            // Keep one outstanding request rather than queue uncorrelatable confirmations.
+            if mode != pending {
+                self.emit_action_result(
+                    ActionResultSource::Client,
+                    ActionResultReason::General("Wait for the pending combat-mode request.".into()),
+                );
+            }
+            return Ok(());
+        }
         let use_target = match &action {
             GameAction::Use(data) => Some(data.guid),
             _ => None,
@@ -371,6 +409,12 @@ impl ClientRuntime {
             self.world.retain_inventory_transfer(item);
         }
         let result = self.session.send_action(action).await;
+        if result.is_ok()
+            && let Some(mode) = requested_mode
+            && mode != self.world.player_combat_mode()
+        {
+            self.pending_combat_mode = Some(mode);
+        }
         if result.is_ok()
             && let Some(crystal) = use_target
         {
@@ -1285,13 +1329,16 @@ mod tests {
             .entities
             .get_mut(Guid(1))
             .unwrap()
-            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Melee as i32);
+        client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
+            CombatMode::Melee,
+        ));
         client
             .handle_command(ClientCommand::ToggleCombatMode)
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 2);
-        assert_eq!(client.world.player_combat_mode(), CombatMode::Magic);
+        assert_eq!(client.world.player_combat_mode(), CombatMode::Melee);
     }
 
     #[tokio::test]

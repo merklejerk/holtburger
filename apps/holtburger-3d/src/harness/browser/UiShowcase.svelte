@@ -292,7 +292,7 @@
 					></select
 				></label
 			>
-			<label
+			<label class="ui-checkbox"
 				><input
 					type="checkbox"
 					bind:checked={opaque}

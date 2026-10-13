@@ -137,6 +137,10 @@ const actionFeedbackSchema = z
 		message: z.string().trim().min(1),
 		/** Progress yields to warnings; status and warning results replace previous feedback. */
 		tone: z.enum(["progress", "status", "warning"]),
+		/** Original equipment requests; the app retains saved item names for warnings. */
+		equipment: z
+			.array(z.object({ item: guid.nullable(), target: guid }).strict())
+			.optional(),
 	})
 	.strict();
 

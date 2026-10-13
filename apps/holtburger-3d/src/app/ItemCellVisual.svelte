@@ -24,7 +24,9 @@
 	}: Props = $props();
 </script>
 
-<span class="item-cell-art"><UiIcon {display} {name} {tooltipLabel} /></span>
+<span class="item-cell-art" data-drag-preview
+	><UiIcon {display} {name} {tooltipLabel} /></span
+>
 <ItemCountOverlay
 	count={presentation.count}
 	besideStructure={presentation.meter !== null}

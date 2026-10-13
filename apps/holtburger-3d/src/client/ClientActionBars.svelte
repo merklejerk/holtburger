@@ -173,6 +173,16 @@
 		reconcile();
 		const content = requireActionBar(bars, id).slots[slot];
 		if (content === null) return;
+		if (content.kind === "loadout") {
+			void session
+				.applyEquipmentSet(content.bindings)
+				.catch((error: unknown) =>
+					inventory.reportFailure(
+						`Equipment submission failed: ${String(error)}`,
+					),
+				);
+			return;
+		}
 		if (content.replacement !== null) {
 			const item = inventory.readItem(content.item);
 			if (
@@ -193,7 +203,12 @@
 	function reconcile() {
 		if (
 			!bars.some((bar) =>
-				bar.slots.some((content) => content?.replacement != null),
+				bar.slots.some(
+					(content) =>
+						content !== null &&
+						content.kind !== "loadout" &&
+						content.replacement !== null,
+				),
 			)
 		)
 			return;
@@ -213,7 +228,8 @@
 			},
 			inventory.reportFailure,
 			{
-				read: (cell) => requireActionBar(bars, cell.bar).slots[cell.slot],
+				read: (cell) =>
+					bars.find((bar) => bar.id === cell.bar)?.slots[cell.slot] ?? null,
 				bind: (cell, content) => {
 					onBarsChange(bindActionCell(bars, cell, content));
 				},
@@ -248,7 +264,12 @@
 				const next = new Map<number, ActionItemDisplay>();
 				for (const bar of bars)
 					for (const content of bar.slots) {
-						if (content === null || next.has(content.item)) continue;
+						if (
+							content === null ||
+							content.kind === "loadout" ||
+							next.has(content.item)
+						)
+							continue;
 						const facts = view.items.get(content.item);
 						const key = view.iconKeys.get(content.item);
 						if (key !== undefined) {

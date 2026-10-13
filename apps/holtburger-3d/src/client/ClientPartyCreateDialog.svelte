@@ -43,10 +43,11 @@
 		>
 		<fieldset class="ui-fieldset">
 			<legend>Sharing</legend>
-			<label
+			<label class="ui-checkbox"
 				><input type="checkbox" bind:checked={shareXp} />Share XP and luminance</label
 			>
-			<label><input type="checkbox" bind:checked={shareLoot} />Share loot</label
+			<label class="ui-checkbox"
+				><input type="checkbox" bind:checked={shareLoot} />Share loot</label
 			>
 		</fieldset>
 		<p>Sharing settings apply when this party is created.</p>
@@ -68,14 +69,6 @@
 		.name-field {
 			display: grid;
 			gap: 0.75rem;
-		}
-		label {
-			display: flex;
-			align-items: center;
-			gap: 0.5rem;
-		}
-		.name-field {
-			display: grid;
 		}
 		p {
 			color: var(--ui-color-muted);

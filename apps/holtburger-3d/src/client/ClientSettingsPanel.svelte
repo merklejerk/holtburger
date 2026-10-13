@@ -395,7 +395,7 @@
 							})}
 					/>
 				</label>
-				<label class="checkbox"
+				<label class="ui-checkbox"
 					><input
 						type="checkbox"
 						checked={graphics.ambientOcclusionEnabled}
@@ -465,7 +465,7 @@
 							>{/each}
 					</select>
 				</label>
-				<label class="checkbox"
+				<label class="ui-checkbox"
 					><input
 						type="checkbox"
 						checked={graphics.weatherEnabled}
@@ -501,7 +501,7 @@
 						/>
 					</label>
 				{/each}
-				<label class="checkbox"
+				<label class="ui-checkbox"
 					><input
 						type="checkbox"
 						checked={audio.muted}
@@ -759,7 +759,7 @@
 			display: grid;
 			gap: 12px;
 		}
-		.settings-section label:not(.checkbox) {
+		.settings-section label:not(.ui-checkbox) {
 			display: grid;
 			gap: 4px;
 		}

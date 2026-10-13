@@ -24,7 +24,7 @@ use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::book::BookData;
 use holtburger_world::stats::Vital;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Confirmed outgoing combat outcome consumed by h3d's combat effects owner.
 #[derive(Debug, Clone, Serialize)]
@@ -279,6 +279,28 @@ pub struct ClientActionFeedback {
     pub message: String,
     /// Presentation class chosen by the app's host projection.
     pub tone: ClientActionFeedbackTone,
+    /// Equipment requests affected by this warning; renderer supplies saved names/slot labels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipment: Option<Vec<ClientEquipmentBindingWire>>,
+}
+
+/// Numeric equipment bindings at the app host boundary; no saved-loadout metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientEquipmentBindingWire {
+    /// Exact owned item identity, or None for an explicit empty-location request.
+    pub item: Option<Guid>,
+    /// Requested location bits, resolved by shared equipment semantics.
+    pub target: u32,
+}
+
+impl From<holtburger_core::client::equipment_set::EquipmentBinding> for ClientEquipmentBindingWire {
+    fn from(binding: holtburger_core::client::equipment_set::EquipmentBinding) -> Self {
+        Self {
+            item: binding.item,
+            target: binding.target.bits(),
+        }
+    }
 }
 
 /// Recoverable question; the renderer echoes only its opaque receipt when answering.
@@ -1488,6 +1510,13 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             })
         }
         ClientViewEvent::ActionResult { reason, .. } => {
+            if let ActionResultReason::EquipmentSet { bindings, message } = &reason {
+                return Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                    message: message.clone(),
+                    tone: ClientActionFeedbackTone::Warning,
+                    equipment: Some(bindings.iter().copied().map(Into::into).collect()),
+                }));
+            }
             if let ActionResultReason::Weenie(error, _) = &reason
                 && matches!(
                     error,
@@ -1525,6 +1554,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                     ClientHostEvent::ActionFeedback(ClientActionFeedback {
                         message: format_weenie_error(*error, None),
                         tone: ClientActionFeedbackTone::Status,
+                        equipment: None,
                     })
                 });
             }
@@ -1540,6 +1570,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                 message: format_action_result_message(&reason),
                 tone,
+                equipment: None,
             }))
         }
         // Completed errors already arrive through ActionResult; only timeout needs its own notice.
@@ -1562,12 +1593,14 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                 message: format!("{operation} timed out waiting for the server."),
                 tone: ClientActionFeedbackTone::Warning,
+                equipment: None,
             }))
         }
         ClientViewEvent::EntityUseFeedback(feedback) => {
             Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                 message: format_entity_use_feedback(&feedback),
                 tone: ClientActionFeedbackTone::Progress,
+                equipment: None,
             }))
         }
         ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
@@ -1772,7 +1805,7 @@ mod tests {
     use crate::protocol::{ProtocolFrame, StdioEventSink};
     use holtburger_common::legacy_hash::legacy_string_hash;
     use holtburger_common::properties::{
-        DamageType, ObjectDescriptionFlag, PropertyInt, PropertyString,
+        DamageType, EquipMask, ObjectDescriptionFlag, PropertyInt, PropertyString,
         WorldObjectPropertyAccessorsMut,
     };
     use holtburger_core::client::types::ChatSpeaker;
@@ -2430,6 +2463,37 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn equipment_set_feedback_preserves_requested_numeric_targets() {
+        let binding = holtburger_core::client::equipment_set::EquipmentBinding {
+            item: Some(Guid(91)),
+            target: EquipMask::FINGER_WEAR_LEFT,
+        };
+        let event = project_client_event(ClientViewEvent::ActionResult {
+            source: holtburger_core::ActionResultSource::Client,
+            reason: ActionResultReason::EquipmentSet {
+                bindings: vec![
+                    binding,
+                    holtburger_core::client::equipment_set::EquipmentBinding {
+                        item: None,
+                        target: binding.target,
+                    },
+                ],
+                message: "The server rejected the equipment request".into(),
+            },
+        })
+        .unwrap();
+        let ClientHostEvent::ActionFeedback(feedback) = event else {
+            panic!("Expected equipment feedback");
+        };
+        let encoded = serde_json::to_value(feedback).unwrap();
+        assert_eq!(encoded["tone"], "warning");
+        assert_eq!(
+            encoded["equipment"],
+            serde_json::json!([{ "item": binding.item, "target": binding.target.bits() }, { "item": null, "target": binding.target.bits() }])
+        );
     }
 
     #[test]

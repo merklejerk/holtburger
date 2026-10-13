@@ -42,6 +42,21 @@ pub struct EquipmentPlan {
     pub unequips: Vec<EquipmentUnequip>,
 }
 
+/// Resolved equipment semantics before a caller reserves inventory destinations.
+#[derive(Debug, Clone)]
+pub(super) struct EquipmentReplacement {
+    /// Incoming item identity.
+    pub item: Guid,
+    /// Accepted ownership location consumed by storage preference and movement planning.
+    pub source: StorageLocation,
+    /// Incoming facts also consumed by equipment-set compatibility checks.
+    pub facts: EquipmentFacts,
+    /// Exact wire destination, including full apparel coverage.
+    pub target: EquipMask,
+    /// Current conflicts; set planning reserves each displaced identity only once.
+    pub conflicts: Vec<(Guid, EquipMask)>,
+}
+
 /// Local admission failures are feedback, never transport/runtime errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EquipmentPlanError {
@@ -68,6 +83,48 @@ pub fn plan_equipment_change(
     item: Guid,
     slot: Option<TargetSlot>,
 ) -> Result<EquipmentPlan, EquipmentPlanError> {
+    let replacement = resolve_equipment_change(world, item, slot)?;
+    let preferred = match replacement.source {
+        StorageLocation::Contained { parent, .. } => parent,
+        StorageLocation::Equipped { wearer, .. } => wearer,
+    };
+    let pack_slots = replacement
+        .conflicts
+        .iter()
+        .map(|(guid, _)| {
+            world
+                .entities
+                .get(*guid)
+                .map(|entity| entity.uses_player_container_slot())
+                .ok_or(EquipmentPlanError::MissingEntity(*guid))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let destinations = allocate_storage(world, preferred, &pack_slots)?;
+    let unequips = replacement
+        .conflicts
+        .into_iter()
+        .zip(destinations)
+        .map(|((guid, from), destination)| EquipmentUnequip {
+            item: guid,
+            from,
+            container: destination.container,
+            placement: destination.placement,
+        })
+        .collect();
+    Ok(EquipmentPlan {
+        item,
+        source: replacement.source,
+        target: replacement.target,
+        unequips,
+    })
+}
+
+/// Resolve ownership, requested location, and conflicts without allocating storage.
+pub(super) fn resolve_equipment_change(
+    world: &WorldState,
+    item: Guid,
+    slot: Option<TargetSlot>,
+) -> Result<EquipmentReplacement, EquipmentPlanError> {
     if !world.is_owned_by_player(item) {
         return Err(EquipmentPlanError::NotOwned(item));
     }
@@ -131,50 +188,19 @@ pub fn plan_equipment_change(
                 .or_else(|| candidates.iter().next())
         })
         .ok_or(EquipmentPlanError::InvalidTarget)?;
-    let conflicts: Vec<_> = equipment
+    let conflicts = equipment
         .into_iter()
         .filter(|(guid, mask, facts)| {
             *guid != item && incoming.conflicts_with(target, *facts, *mask)
         })
+        .map(|(guid, mask, _)| (guid, mask))
         .collect();
-    if conflicts.is_empty() {
-        return Ok(EquipmentPlan {
-            item,
-            source,
-            target,
-            unequips: Vec::new(),
-        });
-    }
-    let preferred = match source {
-        StorageLocation::Contained { parent, .. } => parent,
-        StorageLocation::Equipped { wearer, .. } => wearer,
-    };
-    let pack_slots = conflicts
-        .iter()
-        .map(|(guid, _, _)| {
-            world
-                .entities
-                .get(*guid)
-                .map(|entity| entity.uses_player_container_slot())
-                .ok_or(EquipmentPlanError::MissingEntity(*guid))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let destinations = allocate_storage(world, preferred, &pack_slots)?;
-    let unequips = conflicts
-        .into_iter()
-        .zip(destinations)
-        .map(|((guid, from, _), destination)| EquipmentUnequip {
-            item: guid,
-            from,
-            container: destination.container,
-            placement: destination.placement,
-        })
-        .collect();
-    Ok(EquipmentPlan {
+    Ok(EquipmentReplacement {
         item,
         source,
+        facts: incoming,
         target,
-        unequips,
+        conflicts,
     })
 }
 

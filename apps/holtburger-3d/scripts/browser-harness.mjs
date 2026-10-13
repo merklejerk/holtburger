@@ -10,6 +10,7 @@ import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
 import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
+import { probeLoadouts } from "./client-loadout-probe.mjs";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
@@ -264,6 +265,8 @@ try {
 			connectionBadge: result.connectionBadge,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientLoadouts) {
+		report = { clientLoadouts: result.clientLoadouts, browserErrors };
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
@@ -517,6 +520,7 @@ function parseArgs(args) {
 		clientWorldMap: false,
 		clientHousing: false,
 		clientHud: false,
+		clientLoadouts: false,
 		clientSettingsTabs: false,
 		clientEnvironment: false,
 		clientVitals: false,
@@ -689,6 +693,10 @@ function parseArgs(args) {
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
+				break;
+			case "--client-loadouts":
+				parsed.clientHud = true;
+				parsed.clientLoadouts = true;
 				break;
 			case "--character-sheet":
 				parsed.characterSheet = true;
@@ -1964,6 +1972,7 @@ Options:
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
+  --client-loadouts     Exercise loadout capture, exclusions, shortcut placement, and warning feedback.
   --relocate-sequence <hex,hex,...>
                          Re-issue scene interest at each landblock in turn, so sustained streaming
                          churn can be measured without the interactive client. Reports per-hop
@@ -4800,6 +4809,18 @@ async function runClientHudHarness({ viteUrl }) {
 					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeParty",
 					[],
 				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientLoadouts) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInventory",
+				[],
+			);
+			return {
+				clientLoadouts: await probeLoadouts(client, evaluateExpression),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

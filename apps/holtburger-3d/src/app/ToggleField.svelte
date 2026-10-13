@@ -36,7 +36,7 @@
 		.toggle-field {
 			display: grid;
 			grid-template-columns: 15px minmax(0, 1fr) auto;
-			gap: 7px;
+			gap: var(--ui-checkbox-label-gap);
 			align-items: center;
 			min-height: 25px;
 			padding: 3px 5px;
@@ -45,7 +45,6 @@
 			width: 15px;
 			height: 15px;
 			padding: 0;
-			margin: 0;
 			cursor: pointer;
 		}
 		strong {

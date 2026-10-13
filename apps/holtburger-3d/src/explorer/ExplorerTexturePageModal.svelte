@@ -337,7 +337,7 @@
 			<div class="texture-page-modal-toolbar">
 				<span>{preview.width} × {preview.height} {preview.format} readback</span
 				>
-				<label
+				<label class="ui-checkbox"
 					><input bind:checked={boundsVisible} type="checkbox" /> Bounds</label
 				>
 				<button
@@ -452,11 +452,6 @@
 			margin-bottom: 8px;
 			color: var(--ui-color-accent);
 			font-size: 0.78rem;
-		}
-		.texture-page-modal-toolbar label {
-			display: flex;
-			align-items: center;
-			gap: 4px;
 		}
 		.texture-page-modal-viewport {
 			height: min(68vh, 700px);

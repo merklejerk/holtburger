@@ -103,7 +103,13 @@ export async function probeTrade(client, evaluateExpression) {
 		`document.querySelector('[data-trade-item="6002"]')?.title.includes('Examine (F8)')`,
 	);
 	await read(`${api}.selectInventoryItem(6001)`);
-	await read(`document.querySelector('[data-trade-item="6002"]').focus()`);
+	// Pointer selection intentionally keeps game ownership until the click task retires.
+	// Verify deliberate keyboard focus before testing contextual shortcut dispatch.
+	await wait(`(() => {
+		const cell = document.querySelector('[data-trade-item="6002"]');
+		cell?.focus();
+		return cell !== null && document.activeElement === cell;
+	})()`);
 	const beforeExamine = await read(
 		`${api}.inventoryDragCommands().filter(entry => entry.command === 'examine_client_entity').length`,
 	);

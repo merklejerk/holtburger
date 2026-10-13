@@ -39,7 +39,7 @@
 	}
 </script>
 
-<label class="checkbox">
+<label class="ui-checkbox">
 	<input
 		type="checkbox"
 		checked={clockFormat === "24-hour"}
@@ -47,7 +47,7 @@
 			onClockFormatChange(event.currentTarget.checked ? "24-hour" : "12-hour")}
 	/> Use 24-hour clock
 </label>
-<label class="checkbox">
+<label class="ui-checkbox">
 	<input
 		type="checkbox"
 		checked={overrides.time.kind === "fixed"}

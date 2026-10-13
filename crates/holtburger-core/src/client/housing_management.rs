@@ -248,7 +248,7 @@ impl ClientRuntime {
         }
         if self.active_busy_operation.is_some()
             || self.pack_exchange.is_some()
-            || self.equipment_operation.is_some()
+            || self.equipment_change_pending()
             || self.world.trade.is_some()
         {
             return Err(

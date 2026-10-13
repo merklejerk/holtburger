@@ -29,7 +29,7 @@ use std::{
 };
 
 /// Deadline applies to each server-confirmed step, not total outfit size.
-const EQUIPMENT_STEP_TIMEOUT: Duration = Duration::from_secs(10);
+pub(super) const EQUIPMENT_STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The current request awaiting an authoritative world consequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,7 +236,7 @@ impl ClientRuntime {
         slot: Option<TargetSlot>,
         split: Option<u32>,
     ) -> Result<()> {
-        if self.equipment_operation.is_some()
+        if self.equipment_change_pending()
             || self.pack_exchange.is_some()
             || self.active_busy_operation.is_some()
         {

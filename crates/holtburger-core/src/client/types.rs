@@ -265,10 +265,20 @@ pub enum ActionResultSource {
 #[derive(Debug, PartialEq, Clone, Eq)]
 pub enum ActionResultReason {
     Weenie(WeenieError, Option<String>),
-    InventoryServerSaveFailed { item_guid: Guid, error: WeenieError },
+    InventoryServerSaveFailed {
+        item_guid: Guid,
+        error: WeenieError,
+    },
     Character(CharacterError),
     General(String),
     Transport(String),
+    /// Equipment requests affected by a local or attributed server refusal.
+    EquipmentSet {
+        /// Original item/target pairs consumed by frontend slot-specific feedback.
+        bindings: Vec<super::equipment_set::EquipmentBinding>,
+        /// Shared explanation; saved names and slot labels remain frontend-owned.
+        message: String,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -1057,6 +1067,8 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Apply exact equipment bindings after one confirmed-peace prerequisite when needed.
+    ApplyEquipmentSet(Vec<super::equipment_set::EquipmentBinding>),
     /// Explicit refresh of the active character/account effective home.
     RefreshHousing,
     /// Read named access records after effective-home initialization completes.

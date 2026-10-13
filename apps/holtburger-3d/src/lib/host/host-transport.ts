@@ -173,6 +173,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_inventory",
 	"close_client_container",
 	"equip_client_item",
+	"apply_client_equipment_set",
 	"submit_client_item_use",
 	"query_client_item_use_target",
 	"query_client_spell_inspection",

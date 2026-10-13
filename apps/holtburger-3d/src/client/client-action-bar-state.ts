@@ -1,5 +1,6 @@
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import type { ClientHudPlacement } from "./client-hud-layout";
+import type { LoadoutActionContent } from "./client-loadout";
 import {
 	ACTION_SLOT_INDICES,
 	MAX_ACTION_BARS,
@@ -10,12 +11,14 @@ export type ConsumableIdentity = NonNullable<
 	Extract<ClientEntityFacts["description"], { kind: "known" }>["consumable"]
 >["identity"];
 /** One action binding, including optional consumable replacement intent. */
-export type ActionContent = {
+export type ItemActionContent = {
 	readonly kind: "equipment" | "direct" | "targeted";
 	readonly item: number;
 	/** Null keeps an exact instance, including explicitly bound empty mana stones. */
 	readonly replacement: ConsumableIdentity | null;
 };
+/** A shortcut contains either one item action or an immutable equipment snapshot. */
+export type ActionContent = ItemActionContent | LoadoutActionContent;
 /** Exact sparse address space: empty cells remain present. */
 type ActionSlots = readonly [
 	ActionContent | null,

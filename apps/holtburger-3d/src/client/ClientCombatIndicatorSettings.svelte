@@ -55,7 +55,7 @@
 						})}
 				/>
 			</label>
-			<label class="checkbox"
+			<label class="ui-checkbox"
 				><input
 					type="checkbox"
 					checked={settings.fontSize === null}
@@ -92,7 +92,7 @@
 							})}
 					/>
 				</label>
-				<label class="checkbox"
+				<label class="ui-checkbox"
 					><input
 						type="checkbox"
 						checked={settings.colors[color.key] === null}
@@ -126,7 +126,7 @@
 			display: grid;
 			gap: 12px;
 		}
-		label:not(.checkbox) {
+		label:not(.ui-checkbox) {
 			display: grid;
 			gap: 4px;
 		}

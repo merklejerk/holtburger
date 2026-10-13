@@ -83,14 +83,14 @@ it("replaces depleted stones and ownership loss but rejects empty stones and oth
 	const bars = bound();
 	expect(
 		reconcileActionBars(bars, read([supply(10, "exhausted"), supply(11)]))[0]
-			?.slots[0]?.item,
-	).toBe(11);
+			?.slots[0],
+	).toMatchObject({ item: 11 });
 	expect(
 		reconcileActionBars(
 			bars,
 			read([{ ...supply(10), ownedByPlayer: false }, supply(11)]),
-		)[0]?.slots[0]?.item,
-	).toBe(11);
+		)[0]?.slots[0],
+	).toMatchObject({ item: 11 });
 	const cleared = reconcileActionBars(
 		bars,
 		read([
@@ -119,8 +119,8 @@ it("suspends clearing for recovery, pending items, and unannounced packs", () =>
 	};
 	expect(reconcileActionBars(bars, read([pack]))).toBe(bars);
 	expect(
-		reconcileActionBars(bars, read([pending, supply(12)]))[0]?.slots[0]?.item,
-	).toBe(12);
+		reconcileActionBars(bars, read([pending, supply(12)]))[0]?.slots[0],
+	).toMatchObject({ item: 12 });
 });
 it("keeps explicit empty-stone drain bindings exact and retains pending kit identity", () => {
 	expect(bindingAction(supply(10, "exhausted"))?.replacement).toBeNull();

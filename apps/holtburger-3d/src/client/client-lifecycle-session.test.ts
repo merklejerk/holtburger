@@ -20,6 +20,7 @@ import {
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
 import { describe, expect, it, vi } from "vitest";
+import { EQUIPMENT_SLOTS } from "./client-inventory-equipment";
 import inspectionFixture from "./fixtures/object-inspection-wire.json";
 
 import { landblockVector3 } from "../lib/assets/ac-frame";
@@ -814,6 +815,56 @@ describe("ClientLifecycleSession", () => {
 		expect(session.state().enchantments).toBeNull();
 		session.stop();
 		expect(session.state().enchantments).toBeNull();
+	});
+	it("submits numeric equipment primitives and retains missing-item names for failure feedback", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState({
+			...currentState(0x5000_0001),
+			worldGeneration: 4,
+		});
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const slot = EQUIPMENT_SLOTS.find(
+			(candidate) => candidate.label === "Left ring",
+		);
+		if (slot === undefined) throw new Error("Missing ring fixture slot");
+		const messages: string[] = [];
+		session.subscribe((event) => {
+			if (event.type === "action-feedback")
+				messages.push(event.feedback.message);
+		});
+		await session.applyEquipmentSet([
+			{ slot: slot.mask, item: 91, name: "Saved Silver Ring" },
+			{ slot: EQUIPMENT_SLOTS[0].mask, item: null, name: null },
+		]);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "apply_client_equipment_set",
+			args: {
+				bindings: [
+					{ item: 91, target: slot.mask },
+					{ item: null, target: EQUIPMENT_SLOTS[0].mask },
+				],
+			},
+		});
+		// An ignored older portal must not retire the current activation's saved names.
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 3,
+		});
+		transport.emit("client-action-feedback", {
+			message: "The server rejected the equipment request",
+			tone: "warning",
+			equipment: [
+				{ item: 91, target: slot.mask },
+				{ item: null, target: EQUIPMENT_SLOTS[0].mask },
+			],
+		});
+		expect(messages).toEqual([
+			"Could not equip Saved Silver Ring to Left ring: The server rejected the equipment request",
+			"Could not clear Main hand: The server rejected the equipment request",
+		]);
+		session.stop();
 	});
 	it.each([false, true])(
 		"submits equipment identity and off-side preference %s",

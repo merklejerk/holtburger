@@ -7,6 +7,7 @@ import {
 	type ClientCombatOutcome,
 } from "./client-host-contract";
 import { ClientContractsState } from "./client-contracts-state";
+import { equipmentSlotLabel, type LoadoutBinding } from "./client-loadout";
 import {
 	contractsUpdatedSchema,
 	contractMembershipChangeSchema,
@@ -257,6 +258,7 @@ type ClientCommandName = Extract<
 	| "submit_client_inventory"
 	| "close_client_container"
 	| "equip_client_item"
+	| "apply_client_equipment_set"
 	| "query_client_item_use_target"
 	| "query_client_spell_inspection"
 	| "evaluate_client_progression"
@@ -553,6 +555,8 @@ export type ClientLifecycleSessionEvent =
  * leave a plausible but incomplete client scene.
  */
 export class ClientLifecycleSession {
+	/** Latest submitted snapshot names outlive shortcut removal, without retaining past activations. */
+	#equipmentNames = new Map<number, string>();
 	/** Imperative progression owner retained across character-panel mounts. */
 	readonly characterSheet: ClientCharacterSheetState;
 	/** Dedicated Friends owner; the session only routes transport and lifecycle. */
@@ -671,6 +675,7 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.#equipmentNames = new Map();
 		this.#partyUpdates.stop();
 		this.#serverClock = null;
 		this.#resetCharacterLists();
@@ -865,6 +870,7 @@ export class ClientLifecycleSession {
 
 	/** Submission is re-evaluated by core; an earlier preview is not an authorization token. */
 	async submitInventory(intent: ClientInventoryIntent): Promise<void> {
+		this.#equipmentNames.delete(intent.item);
 		await this.#transport.invoke("submit_client_inventory", {
 			intent: inventoryIntentSchema.parse(intent),
 		});
@@ -932,10 +938,49 @@ export class ClientLifecycleSession {
 
 	/** Equip one owned item through core’s equipment replacement policy with a side preference. */
 	async equipItem(guid: number, alternate: boolean): Promise<void> {
+		this.#equipmentNames.delete(guid);
 		await this.#transport.invoke("equip_client_item", {
 			guid,
 			alternate,
 		});
+	}
+
+	/** Submit equipment primitives while retaining app-only names for attributed warnings. */
+	async applyEquipmentSet(bindings: readonly LoadoutBinding[]): Promise<void> {
+		this.#equipmentNames = new Map(
+			bindings.flatMap((binding) =>
+				binding.item === null ? [] : [[binding.item, binding.name] as const],
+			),
+		);
+		await this.#transport.invoke("apply_client_equipment_set", {
+			bindings: bindings.map((binding) => ({
+				item: binding.item,
+				target: binding.slot,
+			})),
+		});
+	}
+
+	#receiveActionFeedback(payload: unknown): void {
+		const feedback = decodeClientActionFeedback(payload);
+		if (feedback.equipment === undefined) {
+			this.#emit({ type: "action-feedback", feedback });
+			return;
+		}
+		for (const binding of feedback.equipment) {
+			const name =
+				binding.item === null ? null : this.#equipmentNames.get(binding.item);
+			const itemLabel = name === undefined ? `item ${binding.item}` : name;
+			this.#emit({
+				type: "action-feedback",
+				feedback: {
+					tone: "warning",
+					message:
+						binding.item === null
+							? `Could not clear ${equipmentSlotLabel(binding.target)}: ${feedback.message}`
+							: `Could not equip ${itemLabel} to ${equipmentSlotLabel(binding.target)}: ${feedback.message}`,
+				},
+			});
+		}
 	}
 
 	/** Cast using complete caller-owned recipient intent; core resolves normal spell routes. */
@@ -1525,10 +1570,7 @@ export class ClientLifecycleSession {
 			);
 			unlisteners.push(
 				await this.#transport.listen("client-action-feedback", (payload) =>
-					this.#emit({
-						type: "action-feedback",
-						feedback: decodeClientActionFeedback(payload),
-					}),
+					this.#receiveActionFeedback(payload),
 				),
 			);
 			unlisteners.push(
@@ -1716,6 +1758,7 @@ export class ClientLifecycleSession {
 			lifecycle.worldGeneration < this.#state.worldGeneration
 		)
 			return;
+		if (lifecycle.kind !== "in-world") this.#equipmentNames = new Map();
 		if (lifecycle.kind !== "entering-world") {
 			this.#entryRequestGuid = null;
 		}

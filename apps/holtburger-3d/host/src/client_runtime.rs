@@ -205,6 +205,10 @@ impl ClientAttackProfileRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Submit reusable equipment bindings, with one peace prerequisite if required.
+    ApplyClientEquipmentSet {
+        bindings: Vec<super::client_projection::ClientEquipmentBindingWire>,
+    },
     /// Request authoritative examination facts for one selected entity.
     ExamineClientEntity {
         guid: holtburger_common::Guid,
@@ -428,6 +432,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_trade",
     "submit_client_inventory",
     "equip_client_item",
+    "apply_client_equipment_set",
     "submit_client_item_use",
     "query_client_item_use_target",
     "query_client_spell_inspection",
@@ -942,6 +947,23 @@ pub async fn dispatch_client(
                 item: guid,
                 slot: Some(holtburger_core::client::types::TargetSlot::PreferredSide { alternate }),
             })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ApplyClientEquipmentSet { bindings } => runtime
+            .send_command(ClientCommand::ApplyEquipmentSet(
+                bindings
+                    .into_iter()
+                    .map(
+                        |binding| holtburger_core::client::equipment_set::EquipmentBinding {
+                            item: binding.item,
+                            target: holtburger_common::properties::EquipMask::from_bits_retain(
+                                binding.target,
+                            ),
+                        },
+                    )
+                    .collect(),
+            ))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

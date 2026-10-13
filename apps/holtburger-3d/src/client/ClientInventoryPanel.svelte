@@ -36,6 +36,8 @@
 	} from "./client-host-contract";
 
 	interface Props {
+		/** Capture current confirmed equipment into an independent HUD draft. */
+		readonly onSaveLoadout: () => void;
 		/** Accepted bindings and platform vocabulary keep stack hints current after remapping. */
 		readonly input: ClientKeyboardConfiguration;
 		readonly displayPlatform: InputDisplayPlatform;
@@ -56,6 +58,7 @@
 		) => Promise<void>;
 	}
 	const {
+		onSaveLoadout,
 		input,
 		displayPlatform,
 		inventory,
@@ -269,8 +272,10 @@
 				<button
 					type="button"
 					class="inventory-tool ui-hud-button"
-					aria-label="Save loadout"
-					title="Save loadout (stub)"
+					aria-label="Create loadout"
+					title="Create loadout"
+					disabled={pending || view?.equipment.pending !== false}
+					onclick={onSaveLoadout}
 				>
 					<ClientHudIcon name="save-loadout" />
 				</button>

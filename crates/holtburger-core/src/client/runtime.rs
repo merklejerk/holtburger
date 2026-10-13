@@ -264,6 +264,7 @@ impl ClientRuntime {
                     last_physics_time = now;
 
                     self.advance_equipment_change(now).await?;
+                    self.advance_equipment_set(now).await?;
                     self.advance_pack_exchange(now).await?;
                     let active_world = self.activation.is_none()
                         && matches!(self.state, ClientState::InWorld);
@@ -327,6 +328,7 @@ impl ClientRuntime {
                     self.try_complete_world_activation().await?;
 
                     self.advance_equipment_change(now).await?;
+                    self.advance_equipment_set(now).await?;
                     self.advance_pack_exchange(now).await?;
                     let active_world = self.activation.is_none()
                         && matches!(self.state, ClientState::InWorld);

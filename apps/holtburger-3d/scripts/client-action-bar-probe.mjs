@@ -190,6 +190,16 @@ export async function probeActionBars(
 			["submit_client_inventory", "equip_client_item"].includes(entry.command),
 		).length;
 	const before = await mutations();
+	// The preceding give probe restores this item through world facts; the
+	// inventory panel publishes those facts at its bounded display cadence.
+	await read(`(async () => {
+  const deadline = performance.now() + 5000;
+  while (performance.now() < deadline) {
+    if (document.querySelector(${JSON.stringify(source)})) return;
+    await new Promise(requestAnimationFrame);
+  }
+  throw new Error('Restored inventory source did not reach the action-bar probe');
+ })()`);
 	await drag(source, cell(1, 3));
 	assert.equal(await item(1, 3), "91", "Inventory drag binds equipment");
 	assert.equal(

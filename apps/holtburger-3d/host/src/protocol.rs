@@ -837,6 +837,7 @@ pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::host_mode::ClientLaunchConfiguration;
+    use holtburger_common::properties::EquipMask;
     use holtburger_core::client::connection::{
         ConnectionHealth, ConnectionQuality, ConnectionReliability, ConnectionSample,
     };
@@ -1338,6 +1339,29 @@ mod tests {
             panic!("equipment request did not decode into the client command");
         };
         assert_eq!(guid, holtburger_common::Guid(91));
+    }
+
+    #[test]
+    fn equipment_set_decodes_numeric_bindings_without_frontend_metadata() {
+        let target = EquipMask::FINGER_WEAR_LEFT.bits();
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "apply_client_equipment_set", "bindings": [{ "item": 91, "target": target }, { "item": null, "target": target }] },
+        })).unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::ApplyClientEquipmentSet { bindings }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("Equipment set did not decode");
+        };
+        assert_eq!(bindings.len(), 2);
+        assert!(bindings[1].item.is_none());
+        assert_eq!(
+            (bindings[0].item, bindings[0].target),
+            (Some(holtburger_common::Guid(91)), target)
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
 import {
 	SPELL_BAR_INDICES,
 	type SpellCellAddress,
@@ -169,18 +170,9 @@ export class ClientSpellDrag {
 				return;
 			this.bindings.begin();
 			gesture.dragging = true;
-			const icon = gesture.element.querySelector(".ui-icon, .ui-icon-fallback");
-			const bounds = gesture.element.getBoundingClientRect();
-			this.#ghost.style.width = `${bounds.height}px`;
-			this.#ghost.style.height = `${bounds.height}px`;
-			this.#ghost.replaceChildren(
-				icon?.cloneNode(true) ?? `Spell ${gesture.spell}`,
-			);
-			this.#ghost.hidden = false;
-			this.#ghost.showPopover();
+			showUiDragGhost(this.#ghost, gesture.element, `Spell ${gesture.spell}`);
 		}
-		this.#ghost.style.left = `${event.clientX + 12}px`;
-		this.#ghost.style.top = `${event.clientY + 12}px`;
+		positionUiDragGhost(this.#ghost, event);
 		const target =
 			document
 				.elementFromPoint(event.clientX, event.clientY)

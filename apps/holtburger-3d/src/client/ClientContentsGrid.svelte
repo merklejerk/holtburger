@@ -44,7 +44,7 @@
 </script>
 
 {#snippet cells(items: readonly ClientEntityFacts[])}
-	<div class="contents-grid">
+	<div class="contents-grid ui-item-grid">
 		{#each items as item (item.guid)}
 			<ItemGridCell
 				itemGuid={item.guid}
@@ -142,12 +142,6 @@
 			font-size: 0.85rem;
 		}
 		.contents-grid {
-			display: grid;
-			grid-template-columns: repeat(
-				auto-fill,
-				minmax(min(100%, var(--ui-item-cell-min-size)), 1fr)
-			);
-			gap: var(--ui-item-grid-gap);
 			margin-bottom: 8px;
 		}
 		.contents-header {

@@ -140,10 +140,14 @@
 		--ui-combat-breakpoint-shadow:
 			0 0 5px var(--ui-color-shadow), 0 0 10px var(--ui-color-shadow);
 		/* Item grid density, artwork scaling, strip controls and inventory layout. */
-		/* Minimum contents-grid cell size and fixed pack-strip cell size. */
+		/* Shared item-grid minimum and fixed strip/shortcut cell size. */
 		--ui-item-cell-min-size: 36px;
 		--ui-item-cell-padding: 1px;
+		/* Shared horizontal/vertical cursor clearance for item, loadout, and spell drag previews. */
+		--ui-drag-ghost-offset: 12px;
 		--ui-item-grid-gap: 5px;
+		/* Separation between a checkbox and its label; layout owns spacing, not native margins. */
+		--ui-checkbox-label-gap: 6px;
 		/* Space between an action bar's numbered menu strip and its cells. */
 		--ui-action-bar-strip-gap: 4px;
 		/* Background opacity leaves the numbered strip label fully legible. */
@@ -312,7 +316,6 @@
 		--ui-trade-side-gap: 6px;
 		--ui-trade-content-inset: 6px;
 		--ui-trade-control-gap: 4px;
-		--ui-trade-grid-gap: 4px;
 		--ui-trade-border-width: 1px;
 		--ui-trade-header-border-width: 4px;
 		--ui-trade-header-min-height: 32px;
@@ -546,9 +549,18 @@
 		gap: 4px;
 		min-width: 0;
 	}
-	/* Native controls retain browser behavior; only their shared color/focus changes. */
+	/* Native controls retain browser behavior with shared spacing, color, and focus. */
 	.ui-theme input:is([type="range"], [type="checkbox"]) {
 		accent-color: var(--ui-color-accent);
+	}
+	.ui-theme input[type="checkbox"] {
+		margin: 0;
+		flex-shrink: 0;
+	}
+	.ui-theme .ui-checkbox {
+		display: flex;
+		align-items: center;
+		gap: var(--ui-checkbox-label-gap);
 	}
 	.ui-theme
 		:is(input[type="range"], input[type="checkbox"], summary):focus-visible {
@@ -874,8 +886,17 @@
 	}
 }
 
-/* Shared item presentation hooks. Geometry and scrolling remain component-owned. */
+/* Shared item presentation and collection geometry; feature owners retain scrolling. */
 @layer components {
+	/* Responsive item collections share density; feature owners retain cell contents and gestures. */
+	.ui-item-grid {
+		display: grid;
+		grid-template-columns: repeat(
+			auto-fill,
+			minmax(min(100%, var(--ui-item-cell-min-size)), 1fr)
+		);
+		gap: var(--ui-item-grid-gap);
+	}
 	.ui-theme .ui-item-cell {
 		transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
 		background: var(--ui-item-cell-background, transparent);
@@ -944,6 +965,7 @@
 /* Shared shortcut geometry and pointer artwork; binding behavior remains app-owned. */
 @layer components {
 	.ui-drag-ghost {
+		translate: var(--ui-drag-ghost-offset) var(--ui-drag-ghost-offset);
 		position: fixed;
 		inset: 0 auto auto 0;
 		z-index: 10000;
@@ -966,6 +988,15 @@
 		min-height: 0;
 		padding: var(--ui-item-cell-padding);
 		user-select: none;
+	}
+	.ui-shortcut-emoji {
+		display: grid;
+		place-items: center;
+		width: 100%;
+		height: 100%;
+		font-size: 1.75rem;
+		line-height: 1;
+		pointer-events: none;
 	}
 	.ui-shortcut-hint {
 		position: absolute;

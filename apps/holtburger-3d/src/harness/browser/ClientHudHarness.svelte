@@ -127,6 +127,8 @@
 	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
+	import { captureLoadout } from "../../client/client-loadout";
+	import type { ClientActionFeedback } from "../../client/client-host-contract";
 	import {
 		ClientBookReader,
 		type ClientBookReaderState,
@@ -1130,6 +1132,8 @@
 		readonly combatBarProbe: typeof combatBarProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
+		/** Observe immutable captures and exercise failure feedback without a live server. */
+		readonly loadoutProbe: typeof loadoutProbe;
 		/** Replace selected inventory identity while a panel interaction is active. */
 		readonly selectInventoryItem: (guid: number) => void;
 		/** Controlled viewport answers exercise production drag ownership. */
@@ -1405,6 +1409,35 @@
 			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
+	let publishLoadoutFeedback:
+		((feedback: ClientActionFeedback) => void) | null = null;
+	const loadoutProbe = {
+		capture: () => captureLoadout(interactionLifecycle.entities.read()),
+		bars: () => characterSettings?.actionBars,
+		restore: (settings: NonNullable<typeof characterSettings>) =>
+			(characterSettings = settings),
+		settings: () => characterSettings,
+		fail: async (
+			equipment: readonly { item: number | null; target: number }[],
+		) => {
+			const publish = publishLoadoutFeedback;
+			if (publish === null)
+				throw new Error("Loadout toast probe is not mounted");
+			const unsubscribe = interactionLifecycle.subscribe((event) => {
+				if (event.type === "action-feedback") publish(event.feedback);
+			});
+			try {
+				emitInteractionEvent("client-action-feedback", {
+					message: "The server rejected the equipment request",
+					tone: "warning",
+					equipment,
+				});
+				await tick();
+			} finally {
+				unsubscribe();
+			}
+		},
+	};
 	// Feed the real Social window as well as the isolated domain probes.
 	const socialParty = new ClientPartyState(
 		interactionLifecycle,
@@ -3950,6 +3983,7 @@
 		const unsubscribeInventoryToasts = inventoryToasts.subscribe((next) => {
 			toast = next;
 		});
+		publishLoadoutFeedback = (feedback) => inventoryToasts.publish(feedback);
 		const inventoryOwner = new ClientInventoryState(
 			{
 				entities: { read: readInventoryEntities },
@@ -4430,6 +4464,7 @@
 				},
 			},
 			inventoryDragCommands: () => interactionCommands,
+			loadoutProbe,
 			selectInventoryItem: (guid) =>
 				selection.selectContentsItem(guid, "select"),
 			giveProbe,
@@ -4503,6 +4538,7 @@
 			vendor = null;
 			worldContainer = null;
 			unsubscribeInventoryToasts();
+			publishLoadoutFeedback = null;
 			inventoryToasts.destroy();
 			inventory = null;
 			icons.dispose();

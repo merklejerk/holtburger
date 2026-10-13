@@ -35,6 +35,17 @@ pub fn allocate_storage(
     preferred: Guid,
     pack_slots: &[bool],
 ) -> Result<Vec<StorageDestination>, StorageAllocationError> {
+    allocate_storage_with_reservations(world, preferred, pack_slots, &[])
+}
+
+/// Allocate against confirmed capacity and earlier temporary set reservations.
+/// Each reservation retains its slot domain; failed allocations reserve nothing.
+pub(super) fn allocate_storage_with_reservations(
+    world: &WorldState,
+    preferred: Guid,
+    pack_slots: &[bool],
+    reserved: &[(StorageDestination, bool)],
+) -> Result<Vec<StorageDestination>, StorageAllocationError> {
     let mut containers = vec![preferred];
     if preferred != world.player.guid {
         containers.push(world.player.guid);
@@ -51,9 +62,16 @@ pub fn allocate_storage(
         .collect();
     packs.sort_unstable();
     containers.extend(packs.into_iter().map(|(_, guid)| guid));
-    let mut candidates = containers
-        .into_iter()
-        .map(|guid| storage_budget(world, guid));
+    let mut candidates = containers.into_iter().map(|guid| {
+        let mut budget = storage_budget(world, guid)?;
+        for &(destination, pack_slot) in reserved {
+            if destination.container == guid {
+                let allocated = budget.allocate(pack_slot)?;
+                debug_assert_eq!(allocated, destination.placement);
+            }
+        }
+        Ok(budget)
+    });
     let mut storage: Vec<StorageBudget> = Vec::new();
     let mut destinations = Vec::with_capacity(pack_slots.len());
     for &pack_slot in pack_slots {
@@ -153,6 +171,35 @@ mod tests {
         GameEvent, InventoryPutObjInContainerEventData, ViewContentsEventData,
     };
     use holtburger_world::entity::Entity;
+
+    #[test]
+    fn separate_bindings_share_reservations_without_overallocating() {
+        let world = outfit(1, 2);
+        let first = allocate_storage_with_reservations(&world, Guid(2), &[false], &[]).unwrap();
+        let mut reserved = vec![(first[0], false)];
+        let second =
+            allocate_storage_with_reservations(&world, Guid(2), &[false], &reserved).unwrap();
+        assert_ne!(first[0].container, second[0].container);
+        reserved.push((second[0], false));
+        assert_eq!(
+            allocate_storage_with_reservations(&world, Guid(2), &[false], &reserved),
+            Err(StorageAllocationError::NoSpace)
+        );
+    }
+
+    #[test]
+    fn rejected_allocation_leaves_earlier_reservations_unchanged() {
+        let world = outfit(1, 2);
+        let first = allocate_storage_with_reservations(&world, Guid(2), &[false], &[]).unwrap();
+        let reserved = vec![(first[0], false)];
+        assert_eq!(
+            allocate_storage_with_reservations(&world, Guid(2), &[false, false], &reserved),
+            Err(StorageAllocationError::NoSpace)
+        );
+        let admitted =
+            allocate_storage_with_reservations(&world, Guid(2), &[false], &reserved).unwrap();
+        assert_eq!(admitted[0].container, Guid(1));
+    }
 
     #[test]
     fn full_preferred_and_root_use_remaining_packs_in_native_order() {

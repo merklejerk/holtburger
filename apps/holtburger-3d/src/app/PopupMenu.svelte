@@ -23,6 +23,8 @@
 		readonly label: string;
 		/** Ordered commands. Their identities must be unique within this menu. */
 		readonly items: readonly (Item & PopupMenuItem<Action>)[];
+		/** Dense symbol choices use a scrolling grid; ordinary command menus remain lists. */
+		readonly layout?: "list" | "grid";
 		/** Optional decorative artwork before each command label. */
 		readonly icon?: Snippet<[Item]>;
 		/** Called after dismissal when an enabled command is activated. */
@@ -30,7 +32,15 @@
 		/** The caller unmounts this open menu on dismissal. */
 		readonly onclose: () => void;
 	}
-	let { anchor, label, items, icon, onselect, onclose }: Props = $props();
+	let {
+		anchor,
+		label,
+		items,
+		icon,
+		layout = "list",
+		onselect,
+		onclose,
+	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	const id = $props.id();
 	let surface: HTMLDivElement;
@@ -57,10 +67,24 @@
 	function keydown(event: KeyboardEvent) {
 		switch (event.key) {
 			case "ArrowDown":
-			case "ArrowUp": {
+			case "ArrowUp":
+			case "ArrowLeft":
+			case "ArrowRight": {
+				if (
+					layout === "list" &&
+					(event.key === "ArrowLeft" || event.key === "ArrowRight")
+				)
+					return;
 				event.preventDefault();
 				if (active === null) return;
-				const direction = event.key === "ArrowDown" ? 1 : -1;
+				const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+				const columns =
+					layout === "grid" && vertical
+						? getComputedStyle(surface).gridTemplateColumns.split(" ").length
+						: 1;
+				const direction =
+					(event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1) *
+					columns;
 				const index = enabled.indexOf(active);
 				selected =
 					enabled[(index + direction + enabled.length) % enabled.length]
@@ -134,6 +158,7 @@
 
 <div
 	class="popup-menu ui-overlay-surface"
+	class:symbol-grid={layout === "grid"}
 	popover="manual"
 	role="menu"
 	tabindex="-1"
@@ -155,6 +180,7 @@
 			id={itemId(item.action)}
 			disabled={item.disabled}
 			aria-disabled={item.disabled}
+			title={layout === "grid" ? item.label : undefined}
 			onpointermove={() => {
 				if (!item.disabled) selected = item.action;
 			}}
@@ -186,6 +212,24 @@
 		.popup-menu:popover-open {
 			display: flex;
 			flex-direction: column;
+		}
+		.popup-menu.symbol-grid {
+			box-sizing: border-box;
+			width: min(18rem, 100vw);
+			min-width: 0;
+			max-height: min(18rem, 100vh);
+			overflow-x: hidden;
+		}
+		.popup-menu.symbol-grid:popover-open {
+			display: grid;
+			grid-template-columns: repeat(6, minmax(0, 1fr));
+		}
+		.symbol-grid .popup-menu-item {
+			justify-content: center;
+			min-width: 0;
+			font-size: 1.75rem;
+			line-height: 1;
+			aspect-ratio: 1;
 		}
 		.popup-menu-item {
 			display: flex;

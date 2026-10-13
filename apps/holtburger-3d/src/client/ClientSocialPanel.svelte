@@ -236,7 +236,7 @@
 					</div>
 				</details>
 				{#if view.party.capabilities.canChangeOpenness}
-					<label
+					<label class="ui-checkbox"
 						><input
 							type="checkbox"
 							checked={view.party.open}
@@ -281,7 +281,7 @@
 						aria-label="Invitation preferences"
 						disabled={!view.enabled || view.preferences === null}
 					>
-						<label
+						<label class="ui-checkbox"
 							><input
 								type="checkbox"
 								checked={view.preferences?.ignoreRequests === true}
@@ -377,11 +377,6 @@
 		.social-tab p,
 		.party-summary {
 			margin: 0;
-		}
-		label {
-			display: flex;
-			align-items: center;
-			gap: 6px;
 		}
 		.party-roster {
 			margin: 0;

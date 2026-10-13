@@ -10,6 +10,8 @@ export const CASTER_EQUIP_MASK = 0x01000000;
 export const AMMUNITION_SLOT = {
 	mask: 0x00800000,
 	label: "Ammunition",
+	/** Compact loadout-builder caption; tooltips retain the full label. */
+	compactLabel: "Ammo",
 	symbol: "ammo",
 } as const;
 
@@ -59,32 +61,113 @@ export function findWieldedCasterSpell(
  * raw clothing-location bits are not exclusive slots. ACE checks ClothingPriority
  * for conflicts (Creature_Equipment.cs:GetEquippedItems) and publishes full valid
  * locations (Player_Inventory.cs:DoHandleActionGetAndWieldItem).
+ * Full labels name slots in tooltips; compactLabel supplies the loadout builder's visible captions.
  */
 export const EQUIPMENT_SLOTS = [
-	{ mask: 0x03500000, label: "Main hand", symbol: "weapon" },
-	{ mask: 0x00200000, label: "Off hand", symbol: "shield" },
+	{
+		mask: 0x03500000,
+		label: "Main hand",
+		compactLabel: "Main",
+		symbol: "weapon",
+	},
+	{
+		mask: 0x00200000,
+		label: "Off hand",
+		compactLabel: "Off",
+		symbol: "shield",
+	},
 	AMMUNITION_SLOT,
-	{ mask: 0x00000001, label: "Head", symbol: "head" },
-	{ mask: 0x00000200, label: "Chest armor", symbol: "chest" },
-	{ mask: 0x00000400, label: "Abdomen armor", symbol: "abdomen" },
-	{ mask: 0x00000800, label: "Upper arm armor", symbol: "arm" },
-	{ mask: 0x00001000, label: "Lower arm armor", symbol: "forearm" },
-	{ mask: 0x00000020, label: "Hands", symbol: "hand" },
-	{ mask: 0x00002000, label: "Upper leg armor", symbol: "leg" },
-	{ mask: 0x00004000, label: "Lower leg armor", symbol: "shin" },
-	{ mask: 0x00000100, label: "Feet", symbol: "foot" },
-	{ mask: 0x00000002, label: "Shirt", symbol: "chest" },
-	{ mask: 0x00000040, label: "Pants", symbol: "leg" },
-	{ mask: 0x08000000, label: "Cloak", symbol: "cloak" },
-	{ mask: 0x00008000, label: "Neck", symbol: "neck" },
-	{ mask: 0x00010000, label: "Left wrist", symbol: "wrist" },
-	{ mask: 0x00020000, label: "Right wrist", symbol: "wrist" },
-	{ mask: 0x00040000, label: "Left ring", symbol: "ring" },
-	{ mask: 0x00080000, label: "Right ring", symbol: "ring" },
-	{ mask: 0x04000000, label: "Trinket", symbol: "trinket" },
-	{ mask: 0x10000000, label: "Blue aetheria", symbol: "sigil" },
-	{ mask: 0x20000000, label: "Yellow aetheria", symbol: "sigil" },
-	{ mask: 0x40000000, label: "Red aetheria", symbol: "sigil" },
+	{ mask: 0x00000001, label: "Head", compactLabel: "Head", symbol: "head" },
+	{
+		mask: 0x00000200,
+		label: "Chest armor",
+		compactLabel: "Chest",
+		symbol: "chest",
+	},
+	{
+		mask: 0x00000400,
+		label: "Abdomen armor",
+		compactLabel: "Abd.",
+		symbol: "abdomen",
+	},
+	{
+		mask: 0x00000800,
+		label: "Upper arm armor",
+		compactLabel: "U. Arm",
+		symbol: "arm",
+	},
+	{
+		mask: 0x00001000,
+		label: "Lower arm armor",
+		compactLabel: "L. Arm",
+		symbol: "forearm",
+	},
+	{ mask: 0x00000020, label: "Hands", compactLabel: "Hands", symbol: "hand" },
+	{
+		mask: 0x00002000,
+		label: "Upper leg armor",
+		compactLabel: "U. Leg",
+		symbol: "leg",
+	},
+	{
+		mask: 0x00004000,
+		label: "Lower leg armor",
+		compactLabel: "L. Leg",
+		symbol: "shin",
+	},
+	{ mask: 0x00000100, label: "Feet", compactLabel: "Feet", symbol: "foot" },
+	{ mask: 0x00000002, label: "Shirt", compactLabel: "Shirt", symbol: "chest" },
+	{ mask: 0x00000040, label: "Pants", compactLabel: "Pants", symbol: "leg" },
+	{ mask: 0x08000000, label: "Cloak", compactLabel: "Cloak", symbol: "cloak" },
+	{ mask: 0x00008000, label: "Neck", compactLabel: "Neck", symbol: "neck" },
+	{
+		mask: 0x00010000,
+		label: "Left wrist",
+		compactLabel: "Wrist (L)",
+		symbol: "wrist",
+	},
+	{
+		mask: 0x00020000,
+		label: "Right wrist",
+		compactLabel: "Wrist (R)",
+		symbol: "wrist",
+	},
+	{
+		mask: 0x00040000,
+		label: "Left ring",
+		compactLabel: "Ring (L)",
+		symbol: "ring",
+	},
+	{
+		mask: 0x00080000,
+		label: "Right ring",
+		compactLabel: "Ring (R)",
+		symbol: "ring",
+	},
+	{
+		mask: 0x04000000,
+		label: "Trinket",
+		compactLabel: "Trinket",
+		symbol: "trinket",
+	},
+	{
+		mask: 0x10000000,
+		label: "Blue aetheria",
+		compactLabel: "Aeth. (B)",
+		symbol: "sigil",
+	},
+	{
+		mask: 0x20000000,
+		label: "Yellow aetheria",
+		compactLabel: "Aeth. (Y)",
+		symbol: "sigil",
+	},
+	{
+		mask: 0x40000000,
+		label: "Red aetheria",
+		compactLabel: "Aeth. (R)",
+		symbol: "sigil",
+	},
 ] as const;
 
 /** A row references the original entity; multi-slot items share that identity. */

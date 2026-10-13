@@ -126,7 +126,7 @@ impl ClientRuntime {
                 "The originating character is no longer in the world.",
             ));
         }
-        if self.equipment_operation.is_some() || self.pack_exchange.is_some() {
+        if self.equipment_change_pending() || self.pack_exchange.is_some() {
             return Ok(reject("An inventory change is still pending."));
         }
         let source = match request.intent {

@@ -544,11 +544,23 @@ pub trait WorldContextExt: WorldContext {
     /// Retail's default stance from wielded weapons, then the held/caster slot.
     /// A held non-caster or incomplete equipped entity cannot enter combat.
     fn get_suggested_combat_mode(&self) -> CombatMode {
+        self.get_suggested_combat_mode_for_equipment(
+            self.iter_equipment()
+                .map(|guid| (guid, self.equipment_mask(guid))),
+        )
+    }
+
+    /// Resolve combat mode for a caller's intended equipment without mutating world state.
+    /// Missing locations retain the same hydration policy as confirmed equipment.
+    fn get_suggested_combat_mode_for_equipment(
+        &self,
+        equipment: impl IntoIterator<Item = (Guid, Option<EquipMask>)>,
+    ) -> CombatMode {
         // acclient.c:390641: weapons take precedence over the held slot; empty hands use melee.
         let mut held_mode = CombatMode::Melee;
         let mut weapon_mode = None;
-        for guid in self.iter_equipment() {
-            let Some(location) = self.equipment_mask(guid) else {
+        for (guid, location) in equipment {
+            let Some(location) = location else {
                 return CombatMode::NonCombat;
             };
             if location.intersects(

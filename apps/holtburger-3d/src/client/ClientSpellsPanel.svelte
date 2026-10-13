@@ -238,7 +238,7 @@
 								expandedId = expandedId === row.id ? null : row.id;
 							}}
 						>
-							<span class="spell-icon">
+							<span class="spell-icon" data-drag-preview>
 								{#if row.artwork.kind === "icon"}
 									<UiIcon
 										display={displays.get(row.artwork.key)}

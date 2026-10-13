@@ -122,7 +122,10 @@
 						<header class="trade-side-heading">
 							<h3 title={side.name}>{side.name}</h3>
 						</header>
-						<div class="trade-grid" class:empty={side.items.length === 0}>
+						<div
+							class="trade-grid ui-item-grid"
+							class:empty={side.items.length === 0}
+						>
 							{#if side.items.length === 0}
 								<p class="trade-placeholder">
 									{side.own ? "Drop items" : "No items offered"}
@@ -385,13 +388,7 @@
 
 		.trade-grid {
 			flex: 1;
-			display: grid;
-			grid-template-columns: repeat(
-				auto-fill,
-				minmax(var(--ui-item-cell-min-size), 1fr)
-			);
 			align-content: start;
-			gap: var(--ui-trade-grid-gap);
 			overflow: auto;
 			min-height: 0;
 			padding: var(--ui-trade-content-inset);

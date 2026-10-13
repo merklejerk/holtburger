@@ -626,7 +626,7 @@ impl super::ClientRuntime {
         if !matches!(self.state, super::ClientState::InWorld) || self.activation.is_some() {
             return Err("Inventory changes require an active world".into());
         }
-        if self.equipment_operation.is_some()
+        if self.equipment_change_pending()
             || self.pack_exchange.is_some()
             || self.active_busy_operation.is_some()
         {

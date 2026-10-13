@@ -1,5 +1,5 @@
-import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { ClientSettingsStore } from "./client-settings-store";
@@ -22,6 +22,10 @@ import {
 	clientCombatIndicatorSettingsSchema,
 } from "../src/client/client-combat-indicator-settings";
 
+import { EQUIPMENT_SLOTS } from "../src/client/client-inventory-equipment";
+import { loadoutActionContentSchema } from "../src/client/client-loadout";
+import { bindActionCell } from "../src/client/client-action-bar-state";
+
 const initialWindow = {
 	normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
 	maximized: false,
@@ -41,6 +45,57 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("reloads character-scoped loadouts and persists cell deletion independently", async () => {
+		const path = await temporarySettingsPath();
+		try {
+			const defaults = createDefaultClientCharacterSettings();
+			const slot = EQUIPMENT_SLOTS[0];
+			if (slot === undefined) throw new Error("Equipment fixture needs a slot");
+			const saved = loadoutActionContentSchema.parse({
+				kind: "loadout",
+				name: "Travel",
+				icon: "❤️",
+				bindings: [
+					{ slot: slot.mask, item: 91, name: "Missing item name" },
+					{ slot: EQUIPMENT_SLOTS[1].mask, item: null, name: null },
+				],
+			});
+			const address = { bar: defaults.actionBars[0].id, slot: 0 } as const;
+			const first = "example:9000/0x50000001";
+			const second = "example:9000/0x50000002";
+			const firstBars = bindActionCell(defaults.actionBars, address, saved);
+			const secondBars = bindActionCell(defaults.actionBars, address, {
+				...saved,
+				name: "Combat",
+			});
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			await store.saveCharacterPatch(first, { actionBars: firstBars });
+			await store.saveCharacterPatch(second, { actionBars: secondBars });
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(
+				reloaded.readCharacter(first, "persisted").sections.actionBars,
+			).toEqual(firstBars);
+			expect(
+				reloaded.readCharacter(second, "persisted").sections.actionBars,
+			).toEqual(secondBars);
+			await reloaded.saveCharacterPatch(first, {
+				actionBars: bindActionCell(firstBars, address, null),
+			});
+			const removed = new ClientSettingsStore(path, initialWindow);
+			await removed.load();
+			expect(
+				removed.readCharacter(first, "persisted").sections.actionBars,
+			).toEqual(defaults.actionBars);
+			expect(
+				removed.readCharacter(second, "persisted").sections.actionBars,
+			).toEqual(secondBars);
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it("persists independent vital warning thresholds in the existing UI section", async () => {
 		const path = await temporarySettingsPath();
 		const defaults = createDefaultClientUserSettings(

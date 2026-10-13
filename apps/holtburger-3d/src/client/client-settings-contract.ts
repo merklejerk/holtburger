@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { loadoutActionContentSchema } from "./client-loadout.js";
 
 import {
 	normalizeSpellTab,
@@ -225,7 +226,7 @@ const consumableIdentitySchema = z
 	.strict()
 	.readonly();
 
-const actionContentSchema = z
+const itemActionContentSchema = z
 	.object({
 		kind: z.enum(["equipment", "direct", "targeted"]),
 		item: unsigned,
@@ -233,6 +234,11 @@ const actionContentSchema = z
 	})
 	.strict()
 	.readonly();
+
+const actionContentSchema = z.union([
+	itemActionContentSchema,
+	loadoutActionContentSchema,
+]);
 
 const actionSlotsSchema = z
 	.tuple([

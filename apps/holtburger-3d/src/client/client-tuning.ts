@@ -10,6 +10,14 @@ import type {
 } from "./client-tuning-contract";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout";
 
+/** Local builder geometry; no new persisted HUD preference section. */
+export const CLIENT_LOADOUT_BUILDER_TUNING = {
+	width: 380,
+	height: 420,
+	minimumWidth: 280,
+	minimumHeight: 260,
+} as const;
+
 /** Floating combat text policy; values are intentionally editable without changing tests. */
 export const CLIENT_COMBAT_EFFECTS_TUNING = {
 	maximumActive: 32,

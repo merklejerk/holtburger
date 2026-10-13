@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { loadoutTooltip } from "./client-loadout";
 	import ActionAlternateIcon from "../assets/icons/action-alternate.svg?component";
 	import { useClientInput } from "./client-input-context";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
@@ -80,7 +81,7 @@
 	const activeAlternate = $derived(available ? alternateLabel : null);
 	const tooltip = $derived(
 		[
-			`${digit}: ${presentation.label}`,
+			`${digit}: ${content?.kind === "loadout" ? loadoutTooltip(content) : presentation.label}`,
 			`Key (focused bar): ${bindingDescription}`,
 			...(alternateAction === null
 				? []
@@ -95,7 +96,9 @@
 	data-action-bar={bar}
 	data-action-cell={digit}
 	style:anchor-name={anchorName}
-	data-action-item={content?.item}
+	data-action-item={content !== null && content.kind !== "loadout"
+		? content.item
+		: undefined}
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}
 	aria-label={tooltip}
@@ -103,7 +106,9 @@
 	aria-pressed={selected}
 	onclick={(event) => onactivate(clientInput.actionBarAlternate(event))}
 >
-	{#if content !== null}
+	{#if content?.kind === "loadout"}
+		<span class="ui-shortcut-emoji" aria-hidden="true">{content.icon}</span>
+	{:else if content !== null}
 		<ItemCellVisual
 			{display}
 			name={label}

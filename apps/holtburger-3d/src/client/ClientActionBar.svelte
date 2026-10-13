@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { loadoutLabel } from "./client-loadout";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { sameConsumableIdentity } from "./client-action-item";
 	import { useClientInput } from "./client-input-context";
@@ -271,7 +272,10 @@
 			>
 				{#each ACTION_SLOT_INDICES as slot}
 					{@const content = bar.slots[slot]}
-					{@const item = content === null ? undefined : items.get(content.item)}
+					{@const item =
+						content === null || content.kind === "loadout"
+							? undefined
+							: items.get(content.item)}
 					{@const position = actionCellPosition(bar, slot)}
 					{@const binding = presentClientBinding(
 						input,
@@ -295,19 +299,22 @@
 							{content}
 							label={content === null
 								? "Empty"
-								: (item?.label ?? `Unavailable item ${content.item}`)}
+								: content.kind === "loadout"
+									? loadoutLabel(content)
+									: (item?.label ?? `Unavailable item ${content.item}`)}
 							display={item?.display}
 							count={item?.stackCount ?? null}
 							structure={item?.structure ?? null}
 							capacity={item?.capacity ?? null}
-							available={content !== null &&
-								item?.actionKind === content.kind &&
-								(content.replacement === null ||
-									(item.readyReplacement !== null &&
-										sameConsumableIdentity(
-											content.replacement,
-											item.readyReplacement,
-										)))}
+							available={content?.kind === "loadout" ||
+								(content !== null &&
+									item?.actionKind === content.kind &&
+									(content.replacement === null ||
+										(item.readyReplacement !== null &&
+											sameConsumableIdentity(
+												content.replacement,
+												item.readyReplacement,
+											))))}
 							alternateLabel={focused !== null && alternateHeld
 								? (item?.alternateLabel ?? null)
 								: null}

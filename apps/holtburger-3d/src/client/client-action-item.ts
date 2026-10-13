@@ -4,7 +4,7 @@ import type { UiIconDisplay } from "../app/ui-icon-repository";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 
 import type {
-	ActionContent,
+	ItemActionContent,
 	ConsumableIdentity,
 } from "./client-action-bar-state";
 
@@ -19,7 +19,7 @@ export function sameConsumableIdentity(
 /** One frontend binding decision over world-produced capabilities; equipment retains precedence. */
 export function bindingAction(
 	item: ClientEntityFacts | undefined,
-): ActionContent | null {
+): ItemActionContent | null {
 	if (item?.ownedByPlayer !== true || item.description.kind !== "known")
 		return null;
 	if (
@@ -53,7 +53,7 @@ export interface ActionItemDisplay {
 	/** Known container occupancy from the inventory baseline. */
 	readonly capacity: ItemCapacity | null;
 	/** Current binding kind; each cell compares this against its retained action. */
-	readonly actionKind: ActionContent["kind"] | null;
+	readonly actionKind: ItemActionContent["kind"] | null;
 	/** Available alternate behavior, consumed by focused action-cell modifier hints. */
 	readonly alternateLabel: string | null;
 	/** A depleted instance must not turn a waiting supply binding into a drain action. */

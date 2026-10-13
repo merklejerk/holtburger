@@ -1,3 +1,4 @@
+import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
 import { filterDraggedEquipment } from "./client-equipment-strip-filter";
 import type { ClientTradeState } from "./client-trade-state";
 import type {
@@ -27,10 +28,14 @@ import type {
 } from "./client-action-bar-state";
 import { actionDigitIndex } from "./client-action-bar-state";
 
-/** Direct session authority consumed by item gestures, independent of panel models. */
+/** Direct session authority shared by item gestures and action-bar activation. */
 export interface ItemDragSession extends Pick<
 	ClientLifecycleSession,
-	"previewInventory" | "submitInventory" | "subscribe" | "state"
+	| "previewInventory"
+	| "submitInventory"
+	| "applyEquipmentSet"
+	| "subscribe"
+	| "state"
 > {
 	/** Coherent world facts; gestures never read retained display records. */
 	readonly entities: { read(): ClientEntityRead };
@@ -125,6 +130,31 @@ type Gesture =
 	  }
 	| { kind: "released"; source: DragSource; target: DragTarget };
 
+/** Shortcut content has no inventory identity and cannot enter inventory targeting. */
+interface BindingDragSource {
+	/** Current immutable draft; identity changes invalidate an active gesture. */
+	readonly read: () => ActionContent | null;
+	/** Successful action-cell placement discards the originating draft. */
+	readonly placed: () => void;
+}
+
+/** Press-to-drag lifetime shared by builder snapshots and saved loadout cells. */
+interface BindingGesture {
+	/** Content identity captured at press, rechecked before every transfer. */
+	readonly content: ActionContent;
+	/** Original DOM source must remain connected. */
+	readonly element: HTMLElement;
+	/** A saved cell moves content; an unplaced draft binds a copy. */
+	readonly source: ActionCellAddress | BindingDragSource;
+	/** Only this pointer can continue the gesture. */
+	readonly pointer: number;
+	/** Press coordinates establish the ordinary drag threshold. */
+	readonly x: number;
+	readonly y: number;
+	/** Threshold crossing enables the ghost and suppresses activation on release. */
+	dragging: boolean;
+}
+
 /** Imperative pointer owner: only semantic target changes cross the host boundary. */
 export class ClientItemDrag {
 	readonly #root: HTMLElement;
@@ -133,6 +163,8 @@ export class ClientItemDrag {
 	readonly #unsubscribe: () => void;
 	readonly #timer: ReturnType<typeof setInterval>;
 	#gesture: Gesture | null = null;
+	readonly #bindingSources = new Map<HTMLElement, BindingDragSource>();
+	#bindingGesture: BindingGesture | null = null;
 	/** Requirement drafts have a separate local gesture and never enter inventory targeting. */
 	#housingGesture: {
 		readonly identity: HousingRowDrag;
@@ -241,7 +273,12 @@ export class ClientItemDrag {
 
 	/** Cancel only a pointer gesture; the HUD owns fallback interaction cancellation. */
 	cancel(): boolean {
-		if (this.#gesture === null && this.#housingGesture === null) return false;
+		if (
+			this.#gesture === null &&
+			this.#housingGesture === null &&
+			this.#bindingGesture === null
+		)
+			return false;
 		this.#cancel();
 		return true;
 	}
@@ -251,6 +288,22 @@ export class ClientItemDrag {
 		this.#unsubscribe();
 		clearInterval(this.#timer);
 		this.#ghost.remove();
+		this.#bindingSources.clear();
+	}
+
+	/** Register a local draft source; disposing it cancels its active pointer lifetime. */
+	registerBindingSource(
+		element: HTMLElement,
+		read: () => ActionContent | null,
+		placed: () => void,
+	): () => void {
+		this.#bindingSources.set(element, { read, placed });
+		element.dataset.bindingSource = "true";
+		return () => {
+			if (this.#bindingGesture?.element === element) this.#cancel();
+			this.#bindingSources.delete(element);
+			delete element.dataset.bindingSource;
+		};
 	}
 
 	#down = (event: PointerEvent): void => {
@@ -262,6 +315,33 @@ export class ClientItemDrag {
 			this.#root.querySelector('[data-inventory-modal="true"]') !== null
 		)
 			return;
+		const bindingElement =
+			event.target instanceof Element
+				? event.target.closest<HTMLElement>(
+						"[data-binding-source], [data-action-cell]:not([data-empty='true'])",
+					)
+				: null;
+		if (bindingElement !== null && this.#root.contains(bindingElement)) {
+			const cell = this.#actionCell(bindingElement);
+			const registered = this.#bindingSources.get(bindingElement);
+			const content =
+				cell === null ? registered?.read() : this.bindings.read(cell);
+			const source = cell ?? registered;
+			if (content?.kind === "loadout" && source !== undefined) {
+				this.#cancel();
+				this.#bindingGesture = {
+					content,
+					element: bindingElement,
+					source,
+					pointer: event.pointerId,
+					x: event.clientX,
+					y: event.clientY,
+					dragging: false,
+				};
+				event.stopPropagation();
+				return;
+			}
+		}
 		const requirement =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>(
@@ -325,6 +405,7 @@ export class ClientItemDrag {
 		)
 			return;
 		const bound = actionCell === null ? null : this.bindings.read(actionCell);
+		if (bound?.kind === "loadout") return;
 		if (actionCell !== null && bound === null) return;
 		const item = bound === null ? Number(element.dataset.itemGuid) : bound.item;
 		const origin =
@@ -363,6 +444,34 @@ export class ClientItemDrag {
 	};
 
 	#move = (event: PointerEvent): void => {
+		const binding = this.#bindingGesture;
+		if (binding !== null) {
+			if (event.pointerId !== binding.pointer) return;
+			if (!this.#bindingCurrent(binding)) {
+				this.#cancel();
+				return;
+			}
+			if (!binding.dragging) {
+				if (
+					Math.hypot(event.clientX - binding.x, event.clientY - binding.y) <
+					CLIENT_TUNING.inventory.dragThresholdCssPixels
+				)
+					return;
+				binding.dragging = true;
+				this.cancelInteraction();
+				this.#showGhost(binding.element);
+			}
+			positionUiDragGhost(this.#ghost, event);
+			this.#clearHighlight();
+			const target = document
+				.elementFromPoint(event.clientX, event.clientY)
+				?.closest<HTMLElement>("[data-action-cell]");
+			if (target != null && this.#root.contains(target))
+				target.dataset.inventoryDrop = "accepted";
+			event.preventDefault();
+			event.stopPropagation();
+			return;
+		}
 		const housing = this.#housingGesture;
 		if (housing !== null) {
 			if (housing.pointer !== event.pointerId) return;
@@ -379,21 +488,9 @@ export class ClientItemDrag {
 			if (!housing.dragging) {
 				housing.dragging = true;
 				this.cancelInteraction();
-				const bounds = housing.element.getBoundingClientRect();
-				this.#ghost.style.width = `${bounds.width}px`;
-				this.#ghost.style.height = `${bounds.height}px`;
-				this.#ghost.replaceChildren(
-					housing.element
-						.querySelector(".ui-icon, .ui-icon-fallback")
-						?.cloneNode(true) ??
-						housing.element.getAttribute("aria-label") ??
-						"",
-				);
-				this.#ghost.hidden = false;
-				this.#ghost.showPopover();
-				this.#root.dataset.itemDragging = "true";
+				this.#showGhost(housing.element);
 			}
-			this.#ghost.style.transform = `translate(${event.clientX + 12}px, ${event.clientY + 12}px)`;
+			positionUiDragGhost(this.#ghost, event);
 			event.preventDefault();
 			event.stopPropagation();
 			return;
@@ -426,25 +523,14 @@ export class ClientItemDrag {
 				target: null,
 			};
 			this.#gesture = gesture;
-			const source = gesture.source.element;
-			const icon = source.querySelector(".ui-icon, .ui-icon-fallback");
-			const bounds = source.getBoundingClientRect();
-			this.#ghost.style.width = `${bounds.width}px`;
-			this.#ghost.style.height = `${bounds.height}px`;
-			// Reuse the prepared artwork without acquiring another icon-cache lease.
-			this.#ghost.replaceChildren(
-				icon?.cloneNode(true) ?? source.getAttribute("aria-label") ?? "",
-			);
-			this.#ghost.hidden = false;
-			this.#ghost.showPopover();
-			this.#root.dataset.itemDragging = "true";
+			this.#showGhost(gesture.source.element);
 			// Initial hints already describe this view; the timer must not retire them as stale.
 			this.#views = this.#readViews();
 			this.#dimDropCandidates();
 		}
 		event.preventDefault();
 		event.stopPropagation();
-		this.#ghost.style.transform = `translate(${event.clientX + 12}px, ${event.clientY + 12}px)`;
+		positionUiDragGhost(this.#ghost, event);
 		this.#target(false);
 	};
 
@@ -933,6 +1019,34 @@ export class ClientItemDrag {
 	}
 
 	#up = (event: PointerEvent): void => {
+		const binding = this.#bindingGesture;
+		if (binding !== null) {
+			if (binding.pointer !== event.pointerId) return;
+			if (!binding.dragging || !this.#bindingCurrent(binding)) {
+				this.#cancel();
+				return;
+			}
+			event.preventDefault();
+			event.stopPropagation();
+			this.#suppressClick = true;
+			this.#suppressDoubleClickUntil =
+				performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
+			const targetElement = document
+				.elementFromPoint(event.clientX, event.clientY)
+				?.closest<HTMLElement>("[data-action-cell]");
+			const target =
+				targetElement != null && this.#root.contains(targetElement)
+					? this.#actionCell(targetElement)
+					: null;
+			this.#finishGesture();
+			if ("bar" in binding.source)
+				this.bindings.transfer(binding.source, target);
+			else if (target !== null) {
+				this.bindings.bind(target, binding.content);
+				binding.source.placed();
+			}
+			return;
+		}
 		const housing = this.#housingGesture;
 		if (housing !== null) {
 			if (housing.pointer !== event.pointerId) return;
@@ -1012,7 +1126,12 @@ export class ClientItemDrag {
 				gesture.target?.kind === "action" ? gesture.target.cell : null;
 			const source = gesture.source.origin;
 			// Automatic supply replacement may change the binding during this pointer gesture.
-			if (this.bindings.read(source)?.item !== gesture.source.item) {
+			const current = this.bindings.read(source);
+			if (
+				current === null ||
+				current.kind === "loadout" ||
+				current.item !== gesture.source.item
+			) {
 				this.#cancel();
 				this.reportFailure("The action cell changed while dragging.");
 				return;
@@ -1073,6 +1192,7 @@ export class ClientItemDrag {
 		this.#clearDimming();
 		this.#gesture = null;
 		this.#housingGesture = null;
+		this.#bindingGesture = null;
 		this.#views = [];
 		this.#ghost.hidden = true;
 		this.#ghost.hidePopover();
@@ -1082,6 +1202,7 @@ export class ClientItemDrag {
 	#cancel = (): void => {
 		if (
 			this.#gesture?.kind === "dragging" ||
+			this.#bindingGesture?.dragging === true ||
 			this.#housingGesture?.dragging === true
 		) {
 			this.#suppressClick = true;
@@ -1090,11 +1211,36 @@ export class ClientItemDrag {
 		}
 		this.#finishGesture();
 	};
+
+	#bindingCurrent(binding: BindingGesture): boolean {
+		if (
+			!binding.element.isConnected ||
+			this.session.state().lifecycle?.kind !== "in-world"
+		) {
+			return false;
+		}
+		const content =
+			"bar" in binding.source
+				? this.bindings.read(binding.source)
+				: binding.source.read();
+		return content === binding.content;
+	}
+
+	/** Reuse authored artwork for all shortcut/item drags without another display lease. */
+	#showGhost(source: HTMLElement): void {
+		showUiDragGhost(
+			this.#ghost,
+			source,
+			source.getAttribute("aria-label") ?? "",
+		);
+		this.#root.dataset.itemDragging = "true";
+	}
 	#failure(error: unknown): void {
 		this.#cancel();
 		this.reportFailure(`Inventory request failed: ${String(error)}`);
 	}
 	#cancelPointer = (event: PointerEvent): void => {
+		if (this.#bindingGesture?.pointer === event.pointerId) this.#cancel();
 		if (this.#housingGesture?.pointer === event.pointerId) this.#cancel();
 		if (
 			this.#gesture?.kind !== "released" &&

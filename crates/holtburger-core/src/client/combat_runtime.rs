@@ -160,7 +160,7 @@ impl ClientRuntime {
                 .is_available()
             && physical_ready
             && self.active_busy_operation.is_none()
-            && self.equipment_operation.is_none()
+            && !self.equipment_change_pending()
             && self.pack_exchange.is_none()
     }
 
@@ -652,7 +652,7 @@ impl ClientRuntime {
             ClientCommand::ToggleCombatMode => {
                 // An equipment transaction temporarily enters peace. Do not interpret that
                 // intermediate stance as a new player request or interrupt its restoration.
-                if self.equipment_operation.is_some() {
+                if self.equipment_change_pending() {
                     self.emit_action_result(
                         ActionResultSource::Client,
                         ActionResultReason::General(
@@ -692,6 +692,7 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::SetCombatMode(mode) => {
+                self.cancel_equipment_set_peace();
                 self.stop_equipment_change(
                     "Combat mode changed by another command; the last request may still complete",
                 );

@@ -333,9 +333,9 @@ pub fn format_action_result_message(reason: &ActionResultReason) -> String {
             }
         }
         ActionResultReason::Character(error) => format!("Character error: {:?}", error),
-        ActionResultReason::General(message) | ActionResultReason::Transport(message) => {
-            message.clone()
-        }
+        ActionResultReason::General(message)
+        | ActionResultReason::Transport(message)
+        | ActionResultReason::EquipmentSet { message, .. } => message.clone(),
     }
 }
 

@@ -56,7 +56,7 @@
 				oninput={(event) =>
 					owner.setFilters(event.currentTarget.value, view.onlineOnly)}
 			/>
-			<label
+			<label class="ui-checkbox"
 				><input
 					type="checkbox"
 					checked={view.onlineOnly}
@@ -123,7 +123,7 @@
 	<details class="ui-disclosure ui-disclosure-section" open>
 		<summary>Presence</summary>
 		<div class="ui-disclosure-body">
-			<label
+			<label class="ui-checkbox"
 				><input
 					type="checkbox"
 					checked={view.preferences?.appearOffline === true}

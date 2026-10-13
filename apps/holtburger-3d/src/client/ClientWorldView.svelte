@@ -1,4 +1,10 @@
 <script lang="ts">
+	import ClientLoadoutBuilder from "./ClientLoadoutBuilder.svelte";
+	import {
+		captureLoadout,
+		chooseLoadoutIcon,
+		type LoadoutDraft,
+	} from "./client-loadout";
 	import ClientPartyHud from "./ClientPartyHud.svelte";
 	import type { PartyHudDisplay } from "./client-party-hud";
 	import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
@@ -514,7 +520,21 @@
 			itemInteraction = state;
 		});
 	});
-	let itemDrag: ClientItemDrag | null = null;
+	let itemDrag = $state<ClientItemDrag | null>(null);
+	/** Opening snapshots are cold drafts, independent of subsequent entity updates. */
+	let loadoutCapture = $state<LoadoutDraft | null>(null);
+	function openLoadoutBuilder() {
+		if (itemSession === null || actionBars === null) return;
+		const capture = captureLoadout(itemSession.entities.read());
+		if (capture.kind === "unavailable") {
+			onInventoryNotice(capture.reason);
+			return;
+		}
+		loadoutCapture = { ...capture, icon: chooseLoadoutIcon(actionBars) };
+	}
+	$effect(() => {
+		if (!combatEnabled || itemSession === null) loadoutCapture = null;
+	});
 	let spellDrag: ClientSpellDrag | null = null;
 	onMount(() =>
 		keyboard.bindEscapeCancellation(
@@ -873,7 +893,7 @@
 			return;
 		}
 		const cell = target?.closest<HTMLElement>(
-			".item-grid-cell[data-item-guid]:not(:disabled), [data-action-cell][data-action-item]",
+			".item-grid-cell[data-item-guid]:not(:disabled), .loadout-item-cell[data-item-guid], [data-action-cell][data-action-item]",
 		);
 		if (cell === undefined || cell === null || !worldElement?.contains(cell))
 			return;
@@ -986,6 +1006,13 @@
 				{inventory}
 				{viewport}
 				editable={hudMode === "layout"}
+			/>
+			<ClientLoadoutBuilder
+				{inventory}
+				capture={loadoutCapture}
+				owner={itemDrag}
+				{viewport}
+				onClose={() => (loadoutCapture = null)}
 			/>
 		{/key}
 	{/if}
@@ -1420,6 +1447,7 @@
 					{#if inventory !== null && itemInteractions !== null}
 						{#key inventory}
 							<ClientInventoryPanel
+								onSaveLoadout={openLoadoutBuilder}
 								{input}
 								{displayPlatform}
 								interactions={itemInteractions}

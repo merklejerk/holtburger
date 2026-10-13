@@ -706,19 +706,26 @@ impl ClientRuntime {
                 }
                 GameEvent::InventoryPutObjInContainer(data) => {
                     self.observe_vendor_transfer(data.item_guid, data.container_guid);
+                    self.equipment_set.confirmed_removal(data.item_guid);
+                    Ok(())
+                }
+                GameEvent::WieldObject(data) => {
+                    self.equipment_set.confirmed_wield(data.object_guid);
                     Ok(())
                 }
                 GameEvent::InventoryServerSaveFailed(data) => {
                     self.observe_vendor_failure(data.item_guid, data.error);
                     self.reject_equipment_item(data.item_guid);
                     self.reject_pack_exchange_item(data.item_guid);
-                    self.emit_action_result(
-                        ActionResultSource::Wire,
-                        ActionResultReason::InventoryServerSaveFailed {
-                            item_guid: data.item_guid,
-                            error: data.error,
-                        },
-                    );
+                    if !self.reject_equipment_set_item(data.item_guid, data.error) {
+                        self.emit_action_result(
+                            ActionResultSource::Wire,
+                            ActionResultReason::InventoryServerSaveFailed {
+                                item_guid: data.item_guid,
+                                error: data.error,
+                            },
+                        );
+                    }
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {

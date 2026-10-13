@@ -69,7 +69,7 @@
 					disabled={!view.editable || view.confirmation !== null}
 					aria-label="Access controls"
 				>
-					<label class="housing-toggle"
+					<label class="housing-toggle ui-checkbox"
 						><input
 							type="checkbox"
 							checked={view.publicEntry}
@@ -82,7 +82,7 @@
 								)}
 						/>Public entry</label
 					>
-					<label class="housing-toggle"
+					<label class="housing-toggle ui-checkbox"
 						><input
 							type="checkbox"
 							aria-label="Allegiance entry"
@@ -96,7 +96,7 @@
 								)}
 						/>Allegiance entry</label
 					>
-					<label class="housing-toggle"
+					<label class="housing-toggle ui-checkbox"
 						><input
 							type="checkbox"
 							aria-label="Allegiance storage"
@@ -132,7 +132,7 @@
 								{#each view.guests as guest (guest.character)}
 									<li class="housing-guest-row ui-list-row">
 										<strong>{guest.name}</strong>
-										<label class="housing-toggle"
+										<label class="housing-toggle ui-checkbox"
 											><input
 												type="checkbox"
 												aria-label={`Storage access for ${guest.name}`}

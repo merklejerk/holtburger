@@ -198,7 +198,7 @@
 	<details class="ui-disclosure ui-disclosure-section" open>
 		<summary>Presence</summary>
 		<div class="ui-disclosure-body">
-			<label
+			<label class="ui-checkbox"
 				><input
 					type="checkbox"
 					checked={view.preferences?.showLogons === true}
@@ -326,18 +326,12 @@
 		}
 		.member-heading {
 			grid-column: 1 / -1;
+			display: flex;
+			align-items: center;
+			gap: var(--ui-list-icon-gap);
 		}
 		.member-info > .ui-muted {
 			grid-column: 2;
-		}
-		.member-heading,
-		label {
-			display: flex;
-			align-items: center;
-			gap: 6px;
-		}
-		.member-heading {
-			gap: var(--ui-list-icon-gap);
 		}
 		p,
 		dl,

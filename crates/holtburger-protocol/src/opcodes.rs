@@ -216,8 +216,8 @@ pub enum GameOpcode {
     // DddBeginPullDdd = 0xF7E8,
     // /// S2C/C2S: DDD iteration data.
     // DddIterationData = 0xF7E9,
-    // /// S2C: End DDD process.
-    // DddEndDdd = 0xF7EA,
+    /// S2C/C2S: End DAT synchronization; no payload follows the opcode.
+    DddEndDdd = 0xF7EA,
 
     // --- Server & Account Status ---
     // /// S2C: Account has been banned.

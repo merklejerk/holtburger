@@ -77,6 +77,7 @@ impl ProtocolUnpack for GameMessage {
                 Some(GameMessage::CharacterEnterWorldServerReady)
             }
             GameOpcode::DddInterrogation => Some(GameMessage::DddInterrogation),
+            GameOpcode::DddEndDdd => Some(GameMessage::DddEndDdd),
             GameOpcode::DddInterrogationResponse => Some(GameMessage::DddInterrogationResponse(
                 Box::new(DddInterrogationResponseData::unpack(data, offset)?),
             )),

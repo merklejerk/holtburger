@@ -86,6 +86,17 @@ fn test_dispatch_ddd_interrogation_response() {
 }
 
 #[test]
+fn test_dispatch_ddd_end_ddd() {
+    // ACE GameMessageDDDEndDDD sends only the little-endian opcode, with no payload.
+    let wire = [0xEA, 0xF7, 0x00, 0x00];
+    assert_dispatch_match(&wire, |msg| matches!(msg, GameMessage::DddEndDdd));
+
+    let mut offset = 0;
+    GameMessage::unpack(&wire, &mut offset).expect("DDD end marker must decode");
+    assert_eq!(offset, wire.len());
+}
+
+#[test]
 fn test_dispatch_game_action_move_to_state() {
     assert_dispatch_match(test_fixtures::MOVE_TO_STATE, |msg| {
         matches!(msg, GameMessage::GameAction(_))

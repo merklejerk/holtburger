@@ -33,6 +33,8 @@ pub enum GameMessage {
     TurbineChat(Box<TurbineChatMessageData>),
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
+    /// Payload-free DAT synchronization end marker (0xF7EA).
+    DddEndDdd,
     CharacterError(Box<CharacterErrorData>),
     AccountBoot(Box<BootAccountData>),
     CharacterLogOff, // 0xF653

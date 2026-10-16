@@ -394,7 +394,9 @@ impl BodyMotionRuntime {
         previous_unmodelled: UnmodelledMotionChannels,
     ) {
         for action in std::mem::take(&mut self.rejected_actions) {
-            log::warn!(
+            // Missing action routes are normal: ACE can request human NPC twitches absent
+            // from their table. Retail also rejects these (`acclient.c:324405-324438`).
+            log::debug!(
                 "body 0x{guid:08X} motion table 0x{:08X} cannot route admitted action 0x{:08X} in style 0x{:08X} from substate 0x{:08X} (source {:?}, action sequence {})",
                 table.id,
                 action.command.raw(),

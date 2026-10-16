@@ -578,9 +578,9 @@ pub enum CharacterManagementOperation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum CombatOutcomeAttribution {
-    /// Exactly one known attack target matches without a retained-creature ambiguity veto.
+    /// Exactly one distinct target in relevant successful attack/cast history matches the name.
     Attributed { target: Guid },
-    /// Feedback is confirmed but its defender identity cannot be established reliably.
+    /// Feedback is confirmed, but relevant history has no unique matching target.
     Unplaced,
 }
 
@@ -589,7 +589,7 @@ pub enum CombatOutcomeAttribution {
 pub struct CombatOutcomeContext {
     /// World generation in which core received this outcome.
     pub world_generation: u64,
-    /// Conservative correlation computed by the combat attribution owner.
+    /// Best-effort correlation computed by the combat attribution owner.
     pub attribution: CombatOutcomeAttribution,
 }
 

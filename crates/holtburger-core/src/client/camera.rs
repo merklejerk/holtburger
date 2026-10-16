@@ -1684,15 +1684,28 @@ mod tests {
         );
     }
 
-    fn indoor_camera() -> (ClientRuntime, SimulationSceneSnapshot, WorldPosition) {
+    /// Ordinary interior placement shared by the camera lifecycle fixtures.
+    const INDOOR_PLAYER_POSE: WorldPosition = WorldPosition {
+        landblock_id: Guid(0x1000_0100),
+        coords: Vector3 {
+            x: 20.0,
+            y: 30.0,
+            z: 4.0,
+        },
+        rotation: holtburger_common::Quaternion {
+            w: 1.0,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    };
+
+    fn indoor_camera(
+        player_pose: WorldPosition,
+    ) -> (ClientRuntime, SimulationSceneSnapshot, WorldPosition) {
         let mut client = build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
-        let cell = Guid(0x1000_0100);
-        let player_pose = WorldPosition {
-            landblock_id: cell,
-            coords: Vector3::new(20.0, 30.0, 4.0),
-            rotation: holtburger_common::Quaternion::identity(),
-        };
+        let cell = player_pose.landblock_id;
         client
             .world
             .seed_local_player_entity(guid, "Player", player_pose);
@@ -1734,12 +1747,12 @@ mod tests {
         let mut scene = CollisionScene::new();
         scene
             .insert(LandblockCollisionAsset {
-                landblock_id: 0x1000_ffff,
+                landblock_id: (cell.0 & 0xffff_0000) | 0xffff,
                 terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
-                        cell_selector: 0x0100,
+                        cell_selector: (cell.0 & 0xffff) as u16,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
                             orientation: holtburger_common::Quaternion::identity(),
@@ -1777,7 +1790,7 @@ mod tests {
 
     #[test]
     fn camera_initializes_from_authoritative_deep_env_cell() {
-        let (client, collision, player_pose) = indoor_camera();
+        let (client, collision, player_pose) = indoor_camera(INDOOR_PLAYER_POSE);
         let mut camera = registered_camera(&client.world);
         let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
         let tick = camera
@@ -1796,8 +1809,45 @@ mod tests {
     }
 
     #[test]
+    fn camera_settles_when_dungeon_coordinates_cross_into_region_zero() {
+        // Reproduce the coordinate-frame crossing from the 0x000102C7 login incident.
+        // The empty synthetic interior isolates coordinate conversion from content geometry.
+        let (client, collision, player_pose) = indoor_camera(WorldPosition {
+            landblock_id: Guid(0x0001_02c7),
+            coords: Vector3::new(66.25, -2.25, 1.35),
+            rotation: holtburger_common::Quaternion::identity(),
+        });
+        let request = start_request(
+            client.world.player.guid,
+            u64::from(client.world.player_entity().unwrap().instance_sequence()),
+        );
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        camera.start(request, &client.world).unwrap();
+        let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let ClientCameraSettlement::Settled(tick) = camera.settle_for_activation(&input).unwrap()
+        else {
+            panic!("stationary dungeon camera must settle");
+        };
+        let ClientCameraTick::Advanced {
+            path,
+            rendered_reach,
+            diagnostics,
+            ..
+        } = tick
+        else {
+            panic!("settlement must finish with a continuous camera placement: {tick:?}");
+        };
+        assert!(rendered_reach >= request.minimum_reach);
+        assert_eq!(path.initial.position.landblock_id, player_pose.landblock_id);
+        assert_eq!(
+            diagnostics.collision_proof,
+            ClientCameraCollisionProof::Covered
+        );
+    }
+
+    #[test]
     fn camera_snapshot_is_independent_and_refreshes_a_target_without_travel() {
-        let (mut client, collision, original_pose) = indoor_camera();
+        let (mut client, collision, original_pose) = indoor_camera(INDOOR_PLAYER_POSE);
         let mut camera = registered_camera(&client.world);
         let original = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
         let identity = client.camera.identity().unwrap();
@@ -1903,7 +1953,7 @@ mod tests {
 
     #[test]
     fn stationary_physics_ticks_apply_orbit_and_retire_input_on_shutdown() {
-        let (client, collision, _) = indoor_camera();
+        let (client, collision, _) = indoor_camera(INDOOR_PLAYER_POSE);
         let identity = client.camera.identity().unwrap();
         let input = client.camera_input_handle();
         let scope = client.camera.run_scope();
@@ -1960,7 +2010,7 @@ mod tests {
 
     #[test]
     fn teleport_registration_suspends_direct_camera_input_until_world_publication() {
-        let (mut client, collision, _) = indoor_camera();
+        let (mut client, collision, _) = indoor_camera(INDOOR_PLAYER_POSE);
         let guid = client.world.player.guid;
         let generation = u64::from(client.world.player_entity().unwrap().instance_sequence());
         client.start_world_activation(crate::client::ClientWorldActivationState::Teleport, guid);

@@ -10,8 +10,7 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 ///
 /// The inverse of the presentation projection above, and the boundary every frontend-supplied
 /// position crosses: canonical scene axes are Y-up with +Z south, while AC authors Z-up with +Y
-/// north. The returned landblock carries an outdoor selector so normalization may derive the exact
-/// terrain cell.
+/// north. The returned position carries the derived outdoor terrain cell selector.
 pub fn scene_point_to_pose(scene_point: [f32; 3]) -> Result<WorldPosition> {
     ensure!(
         scene_point.iter().all(|component| component.is_finite()),
@@ -26,15 +25,15 @@ pub fn scene_point_to_pose(scene_point: [f32; 3]) -> Result<WorldPosition> {
             && (0..=i32::from(MAX_OUTDOOR_LANDBLOCK_AXIS)).contains(&block_y),
         "scene point is outside AC's authored landscape"
     );
-    Ok(WorldPosition {
-        landblock_id: Guid(((block_x as u32) << 24) | ((block_y as u32) << 16)),
-        coords: Vector3::new(
+    Ok(WorldPosition::from_outdoor_frame(
+        Guid(((block_x as u32) << 24) | ((block_y as u32) << 16)),
+        Vector3::new(
             ac_world_x - block_x as f32 * METERS_PER_LANDBLOCK,
             ac_world_y - block_y as f32 * METERS_PER_LANDBLOCK,
             scene_point[1],
         ),
-        rotation: Quaternion::identity(),
-    })
+        Quaternion::identity(),
+    ))
 }
 
 /// Rotates one canonical scene direction into AC authored axes.

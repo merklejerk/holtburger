@@ -36,6 +36,20 @@ pub fn outdoor_landblock_owner_at(anchor: Guid, local_point: Vector3) -> Option<
         .then_some(Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff))
 }
 
+/// Derives the local outdoor cell selector from coordinates alone (ACE `Position.SetLandCell`).
+/// Keeping this independent of position validity lets reanchoring assemble a complete ID even
+/// when the target region is zero, without constructing an intermediate null position.
+fn outdoor_cell_id_at(coords: Vector3) -> u32 {
+    let max_local = METERS_PER_LANDBLOCK - 1e-4;
+    let local_x = coords.x.clamp(0.0, max_local);
+    let local_y = coords.y.clamp(0.0, max_local);
+    let cell_length = METERS_PER_LANDBLOCK / 8.0;
+    let cell_x = (local_x / cell_length) as u32;
+    let cell_y = (local_y / cell_length) as u32;
+
+    (cell_x * 8) + cell_y + 1
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorldPosition {
@@ -121,6 +135,18 @@ impl std::fmt::Display for WorldCoordinates {
 }
 
 impl WorldPosition {
+    /// Constructs an outdoor position from a coordinate frame and already-local coordinates.
+    /// Only the frame's upper 16 bits select the region; region zero is valid. The complete cell
+    /// ID is derived before construction. This neither translates coordinates nor proves residency;
+    /// noncanonical coordinates retain their values and use the nearest edge cell selector.
+    pub fn from_outdoor_frame(frame: Guid, coords: Vector3, rotation: Quaternion) -> Self {
+        Self {
+            landblock_id: Guid((frame.0 & 0xffff_0000) | outdoor_cell_id_at(coords)),
+            coords,
+            rotation,
+        }
+    }
+
     /// Expresses the exact same world point in one normalized outdoor landblock frame.
     ///
     /// This is coordinate representation only: it neither reads collision content nor selects an
@@ -139,18 +165,18 @@ impl WorldPosition {
         let (source_x, source_y) = self.landblock_coords();
         let target_x = ((target_owner.0 >> 24) & 0xff) as u8;
         let target_y = ((target_owner.0 >> 16) & 0xff) as u8;
-        Ok(Self {
-            landblock_id: Guid(target_owner.0 & 0xffff_0000),
-            coords: Vector3::new(
-                self.coords.x
-                    + (i32::from(source_x) - i32::from(target_x)) as f32 * METERS_PER_LANDBLOCK,
-                self.coords.y
-                    + (i32::from(source_y) - i32::from(target_y)) as f32 * METERS_PER_LANDBLOCK,
-                self.coords.z,
-            ),
-            rotation: self.rotation,
-        }
-        .normalize_outdoor_cell())
+        let coords = Vector3::new(
+            self.coords.x
+                + (i32::from(source_x) - i32::from(target_x)) as f32 * METERS_PER_LANDBLOCK,
+            self.coords.y
+                + (i32::from(source_y) - i32::from(target_y)) as f32 * METERS_PER_LANDBLOCK,
+            self.coords.z,
+        );
+        Ok(Self::from_outdoor_frame(
+            target_owner,
+            coords,
+            self.rotation,
+        ))
     }
 
     /// Reanchors into the authored outdoor owner containing this point when one exists.
@@ -202,15 +228,7 @@ impl WorldPosition {
             return None;
         }
 
-        // ACE derives outdoor cell ids from the local 0-192 block coordinates.
-        let max_local = METERS_PER_LANDBLOCK - 1e-4;
-        let local_x = self.coords.x.clamp(0.0, max_local);
-        let local_y = self.coords.y.clamp(0.0, max_local);
-        let cell_length = METERS_PER_LANDBLOCK / 8.0;
-        let cell_x = (local_x / cell_length) as u32;
-        let cell_y = (local_y / cell_length) as u32;
-
-        Some((cell_x * 8) + cell_y + 1)
+        Some(outdoor_cell_id_at(self.coords))
     }
 
     pub fn normalize_outdoor_cell(mut self) -> Self {
@@ -303,6 +321,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn outdoor_frame_construction_accepts_region_zero_without_treating_it_as_a_position() {
+        let coords = Vector3::new(66.25, 189.75, 1.35);
+        let rotation = Quaternion::from_heading(1.0);
+        for frame in [Guid(0), Guid(0x0000_ffff)] {
+            let position = WorldPosition::from_outdoor_frame(frame, coords, rotation);
+            assert_eq!(position.landblock_id, Guid(0x0000_0018));
+            assert_eq!(position.coords, coords);
+            assert_eq!(position.rotation, rotation);
+        }
+    }
+
+    #[test]
     fn landblock_reanchoring_preserves_the_exact_world_point_without_content() {
         let original = WorldPosition {
             landblock_id: Guid(0xda55_010a),
@@ -318,6 +348,57 @@ mod tests {
         assert_eq!(reanchored.coords, Vector3::new(1.25, 191.5, 17.0));
         assert_eq!(reanchored.rotation, original.rotation);
         assert!(!reanchored.is_indoors());
+    }
+
+    #[test]
+    fn landblock_reanchoring_into_region_zero_produces_complete_cell_ids() {
+        let far_edge = METERS_PER_LANDBLOCK - 1.0;
+        for (x, y, expected_cell) in [
+            (0.0, 0.0, 0x0001),
+            (0.0, far_edge, 0x0008),
+            (far_edge, 0.0, 0x0039),
+            (far_edge, far_edge, 0x0040),
+        ] {
+            let original = WorldPosition {
+                landblock_id: Guid(0x0000_0100),
+                coords: Vector3::new(x, y, 17.0),
+                rotation: Quaternion::from_heading(1.0),
+            };
+            let reanchored = original
+                .reanchor_to_landblock_owner(Guid(0x0000_ffff))
+                .unwrap();
+
+            assert_eq!(reanchored.landblock_id, Guid(expected_cell));
+            assert_eq!(reanchored.coords, original.coords);
+            assert_eq!(reanchored.rotation, original.rotation);
+        }
+    }
+
+    #[test]
+    fn outdoor_frame_normalization_can_cross_into_region_zero_and_back() {
+        // Dungeon coordinates can extend beyond their owner's nominal outdoor square.
+        let original = WorldPosition {
+            landblock_id: Guid(0x0001_ffff),
+            coords: Vector3::new(66.25, -2.25, 1.35),
+            rotation: Quaternion::identity(),
+        };
+        let normalized = original.normalize_outdoor_landblock_frame().unwrap();
+
+        assert_eq!(normalized.landblock_id, Guid(0x0000_0018));
+        assert_eq!(normalized.global_coords(), original.global_coords());
+        let returned = normalized
+            .reanchor_to_landblock_owner(original.landblock_id)
+            .unwrap();
+        assert_eq!(returned.coords, original.coords);
+        assert_eq!(returned.rotation, original.rotation);
+    }
+
+    #[test]
+    fn landblock_reanchoring_rejects_a_missing_source() {
+        assert_eq!(
+            WorldPosition::default().reanchor_to_landblock_owner(Guid(0x0000_ffff)),
+            Err(WorldPositionReanchorError::NullSource)
+        );
     }
 
     #[test]

@@ -67,6 +67,10 @@ pub enum CollisionQueryError {
     /// The collision backend does not support one authored static shape pairing.
     #[error("static sphere sweep reached an unsupported collision shape pairing")]
     UnsupportedSphereSweep,
+    /// A selected immutable peer could not be placed into the query's coordinate frame.
+    /// The preparation owner logs the peer identity and source error.
+    #[error("collision query could not prepare selected peer geometry")]
+    InvalidPeerPlacement,
     /// A placed-motion request supplied no accepted geometric leg.
     #[error("placed-motion path must contain at least one waypoint")]
     EmptyMotionPath,

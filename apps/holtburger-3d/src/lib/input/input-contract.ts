@@ -63,6 +63,10 @@ export const CHARACTER_ACTIONS = [
 ] as const;
 export type CharacterAction = (typeof CHARACTER_ACTIONS)[number];
 
+/** Held power adjustments owned only by precise targeting. */
+export const PRECISE_JUMP_ACTIONS = ["increasePower", "decreasePower"] as const;
+export type PreciseJumpAction = (typeof PRECISE_JUMP_ACTIONS)[number];
+
 /** Explorer camera intent, independent of keyboard layout. */
 export type FlyAction =
 	| Exclude<CharacterAction, "jump" | "walk">
@@ -106,6 +110,8 @@ type ViewportPointerAction =
 export interface InputConfiguration {
 	/** Shared grounded controls for client play and Explorer possession. */
 	readonly character: InputBindings<CharacterAction>;
+	/** Power controls independent of the ordinary movement map. */
+	readonly preciseJump: InputBindings<PreciseJumpAction>;
 	/** Explorer free and physical camera controls. */
 	readonly fly: InputBindings<FlyAction>;
 	/** Client and chat shortcuts, interpreted within their UI context. */
@@ -132,7 +138,12 @@ export interface InputConfiguration {
 /** User-scoped keyboard groups; Explorer-only fly and fixed pointer policy stay separate. */
 export type ClientKeyboardConfiguration = Pick<
 	InputConfiguration,
-	"character" | "client" | "spellBar" | "combatBar" | "actionBars"
+	| "character"
+	| "preciseJump"
+	| "client"
+	| "spellBar"
+	| "combatBar"
+	| "actionBars"
 >;
 
 /** Zero-based positions of the ten numbered bars and cells. */

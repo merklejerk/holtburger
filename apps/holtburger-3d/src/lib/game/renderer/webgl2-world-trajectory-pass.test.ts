@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { sceneVec3 } from "../../assets/ac-frame";
 import { Vec3 } from "../math/types";
-import type { WorldTrajectoryInput } from "./renderer";
+import type { WorldCurveTrajectoryInput } from "./renderer";
 import { buildTrajectoryGeometry } from "./webgl2-world-trajectory-pass";
 
 function trajectory(
-	placements: WorldTrajectoryInput["placements"],
-): WorldTrajectoryInput {
+	placements: WorldCurveTrajectoryInput["placements"],
+): WorldCurveTrajectoryInput {
 	return {
+		kind: "curve",
+		style: "dashed",
 		revision: 7,
 		color: [0.08, 0.48, 1, 0.9],
 		origin: sceneVec3(new Vec3(10, 2, 30)),
@@ -63,5 +65,37 @@ describe("world trajectory geometry", () => {
 		const firstScopeEndDistance = built.records[6 * 8 - 1];
 		const secondScopeStartDistance = built.records[6 * 8 + 6];
 		expect(secondScopeStartDistance).toBeCloseTo(firstScopeEndDistance ?? -1);
+	});
+	it("preserves contact corners and each polyline segment's own scope", () => {
+		const built = buildTrajectoryGeometry({
+			kind: "polyline",
+			style: "solid",
+			revision: 8,
+			color: [1, 0, 0, 1],
+			segments: [
+				{
+					start: sceneVec3(new Vec3(0, 0, 0)),
+					end: sceneVec3(new Vec3(3, 0, 0)),
+					renderScopeKey: "outdoor",
+				},
+				{
+					start: sceneVec3(new Vec3(3, 0, 0)),
+					end: sceneVec3(new Vec3(3, 4, 0)),
+					renderScopeKey: "room",
+				},
+				{
+					start: sceneVec3(new Vec3(3, 4, 0)),
+					end: sceneVec3(new Vec3(3, 4, 2)),
+					renderScopeKey: "outdoor",
+				},
+			],
+		});
+		expect(built.ranges).toEqual([
+			{ renderScopeKey: "outdoor", firstInstance: 0, instanceCount: 2 },
+			{ renderScopeKey: "room", firstInstance: 2, instanceCount: 1 },
+		]);
+		expect([...built.records]).toEqual([
+			0, 0, 0, 3, 0, 0, 0, 3, 3, 4, 0, 3, 4, 2, 7, 9, 3, 0, 0, 3, 4, 0, 3, 7,
+		]);
 	});
 });

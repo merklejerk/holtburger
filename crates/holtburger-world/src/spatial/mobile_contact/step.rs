@@ -689,7 +689,7 @@ pub struct FrozenContactTargets {
     /// Common coordinate frame retained across the speculative trajectory.
     anchor: Guid,
     /// Authored peer surfaces and their spatial index; never mutated by prediction.
-    hard: HardTargets,
+    hard: std::sync::Arc<HardTargets>,
 }
 
 impl FrozenContactTargets {
@@ -697,19 +697,15 @@ impl FrozenContactTargets {
         anchor: Guid,
         targets: impl IntoIterator<Item = &'a crate::spatial::dynamic_index::EntityCollisionTarget>,
     ) -> Result<Self> {
-        let hard = targets
-            .into_iter()
-            .map(|target| {
-                Ok(SweepTarget {
-                    contact: target.contact.clone(),
-                    shapes: target.shapes_in(anchor)?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             anchor,
-            hard: HardTargets::new(hard)?,
+            hard: std::sync::Arc::new(HardTargets::frozen(anchor, targets)?),
         })
+    }
+
+    /// Common frame checked by the immutable publication's preparation owner.
+    pub(crate) fn anchor(&self) -> Guid {
+        self.anchor
     }
 
     /// Applies one ordinary physical tick to private mover state against this frozen query.
@@ -1723,7 +1719,7 @@ fn sweep_motion_sphere(
     let center = sphere.center + requested * 0.5;
     let reach = sphere.radius + requested.length() * 0.5;
     let candidates = hard
-        .sphere_candidates(center, reach)
+        .sphere_candidates(center, reach)?
         .filter(|target| contact.receives_response_from(&target.contact))
         .flat_map(|target| {
             target

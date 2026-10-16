@@ -7,7 +7,10 @@
 	} from "../../client/client-party-hud";
 	import type { PartySnapshot } from "../../client/client-party-contract";
 	import { probeVitalWarnings } from "./client-vital-warning-probe";
-	import type { ClientVital } from "../../client/client-host-contract";
+	import {
+		MINIMUM_JUMP_POWER,
+		type ClientVital,
+	} from "../../client/client-host-contract";
 	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 	import { ClientHousingManagementState } from "../../client/client-housing-management-state";
 	import {
@@ -618,7 +621,6 @@
 		/** Browser-resolved cursor for the game canvas. */
 		readonly gameCanvasCursor: string;
 		readonly hoveredGuid: number | null;
-		readonly jumpActionDisabled: boolean | null;
 		readonly mode: "runtime" | "layout";
 		/** Coordinates currently displayed beneath the map. */
 		readonly minimapCoordinates: string;
@@ -637,7 +639,8 @@
 		readonly orbitDeltas: readonly { readonly x: number; readonly y: number }[];
 		/** Left-clicks consumed by precise-jump mode. */
 		readonly preciseJumpActivationCount: number;
-		readonly preciseJumpEnterCount: number;
+		/** Aim callback count distinguishes click jitter from orbit-driven refresh. */
+		readonly preciseJumpAimCount: number;
 		/** Selection changes emitted by either viewport or minimap input. */
 		readonly selectionEvents: readonly (number | null)[];
 		/** Cadence ticks delivered independently of pointer presence. */
@@ -1186,6 +1189,8 @@
 		readonly setHoverHitEnabled: (enabled: boolean) => void;
 		/** Toggle precise-jump pointer ownership. */
 		readonly setPreciseJumpActive: (active: boolean) => void;
+		/** Verify real viewport wheel ownership in precise/manual and blocked states. */
+		readonly probePreciseJumpWheel: () => Promise<{ passed: boolean }>;
 		/** Replace the frame-hot target projection consumed by the real indicator component. */
 		readonly setTargetIndicatorFrame: (
 			frame: ClientTargetIndicatorFrame | null,
@@ -1198,7 +1203,7 @@
 	let jumpChargeActive = $state(
 		jumpFixture === "charging" || jumpFixture === "full",
 	);
-	const jumpExtent = jumpFixture === "full" ? 1 : 0.45;
+	let jumpExtent = $state(jumpFixture === "full" ? 1 : 0.45);
 	const toastFixture = new URLSearchParams(window.location.search).get("toast");
 	let toast = $state<ClientToast | null>(
 		toastFixture === "precise"
@@ -1211,8 +1216,11 @@
 					}
 				: null,
 	);
-	let preciseJumpEnterCount = 0;
+	/** Wheel power requests captured only by the focused routing probe. */
+	const preciseJumpPowerSteps: number[] = [];
 	let preciseJumpActivationCount = 0;
+	/** Counts aim publication for the precise click/drag ownership probe. */
+	let preciseJumpAimCount = 0;
 	let selectionMaintenanceCount = 0;
 	/** Counts synthetic artwork preparation independently of inventory sampling. */
 	let preparedIconCount = 0;
@@ -3603,8 +3611,6 @@
 			}),
 		);
 		const toastElement = document.querySelector<HTMLElement>(".client-toast");
-		const jumpAction =
-			document.querySelector<HTMLButtonElement>(".jump-precise");
 		const gameCanvas = document.querySelector<HTMLElement>(".client-canvas");
 		const targetIndicator =
 			document.querySelector<HTMLElement>(".target-indicator");
@@ -3626,7 +3632,6 @@
 			gameCanvas: rectangle(gameCanvas),
 			gameCanvasCursor: getComputedStyle(gameCanvas).cursor,
 			hoveredGuid,
-			jumpActionDisabled: jumpAction?.disabled ?? null,
 			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
 			minimapCoordinates:
 				document.querySelector<HTMLElement>(".minimap-coordinates")
@@ -3641,7 +3646,7 @@
 			moveHandles,
 			orbitDeltas: orbitDeltas.map((delta) => ({ ...delta })),
 			preciseJumpActivationCount,
-			preciseJumpEnterCount,
+			preciseJumpAimCount,
 			selectedGuid,
 			selectionAnnouncement:
 				document
@@ -3872,6 +3877,67 @@
 
 	function setCameraEnabled(enabled: boolean): void {
 		cameraEnabled = enabled;
+	}
+
+	async function probePreciseJumpWheel() {
+		const canvas = document.querySelector<HTMLCanvasElement>(".client-canvas");
+		if (canvas === null)
+			throw new Error("Precise wheel probe requires a canvas");
+		const previous = { preciseJumpActive, cameraEnabled, hudMode };
+		const zoomStart = zoomDeltas.length;
+		const powerStart = preciseJumpPowerSteps.length;
+		const wheel = (shiftKey: boolean, deltaY: number, deltaX = 0) =>
+			canvas.dispatchEvent(
+				new WheelEvent("wheel", {
+					bubbles: true,
+					cancelable: true,
+					shiftKey,
+					deltaY,
+					deltaX,
+				}),
+			);
+		try {
+			preciseJumpActive = true;
+			cameraEnabled = true;
+			hudMode = "runtime";
+			await tick();
+			wheel(false, 120);
+			if (
+				zoomDeltas.length !== zoomStart + 1 ||
+				preciseJumpPowerSteps.length !== powerStart
+			)
+				throw new Error(
+					"Plain wheel did not retain camera zoom in precise mode",
+				);
+			wheel(true, -120);
+			wheel(true, 0, -120);
+			if (
+				zoomDeltas.length !== zoomStart + 1 ||
+				preciseJumpPowerSteps.slice(powerStart).join(",") !== "1,1"
+			)
+				throw new Error("Shift wheel did not exclusively adjust precise power");
+			const unblock = inputGate.block();
+			try {
+				wheel(true, 120);
+			} finally {
+				unblock();
+			}
+			if (preciseJumpPowerSteps.length !== powerStart + 2)
+				throw new Error("Blocked viewport changed jump power");
+			preciseJumpActive = false;
+			await tick();
+			wheel(true, 120);
+			if (zoomDeltas.length !== zoomStart + 2)
+				throw new Error("Manual mode wheel did not zoom");
+			return { passed: true };
+		} finally {
+			preciseJumpActive = previous.preciseJumpActive;
+			cameraEnabled = previous.cameraEnabled;
+			hudMode = previous.hudMode;
+			zoomDeltas.splice(zoomStart);
+			preciseJumpPowerSteps.splice(powerStart);
+			await tick();
+		}
 	}
 
 	function setPreciseJumpActive(active: boolean): void {
@@ -4470,6 +4536,7 @@
 			setHoverHitEnabled,
 			setMinimapSubject,
 			setPreciseJumpActive,
+			probePreciseJumpWheel,
 			setTargetIndicatorFrame,
 			setRuntimeTransients,
 			teleportMinimapSubject,
@@ -4654,12 +4721,15 @@
 		onEntityCollisionDisabledChange={() => {}}
 		cameraController={cameraEnabled ? cameraController : null}
 		{preciseJumpActive}
-		onPreciseJumpAim={() => undefined}
+		onPreciseJumpAim={() => {
+			preciseJumpAimCount += 1;
+		}}
+		onPreciseJumpPowerSet={(power) => {
+			jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
+		}}
+		onPreciseJumpPowerAdjust={(steps) => preciseJumpPowerSteps.push(steps)}
 		onPreciseJumpActivate={() => {
 			preciseJumpActivationCount += 1;
-		}}
-		onPreciseJumpEnter={() => {
-			preciseJumpEnterCount += 1;
 		}}
 		onSocialNotice={(message) => {
 			toast = { id: 1, message, tone: "warning" };
@@ -4740,6 +4810,7 @@
 		{vitalWarningsEnabled}
 		vitals={warningVitals}
 		{jumpChargeActive}
+		jumpPowerKeys={["W", "S"]}
 		readJumpExtent={() => jumpExtent}
 		{toast}
 		chatMessages={messages}

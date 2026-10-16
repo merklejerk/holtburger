@@ -2,6 +2,7 @@ import type {
 	ClientKeyboardConfiguration,
 	ClientShortcut,
 	CharacterAction,
+	PreciseJumpAction,
 	InputDigitIndex,
 	CombatHeightIndex,
 	CombatBreakpointIndex,
@@ -15,6 +16,7 @@ type ActionBarCommand = (typeof ACTION_BAR_COMMANDS)[number];
 export type ClientBindingReference =
 	| { readonly kind: "client"; readonly action: ClientShortcut }
 	| { readonly kind: "character"; readonly action: CharacterAction }
+	| { readonly kind: "preciseJump"; readonly action: PreciseJumpAction }
 	| { readonly kind: "spellTab"; readonly index: InputDigitIndex }
 	| { readonly kind: "spellCell"; readonly index: InputDigitIndex }
 	| { readonly kind: "spellCaster" }
@@ -28,6 +30,7 @@ export type ClientBindingReference =
 export type ClientBindingId =
 	| `client.${ClientShortcut}`
 	| `character.${CharacterAction}`
+	| `preciseJump.${PreciseJumpAction}`
 	| `spellBar.tabs.${InputDigitIndex}`
 	| `spellBar.cells.${InputDigitIndex}`
 	| "spellBar.caster"
@@ -46,6 +49,8 @@ export function clientBindingId(
 			return `client.${reference.action}`;
 		case "character":
 			return `character.${reference.action}`;
+		case "preciseJump":
+			return `preciseJump.${reference.action}`;
 		case "spellTab":
 			return `spellBar.tabs.${reference.index}`;
 		case "spellCell":
@@ -75,6 +80,8 @@ export function readClientBinding(
 			return settings.client[reference.action];
 		case "character":
 			return settings.character[reference.action];
+		case "preciseJump":
+			return settings.preciseJump[reference.action];
 		case "spellTab":
 			return settings.spellBar.tabs[reference.index];
 		case "spellCell":
@@ -110,6 +117,11 @@ export function replaceClientBinding(
 			return {
 				...settings,
 				character: { ...settings.character, [reference.action]: bindings },
+			};
+		case "preciseJump":
+			return {
+				...settings,
+				preciseJump: { ...settings.preciseJump, [reference.action]: bindings },
 			};
 		case "spellTab":
 			return {

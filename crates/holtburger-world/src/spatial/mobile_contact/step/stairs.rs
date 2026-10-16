@@ -186,7 +186,7 @@ fn support_candidates(
 ) -> std::result::Result<Vec<SupportContact>, CollisionQueryError> {
     let mut supports = collision.support_contacts(request)?;
     for target in hard
-        .support_candidates(request.center, request.radius)
+        .support_candidates(request.center, request.radius)?
         .filter(|target| {
             contact.receives_response_from(&target.contact)
                 && request

@@ -50,7 +50,7 @@
 			<p class="binding-dialog-conflict" role="alert">
 				{#each conflict.bindings as binding, index}
 					{#if index > 0}<span>/</span>{/if}
-					<kbd class="binding-dialog-key">{binding}</kbd>
+					<kbd class="ui-keycap">{binding}</kbd>
 				{/each}
 				<span>conflicts with {conflict.actions}.</span>
 			</p>
@@ -93,21 +93,6 @@
 			flex-wrap: wrap;
 			align-items: center;
 			gap: 4px;
-		}
-		.binding-dialog-key {
-			display: inline-flex;
-			min-width: 30px;
-			min-height: 24px;
-			box-sizing: border-box;
-			align-items: center;
-			justify-content: center;
-			padding: 1px 8px;
-			border: 1px solid var(--ui-color-border);
-			border-radius: 999px;
-			background: var(--ui-color-control);
-			color: inherit;
-			font: inherit;
-			white-space: nowrap;
 		}
 		.binding-dialog-actions {
 			display: flex;

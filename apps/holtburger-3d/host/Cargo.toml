@@ -32,3 +32,4 @@ serde_bytes = "0.11.19"
 png = "0.18.1"
 tempfile.workspace = true
 rayon.workspace = true
+env_logger.workspace = true

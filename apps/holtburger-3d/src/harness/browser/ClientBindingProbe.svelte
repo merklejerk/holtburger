@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
+	import ClientJumpPowerBar from "../../client/ClientJumpPowerBar.svelte";
+	import { compactInputHint } from "../../lib/input/input-presentation";
 	import ClientSettingsPanel from "../../client/ClientSettingsPanel.svelte";
 	import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 	import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
@@ -24,6 +26,17 @@
 </script>
 
 <div data-binding-probe>
+	<ClientJumpPowerBar
+		active={true}
+		previewExtent={0.5}
+		precise={true}
+		readExtent={() => 0.5}
+		powerKeys={[
+			compactInputHint(input.preciseJump.increasePower, "windows") ?? "—",
+			compactInputHint(input.preciseJump.decreasePower, "windows") ?? "—",
+		]}
+		powerControl={null}
+	/>
 	<ClientSettingsPanel
 		audio={defaults.audio}
 		graphics={defaults.graphics}

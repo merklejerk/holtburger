@@ -3,6 +3,7 @@ import { INPUT_DEFAULTS } from "../lib/input/input-defaults.js";
 import {
 	ACTION_BAR_COMMANDS,
 	CHARACTER_ACTIONS,
+	PRECISE_JUMP_ACTIONS,
 	CLIENT_SHORTCUT_ACTIONS,
 	COMBAT_BREAKPOINT_KEYS,
 	COMBAT_HEIGHT_KEYS,
@@ -38,12 +39,23 @@ const keyboardSettingsBaseSchema = z
 		character: z
 			.record(z.enum(CHARACTER_ACTIONS), bindingListSchema)
 			.readonly(),
+		preciseJump: z
+			.record(z.enum(PRECISE_JUMP_ACTIONS), bindingListSchema)
+			.readonly()
+			.default(INPUT_DEFAULTS.preciseJump),
 		client: z.preprocess(
-			// Older saved maps predate split-stack; retain every existing binding, including unbound actions.
-			(value) =>
-				typeof value === "object" && value !== null && !Array.isArray(value)
-					? { splitStack: INPUT_DEFAULTS.client.splitStack, ...value }
-					: value,
+			// Preserve current bindings, fill older split-stack defaults, and retire the old step actions.
+			(value) => {
+				if (typeof value !== "object" || value === null || Array.isArray(value))
+					return value;
+				const current = {
+					splitStack: INPUT_DEFAULTS.client.splitStack,
+					...value,
+				};
+				Reflect.deleteProperty(current, "preciseJumpPowerUp");
+				Reflect.deleteProperty(current, "preciseJumpPowerDown");
+				return current;
+			},
 			z.record(z.enum(CLIENT_SHORTCUT_ACTIONS), bindingListSchema).readonly(),
 		),
 		spellBar: z
@@ -93,6 +105,7 @@ export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
 /** Current user keyboard defaults; Explorer and pointer policy stay outside persistence. */
 export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	character: INPUT_DEFAULTS.character,
+	preciseJump: INPUT_DEFAULTS.preciseJump,
 	client: INPUT_DEFAULTS.client,
 	spellBar: INPUT_DEFAULTS.spellBar,
 	combatBar: INPUT_DEFAULTS.combatBar,

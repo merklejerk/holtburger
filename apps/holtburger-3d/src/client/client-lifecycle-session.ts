@@ -195,7 +195,7 @@ import {
 	type ClientPreciseJumpAimRequest,
 	type ClientPreciseJumpCommitRequest,
 	type ClientPreciseJumpCancelRequest,
-	type ClientPreciseJumpEvaluation,
+	type ClientPreciseJumpProgress,
 	type ClientPreciseJumpTransactionFeedback,
 	type ClientEntitySelectionQueryRequest,
 	type ClientEntitySelectionQueryResult,
@@ -490,7 +490,7 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "server-controlled-motion" }
 	| {
 			readonly type: "precise-jump-evaluation";
-			readonly evaluation: ClientPreciseJumpEvaluation;
+			readonly evaluation: ClientPreciseJumpProgress;
 	  }
 	| {
 			readonly type: "precise-jump-transaction-feedback";

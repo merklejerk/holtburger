@@ -1,3 +1,7 @@
+import {
+	resolvedJumpFixture,
+	predictedJumpFixture,
+} from "./client-precise-jump-fixtures";
 import type { PartySnapshot } from "./client-party-contract";
 import membershipFixture from "../harness/browser/fixtures/contract-membership.json";
 import { contractMembershipChangeSchema } from "./client-contracts-contract";
@@ -1273,46 +1277,25 @@ describe("ClientLifecycleSession", () => {
 		await session.setPreciseJumpAim({
 			camera,
 			sequence: 9,
+			power: 0.5,
 			anchor: 0xda55_ffff,
 			start: landblockVector3([10, 20, 4]),
 			direction: [0, 1, 0],
 			maximumDistance: 80,
 			previousCell: null,
 		});
-		await session.commitPreciseJump({ sequence: 3, evaluationId: 11 });
+		await session.commitPreciseJump({
+			sequence: 3,
+			camera,
+			target: resolvedJumpFixture(camera, 9, 0.5).launch.target,
+			power: 0.5,
+		});
 		await session.cancelPreciseJump({ sequence: 4 });
 
-		transport.emit("client-precise-jump-evaluation", {
-			evaluationId: 11,
-			camera,
-			sequence: 9,
-			target: {
-				anchor: 0xda55_ffff,
-				point: [10, 40, 0],
-				normal: [0, 0, 1],
-				committedCell: null,
-			},
-			status: "reachable",
-			trajectory: {
-				anchor: 0xda55_ffff,
-				origin: [10, 20, 4],
-				velocity: [0, 14, 8],
-				acceleration: [0, 0, -9.8],
-				durationSeconds: 1.5,
-				placements: [
-					{
-						startFraction: 0,
-						endFraction: 1,
-						committedCell: null,
-					},
-				],
-			},
-			diagnostics: {
-				generatedCandidates: 6,
-				evaluatedCandidates: 2,
-				solverTicks: 71,
-			},
-		});
+		transport.emit(
+			"client-precise-jump-evaluation",
+			predictedJumpFixture(resolvedJumpFixture(camera, 9, 0.5), "miss"),
+		);
 		transport.emit("client-precise-jump-transaction-feedback", {
 			sequence: 3,
 			outcome: { kind: "committed" },
@@ -1333,6 +1316,7 @@ describe("ClientLifecycleSession", () => {
 			session.setPreciseJumpAim({
 				camera,
 				sequence: 10,
+				power: 0.5,
 				anchor: 0xda55_ffff,
 				start: landblockVector3([Number.NaN, 0, 0]),
 				direction: [0, 1, 0],

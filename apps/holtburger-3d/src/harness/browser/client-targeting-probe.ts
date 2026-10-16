@@ -98,6 +98,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		},
 	});
 	const arbiter = new ClientInputArbiter({
+		powerBindings: INPUT_DEFAULTS.preciseJump,
 		ordinary: {
 			applyAction: () => false,
 			restoreHeldAction() {},

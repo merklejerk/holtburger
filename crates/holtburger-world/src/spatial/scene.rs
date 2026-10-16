@@ -984,32 +984,22 @@ impl SpatialScene {
         now: Instant,
     ) -> Option<RuntimeSpatialBodyView> {
         let body = self.body_store.body_mut(body_id)?;
-        let physical = body.physical.as_ref()?;
-        let entity_collision = physical.dynamic.as_ref()?.collision.clone();
-        let demand = physical.dynamic.as_ref()?.demand;
-        let mut response_policy = physical.response_policy;
-        response_policy.align_path = kinematics.align_path();
-        let replacement = DynamicPhysicalBodyConfiguration::new(
-            DynamicPhysicalBodyDefinition {
-                movement: physical.definition,
-                response_policy,
-                entity_collision,
-            },
-            demand,
-        )
-        .expect("installed dynamic body must retain non-empty local demand");
-        let collision_filter = physical.collision_filter;
-        let retained_cell = physical.response.cell();
-        let retained_placement = physical.dynamic.as_ref()?.placement.clone();
-
-        let mut replacement =
-            PhysicalBodyState::new_dynamic(replacement, collision_filter, retained_cell);
-        replacement
-            .dynamic
-            .as_mut()
-            .expect("dynamic definition produced generic physical state")
-            .placement = retained_placement;
-        body.physical = Some(replacement);
+        let physical = body.physical.as_mut()?;
+        physical.dynamic.as_mut()?.wake();
+        physical.response_policy.align_path = kinematics.align_path();
+        // A release changes response memory, not authored geometry, scale or part poses.
+        physical.response = match physical.response {
+            super::PhysicalBodyResponseState::Grounded { cell, .. } => {
+                super::PhysicalBodyResponseState::Grounded {
+                    cell,
+                    ground: GroundState::Airborne,
+                    stationary_fall_frames: 0,
+                }
+            }
+            super::PhysicalBodyResponseState::Placement { cell } => {
+                super::PhysicalBodyResponseState::Placement { cell }
+            }
+        };
         body.nominal = AuthoritativeBodyVectors {
             velocity: kinematics.velocity(),
             acceleration: kinematics.acceleration(),
@@ -4471,7 +4461,7 @@ mod physical_body_tests {
     mod connected_crowd_benchmark;
 
     #[test]
-    fn dynamic_kinematics_replace_response_memory_and_integrate_world_axis_rotation() {
+    fn dynamic_kinematics_preserve_geometry_and_integrate_world_axis_rotation() {
         let now = Instant::now();
         let id = SpatialBodyId::Entity(Guid(0x7000_0001));
         let initial_rotation =
@@ -4481,17 +4471,20 @@ mod physical_body_tests {
         let mut initial_pose = pose(Vector3::new(10.0, 20.0, 30.0));
         initial_pose.rotation = initial_rotation;
         scene.register_body(SpatialBody::new(id, initial_pose, now));
+        let (definition, demand, _, _) =
+            dynamic_definition(free_definition(Vector3::zero(), 0.5), true).into_parts();
         scene
             .set_dynamic_physical_body(
                 id,
-                Some(dynamic_definition(
-                    free_definition(Vector3::zero(), 0.5),
-                    true,
-                )),
+                Some(
+                    DynamicPhysicalBodyConfiguration::with_object_scale(definition, demand, 0.75)
+                        .unwrap(),
+                ),
                 PhysicalCollisionFilter::ALL,
                 None,
             )
             .unwrap();
+        let before = scene.body(id).unwrap().physical.as_ref().unwrap().clone();
 
         let omega = Vector3::new(std::f32::consts::TAU, 0.0, 0.0);
         let view = scene
@@ -4515,6 +4508,16 @@ mod physical_body_tests {
         assert_eq!(view.acceleration, Vector3::new(0.0, 0.0, -9.8));
         assert_eq!(view.omega, omega);
         assert_eq!(view.contact, ContactState::Airborne);
+        let after = scene.body(id).unwrap().physical.as_ref().unwrap();
+        assert_eq!(after.definition, before.definition);
+        let before = before.dynamic.unwrap();
+        let after = after.dynamic.as_ref().unwrap();
+        assert_eq!(after.object_scale, before.object_scale);
+        assert_eq!(after.collision_poses, before.collision_poses);
+        assert!(Arc::ptr_eq(
+            &after.collision.target_geometry,
+            &before.collision.target_geometry
+        ));
         assert!(matches!(
             view.sample_mode,
             SpatialSampleMode::SimulatingVelocity

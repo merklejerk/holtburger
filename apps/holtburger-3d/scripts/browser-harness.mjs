@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probePreciseJumpCamera } from "./client-precise-camera-probe.mjs";
 import { probeBindingControls } from "./client-binding-controls-probe.mjs";
 import { probeVendor } from "./client-vendor-probe.mjs";
 import {
@@ -264,12 +265,19 @@ try {
 			connectionBadge: result.connectionBadge,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientPreciseJump) {
+		report = {
+			suite: "client-precise-jump",
+			...result.clientPreciseJump,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
 			connectionBadge: result.connectionBadge,
 			clientInspection: result.clientInspection,
 			clientTargeting: result.clientTargeting,
+			clientPreciseJump: result.clientPreciseJump,
 			clientTheme: result.clientTheme,
 			clientInventory: result.clientInventory,
 			keyboardPolicy: result.keyboardPolicy,
@@ -312,6 +320,7 @@ try {
 			glRenderer: result.glRenderer,
 			clientHud: result.clientHud,
 			clientTargeting: result.clientTargeting,
+			clientPreciseJump: result.clientPreciseJump,
 			buildingRadius: options.buildingRadius,
 			camera: result.state.camera,
 			envCellRadius: options.envCellRadius,
@@ -413,6 +422,19 @@ try {
 			result.entityShadowCycleInitialState,
 			result.entityShadowCycleStates,
 		);
+	}
+	if (options.worldMarker !== null)
+		report.worldIndicatorProof = result.state.worldIndicatorProof;
+	if (options.worldMarker === "settled") {
+		const proof = result.state.worldIndicatorProof;
+		if (
+			proof?.desiredKind !== "curve" ||
+			proof?.actualKind !== "polyline" ||
+			proof?.markerShapes?.join(",") !== "target,miss"
+		)
+			throw new Error(
+				"Manual jump renderer fixture did not install both paths and endpoint glyphs.",
+			);
 	}
 	if (options.fixture === "portal-scope-atlas") {
 		assertPortalScopeAtlasFixture(result.state);
@@ -517,6 +539,7 @@ function parseArgs(args) {
 		clientWorldMap: false,
 		clientHousing: false,
 		clientHud: false,
+		clientPreciseJump: false,
 		clientSettingsTabs: false,
 		clientEnvironment: false,
 		clientVitals: false,
@@ -610,7 +633,7 @@ function parseArgs(args) {
 		entityShadowCycle: false,
 		entityShadowBenchmarkPairs: 0,
 		traceTerrainGl: false,
-		worldMarker: false,
+		worldMarker: null,
 		vitePort: null,
 		colorGrade: null,
 		staticLights: true,
@@ -686,6 +709,10 @@ function parseArgs(args) {
 			case "--client-keyboard":
 				parsed.clientHud = true;
 				parsed.clientKeyboard = true;
+				break;
+			case "--client-precise-jump":
+				parsed.clientHud = true;
+				parsed.clientPreciseJump = true;
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
@@ -1197,7 +1224,10 @@ function parseArgs(args) {
 				parsed.traceTerrainGl = true;
 				break;
 			case "--world-marker":
-				parsed.worldMarker = true;
+				parsed.worldMarker = "settled";
+				break;
+			case "--world-marker-pending":
+				parsed.worldMarker = "pending";
 				break;
 			case "--ambient-occlusion":
 				parsed.ambientOcclusion = true;
@@ -1753,6 +1783,7 @@ Options:
   --object-preview-report-only
                         Print only renderer identity, errors, and object-preview evidence.
   --world-marker        Draw the depth-tested world marker and trajectory fixture.
+  --world-marker-pending Draw the rotating pending world marker without a trajectory.
   --map                 Draw the overhead map onto a harness canvas before the screenshot.
   --map-size <px>       Square pixel size of the map canvas (default 512).
   --map-view-diameter <m> World metres across the map's visible circle.
@@ -1962,6 +1993,7 @@ Options:
   --client-binding-controls Verify indexed remapping, casts, and contextual vendor Examine.
   --client-bindings   Verify Settings remapping, shortcut hints, and feature dispatch.
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
+  --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -4811,6 +4843,41 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
+		if (options.clientPreciseJump) {
+			const preciseJump = await evaluateExpression(
+				client,
+				`(async () => (await import('/src/harness/browser/client-precise-jump-probe.ts')).probeClientPreciseJump())()`,
+			);
+			if (!preciseJump?.passed)
+				throw new Error("Client precise-jump probe did not pass.");
+			const jumpHud = await evaluateExpression(
+				client,
+				`(async () => (await import('/src/harness/browser/client-jump-hud-probe.ts')).probeClientJumpHud())()`,
+			);
+			if (!jumpHud?.passed)
+				throw new Error("Jump HUD theme/icon probe did not pass.");
+			const wheel = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probePreciseJumpWheel",
+				[],
+			);
+			if (!wheel?.passed)
+				throw new Error("Precise wheel routing probe failed.");
+			return {
+				clientPreciseJump: {
+					...preciseJump,
+					jumpHud,
+					wheel,
+					camera: await probePreciseJumpCamera(
+						client,
+						evaluate,
+						evaluateExpression,
+					),
+				},
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		return {
 			...(await probeClientHud(client, {
 				options,
@@ -4877,7 +4944,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			? ""
 			: "&audioTrace=1";
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
-	const worldMarker = options.worldMarker ? "&worldMarker=true" : "";
+	const worldMarker =
+		options.worldMarker === null ? "" : `&worldMarker=${options.worldMarker}`;
 	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",

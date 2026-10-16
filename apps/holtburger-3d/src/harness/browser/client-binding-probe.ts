@@ -171,12 +171,38 @@ export async function probeClientBindings(options: {
 		), "Split-stack menu hint did not update after remapping");
 		await click("Selected entity actions");
 		await click("Restore default keys for Split stack");
+		const movementBefore = target.querySelector(
+			".binding-group .binding-row",
+		)?.textContent;
+		const powerRow = Array.from(target.querySelectorAll(".binding-row")).find(
+			(row) =>
+				row.querySelector(".binding-label")?.textContent ===
+				"Increase jump power (precise mode)",
+		);
+		const powerKey = powerRow?.querySelector<HTMLButtonElement>(".binding-key");
+		if (!powerKey) throw new Error("Missing power binding row");
+		powerKey.click();
+		await tick();
+		await click("Add key for Increase jump power (precise mode)");
+		press("i", "KeyI");
+		await tick();
+		require(target.querySelector(".jump-power-keys kbd")?.textContent ===
+			"I", "Power keycap did not follow remapping");
+		require(target.querySelector(".binding-group .binding-row")?.textContent ===
+			movementBefore, "Power remapping changed movement");
+		await click("Restore default keys for Increase jump power (precise mode)");
+		require(target.querySelector(".jump-power-keys kbd")?.textContent ===
+			formatInputBindings(
+				CLIENT_KEYBOARD_DEFAULTS.preciseJump.increasePower,
+				"windows",
+			).toUpperCase(), "Power default did not restore its keycap");
 		return {
 			passed: true,
 			original,
 			remapped: "Trade (e)",
 			oldKeyStopped: true,
 			splitStackRemapped: true,
+			precisePowerRemapped: true,
 			featureSubmissions: options.submissions() - before,
 		};
 	} finally {

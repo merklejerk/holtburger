@@ -79,6 +79,36 @@ describe("current client settings values", () => {
 			).toEqual(binding);
 		}
 	});
+	it("adds independent power defaults to older maps and preserves saved power alternatives", () => {
+		const { preciseJump, ...older } = CLIENT_KEYBOARD_DEFAULTS;
+		expect(clientKeyboardSettingsSchema.parse(older).preciseJump).toEqual(
+			preciseJump,
+		);
+		const remapped = { increasePower: [{ key: "i" }], decreasePower: [] };
+		expect(
+			clientKeyboardSettingsSchema.parse({ ...older, preciseJump: remapped })
+				.preciseJump,
+		).toEqual(remapped);
+	});
+	it("loads saved keyboard maps while preserving current remapped controls", () => {
+		const current = createDefaultClientUserSettings(viewport, 8).input;
+		const examine = [{ key: "F8" }];
+		const forward = [{ key: "i" }];
+		const saved = {
+			...current,
+			character: { ...current.character, forward },
+			client: {
+				...current.client,
+				examine,
+				preciseJumpPowerUp: [{ key: "]" }],
+				preciseJumpPowerDown: [{ key: "[" }],
+			},
+		};
+		const loaded = clientKeyboardSettingsSchema.parse(saved);
+		expect(loaded.client).toEqual({ ...current.client, examine });
+		expect(loaded.character).toEqual({ ...current.character, forward });
+	});
+
 	it("uses the declared initial audio mix", () => {
 		expect(createDefaultClientUserSettings(viewport, 8).audio).toEqual(
 			CLIENT_AUDIO_DEFAULTS,

@@ -915,6 +915,7 @@ export class WebGL2Renderer implements Renderer {
 	#particlePass: WebGL2ParticlePass | null = null;
 	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
+	readonly #desiredTrajectoryPass: WebGL2WorldTrajectoryPass;
 	readonly #nameplatePass: WebGL2NameplatePass;
 	readonly #nameplateIconRepository: NameplateIconRepository;
 	readonly #nameplateTextureCache: WebGL2NameplateTextureCache;
@@ -1274,6 +1275,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#portalWarpDriveTuning = portalWarpDriveTuning;
 		this.#worldMarkerPass = new WebGL2WorldMarkerPass(gl);
 		this.#worldTrajectoryPass = new WebGL2WorldTrajectoryPass(gl);
+		this.#desiredTrajectoryPass = new WebGL2WorldTrajectoryPass(gl);
 		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
 			gl,
 			textureFilteringSupport,
@@ -2141,22 +2143,33 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawNameplates(view, pipeline);
 		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
-		if (indicator?.trajectory) {
-			this.#drawWorldTrajectory(view, indicator.trajectory, {
-				visibility: frame.atlas.visibility,
-				routing: pipeline,
-			});
-		}
-		if (
-			indicator !== null &&
-			frame.atlas.visibility.selectedScopeOrdinal(
-				indicator.marker.renderScopeKey,
-			) !== null
-		) {
-			this.#drawWorldMarker(view, indicator.marker, {
-				key: indicator.marker.renderScopeKey,
-				routing: pipeline,
-			});
+		if (indicator !== null) {
+			const portal = { visibility: frame.atlas.visibility, routing: pipeline };
+			if (indicator.desiredTrajectory)
+				this.#drawWorldTrajectory(
+					view,
+					indicator.desiredTrajectory,
+					portal,
+					this.#desiredTrajectoryPass,
+				);
+			if (indicator.trajectory)
+				this.#drawWorldTrajectory(
+					view,
+					indicator.trajectory,
+					portal,
+					this.#worldTrajectoryPass,
+				);
+			for (const marker of [indicator.marker, indicator.landingMarker]) {
+				if (
+					marker &&
+					frame.atlas.visibility.selectedScopeOrdinal(marker.renderScopeKey) !==
+						null
+				)
+					this.#drawWorldMarker(view, marker, {
+						key: marker.renderScopeKey,
+						routing: pipeline,
+					});
+			}
 		}
 		this.#drawPortalTransitionTunnel(
 			target,
@@ -2214,6 +2227,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#skyPass = null;
 		this.#worldMarkerPass.destroy();
 		this.#worldTrajectoryPass.destroy();
+		this.#desiredTrajectoryPass.destroy();
 		this.#nameplatePass.destroy();
 		this.#nameplateTextureCache.destroy();
 		this.#nameplateIconRepository.destroy();
@@ -3702,9 +3716,25 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawNameplates(view, null);
 		this.#drawCombatEffects(view, null, null);
 		const indicator = this.#frameWorldIndicator;
+		if (indicator?.desiredTrajectory)
+			this.#drawWorldTrajectory(
+				view,
+				indicator.desiredTrajectory,
+				null,
+				this.#desiredTrajectoryPass,
+			);
 		if (indicator?.trajectory)
-			this.#drawWorldTrajectory(view, indicator.trajectory, null);
-		if (indicator !== null) this.#drawWorldMarker(view, indicator.marker, null);
+			this.#drawWorldTrajectory(
+				view,
+				indicator.trajectory,
+				null,
+				this.#worldTrajectoryPass,
+			);
+		if (indicator !== null) {
+			this.#drawWorldMarker(view, indicator.marker, null);
+			if (indicator.landingMarker)
+				this.#drawWorldMarker(view, indicator.landingMarker, null);
+		}
 		this.#gl.bindVertexArray(null);
 		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry, profile);
 		this.#presentFlatScene(
@@ -3875,6 +3905,10 @@ export class WebGL2Renderer implements Renderer {
 				color: marker.color,
 				normal: marker.normal,
 				radius: Math.min(2.4, Math.max(marker.radius, cameraDistance * 0.012)),
+				shape: marker.shape,
+				spinAngle: marker.pending
+					? (this.#frameClockSeconds % 1) * Math.PI * 2
+					: null,
 			},
 			portal,
 		);
@@ -3884,8 +3918,9 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedViewGeometry,
 		trajectory: NonNullable<WorldIndicatorInput["trajectory"]>,
 		portal: Parameters<WebGL2WorldTrajectoryPass["draw"]>[2],
+		pass: WebGL2WorldTrajectoryPass,
 	): void {
-		this.#worldTrajectoryPass.draw(
+		pass.draw(
 			trajectory,
 			{
 				anchorOrigin: createLandblockWorldOrigin(view.anchorLandblockId),

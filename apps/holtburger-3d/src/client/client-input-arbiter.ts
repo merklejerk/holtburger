@@ -1,6 +1,12 @@
 import type { CharacterInputController } from "../lib/game/controls/character-input-controller";
 
-import type { CharacterAction } from "../lib/input/input-contract";
+import type {
+	CharacterAction,
+	InputBindings,
+	InputKeyEvent,
+	PreciseJumpAction,
+} from "../lib/input/input-contract";
+import { InputContext } from "../lib/input/input-context";
 
 /** Owns client-local auto-run and the handoff between ordinary and precise-jump input. */
 export class ClientInputArbiter {
@@ -13,11 +19,15 @@ export class ClientInputArbiter {
 	readonly #onCancel: () => void;
 	readonly #onAutoRunChanged: (enabled: boolean) => void;
 	readonly #held = new Set<CharacterAction>();
+	/** Power presses have their own key lifetimes and never become movement on exit. */
+	readonly #powerHeld = new Set<PreciseJumpAction>();
+	readonly #powerInput: InputContext<PreciseJumpAction>;
 	#precise = false;
 	#autoRun = false;
 	#suppressJumpUntilRelease = false;
 
 	constructor(options: {
+		readonly powerBindings: InputBindings<PreciseJumpAction>;
 		readonly ordinary: Pick<
 			CharacterInputController,
 			"applyAction" | "restoreHeldAction" | "reset" | "setPersistentForward"
@@ -27,6 +37,15 @@ export class ClientInputArbiter {
 		readonly onCancel: () => void;
 		readonly onAutoRunChanged: (enabled: boolean) => void;
 	}) {
+		this.#powerInput = new InputContext(
+			options.powerBindings,
+			(action, down) => {
+				if (down) {
+					this.#powerHeld.add(action);
+					this.cancelAutoRun();
+				} else this.#powerHeld.delete(action);
+			},
+		);
 		this.#ordinary = options.ordinary;
 		this.#onEnter = options.onEnter;
 		this.#onActivate = options.onActivate;
@@ -36,6 +55,28 @@ export class ClientInputArbiter {
 
 	get preciseActive(): boolean {
 		return this.#precise;
+	}
+
+	/** Opposing held controls cancel; pre-existing movement does not start a power sweep. */
+	get precisePowerDirection(): -1 | 0 | 1 {
+		if (!this.#precise) return 0;
+		if (
+			this.#powerHeld.has("increasePower") ===
+			this.#powerHeld.has("decreasePower")
+		)
+			return 0;
+		return this.#powerHeld.has("increasePower") ? 1 : -1;
+	}
+
+	/** Precise controls take priority over ordinary keys only while targeting. */
+	applyPowerKey(event: InputKeyEvent, down: boolean): boolean {
+		return this.#precise && this.#powerInput.apply(event, down);
+	}
+
+	/** Settings changes retire held power before accepting the new map. */
+	replacePowerBindings(bindings: InputBindings<PreciseJumpAction>): void {
+		this.#powerHeld.clear();
+		this.#powerInput.replaceBindings(bindings);
 	}
 
 	/** Toggle client-local forward drive, paused while precise jump owns movement. */
@@ -56,6 +97,10 @@ export class ClientInputArbiter {
 	}
 
 	applyAction(action: CharacterAction, down: boolean): void {
+		if (this.#precise && (action === "forward" || action === "backward")) {
+			this.#held.delete(action);
+			return;
+		}
 		if (down) {
 			if (this.#held.has(action)) return;
 			this.#held.add(action);
@@ -66,8 +111,10 @@ export class ClientInputArbiter {
 			return;
 		}
 		if (this.#precise) {
-			if (down && (action === "forward" || action === "backward"))
-				this.cancelAutoRun();
+			if (action === "turnLeft" || action === "turnRight") {
+				this.#ordinary.applyAction(action, down);
+				return;
+			}
 			if (action === "jump" && down) {
 				this.#suppressJumpUntilRelease = true;
 				this.#onActivate();
@@ -85,6 +132,10 @@ export class ClientInputArbiter {
 		this.#precise = true;
 		this.#suppressJumpUntilRelease = this.#held.has("jump");
 		this.#ordinary.reset();
+		for (const action of this.#held) {
+			if (action === "turnLeft" || action === "turnRight")
+				this.#ordinary.restoreHeldAction(action);
+		}
 		this.#onEnter();
 		return true;
 	}
@@ -107,6 +158,8 @@ export class ClientInputArbiter {
 	deactivate(): void {
 		if (!this.#precise) return;
 		this.#precise = false;
+		this.#powerHeld.clear();
+		this.#powerInput.reset();
 		this.#ordinary.reset();
 		for (const action of this.#held) {
 			if (action !== "jump") this.#ordinary.restoreHeldAction(action);
@@ -119,6 +172,8 @@ export class ClientInputArbiter {
 		const cancel = this.#precise;
 		this.#precise = false;
 		this.#held.clear();
+		this.#powerHeld.clear();
+		this.#powerInput.reset();
 		this.#suppressJumpUntilRelease = false;
 		this.#ordinary.reset();
 		this.#retireAutoRun(true);

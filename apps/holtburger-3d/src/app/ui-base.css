@@ -89,8 +89,8 @@
 		/* Minimum keycap dimensions, relative to the surrounding shortcut text. */
 		--ui-keycap-size: 1.65em;
 		/* Jump HUD density; outer bounds and position belong to HUD layout. */
-		--ui-jump-bar-width: 16px;
-		--ui-jump-readout-font-size: 1.6rem;
+		--ui-jump-bar-width: 13px;
+		--ui-jump-readout-font-size: 1.15rem;
 		--ui-jump-gap: 12px;
 		--ui-jump-fill-color: var(--ui-color-accent);
 		/* Party HUD density. Row heights and three internal gaps determine the cell height. */

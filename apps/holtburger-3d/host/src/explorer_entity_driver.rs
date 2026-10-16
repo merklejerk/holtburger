@@ -1125,13 +1125,12 @@ fn resolve_spawn_placement(
         return Ok(candidate_pose);
     }
 
-    // Only an accepted outdoor result may leave the authored EnvCell frame. Clear the indoor
-    // selector before coordinate-derived owner/cell normalization so an exit is canonicalized
+    // Only an accepted outdoor result may leave the authored EnvCell frame. Reanchor into an
+    // outdoor frame before coordinate-derived owner normalization so an exit is canonicalized
     // exactly once and missing indoor topology cannot masquerade as an outdoor spawn.
-    candidate_pose.landblock_id = Guid(candidate_pose.landblock_id.0 & 0xffff_0000);
     candidate_pose
-        .normalize_outdoor_landblock_frame()
-        .map(|pose| pose.normalize_outdoor_cell())
+        .reanchor_to_landblock_owner(anchor)
+        .and_then(WorldPosition::normalize_outdoor_landblock_frame)
         .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))
 }
 

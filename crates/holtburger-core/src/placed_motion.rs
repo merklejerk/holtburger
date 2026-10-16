@@ -48,12 +48,7 @@ pub fn present_placed_motion_pose(
     rotation: Quaternion,
 ) -> Result<WorldPosition> {
     let presented = present_placed_motion_point(path.anchor(), point)?;
-    let mut pose = WorldPosition {
-        landblock_id: Guid(presented.owner.0 & 0xffff_0000),
-        coords: presented.coords,
-        rotation,
-    }
-    .normalize_outdoor_cell();
+    let mut pose = WorldPosition::from_outdoor_frame(presented.owner, presented.coords, rotation);
     if let Some(cell) = presented.cell {
         pose.landblock_id = cell;
     }
@@ -130,4 +125,46 @@ pub fn reanchor_point(point: Vector3, source_owner: Guid, target_owner: Guid) ->
 /// Normalizes any outdoor-cell or EnvCell selector to its collision-product owner.
 pub const fn landblock_key(id: Guid) -> Guid {
     Guid((id.0 & 0xffff_0000) | 0xffff)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_content::{
+        LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface,
+    };
+    use holtburger_world::{
+        CollisionScene, MotionWaypoint, MotionWaypointPlacement, PlacedMotionPathRequest,
+    };
+
+    #[test]
+    fn outdoor_motion_presentation_preserves_a_complete_region_zero_position() {
+        let anchor = Guid(0x0000_ffff);
+        let center = Vector3::new(66.25, 189.75, 1.35);
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: anchor.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(Vec::new(), Vec::new()),
+            })
+            .unwrap();
+        let path = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: None,
+                anchor,
+                start: center,
+                radius: 0.2,
+                waypoints: &[MotionWaypoint {
+                    center,
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+        let pose =
+            present_placed_motion_pose(&path, path.final_point(), Quaternion::identity()).unwrap();
+        assert_eq!(pose.landblock_id, Guid(0x0000_0018));
+        assert_eq!(pose.coords, center);
+    }
 }

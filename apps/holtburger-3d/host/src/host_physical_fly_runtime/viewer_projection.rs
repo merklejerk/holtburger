@@ -8,7 +8,9 @@ use holtburger_world::{
 
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, report_placed_motion_recoveries};
 use crate::placed_motion_presentation::scene_point_to_pose;
-use holtburger_core::placed_motion::{landblock_key, present_placed_motion_point, reanchor_point};
+use holtburger_core::placed_motion::{
+    landblock_key, present_placed_motion_point, present_placed_motion_pose, reanchor_point,
+};
 
 use super::{
     ActivePhysicalFly, PhysicalFlyPathLeg, PhysicalFlyPathPoint, PhysicalFlyResidency,
@@ -43,7 +45,11 @@ pub(super) fn prepare_physical_fly_presentation(
         .iter()
         .map(|leg| {
             Ok(ChildSpatialBodyWaypoint {
-                parent_pose: placed_point_pose(&motion.path, leg.end())?,
+                parent_pose: present_placed_motion_pose(
+                    &motion.path,
+                    leg.end(),
+                    Quaternion::identity(),
+                )?,
                 end_fraction: leg.end_fraction(),
             })
         })
@@ -114,12 +120,7 @@ pub(super) fn scene_point_to_residency_pose(
         );
     }
     let coords = reanchor_point(derived.coords, derived_owner, owner);
-    let mut pose = WorldPosition {
-        landblock_id: Guid(owner.0 & 0xffff_0000),
-        coords,
-        rotation: Quaternion::identity(),
-    }
-    .normalize_outdoor_cell();
+    let mut pose = WorldPosition::from_outdoor_frame(owner, coords, Quaternion::identity());
     if let Some(cell) = cell {
         pose.landblock_id = cell;
     }
@@ -157,8 +158,8 @@ pub(super) fn pose_with_cell(mut pose: WorldPosition, cell: Option<Guid>) -> Res
         return Ok(pose);
     }
 
-    // Clear a stale EnvCell selector before normalization; low words >= 0x0100 identify interiors.
-    pose.landblock_id = Guid(pose.landblock_id.0 & 0xffff_0000);
+    // Retire the stale EnvCell through coordinate conversion, preserving null-source rejection.
+    pose = pose.reanchor_to_landblock_owner(landblock_key(pose.landblock_id))?;
     Ok(pose.normalize_outdoor_landblock_frame()?)
 }
 
@@ -194,20 +195,6 @@ fn presented_viewer_from_path(
         "presented viewer body disagrees with its accepted path"
     );
     Ok(PresentedViewer { body })
-}
-
-fn placed_point_pose(path: &PlacedMotionPath, point: &PlacedMotionPoint) -> Result<WorldPosition> {
-    let presented = present_placed_motion_point(path.anchor(), point)?;
-    let mut pose = WorldPosition {
-        landblock_id: Guid(presented.owner.0 & 0xffff_0000),
-        coords: presented.coords,
-        rotation: Quaternion::identity(),
-    }
-    .normalize_outdoor_cell();
-    if let Some(cell) = presented.cell {
-        pose.landblock_id = cell;
-    }
-    Ok(pose)
 }
 
 fn physical_fly_scene_residency(

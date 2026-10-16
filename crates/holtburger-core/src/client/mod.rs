@@ -1324,12 +1324,10 @@ impl ClientRuntime {
             }
             WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
             WorldEvent::ContractsStateUpdated => self.emit_contracts_state_updated(),
-            WorldEvent::ContractMembershipChanged(change) => {
-                if self.state == ClientState::InWorld {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::ContractMembershipChanged(change.clone()));
-                }
+            WorldEvent::ContractMembershipChanged(change) if self.state == ClientState::InWorld => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ContractMembershipChanged(change.clone()));
             }
             WorldEvent::SquelchStateUpdated => self.emit_squelch_state_updated(),
             WorldEvent::AllegianceStateUpdated => self.emit_allegiance_snapshot(),

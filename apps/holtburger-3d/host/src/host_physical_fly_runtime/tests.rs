@@ -12,6 +12,24 @@ use holtburger_world::CollisionScene;
 
 use super::*;
 
+#[test]
+fn viewer_projection_preserves_region_zero_through_scene_input_and_cell_exit() {
+    let coords = [66.25, 1.35, -189.75];
+    let pose = scene_point_to_residency_pose(coords, Guid(0x0000_ffff), None).unwrap();
+    assert_eq!(pose.landblock_id, Guid(0x0000_0018));
+    assert_eq!(pose.coords, Vector3::new(coords[0], -coords[2], coords[1]));
+    let indoor = WorldPosition {
+        landblock_id: Guid(0x0000_0100),
+        ..pose
+    };
+    assert_eq!(pose_with_cell(indoor, None).unwrap(), pose);
+}
+
+#[test]
+fn viewer_cell_exit_rejects_a_missing_position() {
+    assert!(pose_with_cell(WorldPosition::default(), None).is_err());
+}
+
 #[derive(Default)]
 struct FlatCollisionSource {
     loaded: Mutex<Vec<u32>>,

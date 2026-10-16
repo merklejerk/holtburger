@@ -3288,19 +3288,9 @@ pub(super) fn anchor_point_to_outdoor_position(
     rotation: holtburger_common::Quaternion,
 ) -> WorldPosition {
     let Some(owner) = outdoor_landblock_owner_at(anchor, point) else {
-        return WorldPosition {
-            landblock_id: Guid(anchor.0 & 0xffff_0000),
-            coords: point,
-            rotation,
-        };
+        return WorldPosition::from_outdoor_frame(anchor, point, rotation);
     };
-    WorldPosition {
-        // A pose carries an outdoor cell selector, not the root record's 0xFFFF selector.
-        landblock_id: Guid(owner.0 & 0xffff_0000),
-        coords: anchor_to_landblock(point, anchor, owner),
-        rotation,
-    }
-    .normalize_outdoor_cell()
+    WorldPosition::from_outdoor_frame(owner, anchor_to_landblock(point, anchor, owner), rotation)
 }
 
 #[cfg(test)]
@@ -3317,6 +3307,21 @@ mod tests {
     use holtburger_dat::physics::{BspLeaf, BspNode};
 
     use super::*;
+
+    #[test]
+    fn outdoor_pose_construction_keeps_region_zero_valid_inside_and_beyond_the_landscape() {
+        let rotation = Quaternion::identity();
+        for point in [
+            Vector3::new(66.25, 189.75, 1.35),
+            Vector3::new(-2.25, 189.75, 1.35),
+        ] {
+            let pose = anchor_point_to_outdoor_position(Guid(0x0000_ffff), point, rotation);
+            assert_ne!(pose.landblock_id, Guid::NULL);
+            assert_eq!(pose.landblock_coords(), (0, 0));
+            assert_eq!(pose.coords, point);
+            assert_eq!(pose.rotation, rotation);
+        }
+    }
 
     #[test]
     fn aperture_membership_ignores_repeated_corners() {

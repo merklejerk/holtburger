@@ -1,4 +1,4 @@
-//! Conservative correlation of name-only server feedback with successful attack and cast requests.
+//! Best-effort correlation of name-only server feedback with successful attack and cast requests.
 
 use super::server_combat_text::TextCombatSource;
 use super::types::CombatOutcomeAttribution;
@@ -75,11 +75,10 @@ impl CombatOutcomeAttributor {
         }
     }
 
-    /// Retained same-name creatures veto ambiguity; they never establish attack context.
+    /// Resolve against successfully sent targets; unrelated same-name creatures are not candidates.
     pub(super) fn resolve(
         &mut self,
         defender_name: &str,
-        matching_creatures: impl Iterator<Item = Guid>,
         now: Instant,
     ) -> CombatOutcomeAttribution {
         self.retired
@@ -89,7 +88,6 @@ impl CombatOutcomeAttributor {
             self.active
                 .iter()
                 .chain(self.retired.iter().map(|entry| &entry.target)),
-            matching_creatures,
         )
     }
 
@@ -116,12 +114,11 @@ impl CombatOutcomeAttributor {
         }
     }
 
-    /// Select source-appropriate hints, then use the same conservative identity decision.
+    /// Select source-appropriate hints, then use the same best-effort identity decision.
     pub(super) fn resolve_text(
         &mut self,
         defender_name: &str,
         source: TextCombatSource<'_>,
-        matching_creatures: impl Iterator<Item = Guid>,
         now: Instant,
     ) -> CombatOutcomeAttribution {
         self.casts
@@ -141,7 +138,7 @@ impl CombatOutcomeAttributor {
             .iter()
             .chain(self.retired.iter().map(|entry| &entry.target))
             .filter(|_| source == TextCombatSource::Periodic);
-        resolve_candidates(defender_name, casts.chain(physical), matching_creatures)
+        resolve_candidates(defender_name, casts.chain(physical))
     }
 
     /// World/session discontinuities invalidate all correlation hints.
@@ -152,21 +149,18 @@ impl CombatOutcomeAttributor {
     }
 }
 
-/// Same-GUID hints corroborate one identity; any different GUID vetoes it.
+/// Same-GUID hints corroborate one identity; distinct matching history targets remain ambiguous.
+/// ACE Player_Melee.cs:333-349 sends identical name-only feedback for primary and cleave targets.
+/// Best-effort cosmetic placement accepts that same-name secondaries may resolve to the primary.
 fn resolve_candidates<'a>(
     defender_name: &str,
     candidates: impl Iterator<Item = &'a AttackTarget>,
-    matching_creatures: impl Iterator<Item = Guid>,
 ) -> CombatOutcomeAttribution {
     let mut candidates = candidates.filter(|target| target.name.as_deref() == Some(defender_name));
     let Some(candidate) = candidates.next() else {
         return CombatOutcomeAttribution::Unplaced;
     };
-    if candidates.any(|other| other.guid != candidate.guid)
-        || matching_creatures
-            .into_iter()
-            .any(|guid| guid != candidate.guid)
-    {
+    if candidates.any(|other| other.guid != candidate.guid) {
         return CombatOutcomeAttribution::Unplaced;
     }
     CombatOutcomeAttribution::Attributed {
@@ -179,7 +173,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cast_sources_refresh_expire_and_share_identity_veto_without_overwriting_physical() {
+    fn cast_sources_refresh_expire_and_preserve_history_ambiguity_without_overwriting_physical() {
         let mut owner = CombatOutcomeAttributor::default();
         let now = Instant::now();
         owner.sent(Guid(1), Some("Drudge"), now);
@@ -193,51 +187,31 @@ mod tests {
             TextCombatSource::Resistance,
         ] {
             assert_eq!(
-                owner.resolve_text("Drudge", source, [].into_iter(), now),
+                owner.resolve_text("Drudge", source, now),
                 CombatOutcomeAttribution::Attributed { target: Guid(2) }
             );
         }
         assert_eq!(
-            owner.resolve("Drudge", [].into_iter(), now),
+            owner.resolve("Drudge", now),
             CombatOutcomeAttribution::Attributed { target: Guid(1) }
         );
         assert_eq!(
-            owner.resolve_text("Drudge", TextCombatSource::Periodic, [].into_iter(), now),
+            owner.resolve_text("Drudge", TextCombatSource::Periodic, now),
             CombatOutcomeAttribution::Unplaced
         );
         assert_eq!(
-            owner.resolve_text(
-                "Drudge",
-                TextCombatSource::NamedSpell("Other"),
-                [].into_iter(),
-                now
-            ),
-            CombatOutcomeAttribution::Unplaced
-        );
-        assert_eq!(
-            owner.resolve_text(
-                "Drudge",
-                TextCombatSource::Resistance,
-                [Guid(3)].into_iter(),
-                now
-            ),
+            owner.resolve_text("Drudge", TextCombatSource::NamedSpell("Other"), now),
             CombatOutcomeAttribution::Unplaced
         );
         owner.sent_cast(Guid(3), Some("Drudge"), "Flame", now);
         assert_eq!(
-            owner.resolve_text(
-                "Drudge",
-                TextCombatSource::NamedSpell("Flame"),
-                [].into_iter(),
-                now
-            ),
+            owner.resolve_text("Drudge", TextCombatSource::NamedSpell("Flame"), now),
             CombatOutcomeAttribution::Unplaced
         );
         assert_eq!(
             owner.resolve_text(
                 "Drudge",
                 TextCombatSource::Resistance,
-                [].into_iter(),
                 now + ATTRIBUTION_HISTORY_LIFETIME
             ),
             CombatOutcomeAttribution::Unplaced
@@ -246,7 +220,6 @@ mod tests {
             owner.resolve_text(
                 "Drudge",
                 TextCombatSource::Periodic,
-                [].into_iter(),
                 now + ATTRIBUTION_HISTORY_LIFETIME
             ),
             CombatOutcomeAttribution::Attributed { target: Guid(1) }
@@ -262,7 +235,6 @@ mod tests {
             owner.resolve_text(
                 "Drudge",
                 TextCombatSource::Resistance,
-                [].into_iter(),
                 now + ATTRIBUTION_HISTORY_LIFETIME
             ),
             CombatOutcomeAttribution::Unplaced
@@ -283,52 +255,33 @@ mod tests {
         }
         assert_eq!(owner.casts.len(), MAX_RECENT_TARGETS);
         assert_eq!(
-            owner.resolve_text(
-                "Target 0",
-                TextCombatSource::Resistance,
-                [].into_iter(),
-                now
-            ),
+            owner.resolve_text("Target 0", TextCombatSource::Resistance, now),
             CombatOutcomeAttribution::Unplaced
         );
         owner.sent_cast(Guid(100), None, "Flame", now);
         owner.sent_cast(Guid(101), Some("Unknown"), "Other Spell", now);
         assert_eq!(
-            owner.resolve_text(
-                "Target 100",
-                TextCombatSource::NamedSpell("Flame"),
-                [].into_iter(),
-                now
-            ),
+            owner.resolve_text("Target 100", TextCombatSource::NamedSpell("Flame"), now),
             CombatOutcomeAttribution::Unplaced
         );
         assert_eq!(
-            owner.resolve_text(
-                "Unknown",
-                TextCombatSource::NamedSpell("Flame"),
-                [].into_iter(),
-                now
-            ),
+            owner.resolve_text("Unknown", TextCombatSource::NamedSpell("Flame"), now),
             CombatOutcomeAttribution::Unplaced
         );
     }
 
     #[test]
-    fn active_repeat_survives_history_expiry_but_duplicate_creatures_veto_it() {
+    fn active_repeat_survives_history_expiry_and_requires_a_matching_name() {
         let mut owner = CombatOutcomeAttributor::default();
         let start = Instant::now();
         owner.sent(Guid(1), Some("Drudge"), start);
         let later = start + ATTRIBUTION_HISTORY_LIFETIME * 2;
         assert_eq!(
-            owner.resolve("Drudge", [Guid(1)].into_iter(), later),
+            owner.resolve("Drudge", later),
             CombatOutcomeAttribution::Attributed { target: Guid(1) }
         );
         assert_eq!(
-            owner.resolve("Drudge", [Guid(1), Guid(2)].into_iter(), later),
-            CombatOutcomeAttribution::Unplaced
-        );
-        assert_eq!(
-            owner.resolve("Other", [Guid(3)].into_iter(), later),
+            owner.resolve("Other", later),
             CombatOutcomeAttribution::Unplaced
         );
     }
@@ -341,24 +294,16 @@ mod tests {
         owner.retire(start);
         owner.sent(Guid(2), Some("Drudge"), start);
         assert_eq!(
-            owner.resolve("Drudge", [Guid(2)].into_iter(), start),
+            owner.resolve("Drudge", start),
             CombatOutcomeAttribution::Unplaced
         );
         assert_eq!(
-            owner.resolve(
-                "Drudge",
-                [Guid(2)].into_iter(),
-                start + ATTRIBUTION_HISTORY_LIFETIME
-            ),
+            owner.resolve("Drudge", start + ATTRIBUTION_HISTORY_LIFETIME),
             CombatOutcomeAttribution::Attributed { target: Guid(2) }
         );
         owner.clear();
         assert_eq!(
-            owner.resolve(
-                "Drudge",
-                [Guid(2)].into_iter(),
-                start + ATTRIBUTION_HISTORY_LIFETIME
-            ),
+            owner.resolve("Drudge", start + ATTRIBUTION_HISTORY_LIFETIME),
             CombatOutcomeAttribution::Unplaced
         );
     }
@@ -369,7 +314,7 @@ mod tests {
         let now = Instant::now();
         owner.sent(Guid(1), None, now);
         assert_eq!(
-            owner.resolve("Unknown", [].into_iter(), now),
+            owner.resolve("Unknown", now),
             CombatOutcomeAttribution::Unplaced
         );
         owner.sent(Guid(1), Some("Drudge"), now);
@@ -377,7 +322,7 @@ mod tests {
         owner.sent(Guid(1), Some("Drudge"), now);
         assert!(owner.retired.is_empty());
         assert_eq!(
-            owner.resolve("Drudge", [].into_iter(), now),
+            owner.resolve("Drudge", now),
             CombatOutcomeAttribution::Attributed { target: Guid(1) }
         );
     }
@@ -392,11 +337,11 @@ mod tests {
         }
         assert_eq!(owner.retired.len(), MAX_RECENT_TARGETS);
         assert_eq!(
-            owner.resolve("Target 0", [].into_iter(), now),
+            owner.resolve("Target 0", now),
             CombatOutcomeAttribution::Unplaced
         );
         assert_eq!(
-            owner.resolve(&format!("Target {MAX_RECENT_TARGETS}"), [].into_iter(), now),
+            owner.resolve(&format!("Target {MAX_RECENT_TARGETS}"), now),
             CombatOutcomeAttribution::Attributed {
                 target: Guid(MAX_RECENT_TARGETS as u32)
             }

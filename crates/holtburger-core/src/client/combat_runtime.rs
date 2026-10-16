@@ -9,7 +9,7 @@ use super::types::{
 };
 use super::{ClientRuntime, ClientState};
 use anyhow::Result;
-use holtburger_common::properties::{PropertyString, WorldObjectExt, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{PropertyString, WorldObjectPropertyAccessors};
 use holtburger_common::{CharacterOption, Guid, Vector3};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::MotionStance;
@@ -471,24 +471,15 @@ impl ClientRuntime {
         Ok(())
     }
 
-    /// Resolve correlation once while authoritative attack and retained entity facts coexist.
+    /// Resolve name-only feedback once against successful physical attack history.
     pub(super) fn attribute_combat_outcome(
         &mut self,
         name: &str,
         now: Instant,
     ) -> super::types::CombatOutcomeContext {
-        let matching = self
-            .world
-            .entities
-            .entities
-            .values()
-            .filter(|entity| {
-                entity.is_creature() && entity.get_string_prop(PropertyString::Name) == Some(name)
-            })
-            .map(|entity| entity.guid);
         super::types::CombatOutcomeContext {
             world_generation: self.world_generation,
-            attribution: self.combat_attribution.resolve(name, matching, now),
+            attribution: self.combat_attribution.resolve(name, now),
         }
     }
 
@@ -500,23 +491,12 @@ impl ClientRuntime {
         now: Instant,
     ) -> Option<super::types::ServerTextCombatOutcome> {
         let parsed = super::server_combat_text::recognize(chat_type, message)?;
-        let matching = self
-            .world
-            .entities
-            .entities
-            .values()
-            .filter(|entity| {
-                entity.is_creature()
-                    && entity.get_string_prop(PropertyString::Name) == Some(parsed.defender_name)
-            })
-            .map(|entity| entity.guid);
         Some(super::types::ServerTextCombatOutcome {
             context: super::types::CombatOutcomeContext {
                 world_generation: self.world_generation,
                 attribution: self.combat_attribution.resolve_text(
                     parsed.defender_name,
                     parsed.source,
-                    matching,
                     now,
                 ),
             },
@@ -953,17 +933,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_cast_and_completed_busy_flow_through_network_text_once_until_reset() {
+    async fn successful_cast_with_same_name_creatures_attributes_network_text_until_reset() {
         use super::super::types::{CombatOutcomeAttribution, ServerTextCombatOutcomeKind};
         let mut client = client(0);
-        client
-            .world
-            .entities
-            .insert(holtburger_world::entity::Entity::new(
-                Guid(2),
+        // Only GUID 2 receives a targeted cast; the other same-name creatures are unrelated.
+        for guid in [Guid(2), Guid(3), Guid(4), Guid(5)] {
+            let mut entity = holtburger_world::entity::Entity::new(
+                guid,
                 "Drudge".into(),
                 WorldPosition::default(),
-            ));
+            );
+            entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            client.world.entities.insert(entity);
+        }
         let aim = SpellCastAim::Normal {
             selection: Some(Guid(2)),
         };
@@ -1084,17 +1066,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_physical_send_attributes_feedback_and_generation_reset_invalidates_it() {
+    async fn successful_physical_send_with_same_name_creatures_attributes_feedback_until_reset() {
         use super::super::types::CombatOutcomeAttribution;
         let mut client = client(0);
-        client
-            .world
-            .entities
-            .insert(holtburger_world::entity::Entity::new(
-                Guid(2),
+        // Only GUID 2 receives an attack request; the other same-name creatures are unrelated.
+        for guid in [Guid(2), Guid(3), Guid(4), Guid(5)] {
+            let mut entity = holtburger_world::entity::Entity::new(
+                guid,
                 "Drudge".into(),
                 WorldPosition::default(),
-            ));
+            );
+            entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            client.world.entities.insert(entity);
+        }
         let now = Instant::now();
         client
             .send_targeted_attack(

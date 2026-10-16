@@ -17,6 +17,21 @@ export async function probeClientHud(
 	client,
 	{ options, viteUrl, evaluate, evaluateExpression, delay },
 ) {
+	await client.send("Browser.grantPermissions", {
+		origin: new URL(viteUrl).origin,
+		permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+	});
+	await evaluateExpression(
+		client,
+		`(async () => {
+			const { runClientLocationCommand } = await import('/src/client/client-location-command.ts');
+			const report = 'Player pose\\nCamera pose';
+			let printed = null;
+			const handled = await runClientLocationCommand('@loc', () => report, line => { printed = line.message; });
+			if (!handled || printed !== report || await navigator.clipboard.readText() !== printed)
+				throw new Error('@loc must print and copy identical repro text.');
+		})()`,
+	);
 	const captureImage = async () =>
 		options.screenshotPath === null
 			? null

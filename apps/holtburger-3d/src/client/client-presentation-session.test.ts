@@ -40,6 +40,7 @@ import type {
 } from "../lib/game/runtime/scene-availability";
 import type { DynamicEntityRealizationDisposition } from "../lib/game/runtime/dynamic-entity-presentation";
 import { ClientPresentationSession } from "./client-presentation-session";
+import { formatClientLocation } from "./client-location-command";
 import {
 	clientWeatherPresets,
 	CLIENT_ENVIRONMENT_INTERVAL_MS,
@@ -581,9 +582,26 @@ describe("ClientPresentationSession", () => {
 
 		await presentation.start();
 		expect(presentation.frame(1_000).status.kind).toBe("loading-player");
+		expect(() => presentation.readLocationReport()).toThrow(
+			"Player location is unavailable.",
+		);
 
 		transport.emit("client-local-player-established", { playerGuid });
+		expect(() => presentation.readLocationReport()).toThrow(
+			"Presented camera location is unavailable.",
+		);
 		expect(presentation.frame(1_016).rendered).toBe(true);
+		const player = currentState(playerGuid).dynamic.entities.find(
+			(entity) => entity.identity.guid === playerGuid,
+		);
+		const view = runtime.primaryViews.at(-1);
+		if (player?.placement.kind !== "world" || view === undefined)
+			throw new Error(
+				"Location fixture requires a world player and presented camera.",
+			);
+		expect(presentation.readLocationReport()).toBe(
+			formatClientLocation(player.placement.pose, view.camera.placement),
+		);
 		expect(runtime.viewerLightGuid).toBe(playerGuid);
 		const landblockOrigin = createLandblockWorldOrigin("0x0100ffff");
 		expect(presentation.readMinimapFrame()).toMatchObject({

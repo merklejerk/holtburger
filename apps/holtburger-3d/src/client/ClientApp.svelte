@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { runClientLocationCommand } from "./client-location-command";
 	import {
 		compactInputHint,
 		inputDisplayPlatform,
@@ -1055,8 +1056,19 @@
 	}
 
 	async function sendChat(message: string): Promise<void> {
-		if (session === null) throw new Error("Chat session is unavailable.");
-		await session.sendChat(message);
+		const currentSession = session;
+		if (currentSession === null)
+			throw new Error("Chat session is unavailable.");
+		const handled = await runClientLocationCommand(
+			message,
+			() => {
+				if (presentationSession === null)
+					throw new Error("World presentation is unavailable.");
+				return presentationSession.readLocationReport();
+			},
+			appendChatLine,
+		);
+		if (!handled) await currentSession.sendChat(message);
 		sentChatHistory = recordSentChat(
 			sentChatHistory,
 			message,

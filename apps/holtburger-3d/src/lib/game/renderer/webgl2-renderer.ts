@@ -358,6 +358,9 @@ const FRONTEND_CLEAR_COLOR = normalizedRgbaColor(
 	SHARED_FRONTEND_TUNING.rendering.clearColor,
 );
 
+/** Opaque background for sealed interiors and the isolated portal tunnel. */
+const BLACK_SCENE_CLEAR_COLOR = [0, 0, 0, 1] as const;
+
 /** Stand-in before any emitter has published records, so the context is never partially built. */
 const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
 	data: new Float32Array(0),
@@ -383,6 +386,8 @@ function anchorRelativePosition(
 }
 
 interface SceneShading {
+	/** Environment/fog clear color shared by views that can see outdoors. */
+	readonly clearColor: readonly [number, number, number, number];
 	/** Effective optional near-field presentation policy resolved once for this frame. */
 	readonly ambientOcclusion: EffectiveAmbientOcclusionPolicy;
 	readonly fog: FrameInput["environment"]["distanceFog"];
@@ -410,6 +415,12 @@ interface SceneShading {
  * resolved frame environment. Fog stays disabled exactly as this probe path always had it.
  */
 const PROBE_SHADING: SceneShading = {
+	clearColor: [
+		FRONTEND_CLEAR_COLOR.red,
+		FRONTEND_CLEAR_COLOR.green,
+		FRONTEND_CLEAR_COLOR.blue,
+		FRONTEND_CLEAR_COLOR.alpha,
+	],
 	ambientOcclusion: { kind: "disabled" },
 	fog: null,
 	// Probe views measure world draws only; the sky contributes no depth and no selection.
@@ -671,6 +682,8 @@ type ObjectColorSubmission = PreparedObjectFrameInput | PreparedDynamicBlended;
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedViewGeometry extends PreparedPortalProjection {
+	/** Runtime-owned cell classification selecting this view's uncovered background. */
+	readonly cameraInsideSealedCell: boolean;
 	/** Independent retained outputs for this camera, shared by its color and auxiliary passes. */
 	readonly submissionStorage: ViewSubmissionStorage;
 	/** Camera position expressed in the view's anchor-relative render frame. */
@@ -1644,7 +1657,9 @@ export class WebGL2Renderer implements Renderer {
 			MAX_DYNAMIC_LIGHTS,
 		);
 		this.#frameSelectionMetrics.droppedLights += fittedDynamic.dropped;
+		const clear = fog?.color ?? input.environment.backgroundColor;
 		const shading: SceneShading = {
+			clearColor: [clear.red, clear.green, clear.blue, clear.alpha],
 			ambientOcclusion,
 			fog,
 			sky: input.environment.sky,
@@ -1661,7 +1676,7 @@ export class WebGL2Renderer implements Renderer {
 				input.views.some((view) => view.cameraInsideSealedCell),
 			),
 		};
-		this.#beginFrame(input.environment, shading);
+		this.#beginFrame(shading.clearColor);
 		this.#particlePass?.beginFrame(this.#particleRecords);
 		if (profile && setupStartedAt !== undefined) {
 			profile.finishCpuPhase("setup", setupStartedAt);
@@ -1706,13 +1721,6 @@ export class WebGL2Renderer implements Renderer {
 				);
 			}
 		} else {
-			const clear = fog?.color ?? input.environment.backgroundColor;
-			const clearColor = [
-				clear.red,
-				clear.green,
-				clear.blue,
-				clear.alpha,
-			] as const;
 			const pipeline = (this.#portalScopeAtlasPipeline ??=
 				new WebGL2PortalScopeAtlasPipeline(this.#gl));
 			const plans = input.views.map((view) => {
@@ -1741,7 +1749,6 @@ export class WebGL2Renderer implements Renderer {
 			for (const plan of plans) {
 				this.#executePortalScopeAtlasFrame(
 					plan,
-					clearColor,
 					shading,
 					input.frameSettings,
 					profile,
@@ -1788,7 +1795,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 
 		const target = this.#acquireFlatSceneTarget();
-		this.#beginFlatOpaqueScene(target);
+		this.#beginFlatOpaqueScene(target, BLACK_SCENE_CLEAR_COLOR);
 		this.#drawPortalTransitionTunnel(
 			target,
 			input.frameSettings.showRetailHiddenGeometry,
@@ -1968,12 +1975,6 @@ export class WebGL2Renderer implements Renderer {
 		);
 		this.#executePortalScopeAtlasFrame(
 			plan,
-			[
-				FRONTEND_CLEAR_COLOR.red,
-				FRONTEND_CLEAR_COLOR.green,
-				FRONTEND_CLEAR_COLOR.blue,
-				FRONTEND_CLEAR_COLOR.alpha,
-			],
 			PROBE_SHADING,
 			frameSettings,
 			null,
@@ -2046,15 +2047,14 @@ export class WebGL2Renderer implements Renderer {
 	/** Execute the same already-prepared compositor schedule for continuous frames and probes. */
 	#executePortalScopeAtlasFrame(
 		plan: PreparedPortalView,
-		clearColor: readonly [number, number, number, number],
 		shading: SceneShading,
 		frameSettings: FrameSettings,
 		profile: WebGL2FrameProfileCapture | null,
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): void {
 		const { view, frame, particlesByScope } = plan;
+		const clearColor = this.#viewClearColor(view, shading);
 		this.#executeOutdoorShadows(plan.shadows, profile);
-		const gl = this.#gl;
 		const target = this.#acquireFlatSceneTarget();
 		const setupGpu = profile?.beginGpuPhase("portalComposition") ?? null;
 		const setupStartedAt = profile?.beginCpuPhase();
@@ -2062,10 +2062,7 @@ export class WebGL2Renderer implements Renderer {
 			WebGL2PortalScopeAtlasPipeline["beginOpaqueScene"]
 		>;
 		try {
-			// Explicit rather than inherited from `#beginFrame`, because the harness probe seam
-			// reaches this schedule without one.
-			gl.clearColor(...clearColor);
-			this.#beginFlatOpaqueScene(target);
+			this.#beginFlatOpaqueScene(target, clearColor);
 			portalTargets = pipeline.beginOpaqueScene(frame, clearColor);
 		} finally {
 			if (profile && setupStartedAt !== undefined) {
@@ -2372,18 +2369,18 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	#beginFrame(
-		environment: FrameInput["environment"],
+	#viewClearColor(
+		view: PreparedViewGeometry,
 		shading: SceneShading,
-	): void {
+	): readonly [number, number, number, number] {
+		return view.cameraInsideSealedCell
+			? BLACK_SCENE_CLEAR_COLOR
+			: shading.clearColor;
+	}
+
+	#beginFrame(clearColor: readonly [number, number, number, number]): void {
 		const gl = this.#gl;
-		const clearColor = shading.fog?.color ?? environment.backgroundColor;
-		gl.clearColor(
-			clearColor.red,
-			clearColor.green,
-			clearColor.blue,
-			clearColor.alpha,
-		);
+		gl.clearColor(...clearColor);
 		gl.colorMask(true, true, true, true);
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -2419,6 +2416,7 @@ export class WebGL2Renderer implements Renderer {
 			anchorCoordinates,
 			anchorLandblockId,
 			camera,
+			cameraInsideSealedCell: input.cameraInsideSealedCell,
 			cameraPosition,
 			clipFromAnchor,
 			frustum: createFrustumFromClipMatrix(clipFromAnchor, cameraPosition),
@@ -3659,7 +3657,7 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const target = this.#acquireFlatSceneTarget();
-		this.#beginFlatOpaqueScene(target);
+		this.#beginFlatOpaqueScene(target, this.#viewClearColor(view, shading));
 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
 		if (domain === "exterior") {
 			this.#submitSkyPhase(view, shading, "before-world", profile, null);
@@ -4082,6 +4080,7 @@ export class WebGL2Renderer implements Renderer {
 				entityAnalyticShadows: null,
 			};
 			const portalShading: SceneShading = {
+				clearColor: BLACK_SCENE_CLEAR_COLOR,
 				authoredLightResponse: 0,
 				ambientOcclusion: { kind: "disabled" },
 				anchorOrigin: { x: 0, z: 0 },
@@ -4314,8 +4313,11 @@ export class WebGL2Renderer implements Renderer {
 		});
 	}
 
-	/** Bind and clear one complete flat-scene target before any world submission. */
-	#beginFlatOpaqueScene(target: WebGL2FlatSceneTargetSet): void {
+	/** Bind and clear one complete flat-scene target before any scene submission. */
+	#beginFlatOpaqueScene(
+		target: WebGL2FlatSceneTargetSet,
+		clearColor: readonly [number, number, number, number],
+	): void {
 		const gl = this.#gl;
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
 		gl.viewport(0, 0, target.extent.width, target.extent.height);
@@ -4328,6 +4330,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.disable(gl.CULL_FACE);
 		gl.disable(gl.SCISSOR_TEST);
 		gl.disable(gl.STENCIL_TEST);
+		gl.clearColor(...clearColor);
 		gl.clearDepth(1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 	}

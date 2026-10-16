@@ -393,21 +393,10 @@ void main() {
 			float positiveDepth = positiveClipPosition.z / positiveClipPosition.w * 0.5 + 0.5;
 			float negativeDepth = negativeClipPosition.z / negativeClipPosition.w * 0.5 + 0.5;
 			sourceOcclusionDepth = max(positiveDepth, negativeDepth);
-			// Independently triangulated shell and aperture edges do not have identical raster
-			// coverage. Conservatively dilate source opaque depth by one pixel so a subpixel coverage
-			// crack cannot expose the destination through a material-bearing portal.
-			ivec2 atlasMinimum = ivec2(scope.atlasAndScreenOrigin.xy);
-			ivec2 atlasMaximum = atlasMinimum + ivec2(extent) - ivec2(1);
-			for (int y = -1; y <= 1; y += 1) {
-				for (int x = -1; x <= 1; x += 1) {
-					if (x == 0 && y == 0) continue;
-					ivec2 samplePixel = clamp(atlasPixel + ivec2(x, y), atlasMinimum, atlasMaximum);
-					localOpaqueDepth = min(
-						localOpaqueDepth,
-						texelFetch(uSceneDepth, samplePixel, 0).r
-					);
-				}
-			}
+			// Only opaque depth at this pixel proves source coverage. Borrowing a neighbor's
+			// depth also closes genuine aperture-edge pixels, but supplies no wall color there,
+			// leaving the destination's background visible. Keep the coplanar tolerance above
+			// local to the surface that actually rendered this pixel.
 		}
 		bool occluded = vPolicy == ${PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL}u
 			? sourceOcclusionDepth >= localOpaqueDepth

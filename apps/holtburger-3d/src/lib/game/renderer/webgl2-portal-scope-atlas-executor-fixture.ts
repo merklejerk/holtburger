@@ -129,8 +129,10 @@ export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly expectedJunctionPixels: readonly number[];
 	/** Without a junction id, the same equal-depth advance stays rejected (today's behavior). */
 	readonly junctionAbsentEqualDepthIsRejected: boolean;
-	/** A coplanar source surface owns transform-rounding and raster-coverage seam pixels. */
+	/** A covered coplanar source surface wins despite independent transform rounding. */
 	readonly materialBearingCoplanarSurfaceOccludesMask: boolean;
+	/** A one-pixel opening remains visible even when its neighbors are coplanar walls. */
+	readonly materialBearingOpeningRetainsBoundaryPixels: boolean;
 	readonly strictPixels: readonly number[];
 	readonly expectedStrictPixels: readonly number[];
 	readonly straddlePixels: readonly number[];
@@ -161,8 +163,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			`Portal shader fixture requires a ${DRAWING_EXTENT.width}x${DRAWING_EXTENT.height} drawing buffer.`,
 		);
 	}
-	const materialBearingCoplanarSurfaceOccludesMask =
-		runMaterialBearingCoplanarFixture(gl);
+	const materialBearingBoundary = runMaterialBearingBoundaryFixture(gl);
 	const state = captureState(gl, METADATA_BINDING_POINT);
 	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
 	const executor = new WebGL2PortalScopeAtlasExecutor(
@@ -360,7 +361,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				strictPixels,
 				expectedStrictPixels,
 			),
-			materialBearingCoplanarSurfaceOccludesMask,
+			...materialBearingBoundary,
 			strictPixels: [...strictPixels],
 			expectedStrictPixels: [...expectedStrictPixels],
 			opaqueOcclusionMatchesOracle: pixelsMatch(
@@ -675,10 +676,14 @@ function createMaterialBearingCoplanarStream(
 	};
 }
 
-/** Run the coplanar depth/coverage regression without changing the main fixture's atlas history. */
-function runMaterialBearingCoplanarFixture(
+/** Check covered walls and genuine openings without changing the main fixture's atlas history. */
+function runMaterialBearingBoundaryFixture(
 	gl: WebGL2RenderingContext,
-): boolean {
+): Pick<
+	WebGL2PortalScopeAtlasExecutorFixtureResult,
+	| "materialBearingCoplanarSurfaceOccludesMask"
+	| "materialBearingOpeningRetainsBoundaryPixels"
+> {
 	const state = captureState(gl, METADATA_BINDING_POINT);
 	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
 	const executor = new WebGL2PortalScopeAtlasExecutor(
@@ -691,6 +696,7 @@ function runMaterialBearingCoplanarFixture(
 			atlas: ATLAS_EXTENT,
 			drawingBuffer: DRAWING_EXTENT,
 		});
+		let materialBearingCoplanarSurfaceOccludesMask = true;
 		seedSceneAtlas(gl, targets, 0.5);
 		for (const arrivalPlaneNormalZ of [-1, 1] as const) {
 			clearOutput(gl);
@@ -701,19 +707,23 @@ function runMaterialBearingCoplanarFixture(
 				targets,
 				traversalDepth: 1,
 			});
-			if (!pixelsMatch(readOutput(gl), solidPixels(ROOT_COLOR))) return false;
+			materialBearingCoplanarSurfaceOccludesMask &&= pixelsMatch(
+				readOutput(gl),
+				solidPixels(ROOT_COLOR),
+			);
 		}
-		// Reproduce the one-pixel coverage crack made by independently triangulating the shell and
-		// its aperture. Neighboring coplanar depth must conservatively retain source ownership.
+		// Clear color and depth together: an uncovered pixel is a real opening, even when
+		// coplanar wall samples surround it. Depth-only dilation must not close that opening.
+		const openingX = Math.floor(DRAWING_EXTENT.width / 2);
+		const expectedOpeningPixels = solidPixels(ROOT_COLOR);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
 		gl.enable(gl.SCISSOR_TEST);
-		gl.scissor(
-			Math.floor(DRAWING_EXTENT.width / 2),
-			0,
-			1,
-			DRAWING_EXTENT.height,
-		);
-		gl.clearBufferfv(gl.DEPTH, 0, new Float32Array([1]));
+		for (const pixel of CENTER_PIXELS) {
+			if (pixel % DRAWING_EXTENT.width !== openingX) continue;
+			gl.scissor(openingX, Math.floor(pixel / DRAWING_EXTENT.width), 1, 1);
+			clearCurrentTile(gl, CLEAR_COLOR, 1);
+			expectedOpeningPixels.set(MIDDLE_COLOR, pixel * 4);
+		}
 		gl.disable(gl.SCISSOR_TEST);
 		clearOutput(gl);
 		executor.execute({
@@ -723,8 +733,13 @@ function runMaterialBearingCoplanarFixture(
 			targets,
 			traversalDepth: 1,
 		});
-		if (!pixelsMatch(readOutput(gl), solidPixels(ROOT_COLOR))) return false;
-		return true;
+		return {
+			materialBearingCoplanarSurfaceOccludesMask,
+			materialBearingOpeningRetainsBoundaryPixels: pixelsMatch(
+				readOutput(gl),
+				expectedOpeningPixels,
+			),
+		};
 	} finally {
 		executor.destroy();
 		targetOwner.destroy();
@@ -1240,6 +1255,8 @@ function createParticleFixtureProgram(
 	gl.uniform1i(requireWebGL2Uniform(gl, program, "uMaterialKind"), 0);
 	gl.uniform1i(requireWebGL2Uniform(gl, program, "uPalettedClipMap"), 0);
 	gl.uniform1f(requireWebGL2Uniform(gl, program, "uAlphaTest"), 0);
+	// Match production opacity; the uniform's initial zero otherwise hides every fixture particle.
+	gl.uniform1f(requireWebGL2Uniform(gl, program, "uOpacityScale"), 1);
 	return {
 		color: requireWebGL2Uniform(gl, program, "uMaterialColor"),
 		depth: requireWebGL2Uniform(gl, program, "uDepth"),

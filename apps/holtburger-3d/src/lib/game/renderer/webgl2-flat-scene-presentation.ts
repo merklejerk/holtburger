@@ -477,10 +477,9 @@ export class WebGL2FlatScenePresentation {
 	/**
 	 * Replace the default framebuffer with the finished scene, graded if a grade is enabled.
 	 *
-	 * Depth is deliberately not republished: nothing draws or reads there after this call, so
-	 * the copy had no consumer. The depth *state* below still matters — `DEPTH_TEST` is enabled
-	 * once for the renderer's lifetime rather than per frame, so disabling it here would leave
-	 * every later frame drawing without a depth test.
+	 * Scene depth is not republished: the following combat HUD lane overlays the finished image
+	 * without testing depth. Each scene entry establishes its own depth state independently of
+	 * presentation and overlays.
 	 */
 	present(
 		target: WebGL2FlatSceneTargetSet,

@@ -4135,6 +4135,8 @@ export class WebGL2Renderer implements Renderer {
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
 		gl.viewport(0, 0, target.extent.width, target.extent.height);
 		gl.colorMask(true, true, true, true);
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(gl.LEQUAL);
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		gl.disable(gl.CULL_FACE);
@@ -4221,10 +4223,9 @@ export class WebGL2Renderer implements Renderer {
 	/**
 	 * Write one finished scene target to the default framebuffer.
 	 *
-	 * Both physical schedules end here, and this is the frame's only default-framebuffer write.
-	 * That is a deliberate invariant rather than an incidental one: it is what lets a whole-frame
-	 * presentation transform see every fragment — opaque, portal-composited, blended, and
-	 * particle — exactly once. Anything drawn after this call would escape that transform.
+	 * Both physical schedules present the complete world here, so grading and transition composition
+	 * see every world fragment exactly once. Unplaced combat feedback draws afterward as a HUD
+	 * overlay and bypasses those transforms.
 	 */
 	#presentFlatScene(
 		target: WebGL2FlatSceneTargetSet,
@@ -4319,6 +4320,9 @@ export class WebGL2Renderer implements Renderer {
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
 		gl.viewport(0, 0, target.extent.width, target.extent.height);
 		gl.colorMask(true, true, true, true);
+		// Opaque visibility must not depend on state left by presentation or HUD overlays.
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(gl.LEQUAL);
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		gl.disable(gl.CULL_FACE);

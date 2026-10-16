@@ -191,6 +191,9 @@ export class WebGL2PortalScopeAtlasPipeline {
 		gl.disable(gl.SCISSOR_TEST);
 		gl.disable(gl.STENCIL_TEST);
 		gl.colorMask(true, true, true, true);
+		// Scope-local geometry needs depth testing before the compositor establishes its own state.
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(gl.LEQUAL);
 		gl.depthMask(true);
 		gl.clearDepth(1);
 		gl.clearColor(...clearColor);

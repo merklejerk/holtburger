@@ -219,32 +219,42 @@ export class WebGL2CombatEffects implements CombatEffectsResources {
 		}
 		const gl = this.#gl;
 		const program = view.routing && !screen ? device.portal : device.flat;
-		gl.useProgram(program.handle);
-		gl.uniformMatrix4fv(program.matrix, false, view.clipFromAnchor);
-		gl.uniform2f(program.extent, view.width, view.height);
-		gl.uniform1f(program.density, view.density);
-		if (view.routing && program.portal)
-			view.routing.routeDeferredSubmission(key, program.portal);
-		gl.bindVertexArray(device.vao);
-		gl.bindBuffer(gl.ARRAY_BUFFER, device.buffer);
-		gl.bufferData(
-			gl.ARRAY_BUFFER,
-			this.#scratch.subarray(0, this.#used),
-			gl.STREAM_DRAW,
-		);
-		gl.activeTexture(gl.TEXTURE0);
-		gl.bindTexture(gl.TEXTURE_2D, device.texture);
-		gl.bindSampler(0, device.sampler);
-		gl.depthMask(false);
-		// Combat feedback overlays geometry, including the mesh containing its center anchor.
-		// Portal-domain clipping remains in the fragment shader.
-		gl.disable(gl.DEPTH_TEST);
-		gl.disable(gl.CULL_FACE);
-		gl.enable(gl.BLEND);
-		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-		gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.#used / FLOATS_PER_GLYPH);
-
-		gl.bindVertexArray(null);
+		try {
+			gl.useProgram(program.handle);
+			gl.uniformMatrix4fv(program.matrix, false, view.clipFromAnchor);
+			gl.uniform2f(program.extent, view.width, view.height);
+			gl.uniform1f(program.density, view.density);
+			if (view.routing && program.portal)
+				view.routing.routeDeferredSubmission(key, program.portal);
+			gl.bindVertexArray(device.vao);
+			gl.bindBuffer(gl.ARRAY_BUFFER, device.buffer);
+			gl.bufferData(
+				gl.ARRAY_BUFFER,
+				this.#scratch.subarray(0, this.#used),
+				gl.STREAM_DRAW,
+			);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, device.texture);
+			gl.bindSampler(0, device.sampler);
+			gl.depthMask(false);
+			// Combat feedback overlays geometry, including the mesh containing its center anchor.
+			// Portal-domain clipping remains in the fragment shader.
+			gl.disable(gl.DEPTH_TEST);
+			gl.disable(gl.CULL_FACE);
+			gl.enable(gl.BLEND);
+			gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+			gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.#used / FLOATS_PER_GLYPH);
+		} finally {
+			// The HUD lane runs after presentation; leave depth ready for the next scene.
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			gl.bindSampler(0, null);
+			gl.bindVertexArray(null);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+			gl.enable(gl.DEPTH_TEST);
+			gl.depthMask(true);
+			gl.disable(gl.BLEND);
+		}
 	}
 
 	#writeText(

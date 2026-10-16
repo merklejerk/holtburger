@@ -30,6 +30,9 @@ import {
 	type LandblockVector3,
 } from "../lib/assets/ac-frame";
 
+/** Inclusive retail jump-power floor, matching core JumpExtent::MINIMUM. */
+export const MINIMUM_JUMP_POWER = 0.001;
+
 /** Canonical map-plane point: X east, Z south; ACE supplies the missing height. */
 export const clientMapPositionSchema = z
 	.object({
@@ -498,7 +501,7 @@ const clientCharacterMotionEventRequestSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("release-jump"),
 			sequence: z.number().int().nonnegative().safe(),
 			drive: clientDriveSnapshotSchema,
-			extent: finiteNumber.min(0.001).max(1),
+			extent: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
 		})
 		.strict(),
 	z
@@ -642,19 +645,11 @@ const vector3TupleSchema = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
 const preciseJumpTargetSchema = z
 	.object({
 		anchor: guid,
-		point: vector3TupleSchema,
+		point: vector3TupleSchema.transform(landblockVector3),
 		normal: vector3TupleSchema,
 		committedCell: guid.nullable(),
 	})
 	.strict();
-const preciseJumpDiagnosticsSchema = z
-	.object({
-		generatedCandidates: z.number().int().nonnegative().safe(),
-		evaluatedCandidates: z.number().int().nonnegative().safe(),
-		solverTicks: z.number().int().nonnegative().safe(),
-	})
-	.strict();
-
 const preciseJumpTrajectoryPlacementSchema = z
 	.object({
 		startFraction: finiteNumber.min(0).max(1),
@@ -669,7 +664,7 @@ const preciseJumpTrajectoryPlacementSchema = z
 const preciseJumpTrajectorySchema = z
 	.object({
 		anchor: guid,
-		origin: vector3TupleSchema,
+		origin: vector3TupleSchema.transform(landblockVector3),
 		velocity: vector3TupleSchema,
 		acceleration: vector3TupleSchema,
 		durationSeconds: finiteNumber.positive(),
@@ -704,47 +699,117 @@ const preciseJumpTrajectorySchema = z
 			});
 		}
 	});
+const preciseJumpLaunchSchema = z
+	.object({
+		target: preciseJumpTargetSchema,
+		power: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
+		preview: z
+			.object({
+				kind: z.enum(["desired", "below-height"]),
+				curve: preciseJumpTrajectorySchema,
+			})
+			.strict(),
+	})
+	.strict();
+const preciseJumpFlightSegmentSchema = z
+	.object({
+		start: vector3TupleSchema.transform(landblockVector3),
+		end: vector3TupleSchema.transform(landblockVector3),
+		committedCell: guid.nullable(),
+	})
+	.strict();
+const preciseJumpIncompleteReasonSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.enum([
+				"cancelled",
+				"session-changed",
+				"body-unavailable",
+				"body-definition-changed",
+				"flight-horizon-exhausted",
+			]),
+		})
+		.strict(),
+	z.object({ kind: z.literal("collision-unavailable"), owner: guid }).strict(),
+	z.object({ kind: z.literal("env-cell-unavailable"), cell: guid }).strict(),
+]);
+const preciseJumpFlightSchema = z
+	.object({
+		anchor: guid,
+		segments: z.array(preciseJumpFlightSegmentSchema),
+		outcome: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("landed"),
+					contactPoint: vector3TupleSchema.transform(landblockVector3),
+					normal: vector3TupleSchema,
+					committedCell: guid.nullable(),
+					matchesTarget: z.boolean(),
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("incomplete"),
+					reason: preciseJumpIncompleteReasonSchema,
+				})
+				.strict(),
+		]),
+	})
+	.strict();
 const preciseJumpEvaluationCommonShape = {
-	evaluationId: z.number().int().positive().safe(),
+	phase: z.literal("completed"),
+
 	camera: cameraIdentitySchema,
 	sequence: z.number().int().nonnegative().safe(),
-	diagnostics: preciseJumpDiagnosticsSchema,
 } as const;
-const preciseJumpEvaluationSchema = z.discriminatedUnion("status", [
+const preciseJumpCompletedEvaluationSchema = z.discriminatedUnion("status", [
 	z
 		.object({
 			...preciseJumpEvaluationCommonShape,
-			status: z.literal("reachable"),
-			target: preciseJumpTargetSchema,
-			trajectory: preciseJumpTrajectorySchema,
+			status: z.literal("predicted"),
+			launch: preciseJumpLaunchSchema,
+			flight: preciseJumpFlightSchema,
 		})
 		.strict(),
-	...(
-		[
-			"no-surface",
-			"unreachable",
-			"unproven",
-			"invalid-aim",
-			"solver-failed",
-		] as const
-	).map((status) =>
-		z
-			.object({
-				...preciseJumpEvaluationCommonShape,
-				status: z.literal(status),
-				target: preciseJumpTargetSchema.nullable(),
-			})
-			.strict(),
+	z
+		.object({
+			...preciseJumpEvaluationCommonShape,
+			status: z.literal("prediction-failed"),
+			launch: preciseJumpLaunchSchema,
+		})
+		.strict(),
+	...(["no-surface", "unproven", "invalid-aim", "solver-failed"] as const).map(
+		(status) =>
+			z
+				.object({
+					...preciseJumpEvaluationCommonShape,
+					status: z.literal(status),
+				})
+				.strict(),
 	),
 ]);
+const preciseJumpLaunchResolvedSchema = z
+	.object({
+		phase: z.literal("launch-resolved"),
+
+		camera: cameraIdentitySchema,
+		sequence: z.number().int().nonnegative().safe(),
+		launch: preciseJumpLaunchSchema,
+	})
+	.strict();
+const preciseJumpEvaluationSchema = z.union([
+	preciseJumpLaunchResolvedSchema,
+	preciseJumpCompletedEvaluationSchema,
+]);
+
 const preciseJumpTransactionRejectionSchema = z.enum([
 	"stale-action",
 	"commit-pending",
-	"no-reachable-evaluation",
-	"evaluation-mismatch",
-	"authority-changed",
-	"fresh-resolution-rejected",
+	"session-changed",
 	"launch-rejected",
+	"airborne",
+	"unsupported",
+	"overburdened",
 ]);
 const preciseJumpTransactionFeedbackSchema = z
 	.object({
@@ -764,6 +829,7 @@ const preciseJumpTransactionFeedbackSchema = z
 const preciseJumpAimRequestSchema = z
 	.object({
 		camera: cameraIdentitySchema,
+		power: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
 		sequence: z.number().int().nonnegative().safe(),
 		anchor: guid,
 		start: vector3TupleSchema,
@@ -775,7 +841,9 @@ const preciseJumpAimRequestSchema = z
 const preciseJumpCommitRequestSchema = z
 	.object({
 		sequence: z.number().int().nonnegative().safe(),
-		evaluationId: z.number().int().positive().safe(),
+		camera: cameraIdentitySchema,
+		target: preciseJumpTargetSchema,
+		power: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
 	})
 	.strict();
 const preciseJumpCancelRequestSchema = z
@@ -860,40 +928,16 @@ export type ClientCharacterMotionRejection = z.infer<
 export type ClientCameraIdentity = z.infer<typeof cameraIdentitySchema>;
 export type ClientCameraTick = z.infer<typeof cameraTickSchema>;
 export type ClientCameraStartReceipt = z.infer<typeof cameraStartedSchema>;
-type DecodedClientPreciseJumpEvaluation = z.infer<
+export type ClientPreciseJumpTrajectory = z.infer<
+	typeof preciseJumpTrajectorySchema
+>;
+export type ClientPreciseJumpLaunch = z.infer<typeof preciseJumpLaunchSchema>;
+export type ClientPreciseJumpEvaluation = z.infer<
+	typeof preciseJumpCompletedEvaluationSchema
+>;
+export type ClientPreciseJumpProgress = z.infer<
 	typeof preciseJumpEvaluationSchema
 >;
-type ClientPreciseJumpTarget = Omit<
-	z.infer<typeof preciseJumpTargetSchema>,
-	"point"
-> & {
-	readonly point: LandblockVector3;
-};
-type ClientPreciseJumpTrajectory = Omit<
-	z.infer<typeof preciseJumpTrajectorySchema>,
-	"origin"
-> & {
-	readonly origin: LandblockVector3;
-};
-type ClientPreciseJumpEvaluationCommon = Pick<
-	DecodedClientPreciseJumpEvaluation,
-	"evaluationId" | "camera" | "sequence" | "diagnostics"
->;
-export type ClientPreciseJumpEvaluation = ClientPreciseJumpEvaluationCommon &
-	(
-		| {
-				readonly status: "reachable";
-				readonly target: ClientPreciseJumpTarget;
-				readonly trajectory: ClientPreciseJumpTrajectory;
-		  }
-		| {
-				readonly status: Exclude<
-					DecodedClientPreciseJumpEvaluation["status"],
-					"reachable"
-				>;
-				readonly target: ClientPreciseJumpTarget | null;
-		  }
-	);
 export type ClientPreciseJumpTransactionFeedback = z.infer<
 	typeof preciseJumpTransactionFeedbackSchema
 >;
@@ -938,6 +982,7 @@ export interface ClientCameraClearanceRequest extends ClientCameraIdentity {
 export interface ClientPreciseJumpAimRequest {
 	readonly camera: ClientCameraIdentity;
 	readonly sequence: number;
+	readonly power: number;
 	readonly anchor: number;
 	readonly start: LandblockVector3;
 	readonly direction: readonly [number, number, number];
@@ -1081,28 +1126,8 @@ export function decodeClientPreciseJumpCancelRequest(
 
 export function decodeClientPreciseJumpEvaluation(
 	value: unknown,
-): ClientPreciseJumpEvaluation {
-	const parsed = preciseJumpEvaluationSchema.parse(value);
-	if (parsed.status === "reachable") {
-		return {
-			...parsed,
-			target: {
-				...parsed.target,
-				point: landblockVector3(parsed.target.point),
-			},
-			trajectory: {
-				...parsed.trajectory,
-				origin: landblockVector3(parsed.trajectory.origin),
-			},
-		};
-	}
-	return {
-		...parsed,
-		target:
-			parsed.target === null
-				? null
-				: { ...parsed.target, point: landblockVector3(parsed.target.point) },
-	};
+): ClientPreciseJumpProgress {
+	return preciseJumpEvaluationSchema.parse(value);
 }
 
 export function decodeClientPreciseJumpTransactionFeedback(

@@ -4,6 +4,8 @@
 		"src/client/main.ts",
 		"src/explorer/main.ts",
 		"src/harness/browser/main.ts",
+		"src/harness/browser/client-precise-jump-probe.ts",
+		"src/harness/browser/client-jump-hud-probe.ts",
 		"src/harness/browser/dynamic-material-table-probe.ts",
 		"src/harness/browser/portal-traversal-investigation.ts",
 		"src/svg.d.ts",

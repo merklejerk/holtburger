@@ -6,12 +6,14 @@ import {
 	replaceClientBinding,
 	type ClientBindingReference,
 } from "./client-keyboard-bindings";
+import { InputContext } from "./input-context";
 import { AppInput } from "./app-input";
 import { clientInputConfiguration } from "../../client/client-input-settings";
 import type { KeyBinding } from "./input-contract";
 
 const addresses: readonly ClientBindingReference[] = [
 	{ kind: "character", action: "forward" },
+	{ kind: "preciseJump", action: "increasePower" },
 	{ kind: "client", action: "selectSelf" },
 	{ kind: "client", action: "splitStack" },
 	{ kind: "spellTab", index: 9 },
@@ -94,6 +96,15 @@ it("uses accepted replacement addresses in every runtime lookup family", () => {
 			case "character": {
 				const actions: string[] = [];
 				const context = input.characterContext((action) =>
+					actions.push(action),
+				);
+				expect(context.apply(event, true)).toBe(true);
+				expect(actions).toEqual([reference.action]);
+				break;
+			}
+			case "preciseJump": {
+				const actions: string[] = [];
+				const context = new InputContext(settings.preciseJump, (action) =>
 					actions.push(action),
 				);
 				expect(context.apply(event, true)).toBe(true);

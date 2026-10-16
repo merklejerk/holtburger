@@ -175,6 +175,17 @@ impl ClientRuntime {
         self.project_world_event(event, suppress_vital_projection);
     }
 
+    fn publish_precise_jump_progress(&mut self) {
+        for progress in
+            self.precise_jump
+                .poll(self.world_generation, self.camera.identity(), &self.world)
+        {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::PreciseJumpEvaluation(progress));
+        }
+    }
+
     pub async fn run(&mut self) -> Result<()> {
         self.send_status_event();
         let _camera_scope = self.camera.run_scope();
@@ -194,6 +205,7 @@ impl ClientRuntime {
         // Overdue slots are not extra simulation work. Advance once using actual elapsed time.
         physics_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut last_physics_time = Instant::now();
+        let precise_jump_notification = self.precise_jump.progress_notification();
 
         loop {
             if matches!(self.state, ClientState::Disconnected) {
@@ -251,6 +263,9 @@ impl ClientRuntime {
                     }
                 } => {
                     self.process_command_batch(Some(cmd)).await?;
+                }
+                _ = precise_jump_notification.notified() => {
+                    self.publish_precise_jump_progress();
                 }
                 _ = physics_tick.tick() => {
                     // A ready physics deadline must not bypass all queued input. Preserve command
@@ -310,20 +325,7 @@ impl ClientRuntime {
                         }
                     }
 
-                    let precise_collision = self
-                        .collision_coordinator
-                        .as_ref()
-                        .map(super::collision::ClientCollisionCoordinator::snapshot);
-                    for evaluation in self.precise_jump.poll(
-                        self.world_generation,
-                        self.camera.identity(),
-                        &self.world,
-                        precise_collision.as_deref(),
-                    ) {
-                        let _ = self
-                            .client_view_event_tx
-                            .send(ClientViewEvent::PreciseJumpEvaluation(evaluation));
-                    }
+                    self.publish_precise_jump_progress();
 
                     self.try_complete_world_activation().await?;
 
@@ -346,9 +348,6 @@ impl ClientRuntime {
                         let prepared_precise_jump = match self.precise_jump.prepare_queued_commit(
                             self.world_generation,
                             self.camera.identity(),
-                            &self.world,
-                            collision_snapshot.as_deref(),
-                            now,
                         ) {
                             Some(Ok(prepared)) => Some(prepared),
                             Some(Err(feedback)) => {

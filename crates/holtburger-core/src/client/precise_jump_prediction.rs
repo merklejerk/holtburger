@@ -1,35 +1,40 @@
 //! Collision-backed first-landing prediction for precise jumps.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use holtburger_common::position::METERS_PER_LANDBLOCK;
 use holtburger_common::{Guid, Vector3};
-use holtburger_world::state::SelfJumpCapabilities;
 use holtburger_world::{
     CollisionQueryError, CollisionScene, CollisionSurfaceRayHit, ContactMotionSegment,
-    ContactState, EntityCollisionSnapshot, GroundState, GroundedBodyActuation, GroundedLaunch,
-    HardSphereSweepHit, PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponseState,
-    PlacedMotionPath, SpatialBody, SpatialScene,
+    ContactState, EntityCollisionSnapshot, GroundState, GroundedBodyActuation, MotionWaypoint,
+    MotionWaypointPlacement, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponseState, PlacedMotionPathRequest, SpatialBody,
 };
 use thiserror::Error;
 
-use super::character_jump::CharacterJumpReadiness;
-use super::precise_jump::{
-    PreciseJumpCandidateBudget, PreciseJumpCandidateRejection, PreciseJumpLaunchCandidate,
-    PreciseJumpWorldDisplacement, generate_precise_jump_candidates,
-};
+use super::precise_jump::PreciseJumpLaunchCandidate;
 
 /// The ordinary client physics quantum used for every speculative tick.
-pub const PRECISE_JUMP_FIXED_TICK: Duration = Duration::from_millis(30);
+pub const PRECISE_JUMP_FIXED_TICK: Duration = Duration::from_nanos(
+    (holtburger_world::MOBILE_CONTACT_TICK_SECONDS as f64 * 1_000_000_000.0) as u64,
+);
 const TARGET_NORMAL_TOLERANCE: f32 = 0.000_1;
 
-/// Collision-backed environment or entity target retained in one normalized outdoor anchor frame.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreciseJumpTarget {
-    anchor: Guid,
-    hit: CollisionSurfaceRayHit,
+/// Finite picked surface coordinates used by launch math and frontend presentation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreciseJumpTargetView {
+    pub anchor: Guid,
+    pub point: Vector3,
+    pub normal: Vector3,
+    pub committed_cell: Option<Guid>,
 }
 
+/// Validated picked surface; selection does not retain a collision-clearance certificate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreciseJumpTarget {
+    view: PreciseJumpTargetView,
+}
 impl PreciseJumpTarget {
     pub fn new(anchor: Guid, hit: CollisionSurfaceRayHit) -> Result<Self, PreciseJumpTargetError> {
         if anchor.0 & 0xffff != 0xffff {
@@ -37,34 +42,31 @@ impl PreciseJumpTarget {
         }
         let point = hit.point();
         let normal = hit.normal();
-        let normal_length_squared = normal.length_squared();
+        let length = normal.length_squared();
         if !point.x.is_finite()
             || !point.y.is_finite()
             || !point.z.is_finite()
             || !hit.distance().is_finite()
             || hit.distance() < 0.0
-            || !normal_length_squared.is_finite()
-            || (normal_length_squared - 1.0).abs() > TARGET_NORMAL_TOLERANCE
+            || !length.is_finite()
+            || (length - 1.0).abs() > TARGET_NORMAL_TOLERANCE
         {
             return Err(PreciseJumpTargetError::InvalidHit);
         }
-        Ok(Self { anchor, hit })
+        Ok(Self {
+            view: PreciseJumpTargetView {
+                anchor,
+                point,
+                normal,
+                committed_cell: hit.placement().committed_cell(),
+            },
+        })
     }
-
     pub const fn anchor(&self) -> Guid {
-        self.anchor
+        self.view.anchor
     }
-
-    pub const fn hit(&self) -> &CollisionSurfaceRayHit {
-        &self.hit
-    }
-
-    /// Verifies the retained source identity against current environment or entity authority.
-    pub fn is_current(&self, spatial: &SpatialScene, collision: &CollisionScene) -> bool {
-        match &self.hit {
-            CollisionSurfaceRayHit::Environment(hit) => collision.proves(hit.proof),
-            CollisionSurfaceRayHit::Entity(hit) => spatial.proves_entity_collision(&hit.proof),
-        }
+    pub const fn view(&self) -> &PreciseJumpTargetView {
+        &self.view
     }
 }
 
@@ -75,109 +77,6 @@ pub enum PreciseJumpTargetError {
     InvalidAnchor,
     #[error("precise-jump target hit must contain finite geometry and a unit normal")]
     InvalidHit,
-}
-
-/// Explicit replaceable-work limits for one complete target evaluation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PreciseJumpPredictionBudget {
-    candidate_budget: PreciseJumpCandidateBudget,
-    maximum_ticks_per_candidate: u32,
-}
-
-impl PreciseJumpPredictionBudget {
-    pub fn new(
-        candidate_budget: PreciseJumpCandidateBudget,
-        maximum_ticks_per_candidate: usize,
-    ) -> Result<Self, PreciseJumpPredictionBudgetError> {
-        if maximum_ticks_per_candidate == 0 {
-            return Err(PreciseJumpPredictionBudgetError::ZeroTicks);
-        }
-        let maximum_ticks_per_candidate = u32::try_from(maximum_ticks_per_candidate)
-            .map_err(|_| PreciseJumpPredictionBudgetError::TooManyTicks)?;
-        Ok(Self {
-            candidate_budget,
-            maximum_ticks_per_candidate,
-        })
-    }
-
-    pub const fn candidate_budget(self) -> PreciseJumpCandidateBudget {
-        self.candidate_budget
-    }
-
-    pub const fn maximum_ticks_per_candidate(self) -> u32 {
-        self.maximum_ticks_per_candidate
-    }
-
-    pub fn maximum_flight_duration(self) -> Duration {
-        PRECISE_JUMP_FIXED_TICK * self.maximum_ticks_per_candidate
-    }
-}
-
-/// Invalid speculative work limits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum PreciseJumpPredictionBudgetError {
-    #[error("precise-jump prediction budget must permit at least one solver tick")]
-    ZeroTicks,
-    #[error("precise-jump prediction tick budget exceeds its representable duration")]
-    TooManyTicks,
-}
-
-/// Immutable authority and target facts required by one replaceable prediction.
-#[derive(Clone, Copy)]
-pub struct PreciseJumpPredictionRequest<'a> {
-    /// Captured mover; only this body is copied for each speculative candidate.
-    pub body: Option<&'a SpatialBody>,
-    /// Immutable installed static collision snapshot.
-    pub collision_scene: &'a CollisionScene,
-    /// Immutable peer targets sealed once for this complete evaluation.
-    pub entity_collision: &'a EntityCollisionSnapshot,
-    /// Fresh authority-resolved movement and jump facts.
-    pub capabilities: &'a SelfJumpCapabilities,
-    /// Collision-backed target retained from the nearest surface ray.
-    pub target: &'a PreciseJumpTarget,
-    /// Evaluation work limits selected by the host policy.
-    pub budget: PreciseJumpPredictionBudget,
-    /// Stable time origin used only by cloned scene bookkeeping.
-    pub start_time: Instant,
-}
-
-/// First walkable target contact acquired after a proven launch.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreciseJumpPredictedLanding {
-    candidate: PreciseJumpLaunchCandidate,
-    contact_point: Vector3,
-    normal: Vector3,
-    flight_duration: Duration,
-    solver_ticks: u32,
-    trajectory: PreciseJumpTrajectory,
-}
-
-impl PreciseJumpPredictedLanding {
-    pub const fn candidate(&self) -> PreciseJumpLaunchCandidate {
-        self.candidate
-    }
-
-    /// Support-sphere contact point in the target's anchor-local frame.
-    pub const fn contact_point(&self) -> Vector3 {
-        self.contact_point
-    }
-
-    pub const fn normal(&self) -> Vector3 {
-        self.normal
-    }
-
-    pub const fn flight_duration(&self) -> Duration {
-        self.flight_duration
-    }
-
-    pub const fn solver_ticks(&self) -> u32 {
-        self.solver_ticks
-    }
-
-    /// Analytic launch curve authorized by the collision-backed candidate solve.
-    pub const fn trajectory(&self) -> &PreciseJumpTrajectory {
-        &self.trajectory
-    }
 }
 
 /// One placement interval over the trajectory's normalized `[0, 1]` time domain.
@@ -252,110 +151,17 @@ impl PreciseJumpTrajectory {
         Some(self.origin + self.velocity * seconds + self.acceleration * (0.5 * seconds * seconds))
     }
 }
-
-/// Proven failure of one legal analytic candidate.
+/// Missing facts or exhausted work that cannot claim a landing endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreciseJumpCandidateFailure {
-    LaunchDidNotLeaveSupport,
-    Obstructed,
-    SlidingContact,
-    FirstLandingMissedTarget,
-}
-
-/// Proven reason a target cannot be accepted by the evaluated envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreciseJumpUnreachableReason {
-    Airborne,
-    Unsupported,
-    Overburdened,
-    TargetOutsideEnvelope,
-    TargetSurfaceNotWalkable,
-}
-
-/// Missing authority or exhausted work that cannot honestly become a red result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreciseJumpUnprovenReason {
-    /// Authority changed after the aim was accepted but before its result could be retained.
-    AuthorityChanged,
+pub enum PreciseJumpPredictionIncompleteReason {
+    Cancelled,
+    SessionChanged,
     BodyUnavailable,
     BodyDefinitionChanged,
-    InvalidCapabilities,
-    StaleTargetCollision,
-    CollisionUnavailable {
-        owner: Guid,
-    },
-    EnvCellUnavailable {
-        cell: Guid,
-    },
-    WorkBudgetExhausted,
-    CandidateSearchExhausted {
-        /// Failure observed for the final adaptively sampled arc.
-        last_failure: PreciseJumpCandidateFailure,
-    },
+    CollisionUnavailable { owner: Guid },
+    EnvCellUnavailable { cell: Guid },
+    FlightHorizonExhausted,
 }
-
-/// One complete collision-target evaluation.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreciseJumpPredictionOutcome {
-    Reachable(PreciseJumpPredictedLanding),
-    Unreachable(PreciseJumpUnreachableReason),
-    Unproven(PreciseJumpUnprovenReason),
-}
-
-/// Aggregate work facts for reproducible predictor benchmarks and live diagnostics.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PreciseJumpPredictionDiagnostics {
-    generated_candidates: usize,
-    evaluated_candidates: usize,
-    solver_ticks: u64,
-}
-
-impl PreciseJumpPredictionDiagnostics {
-    /// Analytic candidates emitted before collision-backed search began.
-    pub const fn generated_candidates(self) -> usize {
-        self.generated_candidates
-    }
-
-    /// Candidates whose speculative scene entered the ordinary body solver.
-    pub const fn evaluated_candidates(self) -> usize {
-        self.evaluated_candidates
-    }
-
-    /// Total ordinary 30 Hz body ticks spent across every evaluated candidate.
-    pub const fn solver_ticks(self) -> u64 {
-        self.solver_ticks
-    }
-}
-
-/// Prediction outcome paired with aggregate work facts, without retaining a speculative path.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreciseJumpPredictionEvaluation {
-    outcome: PreciseJumpPredictionOutcome,
-    diagnostics: PreciseJumpPredictionDiagnostics,
-}
-
-impl PreciseJumpPredictionEvaluation {
-    /// Semantic blue/red/unproven result shared with the ordinary prediction API.
-    pub const fn outcome(&self) -> &PreciseJumpPredictionOutcome {
-        &self.outcome
-    }
-
-    /// Aggregate bounded work performed to produce the outcome.
-    pub const fn diagnostics(&self) -> PreciseJumpPredictionDiagnostics {
-        self.diagnostics
-    }
-
-    /// Moves the potentially owned reachable trajectory with its aggregate work facts.
-    pub fn into_parts(
-        self,
-    ) -> (
-        PreciseJumpPredictionOutcome,
-        PreciseJumpPredictionDiagnostics,
-    ) {
-        (self.outcome, self.diagnostics)
-    }
-}
-
 /// Unexpected solver failure outside the prediction's explicit semantic outcomes.
 #[derive(Debug, Error)]
 pub enum PreciseJumpPredictionError {
@@ -363,474 +169,339 @@ pub enum PreciseJumpPredictionError {
     Solver(#[source] anyhow::Error),
 }
 
-/// Searches legal arcs against the same environment and entity solver used by ordinary motion.
-pub fn predict_precise_jump(
-    request: PreciseJumpPredictionRequest<'_>,
-) -> Result<PreciseJumpPredictionOutcome, PreciseJumpPredictionError> {
-    Ok(diagnose_precise_jump(request)?.outcome)
-}
-
-/// Runs the same prediction while retaining only aggregate work measurements.
-pub fn diagnose_precise_jump(
-    request: PreciseJumpPredictionRequest<'_>,
-) -> Result<PreciseJumpPredictionEvaluation, PreciseJumpPredictionError> {
-    let mut diagnostics = PreciseJumpPredictionDiagnostics::default();
-    let outcome = predict_precise_jump_inner(request, &mut diagnostics)?;
-    Ok(PreciseJumpPredictionEvaluation {
-        outcome,
-        diagnostics,
+/// Builds an ideal free-flight curve with its own directed interior placement partition.
+/// This query assigns visibility scopes only; it deliberately does not stop on obstacles.
+pub(super) fn selected_jump_curve(
+    body: &SpatialBody,
+    collision: &CollisionScene,
+    anchor: Guid,
+    launch_velocity: Vector3,
+    duration_seconds: f32,
+) -> Result<PreciseJumpTrajectory, PreciseJumpPredictionError> {
+    let physical = body.physical.as_ref().ok_or_else(|| {
+        PreciseJumpPredictionError::Solver(anyhow::anyhow!("selected curve requires body physics"))
+    })?;
+    let PhysicalBodyDefinition::Grounded { spheres, config } = physical.definition else {
+        return Err(PreciseJumpPredictionError::Solver(anyhow::anyhow!(
+            "selected curve requires grounded body geometry"
+        )));
+    };
+    let origin = point_between_anchors(
+        body.pose.coords,
+        owner_for_position(body.pose.landblock_id),
+        anchor,
+    );
+    let velocity = launch_velocity
+        + Vector3::new(
+            0.0,
+            0.0,
+            config.gravity * PRECISE_JUMP_FIXED_TICK.as_secs_f32() * 0.5,
+        );
+    let acceleration = Vector3::new(0.0, 0.0, config.gravity);
+    let offset = body.pose.rotation.rotate_vector(spheres.support.center);
+    let samples =
+        ((duration_seconds / PRECISE_JUMP_FIXED_TICK.as_secs_f32()).ceil() as usize).clamp(1, 160);
+    let waypoints = (1..=samples)
+        .map(|sample| {
+            let fraction = sample as f32 / samples as f32;
+            let time = fraction * duration_seconds;
+            MotionWaypoint {
+                center: origin + offset + velocity * time + acceleration * (0.5 * time * time),
+                end_fraction: fraction,
+                placement: MotionWaypointPlacement::Traverse,
+            }
+        })
+        .collect::<Vec<_>>();
+    let path = collision
+        .transit_motion_path(PlacedMotionPathRequest {
+            previous_cell: physical.response.cell(),
+            anchor,
+            start: origin + offset,
+            radius: spheres.support.radius,
+            waypoints: &waypoints,
+        })
+        .map_err(|error| PreciseJumpPredictionError::Solver(error.into()))?;
+    let mut placements = Vec::new();
+    let mut start_fraction = 0.0;
+    let mut committed_cell = path.initial().placement().committed_cell();
+    for leg in path.legs() {
+        let next_cell = leg.end().placement().committed_cell();
+        if next_cell != committed_cell {
+            if leg.end_fraction() > start_fraction {
+                placements.push(PreciseJumpTrajectoryPlacement {
+                    start_fraction,
+                    end_fraction: leg.end_fraction(),
+                    committed_cell,
+                });
+            }
+            start_fraction = leg.end_fraction();
+            committed_cell = next_cell;
+        }
+    }
+    if start_fraction < 1.0 {
+        placements.push(PreciseJumpTrajectoryPlacement {
+            start_fraction,
+            end_fraction: 1.0,
+            committed_cell,
+        });
+    }
+    Ok(PreciseJumpTrajectory {
+        anchor,
+        origin,
+        velocity,
+        acceleration,
+        duration_seconds,
+        placements,
     })
 }
 
-fn predict_precise_jump_inner(
-    request: PreciseJumpPredictionRequest<'_>,
-    diagnostics: &mut PreciseJumpPredictionDiagnostics,
-) -> Result<PreciseJumpPredictionOutcome, PreciseJumpPredictionError> {
-    let Some(body) = request.body else {
-        return Ok(PreciseJumpPredictionOutcome::Unproven(
-            PreciseJumpUnprovenReason::BodyUnavailable,
-        ));
+/// One accepted root-motion leg, including contact adjustments.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreciseJumpFlightSegment {
+    /// Body-reference endpoints in the flight's common anchor frame.
+    pub start: Vector3,
+    pub end: Vector3,
+    /// Interior scope for this leg, or outdoors. Portal changes split legs.
+    pub committed_cell: Option<Guid>,
+}
+
+/// The first walkable landing, or an explicitly incomplete accepted path prefix.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreciseJumpFlightOutcome {
+    Landed {
+        /// Surface contact, rather than the body-reference endpoint.
+        contact_point: Vector3,
+        /// Walkable contact normal used to place the landing marker.
+        normal: Vector3,
+        /// Cell containing the contact, or outdoors.
+        committed_cell: Option<Guid>,
+        /// Core-owned proximity and walkability classification of the desired target.
+        matches_target: bool,
+    },
+    Incomplete(PreciseJumpPredictionIncompleteReason),
+}
+
+/// Collision-predicted path for exactly one user-selected launch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreciseJumpFlight {
+    /// Common normalized outdoor frame for path and endpoint positions.
+    pub anchor: Guid,
+    /// Accepted geometry; no fitted post-impact ballistic curve.
+    pub segments: Vec<PreciseJumpFlightSegment>,
+    /// Landing or reason no endpoint can yet be claimed.
+    pub outcome: PreciseJumpFlightOutcome,
+    /// Work performed, consumed by diagnostics independently of endpoint classification.
+    pub solver_ticks: u32,
+}
+
+/// Immutable inputs for one chosen launch, with no proposal/search budget.
+#[derive(Clone, Copy)]
+pub struct PreciseJumpFlightRequest<'a> {
+    pub body: &'a SpatialBody,
+    pub collision_scene: &'a CollisionScene,
+    pub entity_collision: &'a EntityCollisionSnapshot,
+    pub target: &'a PreciseJumpTarget,
+    pub candidate: PreciseJumpLaunchCandidate,
+    /// Maximum fixed physical ticks admitted before an incomplete endpoint is published.
+    pub maximum_ticks: std::num::NonZeroU32,
+    pub start_time: Instant,
+}
+
+/// Simulates one hypothetical release through contacts to its first walkable landing.
+/// Current support is deliberately not a prerequisite; actual release checks eligibility.
+pub fn predict_selected_precise_jump(
+    request: PreciseJumpFlightRequest<'_>,
+    control: PreciseJumpPredictionControl<'_>,
+) -> Result<PreciseJumpFlight, PreciseJumpPredictionError> {
+    let mut flight = PreciseJumpFlight {
+        anchor: request.target.anchor(),
+        segments: Vec::new(),
+        outcome: PreciseJumpFlightOutcome::Incomplete(
+            PreciseJumpPredictionIncompleteReason::FlightHorizonExhausted,
+        ),
+        solver_ticks: 0,
     };
-    let Some(physical) = body.physical.as_ref() else {
-        return Ok(PreciseJumpPredictionOutcome::Unproven(
-            PreciseJumpUnprovenReason::BodyUnavailable,
-        ));
+    let mut mover = request.body.clone();
+    let Some(physical) = mover.physical.as_mut() else {
+        flight.outcome = PreciseJumpFlightOutcome::Incomplete(
+            PreciseJumpPredictionIncompleteReason::BodyUnavailable,
+        );
+        return Ok(flight);
     };
     let PhysicalBodyDefinition::Grounded { spheres, config } = physical.definition else {
-        return Ok(PreciseJumpPredictionOutcome::Unproven(
-            PreciseJumpUnprovenReason::BodyUnavailable,
-        ));
+        flight.outcome = PreciseJumpFlightOutcome::Incomplete(
+            PreciseJumpPredictionIncompleteReason::BodyUnavailable,
+        );
+        return Ok(flight);
     };
-    let target_is_current = match request.target.hit() {
-        CollisionSurfaceRayHit::Environment(hit) => request.collision_scene.proves(hit.proof),
-        CollisionSurfaceRayHit::Entity(hit) => request.entity_collision.proves(&hit.proof),
+    // This private clone starts with the selected impulse, not a supported launch edge.
+    // Frozen ticks wake dynamic runtime state and ordinary response supplies later contacts.
+    physical.response = PhysicalBodyResponseState::Grounded {
+        cell: physical.response.cell(),
+        ground: GroundState::Airborne,
+        stationary_fall_frames: 0,
     };
-    if !target_is_current {
-        return Ok(PreciseJumpPredictionOutcome::Unproven(
-            PreciseJumpUnprovenReason::StaleTargetCollision,
-        ));
-    }
-    if request.target.hit.normal().z < config.walkable_normal_z {
-        return Ok(PreciseJumpPredictionOutcome::Unreachable(
-            PreciseJumpUnreachableReason::TargetSurfaceNotWalkable,
-        ));
-    }
-
-    let readiness = match body.contact {
-        ContactState::Grounded => CharacterJumpReadiness::Supported,
-        ContactState::Airborne => CharacterJumpReadiness::Airborne,
-        ContactState::Sliding | ContactState::Unknown => CharacterJumpReadiness::Unsupported,
-    };
-    let desired_body_point = desired_landing_body_point(body, request.target, spheres.support);
-    let displacement = desired_body_point - body.pose.coords;
-    let displacement = PreciseJumpWorldDisplacement::new(displacement)
-        .expect("validated body and collision target produce finite local displacement");
-    let candidates = match generate_precise_jump_candidates(
-        PRECISE_JUMP_FIXED_TICK,
-        request.capabilities,
-        physical.definition,
-        body.pose.rotation.to_heading(),
-        readiness,
-        displacement,
-        request.budget.candidate_budget(),
-    ) {
-        Ok(candidates) => candidates,
-        Err(rejection) => return Ok(map_candidate_rejection(rejection)),
-    };
+    mover.contact = ContactState::Airborne;
+    mover.retained.velocity = request.candidate.world_velocity();
     let frozen = request
         .entity_collision
-        .prepare_frozen_contacts(owner_for_position(body.pose.landblock_id))
+        .prepare_frozen_contacts(owner_for_position(mover.pose.landblock_id))
         .map_err(PreciseJumpPredictionError::Solver)?;
-    let prepared = PreparedJumpPrediction {
-        request,
-        body,
-        frozen,
-        support_sphere: spheres.support,
-        walkable_normal_z: config.walkable_normal_z,
-        gravity: config.gravity,
-        landing_tolerance: candidates
-            .envelope()
-            .landing_tolerance()
-            .support_sphere_radius(),
-    };
-    let mut last_failure = None;
-    let mut first_unproven = None;
-    let mut lowest_landing: Option<PreciseJumpPredictedLanding> = None;
-    diagnostics.generated_candidates = candidates.candidates().len();
-    for candidate in candidates.candidates() {
-        diagnostics.evaluated_candidates += 1;
-        match predict_candidate(&prepared, *candidate, diagnostics)? {
-            CandidatePrediction::Reached(landing) => {
-                if landing.candidate.extent() == candidates.candidates()[0].extent() {
-                    return Ok(PreciseJumpPredictionOutcome::Reachable(landing));
-                }
-                if lowest_landing.as_ref().is_none_or(|current| {
-                    landing.candidate.extent().get() < current.candidate.extent().get()
-                }) {
-                    lowest_landing = Some(landing);
-                }
-            }
-            CandidatePrediction::Failed(failure) => last_failure = Some(failure),
-            CandidatePrediction::Unproven(reason) => {
-                first_unproven.get_or_insert(reason);
-            }
+    let mut orientation = mover.pose.rotation;
+    for tick in 1..=request.maximum_ticks.get() {
+        if let Some(reason) = control.interruption() {
+            flight.outcome = PreciseJumpFlightOutcome::Incomplete(reason);
+            return Ok(flight);
         }
-    }
-    if let Some(landing) = lowest_landing {
-        return Ok(PreciseJumpPredictionOutcome::Reachable(landing));
-    }
-    if let Some(reason) = first_unproven {
-        return Ok(PreciseJumpPredictionOutcome::Unproven(reason));
-    }
-    Ok(PreciseJumpPredictionOutcome::Unproven(
-        PreciseJumpUnprovenReason::CandidateSearchExhausted {
-            last_failure: last_failure.expect("a nonempty candidate set evaluated every arc"),
-        },
-    ))
-}
-
-enum CandidatePrediction {
-    Reached(PreciseJumpPredictedLanding),
-    Failed(PreciseJumpCandidateFailure),
-    Unproven(PreciseJumpUnprovenReason),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TrajectoryPlacementKey {
-    committed_cell: Option<Guid>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TrajectoryPlacementChange {
-    tick_time: f32,
-    key: TrajectoryPlacementKey,
-}
-
-/// Retains only semantic placement changes while speculative fixed-tick geometry is consumed.
-struct TrajectoryPlacementBuilder {
-    changes: Vec<TrajectoryPlacementChange>,
-}
-
-impl TrajectoryPlacementBuilder {
-    fn new() -> Self {
-        Self {
-            changes: Vec::new(),
-        }
-    }
-
-    fn observe(&mut self, tick: u32, path: &PlacedMotionPath, start: f32, end: f32) {
-        let tick_start = tick.saturating_sub(1) as f32;
-        self.observe_key(
-            tick_start + start,
-            TrajectoryPlacementKey {
-                committed_cell: path.initial().placement().committed_cell(),
-            },
-        );
-        for leg in path.legs() {
-            self.observe_key(
-                tick_start + start + leg.end_fraction() * (end - start),
-                TrajectoryPlacementKey {
-                    committed_cell: leg.end().placement().committed_cell(),
-                },
-            );
-        }
-    }
-
-    fn observe_key(&mut self, tick_time: f32, key: TrajectoryPlacementKey) {
-        if self.changes.last().is_some_and(|change| change.key == key) {
-            return;
-        }
-        self.changes
-            .push(TrajectoryPlacementChange { tick_time, key });
-    }
-
-    fn finish(
-        self,
-        anchor: Guid,
-        origin: Vector3,
-        candidate: PreciseJumpLaunchCandidate,
-        gravity: f32,
-        end_tick_time: f32,
-    ) -> PreciseJumpTrajectory {
-        let denominator = end_tick_time;
-        let mut placements = Vec::with_capacity(self.changes.len());
-        for (index, change) in self.changes.iter().enumerate() {
-            let start_fraction = (change.tick_time / denominator).clamp(0.0, 1.0);
-            let end_fraction = self
-                .changes
-                .get(index + 1)
-                .map_or(1.0, |next| (next.tick_time / denominator).clamp(0.0, 1.0));
-            if end_fraction <= start_fraction {
-                continue;
-            }
-            placements.push(PreciseJumpTrajectoryPlacement {
-                start_fraction,
-                end_fraction,
-                committed_cell: change.key.committed_cell,
-            });
-        }
-        assert!(
-            !placements.is_empty()
-                && placements[0].start_fraction == 0.0
-                && placements
-                    .last()
-                    .is_some_and(|placement| placement.end_fraction == 1.0),
-            "a successful precise-jump solve must produce a complete placement partition"
-        );
-        PreciseJumpTrajectory {
-            anchor,
-            origin,
-            // This smooth curve matches the semi-implicit positions at tick boundaries.
-            velocity: candidate.world_velocity()
-                + Vector3::new(
-                    0.0,
-                    0.0,
-                    0.5 * gravity * PRECISE_JUMP_FIXED_TICK.as_secs_f32(),
-                ),
-            acceleration: Vector3::new(0.0, 0.0, gravity),
-            duration_seconds: candidate.flight_duration_seconds(),
-            placements,
-        }
-    }
-}
-
-/// Validated per-evaluation geometry and immutable targets reused by every candidate.
-struct PreparedJumpPrediction<'a> {
-    /// Original authority, target, and finite-work policy.
-    request: PreciseJumpPredictionRequest<'a>,
-    /// Validated mover, avoiding optional-body recovery inside each candidate.
-    body: &'a SpatialBody,
-    /// Frozen peer index in the trajectory's fixed coordinate frame.
-    frozen: holtburger_world::spatial::FrozenContactTargets,
-    /// Grounded support sphere used to relate contacts to the desired landing.
-    support_sphere: holtburger_world::GroundedSphere,
-    /// Minimum walkable contact normal from the mover's grounded configuration.
-    walkable_normal_z: f32,
-    /// Authored acceleration used by the verified trajectory contract.
-    gravity: f32,
-    /// Landing allowance resolved once by the candidate envelope.
-    landing_tolerance: f32,
-}
-
-fn predict_candidate(
-    prepared: &PreparedJumpPrediction<'_>,
-    candidate: PreciseJumpLaunchCandidate,
-    diagnostics: &mut PreciseJumpPredictionDiagnostics,
-) -> Result<CandidatePrediction, PreciseJumpPredictionError> {
-    let request = prepared.request;
-    let support_sphere = prepared.support_sphere;
-    let walkable_normal_z = prepared.walkable_normal_z;
-    let gravity = prepared.gravity;
-    let landing_tolerance = prepared.landing_tolerance;
-    let launch = GroundedLaunch::new(candidate.world_velocity())
-        .expect("analytic precise-jump candidates always launch upward with finite velocity");
-    let initial_body = prepared.body;
-    let mut mover = initial_body.clone();
-    let initial_anchor = owner_for_position(initial_body.pose.landblock_id);
-    let trajectory_origin = point_between_anchors(
-        initial_body.pose.coords,
-        initial_anchor,
-        request.target.anchor,
-    );
-    let mut trajectory_placements = TrajectoryPlacementBuilder::new();
-    for tick in 1..=request.budget.maximum_ticks_per_candidate() {
-        diagnostics.solver_ticks += 1;
-        let grounded = if tick == 1 {
-            GroundedBodyActuation::coast().with_launch(launch)
-        } else {
-            GroundedBodyActuation::coast()
-        };
-        let now = request.start_time + PRECISE_JUMP_FIXED_TICK * tick;
-        let result = match prepared.frozen.tick(
+        let result = match frozen.tick(
             &mut mover,
             request.collision_scene,
-            PhysicalBodyActuation::Grounded(grounded),
+            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
             PRECISE_JUMP_FIXED_TICK.as_secs_f32(),
-            now,
+            request.start_time + PRECISE_JUMP_FIXED_TICK * tick,
         ) {
             Ok(result) => result,
-            Err(error) => return classify_solver_error(error),
+            Err(error) => {
+                let reason = match error.downcast_ref::<CollisionQueryError>() {
+                    Some(CollisionQueryError::UnavailableOwner { owner }) => {
+                        PreciseJumpPredictionIncompleteReason::CollisionUnavailable {
+                            owner: Guid(*owner),
+                        }
+                    }
+                    Some(CollisionQueryError::UnknownMotionCell { cell }) => {
+                        PreciseJumpPredictionIncompleteReason::EnvCellUnavailable {
+                            cell: Guid(*cell),
+                        }
+                    }
+                    _ => return Err(PreciseJumpPredictionError::Solver(error)),
+                };
+                flight.outcome = PreciseJumpFlightOutcome::Incomplete(reason);
+                return Ok(flight);
+            }
         };
+        flight.solver_ticks = tick;
         for segment in &result.motion {
-            if matches!(segment, ContactMotionSegment::Impact { .. }) {
-                break;
+            if let ContactMotionSegment::Rotation { rotation, .. } = segment {
+                // Angular clearance paths move sphere centers, not the root.
+                orientation = *rotation;
+                continue;
             }
             if let Some(path) = segment.path() {
-                trajectory_placements.observe(
-                    tick,
-                    path.primary(),
-                    segment.start_fraction(),
-                    segment.end_fraction(),
+                let path = path.primary();
+                let offset = orientation.rotate_vector(spheres.support.center);
+                let mut start = point_between_anchors(
+                    path.initial().center() - offset,
+                    path.anchor(),
+                    flight.anchor,
                 );
+                let mut cell = path.initial().placement().committed_cell();
+                for leg in path.legs() {
+                    let end = point_between_anchors(
+                        leg.end().center() - offset,
+                        path.anchor(),
+                        flight.anchor,
+                    );
+                    flight.segments.push(PreciseJumpFlightSegment {
+                        start,
+                        end,
+                        committed_cell: cell,
+                    });
+                    start = end;
+                    cell = leg.end().placement().committed_cell();
+                }
+            }
+            if let ContactMotionSegment::Impact { hit, point, .. } = segment {
+                let normal = hit.contact().normal;
+                if normal.z >= config.walkable_normal_z {
+                    let contact = point_between_anchors(
+                        point.center - normal * spheres.support.radius,
+                        point.anchor,
+                        flight.anchor,
+                    );
+                    flight.outcome = selected_landing(
+                        request.target,
+                        contact,
+                        normal,
+                        point.committed_cell,
+                        spheres.support.radius,
+                        config.walkable_normal_z,
+                    );
+                    return Ok(flight);
+                }
             }
         }
         if let Some(owner) = result.unavailable_owner {
-            return Ok(CandidatePrediction::Unproven(
-                PreciseJumpUnprovenReason::CollisionUnavailable { owner },
-            ));
-        }
-        let solved = &mover;
-        if tick == 1 && solved.contact != ContactState::Airborne {
-            return Ok(CandidatePrediction::Failed(
-                PreciseJumpCandidateFailure::LaunchDidNotLeaveSupport,
-            ));
-        }
-        // Consume the first accepted hard impact directly. Later support/bounce must not
-        // replace a ceiling, wall, or wrong-target strike with a successful landing.
-        let accepted_contact = result.motion.iter().find_map(|segment| {
-            let ContactMotionSegment::Impact { hit, point, fraction } = segment else { return None; };
-            let matches_target = match hit {
-                HardSphereSweepHit::World(_) => matches!(request.target.hit(), CollisionSurfaceRayHit::Environment(_)),
-                HardSphereSweepHit::Entity { body_id, .. } => matches!(
-                    request.target.hit(), CollisionSurfaceRayHit::Entity(target) if target.proof.body_id() == *body_id
-                ),
-            };
-            Some((hit.contact().normal, matches_target, point, fraction))
-        });
-        if accepted_contact.is_some_and(|(normal, _, _, _)| normal.z < walkable_normal_z) {
-            return Ok(CandidatePrediction::Failed(
-                PreciseJumpCandidateFailure::Obstructed,
-            ));
-        }
-        if let Some((normal, contact_matches_target, point, fraction)) = accepted_contact {
-            if !contact_matches_target {
-                return Ok(CandidatePrediction::Failed(
-                    PreciseJumpCandidateFailure::FirstLandingMissedTarget,
-                ));
-            }
-            let contact_point = point_between_anchors(
-                point.center - normal * support_sphere.radius,
-                point.anchor,
-                request.target.anchor,
+            flight.outcome = PreciseJumpFlightOutcome::Incomplete(
+                PreciseJumpPredictionIncompleteReason::CollisionUnavailable { owner },
             );
-            let committed_cell = point.committed_cell;
-            if committed_cell == request.target.hit.placement().committed_cell()
-                && contact_point.distance(&request.target.hit.point()) <= landing_tolerance
+            return Ok(flight);
+        }
+        if mover.contact == ContactState::Grounded {
+            if let Some((normal, point, cell)) =
+                grounded_support_contact(&mover, spheres.support, flight.anchor)
             {
-                return Ok(CandidatePrediction::Reached(PreciseJumpPredictedLanding {
-                    candidate,
-                    contact_point,
+                flight.outcome = selected_landing(
+                    request.target,
+                    point,
                     normal,
-                    flight_duration: PRECISE_JUMP_FIXED_TICK
-                        .mul_f32(tick.saturating_sub(1) as f32 + fraction),
-                    solver_ticks: tick,
-                    trajectory: trajectory_placements.finish(
-                        request.target.anchor,
-                        trajectory_origin,
-                        candidate,
-                        gravity,
-                        tick.saturating_sub(1) as f32 + fraction,
-                    ),
-                }));
+                    cell,
+                    spheres.support.radius,
+                    config.walkable_normal_z,
+                );
+                return Ok(flight);
             }
-            return Ok(CandidatePrediction::Failed(
-                PreciseJumpCandidateFailure::FirstLandingMissedTarget,
-            ));
-        }
-        match solved.contact {
-            ContactState::Grounded => {
-                let Some((normal, contact_point, committed_cell)) =
-                    grounded_support_contact(solved, support_sphere, request.target.anchor)
-                else {
-                    return Ok(CandidatePrediction::Unproven(
-                        PreciseJumpUnprovenReason::BodyDefinitionChanged,
-                    ));
-                };
-                if committed_cell == request.target.hit.placement().committed_cell()
-                    && contact_point.distance(&request.target.hit.point()) <= landing_tolerance
-                {
-                    return Ok(CandidatePrediction::Reached(PreciseJumpPredictedLanding {
-                        candidate,
-                        contact_point,
-                        normal,
-                        flight_duration: PRECISE_JUMP_FIXED_TICK * tick,
-                        solver_ticks: tick,
-                        trajectory: trajectory_placements.finish(
-                            request.target.anchor,
-                            trajectory_origin,
-                            candidate,
-                            gravity,
-                            tick as f32,
-                        ),
-                    }));
-                }
-                return Ok(CandidatePrediction::Failed(
-                    PreciseJumpCandidateFailure::FirstLandingMissedTarget,
-                ));
-            }
-            ContactState::Sliding => {
-                return Ok(CandidatePrediction::Failed(
-                    PreciseJumpCandidateFailure::SlidingContact,
-                ));
-            }
-            ContactState::Airborne => {}
-            ContactState::Unknown => {
-                return Ok(CandidatePrediction::Unproven(
-                    PreciseJumpUnprovenReason::BodyDefinitionChanged,
-                ));
-            }
+            flight.outcome = PreciseJumpFlightOutcome::Incomplete(
+                PreciseJumpPredictionIncompleteReason::BodyDefinitionChanged,
+            );
+            return Ok(flight);
         }
     }
-    Ok(CandidatePrediction::Unproven(
-        PreciseJumpUnprovenReason::WorkBudgetExhausted,
-    ))
+    Ok(flight)
 }
 
-fn classify_solver_error(
-    error: anyhow::Error,
-) -> Result<CandidatePrediction, PreciseJumpPredictionError> {
-    match error.downcast_ref::<CollisionQueryError>() {
-        Some(CollisionQueryError::UnavailableOwner { owner }) => Ok(CandidatePrediction::Unproven(
-            PreciseJumpUnprovenReason::CollisionUnavailable {
-                owner: Guid(*owner),
-            },
-        )),
-        Some(CollisionQueryError::UnknownMotionCell { cell }) => Ok(CandidatePrediction::Unproven(
-            PreciseJumpUnprovenReason::EnvCellUnavailable { cell: Guid(*cell) },
-        )),
-        Some(_) | None => Err(PreciseJumpPredictionError::Solver(error)),
-    }
-}
-
-fn map_candidate_rejection(
-    rejection: PreciseJumpCandidateRejection,
-) -> PreciseJumpPredictionOutcome {
-    match rejection {
-        PreciseJumpCandidateRejection::Airborne => {
-            PreciseJumpPredictionOutcome::Unreachable(PreciseJumpUnreachableReason::Airborne)
-        }
-        PreciseJumpCandidateRejection::Unsupported => {
-            PreciseJumpPredictionOutcome::Unreachable(PreciseJumpUnreachableReason::Unsupported)
-        }
-        PreciseJumpCandidateRejection::Overburdened => {
-            PreciseJumpPredictionOutcome::Unreachable(PreciseJumpUnreachableReason::Overburdened)
-        }
-        PreciseJumpCandidateRejection::TargetOutsideEnvelope => {
-            PreciseJumpPredictionOutcome::Unreachable(
-                PreciseJumpUnreachableReason::TargetOutsideEnvelope,
-            )
-        }
-        PreciseJumpCandidateRejection::NonGroundedBody
-        | PreciseJumpCandidateRejection::InvalidCapabilities
-        | PreciseJumpCandidateRejection::InvalidHeading
-        | PreciseJumpCandidateRejection::InvalidIntegrationStep => {
-            PreciseJumpPredictionOutcome::Unproven(PreciseJumpUnprovenReason::InvalidCapabilities)
-        }
-    }
-}
-
-fn desired_landing_body_point(
-    body: &SpatialBody,
+fn selected_landing(
     target: &PreciseJumpTarget,
+    contact_point: Vector3,
+    normal: Vector3,
+    committed_cell: Option<Guid>,
+    tolerance: f32,
+    walkable_normal_z: f32,
+) -> PreciseJumpFlightOutcome {
+    PreciseJumpFlightOutcome::Landed {
+        contact_point,
+        normal,
+        committed_cell,
+        matches_target: target.view.normal.z >= walkable_normal_z
+            && committed_cell == target.view.committed_cell
+            && contact_point.distance(&target.view.point) <= tolerance,
+    }
+}
+
+/// Cooperative cancellation for one horizon-bounded chosen flight.
+#[derive(Clone, Copy)]
+pub struct PreciseJumpPredictionControl<'a> {
+    /// Cooperative retirement checked between indivisible solver queries.
+    pub cancelled: &'a AtomicBool,
+}
+
+impl PreciseJumpPredictionControl<'_> {
+    fn interruption(self) -> Option<PreciseJumpPredictionIncompleteReason> {
+        self.cancelled
+            .load(Ordering::Relaxed)
+            .then_some(PreciseJumpPredictionIncompleteReason::Cancelled)
+    }
+}
+
+pub(super) fn desired_landing_body_point(
+    body: &SpatialBody,
+    target: &PreciseJumpTargetView,
     support_sphere: holtburger_world::GroundedSphere,
 ) -> Vector3 {
     let body_anchor = owner_for_position(body.pose.landblock_id);
-    let target_in_body_frame =
-        point_between_anchors(target.hit.point(), target.anchor, body_anchor);
-    target_in_body_frame + target.hit.normal() * support_sphere.radius
+    let target_in_body_frame = point_between_anchors(target.point, target.anchor, body_anchor);
+    target_in_body_frame + target.normal * support_sphere.radius
         - body.pose.rotation.rotate_vector(support_sphere.center)
 }
-
 fn grounded_support_contact(
     body: &SpatialBody,
     support_sphere: holtburger_world::GroundedSphere,
@@ -847,7 +518,6 @@ fn grounded_support_contact(
         support_contact(body, support_sphere, support.normal, target_anchor)?;
     Some((support.normal, contact, committed_cell))
 }
-
 fn support_contact(
     body: &SpatialBody,
     support_sphere: holtburger_world::GroundedSphere,
@@ -863,11 +533,9 @@ fn support_contact(
         physical.response.cell(),
     ))
 }
-
 fn owner_for_position(position: Guid) -> Guid {
     Guid((position.0 & 0xffff_0000) | 0xffff)
 }
-
 fn point_between_anchors(point: Vector3, source: Guid, target: Guid) -> Vector3 {
     Vector3::new(
         point.x
@@ -879,25 +547,24 @@ fn point_between_anchors(point: Vector3, source: Guid, target: Guid) -> Vector3 
         point.z,
     )
 }
-
 #[cfg(test)]
-mod tests {
-    use holtburger_world::SpatialBodyId;
+pub(in crate::client) mod tests {
+    use holtburger_world::{SpatialBodyId, SpatialScene};
     use std::collections::HashMap;
     use std::sync::Arc;
 
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::{Plane, Quaternion, Sphere};
+    use holtburger_common::{Quaternion, Sphere};
     use holtburger_content::{
-        BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
-        CollisionBall, CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders,
-        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, PlacedCollider,
-        StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
+        BspSolid, CellVolume, ColliderScale, CollisionBox, CollisionPolygon, CollisionShape,
+        LandblockColliders, LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
+        PlacedCollider, StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_world::state::{
-        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
+        PlayerMotionTableSource, SelfJumpCapabilities, SelfMovementCapabilities,
+        SelfMovementKinematics,
     };
     use holtburger_world::{
         DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
@@ -908,11 +575,338 @@ mod tests {
         PreparedEntityTargetGeometry, StaticSurfaceRayRequest,
     };
 
-    use crate::{JumpExtent, retail_player_grounded_profile};
+    use crate::{JumpExtent, PreciseJumpWorldDisplacement, retail_player_grounded_profile};
 
     use super::*;
 
     const OWNER: Guid = Guid(0xda55_ffff);
+
+    /// Asset-free collision fixture shared by prediction and asynchronous runtime tests.
+    pub(in crate::client) struct PredictionFixture {
+        pub collision: CollisionScene,
+        pub scene: SpatialScene,
+        pub body_id: SpatialBodyId,
+        pub capabilities: SelfJumpCapabilities,
+        pub target: PreciseJumpTarget,
+        pub now: Instant,
+    }
+
+    pub(in crate::client) fn flat_prediction_fixture() -> PredictionFixture {
+        let collision = collision_scene(0.0, Vec::new());
+        let now = Instant::now();
+        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
+        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
+        PredictionFixture {
+            collision,
+            scene,
+            body_id,
+            capabilities: capabilities(),
+            target,
+            now,
+        }
+    }
+
+    /// Collection-admitted variant for authority-tick launch transaction tests.
+    pub(in crate::client) fn flat_dynamic_prediction_fixture() -> PredictionFixture {
+        let mut fixture = flat_prediction_fixture();
+        let (scene, body_id) = dynamic_body_scene(
+            &fixture.collision,
+            Vector3::new(120.0, 96.0, 0.005),
+            fixture.now,
+        );
+        fixture.scene = scene;
+        fixture.body_id = body_id;
+        fixture
+    }
+
+    fn selected_flight(
+        scene: &SpatialScene,
+        collision: &CollisionScene,
+        body_id: SpatialBodyId,
+        target: &PreciseJumpTarget,
+        power: JumpExtent,
+        maximum_ticks: u32,
+        now: Instant,
+    ) -> PreciseJumpFlight {
+        let body = scene.body(body_id).unwrap();
+        let spheres = body.physical.as_ref().unwrap().definition.spheres();
+        let desired = desired_landing_body_point(body, target.view(), spheres.primary());
+        let selected = super::super::precise_jump::resolve_selected_precise_jump(
+            PRECISE_JUMP_FIXED_TICK,
+            &capabilities(),
+            body.physical.as_ref().unwrap().definition,
+            body.pose.rotation.to_heading(),
+            PreciseJumpWorldDisplacement::new(desired - body.pose.coords).unwrap(),
+            power,
+        )
+        .unwrap();
+        let entities = scene.entity_collision_snapshot().unwrap();
+        predict_selected_precise_jump(
+            PreciseJumpFlightRequest {
+                body,
+                collision_scene: collision,
+                entity_collision: &entities,
+                target,
+                candidate: selected.candidate(),
+                maximum_ticks: std::num::NonZeroU32::new(maximum_ticks).unwrap(),
+                start_time: now,
+            },
+            PreciseJumpPredictionControl {
+                cancelled: &AtomicBool::new(false),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn selected_flight_continues_after_ceiling_impact_and_reports_the_missed_landing() {
+        let ceiling = polygon_collider(
+            vec![
+                Vector3::new(80.0, 80.0, 3.0),
+                Vector3::new(80.0, 110.0, 3.0),
+                Vector3::new(125.0, 110.0, 3.0),
+                Vector3::new(125.0, 80.0, 3.0),
+            ],
+            Vector3::new(0.0, 0.0, -1.0),
+            0,
+        );
+        let collision = collision_scene(0.0, vec![ceiling]);
+        let now = Instant::now();
+        let (mut scene, id) = body_scene(&collision, Vector3::new(90.0, 96.0, 0.005), now);
+        let target = downward_target(&collision, Vector3::new(94.8, 96.0, 0.0));
+        let power = JumpExtent::new(0.77).unwrap();
+        let supported = selected_flight(&scene, &collision, id, &target, power, 160, now);
+        assert!(supported.solver_ticks > 5);
+        let PreciseJumpFlightOutcome::Landed {
+            contact_point,
+            matches_target,
+            ..
+        } = supported.outcome
+        else {
+            panic!("ceiling arc must land: {:?}", supported.outcome);
+        };
+        assert!(!matches_target);
+        assert!(contact_point.x < 92.0);
+        assert!(contact_point.z.abs() < 0.001);
+        assert!(
+            supported
+                .segments
+                .iter()
+                .any(|segment| segment.end.z < segment.start.z)
+        );
+        for pair in supported.segments.windows(2) {
+            assert!((pair[0].end - pair[1].start).length() < 0.001);
+        }
+        let mut body = scene.body(id).unwrap().clone();
+        body.contact = ContactState::Airborne;
+        if let PhysicalBodyResponseState::Grounded { ground, .. } =
+            &mut body.physical.as_mut().unwrap().response
+        {
+            *ground = GroundState::Airborne;
+        }
+        scene.update_body(body).unwrap();
+        assert_eq!(
+            selected_flight(&scene, &collision, id, &target, power, 160, now),
+            supported
+        );
+    }
+
+    #[test]
+    fn selected_flight_distinguishes_matching_landing_speed_capped_miss_and_incomplete_prefix() {
+        let collision = collision_scene(0.0, Vec::new());
+        let now = Instant::now();
+        let (scene, id) = body_scene(&collision, Vector3::new(90.0, 96.0, 0.005), now);
+        for (distance, expected) in [(1.0, true), (20.0, false)] {
+            let target = downward_target(&collision, Vector3::new(90.0 + distance, 96.0, 0.0));
+            let flight = selected_flight(
+                &scene,
+                &collision,
+                id,
+                &target,
+                JumpExtent::MAXIMUM,
+                160,
+                now,
+            );
+            let PreciseJumpFlightOutcome::Landed { matches_target, .. } = flight.outcome else {
+                panic!("flat arc must land");
+            };
+            assert_eq!(matches_target, expected);
+            let incomplete =
+                selected_flight(&scene, &collision, id, &target, JumpExtent::MAXIMUM, 1, now);
+            assert_eq!(
+                incomplete.outcome,
+                PreciseJumpFlightOutcome::Incomplete(
+                    PreciseJumpPredictionIncompleteReason::FlightHorizonExhausted
+                )
+            );
+            assert!(!incomplete.segments.is_empty());
+        }
+    }
+
+    #[test]
+    fn selected_flight_continues_after_wall_contact_with_tangential_motion() {
+        let wall = polygon_collider(
+            vec![
+                Vector3::new(92.0, 90.0, 0.0),
+                Vector3::new(92.0, 105.0, 0.0),
+                Vector3::new(92.0, 105.0, 8.0),
+                Vector3::new(92.0, 90.0, 8.0),
+            ],
+            Vector3::new(-1.0, 0.0, 0.0),
+            0,
+        );
+        let collision = collision_scene(0.0, vec![wall]);
+        let now = Instant::now();
+        let (scene, id) = body_scene(&collision, Vector3::new(90.0, 96.0, 0.005), now);
+        let target = downward_target(&collision, Vector3::new(95.0, 99.0, 0.0));
+        let flight = selected_flight(
+            &scene,
+            &collision,
+            id,
+            &target,
+            JumpExtent::MAXIMUM,
+            160,
+            now,
+        );
+        let PreciseJumpFlightOutcome::Landed {
+            contact_point,
+            matches_target,
+            ..
+        } = flight.outcome
+        else {
+            panic!("wall continuation must land");
+        };
+        assert!(!matches_target);
+        assert!(contact_point.x < 92.0);
+        assert!(contact_point.y > 96.5);
+        assert!(
+            flight
+                .segments
+                .iter()
+                .any(|segment| segment.end.x < segment.start.x
+                    && segment.end.y > segment.start.y + 0.001)
+        );
+    }
+
+    #[test]
+    fn selected_flight_and_ideal_curve_preserve_interior_placement() {
+        let cell = Guid(0xda550100);
+        let mut floor = polygon_collider(
+            vec![
+                Vector3::new(108.0, 92.0, 0.0),
+                Vector3::new(124.0, 92.0, 0.0),
+                Vector3::new(124.0, 100.0, 0.0),
+                Vector3::new(108.0, 100.0, 0.0),
+            ],
+            Vector3::new(0.0, 0.0, 1.0),
+            0,
+        );
+        floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: cell.0 };
+        let mut collision = CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: OWNER.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(
+                    vec![floor],
+                    vec![CellVolume {
+                        cell_selector: cell.0 as u16,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: Vec::new(),
+                    }],
+                ),
+            })
+            .unwrap();
+        let now = Instant::now();
+        let (scene, id) = body_scene_in_cell(
+            &collision,
+            cell,
+            Vector3::new(120.0, 96.0, 0.005),
+            Some(cell),
+            now,
+        );
+        let target =
+            downward_target_in_cell(&collision, Vector3::new(114.0, 96.0, 0.0), Some(cell));
+        let flight = selected_flight(
+            &scene,
+            &collision,
+            id,
+            &target,
+            JumpExtent::MAXIMUM,
+            160,
+            now,
+        );
+        assert!(
+            matches!(flight.outcome,PreciseJumpFlightOutcome::Landed {matches_target:true,committed_cell:Some(landed),..} if landed==cell)
+        );
+        assert!(
+            flight
+                .segments
+                .iter()
+                .all(|segment| segment.committed_cell == Some(cell))
+        );
+        let body = scene.body(id).unwrap();
+        let physical = body.physical.as_ref().unwrap();
+        let selected = super::super::precise_jump::resolve_selected_precise_jump(
+            PRECISE_JUMP_FIXED_TICK,
+            &capabilities(),
+            physical.definition,
+            0.0,
+            PreciseJumpWorldDisplacement::new(
+                desired_landing_body_point(
+                    body,
+                    target.view(),
+                    physical.definition.spheres().primary(),
+                ) - body.pose.coords,
+            )
+            .unwrap(),
+            JumpExtent::MAXIMUM,
+        )
+        .unwrap();
+        let curve = selected_jump_curve(
+            body,
+            &collision,
+            OWNER,
+            selected.desired_velocity().unwrap(),
+            selected.candidate().flight_duration_seconds(),
+        )
+        .unwrap();
+        assert_eq!(
+            curve.placements(),
+            &[PreciseJumpTrajectoryPlacement {
+                start_fraction: 0.0,
+                end_fraction: 1.0,
+                committed_cell: Some(cell)
+            }]
+        );
+    }
+
+    #[test]
+    fn missing_collision_coverage_keeps_an_explicit_incomplete_endpoint() {
+        let collision = collision_scene(0.0, Vec::new());
+        let now = Instant::now();
+        let (scene, id) = body_scene(&collision, Vector3::new(0.1, 96.0, 0.005), now);
+        let target = downward_target(&collision, Vector3::new(4.0, 96.0, 0.0));
+        let flight = selected_flight(
+            &scene,
+            &collision,
+            id,
+            &target,
+            JumpExtent::MAXIMUM,
+            160,
+            now,
+        );
+        assert!(matches!(
+            flight.outcome,
+            PreciseJumpFlightOutcome::Incomplete(
+                PreciseJumpPredictionIncompleteReason::CollisionUnavailable { .. }
+            )
+        ));
+    }
 
     fn capabilities() -> SelfJumpCapabilities {
         SelfJumpCapabilities {
@@ -934,14 +928,6 @@ mod tests {
             burden: 0.0,
         }
     }
-
-    fn admin_capabilities() -> SelfJumpCapabilities {
-        let mut capabilities = capabilities();
-        capabilities.movement.run_rate_scalar = 4.5;
-        capabilities.full_extent_jump_height = 9.696_716;
-        capabilities
-    }
-
     fn flat_terrain(owner: Guid, height: f32) -> TerrainCollisionSurface {
         TerrainCollisionSurface::from_terrain(&LandblockTerrain {
             grid_size: 9,
@@ -953,7 +939,6 @@ mod tests {
         })
         .unwrap()
     }
-
     fn collision_scene(terrain_height: f32, colliders: Vec<PlacedCollider>) -> CollisionScene {
         let mut collision = CollisionScene::new();
         collision
@@ -965,7 +950,6 @@ mod tests {
             .unwrap();
         collision
     }
-
     fn polygon_collider(
         vertices: Vec<Vector3>,
         normal: Vector3,
@@ -1009,24 +993,6 @@ mod tests {
         )
         .unwrap()
     }
-
-    fn horizontal_platform(
-        minimum: Vector3,
-        maximum: Vector3,
-        source_index: usize,
-    ) -> PlacedCollider {
-        polygon_collider(
-            vec![
-                Vector3::new(minimum.x, minimum.y, minimum.z),
-                Vector3::new(maximum.x, minimum.y, minimum.z),
-                Vector3::new(maximum.x, maximum.y, maximum.z),
-                Vector3::new(minimum.x, maximum.y, maximum.z),
-            ],
-            Vector3::new(0.0, 0.0, 1.0),
-            source_index,
-        )
-    }
-
     fn body_scene(
         collision: &CollisionScene,
         coords: Vector3,
@@ -1034,7 +1000,6 @@ mod tests {
     ) -> (SpatialScene, SpatialBodyId) {
         body_scene_in_cell(collision, OWNER, coords, None, now)
     }
-
     fn body_scene_in_cell(
         collision: &CollisionScene,
         pose_landblock_id: Guid,
@@ -1071,7 +1036,6 @@ mod tests {
         scene.register_body(body);
         (scene, body_id)
     }
-
     fn dynamic_body_scene(
         collision: &CollisionScene,
         coords: Vector3,
@@ -1158,11 +1122,9 @@ mod tests {
         assert_eq!(scene.body(body_id).unwrap().contact, ContactState::Grounded);
         (scene, body_id)
     }
-
     fn downward_target(collision: &CollisionScene, point: Vector3) -> PreciseJumpTarget {
         downward_target_in_cell(collision, point, None)
     }
-
     fn downward_target_in_cell(
         collision: &CollisionScene,
         point: Vector3,
@@ -1180,836 +1142,5 @@ mod tests {
             .unwrap()
             .unwrap();
         PreciseJumpTarget::new(OWNER, CollisionSurfaceRayHit::Environment(hit)).unwrap()
-    }
-
-    fn prediction(
-        scene: &SpatialScene,
-        collision: &CollisionScene,
-        body_id: SpatialBodyId,
-        target: &PreciseJumpTarget,
-        now: Instant,
-    ) -> PreciseJumpPredictionOutcome {
-        prediction_with_capabilities(scene, collision, body_id, &capabilities(), target, now)
-    }
-
-    fn prediction_with_capabilities(
-        scene: &SpatialScene,
-        collision: &CollisionScene,
-        body_id: SpatialBodyId,
-        capabilities: &SelfJumpCapabilities,
-        target: &PreciseJumpTarget,
-        now: Instant,
-    ) -> PreciseJumpPredictionOutcome {
-        let entity_collision = scene.entity_collision_snapshot().unwrap();
-        predict_precise_jump(prediction_request(
-            scene,
-            collision,
-            &entity_collision,
-            body_id,
-            capabilities,
-            target,
-            now,
-        ))
-        .unwrap()
-    }
-
-    fn prediction_request<'a>(
-        scene: &'a SpatialScene,
-        collision: &'a CollisionScene,
-        entity_collision: &'a EntityCollisionSnapshot,
-        body_id: SpatialBodyId,
-        capabilities: &'a SelfJumpCapabilities,
-        target: &'a PreciseJumpTarget,
-        now: Instant,
-    ) -> PreciseJumpPredictionRequest<'a> {
-        PreciseJumpPredictionRequest {
-            body: scene.body(body_id),
-            collision_scene: collision,
-            entity_collision,
-            capabilities,
-            target,
-            budget: PreciseJumpPredictionBudget::new(
-                PreciseJumpCandidateBudget::new(6).unwrap(),
-                160,
-            )
-            .unwrap(),
-            start_time: now,
-        }
-    }
-
-    fn add_solid_dynamic_peer(scene: &mut SpatialScene, now: Instant) {
-        add_solid_dynamic_ball(
-            scene,
-            SpatialBodyId::Entity(Guid(0x5000_0001)),
-            Vector3::new(116.0, 96.0, 2.5),
-            2.0,
-            now,
-        );
-    }
-
-    fn add_solid_dynamic_ball(
-        scene: &mut SpatialScene,
-        peer_id: SpatialBodyId,
-        center: Vector3,
-        radius: f32,
-        now: Instant,
-    ) {
-        let profile = retail_player_grounded_profile(EdgeProtection::None).unwrap();
-        scene.register_body(SpatialBody::new(
-            peer_id,
-            WorldPosition {
-                landblock_id: OWNER,
-                coords: center,
-                rotation: Quaternion::identity(),
-            },
-            now,
-        ));
-        let configuration = DynamicPhysicalBodyConfiguration::new(
-            DynamicPhysicalBodyDefinition {
-                movement: profile.definition,
-                response_policy: profile.response_policy,
-                entity_collision: DynamicBodyCollisionDefinition {
-                    player_collision: None,
-                    contact_response: holtburger_world::EntityContactResponse::Character(
-                        holtburger_world::EntityIntegrationEligibility::Eligible,
-                    ),
-                    target_geometry: Arc::new(PreparedEntityTargetGeometry {
-                        setup_radius: 0.5,
-                        setup_height: 1.0,
-                        collision_animations: Default::default(),
-                        physics_bsp_parts: Vec::new(),
-                        fallback_setup_did: 0x0200_0001,
-                        fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
-                            center: Vector3::zero(),
-                            radius,
-                        }))],
-                        fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                    }),
-                    dynamic_collision: EntityDynamicCollisionPolicy {
-                        is_static: false,
-                        target: EntityCollisionParticipation::Solid,
-                        mover_accepts_response: true,
-                        accepts_peer_reports: true,
-                        missile: false,
-                        path_clipped: false,
-                    },
-                    reporting: EntityCollisionReportPolicy {
-                        enabled: true,
-                        as_environment: false,
-                    },
-                    uses_physics_bsp: false,
-                    elasticity: PhysicalElasticity::DEFAULT,
-                    default_animation_available: false,
-                    default_script_available: false,
-                },
-            },
-            LocalPhysicalDemand {
-                target: LocalTargetDemand::Retained,
-                integration: LocalIntegrationDemand::Excluded,
-            },
-        )
-        .unwrap();
-        scene
-            .set_dynamic_physical_body(
-                peer_id,
-                Some(configuration),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn flat_terrain_prediction_reaches_target_without_mutating_source() {
-        let collision = collision_scene(0.0, Vec::new());
-        let now = Instant::now();
-        let start = Vector3::new(120.0, 96.0, 0.005);
-        let (scene, body_id) = body_scene(&collision, start, now);
-        let initial = scene.body(body_id).unwrap().clone();
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-
-        let PhysicalBodyDefinition::Grounded { spheres, .. } =
-            initial.physical.as_ref().unwrap().definition
-        else {
-            unreachable!()
-        };
-        let desired = desired_landing_body_point(&initial, &target, spheres.support);
-        let analytic = generate_precise_jump_candidates(
-            PRECISE_JUMP_FIXED_TICK,
-            &capabilities(),
-            initial.physical.as_ref().unwrap().definition,
-            initial.pose.rotation.to_heading(),
-            CharacterJumpReadiness::Supported,
-            PreciseJumpWorldDisplacement::new(desired - initial.pose.coords).unwrap(),
-            PreciseJumpCandidateBudget::new(6).unwrap(),
-        );
-        assert!(
-            analytic.is_ok(),
-            "desired={desired:?}, analytic={analytic:?}"
-        );
-
-        let outcome = prediction(&scene, &collision, body_id, &target, now);
-        let PreciseJumpPredictionOutcome::Reachable(landing) = outcome else {
-            panic!("flat in-range target must be reachable: {outcome:?}, target={target:?}")
-        };
-        assert!(landing.contact_point().distance(&target.hit().point()) <= 0.48);
-        let trajectory = landing.trajectory();
-        assert_eq!(trajectory.anchor(), OWNER);
-        assert_eq!(trajectory.origin(), start);
-        assert!(
-            trajectory
-                .position_at_fraction(1.0)
-                .unwrap()
-                .distance(&desired)
-                < 0.000_1
-        );
-        assert_eq!(
-            trajectory.placements(),
-            &[PreciseJumpTrajectoryPlacement {
-                start_fraction: 0.0,
-                end_fraction: 1.0,
-                committed_cell: None,
-            }]
-        );
-        assert_eq!(scene.body(body_id).unwrap(), &initial);
-    }
-
-    #[test]
-    fn high_skill_flat_targets_remain_reachable_through_the_capability_envelope() {
-        let collision = collision_scene(0.0, Vec::new());
-        let now = Instant::now();
-        let start = Vector3::new(120.0, 96.0, 0.005);
-        let (scene, body_id) = body_scene(&collision, start, now);
-        let capabilities = admin_capabilities();
-        let entity_collision = scene.entity_collision_snapshot().unwrap();
-
-        for half_meter in 1..=101 {
-            let distance = half_meter as f32 * 0.5;
-            let target =
-                downward_target(&collision, Vector3::new(start.x - distance, start.y, 0.0));
-            let evaluation = diagnose_precise_jump(prediction_request(
-                &scene,
-                &collision,
-                &entity_collision,
-                body_id,
-                &capabilities,
-                &target,
-                now,
-            ))
-            .unwrap();
-            assert!(
-                matches!(
-                    evaluation.outcome(),
-                    PreciseJumpPredictionOutcome::Reachable(_)
-                ),
-                "flat target at {distance}m must remain reachable: {evaluation:?}"
-            );
-            let PreciseJumpPredictionOutcome::Reachable(landing) = evaluation.outcome() else {
-                unreachable!()
-            };
-            assert_eq!(
-                landing.trajectory().placements().len(),
-                1,
-                "flat outdoor trajectory at {distance}m must not scale its payload with solver ticks"
-            );
-        }
-
-        let outside = downward_target(&collision, Vector3::new(start.x - 51.0, start.y, 0.0));
-        assert_eq!(
-            prediction_with_capabilities(&scene, &collision, body_id, &capabilities, &outside, now),
-            PreciseJumpPredictionOutcome::Unreachable(
-                PreciseJumpUnreachableReason::TargetOutsideEnvelope
-            )
-        );
-    }
-
-    #[test]
-    fn solid_entity_peer_obstructs_an_environment_target() {
-        let collision = collision_scene(0.0, Vec::new());
-        let now = Instant::now();
-        let start = Vector3::new(120.0, 96.0, 0.005);
-        let (scene, body_id) = dynamic_body_scene(&collision, start, now);
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-        let without_peer = prediction(&scene, &collision, body_id, &target, now);
-
-        let mut with_peer = scene;
-        add_solid_dynamic_peer(&mut with_peer, now);
-
-        assert!(matches!(
-            without_peer,
-            PreciseJumpPredictionOutcome::Reachable(_)
-        ));
-        assert!(matches!(
-            prediction(&with_peer, &collision, body_id, &target, now),
-            PreciseJumpPredictionOutcome::Unproven(
-                PreciseJumpUnprovenReason::CandidateSearchExhausted { .. }
-            )
-        ));
-    }
-
-    #[test]
-    fn solid_entity_surface_can_be_selected_reached_and_invalidated() {
-        let collision = collision_scene(0.0, Vec::new());
-        let now = Instant::now();
-        let start = Vector3::new(120.0, 96.0, 0.005);
-        let (mut scene, body_id) = dynamic_body_scene(&collision, start, now);
-        let target_body = SpatialBodyId::Entity(Guid(0x5000_0002));
-        add_solid_dynamic_ball(
-            &mut scene,
-            target_body,
-            Vector3::new(114.0, 96.0, 1.0),
-            1.5,
-            now,
-        );
-        let entities = scene.entity_collision_snapshot().unwrap();
-        let hit = collision
-            .cast_surface_ray(
-                &entities,
-                StaticSurfaceRayRequest {
-                    anchor: OWNER,
-                    start: Vector3::new(114.0, 96.0, 8.0),
-                    direction: Vector3::new(0.0, 0.0, -1.0),
-                    maximum_distance: 10.0,
-                    previous_cell: None,
-                    filter: PhysicalCollisionFilter::ALL,
-                },
-                |candidate| candidate == target_body,
-            )
-            .unwrap()
-            .unwrap();
-        assert!(matches!(
-            &hit,
-            CollisionSurfaceRayHit::Entity(entity) if entity.proof.body_id() == target_body
-        ));
-        let target = PreciseJumpTarget::new(OWNER, hit).unwrap();
-        let outcome = prediction(&scene, &collision, body_id, &target, now);
-        assert!(
-            matches!(outcome, PreciseJumpPredictionOutcome::Reachable(_)),
-            "entity landing target must be reachable: {outcome:?}"
-        );
-        assert!(target.is_current(&scene, &collision));
-
-        scene
-            .relocate_dynamic_body(
-                target_body,
-                WorldPosition {
-                    landblock_id: OWNER,
-                    coords: Vector3::new(113.0, 96.0, 1.0),
-                    rotation: Quaternion::identity(),
-                },
-                now + Duration::from_secs(1),
-            )
-            .unwrap();
-        assert!(!target.is_current(&scene, &collision));
-    }
-
-    #[test]
-    fn entity_surface_targeting_crosses_portals_and_keeps_straddling_targets() {
-        let source = Guid(0xda55_0100);
-        let target = Guid(0xda55_0101);
-        let plane = Plane {
-            normal: Vector3::new(1.0, 0.0, 0.0),
-            d: -10.0,
-        };
-        let mut collision = CollisionScene::new();
-        collision
-            .insert(LandblockCollisionAsset {
-                landblock_id: OWNER.0,
-                terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders::new(
-                    Vec::new(),
-                    vec![
-                        CellVolume {
-                            cell_selector: source.0 as u16,
-                            placement: LandblockPlacement {
-                                origin: Vector3::zero(),
-                                orientation: Quaternion::identity(),
-                            },
-                            planes: vec![Plane {
-                                normal: plane.normal * -1.0,
-                                d: -plane.d,
-                            }],
-                            portals: vec![CellCollisionPortal {
-                                plane,
-                                aperture_vertices: Vec::new(),
-                                reciprocal_visibility_vertices: None,
-                                positive_side: true,
-                                target: CellCollisionPortalTarget::EnvCell(target.0 as u16),
-                                outdoor_building: None,
-                            }],
-                        },
-                        CellVolume {
-                            cell_selector: target.0 as u16,
-                            placement: LandblockPlacement {
-                                origin: Vector3::zero(),
-                                orientation: Quaternion::identity(),
-                            },
-                            planes: vec![plane],
-                            portals: vec![CellCollisionPortal {
-                                plane,
-                                aperture_vertices: Vec::new(),
-                                reciprocal_visibility_vertices: None,
-                                positive_side: false,
-                                target: CellCollisionPortalTarget::EnvCell(source.0 as u16),
-                                outdoor_building: None,
-                            }],
-                        },
-                    ],
-                ),
-            })
-            .unwrap();
-        for x in [13.0, 10.25] {
-            let now = Instant::now();
-            let mut scene = SpatialScene::new();
-            let id = SpatialBodyId::Entity(Guid(0x5000_0002));
-            let center = Vector3::new(x, 10.0, 10.0);
-            let radius = 0.4;
-            add_solid_dynamic_ball(&mut scene, id, center, radius, now);
-            scene
-                .relocate_dynamic_body(
-                    id,
-                    WorldPosition {
-                        landblock_id: target,
-                        coords: center,
-                        rotation: Quaternion::identity(),
-                    },
-                    now,
-                )
-                .unwrap();
-            scene
-                .advance_dynamic_entity_collection(
-                    &collision,
-                    holtburger_world::MOBILE_CONTACT_TICK_SECONDS,
-                    now,
-                    |_| {
-                        Err(anyhow::anyhow!(
-                            "non-integrating target must not request movement"
-                        ))
-                    },
-                )
-                .unwrap();
-            let hit = collision
-                .cast_surface_ray(
-                    &scene.entity_collision_snapshot().unwrap(),
-                    StaticSurfaceRayRequest {
-                        anchor: OWNER,
-                        start: Vector3::new(5.0, 10.0, 10.0),
-                        direction: Vector3::new(1.0, 0.0, 0.0),
-                        maximum_distance: 20.0,
-                        previous_cell: Some(source),
-                        filter: PhysicalCollisionFilter::ALL,
-                    },
-                    |candidate| candidate == id,
-                )
-                .unwrap()
-                .unwrap();
-            assert!((hit.point().x - (x - radius)).abs() < 0.0001, "{hit:?}");
-            assert!(matches!(hit, CollisionSurfaceRayHit::Entity(_)));
-        }
-    }
-
-    #[test]
-    fn non_walkable_target_is_proven_without_spending_solver_ticks() {
-        let wall = polygon_collider(
-            vec![
-                Vector3::new(114.0, 94.0, 0.0),
-                Vector3::new(114.0, 98.0, 0.0),
-                Vector3::new(114.0, 98.0, 4.0),
-                Vector3::new(114.0, 94.0, 4.0),
-            ],
-            Vector3::new(1.0, 0.0, 0.0),
-            0,
-        );
-        let collision = collision_scene(0.0, vec![wall]);
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let hit = collision
-            .cast_static_surface_ray(StaticSurfaceRayRequest {
-                anchor: OWNER,
-                start: Vector3::new(120.0, 96.0, 2.0),
-                direction: Vector3::new(-1.0, 0.0, 0.0),
-                maximum_distance: 10.0,
-                previous_cell: None,
-                filter: PhysicalCollisionFilter::ALL,
-            })
-            .unwrap()
-            .unwrap();
-        let target =
-            PreciseJumpTarget::new(OWNER, CollisionSurfaceRayHit::Environment(hit)).unwrap();
-
-        assert_eq!(
-            prediction(&scene, &collision, body_id, &target, now),
-            PreciseJumpPredictionOutcome::Unreachable(
-                PreciseJumpUnreachableReason::TargetSurfaceNotWalkable
-            )
-        );
-    }
-
-    #[test]
-    fn exhausted_work_and_stale_collision_remain_unproven() {
-        let collision = collision_scene(0.0, Vec::new());
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-        let entity_collision = scene.entity_collision_snapshot().unwrap();
-        let outcome = predict_precise_jump(PreciseJumpPredictionRequest {
-            body: scene.body(body_id),
-            collision_scene: &collision,
-            entity_collision: &entity_collision,
-            capabilities: &capabilities(),
-            target: &target,
-            budget: PreciseJumpPredictionBudget::new(
-                PreciseJumpCandidateBudget::new(1).unwrap(),
-                1,
-            )
-            .unwrap(),
-            start_time: now,
-        })
-        .unwrap();
-        assert_eq!(
-            outcome,
-            PreciseJumpPredictionOutcome::Unproven(PreciseJumpUnprovenReason::WorkBudgetExhausted)
-        );
-
-        let replacement = collision_scene(0.0, Vec::new());
-        assert_eq!(
-            prediction(&scene, &replacement, body_id, &target, now),
-            PreciseJumpPredictionOutcome::Unproven(PreciseJumpUnprovenReason::StaleTargetCollision)
-        );
-    }
-
-    #[test]
-    fn missing_static_coverage_is_unproven_instead_of_red() {
-        let collision = collision_scene(0.0, Vec::new());
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(4.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(0.2, 96.0, 0.0));
-
-        assert_eq!(
-            prediction(&scene, &collision, body_id, &target, now),
-            PreciseJumpPredictionOutcome::Unproven(
-                PreciseJumpUnprovenReason::CollisionUnavailable {
-                    owner: Guid(0xd955_ffff),
-                }
-            )
-        );
-    }
-
-    #[test]
-    fn env_cell_floor_uses_the_same_first_landing_solver() {
-        let cell = Guid(0xda55_0100);
-        let mut floor = horizontal_platform(
-            Vector3::new(108.0, 92.0, 0.0),
-            Vector3::new(124.0, 100.0, 0.0),
-            0,
-        );
-        floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: cell.0 };
-        let mut collision = CollisionScene::new();
-        collision
-            .insert(LandblockCollisionAsset {
-                landblock_id: OWNER.0,
-                terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders::new(
-                    vec![floor],
-                    vec![CellVolume {
-                        cell_selector: cell.0 as u16,
-                        placement: LandblockPlacement {
-                            origin: Vector3::zero(),
-                            orientation: Quaternion::identity(),
-                        },
-                        planes: Vec::new(),
-                        portals: Vec::new(),
-                    }],
-                ),
-            })
-            .unwrap();
-        let now = Instant::now();
-        let (scene, body_id) = body_scene_in_cell(
-            &collision,
-            cell,
-            Vector3::new(120.0, 96.0, 0.005),
-            Some(cell),
-            now,
-        );
-        let target =
-            downward_target_in_cell(&collision, Vector3::new(114.0, 96.0, 0.0), Some(cell));
-
-        let PreciseJumpPredictionOutcome::Reachable(landing) =
-            prediction(&scene, &collision, body_id, &target, now)
-        else {
-            panic!("EnvCell floor target must be reachable")
-        };
-        assert_eq!(target.hit().placement().committed_cell(), Some(cell));
-        assert!(landing.contact_point().distance(&target.hit().point()) <= 0.48);
-        assert_eq!(
-            landing.trajectory().placements(),
-            &[PreciseJumpTrajectoryPlacement {
-                start_fraction: 0.0,
-                end_fraction: 1.0,
-                committed_cell: Some(cell),
-            }]
-        );
-    }
-
-    #[test]
-    fn elevated_and_lower_static_ledges_are_reached_by_the_first_landing() {
-        let elevated = horizontal_platform(
-            Vector3::new(112.0, 94.0, 1.0),
-            Vector3::new(116.0, 98.0, 1.0),
-            0,
-        );
-        let collision = collision_scene(0.0, vec![elevated]);
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 1.0));
-        let PreciseJumpPredictionOutcome::Reachable(elevated_landing) =
-            prediction(&scene, &collision, body_id, &target, now)
-        else {
-            panic!("elevated ledge must be reachable")
-        };
-        assert!(elevated_landing.contact_point().z > 0.99);
-
-        let start_platform = horizontal_platform(
-            Vector3::new(118.0, 94.0, 2.0),
-            Vector3::new(122.0, 98.0, 2.0),
-            0,
-        );
-        let collision = collision_scene(0.0, vec![start_platform]);
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 2.005), now);
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-        let PreciseJumpPredictionOutcome::Reachable(lower_landing) =
-            prediction(&scene, &collision, body_id, &target, now)
-        else {
-            panic!("lower ledge must be reachable")
-        };
-        assert!(lower_landing.contact_point().z.abs() < 0.001);
-    }
-
-    #[test]
-    fn wall_and_low_ceiling_exhaustion_remains_neutral() {
-        let wall = polygon_collider(
-            vec![
-                Vector3::new(117.0, 94.0, 0.0),
-                Vector3::new(117.0, 98.0, 0.0),
-                Vector3::new(117.0, 98.0, 8.0),
-                Vector3::new(117.0, 94.0, 8.0),
-            ],
-            Vector3::new(1.0, 0.0, 0.0),
-            0,
-        );
-        let now = Instant::now();
-        for (label, collision) in [
-            ("wall", collision_scene(0.0, vec![wall])),
-            (
-                "ceiling",
-                collision_scene(
-                    0.0,
-                    vec![polygon_collider(
-                        vec![
-                            Vector3::new(112.0, 94.0, 2.0),
-                            Vector3::new(112.0, 98.0, 2.0),
-                            Vector3::new(121.0, 98.0, 2.0),
-                            Vector3::new(121.0, 94.0, 2.0),
-                        ],
-                        Vector3::new(0.0, 0.0, -1.0),
-                        0,
-                    )],
-                ),
-            ),
-        ] {
-            if label == "wall" {
-                let sweep = collision
-                    .sweep_static_sphere(holtburger_world::StaticSphereSweepRequest {
-                        anchor: OWNER,
-                        start: Vector3::new(120.0, 96.0, 2.5),
-                        displacement: Vector3::new(-6.0, 0.0, 0.0),
-                        previous_cell: None,
-                        radius: 0.48,
-                        filter: PhysicalCollisionFilter::ALL,
-                    })
-                    .unwrap();
-                assert!(
-                    sweep.is_some(),
-                    "wall fixture must obstruct a direct sphere sweep"
-                );
-            }
-            let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-            let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-            let outcome = prediction(&scene, &collision, body_id, &target, now);
-            assert_eq!(
-                outcome,
-                PreciseJumpPredictionOutcome::Unproven(
-                    PreciseJumpUnprovenReason::CandidateSearchExhausted {
-                        last_failure: PreciseJumpCandidateFailure::Obstructed,
-                    }
-                ),
-                "{label}: {outcome:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn adaptive_search_clears_an_obstacle_that_blocks_the_lowest_arc() {
-        let low_wall = polygon_collider(
-            vec![
-                Vector3::new(117.0, 94.0, 0.0),
-                Vector3::new(117.0, 98.0, 0.0),
-                Vector3::new(117.0, 98.0, 3.2),
-                Vector3::new(117.0, 94.0, 3.2),
-            ],
-            Vector3::new(1.0, 0.0, 0.0),
-            0,
-        );
-        let collision = collision_scene(0.0, vec![low_wall]);
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-        let entity_collision = scene.entity_collision_snapshot().unwrap();
-        let outcome = predict_precise_jump(PreciseJumpPredictionRequest {
-            body: scene.body(body_id),
-            collision_scene: &collision,
-            entity_collision: &entity_collision,
-            capabilities: &capabilities(),
-            target: &target,
-            budget: PreciseJumpPredictionBudget::new(
-                PreciseJumpCandidateBudget::new(2).unwrap(),
-                160,
-            )
-            .unwrap(),
-            start_time: now,
-        })
-        .unwrap();
-
-        let PreciseJumpPredictionOutcome::Reachable(landing) = outcome else {
-            panic!("maximum-extent adaptive probe must clear the low wall: {outcome:?}")
-        };
-        assert_eq!(landing.candidate().extent(), JumpExtent::MAXIMUM);
-
-        let PreciseJumpPredictionOutcome::Reachable(refined) =
-            prediction(&scene, &collision, body_id, &target, now)
-        else {
-            panic!("wider adaptive budget must retain a reachable low-wall arc")
-        };
-        assert!(refined.candidate().extent().get() < JumpExtent::MAXIMUM.get());
-    }
-
-    #[test]
-    fn candidate_stops_at_its_first_walkable_landing() {
-        let platform = horizontal_platform(
-            Vector3::new(114.0, 94.0, 2.5),
-            Vector3::new(118.0, 98.0, 2.5),
-            0,
-        );
-        let collision = collision_scene(0.0, vec![platform]);
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(113.0, 96.0, 0.0));
-        let entity_collision = scene.entity_collision_snapshot().unwrap();
-
-        let lowest_arc = predict_precise_jump(PreciseJumpPredictionRequest {
-            body: scene.body(body_id),
-            collision_scene: &collision,
-            entity_collision: &entity_collision,
-            capabilities: &capabilities(),
-            target: &target,
-            budget: PreciseJumpPredictionBudget::new(
-                PreciseJumpCandidateBudget::new(1).unwrap(),
-                160,
-            )
-            .unwrap(),
-            start_time: now,
-        })
-        .unwrap();
-        assert_eq!(
-            lowest_arc,
-            PreciseJumpPredictionOutcome::Unproven(
-                PreciseJumpUnprovenReason::CandidateSearchExhausted {
-                    last_failure: PreciseJumpCandidateFailure::FirstLandingMissedTarget,
-                }
-            )
-        );
-        assert!(matches!(
-            prediction(&scene, &collision, body_id, &target, now),
-            PreciseJumpPredictionOutcome::Unproven(
-                PreciseJumpUnprovenReason::CandidateSearchExhausted { .. }
-            )
-        ));
-    }
-
-    #[test]
-    fn steep_intervening_contact_is_not_reported_as_a_landing() {
-        let steep_face = polygon_collider(
-            vec![
-                Vector3::new(118.0, 94.0, 0.0),
-                Vector3::new(118.0, 98.0, 0.0),
-                Vector3::new(114.0, 98.0, 8.0),
-                Vector3::new(114.0, 94.0, 8.0),
-            ],
-            Vector3::new(2.0 / 5.0_f32.sqrt(), 0.0, 1.0 / 5.0_f32.sqrt()),
-            0,
-        );
-        let collision = collision_scene(0.0, vec![steep_face]);
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(113.0, 96.0, 0.0));
-        let entity_collision = scene.entity_collision_snapshot().unwrap();
-        let outcome = predict_precise_jump(PreciseJumpPredictionRequest {
-            body: scene.body(body_id),
-            collision_scene: &collision,
-            entity_collision: &entity_collision,
-            capabilities: &capabilities(),
-            target: &target,
-            budget: PreciseJumpPredictionBudget::new(
-                PreciseJumpCandidateBudget::new(1).unwrap(),
-                160,
-            )
-            .unwrap(),
-            start_time: now,
-        })
-        .unwrap();
-
-        assert_eq!(
-            outcome,
-            PreciseJumpPredictionOutcome::Unproven(
-                PreciseJumpUnprovenReason::CandidateSearchExhausted {
-                    last_failure: PreciseJumpCandidateFailure::Obstructed,
-                }
-            )
-        );
-    }
-
-    #[test]
-    fn body_sized_narrow_clearance_remains_reachable() {
-        let walls = vec![
-            polygon_collider(
-                vec![
-                    Vector3::new(112.0, 95.45, 0.0),
-                    Vector3::new(112.0, 95.45, 4.0),
-                    Vector3::new(121.0, 95.45, 4.0),
-                    Vector3::new(121.0, 95.45, 0.0),
-                ],
-                Vector3::new(0.0, 1.0, 0.0),
-                0,
-            ),
-            polygon_collider(
-                vec![
-                    Vector3::new(112.0, 96.55, 0.0),
-                    Vector3::new(121.0, 96.55, 0.0),
-                    Vector3::new(121.0, 96.55, 4.0),
-                    Vector3::new(112.0, 96.55, 4.0),
-                ],
-                Vector3::new(0.0, -1.0, 0.0),
-                1,
-            ),
-        ];
-        let collision = collision_scene(0.0, walls);
-        let now = Instant::now();
-        let (scene, body_id) = body_scene(&collision, Vector3::new(120.0, 96.0, 0.005), now);
-        let target = downward_target(&collision, Vector3::new(114.0, 96.0, 0.0));
-
-        assert!(matches!(
-            prediction(&scene, &collision, body_id, &target, now),
-            PreciseJumpPredictionOutcome::Reachable(_)
-        ));
     }
 }

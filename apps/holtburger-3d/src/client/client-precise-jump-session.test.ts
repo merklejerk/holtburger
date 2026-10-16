@@ -1,7 +1,17 @@
+import {
+	resolvedJumpFixture,
+	predictedJumpFixture,
+	jumpActorFixture,
+} from "./client-precise-jump-fixtures";
+import { CLIENT_TUNING } from "./client-tuning";
 import { describe, expect, it } from "vitest";
+import { setImmediate as settleSubmission } from "node:timers/promises";
 
 import { landblockVector3 } from "../lib/assets/ac-frame";
-import type { ClientCameraIdentity } from "./client-host-contract";
+import {
+	MINIMUM_JUMP_POWER,
+	type ClientCameraIdentity,
+} from "./client-host-contract";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleTransport,
@@ -91,50 +101,7 @@ const ray = {
 	previousCell: null,
 };
 
-function evaluation(sequence: number, status: "reachable" | "unreachable") {
-	return {
-		evaluationId: sequence + 100,
-		camera,
-		sequence,
-		target: {
-			anchor: 0xda55_ffff,
-			point: [10, 40, 0],
-			normal: [0, 0, 1],
-			committedCell: null,
-		},
-		status,
-		...(status === "reachable"
-			? {
-					trajectory: {
-						anchor: 0xda55_ffff,
-						origin: [10, 20, 4],
-						velocity: [0, 14, 8],
-						acceleration: [0, 0, -9.8],
-						durationSeconds: 1.5,
-						placements: [
-							{
-								startFraction: 0,
-								endFraction: 1,
-								committedCell: null,
-							},
-						],
-					},
-				}
-			: {}),
-		diagnostics: {
-			generatedCandidates: 6,
-			evaluatedCandidates: 2,
-			solverTicks: 71,
-		},
-	};
-}
-
-async function fixture(): Promise<{
-	transport: FakeClientTransport;
-	lifecycle: ClientLifecycleSession;
-	precise: ClientPreciseJumpSession;
-	cadence: FakeCadence;
-}> {
+async function fixture() {
 	const transport = new FakeClientTransport();
 	const lifecycle = new ClientLifecycleSession(transport);
 	const cadence = new FakeCadence();
@@ -143,218 +110,320 @@ async function fixture(): Promise<{
 	return {
 		transport,
 		lifecycle,
+		cadence,
 		precise: new ClientPreciseJumpSession(
 			lifecycle,
 			() => undefined,
 			cadence,
 			AIM_INTERVAL_MS,
 		),
-		cadence,
 	};
 }
 
 describe("ClientPreciseJumpSession", () => {
-	it("coalesces pointer pressure behind the submitted evaluation", async () => {
-		const { cadence, precise, transport } = await fixture();
+	it("coalesces pointer input without waiting for a flight to finish", async () => {
+		const { precise, transport, cadence } = await fixture();
 		precise.enter();
 		precise.aim(ray);
+		await settleSubmission();
 		precise.aim({ ...ray, maximumDistance: 70 });
 		precise.aim({ ...ray, maximumDistance: 60 });
 		cadence.advance(AIM_INTERVAL_MS);
-
-		expect(transport.invocations).toHaveLength(1);
-		transport.emit(
-			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
-		);
-
-		expect(transport.invocations).toHaveLength(2);
-		expect(transport.invocations.map(({ args }) => args)).toMatchObject([
+		expect(transport.invocations.map((x) => x.args)).toMatchObject([
 			{ request: { sequence: 1, maximumDistance: 80 } },
 			{ request: { sequence: 2, maximumDistance: 60 } },
 		]);
 	});
-
-	it("publishes a submitted completion while a newer ray is pending", async () => {
-		const { precise, transport } = await fixture();
-		expect(precise.snapshot()).toEqual({ active: false, marker: null });
-		precise.enter();
-		expect(precise.snapshot()).toEqual({ active: true, marker: null });
-		precise.aim(ray);
-		precise.aim({ ...ray, maximumDistance: 60 });
-		transport.emit(
-			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
-		);
-		expect(precise.snapshot()).toEqual({
-			active: true,
-			marker: evaluation(1, "reachable"),
-		});
-	});
-
-	it("bounds a sustained pointer stream without starving marker publication", async () => {
-		const { cadence, precise, transport } = await fixture();
-		let invocationIndex = 0;
-		let publications = 0;
-		precise.subscribe((snapshot) => {
-			if (snapshot.marker !== null) publications += 1;
-		});
-		precise.enter();
-
-		const durationMs = AIM_INTERVAL_MS * 10;
-		for (let millisecond = 0; millisecond < durationMs; millisecond += 1) {
-			precise.aim({ ...ray, maximumDistance: 60 + millisecond / 1_000 });
-			cadence.advance(1);
-			while (invocationIndex < transport.invocations.length) {
-				const invocation = transport.invocations[invocationIndex++];
-				const request = (invocation.args as { request: { sequence: number } })
-					.request;
-				transport.emit(
-					"client-precise-jump-evaluation",
-					evaluation(request.sequence, "reachable"),
-				);
-			}
-		}
-
-		expect(transport.invocations.length).toBeGreaterThan(1);
-		expect(transport.invocations.length).toBeLessThanOrEqual(
-			Math.ceil(durationMs / AIM_INTERVAL_MS) + 1,
-		);
-		expect(publications).toBe(transport.invocations.length);
-	});
-
-	it("rejects obsolete evaluations and treats red activation as a no-op", async () => {
-		const { cadence, precise, transport } = await fixture();
+	it("submits changed power for the same ray and invalidates the old selection", async () => {
+		const { precise, transport, cadence } = await fixture();
 		precise.enter();
 		precise.aim(ray);
+		await settleSubmission();
 		transport.emit(
 			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
+			resolvedJumpFixture(camera, 1, precise.power()),
 		);
-		precise.aim(ray);
-		cadence.advance(AIM_INTERVAL_MS);
-		transport.emit(
-			"client-precise-jump-evaluation",
-			evaluation(1, "unreachable"),
+		const before = precise.power();
+		const direction = before <= 0.5 ? 1 : -1;
+		precise.adjustPower(direction);
+		expect(precise.power()).toBe(
+			Math.max(
+				MINIMUM_JUMP_POWER,
+				Math.min(1, before + direction * CLIENT_TUNING.preciseJump.powerStep),
+			),
 		);
-		expect(precise.snapshot().marker).toEqual(evaluation(1, "reachable"));
-
-		transport.emit(
-			"client-precise-jump-evaluation",
-			evaluation(2, "unreachable"),
-		);
+		expect(precise.snapshot().marker).toBeNull();
 		expect(precise.activate()).toBe(false);
-		expect(precise.state().kind).toBe("targeting");
-		expect(precise.snapshot()).toEqual({
-			active: true,
-			marker: evaluation(2, "unreachable"),
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(transport.invocations.at(-1)?.args).toMatchObject({
+			request: { sequence: 2, power: precise.power(), start: ray.start },
 		});
 	});
-
-	it("admits one reachable commit and exits only on matching committed feedback", async () => {
-		const { cadence, precise, transport } = await fixture();
+	it("activates an early resolved launch once while collision prediction is pending", async () => {
+		const { precise, transport } = await fixture();
 		precise.enter();
 		precise.aim(ray);
 		transport.emit(
 			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
+			resolvedJumpFixture(camera, 1, precise.power()),
 		);
-		precise.aim({ ...ray, maximumDistance: 60 });
-		cadence.advance(AIM_INTERVAL_MS);
+		expect(precise.activate()).toBe(true);
+		expect(precise.activate()).toBe(false);
 		expect(
 			transport.invocations.filter(
-				({ command }) => command === "set_client_precise_jump_aim",
+				(x) => x.command === "commit_client_precise_jump",
 			),
-		).toHaveLength(2);
+		).toHaveLength(1);
+	});
+	it.each(["match", "miss", "incomplete"] as const)(
+		"allows the user's chosen launch when prediction reports %s",
+		async (outcome) => {
+			const { precise, transport } = await fixture();
+			precise.enter();
+			precise.aim(ray);
+			const resolved = resolvedJumpFixture(camera, 1, precise.power());
+			transport.emit(
+				"client-precise-jump-evaluation",
+				predictedJumpFixture(resolved, outcome),
+			);
+			expect(precise.activate()).toBe(true);
+		},
+	);
+	it("does not activate an unresolved target", async () => {
+		const { precise, transport } = await fixture();
+		precise.enter();
+		precise.aim(ray);
+		transport.emit("client-precise-jump-evaluation", {
+			phase: "completed",
+			status: "no-surface",
 
-		expect(precise.activate()).toBe(true);
-		cadence.advance(AIM_INTERVAL_MS * 2);
+			camera,
+			sequence: 1,
+		});
 		expect(precise.activate()).toBe(false);
+	});
+	it("rejects old power and camera feedback while replacement awaits cadence", async () => {
+		const { precise, transport, cadence } = await fixture();
+		precise.enter();
+		precise.aim(ray);
+		await settleSubmission();
+		precise.adjustPower(precise.power() <= 0.5 ? 1 : -1);
 		transport.emit(
 			"client-precise-jump-evaluation",
-			evaluation(2, "unreachable"),
+			resolvedJumpFixture(camera, 1, 1),
 		);
-		expect(precise.state()).toMatchObject({
-			kind: "commit-pending",
-			evaluation: evaluation(1, "reachable"),
-		});
-		transport.emit("client-precise-jump-transaction-feedback", {
-			sequence: 99,
-			outcome: { kind: "committed" },
-		});
-		expect(precise.state().kind).toBe("commit-pending");
+		expect(precise.snapshot().marker).toBeNull();
+		cadence.advance(AIM_INTERVAL_MS);
+		transport.emit(
+			"client-precise-jump-evaluation",
+			resolvedJumpFixture(
+				{ ...camera, cameraGeneration: camera.cameraGeneration + 1 },
+				2,
+				precise.power(),
+			),
+		);
+		expect(precise.snapshot().marker).toBeNull();
+		transport.emit(
+			"client-precise-jump-evaluation",
+			resolvedJumpFixture(camera, 2, precise.power()),
+		);
+		expect(precise.activate()).toBe(true);
+	});
+	it("deduplicates unchanged input and rejects late progress after completion", async () => {
+		const { precise, transport, cadence } = await fixture();
+		precise.enter();
+		precise.aim(ray);
+		await settleSubmission();
+		const resolved = resolvedJumpFixture(camera, 1, precise.power());
+		const final = predictedJumpFixture(resolved, "miss");
+		transport.emit("client-precise-jump-evaluation", final);
+		precise.aim({ ...ray });
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(transport.invocations).toHaveLength(1);
+		transport.emit("client-precise-jump-evaluation", resolved);
+		expect(precise.snapshot().marker).toEqual(final);
+	});
+	it("keeps selected power and reacquires a launch after airborne rejection", async () => {
+		const { precise, transport, cadence } = await fixture();
+		precise.enter();
+		precise.aim(ray);
+		await settleSubmission();
+		const power = precise.power();
+		transport.emit(
+			"client-precise-jump-evaluation",
+			resolvedJumpFixture(camera, 1, power),
+		);
+		precise.activate();
 		transport.emit("client-precise-jump-transaction-feedback", {
 			sequence: 1,
-			outcome: { kind: "committed" },
+			outcome: { kind: "rejected", reason: "airborne" },
 		});
-
-		expect(precise.state()).toEqual({ kind: "inactive" });
-		expect(
-			transport.invocations.filter(
-				({ command }) => command === "commit_client_precise_jump",
-			),
-		).toHaveLength(1);
-		expect(
-			transport.invocations.filter(
-				({ command }) => command === "set_client_precise_jump_aim",
-			),
-		).toHaveLength(2);
+		expect(precise.snapshot().active).toBe(true);
+		expect(precise.power()).toBe(power);
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(transport.invocations.at(-1)?.args).toMatchObject({
+			request: { sequence: 2, power },
+		});
+	});
+	it("integrates held power by elapsed time rather than event or frame count", async () => {
+		const first = (await fixture()).precise;
+		const second = (await fixture()).precise;
+		for (const precise of [first, second]) {
+			precise.enter();
+			precise.adjustPower(-1e6);
+		}
+		first.adjustHeldPower(1, 0.2);
+		for (let frame = 0; frame < 4; frame++) second.adjustHeldPower(1, 0.05);
+		const expected = Math.min(
+			1,
+			MINIMUM_JUMP_POWER + CLIENT_TUNING.preciseJump.heldPowerPerSecond * 0.2,
+		);
+		expect(first.power()).toBeCloseTo(expected);
+		expect(second.power()).toBeCloseTo(expected);
+		first.adjustHeldPower(0, 1);
+		first.adjustHeldPower(1, -1);
+		expect(first.power()).toBeCloseTo(expected);
+		first.cancel();
+		first.adjustHeldPower(1, 1);
+		expect(first.power()).toBeCloseTo(expected);
 	});
 
-	it("retires the old trajectory when the player collision policy is acknowledged", async () => {
-		const { cadence, precise, transport } = await fixture();
+	it("sets absolute bar power, replaces the selected launch and clamps endpoints", async () => {
+		const { precise, transport, cadence } = await fixture();
 		precise.enter();
 		precise.aim(ray);
+		await settleSubmission();
 		transport.emit(
 			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
+			resolvedJumpFixture(camera, 1, precise.power()),
 		);
-		precise.aim(ray);
-		transport.emit("client-entity-collision-disabled", true);
-		expect(precise.state()).toEqual({ kind: "inactive" });
-		expect(cadence.pendingTaskCount()).toBe(0);
+		precise.setPower(0.37);
+		expect(precise.power()).toBe(0.37);
 		expect(precise.activate()).toBe(false);
-		transport.emit(
-			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
-		);
-		expect(precise.state()).toEqual({ kind: "inactive" });
+		cadence.advance(AIM_INTERVAL_MS);
+		await settleSubmission();
+		expect(transport.invocations.at(-1)?.args).toMatchObject({
+			request: { power: 0.37 },
+		});
+		precise.setPower(0);
+		expect(precise.power()).toBe(MINIMUM_JUMP_POWER);
+		precise.setPower(2);
+		expect(precise.power()).toBe(1);
+		precise.setPower(Number.NaN);
+		expect(precise.power()).toBe(1);
+		precise.cancel();
+		precise.setPower(0.5);
+		expect(precise.power()).toBe(1);
 	});
 
-	it("cancels pending cadence work on camera replacement and destroy", async () => {
-		const { cadence, precise, transport } = await fixture();
+	it("submits the legal minimum after scrolling below the power range", async () => {
+		const { precise, transport, cadence } = await fixture();
 		precise.enter();
 		precise.aim(ray);
+		await settleSubmission();
+		precise.adjustPower(-1e6);
+		cadence.advance(AIM_INTERVAL_MS);
+		await settleSubmission();
+		expect(transport.invocations.at(-1)?.args).toMatchObject({
+			request: { power: MINIMUM_JUMP_POWER },
+		});
+	});
+	it("clamps power within the legal range", async () => {
+		const { precise } = await fixture();
+		precise.enter();
+		precise.adjustPower(-1e6);
+		expect(precise.power()).toBe(MINIMUM_JUMP_POWER);
+		precise.adjustPower(1e6);
+		expect(precise.power()).toBe(1);
+	});
+	it("refreshes a stationary ray for actor translation but not rotation or peer changes", async () => {
+		const { precise, lifecycle, transport, cadence } = await fixture();
+		const actor = jumpActorFixture(camera.playerGuid, camera.entityGeneration);
+		lifecycle.mirror.apply({
+			kind: "snapshot",
+			snapshot: { hostTime: { seconds: 1 }, entities: [actor] },
+		});
+		precise.enter();
+		precise.aim(ray);
+		await settleSubmission();
+		const rotated = structuredClone(actor);
+		rotated.placement.pose.rotation = { w: 0, x: 0, y: 0, z: 1 };
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: rotated,
+		});
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(transport.invocations).toHaveLength(1);
+		const moved = structuredClone(rotated);
+		moved.placement.pose.coords.x += 1;
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: moved,
+		});
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(transport.invocations.at(-1)?.args).toMatchObject({
+			request: { sequence: 2, start: ray.start, power: precise.power() },
+		});
+		const count = transport.invocations.length;
+		await settleSubmission();
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: jumpActorFixture(42, 1),
+		});
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(transport.invocations).toHaveLength(count);
+	});
+	it("keeps a selected launch usable while actor-only preview refresh is pending", async () => {
+		const { precise, lifecycle, transport, cadence } = await fixture();
+		const actor = jumpActorFixture(camera.playerGuid, camera.entityGeneration);
+		lifecycle.mirror.apply({
+			kind: "snapshot",
+			snapshot: { hostTime: { seconds: 1 }, entities: [actor] },
+		});
+		precise.enter();
+		precise.aim(ray);
+		await settleSubmission();
+		const resolved = resolvedJumpFixture(camera, 1, precise.power());
+		transport.emit("client-precise-jump-evaluation", resolved);
+		const moved = structuredClone(actor);
+		moved.placement.pose.coords.x += 1;
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: moved,
+		});
+		expect(precise.snapshot().refreshing).toBe(true);
+		expect(precise.snapshot().marker).toEqual(resolved);
+		cadence.advance(AIM_INTERVAL_MS);
+		expect(precise.activate()).toBe(true);
+		expect(transport.invocations.at(-1)?.args).toMatchObject({
+			request: {
+				camera,
+				target: resolved.launch.target,
+				power: resolved.launch.power,
+			},
+		});
+	});
+	it("clears queued input and presentation on cancel and ignores late results", async () => {
+		const { precise, transport, cadence } = await fixture();
+		precise.enter();
+		precise.aim(ray);
+		await settleSubmission();
+		precise.aim({ ...ray, maximumDistance: 60 });
+		precise.cancel();
+		cadence.advance(AIM_INTERVAL_MS);
 		transport.emit(
 			"client-precise-jump-evaluation",
-			evaluation(1, "reachable"),
+			resolvedJumpFixture(camera, 1, precise.power()),
 		);
-		precise.aim(ray);
-		expect(cadence.pendingTaskCount()).toBe(1);
-
-		transport.emit("client-camera-started", {
-			cameraGeneration: 3,
-			playerGuid: camera.playerGuid,
-			entityGeneration: camera.entityGeneration,
+		expect(precise.snapshot()).toEqual({
+			active: false,
+			marker: null,
+			refreshing: false,
 		});
-		expect(precise.state()).toEqual({ kind: "inactive" });
-		expect(cadence.pendingTaskCount()).toBe(0);
-		cadence.advance(AIM_INTERVAL_MS * 2);
 		expect(
 			transport.invocations.filter(
-				({ command }) => command === "set_client_precise_jump_aim",
+				(x) => x.command === "set_client_precise_jump_aim",
 			),
 		).toHaveLength(1);
-
-		precise.enter();
-		precise.aim(ray);
-		transport.emit(
-			"client-precise-jump-evaluation",
-			evaluation(2, "reachable"),
-		);
-		precise.aim(ray);
-		expect(cadence.pendingTaskCount()).toBe(1);
-		precise.destroy();
-		expect(cadence.pendingTaskCount()).toBe(0);
 	});
 });

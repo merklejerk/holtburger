@@ -329,11 +329,15 @@
 		) => Promise<void>;
 		readonly jumpChargeActive: boolean;
 		readonly readJumpExtent: () => number;
+		/** Configured power controls displayed as keycaps below POWER. */
+		readonly jumpPowerKeys: readonly [string, string];
 		readonly toast: ClientToast | null;
 		readonly preciseJumpActive: boolean;
 		readonly onPreciseJumpAim: (clientX: number, clientY: number) => void;
+		readonly onPreciseJumpPowerAdjust: (steps: number) => void;
+		/** Set an absolute normalized power from the HUD bar. */
+		readonly onPreciseJumpPowerSet: (power: number) => void;
 		readonly onPreciseJumpActivate: () => void;
-		readonly onPreciseJumpEnter: () => void;
 		readonly onViewportSelect: (clientX: number, clientY: number) => void;
 		readonly onViewportExamine: (clientX: number, clientY: number) => void;
 		readonly onViewportHover: (clientX: number, clientY: number) => void;
@@ -466,11 +470,13 @@
 		onAppearanceOptionChange,
 		jumpChargeActive,
 		readJumpExtent,
+		jumpPowerKeys,
 		toast,
 		preciseJumpActive,
 		onPreciseJumpAim,
+		onPreciseJumpPowerAdjust,
+		onPreciseJumpPowerSet,
 		onPreciseJumpActivate,
-		onPreciseJumpEnter,
 		onViewportSelect,
 		onViewportExamine,
 		onViewportHover,
@@ -647,7 +653,11 @@
 		viewDiameters: minimapViewDiameters,
 	});
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
-	let viewportGesture: ClientViewportPointerGesture | null = null;
+	// Click intent is captured with the gesture; dragging always belongs to camera orbit.
+	let viewportGesture: {
+		readonly motion: ClientViewportPointerGesture;
+		readonly click: "select" | "jump";
+	} | null = null;
 	let pointerX = 0;
 	let pointerY = 0;
 	let hasPointerPosition = false;
@@ -717,10 +727,10 @@
 	});
 
 	$effect(() => {
-		if (!preciseJumpActive) return;
+		const precise = preciseJumpActive;
 		untrack(() => {
 			cancelViewportGesture();
-			if (inputGate.allowed && hasPointerPosition)
+			if (precise && inputGate.allowed && hasPointerPosition)
 				onPreciseJumpAim(pointerX, pointerY);
 		});
 	});
@@ -788,25 +798,28 @@
 			onViewportExamine(event.clientX, event.clientY);
 			return;
 		}
-		if (
-			preciseJumpActive &&
-			clientInput.pointer("preciseJumpActivate", event)
-		) {
+		const jump =
+			preciseJumpActive && clientInput.pointer("preciseJumpActivate", event);
+		if (jump && cameraController === null) {
 			event.preventDefault();
 			onPreciseJumpActivate();
 			return;
 		}
 		if (
 			cameraController === null ||
-			!clientInput.pointer("clientInteract", event) ||
+			(!jump && !clientInput.pointer("clientInteract", event)) ||
 			viewportGesture !== null
 		)
 			return;
-		viewportGesture = beginClientViewportPointerGesture(
-			event.pointerId,
-			event.clientX,
-			event.clientY,
-		);
+		event.preventDefault();
+		viewportGesture = {
+			motion: beginClientViewportPointerGesture(
+				event.pointerId,
+				event.clientX,
+				event.clientY,
+			),
+			click: jump ? "jump" : "select",
+		};
 		pointerX = event.clientX;
 		pointerY = event.clientY;
 		canvasElement?.setPointerCapture(event.pointerId);
@@ -814,35 +827,35 @@
 
 	function handlePointerMove(event: PointerEvent): void {
 		if (!inputGate.allowed) return;
-		if (preciseJumpActive) {
-			pointerX = event.clientX;
-			pointerY = event.clientY;
-			hasPointerPosition = true;
-			onPreciseJumpAim(event.clientX, event.clientY);
-			return;
-		}
 		const gesture = viewportGesture;
-		if (gesture?.pointerId !== event.pointerId || cameraController === null) {
+		if (
+			gesture?.motion.pointerId !== event.pointerId ||
+			cameraController === null
+		) {
 			pointerX = event.clientX;
 			pointerY = event.clientY;
 			hasPointerPosition = true;
+			if (preciseJumpActive) onPreciseJumpAim(event.clientX, event.clientY);
 			return;
 		}
 		const advanced = advanceClientViewportPointerGesture(
-			gesture,
+			gesture.motion,
 			event.clientX,
 			event.clientY,
 		);
-		viewportGesture = advanced.gesture;
+		viewportGesture = { motion: advanced.gesture, click: gesture.click };
 		pointerX = event.clientX;
 		pointerY = event.clientY;
 		hasPointerPosition = true;
-		if (advanced.orbitDelta === null) return;
-		cameraController.orbit(
-			advanced.orbitDelta.x,
-			-advanced.orbitDelta.y,
-			performance.now(),
-		);
+		if (advanced.orbitDelta !== null)
+			cameraController.orbit(
+				advanced.orbitDelta.x,
+				-advanced.orbitDelta.y,
+				performance.now(),
+			);
+		// Keep the displayed choice stable during click jitter; orbit drags still refresh aim.
+		if (preciseJumpActive && advanced.gesture.dragging)
+			onPreciseJumpAim(event.clientX, event.clientY);
 	}
 
 	function handlePointerEnter(event: PointerEvent): void {
@@ -859,29 +872,39 @@
 
 	function completeViewportGesture(event: PointerEvent): void {
 		const gesture = viewportGesture;
-		if (gesture?.pointerId !== event.pointerId) return;
+		if (gesture?.motion.pointerId !== event.pointerId) return;
 		handlePointerMove(event);
-		const wasClick = viewportGesture?.dragging === false;
+		const wasClick = viewportGesture?.motion.dragging === false;
 		viewportGesture = null;
 		if (canvasElement?.hasPointerCapture(event.pointerId))
 			canvasElement.releasePointerCapture(event.pointerId);
-		if (wasClick) onViewportSelect(event.clientX, event.clientY);
+		if (wasClick) {
+			if (gesture.click === "jump") onPreciseJumpActivate();
+			else onViewportSelect(event.clientX, event.clientY);
+		}
 	}
 
 	function cancelViewportGesture(): void {
 		const gesture = viewportGesture;
 		viewportGesture = null;
-		if (gesture && canvasElement?.hasPointerCapture(gesture.pointerId))
-			canvasElement.releasePointerCapture(gesture.pointerId);
+		if (gesture && canvasElement?.hasPointerCapture(gesture.motion.pointerId))
+			canvasElement.releasePointerCapture(gesture.motion.pointerId);
 	}
 
 	function cancelViewportPointer(event: PointerEvent): void {
-		if (viewportGesture?.pointerId === event.pointerId) cancelViewportGesture();
+		if (viewportGesture?.motion.pointerId === event.pointerId)
+			cancelViewportGesture();
 	}
 
 	function handleWheel(event: WheelEvent): void {
 		if (!inputGate.allowed || cameraController === null) return;
 		event.preventDefault();
+		if (preciseJumpActive && event.shiftKey) {
+			onPreciseJumpPowerAdjust(
+				-Math.sign(event.deltaY === 0 ? event.deltaX : event.deltaY),
+			);
+			return;
+		}
 		cameraController.zoom(event.deltaY * 0.01);
 	}
 
@@ -1098,7 +1121,7 @@
 			changeHudPlacement("statusTray", placement)}
 	/>
 
-	{#if jumpChargeActive || hudMode === "layout"}
+	{#if jumpChargeActive || preciseJumpActive || hudMode === "layout"}
 		<ClientHudPanel
 			label="Jump power"
 			placement={hudLayout.jumpPower}
@@ -1106,17 +1129,20 @@
 			minWidth={CLIENT_UI_DEFAULTS.jumpPower.minSize.width}
 			minHeight={CLIENT_UI_DEFAULTS.jumpPower.minSize.height}
 			resizable={CLIENT_UI_DEFAULTS.jumpPower.resizable}
-			contentHitTesting="surface"
+			contentHitTesting="descendants"
 			{viewport}
 			onPlacementChange={(placement) =>
 				changeHudPlacement("jumpPower", placement)}
 		>
 			<ClientJumpPowerBar
-				active={jumpChargeActive}
+				active={jumpChargeActive || preciseJumpActive}
 				previewExtent={hudMode === "layout" ? HUD_PREVIEW_JUMP_EXTENT : null}
-				actionEnabled={hudMode === "runtime" && jumpChargeActive}
+				precise={preciseJumpActive}
 				readExtent={readJumpExtent}
-				onEnterPrecise={onPreciseJumpEnter}
+				powerKeys={jumpPowerKeys}
+				powerControl={hudMode === "runtime" && preciseJumpActive
+					? { setPower: onPreciseJumpPowerSet }
+					: null}
 			/>
 		</ClientHudPanel>
 	{/if}
@@ -1567,6 +1593,9 @@
 
 		.client-canvas:active {
 			cursor: grabbing;
+		}
+		.client-canvas:global([data-precise-jump]) {
+			cursor: crosshair;
 		}
 
 		.client-ui-lock {

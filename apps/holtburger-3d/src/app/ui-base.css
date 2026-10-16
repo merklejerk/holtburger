@@ -86,6 +86,13 @@
 		--ui-hud-background-color: #00000044;
 		/* Spacing between independent icon actions in HUD strips. */
 		--ui-hud-icon-gap: 5px;
+		/* Minimum keycap dimensions, relative to the surrounding shortcut text. */
+		--ui-keycap-size: 1.65em;
+		/* Jump HUD density; outer bounds and position belong to HUD layout. */
+		--ui-jump-bar-width: 16px;
+		--ui-jump-readout-font-size: 1.6rem;
+		--ui-jump-gap: 12px;
+		--ui-jump-fill-color: var(--ui-color-accent);
 		/* Party HUD density. Row heights and three internal gaps determine the cell height. */
 		--ui-party-cell-width: 100px;
 		--ui-party-name-height: 18px;
@@ -959,6 +966,28 @@
 	.ui-theme :is(.ui-item-selection, .ui-item-strip-arrow):focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: -2px;
+	}
+}
+
+/* Keycap backing shared by shortcut hints and binding controls. */
+@layer components {
+	.ui-theme .ui-keycap {
+		display: inline-grid;
+		place-items: center;
+		box-sizing: border-box;
+		min-inline-size: var(--ui-keycap-size);
+		min-block-size: var(--ui-keycap-size);
+		padding: 1px 0.35em;
+		border: 1px solid var(--ui-color-border);
+		border-bottom-width: 2px;
+		border-radius: var(--ui-radius-control);
+		background: var(--ui-color-control);
+		color: var(--ui-color-text);
+		box-shadow: 0 1px 0 var(--ui-color-shadow);
+		font: inherit;
+		line-height: 1;
+		letter-spacing: normal;
+		white-space: nowrap;
 	}
 }
 

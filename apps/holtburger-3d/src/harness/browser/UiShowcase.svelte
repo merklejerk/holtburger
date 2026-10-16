@@ -90,8 +90,18 @@
 			selectedEntity: place(16, 164, width, 72),
 			shortcuts: place(16, 252, width, 42),
 			frameRate: place(16, 320, 120, 26),
-			jumpPower: place(width - 22, 310, 38, 132),
-			toast: place(16, 370, width - 70, 64),
+			jumpPower: place(
+				width + 16 - CLIENT_UI_DEFAULTS.jumpPower.size.width,
+				310,
+				CLIENT_UI_DEFAULTS.jumpPower.size.width,
+				CLIENT_UI_DEFAULTS.jumpPower.size.height,
+			),
+			toast: place(
+				16,
+				370,
+				width - CLIENT_UI_DEFAULTS.jumpPower.size.width - 12,
+				64,
+			),
 			chat: place(right, columns === 2 ? 16 : 470, width, 264),
 			debug: place(
 				right,
@@ -360,9 +370,7 @@
 					minWidth={CLIENT_UI_DEFAULTS[name].minSize.width}
 					minHeight={CLIENT_UI_DEFAULTS[name].minSize.height}
 					resizable={CLIENT_UI_DEFAULTS[name].resizable}
-					contentHitTesting={name === "character" || name === "jumpPower"
-						? "surface"
-						: "descendants"}
+					contentHitTesting={name === "character" ? "surface" : "descendants"}
 					onPlacementChange={(placement) =>
 						(adjustments = { ...adjustments, [name]: placement })}
 				/>
@@ -434,10 +442,10 @@
 			{#snippet jump()}<ClientJumpPowerBar
 					active={false}
 					previewExtent={jumpExtent}
-					actionEnabled={true}
+					precise={false}
+					powerKeys={["W", "S"]}
 					readExtent={() => jumpExtent}
-					onEnterPrecise={() =>
-						(toastMessage = "Precise jump fixture activated.")}
+					powerControl={null}
 				/>{/snippet}
 			{#snippet toast()}<ClientToastOverlay
 					toast={null}

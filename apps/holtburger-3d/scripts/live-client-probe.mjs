@@ -1028,7 +1028,8 @@ async function main() {
 				const aimSequence = 20_000;
 				const evaluationPromise = waiter.wait(
 					"client-precise-jump-evaluation",
-					(payload) => payload?.sequence === aimSequence,
+					(payload) =>
+						payload?.phase === "completed" && payload.sequence === aimSequence,
 					timeoutMs,
 					"precise-jump evaluation",
 				);
@@ -1038,6 +1039,7 @@ async function main() {
 					request: {
 						camera,
 						sequence: aimSequence,
+						power: 1,
 						anchor,
 						start:
 							targetPose === undefined
@@ -1062,7 +1064,10 @@ async function main() {
 				const evaluation = await evaluationPromise;
 				const evaluationLatencyMs = performance.now() - evaluationStartedAt;
 				preciseJump = { evaluation };
-				if (evaluation.status !== "reachable" || evaluation.target === null) {
+				if (
+					evaluation.status !== "predicted" ||
+					evaluation.flight.outcome.kind !== "landed"
+				) {
 					throw new Error(
 						`precise-jump standing target was ${evaluation.status}`,
 					);
@@ -1078,7 +1083,9 @@ async function main() {
 				await invokeMovement("commit_client_precise_jump", {
 					request: {
 						sequence: actionSequence,
-						evaluationId: evaluation.evaluationId,
+						camera: evaluation.camera,
+						target: evaluation.launch.target,
+						power: evaluation.launch.power,
 					},
 				});
 				const feedback = await feedbackPromise;
@@ -1096,11 +1103,11 @@ async function main() {
 				const firstLanding = firstGroundedSampleAfterAirborne(trajectory);
 				const after = trajectory.at(-1) ?? null;
 				const predicted = worldPoint({
-					landblockId: evaluation.target.anchor,
+					landblockId: evaluation.flight.anchor,
 					coords: {
-						x: evaluation.target.point[0],
-						y: evaluation.target.point[1],
-						z: evaluation.target.point[2],
+						x: evaluation.flight.outcome.contactPoint[0],
+						y: evaluation.flight.outcome.contactPoint[1],
+						z: evaluation.flight.outcome.contactPoint[2],
 					},
 				});
 				const closestApproach = trajectory.reduce((closest, sample) => {

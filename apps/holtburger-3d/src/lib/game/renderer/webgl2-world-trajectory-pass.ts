@@ -4,7 +4,10 @@ import {
 	linkWebGL2Program,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
-import type { WorldTrajectoryInput } from "./renderer";
+import type {
+	WorldTrajectoryInput,
+	WorldCurveTrajectoryInput,
+} from "./renderer";
 import {
 	bindWebGL2PortalDeferredVisibilityProgram,
 	PORTAL_DEFERRED_VISIBILITY_GLSL,
@@ -62,7 +65,7 @@ export interface WorldTrajectoryPortalDraw {
 	};
 }
 
-/** Renderer-owned tessellation and dashed ribbon for one compact semantic jump curve. */
+/** Renderer-owned ribbon geometry for a ballistic curve or accepted-motion polyline. */
 export class WebGL2WorldTrajectoryPass {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #matrix = new Float32Array(16);
@@ -71,6 +74,7 @@ export class WebGL2WorldTrajectoryPass {
 	readonly #flatProgram: TrajectoryProgram;
 	readonly #portalProgram: TrajectoryProgram;
 	#revision: number | null = null;
+	#kind: WorldTrajectoryInput["kind"] | null = null;
 	#ranges: readonly TrajectoryDrawRange[] = [];
 
 	constructor(gl: WebGL2RenderingContext) {
@@ -146,7 +150,10 @@ export class WebGL2WorldTrajectoryPass {
 		);
 		gl.uniform1f(selectedProgram.uniforms.lineWidth, LINE_WIDTH_PIXELS);
 		gl.uniform1f(selectedProgram.uniforms.dashPeriod, DASH_PERIOD_METERS);
-		gl.uniform1f(selectedProgram.uniforms.dashDuty, DASH_DUTY);
+		gl.uniform1f(
+			selectedProgram.uniforms.dashDuty,
+			trajectory.style === "solid" ? 1 : DASH_DUTY,
+		);
 		gl.uniform4f(selectedProgram.uniforms.color, ...input.color);
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthMask(false);
@@ -185,7 +192,11 @@ export class WebGL2WorldTrajectoryPass {
 	}
 
 	#prepare(trajectory: WorldTrajectoryInput): void {
-		if (this.#revision === trajectory.revision) return;
+		if (
+			this.#revision === trajectory.revision &&
+			this.#kind === trajectory.kind
+		)
+			return;
 		const geometry = buildTrajectoryGeometry(trajectory);
 		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, this.#segmentBuffer);
 		this.#gl.bufferData(
@@ -195,6 +206,7 @@ export class WebGL2WorldTrajectoryPass {
 		);
 		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, null);
 		this.#revision = trajectory.revision;
+		this.#kind = trajectory.kind;
 		this.#ranges = geometry.ranges;
 		this.#bindRange(0);
 	}
@@ -260,6 +272,34 @@ interface BuiltTrajectoryGeometry {
 export function buildTrajectoryGeometry(
 	trajectory: WorldTrajectoryInput,
 ): BuiltTrajectoryGeometry {
+	if (trajectory.kind === "polyline") {
+		const byScope = new Map<string, number[]>();
+		let distance = 0;
+		for (const segment of trajectory.segments) {
+			const endDistance =
+				distance +
+				Math.hypot(
+					segment.end.x - segment.start.x,
+					segment.end.y - segment.start.y,
+					segment.end.z - segment.start.z,
+				);
+			const records = byScope.get(segment.renderScopeKey) ?? [];
+			if (!byScope.has(segment.renderScopeKey))
+				byScope.set(segment.renderScopeKey, records);
+			records.push(
+				segment.start.x,
+				segment.start.y,
+				segment.start.z,
+				segment.end.x,
+				segment.end.y,
+				segment.end.z,
+				distance,
+				endDistance,
+			);
+			distance = endDistance;
+		}
+		return packTrajectoryGeometry(byScope);
+	}
 	const accelerationMagnitude = Math.hypot(...trajectory.acceleration);
 	const curvatureScale =
 		accelerationMagnitude *
@@ -292,6 +332,12 @@ export function buildTrajectoryGeometry(
 			start = end;
 		}
 	}
+	return packTrajectoryGeometry(byScope);
+}
+
+function packTrajectoryGeometry(
+	byScope: ReadonlyMap<string, readonly number[]>,
+): BuiltTrajectoryGeometry {
 	const flat = new Float32Array(
 		[...byScope.values()].reduce((count, records) => count + records.length, 0),
 	);
@@ -310,7 +356,7 @@ export function buildTrajectoryGeometry(
 }
 
 function evaluateTrajectory(
-	trajectory: WorldTrajectoryInput,
+	trajectory: WorldCurveTrajectoryInput,
 	fraction: number,
 ): readonly [number, number, number] {
 	const seconds = trajectory.durationSeconds * fraction;

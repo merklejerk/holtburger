@@ -257,7 +257,7 @@ struct PreparedBodyContact<'a> {
 }
 
 /// Source facts retained while a mobile working shape changes during contact passes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct ContactParticipant {
     /// Normalized public identity, independent from state-derived physics policy.
     pub(super) player_collision: Option<crate::PlayerCollisionStatus>,

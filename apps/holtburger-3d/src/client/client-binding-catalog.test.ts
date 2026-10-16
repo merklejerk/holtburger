@@ -68,6 +68,31 @@ describe("client binding catalog", () => {
 		).toEqual({ hint: null, description: "Unbound" });
 	});
 
+	it("keeps power remaps independent while checking live precise controls", () => {
+		const power = row("preciseJump.increasePower");
+		const settings = replaceClientBinding(
+			CLIENT_KEYBOARD_DEFAULTS,
+			power.reference,
+			[{ key: "i" }],
+		);
+		expect(settings.character).toBe(CLIENT_KEYBOARD_DEFAULTS.character);
+		expect(presentClientBinding(settings, power.reference, "linux").hint).toBe(
+			"I",
+		);
+		expect(
+			conflictingClientBindings(settings, power, { key: "w" }, null),
+		).toEqual([]);
+		expect(
+			conflictingClientBindings(settings, power, { key: "a" }, null).map(
+				(row) => row.id,
+			),
+		).toEqual(["character.turnLeft"]);
+		expect(
+			conflictingClientBindings(settings, power, { key: " " }, null).map(
+				(row) => row.id,
+			),
+		).toEqual(["character.jump"]);
+	});
 	it("shows all spell tabs before spell slots in one Spells group", () => {
 		const groups = CLIENT_BINDING_GROUPS.filter(
 			(group) => group.title === "Spells",

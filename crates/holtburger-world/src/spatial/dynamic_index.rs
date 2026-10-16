@@ -1,7 +1,7 @@
 //! Tick-start broad-phase membership for dynamic entity targets.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use holtburger_common::position::WorldPosition;
@@ -19,6 +19,8 @@ use crate::{EntityCollisionParticipation, LocalTargetDemand, PreparedEntityTarge
 pub struct EntityCollisionSnapshot {
     pub(crate) targets: BTreeMap<SpatialBodyId, EntityCollisionTarget>,
     pub(crate) index: DynamicShadowIndex,
+    /// Query-driven frozen geometry shared by predictions using this publication's first frame.
+    frozen_queries: OnceLock<super::FrozenContactTargets>,
 }
 
 /// Collision-only immutable entity record, without integration, animation cursors, or reports.
@@ -38,26 +40,46 @@ pub(crate) struct EntityCollisionTarget {
 }
 
 impl EntityCollisionTarget {
-    /// Places the already-prepared geometry in one solver frame without resampling animation.
-    pub(crate) fn shapes_in(&self, anchor: Guid) -> Result<Vec<PlacedCollisionShape>> {
-        self.shapes
-            .iter()
-            .map(|shape| {
-                if anchor == self.anchor {
-                    return Ok(shape.clone());
-                }
-                let mut placement = shape.placement;
-                placement.origin = WorldPosition {
-                    landblock_id: self.anchor,
-                    coords: placement.origin,
-                    rotation: placement.orientation,
-                }
-                .reanchor_to_landblock_owner(anchor)?
-                .coords;
-                PlacedCollisionShape::new(shape.shape.clone(), placement, shape.scale)
-            })
-            .collect()
+    /// Synthetic collision-only record for deferred/exhaustive geometry equivalence tests.
+    #[cfg(test)]
+    pub(super) fn for_test(
+        anchor: Guid,
+        contact: super::mobile_contact::ContactParticipant,
+        shapes: Vec<PlacedCollisionShape>,
+    ) -> Self {
+        Self {
+            anchor,
+            contact,
+            shapes: shapes.into(),
+            proof: None,
+            camera_solid: true,
+        }
     }
+}
+
+/// Reframes captured geometry without resampling its authored shape or animation.
+pub(super) fn reanchor_placed_shapes(
+    source_anchor: Guid,
+    shapes: &[PlacedCollisionShape],
+    anchor: Guid,
+) -> Result<Vec<PlacedCollisionShape>> {
+    shapes
+        .iter()
+        .map(|shape| {
+            if anchor == source_anchor {
+                return Ok(shape.clone());
+            }
+            let mut placement = shape.placement;
+            placement.origin = WorldPosition {
+                landblock_id: source_anchor,
+                coords: placement.origin,
+                rotation: placement.orientation,
+            }
+            .reanchor_to_landblock_owner(anchor)?
+            .coords;
+            PlacedCollisionShape::new(shape.shape.clone(), placement, shape.scale)
+        })
+        .collect()
 }
 
 /// Exact collision-relevant identity of one selectable entity surface.
@@ -86,7 +108,22 @@ impl EntityCollisionProof {
 impl EntityCollisionSnapshot {
     /// Places and indexes frozen peers once in the trajectory's common coordinate frame.
     pub fn prepare_frozen_contacts(&self, anchor: Guid) -> Result<super::FrozenContactTargets> {
-        super::FrozenContactTargets::compile(anchor, self.targets.values())
+        if let Some(prepared) = self.frozen_queries.get() {
+            return if prepared.anchor() == anchor {
+                Ok(prepared.clone())
+            } else {
+                super::FrozenContactTargets::compile(anchor, self.targets.values())
+            };
+        }
+        let prepared = super::FrozenContactTargets::compile(anchor, self.targets.values())?;
+        let shared = self.frozen_queries.get_or_init(|| prepared);
+        if shared.anchor() == anchor {
+            Ok(shared.clone())
+        } else {
+            // Concurrent queries can request different frames; geometry never inherits
+            // another request's frame merely because it won first-publication ownership.
+            super::FrozenContactTargets::compile(anchor, self.targets.values())
+        }
     }
 
     pub(crate) fn compile<'a>(bodies: impl IntoIterator<Item = &'a SpatialBody>) -> Result<Self> {
@@ -129,7 +166,11 @@ impl EntityCollisionSnapshot {
                 target.shapes.as_ref(),
             )
         }));
-        Ok(Self { targets, index })
+        Ok(Self {
+            targets,
+            index,
+            frozen_queries: OnceLock::new(),
+        })
     }
 
     pub(crate) fn target(&self, body_id: SpatialBodyId) -> Option<&EntityCollisionTarget> {

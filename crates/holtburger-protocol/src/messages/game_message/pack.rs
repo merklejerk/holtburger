@@ -346,6 +346,10 @@ impl ProtocolPack for GameMessage {
                 buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogation as u32)
                     .unwrap();
             }
+            GameMessage::DddEndDdd => {
+                buf.write_u32::<LittleEndian>(GameOpcode::DddEndDdd as u32)
+                    .unwrap();
+            }
             GameMessage::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);

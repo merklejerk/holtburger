@@ -1,3 +1,7 @@
+import {
+	resolvedJumpFixture,
+	predictedJumpFixture,
+} from "./client-precise-jump-fixtures";
 import { emptyHousing } from "./client-housing-contract";
 import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import {
@@ -738,7 +742,7 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("projects an accepted evaluation into one scoped render-axis marker", async () => {
+	it("projects the accepted marker and retains neutral world feedback during replacement", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -752,53 +756,99 @@ describe("ClientPresentationSession", () => {
 		});
 		await presentation.start();
 
-		presentation.setPreciseJumpMarker({
-			evaluationId: 4,
-			camera: { cameraGeneration: 1, entityGeneration: 1, playerGuid },
-			sequence: 8,
-			status: "reachable",
-			target: {
-				anchor: 0x0100_ffff,
-				committedCell: 0x0100_0102,
-				normal: [0, 0, 1],
-				point: landblockVector3([10, 20, 4]),
-			},
-			trajectory: {
-				anchor: 0x0100_ffff,
-				origin: landblockVector3([12, 18, 1]),
-				velocity: [-2, 0, 5],
-				acceleration: [0, 0, -9.8],
-				durationSeconds: 1,
-				placements: [
-					{
-						startFraction: 0,
-						endFraction: 1,
-						committedCell: 0x0100_0102,
-					},
-				],
-			},
-			diagnostics: {
-				evaluatedCandidates: 2,
-				generatedCandidates: 6,
-				solverTicks: 30,
-			},
-		});
-
+		const resolved = resolvedJumpFixture(
+			{ cameraGeneration: 1, entityGeneration: 1, playerGuid },
+			8,
+			0.5,
+		);
+		resolved.launch.target.anchor = 0x0100ffff;
+		resolved.launch.target.committedCell = 0x01000102;
+		resolved.launch.target.point = landblockVector3([10, 20, 4]);
+		resolved.launch.preview.curve.anchor = 0x0100ffff;
+		resolved.launch.preview.curve.origin = landblockVector3([12, 18, 1]);
+		resolved.launch.preview.curve.placements = [
+			{ startFraction: 0, endFraction: 1, committedCell: 0x01000102 },
+		];
+		const miss = predictedJumpFixture(resolved, "miss");
+		miss.flight.anchor = 0x0100ffff;
 		const origin = createLandblockWorldOrigin("0x0100ffff");
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			refreshing: false,
+			marker: resolved,
+		});
 		expect(runtime.worldIndicators.at(-1)).toMatchObject({
 			marker: {
-				color: [0.08, 0.48, 1, 0.9],
-				normal: [0, 1, -0],
+				shape: "target",
+				pending: true,
 				position: { x: origin.x + 10, y: 4, z: origin.z - 20 },
 				renderScopeKey: "0x01000102",
 			},
-			trajectory: {
-				origin: { x: origin.x + 12, y: 1, z: origin.z - 18 },
-				velocity: [-2, 5, -0],
-				acceleration: [0, -9.8, -0],
-				placements: [{ renderScopeKey: "0x01000102" }],
-			},
+			desiredTrajectory: { kind: "curve", style: "dashed" },
 		});
+		const belowHeight = {
+			...resolved,
+			launch: {
+				...resolved.launch,
+				preview: {
+					kind: "below-height" as const,
+					curve: resolved.launch.preview.curve,
+				},
+			},
+		};
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			refreshing: false,
+			marker: belowHeight,
+		});
+		expect(runtime.worldIndicators.at(-1)?.desiredTrajectory).toBeUndefined();
+		expect(runtime.worldIndicators.at(-1)?.trajectory).toMatchObject({
+			kind: "curve",
+			style: "dashed",
+		});
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			refreshing: false,
+			marker: miss,
+		});
+		expect(runtime.worldIndicators.at(-1)).toMatchObject({
+			marker: { shape: "target", pending: false },
+			desiredTrajectory: { kind: "curve", style: "dashed" },
+			trajectory: { kind: "polyline", style: "solid" },
+			landingMarker: { shape: "miss", pending: false },
+		});
+		const match = predictedJumpFixture(resolved, "match");
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			refreshing: false,
+			marker: match,
+		});
+		expect(runtime.worldIndicators.at(-1)?.landingMarker).toBeUndefined();
+		expect(runtime.worldIndicators.at(-1)?.marker.color).toEqual([
+			0.08, 0.48, 1, 0.9,
+		]);
+		const incomplete = predictedJumpFixture(resolved, "incomplete");
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			refreshing: false,
+			marker: incomplete,
+		});
+		expect(runtime.worldIndicators.at(-1)?.landingMarker).toBeUndefined();
+		expect(runtime.worldIndicators.at(-1)?.trajectory?.kind).toBe("polyline");
+		presentation.setPreciseJumpPresentation({
+			active: true,
+			refreshing: false,
+			marker: null,
+		});
+		expect(runtime.worldIndicators.at(-1)?.marker.pending).toBe(true);
+		expect(runtime.worldIndicators.at(-1)?.trajectory).toBeUndefined();
+		presentation.setPreciseJumpPresentation({
+			active: false,
+			refreshing: false,
+			marker: null,
+		});
+		expect(runtime.worldIndicators.at(-1)).toBeNull();
+
 		await presentation.destroy();
 	});
 
@@ -1932,6 +1982,7 @@ function fakeOwner(
 
 function fakeCanvas(): HTMLCanvasElement {
 	return {
+		dataset: {},
 		clientWidth: 640,
 		clientHeight: 480,
 		width: 1_280,

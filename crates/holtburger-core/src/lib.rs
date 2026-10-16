@@ -46,19 +46,14 @@ pub use client::dynamic_scale::{
 };
 pub use client::entity_facts::{ClientEntityDelta, ClientEntitySnapshot};
 pub use client::precise_jump::{
-    PreciseJumpCandidateBudget, PreciseJumpCandidateBudgetError, PreciseJumpCandidateRejection,
-    PreciseJumpCandidateSet, PreciseJumpCapabilityEnvelope, PreciseJumpLandingTolerance,
-    PreciseJumpLaunchCandidate, PreciseJumpWorldDisplacement, PreciseJumpWorldDisplacementError,
-    generate_precise_jump_candidates,
+    PreciseJumpCandidateRejection, PreciseJumpLaunchCandidate, PreciseJumpWorldDisplacement,
+    PreciseJumpWorldDisplacementError, SelectedPreciseJumpLaunch, resolve_selected_precise_jump,
 };
 pub use client::precise_jump_prediction::{
-    PRECISE_JUMP_FIXED_TICK, PreciseJumpCandidateFailure, PreciseJumpPredictedLanding,
-    PreciseJumpPredictionBudget, PreciseJumpPredictionBudgetError,
-    PreciseJumpPredictionDiagnostics, PreciseJumpPredictionError, PreciseJumpPredictionEvaluation,
-    PreciseJumpPredictionOutcome, PreciseJumpPredictionRequest, PreciseJumpTarget,
-    PreciseJumpTargetError, PreciseJumpTrajectory, PreciseJumpTrajectoryPlacement,
-    PreciseJumpUnprovenReason, PreciseJumpUnreachableReason, diagnose_precise_jump,
-    predict_precise_jump,
+    PRECISE_JUMP_FIXED_TICK, PreciseJumpFlight, PreciseJumpFlightOutcome, PreciseJumpFlightRequest,
+    PreciseJumpFlightSegment, PreciseJumpPredictionControl, PreciseJumpPredictionError,
+    PreciseJumpPredictionIncompleteReason, PreciseJumpTarget, PreciseJumpTargetError,
+    PreciseJumpTrajectory, PreciseJumpTrajectoryPlacement, predict_selected_precise_jump,
 };
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::selection_envelope::{
@@ -82,9 +77,9 @@ pub use client::{
     ClientCameraStartReceipt, ClientCameraStartRequest, ClientCameraTargetSphereRole,
     ClientCameraTick, ClientCameraUpdateReceipt, PreciseJumpActionSequence, PreciseJumpAimRequest,
     PreciseJumpAimSequence, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
-    PreciseJumpEvaluation, PreciseJumpEvaluationId, PreciseJumpEvaluationStatus,
-    PreciseJumpTargetView, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
-    PreciseJumpTransactionRejection,
+    PreciseJumpEvaluation, PreciseJumpEvaluationStatus, PreciseJumpLaunchView,
+    PreciseJumpPreviewCurve, PreciseJumpProgress, PreciseJumpResolvedLaunch, PreciseJumpTargetView,
+    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
 };
 pub use client::{
     ClientCharacterSheet, ClientCharacterSkill, ClientCharacterTitle,

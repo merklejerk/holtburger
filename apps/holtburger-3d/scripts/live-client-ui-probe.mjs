@@ -742,7 +742,13 @@ async function capturePreciseJumpEntry(client_, milliseconds) {
 				error: document.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
 			})`,
 		);
-		if (state.evaluations.length > 0 || state.error !== null) break;
+		if (
+			state.evaluations.some(
+				(evaluation) => evaluation.phase === "completed",
+			) ||
+			state.error !== null
+		)
+			break;
 		if (Date.now() - startedAt >= milliseconds) {
 			throw new Error("Timed out waiting for precise-jump evaluation.");
 		}
@@ -763,8 +769,8 @@ async function capturePreciseJumpEntry(client_, milliseconds) {
 	const stoppedAt = await evaluate(client_, "() => performance.now()");
 	await waitFor(
 		client_,
-		`() => window.__holtburgerProbeEvidence.preciseJumpEvaluationTimes.some(
-			(time) => time >= ${stoppedAt},
+		`() => window.__holtburgerProbeEvidence.preciseJumpEvaluations.some(
+            (evaluation, index) => evaluation.phase === "completed" && window.__holtburgerProbeEvidence.preciseJumpEvaluationTimes[index] >= ${stoppedAt},
 		)`,
 		milliseconds,
 		"post-sweep precise-jump evaluation",

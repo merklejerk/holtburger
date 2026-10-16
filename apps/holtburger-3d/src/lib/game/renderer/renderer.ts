@@ -229,10 +229,16 @@ export interface PortalTransitionOnlyFrameInput {
 export interface WorldIndicatorInput {
 	readonly marker: WorldMarkerInput;
 	readonly trajectory?: WorldTrajectoryInput;
+	readonly desiredTrajectory?: WorldCurveTrajectoryInput;
+	readonly landingMarker?: WorldMarkerInput;
 }
 
 /** Minimal renderer input for one depth-tested, surface-aligned world ring. */
 export interface WorldMarkerInput {
+	/** Authored endpoint glyph; a miss is distinct from the desired surface ring. */
+	readonly shape: "target" | "miss";
+	/** Animate a surface-aligned spinner while this location awaits validation. */
+	readonly pending: boolean;
 	readonly color: readonly [number, number, number, number];
 	readonly normal: SceneVector3;
 	readonly position: SceneVec3;
@@ -252,22 +258,31 @@ interface WorldTrajectoryPlacementInput {
 }
 
 /** Compact semantic curve; the renderer exclusively owns its geometric approximation. */
-export interface WorldTrajectoryInput {
-	/** Accepted evaluation identity used as the renderer-side geometry revision. */
+interface WorldTrajectoryCommon {
 	readonly revision: number;
-	/** Semantic reachable blue in linear renderer color space. */
 	readonly color: readonly [number, number, number, number];
-	/** Absolute scene-space body-reference launch point. */
+	readonly style: "solid" | "dashed";
+}
+/** The ideal curve uses renderer-owned tessellation and its own placement scopes. */
+export interface WorldCurveTrajectoryInput extends WorldTrajectoryCommon {
+	readonly kind: "curve";
 	readonly origin: SceneVec3;
-	/** Scene-axis launch velocity. */
 	readonly velocity: readonly [number, number, number];
-	/** Scene-axis constant acceleration. */
 	readonly acceleration: readonly [number, number, number];
-	/** Positive analytic curve duration. */
 	readonly durationSeconds: number;
-	/** Gap-free render-domain partition over normalized curve time. */
 	readonly placements: readonly WorldTrajectoryPlacementInput[];
 }
+/** Accepted root-motion legs are drawn directly, without fitting post-contact curves. */
+interface WorldPolylineTrajectoryInput extends WorldTrajectoryCommon {
+	readonly kind: "polyline";
+	readonly segments: readonly {
+		readonly start: SceneVec3;
+		readonly end: SceneVec3;
+		readonly renderScopeKey: string;
+	}[];
+}
+export type WorldTrajectoryInput =
+	WorldCurveTrajectoryInput | WorldPolylineTrajectoryInput;
 
 /** Latest renderer-side selection counts, aggregated across every view in one frame. */
 export interface FrameSelectionMetrics {

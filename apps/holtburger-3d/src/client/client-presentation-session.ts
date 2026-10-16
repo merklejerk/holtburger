@@ -11,6 +11,7 @@ import {
 import type { AudioSettings } from "../lib/game/systems/audio-system";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
+	type LandblockVector3,
 	acVector3,
 	acVectorToRender,
 	landblockVector3,
@@ -100,9 +101,11 @@ import type {
 	ClientLifecycle,
 	ClientPresentationDiscontinuity,
 	ClientEntitySelectionQueryRequest,
-	ClientPreciseJumpEvaluation,
 } from "./client-host-contract";
-import type { ClientPreciseJumpRay } from "./client-precise-jump-session";
+import type {
+	ClientPreciseJumpRay,
+	ClientPreciseJumpSnapshot,
+} from "./client-precise-jump-session";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleSessionEvent,
@@ -129,6 +132,8 @@ import type {
 	FrameSettings,
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
+	WorldCurveTrajectoryInput,
+	WorldTrajectoryInput,
 } from "../lib/game/renderer/renderer";
 import {
 	RuntimeTickProfiler,
@@ -450,6 +455,8 @@ export class ClientPresentationSession {
 	/** Client-only diagnostic observer; absent from ordinary non-debug composition. */
 	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	#owner: ClientPresentationOwner | null = null;
+	/** Last picked location retained as pending feedback between replacement surface picks. */
+	#preciseJumpMarker: WorldIndicatorInput["marker"] | null = null;
 	/** Source composition owns one server sample; the adapter retains no resolved output. */
 	#environmentSources: {
 		readonly server: ClientServerEnvironmentSource;
@@ -820,74 +827,164 @@ export class ClientPresentationSession {
 	}
 
 	/** Publish one accepted atomic marker and optional reachable trajectory. */
-	setPreciseJumpMarker(evaluation: ClientPreciseJumpEvaluation | null): void {
+	setPreciseJumpPresentation(snapshot: ClientPreciseJumpSnapshot): void {
+		if (snapshot.active) {
+			this.#canvas.dataset.preciseJump = "active";
+		} else {
+			delete this.#canvas.dataset.preciseJump;
+			this.#preciseJumpMarker = null;
+		}
+		const evaluation = snapshot.marker;
 		const runtime = this.#owner?.runtime;
 		if (runtime === undefined) return;
-		if (evaluation === null || evaluation.target === null) {
+		if (!snapshot.active) {
 			runtime.setWorldIndicator(null);
 			return;
 		}
-		const target = evaluation.target;
-		const landblockId = normalizeLandblockOwner(
-			`0x${target.anchor.toString(16).padStart(8, "0")}`,
-		);
-		const origin = createLandblockWorldOrigin(landblockId);
-		const local = acVectorToRender(acVector3(target.point));
-		const normal = acVectorToRender(acVector3(target.normal));
-		const color = preciseJumpMarkerColor(evaluation.status);
-		const marker: WorldIndicatorInput["marker"] = {
-			color,
-			normal: sceneVector3([normal[0], normal[1], normal[2]]),
-			position: sceneVec3(origin.add(new Vec3(local[0], local[1], local[2]))),
-			radius: CLIENT_TUNING.preciseJump.markerRadius,
-			renderScopeKey:
-				target.committedCell === null
-					? "outdoor"
-					: `0x${target.committedCell.toString(16).padStart(8, "0")}`,
+		if (evaluation === null) {
+			// Pending input has already lost launch authority. Preserve only its last
+			// picked location, with neutral animation and no old trajectory.
+			const previous = this.#preciseJumpMarker;
+			runtime.setWorldIndicator(
+				previous === null
+					? null
+					: {
+							marker: {
+								...previous,
+								pending: true,
+								color: preciseJumpMarkerColor("neutral"),
+							},
+						},
+			);
+			return;
+		}
+		if (!("launch" in evaluation)) {
+			this.#preciseJumpMarker = null;
+			runtime.setWorldIndicator(null);
+			return;
+		}
+		if (snapshot.refreshing) {
+			const previous = this.#preciseJumpMarker;
+			runtime.setWorldIndicator(
+				previous === null
+					? null
+					: {
+							marker: {
+								...previous,
+								pending: true,
+								color: preciseJumpMarkerColor("neutral"),
+							},
+						},
+			);
+			return;
+		}
+		const launch = evaluation.launch;
+		const target = launch.target;
+		const neutral = preciseJumpMarkerColor("neutral");
+		const success =
+			evaluation.phase === "completed" &&
+			evaluation.status === "predicted" &&
+			evaluation.flight.outcome.kind === "landed" &&
+			evaluation.flight.outcome.matchesTarget;
+		const pending = evaluation.phase === "launch-resolved";
+		const worldPosition = (anchor: number, point: LandblockVector3) => {
+			const owner = normalizeLandblockOwner(
+				`0x${anchor.toString(16).padStart(8, "0")}`,
+			);
+			const origin = createLandblockWorldOrigin(owner);
+			const local = acVectorToRender(acVector3(point));
+			return sceneVec3(origin.add(new Vec3(local[0], local[1], local[2])));
 		};
-		if (evaluation.status !== "reachable") {
+		const scope = (cell: number | null) =>
+			cell === null ? "outdoor" : `0x${cell.toString(16).padStart(8, "0")}`;
+		const renderNormal = (normal: readonly [number, number, number]) => {
+			const vector = acVectorToRender(acVector3(normal));
+			return sceneVector3([vector[0], vector[1], vector[2]]);
+		};
+		const marker: WorldIndicatorInput["marker"] = {
+			shape: "target",
+			pending,
+			color: success ? preciseJumpMarkerColor("success") : neutral,
+			normal: renderNormal(target.normal),
+			position: worldPosition(target.anchor, target.point),
+			radius: CLIENT_TUNING.preciseJump.markerRadius,
+			renderScopeKey: scope(target.committedCell),
+		};
+		this.#preciseJumpMarker = marker;
+		const curve = (
+			input: typeof launch.preview.curve,
+			color: readonly [number, number, number, number],
+		): WorldCurveTrajectoryInput => {
+			const velocity = acVectorToRender(acVector3(input.velocity));
+			const acceleration = acVectorToRender(acVector3(input.acceleration));
+			return {
+				kind: "curve",
+				style: "dashed",
+				revision: evaluation.sequence,
+				color,
+				origin: worldPosition(input.anchor, input.origin),
+				velocity: [velocity[0], velocity[1], velocity[2]],
+				acceleration: [acceleration[0], acceleration[1], acceleration[2]],
+				durationSeconds: input.durationSeconds,
+				placements: input.placements.map((p) => ({
+					startFraction: p.startFraction,
+					endFraction: p.endFraction,
+					renderScopeKey: scope(p.committedCell),
+				})),
+			};
+		};
+		if (
+			evaluation.phase === "completed" &&
+			evaluation.status === "prediction-failed"
+		) {
 			runtime.setWorldIndicator({ marker });
 			return;
 		}
-		const trajectoryAnchor = normalizeLandblockOwner(
-			`0x${evaluation.trajectory.anchor.toString(16).padStart(8, "0")}`,
-		);
-		const trajectoryOrigin = createLandblockWorldOrigin(trajectoryAnchor);
-		const trajectoryLocal = acVectorToRender(
-			acVector3(evaluation.trajectory.origin),
-		);
-		const velocity = acVectorToRender(
-			acVector3(evaluation.trajectory.velocity),
-		);
-		const acceleration = acVectorToRender(
-			acVector3(evaluation.trajectory.acceleration),
-		);
+		const desiredTrajectory =
+			launch.preview.kind === "below-height"
+				? undefined
+				: curve(launch.preview.curve, [0.62, 0.68, 0.75, 0.35]);
+		if (evaluation.phase !== "completed" || evaluation.status !== "predicted") {
+			runtime.setWorldIndicator({
+				marker,
+				desiredTrajectory,
+				trajectory:
+					launch.preview.kind === "below-height"
+						? curve(launch.preview.curve, neutral)
+						: undefined,
+			});
+			return;
+		}
+		const flight = evaluation.flight;
+		const trajectory: WorldTrajectoryInput = {
+			kind: "polyline",
+			style: "solid",
+			revision: evaluation.sequence,
+			color: success ? preciseJumpMarkerColor("success") : neutral,
+			segments: flight.segments.map((segment) => ({
+				start: worldPosition(flight.anchor, segment.start),
+				end: worldPosition(flight.anchor, segment.end),
+				renderScopeKey: scope(segment.committedCell),
+			})),
+		};
+		const outcome = flight.outcome;
+		const landingMarker: WorldIndicatorInput["landingMarker"] =
+			outcome.kind === "landed" && !outcome.matchesTarget
+				? {
+						shape: "miss",
+						pending: false,
+						color: preciseJumpMarkerColor("miss"),
+						normal: renderNormal(outcome.normal),
+						position: worldPosition(flight.anchor, outcome.contactPoint),
+						radius: CLIENT_TUNING.preciseJump.markerRadius,
+						renderScopeKey: scope(outcome.committedCell),
+					}
+				: undefined;
 		runtime.setWorldIndicator({
 			marker,
-			trajectory: {
-				revision: evaluation.evaluationId,
-				color,
-				origin: sceneVec3(
-					trajectoryOrigin.add(
-						new Vec3(
-							trajectoryLocal[0],
-							trajectoryLocal[1],
-							trajectoryLocal[2],
-						),
-					),
-				),
-				velocity: [velocity[0], velocity[1], velocity[2]],
-				acceleration: [acceleration[0], acceleration[1], acceleration[2]],
-				durationSeconds: evaluation.trajectory.durationSeconds,
-				placements: evaluation.trajectory.placements.map((placement) => ({
-					startFraction: placement.startFraction,
-					endFraction: placement.endFraction,
-					renderScopeKey:
-						placement.committedCell === null
-							? "outdoor"
-							: `0x${placement.committedCell.toString(16).padStart(8, "0")}`,
-				})),
-			},
+			desiredTrajectory,
+			trajectory,
+			landingMarker,
 		});
 	}
 
@@ -1193,6 +1290,8 @@ export class ClientPresentationSession {
 
 	/** Dispose subscriptions, scene demand, and shared renderer resources in order. */
 	async destroy(): Promise<void> {
+		delete this.#canvas.dataset.preciseJump;
+		this.#preciseJumpMarker = null;
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#constructionAbortController.abort();
@@ -2134,12 +2233,12 @@ function parseCellId(value: string): number {
 }
 
 function preciseJumpMarkerColor(
-	status: ClientPreciseJumpEvaluation["status"],
+	status: "neutral" | "success" | "miss",
 ): readonly [number, number, number, number] {
 	switch (status) {
-		case "reachable":
+		case "success":
 			return [0.08, 0.48, 1, 0.9];
-		case "unreachable":
+		case "miss":
 			return [1, 0.12, 0.08, 0.9];
 		default:
 			return [0.62, 0.68, 0.75, 0.8];

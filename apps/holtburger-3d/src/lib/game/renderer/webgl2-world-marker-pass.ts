@@ -1,3 +1,4 @@
+import missMarkerSvg from "../../../assets/icons/world-jump-miss.svg?raw";
 import { mat4ToFloat32Array } from "../math/matrices";
 import type { Mat4, Vec3 } from "../math/types";
 import {
@@ -23,15 +24,19 @@ interface MarkerProgram {
 		readonly color: WebGLUniformLocation;
 		readonly normal: WebGLUniformLocation;
 		readonly radius: WebGLUniformLocation;
+		readonly spin: WebGLUniformLocation;
 	};
 }
 
 export interface WorldMarkerDrawInput {
+	readonly shape: "target" | "miss";
 	readonly center: Vec3;
 	readonly clipFromAnchor: Mat4;
 	readonly color: readonly [number, number, number, number];
 	readonly normal: readonly [number, number, number];
 	readonly radius: number;
+	/** Rotation phase for pending feedback; null draws a settled, uniformly colored ring. */
+	readonly spinAngle: number | null;
 }
 
 export interface WorldMarkerPortalRouting {
@@ -41,7 +46,7 @@ export interface WorldMarkerPortalRouting {
 	): void;
 }
 
-/** Renderer-owned static ring with no per-marker GPU allocation. */
+/** Renderer-owned ring with optional rotating highlight and no per-marker GPU allocation. */
 export class WebGL2WorldMarkerPass {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #matrix = new Float32Array(16);
@@ -114,6 +119,11 @@ export class WebGL2WorldMarkerPass {
 		);
 		gl.uniform1f(program.uniforms.radius, input.radius);
 		gl.uniform4f(program.uniforms.color, ...input.color);
+		gl.uniform2f(
+			program.uniforms.spin,
+			input.spinAngle === null ? 0 : 1,
+			input.spinAngle === null ? 0 : input.spinAngle,
+		);
 		if (portal) {
 			if (!program.portal)
 				throw new Error(
@@ -127,7 +137,11 @@ export class WebGL2WorldMarkerPass {
 		gl.enable(gl.BLEND);
 		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 		gl.bindVertexArray(this.#vertexArray);
-		gl.drawArrays(gl.TRIANGLE_STRIP, 0, VERTEX_COUNT);
+		gl.drawArrays(
+			input.shape === "miss" ? gl.TRIANGLES : gl.TRIANGLE_STRIP,
+			input.shape === "miss" ? VERTEX_COUNT : 0,
+			input.shape === "miss" ? 12 : VERTEX_COUNT,
+		);
 		gl.bindVertexArray(null);
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -142,7 +156,29 @@ export class WebGL2WorldMarkerPass {
 }
 
 function createMarkerVertices(): Float32Array {
-	const vertices = new Float32Array(VERTEX_COUNT * 2);
+	// The X is authored as four triangles in normalized SVG coordinates, not generated artwork.
+	const svg = new DOMParser().parseFromString(missMarkerSvg, "image/svg+xml");
+	const triangles = Array.from(svg.querySelectorAll("polygon"));
+	if (triangles.length !== 4)
+		throw new Error("Miss marker requires four authored SVG triangles.");
+	const miss = triangles.flatMap((triangle) => {
+		const points = triangle.getAttribute("points");
+		if (points === null) throw new Error("Miss marker triangle has no points.");
+		const coordinates = points
+			.trim()
+			.split(/[\s,]+/)
+			.map(Number);
+		if (
+			coordinates.length !== 6 ||
+			coordinates.some((value) => !Number.isFinite(value))
+		)
+			throw new Error(
+				"Miss marker triangle must contain three finite vertices.",
+			);
+		return coordinates;
+	});
+	const vertices = new Float32Array(VERTEX_COUNT * 2 + miss.length);
+	vertices.set(miss, VERTEX_COUNT * 2);
 	for (let segment = 0; segment <= SEGMENT_COUNT; segment += 1) {
 		const angle = (segment * Math.PI * 2) / SEGMENT_COUNT;
 		const x = Math.cos(angle);
@@ -167,7 +203,9 @@ uniform mat4 uMarkerClipFromAnchor;
 uniform vec3 uCenter;
 uniform vec3 uNormal;
 uniform float uRadius;
+out vec2 vMarkerPosition;
 void main() {
+	vMarkerPosition = aMarkerPosition;
 	vec3 normal = normalize(uNormal);
 	vec3 reference = abs(normal.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 	vec3 tangent = normalize(cross(reference, normal));
@@ -180,10 +218,17 @@ precision highp float;
 precision highp int;
 ${portal ? PORTAL_DEFERRED_VISIBILITY_GLSL : ""}
 uniform vec4 uColor;
+uniform vec2 uSpin;
+in vec2 vMarkerPosition;
 out vec4 outColor;
 void main() {
 	${portal ? "if (!portalDeferredFragmentVisible()) discard;" : ""}
-	outColor = uColor;
+	// Keep the full ring faintly visible so its center remains legible throughout
+	// the rotation. The bright quarter-ring signals work without moving the target.
+	float angle = mod(atan(vMarkerPosition.y, vMarkerPosition.x) - uSpin.y + 6.2831853, 6.2831853);
+	float highlight = 1.0 - smoothstep(0.0, 1.5707963, angle);
+	float opacity = mix(1.0, 0.3 + 0.7 * highlight, uSpin.x);
+	outColor = vec4(uColor.rgb, uColor.a * opacity);
 }`;
 	const program = linkWebGL2Program(gl, "world marker", vertex, fragment);
 	return {
@@ -201,6 +246,7 @@ void main() {
 			color: requireWebGL2Uniform(gl, program, "uColor"),
 			normal: requireWebGL2Uniform(gl, program, "uNormal"),
 			radius: requireWebGL2Uniform(gl, program, "uRadius"),
+			spin: requireWebGL2Uniform(gl, program, "uSpin"),
 		},
 	};
 }

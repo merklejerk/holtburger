@@ -17,17 +17,18 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::PlacedMotionPath;
 use holtburger_world::entity::EntityMotionDirective;
 use holtburger_world::motion::{
     LocomotionPresentationSource, ServerDirectedMotionState, begin_server_directed_motion,
 };
+use holtburger_world::state::SelfJumpCapabilities;
 use holtburger_world::{
-    AuthoredBodyMotionTick, BodyProjectionResolver, ContactState, GroundedBodyActuation,
-    GroundedLaunch, LocalDriveControl, PhysicalBodyActuation, PhysicalBodyDefinition,
-    SolveBodyInput, SpatialBodyId, WorldEvent, WorldState, admit_physical_duration,
-    advance_body_kinematics,
+    AuthoredBodyMotionTick, BodyProjectionResolver, ContactState, DynamicBodyKinematics,
+    GroundedBodyActuation, GroundedLaunch, LocalDriveControl, PhysicalBodyActuation,
+    PhysicalBodyDefinition, PhysicalBodyState, SolveBodyInput, SpatialBodyId, WorldEvent,
+    WorldState, admit_physical_duration, advance_body_kinematics,
 };
+use holtburger_world::{PlacedMotionPath, SpatialBody};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -92,7 +93,6 @@ struct PreparedPlayerJump {
 struct PreparedPrecisePlayerJump {
     sequence: crate::client::PreciseJumpActionSequence,
     committed: CommittedPlayerJump,
-    launch: GroundedLaunch,
 }
 
 /// Pose-only projection inputs retained for diagnostic and remote dead-reckoning consumers.
@@ -172,7 +172,14 @@ pub(super) fn tick_with_precise_jump(
     let pending_jump = movement
         .take_pending_jump_attempt()
         .map(|pending| prepare_player_jump(world, pending));
-    let precise_jump = precise_jump.map(|pending| prepare_precise_player_jump(world, pending));
+    let precise_jump = precise_jump.map(|pending| {
+        prepare_precise_player_jump(
+            world,
+            pending,
+            now,
+            pending_jump.as_ref().is_some_and(Result::is_ok),
+        )
+    });
     let mut committed_jump = None;
     let mut body_motions = HashMap::new();
     let mut character_motion_feedback = pending_jump
@@ -181,14 +188,17 @@ pub(super) fn tick_with_precise_jump(
     let mut precise_jump_feedback = precise_jump
         .as_ref()
         .and_then(|result| result.as_ref().err().copied());
+    if let Some(Ok(jump)) = precise_jump {
+        precise_jump_feedback = Some(PreciseJumpTransactionFeedback {
+            sequence: jump.sequence,
+            outcome: PreciseJumpTransactionOutcome::Committed,
+        });
+        committed_jump = Some(jump.committed);
+    }
     if let Some(collision) = collision {
         let prepared_jump = pending_jump
             .as_ref()
             .and_then(|result| result.as_ref().ok());
-        let prepared_precise_jump = precise_jump
-            .as_ref()
-            .and_then(|result| result.as_ref().ok());
-        let ordinary_selected = prepared_jump.is_some();
         let physical_tick = tick_physical_entities(
             now,
             dt,
@@ -196,9 +206,7 @@ pub(super) fn tick_with_precise_jump(
             movement,
             collision,
             authored_offset,
-            prepared_jump
-                .map(|jump| jump.launch)
-                .or_else(|| prepared_precise_jump.map(|jump| jump.launch)),
+            prepared_jump.map(|jump| jump.launch),
         )?;
         events.extend(physical_tick.events);
         body_motions = physical_tick.body_motions;
@@ -217,40 +225,10 @@ pub(super) fn tick_with_precise_jump(
                 ));
             }
         }
-        if let Some(Ok(jump)) = precise_jump {
-            if ordinary_selected {
-                precise_jump_feedback = Some(rejected_precise_release(
-                    jump.sequence,
-                    PreciseJumpTransactionRejection::LaunchRejected,
-                ));
-            } else if jump_committed {
-                precise_jump_feedback = Some(PreciseJumpTransactionFeedback {
-                    sequence: jump.sequence,
-                    outcome: PreciseJumpTransactionOutcome::Committed,
-                });
-                committed_jump = Some(jump.committed);
-            } else {
-                precise_jump_feedback = Some(rejected_precise_release(
-                    jump.sequence,
-                    PreciseJumpTransactionRejection::LaunchRejected,
-                ));
-            }
-        }
     } else if let Some(Ok(jump)) = pending_jump {
         character_motion_feedback = Some(rejected_release(
             jump.sequence,
             ClientCharacterMotionRejection::CollisionUnavailable,
-        ));
-        if let Some(Ok(precise)) = precise_jump {
-            precise_jump_feedback = Some(rejected_precise_release(
-                precise.sequence,
-                PreciseJumpTransactionRejection::LaunchRejected,
-            ));
-        }
-    } else if let Some(Ok(precise)) = precise_jump {
-        precise_jump_feedback = Some(rejected_precise_release(
-            precise.sequence,
-            PreciseJumpTransactionRejection::LaunchRejected,
         ));
     }
     events.extend(tick_pose_only_remote_entities(
@@ -268,33 +246,104 @@ pub(super) fn tick_with_precise_jump(
     })
 }
 
-fn prepare_precise_player_jump(
+/// Current player facts admitted by the same eligibility rules for either jump input path.
+struct PlayerJumpContext<'a> {
+    /// Current jump height and burden used by launch conversion.
+    capabilities: SelfJumpCapabilities,
+    /// Supported physical actor supplying release pose and retained motion.
+    body: &'a SpatialBody,
+    /// Admitted grounded-body definition and response policy used by precise release.
+    physical: &'a PhysicalBodyState,
+}
+
+fn player_jump_context(
     world: &WorldState,
+) -> Result<PlayerJumpContext<'_>, ClientCharacterMotionRejection> {
+    let capabilities = world
+        .resolve_self_jump_capabilities()
+        .map_err(|_| ClientCharacterMotionRejection::CapabilityUnavailable)?;
+    if capabilities.is_overburdened() {
+        return Err(ClientCharacterMotionRejection::Overburdened);
+    }
+    let body = world
+        .scene
+        .body(SpatialBodyId::LocalPlayer(world.player.guid))
+        .ok_or(ClientCharacterMotionRejection::BodyUnavailable)?;
+    let physical = body
+        .physical
+        .as_ref()
+        .ok_or(ClientCharacterMotionRejection::BodyUnavailable)?;
+    if !matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. }) {
+        return Err(ClientCharacterMotionRejection::BodyUnavailable);
+    }
+    match body.contact {
+        ContactState::Grounded => Ok(PlayerJumpContext {
+            capabilities,
+            body,
+            physical,
+        }),
+        ContactState::Airborne => Err(ClientCharacterMotionRejection::Airborne),
+        ContactState::Sliding | ContactState::Unknown => {
+            Err(ClientCharacterMotionRejection::Unsupported)
+        }
+    }
+}
+
+fn prepare_precise_player_jump(
+    world: &mut WorldState,
     pending: super::precise_jump_runtime::PreparedPreciseJumpCommit,
+    now: Instant,
+    ordinary_selected: bool,
 ) -> Result<PreparedPrecisePlayerJump, PreciseJumpTransactionFeedback> {
-    let launch = GroundedLaunch::new(pending.resolved.world_velocity()).map_err(|_| {
+    let sequence = pending.sequence();
+    let context = player_jump_context(world).map_err(|reason| {
         rejected_precise_release(
-            pending.sequence,
-            PreciseJumpTransactionRejection::LaunchRejected,
+            sequence,
+            match reason {
+                ClientCharacterMotionRejection::Airborne => {
+                    PreciseJumpTransactionRejection::Airborne
+                }
+                ClientCharacterMotionRejection::Unsupported => {
+                    PreciseJumpTransactionRejection::Unsupported
+                }
+                ClientCharacterMotionRejection::Overburdened => {
+                    PreciseJumpTransactionRejection::Overburdened
+                }
+                _ => PreciseJumpTransactionRejection::LaunchRejected,
+            },
         )
     })?;
-    let position = world.local_player_runtime_pose().ok_or_else(|| {
-        rejected_precise_release(
-            pending.sequence,
-            PreciseJumpTransactionRejection::AuthorityChanged,
-        )
-    })?;
+    let (sequence, resolved) = pending.resolve_at_release(context.body, &context.capabilities)?;
+    let reject =
+        || rejected_precise_release(sequence, PreciseJumpTransactionRejection::LaunchRejected);
+    if ordinary_selected {
+        return Err(reject());
+    }
+    let position = context.body.pose;
+    let body_id = context.body.id;
+    let body = context.body;
+    let physical = context.physical;
+    let kinematics = DynamicBodyKinematics::new(
+        resolved.world_velocity(),
+        body.retained.acceleration,
+        body.retained.omega,
+        physical.response_policy.align_path,
+    )
+    .ok_or_else(reject)?;
+    world
+        .scene
+        .apply_dynamic_body_kinematics(body_id, kinematics, now)
+        .ok_or_else(reject)?;
     Ok(PreparedPrecisePlayerJump {
-        sequence: pending.sequence,
+        sequence,
         committed: CommittedPlayerJump {
-            resolved: pending.resolved,
+            resolved,
             position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
         },
-        launch,
     })
 }
 
@@ -303,31 +352,9 @@ fn prepare_player_jump(
     pending: PendingJumpAttempt,
 ) -> Result<PreparedPlayerJump, ClientCharacterMotionFeedback> {
     let reject = |reason| rejected_release(pending.sequence, reason);
-    let capabilities = world
-        .resolve_self_jump_capabilities()
-        .map_err(|_| reject(ClientCharacterMotionRejection::CapabilityUnavailable))?;
-    if capabilities.is_overburdened() {
-        return Err(reject(ClientCharacterMotionRejection::Overburdened));
-    }
-    let body_id = SpatialBodyId::LocalPlayer(world.player.guid);
-    let body = world
-        .scene
-        .body(body_id)
-        .ok_or_else(|| reject(ClientCharacterMotionRejection::BodyUnavailable))?;
-    if !matches!(
-        body.physical
-            .as_ref()
-            .ok_or_else(|| reject(ClientCharacterMotionRejection::BodyUnavailable))?
-            .definition,
-        PhysicalBodyDefinition::Grounded { .. }
-    ) {
-        return Err(reject(ClientCharacterMotionRejection::BodyUnavailable));
-    }
-    let readiness = match body.contact {
-        ContactState::Grounded => CharacterJumpReadiness::Supported,
-        ContactState::Airborne => CharacterJumpReadiness::Airborne,
-        ContactState::Sliding | ContactState::Unknown => CharacterJumpReadiness::Unsupported,
-    };
+    let context = player_jump_context(world).map_err(reject)?;
+    let capabilities = context.capabilities;
+    let body = context.body;
     let kinematics = jump_kinematics_from_movement_capabilities(
         &capabilities.movement,
         capabilities.full_extent_jump_height,
@@ -338,7 +365,7 @@ fn prepare_player_jump(
         kinematics,
         pending.attempt,
         position.rotation.to_heading(),
-        readiness,
+        CharacterJumpReadiness::Supported,
     )
     .map_err(|error| {
         reject(match error {

@@ -21,6 +21,13 @@ export const INPUT_DEFAULTS = {
 		/** Hold to charge and release to jump; activates an aimed precise jump. */
 		jump: [{ key: " " }],
 	},
+	/** Held controls active only during precise targeting. */
+	preciseJump: {
+		/** Raise the selected jump power continuously. */
+		increasePower: [{ key: "w" }],
+		/** Lower the selected jump power continuously. */
+		decreasePower: [{ key: "s" }],
+	},
 	/** Explorer camera translation, rotation, and precision control. */
 	fly: {
 		/** Move forward along the camera basis. */

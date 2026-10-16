@@ -78,7 +78,7 @@ impl ResolvedJump {
         self.world_velocity
     }
 
-    /// Adapts one core-generated precise candidate into the ordinary launch transaction.
+    /// Adapts core-resolved current launch vectors without re-deriving power or heading.
     pub(super) fn from_precise_candidate(
         candidate: super::precise_jump::PreciseJumpLaunchCandidate,
     ) -> Self {
@@ -89,6 +89,13 @@ impl ResolvedJump {
             world_velocity: candidate.world_velocity(),
         }
     }
+}
+
+/// Expresses a world-space planar intent in the actor's release-time forward/right basis.
+pub(super) fn local_planar_vector(world: Vector3, heading: f32) -> Vector3 {
+    let forward = Vector3::new(-heading.cos(), heading.sin(), 0.0);
+    let right = Vector3::new(heading.sin(), heading.cos(), 0.0);
+    Vector3::new(world.dot(&right), world.dot(&forward), 0.0)
 }
 
 /// Resolves one supported attempt without consulting input devices, skills, resources, or physics.
@@ -129,8 +136,11 @@ pub(super) fn character_jump_vertical_velocity(
     kinematics: CharacterJumpKinematics,
     extent: JumpExtent,
 ) -> f32 {
-    let height =
-        (kinematics.full_extent_jump_height() * extent.get()).max(RETAIL_MINIMUM_JUMP_HEIGHT);
+    vertical_velocity_from_height(kinematics.full_extent_jump_height(), extent)
+}
+
+fn vertical_velocity_from_height(full_extent_jump_height: f32, extent: JumpExtent) -> f32 {
+    let height = (full_extent_jump_height * extent.get()).max(RETAIL_MINIMUM_JUMP_HEIGHT);
     (height * RETAIL_DOUBLE_GRAVITY).sqrt()
 }
 

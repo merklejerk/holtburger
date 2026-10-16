@@ -13,6 +13,7 @@ import {
 import {
 	ACTION_BAR_COMMANDS,
 	CHARACTER_ACTIONS,
+	PRECISE_JUMP_ACTIONS,
 	CLIENT_SHORTCUT_ACTIONS,
 	COMBAT_BREAKPOINT_INDICES,
 	COMBAT_HEIGHT_INDICES,
@@ -27,7 +28,12 @@ import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
 import { COMBAT_BREAKPOINTS } from "./client-combat-bar-state";
 
 type BindingContext =
-	"game-peace" | "game-magic" | "game-physical" | "focused-bar" | "chat";
+	| "game-peace"
+	| "game-magic"
+	| "game-physical"
+	| "precise-jump"
+	| "focused-bar"
+	| "chat";
 type ClientBindingGroup =
 	| "Movement"
 	| "Targeting & interaction"
@@ -96,7 +102,11 @@ function characterRow(action: CharacterAction): BindingDefinition {
 		reference: { kind: "character", action },
 		label: CHARACTER_LABELS[action],
 		group: "Movement",
-		contexts: GAME_CONTEXTS,
+		// Turning and launch remain live while precise targeting owns translation.
+		contexts:
+			action === "turnLeft" || action === "turnRight" || action === "jump"
+				? [...GAME_CONTEXTS, "precise-jump"]
+				: GAME_CONTEXTS,
 	};
 }
 
@@ -113,7 +123,7 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 	const contexts: readonly BindingContext[] = chatOnly
 		? ["chat"]
 		: action === "cancel"
-			? [...GAME_CONTEXTS, "focused-bar", "chat"]
+			? [...GAME_CONTEXTS, "precise-jump", "focused-bar", "chat"]
 			: GAME_CONTEXTS;
 	return {
 		reference: { kind: "client", action },
@@ -124,6 +134,17 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 }
 
 const characterRows = CHARACTER_ACTIONS.map(characterRow);
+const preciseJumpRows: BindingDefinition[] = PRECISE_JUMP_ACTIONS.map(
+	(action) => ({
+		reference: { kind: "preciseJump", action },
+		label:
+			action === "increasePower"
+				? "Increase jump power (precise mode)"
+				: "Decrease jump power (precise mode)",
+		group: "Movement",
+		contexts: ["precise-jump"],
+	}),
+);
 const clientRows = CLIENT_SHORTCUT_ACTIONS.map(clientRow);
 const spellTabRows: BindingDefinition[] = ACTION_SLOT_INDICES.map((index) => ({
 	reference: { kind: "spellTab", index },
@@ -190,6 +211,7 @@ const bindingGroups: readonly {
 		rows: [
 			...characterRows,
 			...clientRows.filter((row) => row.group === "Movement"),
+			...preciseJumpRows,
 		],
 	},
 	{

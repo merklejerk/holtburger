@@ -204,6 +204,25 @@ Both modes use **Holtburger Standard** from
 `src/app/themes/holtburger-standard.css`. Its appearance is owned by that stylesheet
 and can evolve freely.
 CSS themes can replace variables and styling rules; component CSS owns layout.
+
+The jump HUD uses `--ui-jump-bar-width`, `--ui-jump-readout-font-size`,
+`--ui-jump-gap` and `--ui-jump-fill-color` for density
+and appearance. The percentage follows the fill edge, with an underline extending left to the bar.
+A rotated PRECISE JUMP / MANUAL JUMP label sits closely beside the bar, aligned
+to its bottom edge.
+Enter precise targeting with its configured shortcut (Shift+J by default),
+and return to manual controls with Escape. Arc feedback remains in the viewport. Position and outer
+bounds belong to HUD layout editing, including resizing; themes style the contents
+within those bounds.
+
+During precise targeting, hold the configured increase/decrease power controls (W/S by
+default) to adjust power continuously. These have independent entries under Settings → Input → Movement. Click the bar to set an absolute power,
+or use Shift+wheel for steps. Plain wheel zooms the camera. The precise-mode caption shows the configured power keys as shared keycaps on
+the line below POWER. Only the bar receives pointer input; other jump HUD content lets
+input reach the viewport. Held power input clears on release, focus loss and mode exit. Drag in the viewport
+to orbit the camera; a click launches on release. Configured turn controls (A/D by
+default) rotate the character in place while precise targeting blocks translation.
+
 Default and custom stylesheets use the same
 loader, with an optional override sheet, without recreating runtime owners.
 User-file discovery, saved selection, and an editor remain deferred.

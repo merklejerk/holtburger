@@ -98,7 +98,7 @@ pub(crate) fn checked_recovery_destination(
         {
             return Ok(None);
         }
-        for target in hard.iter() {
+        for target in hard.iter()? {
             if !working
                 .contact
                 .membership

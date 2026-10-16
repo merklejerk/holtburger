@@ -34,6 +34,12 @@ export async function probeClientHud(
 	);
 	if (!overlayTheme?.passed)
 		throw new Error("Overlay theme probe did not pass.");
+	const jumpHud = await evaluateExpression(
+		client,
+		`(async () => (await import('/src/harness/browser/client-jump-hud-probe.ts')).probeClientJumpHud())()`,
+	);
+	if (!jumpHud?.passed)
+		throw new Error("Jump HUD theme/icon probe did not pass.");
 	const selectedActions = await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSelectedActions",
@@ -41,6 +47,12 @@ export async function probeClientHud(
 	);
 	if (!selectedActions?.passed)
 		throw new Error("Selected entity actions probe did not pass.");
+	const preciseJump = await evaluateExpression(
+		client,
+		`(async () => (await import('/src/harness/browser/client-precise-jump-probe.ts')).probeClientPreciseJump())()`,
+	);
+	if (!preciseJump?.passed)
+		throw new Error("Client precise-jump probe did not pass.");
 	const targeting = await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTargeting",
@@ -1509,7 +1521,7 @@ export async function probeClientHud(
 			window.dispatchEvent(new KeyboardEvent('keyup', { key: '2', code: 'Digit2', ctrlKey: true, bubbles: true, cancelable: true }));
 			await frame();
 			const focusConflict = panel.querySelector('.binding-dialog');
-			if (!focusConflict?.textContent.includes('Focus action bar 2') || focusConflict.querySelector('button:last-child')?.textContent !== 'Replace' || focusConflict.querySelector('.binding-dialog-key')?.textContent !== 'Ctrl+2') throw new Error('Physical digit binding did not open the replacement dialog with a shortcut pill');
+			if (!focusConflict?.textContent.includes('Focus action bar 2') || focusConflict.querySelector('button:last-child')?.textContent !== 'Replace' || focusConflict.querySelector('kbd.ui-keycap')?.textContent !== 'Ctrl+2') throw new Error('Physical digit binding did not open the replacement dialog with a shortcut keycap');
 			focusConflict.querySelector('button').click();
 			await frame();
 			if (panel.querySelector('.binding-dialog') || ![...actionBarsGroup.querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Focus action bar 2')?.textContent.includes('Ctrl+2')) throw new Error('Cancelling replacement changed the existing binding');
@@ -1754,6 +1766,8 @@ export async function probeClientHud(
 		clientInspection,
 		clientBook,
 		clientTargeting: targeting,
+		clientPreciseJump: preciseJump,
+		clientJumpHud: jumpHud,
 		selectedActions,
 		overlayTheme,
 		connectionBadge,
@@ -2519,24 +2533,13 @@ function assertClientHudHarness(evidence) {
 			`Client HUD layout toast is not an inert preview: ${JSON.stringify(evidence.layout.toast)}.`,
 		);
 	}
-	if (evidence.layout.jumpActionDisabled !== true) {
-		throw new Error("Client HUD layout jump action remained interactive.");
-	}
 	if (
 		evidence.runtimeTransients.toast?.preview !== false ||
-		evidence.runtimeTransients.toast.role !== "status" ||
-		evidence.runtimeTransients.jumpActionDisabled !== false
+		evidence.runtimeTransients.toast.role !== "status"
 	) {
 		throw new Error(
 			`Client HUD runtime transients did not retain live semantics: ${JSON.stringify(evidence.runtimeTransients)}.`,
 		);
-	}
-	for (const state of Object.values(evidence)) {
-		if ("preciseJumpEnterCount" in state && state.preciseJumpEnterCount !== 0) {
-			throw new Error(
-				"Client HUD layout preview dispatched precise-jump input.",
-			);
-		}
 	}
 	const movedOffset = clientHudHorizontalCenterOffset(
 		evidence.moved.surfaces["Jump power"],

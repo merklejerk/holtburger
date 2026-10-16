@@ -4,6 +4,7 @@ import type {
 	CombatEffectsTuning,
 } from "../lib/game/systems/combat-effects-system";
 import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
+import { formatClientLocation } from "./client-location-command";
 import {
 	clientAudioSettingsSchema,
 	type ClientAudioSettings,
@@ -601,6 +602,22 @@ export class ClientPresentationSession {
 							kind: "controlled-entity",
 						},
 		};
+	}
+
+	/** Sample diagnostic poses on demand without publishing frame-hot data through Svelte. */
+	readLocationReport(): string {
+		const player =
+			this.#playerGuid === null
+				? null
+				: this.#authoritativePlayer(this.#playerGuid);
+		if (player === null || player.placement.kind !== "world")
+			throw new Error("Player location is unavailable.");
+		if (this.#status.kind !== "ready" || this.#lastPrimaryView === null)
+			throw new Error("Presented camera location is unavailable.");
+		return formatClientLocation(
+			player.placement.pose,
+			this.#lastPrimaryView.camera.placement,
+		);
 	}
 
 	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */

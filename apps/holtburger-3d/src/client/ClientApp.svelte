@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		compactInputHint,
+		inputDisplayPlatform,
+	} from "../lib/input/input-presentation";
 	import { presentPartyHud } from "./client-party-hud";
 	import {
 		clientCombatIndicatorSettingsSchema,
@@ -566,6 +570,7 @@
 		const accepted = clientKeyboardSettingsSchema.parse(input);
 		keyboard.cancel();
 		characterInput.replaceBindings(accepted.character);
+		inputArbiter?.replacePowerBindings(accepted.preciseJump);
 		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
 		changeUserSection("input", accepted);
 	}
@@ -911,6 +916,19 @@
 					});
 				}
 				return;
+			case "precise-jump-transaction-feedback":
+				if (event.feedback.outcome.kind === "rejected") {
+					toastCenter.publish({
+						message:
+							event.feedback.outcome.reason === "airborne" ||
+							event.feedback.outcome.reason === "unsupported" ||
+							event.feedback.outcome.reason === "overburdened"
+								? jumpRejectionText(event.feedback.outcome.reason)
+								: `Precise jump rejected (${event.feedback.outcome.reason}).`,
+						tone: "warning",
+					});
+				}
+				return;
 			case "server-controlled-motion":
 				inputArbiter?.cancelAutoRun();
 				return;
@@ -1079,8 +1097,28 @@
 		void objectInspectionOwner?.examine(guid);
 	}
 
+	const jumpPowerKeys: readonly [string, string] = $derived.by(() => {
+		const platform = inputDisplayPlatform(
+			globalThis.navigator?.userAgent ?? "",
+		);
+		const input = userSettings.input.preciseJump;
+		return [
+			compactInputHint(input.increasePower, platform) ?? "—",
+			compactInputHint(input.decreasePower, platform) ?? "—",
+		];
+	});
+
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (preciseJumpActive && !event.isComposing) {
+			if (
+				inputArbiter?.applyPowerKey(event, true) ||
+				characterInput.apply(event, true)
+			) {
+				event.preventDefault();
+				return;
+			}
+		}
 		if (
 			handleCombatBarKeydown(
 				clientInput,
@@ -1156,7 +1194,10 @@
 
 	function handleGameKeyup(event: KeyboardEvent): void {
 		selectionInput?.keyup(event, performance.now());
-		if (characterInput.apply(event, false)) event.preventDefault();
+		// A movement press may predate precise mode, so release both owners.
+		const powerReleased = inputArbiter?.applyPowerKey(event, false) ?? false;
+		if (characterInput.apply(event, false) || powerReleased)
+			event.preventDefault();
 	}
 
 	function aimPreciseJump(clientX: number, clientY: number): void {
@@ -1384,8 +1425,18 @@
 		cameraController = presentation.camera;
 		reportPresentationStatus({ kind: "starting", diagnostic: null });
 
+		let previousFrameTime: number | null = null;
 		const frame = (timeMs: number): void => {
 			if (cancelled) return;
+			const elapsedSeconds =
+				previousFrameTime === null
+					? 0
+					: Math.max(0, timeMs - previousFrameTime) / 1000;
+			previousFrameTime = timeMs;
+			preciseJumpSession?.adjustHeldPower(
+				inputArbiter?.precisePowerDirection ?? 0,
+				elapsedSeconds,
+			);
 			const frameStartedAt = performance.now();
 			const nextStatus = presentation.frame(timeMs).status;
 			const frameFinishedAt = performance.now();
@@ -1405,9 +1456,11 @@
 				if (!cancelled) {
 					// The imperative owner remains authoritative; this snapshot only closes the
 					// race between marker publication and presentation startup.
-					presentation.setPreciseJumpMarker(
-						preciseJumpSession?.snapshot().marker ?? null,
-					);
+					if (preciseJumpSession !== null) {
+						presentation.setPreciseJumpPresentation(
+							preciseJumpSession.snapshot(),
+						);
+					}
 					frameHandle = window.requestAnimationFrame(frame);
 				}
 			})
@@ -1460,6 +1513,8 @@
 		});
 		inputController = controller;
 		const arbiter = new ClientInputArbiter({
+			// Read accepted settings without making remaps own the controller lifetime.
+			powerBindings: untrack(() => userSettings.input.preciseJump),
 			ordinary: controller,
 			onEnter: () => {
 				selectionInput?.cancel();
@@ -1680,7 +1735,7 @@
 		const unsubscribePrecise = precise.subscribe((snapshot) => {
 			if (preciseJumpActive !== snapshot.active)
 				preciseJumpActive = snapshot.active;
-			presentationSession?.setPreciseJumpMarker(snapshot.marker);
+			presentationSession?.setPreciseJumpPresentation(snapshot);
 			if (!snapshot.active) {
 				preciseEscapeContext?.release();
 				preciseEscapeContext = null;
@@ -1932,12 +1987,19 @@
 			{appearanceOptions}
 			onAppearanceOptionChange={setAppearanceOption}
 			jumpChargeActive={activeJumpBeginSequence !== null}
-			readJumpExtent={() => inputController?.chargeExtent() ?? 0}
+			{jumpPowerKeys}
+			readJumpExtent={() =>
+				preciseJumpActive
+					? (preciseJumpSession?.power() ??
+						CLIENT_TUNING.preciseJump.initialPower)
+					: (inputController?.chargeExtent() ?? 0)}
 			{toast}
 			{preciseJumpActive}
 			onPreciseJumpAim={aimPreciseJump}
+			onPreciseJumpPowerSet={(power) => preciseJumpSession?.setPower(power)}
+			onPreciseJumpPowerAdjust={(steps) =>
+				preciseJumpSession?.adjustPower(steps)}
 			onPreciseJumpActivate={activatePreciseJump}
-			onPreciseJumpEnter={enterPreciseJump}
 			onSocialNotice={(message) =>
 				toastCenter.publish({ message, tone: "warning" })}
 			onInventoryNotice={(message) =>

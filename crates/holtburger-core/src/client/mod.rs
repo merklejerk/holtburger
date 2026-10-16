@@ -89,11 +89,13 @@ pub use character_sheet::{
     ClientCharacterSheet, ClientCharacterSkill, ClientCharacterTitle, ClientCharacterTitleSelection,
 };
 use movement::MovementSystem;
+pub use precise_jump_prediction::PreciseJumpTargetView;
 pub use precise_jump_runtime::{
     PreciseJumpActionSequence, PreciseJumpAimRequest, PreciseJumpAimSequence,
     PreciseJumpCancelRequest, PreciseJumpCommitRequest, PreciseJumpEvaluation,
-    PreciseJumpEvaluationId, PreciseJumpEvaluationStatus, PreciseJumpTargetView,
-    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+    PreciseJumpEvaluationStatus, PreciseJumpLaunchView, PreciseJumpPreviewCurve,
+    PreciseJumpProgress, PreciseJumpResolvedLaunch, PreciseJumpTransactionFeedback,
+    PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
 };
 pub use progression::{
     ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,

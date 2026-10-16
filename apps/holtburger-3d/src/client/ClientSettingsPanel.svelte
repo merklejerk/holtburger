@@ -687,7 +687,7 @@
 									{#each readClientBinding(input, row.reference) as binding, index}
 										<button
 											type="button"
-											class="binding-key"
+											class="binding-key ui-keycap"
 											aria-label={`Remove ${formatInputBinding(binding, displayPlatform)} from ${row.label}`}
 											title={`Remove binding: ${formatInputBinding(binding, displayPlatform)}`}
 											onclick={(event) =>
@@ -809,19 +809,9 @@
 			gap: 3px;
 		}
 		.binding-key {
-			display: inline-grid;
-			place-items: center;
-			min-width: 30px;
-			min-height: 24px;
-			padding: 1px 8px;
-			border: 1px solid var(--ui-color-border);
-			border-radius: 999px;
-			background: var(--ui-color-control);
-			color: inherit;
-			font: inherit;
-			white-space: nowrap;
 			cursor: pointer;
 		}
+
 		.binding-key kbd,
 		.binding-key-remove {
 			grid-area: 1 / 1;

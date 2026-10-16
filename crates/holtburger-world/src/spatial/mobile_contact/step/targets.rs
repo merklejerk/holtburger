@@ -1,26 +1,81 @@
 //! Tick-local spatial selection over prepared hard geometry, independent of portal membership.
 
 use anyhow::{Result, ensure};
-use holtburger_common::Vector3;
+use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Quaternion, Vector3};
 use parry3d::bounding_volume::Aabb;
 use parry3d::math::Vector;
 use parry3d::partitioning::{Bvh, BvhBuildStrategy};
 use std::collections::BTreeMap;
+use std::sync::{Arc, OnceLock};
 
 use super::SweepTarget;
-use crate::spatial::SpatialBodyId;
 use crate::spatial::bsp_query::CONTACT_EPSILON;
+use crate::spatial::dynamic_index::{EntityCollisionTarget, reanchor_placed_shapes};
+use crate::spatial::{CollisionQueryError, SpatialBodyId};
 
 /// Owns target geometry and its index together so accepted pose changes update both.
 /// Leaf IDs are stable vector slots; query results restore body identity order for hit ties.
 #[derive(Debug, Clone)]
 pub(super) struct HardTargets {
     /// Prepared geometry; existing slots never move when projectile targets are appended.
-    bodies: Vec<SweepTarget>,
+    bodies: Vec<HardTarget>,
     /// Identity lookup for accepted hard-target replacement, independent of append order.
     slots: BTreeMap<SpatialBodyId, usize>,
     /// Spatial bounds only. Exact queries retain collision-domain and response filtering.
     index: Bvh,
+}
+
+/// Ordinary ticks own resolved geometry; immutable predictions resolve selected leaves only.
+#[derive(Debug, Clone)]
+enum HardTarget {
+    Prepared(SweepTarget),
+    Frozen(FrozenHardTarget),
+}
+
+/// Deferred leaf retains its original membership and shapes, independently of cell traversal.
+#[derive(Debug, Clone)]
+struct FrozenHardTarget {
+    anchor: Guid,
+    /// Original frame and shared posed shapes; selection does not copy target proofs.
+    source_anchor: Guid,
+    shapes: Arc<[holtburger_content::PlacedCollisionShape]>,
+    /// Collision participation and membership retained for exact filtering.
+    contact: super::ContactParticipant,
+    prepared: OnceLock<Result<SweepTarget, CollisionQueryError>>,
+}
+
+impl HardTarget {
+    fn body_id(&self) -> SpatialBodyId {
+        match self {
+            Self::Prepared(target) => target.contact.body_id,
+            Self::Frozen(target) => target.contact.body_id,
+        }
+    }
+
+    fn resolve(&self) -> Result<&SweepTarget, CollisionQueryError> {
+        match self {
+            Self::Prepared(target) => Ok(target),
+            Self::Frozen(target) => target
+                .prepared
+                .get_or_init(|| {
+                    reanchor_placed_shapes(target.source_anchor, &target.shapes, target.anchor)
+                        .map(|shapes| SweepTarget {
+                            contact: target.contact.clone(),
+                            shapes,
+                        })
+                        .map_err(|error| {
+                            log::error!(
+                                "frozen peer {:?} preparation failed: {error:#}",
+                                target.contact.body_id
+                            );
+                            CollisionQueryError::InvalidPeerPlacement
+                        })
+                })
+                .as_ref()
+                .map_err(|error| *error),
+        }
+    }
 }
 
 impl HardTargets {
@@ -37,24 +92,54 @@ impl HardTargets {
         // Parry 0.30.2's bulk constructor indexes slots 0/1 for one/two leaves,
         // even when filtering empty geometry left different IDs. Incremental insertion
         // preserves sparse IDs; keep the binned bulk builder for larger target sets.
-        let index = if leaves.len() <= 2 {
-            let mut index = Bvh::new();
-            for (slot, bounds) in leaves {
-                index.insert(bounds, slot as u32);
-            }
-            index
-        } else {
-            Bvh::from_iter(BvhBuildStrategy::Binned, leaves)
-        };
+        let index = build_index(leaves);
         let slots = bodies
             .iter()
             .enumerate()
             .map(|(slot, body)| (body.contact.body_id, slot))
             .collect();
         Ok(Self {
-            bodies,
+            bodies: bodies.into_iter().map(HardTarget::Prepared).collect(),
             slots,
             index,
+        })
+    }
+
+    /// Builds a bounds tree without transforming exact geometry. Each actual solver
+    /// segment/support query recursively rejects disjoint subtrees before preparing leaves.
+    pub(super) fn frozen<'a>(
+        anchor: Guid,
+        targets: impl IntoIterator<Item = &'a EntityCollisionTarget>,
+    ) -> Result<Self> {
+        let targets = targets.into_iter();
+        let mut bodies = Vec::with_capacity(targets.size_hint().0);
+        let mut leaves = Vec::with_capacity(targets.size_hint().0);
+        for target in targets {
+            let slot = bodies.len();
+            ensure!(
+                slot < u32::MAX as usize,
+                "too many hard targets for spatial index"
+            );
+            if let Some(bounds) = frozen_bounds(target, anchor)? {
+                leaves.push((slot, bounds));
+            }
+            bodies.push(HardTarget::Frozen(FrozenHardTarget {
+                anchor,
+                source_anchor: target.anchor,
+                shapes: Arc::clone(&target.shapes),
+                contact: target.contact.clone(),
+                prepared: OnceLock::new(),
+            }));
+        }
+        let slots = bodies
+            .iter()
+            .enumerate()
+            .map(|(slot, target)| (target.body_id(), slot))
+            .collect();
+        Ok(Self {
+            bodies,
+            slots,
+            index: build_index(leaves),
         })
     }
 
@@ -65,7 +150,7 @@ impl HardTargets {
             .get(&target.contact.body_id)
             .ok_or_else(|| anyhow::anyhow!("prepared nonyielding body lost its hard target"))?;
         self.update_bounds(slot, &target);
-        self.bodies[slot] = target;
+        self.bodies[slot] = HardTarget::Prepared(target);
         Ok(())
     }
 
@@ -77,7 +162,7 @@ impl HardTargets {
         );
         self.update_bounds(self.bodies.len(), &target);
         self.slots.insert(target.contact.body_id, self.bodies.len());
-        self.bodies.push(target);
+        self.bodies.push(HardTarget::Prepared(target));
         Ok(())
     }
 
@@ -90,15 +175,20 @@ impl HardTargets {
         // to hit. This avoids adding a separate removal lifecycle for tick-local geometry.
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = &SweepTarget> {
-        self.bodies.iter()
+    pub(super) fn iter(&self) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
+        Ok(self
+            .bodies
+            .iter()
+            .map(HardTarget::resolve)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter())
     }
 
     pub(super) fn sphere_candidates(
         &self,
         center: Vector3,
         radius: f32,
-    ) -> impl Iterator<Item = &SweepTarget> {
+    ) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
         let center = vector(center);
         let extent = Vector::splat(radius);
         self.candidates(Aabb::new(center - extent, center + extent))
@@ -108,7 +198,7 @@ impl HardTargets {
         &self,
         center: Vector3,
         radius: f32,
-    ) -> impl Iterator<Item = &SweepTarget> {
+    ) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
         let reach = radius + CONTACT_EPSILON;
         // Match the existing support primitive's XY column rejection. Height admission
         // remains shape-owned, including BSP slopes and expanded volume cap corners.
@@ -118,11 +208,92 @@ impl HardTargets {
         ))
     }
 
-    fn candidates(&self, query: Aabb) -> impl Iterator<Item = &SweepTarget> {
+    fn candidates(
+        &self,
+        query: Aabb,
+    ) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
         let mut slots = self.index.intersect_aabb(&query).collect::<Vec<_>>();
-        slots.sort_unstable_by_key(|slot| self.bodies[*slot as usize].contact.body_id);
-        slots.into_iter().map(|slot| &self.bodies[slot as usize])
+        slots.sort_unstable_by_key(|slot| self.bodies[*slot as usize].body_id());
+        Ok(slots
+            .into_iter()
+            .map(|slot| self.bodies[slot as usize].resolve())
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter())
     }
+}
+
+/// Preserve sparse slot IDs for the small-population Parry bulk-builder edge case.
+fn build_index(leaves: Vec<(usize, Aabb)>) -> Bvh {
+    if leaves.len() <= 2 {
+        let mut index = Bvh::new();
+        for (slot, bounds) in leaves {
+            index.insert(bounds, slot as u32);
+        }
+        index
+    } else {
+        Bvh::from_iter(BvhBuildStrategy::Binned, leaves)
+    }
+}
+
+/// Translation is the only frame change. Expand by a rounding band covering
+/// the original bounds, translated bounds, and recomputed exact placement.
+/// Membership never removes a leaf: the exact sweep discovers its portal route.
+fn frozen_bounds(target: &EntityCollisionTarget, anchor: Guid) -> Result<Option<Aabb>> {
+    if target.anchor == anchor {
+        // Cloned same-frame leaves retain exactly these bounds. No rounding
+        // expansion or cross-frame placement work is needed for the common case.
+        let mut bounds: Option<Aabb> = None;
+        for shape in target.shapes.iter() {
+            let shape_bounds = Aabb::new(
+                vector(shape.bounds.minimum()),
+                vector(shape.bounds.maximum()),
+            );
+            bounds = Some(match bounds {
+                Some(bounds) => Aabb::new(
+                    bounds.mins.min(shape_bounds.mins),
+                    bounds.maxs.max(shape_bounds.maxs),
+                ),
+                None => shape_bounds,
+            });
+        }
+        return Ok(bounds);
+    }
+
+    let offset = WorldPosition {
+        landblock_id: target.anchor,
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    }
+    .reanchor_to_landblock_owner(anchor)?
+    .coords;
+    let mut bounds: Option<Aabb> = None;
+    for shape in target.shapes.iter() {
+        let original_min = vector(shape.bounds.minimum());
+        let original_max = vector(shape.bounds.maximum());
+        let translated_min = original_min + vector(offset);
+        let translated_max = original_max + vector(offset);
+        let magnitude = original_min
+            .abs()
+            .max(original_max.abs())
+            .max(translated_min.abs())
+            .max(translated_max.abs())
+            .max(vector(shape.placement.origin).abs())
+            .max(vector(offset).abs());
+        let band = (magnitude + Vector::splat(1.0)) * (8.0 * f32::EPSILON);
+        let shape_bounds = Aabb::new(translated_min - band, translated_max + band);
+        ensure!(
+            shape_bounds.mins.is_finite() && shape_bounds.maxs.is_finite(),
+            "frozen peer bounds must be finite"
+        );
+        bounds = Some(match bounds {
+            Some(bounds) => Aabb::new(
+                bounds.mins.min(shape_bounds.mins),
+                bounds.maxs.max(shape_bounds.maxs),
+            ),
+            None => shape_bounds,
+        });
+    }
+    Ok(bounds)
 }
 
 fn vector(value: Vector3) -> Vector {
@@ -237,11 +408,126 @@ mod tests {
         assert_candidates(&HardTargets::new(vec![]).unwrap(), Vector3::zero(), &[]);
     }
 
+    #[test]
+    fn deferred_tree_preserves_cross_cell_and_cross_frame_candidates_without_preparing_distant_peers()
+     {
+        let source_anchor = Guid(0xda55_ffff);
+        let mut sources = (1..=64)
+            .map(|id| {
+                let prepared = target(
+                    id,
+                    Vector3::new((id % 8) as f32 * 12.0, (id / 8) as f32 * 12.0, id as f32),
+                );
+                EntityCollisionTarget::for_test(source_anchor, prepared.contact, prepared.shapes)
+            })
+            .collect::<Vec<_>>();
+        let high = target(65, Vector3::new(12.0, 0.0, 100.0));
+        sources.push(EntityCollisionTarget::for_test(
+            source_anchor,
+            high.contact,
+            high.shapes,
+        ));
+        for anchor in [source_anchor, Guid(0xdb54_ffff), Guid(0x0055_ffff)] {
+            let deferred = HardTargets::frozen(anchor, &sources).unwrap();
+            let exhaustive = HardTargets::new(
+                sources
+                    .iter()
+                    .map(|source| SweepTarget {
+                        contact: source.contact.clone(),
+                        shapes: reanchor_placed_shapes(source.anchor, &source.shapes, anchor)
+                            .unwrap(),
+                    })
+                    .collect(),
+            )
+            .unwrap();
+            let shifted = WorldPosition {
+                landblock_id: source_anchor,
+                coords: Vector3::new(12.0, 0.0, 1.0),
+                rotation: Quaternion::identity(),
+            }
+            .reanchor_to_landblock_owner(anchor)
+            .unwrap()
+            .coords;
+            let ids = |query: Vec<&SweepTarget>| {
+                query
+                    .into_iter()
+                    .map(|target| target.contact.body_id)
+                    .collect::<Vec<_>>()
+            };
+            for radius in [0.5, 12.0, 100.0] {
+                // Rounded deferred bounds may over-select; compare after the same exact
+                // geometry rejection used by the ordinary sweep and support primitives.
+                let spheres = |targets: &HardTargets| {
+                    ids(targets
+                        .sphere_candidates(shifted, radius)
+                        .unwrap()
+                        .filter(|target| {
+                            target
+                                .shapes
+                                .iter()
+                                .any(|shape| shape.bounds.intersects_sphere(shifted, radius))
+                        })
+                        .collect())
+                };
+                assert_eq!(spheres(&deferred), spheres(&exhaustive));
+                let supports = |targets: &HardTargets| {
+                    ids(targets
+                        .support_candidates(shifted, radius)
+                        .unwrap()
+                        .filter(|target| {
+                            target.shapes.iter().any(|shape| {
+                                !crate::spatial::volume_query::placed_shape_supports(
+                                    shape, shifted, radius, 100.0, 100.0,
+                                )
+                                .is_empty()
+                            })
+                        })
+                        .collect())
+                };
+                assert_eq!(supports(&deferred), supports(&exhaustive));
+            }
+            let fresh = HardTargets::frozen(anchor, &sources).unwrap();
+            assert!(fresh.bodies.iter().all(|target| matches!(target, HardTarget::Frozen(target) if target.prepared.get().is_none())));
+            let near = fresh.sphere_candidates(shifted, 0.5).unwrap().count();
+            assert_eq!(near, 1);
+            assert_eq!(fresh.bodies.iter().filter(|target| matches!(target, HardTarget::Frozen(target) if target.prepared.get().is_some())).count(), near);
+            // A high-altitude peer in the support column must remain selectable even
+            // though a short sphere sweep cannot reach it.
+            let column = fresh.support_candidates(shifted, 0.5).unwrap().count();
+            assert!(column > near);
+        }
+    }
+
+    #[test]
+    fn selected_peer_preparation_failure_is_not_treated_as_empty_space() {
+        let source_anchor = Guid(0xda55_ffff);
+        let query_anchor = Guid(0xdb55_ffff);
+        let mut malformed = target(1, Vector3::zero());
+        malformed.shapes[0].scale =
+            ColliderScale::from_components(Vector3::new(1.0, 2.0, 1.0)).unwrap();
+        let source =
+            EntityCollisionTarget::for_test(source_anchor, malformed.contact, malformed.shapes);
+        let deferred = HardTargets::frozen(query_anchor, [&source]).unwrap();
+        let center = WorldPosition {
+            landblock_id: source_anchor,
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        }
+        .reanchor_to_landblock_owner(query_anchor)
+        .unwrap()
+        .coords;
+        assert!(matches!(
+            deferred.sphere_candidates(center, 0.5),
+            Err(CollisionQueryError::InvalidPeerPlacement)
+        ));
+    }
+
     fn assert_candidates(targets: &HardTargets, center: Vector3, expected: &[SpatialBodyId]) {
         let identities = |body: &SweepTarget| body.contact.body_id;
         assert_eq!(
             targets
                 .sphere_candidates(center, 0.5)
+                .unwrap()
                 .map(identities)
                 .collect::<Vec<_>>(),
             expected
@@ -249,6 +535,7 @@ mod tests {
         assert_eq!(
             targets
                 .support_candidates(center, 0.5)
+                .unwrap()
                 .map(identities)
                 .collect::<Vec<_>>(),
             expected
@@ -282,6 +569,7 @@ mod tests {
             for radius in [0.5, 12.0, 100.0] {
                 let mut exhaustive = targets
                     .iter()
+                    .unwrap()
                     .filter(|target| {
                         target
                             .shapes
@@ -293,6 +581,7 @@ mod tests {
                 exhaustive.sort_unstable();
                 let indexed = targets
                     .sphere_candidates(center, radius)
+                    .unwrap()
                     .filter(|target| {
                         target
                             .shapes
@@ -313,18 +602,26 @@ mod tests {
                 };
                 let mut exhaustive = targets
                     .iter()
+                    .unwrap()
                     .filter(|target| exact_supports(target))
                     .map(|target| target.contact.body_id)
                     .collect::<Vec<_>>();
                 exhaustive.sort_unstable();
                 let indexed = targets
                     .support_candidates(center, radius)
+                    .unwrap()
                     .filter(|target| exact_supports(target))
                     .map(|target| target.contact.body_id)
                     .collect::<Vec<_>>();
                 assert_eq!(indexed, exhaustive);
             }
         }
-        assert!(targets.sphere_candidates(Vector3::zero(), 0.5).count() < targets.bodies.len());
+        assert!(
+            targets
+                .sphere_candidates(Vector3::zero(), 0.5)
+                .unwrap()
+                .count()
+                < targets.bodies.len()
+        );
     }
 }

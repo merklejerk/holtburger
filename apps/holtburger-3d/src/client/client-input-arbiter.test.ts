@@ -1,3 +1,4 @@
+import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
 import { describe, expect, it } from "vitest";
 
 import type { CharacterAction } from "../lib/input/input-contract";
@@ -41,6 +42,7 @@ function fixture() {
 	const edges: string[] = [];
 	const autoRunChanges: boolean[] = [];
 	const arbiter = new ClientInputArbiter({
+		powerBindings: INPUT_DEFAULTS.preciseJump,
 		ordinary,
 		onEnter: () => edges.push("enter"),
 		onActivate: () => edges.push("activate"),
@@ -51,6 +53,106 @@ function fixture() {
 }
 
 describe("ClientInputArbiter", () => {
+	it("uses independent held power controls only during precise mode", () => {
+		const { arbiter, ordinary } = fixture();
+		const up = { key: "i", code: "KeyI", shiftKey: false };
+		const down = { key: "k", code: "KeyK", shiftKey: false };
+		arbiter.replacePowerBindings({
+			increasePower: [{ key: "i" }],
+			decreasePower: [{ key: "k" }],
+		});
+		expect(arbiter.applyPowerKey(up, true)).toBe(false);
+		arbiter.enterPrecise();
+		arbiter.applyAction("forward", true);
+		expect(arbiter.precisePowerDirection).toBe(0);
+		expect(arbiter.applyPowerKey(up, true)).toBe(true);
+		expect(arbiter.precisePowerDirection).toBe(1);
+		arbiter.applyPowerKey(down, true);
+		expect(arbiter.precisePowerDirection).toBe(0);
+		arbiter.applyPowerKey(up, false);
+		expect(arbiter.precisePowerDirection).toBe(-1);
+		arbiter.cancelPrecise();
+		expect(arbiter.precisePowerDirection).toBe(0);
+		expect(ordinary.calls).toEqual(["reset", "reset"]);
+		arbiter.enterPrecise();
+		arbiter.applyPowerKey({ ...down, repeat: true }, true);
+		expect(arbiter.precisePowerDirection).toBe(0);
+		arbiter.applyPowerKey(down, false);
+		arbiter.applyPowerKey(down, true);
+		expect(arbiter.precisePowerDirection).toBe(-1);
+	});
+	it("clears held power on focus loss and binding replacement", () => {
+		const { arbiter } = fixture();
+		arbiter.replacePowerBindings({
+			increasePower: [{ key: "i" }],
+			decreasePower: [],
+		});
+		arbiter.enterPrecise();
+		arbiter.applyPowerKey({ key: "i", shiftKey: false }, true);
+		expect(arbiter.precisePowerDirection).toBe(1);
+		arbiter.replacePowerBindings({
+			increasePower: [{ key: "u" }],
+			decreasePower: [],
+		});
+		expect(arbiter.precisePowerDirection).toBe(0);
+		expect(arbiter.applyPowerKey({ key: "i", shiftKey: false }, true)).toBe(
+			false,
+		);
+		arbiter.applyPowerKey({ key: "u", shiftKey: false }, true);
+		expect(arbiter.precisePowerDirection).toBe(1);
+		arbiter.reset();
+		arbiter.enterPrecise();
+		expect(arbiter.precisePowerDirection).toBe(0);
+	});
+	it("does not convert pre-existing held movement into a power sweep", () => {
+		const { arbiter } = fixture();
+		arbiter.applyAction("forward", true);
+		arbiter.enterPrecise();
+		expect(arbiter.precisePowerDirection).toBe(0);
+	});
+
+	it("allows live turning while precise input suppresses translation", () => {
+		const ordinary = new CharacterInputController({
+			fullChargeDurationMs: 1000,
+			now: () => 0,
+			onDrive() {},
+			onEdge() {},
+		});
+		const arbiter = new ClientInputArbiter({
+			powerBindings: INPUT_DEFAULTS.preciseJump,
+			ordinary,
+			onEnter() {},
+			onActivate() {},
+			onCancel() {},
+			onAutoRunChanged() {},
+		});
+		arbiter.applyAction("forward", true);
+		arbiter.applyAction("turnLeft", true);
+		arbiter.enterPrecise();
+		expect(ordinary.drive()).toMatchObject({
+			longitudinal: null,
+			lateral: null,
+			turn: "left",
+		});
+		arbiter.applyAction("turnRight", true);
+		arbiter.applyAction("strafeLeft", true);
+		expect(ordinary.drive()).toMatchObject({
+			longitudinal: null,
+			lateral: null,
+			turn: "right",
+		});
+		arbiter.applyAction("turnRight", false);
+		expect(ordinary.drive().turn).toBe("left");
+		arbiter.applyAction("turnLeft", false);
+		expect(ordinary.drive().turn).toBeNull();
+		arbiter.reset();
+		expect(ordinary.drive()).toMatchObject({
+			longitudinal: null,
+			lateral: null,
+			turn: null,
+		});
+	});
+
 	it("cancels precise mode once and restores held movement", () => {
 		const { arbiter, edges, ordinary } = fixture();
 		arbiter.applyAction("forward", true);
@@ -69,6 +171,7 @@ describe("ClientInputArbiter", () => {
 			onEdge() {},
 		});
 		const arbiter = new ClientInputArbiter({
+			powerBindings: INPUT_DEFAULTS.preciseJump,
 			ordinary,
 			onEnter() {},
 			onActivate() {},
@@ -158,6 +261,7 @@ describe("ClientInputArbiter", () => {
 
 		expect(ordinary.calls).toEqual([
 			"reset",
+			"turnLeft:restore",
 			"reset",
 			"turnLeft:restore",
 			"auto-run:on:synchronize",
@@ -165,16 +269,17 @@ describe("ClientInputArbiter", () => {
 		expect(arbiter.toggleAutoRun()).toBe(false);
 	});
 
-	it("does not restore auto-run after longitudinal input during precise jump", () => {
+	it("power input retires auto-run and returns to idle on mode exit", () => {
 		const { arbiter, autoRunChanges, ordinary } = fixture();
 		arbiter.toggleAutoRun();
 		arbiter.enterPrecise();
 		ordinary.calls.length = 0;
 
-		arbiter.applyAction("forward", true);
+		arbiter.applyPowerKey({ key: "w", shiftKey: false }, true);
 		arbiter.deactivate();
 
-		expect(ordinary.calls).toEqual(["reset", "forward:restore"]);
+		expect(ordinary.calls).toEqual(["reset"]);
+		expect(arbiter.precisePowerDirection).toBe(0);
 		expect(autoRunChanges).toEqual([true, false]);
 	});
 
@@ -207,6 +312,7 @@ describe("ClientInputArbiter", () => {
 		arbiter.deactivate();
 
 		expect(ordinary.calls).toEqual(["reset", "forward:restore"]);
+		expect(arbiter.precisePowerDirection).toBe(0);
 	});
 
 	it("hard-cancels on focus loss without replaying held actions", () => {

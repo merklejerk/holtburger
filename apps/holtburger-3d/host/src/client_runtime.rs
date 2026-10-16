@@ -64,6 +64,8 @@ pub struct ClientPreciseJumpAimRequest {
     pub direction: [f32; 3],
     pub maximum_distance: f32,
     pub previous_cell: Option<holtburger_common::Guid>,
+    /// User-selected normalized jump power.
+    pub power: f32,
 }
 
 /// Strict selection ray; its one-landblock maximum remains world-owned.
@@ -119,6 +121,9 @@ impl ClientPreciseJumpAimRequest {
         Ok(holtburger_core::PreciseJumpAimRequest {
             camera: self.camera.into(),
             sequence: holtburger_core::PreciseJumpAimSequence(self.sequence),
+            power: holtburger_core::JumpExtent::new(self.power).map_err(|_| {
+                anyhow::anyhow!("precise-jump power must be finite and within 0.001 to 1")
+            })?,
             anchor: self.anchor,
             start: holtburger_common::Vector3::new(self.start[0], self.start[1], self.start[2]),
             direction: holtburger_common::Vector3::new(
@@ -132,12 +137,46 @@ impl ClientPreciseJumpAimRequest {
     }
 }
 
-/// Strict opaque commit identity returned by one earlier evaluation event.
+/// Strict click-time target and power, independent of preview work.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClientPreciseJumpCommitRequest {
     pub sequence: u64,
-    pub evaluation_id: u64,
+    pub camera: ClientCameraIdentityRequest,
+    pub target: super::client_projection::ClientPreciseJumpTargetWire,
+    pub power: f32,
+}
+
+impl ClientPreciseJumpCommitRequest {
+    fn into_core(self) -> Result<holtburger_core::PreciseJumpCommitRequest> {
+        ensure!(
+            self.target.point.into_iter().all(f32::is_finite),
+            "precise-jump target point must be finite"
+        );
+        ensure!(
+            self.target.normal.into_iter().all(f32::is_finite),
+            "precise-jump target normal must be finite"
+        );
+        ensure!(
+            self.target.anchor.0 & 0xffff == 0xffff,
+            "precise-jump target anchor must be normalized"
+        );
+        let [x, y, z] = self.target.point;
+        let [nx, ny, nz] = self.target.normal;
+        Ok(holtburger_core::PreciseJumpCommitRequest {
+            sequence: holtburger_core::PreciseJumpActionSequence(self.sequence),
+            camera: self.camera.into(),
+            target: holtburger_core::PreciseJumpTargetView {
+                anchor: self.target.anchor,
+                point: holtburger_common::Vector3::new(x, y, z),
+                normal: holtburger_common::Vector3::new(nx, ny, nz),
+                committed_cell: self.target.committed_cell,
+            },
+            power: holtburger_core::JumpExtent::new(self.power).map_err(|_| {
+                anyhow::anyhow!("precise-jump power must be finite and within 0.001 to 1")
+            })?,
+        })
+    }
 }
 
 /// Strict ordered cancellation edge.
@@ -720,15 +759,8 @@ impl ClientHostRuntime {
     }
 
     pub async fn commit_precise_jump(&self, request: ClientPreciseJumpCommitRequest) -> Result<()> {
-        self.send_command(ClientCommand::CommitPreciseJump(
-            holtburger_core::PreciseJumpCommitRequest {
-                sequence: holtburger_core::PreciseJumpActionSequence(request.sequence),
-                evaluation: holtburger_core::PreciseJumpEvaluationId::from_wire(
-                    request.evaluation_id,
-                ),
-            },
-        ))
-        .await
+        self.send_command(ClientCommand::CommitPreciseJump(request.into_core()?))
+            .await
     }
 
     pub async fn cancel_precise_jump(&self, request: ClientPreciseJumpCancelRequest) -> Result<()> {
@@ -1255,6 +1287,7 @@ mod tests {
                 "entityGeneration": 7
             },
             "sequence": 9,
+            "power":0.5,
             "anchor": 0xda55_ffff_u32,
             "start": [10.0, 20.0, 4.0],
             "direction": [0.0, 1.0, 0.0],
@@ -1280,19 +1313,72 @@ mod tests {
     }
 
     #[test]
-    fn precise_jump_commit_and_cancel_reject_unknown_fields() {
-        assert!(
-            serde_json::from_value::<ClientPreciseJumpCommitRequest>(serde_json::json!({
-                "sequence": 3,
-                "evaluationId": 11,
-                "velocity": [1, 2, 3]
-            }))
-            .is_err()
+    fn precise_jump_power_accepts_retail_bounds_and_rejects_subminimum_values() {
+        for power in [
+            holtburger_core::JumpExtent::MINIMUM.get(),
+            holtburger_core::JumpExtent::MAXIMUM.get(),
+        ] {
+            let mut request =
+                serde_json::from_value::<ClientPreciseJumpAimRequest>(aim_json()).unwrap();
+            request.power = power;
+            assert_eq!(request.into_core().unwrap().power.get(), power);
+        }
+        for power in [
+            0.0,
+            holtburger_core::JumpExtent::MINIMUM.get() / 2.0,
+            -1.0,
+            1.01,
+            f32::NAN,
+            f32::INFINITY,
+        ] {
+            let mut request =
+                serde_json::from_value::<ClientPreciseJumpAimRequest>(aim_json()).unwrap();
+            request.power = power;
+            assert!(request.into_core().is_err());
+        }
+    }
+
+    fn commit_json() -> serde_json::Value {
+        serde_json::json!({
+            "sequence": 3,
+            "camera": aim_json()["camera"],
+            "power": 0.5,
+            "target": { "anchor": 0xda55ffff_u32, "point": [10, 20, 4], "normal": [0, 0, 1], "committedCell": null }
+        })
+    }
+
+    #[test]
+    fn precise_jump_commit_captures_choice_and_validates_wire_values() {
+        let request =
+            serde_json::from_value::<ClientPreciseJumpCommitRequest>(commit_json()).unwrap();
+        let core = request.into_core().unwrap();
+        assert_eq!(core.power.get(), request.power);
+        assert_eq!(
+            core.target.point,
+            holtburger_common::Vector3::new(10.0, 20.0, 4.0)
         );
+        for power in [f32::NAN, f32::INFINITY, 0.0, 1.01] {
+            assert!(
+                ClientPreciseJumpCommitRequest { power, ..request }
+                    .into_core()
+                    .is_err()
+            );
+        }
+        let mut invalid_point = request;
+        invalid_point.target.point[0] = f32::NAN;
+        assert!(invalid_point.into_core().is_err());
+        let mut invalid_normal = request;
+        invalid_normal.target.normal[0] = f32::INFINITY;
+        assert!(invalid_normal.into_core().is_err());
+        let mut invalid_anchor = request;
+        invalid_anchor.target.anchor = holtburger_common::Guid(1);
+        assert!(invalid_anchor.into_core().is_err());
+        let mut unknown = commit_json();
+        unknown["velocity"] = serde_json::json!([1, 2, 3]);
+        assert!(serde_json::from_value::<ClientPreciseJumpCommitRequest>(unknown).is_err());
         assert!(
             serde_json::from_value::<ClientPreciseJumpCancelRequest>(serde_json::json!({
-                "sequence": 4,
-                "evaluationId": 11
+                "sequence": 4, "velocity": [1, 2, 3]
             }))
             .is_err()
         );
@@ -1302,6 +1388,7 @@ mod tests {
     fn entity_selection_query_rejects_distance_override_and_non_finite_vectors() {
         let mut value = aim_json();
         value.as_object_mut().unwrap().remove("maximumDistance");
+        value.as_object_mut().unwrap().remove("power");
         let request = serde_json::from_value::<ClientEntitySelectionQueryRequest>(value.clone())
             .expect("selection request should share the strict camera ray fields");
         assert!(request.into_core().is_ok());
@@ -1312,6 +1399,7 @@ mod tests {
         let mut request = serde_json::from_value::<ClientEntitySelectionQueryRequest>({
             let mut value = aim_json();
             value.as_object_mut().unwrap().remove("maximumDistance");
+            value.as_object_mut().unwrap().remove("power");
             value
         })
         .unwrap();

@@ -5,8 +5,8 @@ use crate::client::camera::{
 use crate::client::character_motion::SequencedCharacterMotionEvent;
 use crate::client::movement_types::PlayerDriveIntent;
 use crate::client::precise_jump_runtime::{
-    PreciseJumpAimRequest, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
-    PreciseJumpEvaluation, PreciseJumpTransactionFeedback,
+    PreciseJumpAimRequest, PreciseJumpCancelRequest, PreciseJumpCommitRequest, PreciseJumpProgress,
+    PreciseJumpTransactionFeedback,
 };
 use crate::client::recall::RecallDestination;
 use crate::client::selection_query::{EntitySelectionQueryRequest, EntitySelectionQueryResult};
@@ -783,7 +783,7 @@ pub enum ClientViewEvent {
     /// Ordered jump gesture result used only to reconcile optimistic client presentation.
     CharacterMotionFeedback(ClientCharacterMotionFeedback),
     /// Latest correlated precise-jump hover evaluation; older pointer samples are replaceable.
-    PreciseJumpEvaluation(PreciseJumpEvaluation),
+    PreciseJumpEvaluation(PreciseJumpProgress),
     /// Ordered result of an explicit precise-jump commit or cancellation request.
     PreciseJumpTransactionFeedback(PreciseJumpTransactionFeedback),
     /// Correlated broad-phase response for one renderer selection action.

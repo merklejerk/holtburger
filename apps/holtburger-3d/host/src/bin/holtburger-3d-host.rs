@@ -2,6 +2,10 @@
 
 #[tokio::main]
 async fn main() {
+    // The framed sidecar protocol owns stdout; runtime diagnostics belong on stderr.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .target(env_logger::Target::Stderr)
+        .init();
     let mode = match holtburger_3d_host::runtime::HostMode::parse_args(std::env::args().skip(1)) {
         Ok(mode) => mode,
         Err(error) => {

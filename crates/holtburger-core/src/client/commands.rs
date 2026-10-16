@@ -273,7 +273,11 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::CommitPreciseJump(request) => {
-                if let Some(feedback) = self.precise_jump.queue_commit(request) {
+                if let Some(feedback) = self.precise_jump.queue_commit(
+                    request,
+                    self.world_generation,
+                    self.camera.identity(),
+                ) {
                     let _ = self.client_view_event_tx.send(
                         crate::client::types::ClientViewEvent::PreciseJumpTransactionFeedback(
                             feedback,

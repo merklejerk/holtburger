@@ -1,3 +1,7 @@
+import {
+	resolvedJumpFixture,
+	predictedJumpFixture,
+} from "./client-precise-jump-fixtures";
 import { decode, encode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 
@@ -9,12 +13,35 @@ import {
 	decodeClientLocalPlayerEstablished,
 	decodeClientVitals,
 	decodeClientPreciseJumpAimRequest,
+	decodeClientPreciseJumpCommitRequest,
 	decodeClientPreciseJumpEvaluation,
 	decodeClientEntitySelectionQueryRequest,
 	decodeClientEntitySelectionQueryResult,
 } from "./client-host-contract";
 
 describe("client host wire contract", () => {
+	it("captures a precise click independently of preview identity", () => {
+		const camera = { cameraGeneration: 2, playerGuid: 1, entityGeneration: 3 };
+		const launch = resolvedJumpFixture(camera, 1, 0.5).launch;
+		const request = {
+			sequence: 4,
+			camera,
+			target: launch.target,
+			power: launch.power,
+		};
+		expect(decodeClientPreciseJumpCommitRequest(request)).toEqual(request);
+		for (const power of [NaN, Infinity, 0, 1.01]) {
+			expect(() =>
+				decodeClientPreciseJumpCommitRequest({ ...request, power }),
+			).toThrow();
+		}
+		expect(() =>
+			decodeClientPreciseJumpCommitRequest({
+				...request,
+				target: { ...request.target, point: [NaN, 0, 0] },
+			}),
+		).toThrow();
+	});
 	it("validates finite nonnegative transport observations", () => {
 		const sample = {
 			health: "connected",
@@ -277,81 +304,65 @@ describe("client host wire contract", () => {
 		).toThrow();
 	});
 
-	it("keeps precise-jump launch authority out of strict renderer contracts", () => {
+	it("strictly decodes selected launch feedback and collision paths", () => {
 		const camera = {
 			cameraGeneration: 1,
-			playerGuid: 0x5000_0001,
+			playerGuid: 0x50000001,
 			entityGeneration: 4,
 		};
-		const evaluation = {
-			evaluationId: 7,
-			camera,
-			sequence: 12,
-			target: {
-				anchor: 0xda55_ffff,
-				point: [12, 30, 1],
-				normal: [0, 0, 1],
-				committedCell: null,
-			},
-			trajectory: {
-				anchor: 0xda55_ffff,
-				origin: [18, 30, 0.005],
-				velocity: [-6, 0, 5],
-				acceleration: [0, 0, -9.8],
-				durationSeconds: 1,
-				placements: [
-					{
-						startFraction: 0,
-						endFraction: 1,
-						committedCell: null,
-					},
-				],
-			},
-			status: "reachable",
-			diagnostics: {
-				generatedCandidates: 6,
-				evaluatedCandidates: 3,
-				solverTicks: 88,
-			},
-		};
-		expect(decodeClientPreciseJumpEvaluation(evaluation)).toMatchObject({
-			evaluationId: 7,
-			status: "reachable",
-		});
+		const resolved = resolvedJumpFixture(camera, 12, 0.5);
+		const completed = predictedJumpFixture(resolved, "miss");
+		expect(decodeClientPreciseJumpEvaluation(resolved)).toEqual(resolved);
+		expect(decodeClientPreciseJumpEvaluation(completed)).toEqual(completed);
 		expect(() =>
-			decodeClientPreciseJumpEvaluation({ ...evaluation, velocity: [1, 2, 3] }),
+			decodeClientPreciseJumpEvaluation({ ...resolved, velocity: [1, 2, 3] }),
 		).toThrow();
 		expect(() =>
 			decodeClientPreciseJumpEvaluation({
-				...evaluation,
-				status: "unreachable",
+				...resolved,
+				launch: { ...resolved.launch, power: 2 },
 			}),
 		).toThrow();
 		expect(() =>
 			decodeClientPreciseJumpEvaluation({
-				...evaluation,
-				trajectory: {
-					...evaluation.trajectory,
-					placements: [
-						{
-							startFraction: 0.2,
-							endFraction: 1,
-							committedCell: null,
+				...resolved,
+				launch: {
+					...resolved.launch,
+					preview: {
+						...resolved.launch.preview,
+						curve: {
+							...resolved.launch.preview.curve,
+							placements: [
+								{ startFraction: 0.2, endFraction: 1, committedCell: null },
+							],
 						},
-					],
+					},
 				},
 			}),
 		).toThrow();
 		expect(() =>
-			decodeClientPreciseJumpAimRequest({
-				camera,
-				sequence: 13,
-				anchor: 0xda55_ffff,
-				start: [Number.POSITIVE_INFINITY, 0, 0],
-				direction: [0, 1, 0],
-				maximumDistance: 80,
-				previousCell: null,
+			decodeClientPreciseJumpEvaluation({
+				...completed,
+				flight: {
+					...completed.flight,
+					segments: [
+						{ ...completed.flight.segments[0], end: [Number.NaN, 0, 0] },
+					],
+				},
 			}),
 		).toThrow();
+		for (const power of [-1, 0, 0.0005, 2, Number.POSITIVE_INFINITY])
+			expect(() =>
+				decodeClientPreciseJumpAimRequest({
+					camera,
+					sequence: 13,
+					power,
+					anchor: 0xda55ffff,
+					start: [0, 0, 0],
+					direction: [0, 1, 0],
+					maximumDistance: 80,
+					previousCell: null,
+				}),
+			).toThrow();
 	});
 });

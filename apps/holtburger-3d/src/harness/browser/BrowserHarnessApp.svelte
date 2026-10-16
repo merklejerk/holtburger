@@ -233,7 +233,13 @@
 	const query = new URLSearchParams(window.location.search);
 	const TRACE_TERRAIN_GL = query.get("traceTerrainGl") === "true";
 	/** Exercise the depth-tested world-marker draw path in renderer screenshots. */
-	const WORLD_MARKER = query.get("worldMarker") === "true";
+	const WORLD_MARKER = query.has("worldMarker");
+	let worldIndicatorProof: {
+		readonly desiredKind: "curve";
+		readonly actualKind: "polyline";
+		readonly markerShapes: readonly ["target", "miss"];
+	} | null = null;
+	const WORLD_MARKER_PENDING = query.get("worldMarker") === "pending";
 	/** Harness-only fixed compositor input; this deliberately does not claim lifecycle coverage. */
 	const PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC =
 		query.get("portalTransitionCompositorDiagnostic") === "true";
@@ -1603,24 +1609,86 @@
 				velocity.z * durationSeconds + acceleration.z * halfDurationSquared,
 			),
 		);
+		const middleTime = durationSeconds * 0.5;
+		const middle = cameraPosition
+			.add(
+				new Vec3(
+					velocity.x * middleTime,
+					velocity.y * middleTime,
+					velocity.z * middleTime,
+				),
+			)
+			.add(
+				new Vec3(
+					acceleration.x * 0.5 * middleTime * middleTime,
+					acceleration.y * 0.5 * middleTime * middleTime,
+					acceleration.z * 0.5 * middleTime * middleTime,
+				),
+			);
+		const actualEnd = markerPosition.add(
+			new Vec3(axes.right.x * -3, axes.right.y * -3, axes.right.z * -3),
+		);
 		runtime.setWorldIndicator({
 			marker: {
-				color: [0.08, 0.48, 1, 0.9],
+				shape: "target",
+				pending: WORLD_MARKER_PENDING,
+				color: [0.62, 0.68, 0.75, 0.8],
 				normal: sceneVector3([0, 1, 0]),
 				position: sceneVec3(markerPosition),
 				radius: 0.65,
 				renderScopeKey,
 			},
-			trajectory: {
-				revision: 1,
-				color: [0.08, 0.48, 1, 0.9],
-				origin: sceneVec3(cameraPosition),
-				velocity: [velocity.x, velocity.y, velocity.z],
-				acceleration: [acceleration.x, acceleration.y, acceleration.z],
-				durationSeconds,
-				placements: [{ startFraction: 0, endFraction: 1, renderScopeKey }],
-			},
+			...(WORLD_MARKER_PENDING
+				? {}
+				: {
+						desiredTrajectory: {
+							kind: "curve",
+							style: "dashed",
+							revision: 1,
+							color: [0.62, 0.68, 0.75, 0.35],
+							origin: sceneVec3(cameraPosition),
+							velocity: [velocity.x, velocity.y, velocity.z],
+							acceleration: [acceleration.x, acceleration.y, acceleration.z],
+							durationSeconds,
+							placements: [
+								{ startFraction: 0, endFraction: 1, renderScopeKey },
+							],
+						},
+						trajectory: {
+							kind: "polyline",
+							style: "solid",
+							revision: 1,
+							color: [0.08, 0.48, 1, 0.9],
+							segments: [
+								{
+									start: sceneVec3(cameraPosition),
+									end: sceneVec3(middle),
+									renderScopeKey,
+								},
+								{
+									start: sceneVec3(middle),
+									end: sceneVec3(actualEnd),
+									renderScopeKey,
+								},
+							],
+						},
+						landingMarker: {
+							shape: "miss",
+							pending: false,
+							color: [1, 0.12, 0.08, 0.9],
+							normal: sceneVector3([0, 1, 0]),
+							position: sceneVec3(actualEnd),
+							radius: 0.65,
+							renderScopeKey,
+						},
+					}),
 		});
+		if (!WORLD_MARKER_PENDING)
+			worldIndicatorProof = {
+				desiredKind: "curve",
+				actualKind: "polyline",
+				markerShapes: ["target", "miss"],
+			};
 	}
 
 	function focusExplorerEnvCell(
@@ -4514,6 +4582,7 @@
 								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,
 							nameplates: frameDiagnostics?.nameplates ?? null,
+							worldIndicatorProof,
 							frames,
 							metrics: frameDiagnostics?.selectionMetrics ?? null,
 							portalContextLossPolicy,

@@ -346,3 +346,15 @@ For native Explorer checks, launch
 `npm run probe:explorer:theme -- <printed CDP port> /tmp/css-explorer`.
 Append `modal` to measure the texture dialog. This uses local content and changes
 diagnostic controls; it restores the default theme when finished.
+
+### Shortcut keycaps
+
+Use `<kbd class="ui-keycap">W</kbd>` for a shortcut key. Settings removal buttons
+use the same `ui-keycap` recipe on the button, with their semantic `kbd` content
+inside; avoid nesting two keycap backings. The shared recipe uses theme text,
+control, border, shadow and control-radius values. `--ui-keycap-size` sets the
+minimum square dimension relative to the surrounding font (default `1.65em`);
+longer chords can grow wider. It inherits font size and pointer ownership.
+
+The precise-jump HUD places its configured increase/decrease keycaps on a row
+below POWER. The bar remains the only pointer target in that HUD.

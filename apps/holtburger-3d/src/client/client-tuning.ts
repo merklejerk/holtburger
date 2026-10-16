@@ -129,6 +129,12 @@ export const CLIENT_TUNING = {
 		},
 	},
 	preciseJump: {
+		/** Explicit power selected on first entry; kept while aiming. */
+		initialPower: 0.5,
+		/** Normalized power increment per wheel/key step. */
+		powerStep: 0.05,
+		/** Normalized power change per second while the power controls are held. */
+		heldPowerPerSecond: 0.4,
 		/** Maximum authority evaluation cadence; raw pointer samples are coalesced behind it. */
 		aimEvaluationIntervalMs: 1_000 / 30,
 		/** Finite camera-ray reach; static prediction may reject targets long before this limit. */

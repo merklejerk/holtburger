@@ -103,6 +103,12 @@ export interface ClientTuning {
 	readonly camera: ClientCameraTuning;
 	/** Precise-jump evaluation cadence, reach, and marker presentation. */
 	readonly preciseJump: {
+		/** Initial selected normalized power. */
+		readonly initialPower: number;
+		/** Increment per power adjustment action. */
+		readonly powerStep: number;
+		/** Normalized power change per second for held power controls. */
+		readonly heldPowerPerSecond: number;
 		/** Maximum cadence for coalesced authority aim evaluation. */
 		readonly aimEvaluationIntervalMs: number;
 		/** Finite reach of the camera aim ray. */

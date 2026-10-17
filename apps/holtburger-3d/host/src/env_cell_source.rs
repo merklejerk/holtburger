@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
@@ -32,13 +31,12 @@ use crate::portal_geometry::{
     transform_render_bounds,
 };
 use crate::portal_visibility::{
-    JunctionCandidate, VisibilityApertureIntersectionEvidence, intersect_visibility_apertures,
-    resolve_junction_groups,
+    VisibilityApertureIntersectionEvidence, intersect_visibility_apertures,
 };
 use crate::source_projection::{dat_id, render_aabb_json};
 
 pub(crate) const ENV_CELL_RECORD_MAGIC: &[u8; 4] = b"HBEC";
-const ENV_CELL_RECORD_VERSION: u16 = 5;
+const ENV_CELL_RECORD_VERSION: u16 = 6;
 const ENV_CELL_RECORD_HEADER_LENGTH: usize = 16;
 
 /// Placement-rotation tolerance for the map-floor up-axis invariant.
@@ -414,7 +412,6 @@ pub(crate) async fn serialize_env_cell_source_record(
                     exact_match: (portal.flags & 0x01) != 0,
                     mask_depth_policy,
                     reciprocal_index: None,
-                    junction_group: None,
                     source: json!({
                         "kind": "env-cell",
                         "envCellId": dat_id(portal.source.env_cell_id),
@@ -449,7 +446,6 @@ pub(crate) async fn serialize_env_cell_source_record(
                     exact_match: (portal.flags & 0x01) != 0,
                     mask_depth_policy,
                     reciprocal_index: None,
-                    junction_group: None,
                     source: json!({
                         "kind": "env-cell",
                         "envCellId": dat_id(portal.source.env_cell_id),
@@ -485,7 +481,6 @@ pub(crate) async fn serialize_env_cell_source_record(
                         exact_match: (building_portal.flags & 0x01) != 0,
                         mask_depth_policy: reverse_aperture.mask_depth_policy,
                         reciprocal_index: Some(crossing_index),
-                        junction_group: None,
                         source: json!({
                             "kind": "building-transition",
                             "buildingIndex": building_ref.building_index,
@@ -524,12 +519,6 @@ pub(crate) async fn serialize_env_cell_source_record(
 
     let cell_island_ordinals = resolve_cell_island_ordinals(prepared_cells.len(), &crossings);
     writer.append_u32("cellIslandIndices", cell_island_ordinals.iter().copied());
-    resolve_crossing_junction_groups(
-        interior.landblock_id,
-        &mut crossings,
-        &apertures,
-        &cell_island_ordinals,
-    )?;
 
     let SerializedApertures {
         manifests: aperture_manifests,
@@ -652,7 +641,6 @@ struct CrossingProjection {
     exact_match: bool,
     mask_depth_policy: MaskDepthPolicy,
     reciprocal_index: Option<usize>,
-    junction_group: Option<NonZeroU32>,
     source: Value,
     relationship: CrossingRelationship,
 }
@@ -885,53 +873,6 @@ fn resolve_cell_island_ordinals(cell_count: usize, crossings: &[CrossingProjecti
         .collect()
 }
 
-/// Assign shared junction ids to coplanar-overlapping crossing groups, degrading loudly on shapes
-/// outside the exemption's soundness bound.
-fn resolve_crossing_junction_groups(
-    landblock_id: u32,
-    crossings: &mut [CrossingProjection],
-    apertures: &SerializedApertures,
-    cell_island_ordinals: &[u32],
-) -> Result<()> {
-    // Outdoor is domain zero; islands shift up by one.
-    let candidates = crossings
-        .iter()
-        .map(|crossing| JunctionCandidate {
-            aperture: &apertures.geometries[crossing.source_aperture_index],
-            source_domain: match crossing.source_cell_index {
-                None => 0,
-                Some(cell) => cell_island_ordinals[cell] + 1,
-            },
-            reciprocal: crossing.reciprocal_index,
-        })
-        .collect::<Vec<_>>();
-    let resolution = resolve_junction_groups(&candidates)?;
-    for ambiguous in &resolution.ambiguous {
-        log::warn!(
-            "landblock 0x{landblock_id:08X} declines a portal junction: {} crossings share plane \
-             (({:.4},{:.4},{:.4})|{:.4}) and three same-domain exits overlap pairwise; members keep \
-             the strict entry test; conflicting apertures: {}",
-            ambiguous.members.len(),
-            ambiguous.plane.normal.x,
-            ambiguous.plane.normal.y,
-            ambiguous.plane.normal.z,
-            ambiguous.plane.d,
-            ambiguous
-                .conflicting_crossings
-                .iter()
-                .map(|member| {
-                    apertures.identities[crossings[*member].source_aperture_index].as_str()
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-    }
-    for (crossing, assignment) in crossings.iter_mut().zip(resolution.assignments) {
-        crossing.junction_group = assignment;
-    }
-    Ok(())
-}
-
 /// Resolve each directed crossing's rendering aperture without changing authored query geometry.
 fn resolve_visibility_apertures(
     crossings: &mut [CrossingProjection],
@@ -1093,7 +1034,6 @@ fn crossing_json(index: usize, crossing: &CrossingProjection) -> Value {
         "reciprocalCrossingIndex": crossing.reciprocal_index,
         "sourcePortal": crossing.source,
         "spatialRelationship": relationship_json(crossing.relationship),
-        "junctionGroupId": crossing.junction_group.map(NonZeroU32::get),
     })
 }
 
@@ -1395,7 +1335,6 @@ mod tests {
             exact_match,
             mask_depth_policy: MaskDepthPolicy::AllowEqualDepth,
             reciprocal_index,
-            junction_group: None,
             source: json!({ "kind": "test" }),
             relationship: CrossingRelationship::IndoorTopologyBoundary(
                 IndoorTopologyBoundaryReason::SourceIsNotExactMatch,
@@ -1421,51 +1360,6 @@ mod tests {
         let ordinals = resolve_cell_island_ordinals(3, &[continuous, boundary]);
 
         assert_eq!(ordinals, vec![0, 0, 1]);
-    }
-
-    #[test]
-    fn coincident_junction_crossings_share_one_group_id() {
-        let mut apertures = SerializedApertures::default();
-        let footprint = square_aperture(0.0, 0.0, 2.0, 2.0, 0.0);
-        let elsewhere = square_aperture(10.0, 0.0, 12.0, 2.0, 0.0);
-        let footprint_index = append_test_aperture(&mut apertures, "footprint", &footprint);
-        let elsewhere_index = append_test_aperture(&mut apertures, "elsewhere", &elsewhere);
-
-        // Cells 0 and 1 in distinct islands, chained through a zero-thickness outdoor slab.
-        let mut crossings = vec![
-            exterior_crossing(footprint_index, Some(0), None, Some(1)),
-            exterior_crossing(footprint_index, None, Some(0), Some(0)),
-            exterior_crossing(footprint_index, Some(1), None, Some(3)),
-            exterior_crossing(footprint_index, None, Some(1), Some(2)),
-            exterior_crossing(elsewhere_index, Some(0), None, None),
-        ];
-        let ordinals = resolve_cell_island_ordinals(2, &crossings);
-
-        resolve_crossing_junction_groups(0x0001_ffff, &mut crossings, &apertures, &ordinals)
-            .unwrap();
-
-        let group = crossings[0].junction_group.expect("junction id assigned");
-        assert!(
-            crossings[..4]
-                .iter()
-                .all(|crossing| crossing.junction_group == Some(group))
-        );
-        assert_eq!(crossings[4].junction_group, None);
-    }
-
-    fn exterior_crossing(
-        source_aperture_index: usize,
-        source_cell_index: Option<usize>,
-        target_cell_index: Option<usize>,
-        reciprocal_index: Option<usize>,
-    ) -> CrossingProjection {
-        let mut crossing = test_crossing(source_aperture_index, false, reciprocal_index);
-        crossing.source_cell_index = source_cell_index;
-        crossing.target_cell_index = target_cell_index;
-        crossing.relationship = CrossingRelationship::ExteriorTransition {
-            exterior_landblock_id: 0x0001_ffff,
-        };
-        crossing
     }
 
     fn square_aperture(

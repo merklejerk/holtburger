@@ -115,7 +115,7 @@ export interface PortalModelCrossing {
 	readonly aperture: PortalModelAperture;
 	readonly id: PortalModelCrossingId;
 	/**
-	 * Host-proven coincident-junction identity shared by every crossing on one coplanar
+	 * Scene-proven coincident-junction identity shared by every crossing on one coplanar
 	 * overlapping footprint, or null. Equal ids license an equal-depth advance.
 	 */
 	readonly junctionGroupId: number | null;
@@ -130,7 +130,7 @@ export interface PortalModelCrossing {
  * Whether one candidate crossing may advance a ray that entered its scope at `entryDepth`.
  *
  * Depth must strictly increase along a path — the models' convergence measure — except across a
- * host-proven coincident junction, where equal depth is authored zero-thickness geometry rather
+ * scene-proven coincident junction, where equal depth is authored zero-thickness geometry rather
  * than backtracking. This is the CPU statement of the propagation shader's entry test.
  */
 export function portalEntryAdvanceAdmitted(

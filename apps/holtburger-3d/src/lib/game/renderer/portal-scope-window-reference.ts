@@ -1,6 +1,6 @@
 import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
 import type {
-	ScenePortalCrossingInput,
+	ScenePortalCrossing,
 	SceneScope,
 	SceneTopologyView,
 } from "../scene";
@@ -50,12 +50,12 @@ export interface PortalScopeWindowReferenceResult {
 
 /** Projection input paired with the stable authored aperture identity. */
 interface IndexedPortalAperture extends PortalApertureProjectionInput {
-	readonly id: ScenePortalCrossingInput["visibilityAperture"]["id"];
+	readonly id: ScenePortalCrossing["visibilityAperture"]["id"];
 }
 
 /** Novel immutable window coverage waiting to expand from one authored scope. */
 interface ReferenceWorkItem {
-	readonly incomingCrossing: ScenePortalCrossingInput | null;
+	readonly incomingCrossing: ScenePortalCrossing | null;
 	readonly scope: SceneScope;
 	readonly window: PortalViewWindow;
 }
@@ -247,7 +247,7 @@ function indexTopology(
 }
 
 function createApertureInput(
-	source: ScenePortalCrossingInput["sourceAperture"],
+	source: ScenePortalCrossing["sourceAperture"],
 ): IndexedPortalAperture {
 	return {
 		aperture: source,
@@ -287,7 +287,7 @@ function resolveAnchorAperture(
 }
 
 function facesCamera(
-	crossing: ScenePortalCrossingInput,
+	crossing: ScenePortalCrossing,
 	cache: Map<string, PlanarAperture>,
 	input: PortalScopeWindowReferenceInput,
 ): boolean {

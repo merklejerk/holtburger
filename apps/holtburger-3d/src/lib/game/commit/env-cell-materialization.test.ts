@@ -384,7 +384,6 @@ function portalCrossing(
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
 		maskDepthPolicy: "allow-equal-depth",
-		junctionGroupId: null,
 		reciprocalCrossingIndex: null,
 		source,
 		sourceApertureIndex: 0,

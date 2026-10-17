@@ -344,6 +344,7 @@ try {
 			measuredFrameThroughput: result.measuredFrameThroughput,
 			portalTraversalSurvey: result.portalTraversalSurvey,
 			portalTraversalInvestigation: result.portalTraversalInvestigation,
+			portalSeamProbe: result.portalSeamProbe,
 			materialTableProbe: result.materialTableProbe,
 			nameplateBenchmark: result.nameplateBenchmark,
 			objectPreviewBenchmark: result.objectPreviewBenchmark,
@@ -2287,6 +2288,7 @@ function briefHarnessReport(result) {
 		measuredFrameThroughput: result.measuredFrameThroughput,
 		portalTraversalSurvey: result.portalTraversalSurvey,
 		portalTraversalInvestigation: result.portalTraversalInvestigation,
+		portalSeamProbe: result.portalSeamProbe,
 		materialTableProbe: result.materialTableProbe,
 		authoredDynamics:
 			authoredDynamics === null
@@ -5026,6 +5028,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			return await probeWorldMap(client, consoleMessages, browserWebSocketUrl);
 		await waitForHarnessApi(client);
 
+		if (process.env.HOLTBURGER_PROBE_PORTAL_SEAM === "1") {
+			await evaluateExpression(
+				client,
+				`import('/src/harness/browser/portal-seam-probe.ts').then(module => module.installPortalSeamProbe())`,
+			);
+		}
+
 		if (process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL === "1") {
 			await evaluateExpression(
 				client,
@@ -6193,6 +6202,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await waitForCaptureFrame(client, options.captureFrame);
 		}
 
+		const portalSeamProbe =
+			process.env.HOLTBURGER_PROBE_PORTAL_SEAM === "1"
+				? await evaluateExpression(
+						client,
+						`import('/src/harness/browser/portal-seam-probe.ts').then(module => module.runPortalSeamProbe())`,
+					)
+				: null;
 		const portalTraversalInvestigation =
 			process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL === "1"
 				? await evaluateExpression(
@@ -6339,6 +6355,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			measuredFrameThroughput,
 			portalTraversalSurvey,
 			portalTraversalInvestigation,
+			portalSeamProbe,
 			materialTableProbe:
 				process.env.HOLTBURGER_PROBE_MATERIAL_TABLES === "1"
 					? await evaluate(

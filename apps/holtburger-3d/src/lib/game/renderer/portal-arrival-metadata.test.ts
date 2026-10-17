@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Vec3 } from "../math/types";
-import type { ScenePortalCrossingInput } from "../scene";
+import type { ScenePortalCrossing } from "../scene";
 import { PORTAL_QUERY_EPSILON } from "../scene/planar-aperture";
 import {
 	portalArrivalPlaneContainsBeyondPoint,
@@ -37,7 +37,7 @@ describe("portal arrival metadata", () => {
 				d: -dot(normal, localPlanePoint),
 				normal,
 			};
-			const acceptedSide: ScenePortalCrossingInput["acceptedSide"] =
+			const acceptedSide: ScenePortalCrossing["acceptedSide"] =
 				caseIndex % 2 === 0 ? "positive" : "negative";
 			const sourceDirection = acceptedSide === "positive" ? 1 : -1;
 			const offsetX = integer(random, -4, 4) * 192;

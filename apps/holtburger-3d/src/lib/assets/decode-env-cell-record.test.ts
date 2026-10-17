@@ -392,7 +392,6 @@ function installReciprocalVisibilityFixture(manifest: MutableManifest): void {
 		acceptedSide: "positive",
 		exactMatch: false,
 		maskDepthPolicy: "allow-equal-depth",
-		junctionGroupId: null,
 		reciprocalCrossingIndex: 1 - index,
 		sourcePortal: {
 			kind: "env-cell",

@@ -41,7 +41,7 @@ describe("portal reference compositor", () => {
 
 	it("blocks a zero-thickness transit without a junction id", () => {
 		// The archive shape: cell A chained to cell B through a zero-thickness outdoor slab, both
-		// crossings on one plane. Without host-proven junction ids the equal-depth advance is
+		// crossings on one plane. Without scene-proven junction ids the equal-depth advance is
 		// backtracking as far as this model can know, so the ray strands in the outdoor domain —
 		// exactly the artifact the compositor showed at coincident junctions.
 		const scene = linearScene(

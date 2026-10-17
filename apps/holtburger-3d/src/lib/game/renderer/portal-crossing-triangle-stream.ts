@@ -4,7 +4,7 @@ import {
 } from "../landblocks";
 import { mat4ToFloat32Array } from "../math/matrices";
 import type { Mat4 } from "../math/types";
-import type { ScenePortalCrossingInput } from "../scene";
+import type { ScenePortalCrossing } from "../scene";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
 	PORTAL_ARRIVAL_METADATA_HAS_ENTRY_PLANE,
@@ -371,7 +371,7 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 }
 
 function encodeDepthPolicy(
-	policy: ScenePortalCrossingInput["maskDepthPolicy"],
+	policy: ScenePortalCrossing["maskDepthPolicy"],
 ): number {
 	switch (policy) {
 		case "allow-equal-depth":

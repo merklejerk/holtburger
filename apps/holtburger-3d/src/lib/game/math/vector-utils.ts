@@ -10,6 +10,11 @@ export function scaleVec3(vector: Vec3, amount: number): Vec3 {
 	return new Vec3(vector.x * amount, vector.y * amount, vector.z * amount);
 }
 
+/** Return the scalar dot product without allocating an intermediate vector. */
+export function dotVec3(left: Vec3, right: Vec3): number {
+	return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
 /** Return the right-handed cross product of two vectors. */
 export function crossVec3(left: Vec3, right: Vec3): Vec3 {
 	return new Vec3(

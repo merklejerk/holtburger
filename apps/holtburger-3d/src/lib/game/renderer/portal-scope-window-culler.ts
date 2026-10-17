@@ -4,7 +4,7 @@ import {
 } from "../landblocks";
 import { PORTAL_QUERY_EPSILON } from "../scene/planar-aperture";
 import type {
-	ScenePortalCrossingInput,
+	ScenePortalCrossing,
 	SceneScope,
 	SceneTopologyView,
 } from "../scene";
@@ -140,7 +140,7 @@ export interface PortalScopeWindowFrameView {
 	/** Return one selected scope's visibility-island render ordinal. */
 	selectedScopeRenderDomainOrdinal(ordinal: number): number;
 	/** Return one selected persistent directed crossing without constructing a frame record. */
-	selectedCrossing(ordinal: number): ScenePortalCrossingInput;
+	selectedCrossing(ordinal: number): ScenePortalCrossing;
 	/** Return the selected source render-domain ordinal for one directed crossing. */
 	selectedCrossingSourceRenderDomainOrdinal(ordinal: number): number;
 	/** Return the selected target render-domain ordinal for one directed crossing. */
@@ -168,7 +168,7 @@ export interface PortalScopeWindowFrameView {
 }
 
 interface IndexedCrossing {
-	readonly crossing: ScenePortalCrossingInput;
+	readonly crossing: ScenePortalCrossing;
 	readonly sourceScopeId: number;
 	readonly targetScopeId: number;
 	readonly sourceLandblockX: number;
@@ -262,10 +262,7 @@ class PortalScopeWindowTopologyIndex {
 				});
 			}),
 		);
-		const crossingIdByPortalId = new Map<
-			ScenePortalCrossingInput["id"],
-			number
-		>();
+		const crossingIdByPortalId = new Map<ScenePortalCrossing["id"], number>();
 		for (
 			let crossingId = 0;
 			crossingId < this.crossings.length;
@@ -549,7 +546,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 		return arena.selectedOrdinalByRenderDomainId[renderDomainId]!;
 	}
 
-	selectedCrossing(ordinal: number): ScenePortalCrossingInput {
+	selectedCrossing(ordinal: number): ScenePortalCrossing {
 		return this.#selectedIndexedCrossing(ordinal).crossing;
 	}
 
@@ -1304,7 +1301,7 @@ export class PortalScopeWindowCuller {
 }
 
 function prepareAperture(
-	aperture: ScenePortalCrossingInput["visibilityAperture"],
+	aperture: ScenePortalCrossing["visibilityAperture"],
 ): PreparedPortalApertureProjectionInput {
 	return preparePortalApertureProjectionInput({
 		aperture,

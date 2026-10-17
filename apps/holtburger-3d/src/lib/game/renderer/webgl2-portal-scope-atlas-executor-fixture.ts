@@ -16,7 +16,7 @@ import { getLandblockCoordinates } from "../landblocks";
 import { createPerspectiveMat4 } from "../math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
-	ScenePortalCrossingInput,
+	ScenePortalCrossing,
 	SceneScope,
 	SceneTopologyScope,
 	SceneTopologyView,
@@ -516,7 +516,7 @@ function createFixtureCrossing(
 	target: SceneScope,
 	z: number,
 	halfExtent: number,
-): ScenePortalCrossingInput {
+): ScenePortalCrossing {
 	const aperture = rectangleAperture(
 		-halfExtent,
 		-halfExtent,
@@ -524,7 +524,7 @@ function createFixtureCrossing(
 		halfExtent,
 		z,
 	);
-	const sceneAperture: ScenePortalCrossingInput["sourceAperture"] = {
+	const sceneAperture: ScenePortalCrossing["sourceAperture"] = {
 		id: `portal-aperture:${id}` as const,
 		indices: aperture.indices,
 		landblockBounds: boundsForAperture(aperture),

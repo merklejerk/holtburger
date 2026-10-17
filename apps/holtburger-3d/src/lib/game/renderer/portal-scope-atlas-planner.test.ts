@@ -4,7 +4,7 @@ import { getLandblockCoordinates } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
 	PortalCrossingId,
-	ScenePortalCrossingInput,
+	ScenePortalCrossing,
 	SceneScope,
 	SceneTopologyScope,
 	SceneTopologyView,
@@ -1150,9 +1150,9 @@ function testNearClipVolume(near: number, position = new Vec3(0, 0, 1)) {
 
 function topology(
 	scopes: readonly SceneTopologyScope[],
-	crossings: readonly ScenePortalCrossingInput[],
+	crossings: readonly ScenePortalCrossing[],
 ): SceneTopologyView {
-	const outgoingByScope = new Map<string, ScenePortalCrossingInput[]>();
+	const outgoingByScope = new Map<string, ScenePortalCrossing[]>();
 	for (const edge of crossings) {
 		const key = scopeIdentity(edge.source);
 		const outgoing = outgoingByScope.get(key) ?? [];
@@ -1195,15 +1195,15 @@ function crossing(
 	source: SceneScope,
 	target: SceneScope,
 	options: {
-		readonly acceptedSide?: ScenePortalCrossingInput["acceptedSide"];
+		readonly acceptedSide?: ScenePortalCrossing["acceptedSide"];
 		readonly aperture?: PlanarAperture;
 		readonly exactMatch?: boolean;
-		readonly maskDepthPolicy?: ScenePortalCrossingInput["maskDepthPolicy"];
+		readonly maskDepthPolicy?: ScenePortalCrossing["maskDepthPolicy"];
 		readonly reciprocalCrossingId?: PortalCrossingId | null;
-		readonly spatialRelationship?: ScenePortalCrossingInput["spatialRelationship"];
+		readonly spatialRelationship?: ScenePortalCrossing["spatialRelationship"];
 		readonly visibilityAperture?: PlanarAperture;
 	} = {},
-): ScenePortalCrossingInput {
+): ScenePortalCrossing {
 	const aperture = options.aperture ?? rectangle(-0.9, -0.9, 0.9, 0.9);
 	const sceneAperture = {
 		id: `portal-aperture:${id}` as const,

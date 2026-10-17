@@ -11,7 +11,6 @@ import { transformPoint3 } from "../math/matrices";
 import { landblockVec3 } from "../../assets/ac-frame";
 import type { ScenePortalCrossingInput } from "../scene";
 import {
-	qualifyJunctionGroupId,
 	qualifyPortalApertureId,
 	qualifyPortalCrossingId,
 } from "../resolution/portal-scene-identity";
@@ -182,10 +181,6 @@ export function createEnvCellEnvironmentArtifact(
 				acceptedSide: crossing.acceptedSide,
 				exactMatch: crossing.exactMatch,
 				id: qualifyPortalCrossingId(plan.landblockId, crossing.id),
-				junctionGroupId: qualifyJunctionGroupId(
-					plan.landblockId,
-					crossing.junctionGroupId,
-				),
 				maskDepthPolicy: crossing.maskDepthPolicy,
 				reciprocalCrossingId:
 					crossing.reciprocalCrossingIndex === null

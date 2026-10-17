@@ -239,10 +239,6 @@ describe("SceneGraph", () => {
 		node.localTransform.m42 = 100;
 		const placement = visiblePlacement(scene, nodeId);
 		placement.localToLandblock.m43 = 100;
-		const resolvedBounds = scene.getResolvedBounds(nodeId);
-		if (!resolvedBounds) throw new Error("Expected resolved scene bounds.");
-		resolvedBounds.localBounds.min.y = -100;
-		resolvedBounds.placement.localToLandblock.m41 = 100;
 
 		expect(scene.getNode(nodeId)).toMatchObject({
 			localBounds: new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
@@ -251,7 +247,7 @@ describe("SceneGraph", () => {
 		expect(
 			getMat4Translation(visiblePlacement(scene, nodeId).localToLandblock),
 		).toEqual(new Vec3(10, 20, 30));
-		expect(scene.getResolvedBounds(nodeId)).toMatchObject({
+		expect(scene.readResolvedBounds(nodeId)).toMatchObject({
 			localBounds: new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
 			placement: {
 				localToLandblock: createTranslationMat4(new Vec3(10, 20, 30)),
@@ -267,13 +263,10 @@ describe("SceneGraph", () => {
 		});
 		const placement = scene.getResolvedPlacement(nodeId);
 		const origin = scene.getResolvedOrigin(nodeId);
-		const bounds = scene.getResolvedBounds(nodeId);
-		if (!placement || !origin || !bounds)
-			throw new Error("Expected scene snapshots.");
+		if (!placement || !origin) throw new Error("Expected scene snapshots.");
 		// Mutating an inspection object must not alter the scene-owned scope shared by readers.
 		Object.assign(placement.scope, { kind: "env-cell", envCellId: 1 });
 		Object.assign(origin.scope, { kind: "env-cell", envCellId: 2 });
-		Object.assign(bounds.placement.scope, { kind: "env-cell", envCellId: 3 });
 		expect(scene.getResolvedPlacement(nodeId)?.scope).toEqual({
 			kind: "outdoor",
 		});
@@ -302,6 +295,44 @@ describe("SceneGraph", () => {
 
 		expect(first).toBe(second);
 		expect(second.entries).toEqual([nodeId]);
+	});
+
+	it("filters nodes without changing traversal order or bypassing frustum selection", () => {
+		const scene = new SceneGraph();
+		const first = createGroupedRoot(scene, "dynamic");
+		const outside = createGroupedRoot(scene, "dynamic");
+		const last = createGroupedRoot(scene, "dynamic");
+		createGroupedRoot(scene, "buildings");
+		scene.updateBounds(
+			outside,
+			new AABB3(new Vec3(90, -1, -5), new Vec3(92, 1, -3)),
+		);
+		const admitted = new Set([first, outside]);
+		const visited: SceneNodeId[] = [];
+		const query = () =>
+			scene.queryScopesFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				[outdoorScope()],
+				(group) => group === "dynamic",
+				(id) => {
+					visited.push(id);
+					return admitted.has(id);
+				},
+			);
+		const result = query();
+		expect(result.entries).toEqual([first]);
+		expect(visited).toEqual([first, outside, last]);
+		admitted.add(last);
+		expect(query()).toBe(result);
+		expect(result.entries).toEqual([first, last]);
+		expect(
+			scene.queryFlatFrustum(
+				TEST_FRUSTUM,
+				"0x0001ffff",
+				(group) => group === "dynamic",
+			).entries,
+		).toEqual([first, last]);
 	});
 
 	it("queries a reusable indexed scope selection without requiring an array", () => {
@@ -358,6 +389,7 @@ describe("SceneGraph", () => {
 				"0x0001ffff",
 				[outdoorScope()],
 				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
 			).entries,
 		).toEqual([visible]);
 		scene.updateBounds(
@@ -370,6 +402,7 @@ describe("SceneGraph", () => {
 				"0x0001ffff",
 				[outdoorScope()],
 				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
 			).entries,
 		).toEqual([visible, hidden]);
 		scene.destroyNode(hidden);
@@ -379,6 +412,7 @@ describe("SceneGraph", () => {
 				"0x0001ffff",
 				[outdoorScope()],
 				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
 			).entries,
 		).toEqual([visible]);
 	});
@@ -398,6 +432,7 @@ describe("SceneGraph", () => {
 					visitedGroups.push(cullingGroup);
 					return cullingGroup === "terrain";
 				},
+				null,
 			).entries,
 		).toEqual([terrain]);
 		expect(visitedGroups).toEqual(["terrain", "static"]);
@@ -435,6 +470,7 @@ describe("SceneGraph", () => {
 			"0x0001ffff",
 			[scope],
 			INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			null,
 		).entries;
 		expect(visible).toEqual([resident]);
 		expect(visible).not.toContain(shell);
@@ -841,6 +877,7 @@ describe("SceneGraph", () => {
 				"0x0001ffff",
 				scopes,
 				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
 			).entries,
 		];
 
@@ -875,6 +912,7 @@ function queryScopes(scene: SceneGraph, ...scopes: readonly SceneScope[]) {
 		"0x0001ffff",
 		scopes,
 		INCLUDE_ALL_SCENE_CULLING_GROUPS,
+		null,
 	);
 }
 
@@ -1049,7 +1087,7 @@ describe("SceneGraph attachment dry run", () => {
 			localBounds: AABB3.zero(),
 			localTransform: createTranslationMat4(new Vec3(0, 0, 1)),
 		});
-		const before = scene.getResolvedBounds(held);
+		const before = scene.getResolvedPlacement(held);
 		if (!before) throw new Error("Expected held bounds.");
 		scene.updateLocalTransformWithChildren(
 			visual,
@@ -1062,7 +1100,7 @@ describe("SceneGraph attachment dry run", () => {
 		expect(scene.readResolvedState(held)?.placement.localToLandblock).toEqual(
 			createTranslationMat4(new Vec3(2, 3, 1)),
 		);
-		expect(before.placement.localToLandblock).toEqual(
+		expect(before.localToLandblock).toEqual(
 			createTranslationMat4(new Vec3(0, 0, 1)),
 		);
 		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(held);

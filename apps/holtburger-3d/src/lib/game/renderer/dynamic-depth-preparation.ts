@@ -5,6 +5,7 @@ import type {
 } from "../systems/components";
 import type { PreparedDynamicAppearance } from "./webgl2-dynamic-appearances";
 import { retainsRetailGeometry } from "./retail-geometry-visibility";
+import { retainsDynamicShadowRange } from "./object-rendering-policy";
 
 /** Compact inputs shared by material-free mask and mapped-shadow preparation. */
 export type DynamicDepthPresentation = Pick<
@@ -161,16 +162,18 @@ export class DynamicDepthPreparations {
 			// Shadow passes omit non-opaque spans (alpha-test, transparent, and additive)
 			// because depth-only shaders cannot evaluate texture cutouts or alpha blend factors.
 			// Selection keeps current-pose geometry through fades, including fully transparent parts.
-			if (
-				(opaqueOnly &&
-					(range.source.ordering !== "opaque" ||
-						part.frameInstance.color.a === 0)) ||
-				!retainsRetailGeometry(
-					range.source.retailVisibility,
-					showRetailHiddenGeometry,
-				)
-			)
-				continue;
+			const retained = opaqueOnly
+				? retainsDynamicShadowRange(
+						range.source.ordering,
+						part.frameInstance.color.a,
+						range.source.retailVisibility,
+						showRetailHiddenGeometry,
+					)
+				: retainsRetailGeometry(
+						range.source.retailVisibility,
+						showRetailHiddenGeometry,
+					);
+			if (!retained) continue;
 			const last = ranges.at(-1);
 			const cullFace = range.batch.cullFace;
 			if (

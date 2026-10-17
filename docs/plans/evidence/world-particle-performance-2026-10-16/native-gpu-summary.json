@@ -1,0 +1,183 @@
+{
+  "captureDate": "2026-10-16",
+  "hardware": "Ryzen 7 PRO 7840U / Radeon 780M / Mesa 26.2.3-arch1.1 / ACO",
+  "originalViewport": [
+    1493,
+    879
+  ],
+  "originalNativeBackend": "Wayland / ANGLE / native OpenGL ES 3.2",
+  "productionSourceChanges": false,
+  "cleanProgramExperiment": {
+    "control": "Original scoped particle shader untouched. Alternative programs selected on CPU, with no extra diagnostic uniforms. Applies to all scoped world particles, preserves the dominant 206 instances.",
+    "spatialRegion": "Fixed [459,480,1122,588) for this stationary view; rectangle equality and all skipped envelope pixels checked after every timing window.",
+    "windowsPerVariant": 5,
+    "measureMs": 4000,
+    "settleMs": 1500,
+    "variants": {
+      "normal": {
+        "particleGpuMs": {
+          "median": 5.166141172093025,
+          "min": 4.8314267000000015,
+          "max": 5.542749186046507
+        },
+        "totalGpuMs": {
+          "median": 11.723864376744181,
+          "min": 11.077738573913056,
+          "max": 12.012202879069767
+        },
+        "frameWorkMs": {
+          "median": 14.204186047509658,
+          "min": 13.824782606570617,
+          "max": 14.603349282125537
+        }
+      },
+      "region": {
+        "particleGpuMs": {
+          "median": 4.853209166666667,
+          "min": 4.697818452173912,
+          "max": 5.085170882882885
+        },
+        "totalGpuMs": {
+          "median": 11.17113473245614,
+          "min": 10.939282260869568,
+          "max": 11.7020920590909
+        },
+        "frameWorkMs": {
+          "median": 13.686521738508473,
+          "min": 13.303070172406079,
+          "max": 14.235909092155369
+        }
+      },
+      "no-portal": {
+        "particleGpuMs": {
+          "median": 2.9525271012658214,
+          "min": 2.818314340425532,
+          "max": 3.034034561702127
+        },
+        "totalGpuMs": {
+          "median": 9.671323413502106,
+          "min": 9.301573144680848,
+          "max": 9.763773736170215
+        },
+        "frameWorkMs": {
+          "median": 13.01744680886573,
+          "min": 12.307083334773779,
+          "max": 13.739224137931034
+        }
+      }
+    }
+  },
+  "nativeCompilerCapture": {
+    "flags": "AMD_DEBUG=ps,initnir,nir,asm,stats; MESA_SHADER_CACHE_DISABLE=true; MESA_SHADER_DUMP_PATH in /tmp",
+    "scope": "Earlier instrumented spatial shaders, actual native GLES path; source BLAKE3 keys mapped to dumped GLSL. Asynchronous compiler output can interleave.",
+    "hudCounterResult": "No CSV/counter samples from the offscreen Electron path; no HUD counter findings claimed.",
+    "variants": [
+      {
+        "label": "normal",
+        "sourceBlake3": "455b3dbcbcf76c64db98d88f7327d57c03cf90306eaa50c970b4eaa5be1c6952",
+        "inlineUniformKey": "1 (0x0, 0x0, 0x0, 0x1)",
+        "stats": {
+          "SGPRS": 108,
+          "VGPRS": 32,
+          "Code Size": 1224,
+          "Scratch": 0,
+          "Max Waves": 16,
+          "Spilled SGPRs": 0,
+          "Spilled VGPRs": 0
+        },
+        "waveSize": 64,
+        "rawStats": "Shader Stats: SGPRS: 108 VGPRS: 32 Code Size: 1224 LDS: 0 Scratch: 0 Max Waves: 16 Spilled SGPRs: 0 Spilled VGPRs: 0 PrivMem VGPRs: 0 LSOutputs: 0 HSOutputs: 0 HSPatchOuts: 0 ESOutputs: 0 GSOutputs: 0 VSOutputs: 0 PSOutputs: 1 InlineUniforms: 4 DivergentLoop: 0 (PS, W64)",
+        "sourceLogLine": 111590
+      },
+      {
+        "label": "region",
+        "sourceBlake3": "455b3dbcbcf76c64db98d88f7327d57c03cf90306eaa50c970b4eaa5be1c6952",
+        "inlineUniformKey": "1 (0x0, 0x1, 0x0, 0x1)",
+        "stats": {
+          "SGPRS": 108,
+          "VGPRS": 32,
+          "Code Size": 1312,
+          "Scratch": 0,
+          "Max Waves": 16,
+          "Spilled SGPRs": 0,
+          "Spilled VGPRs": 0
+        },
+        "waveSize": 64,
+        "rawStats": "Shader Stats: SGPRS: 108 VGPRS: 32 Code Size: 1312 LDS: 0 Scratch: 0 Max Waves: 16 Spilled SGPRs: 0 Spilled VGPRs: 0 PrivMem VGPRs: 0 LSOutputs: 0 HSOutputs: 0 HSPatchOuts: 0 ESOutputs: 0 GSOutputs: 0 VSOutputs: 0 PSOutputs: 1 InlineUniforms: 4 DivergentLoop: 0 (PS, W64)",
+        "sourceLogLine": 144418
+      },
+      {
+        "label": "no-portal",
+        "sourceBlake3": "455b3dbcbcf76c64db98d88f7327d57c03cf90306eaa50c970b4eaa5be1c6952",
+        "inlineUniformKey": "1 (0x0, 0x2, 0x0, 0x1)",
+        "stats": {
+          "SGPRS": 108,
+          "VGPRS": 16,
+          "Code Size": 376,
+          "Scratch": 0,
+          "Max Waves": 16,
+          "Spilled SGPRs": 0,
+          "Spilled VGPRs": 0
+        },
+        "waveSize": 64,
+        "rawStats": "Shader Stats: SGPRS: 108 VGPRS: 16 Code Size: 376 LDS: 0 Scratch: 0 Max Waves: 16 Spilled SGPRs: 0 Spilled VGPRs: 0 PrivMem VGPRs: 0 LSOutputs: 0 HSOutputs: 0 HSPatchOuts: 0 ESOutputs: 0 GSOutputs: 0 VSOutputs: 0 PSOutputs: 1 InlineUniforms: 4 DivergentLoop: 0 (PS, W64)",
+        "sourceLogLine": 144968
+      },
+      {
+        "label": "stripped",
+        "sourceBlake3": "382c0c742f123fba8e0b8bf7c8d290c4890ddf20e714b41ed61365d81fc3022d",
+        "inlineUniformKey": "1 (0x1, 0x0, 0x0, 0x0)",
+        "stats": {
+          "SGPRS": 108,
+          "VGPRS": 16,
+          "Code Size": 220,
+          "Scratch": 0,
+          "Max Waves": 16,
+          "Spilled SGPRs": 0,
+          "Spilled VGPRs": 0
+        },
+        "waveSize": 64,
+        "rawStats": "Shader Stats: SGPRS: 108 VGPRS: 16 Code Size: 220 LDS: 0 Scratch: 0 Max Waves: 16 Spilled SGPRs: 0 Spilled VGPRs: 0 PrivMem VGPRs: 0 LSOutputs: 0 HSOutputs: 0 HSPatchOuts: 0 ESOutputs: 0 GSOutputs: 0 VSOutputs: 0 PSOutputs: 1 InlineUniforms: 2 DivergentLoop: 0 (PS, W64)",
+        "sourceLogLine": 145980
+      }
+    ]
+  },
+  "replay": {
+    "tool": "RenderDoc 1.46 (Arch package 1.46-1), extracted under /tmp; Qt runtime dependencies extracted under /tmp",
+    "backend": "X11 / in-process GPU / ANGLE / Mesa desktop OpenGL 4.6",
+    "viewport": [
+      1498,
+      920
+    ],
+    "validBaseline": {
+      "dominantDraws": 206,
+      "totals": {
+        "GPU Duration": 0.005732217,
+        "PS Invocations": 35050992,
+        "VS Invocations": 67980,
+        "Samples Passed": 30553386
+      },
+      "sourceVerified": "All 206 draws have particle record input, portal fragment code, and no fixed-rectangle branch.",
+      "fragmentInvocationsPerPassedSample": 1.147204830260057,
+      "captureFilename": "h3d-native-rdc_frame763.rdc",
+      "captureBytes": 77287221,
+      "captureSha256": "e797f750e07823898a3499c7235c0c08821d9af66a5a973184137a8c35079eb9"
+    },
+    "limits": [
+      "Native backend and viewport differ from the original GLES runs; no timing or invocation-count equivalence assumed.",
+      "Only one frame has valid replay counters; no paired replay counter comparison.",
+      "Per-draw replay GPU durations include query/replay overhead and are not live renderer phase timing.",
+      "The original X11 spatial capture still used the old fixed rectangle; it is not accepted as rendering-equivalent. Only original shader baseline counts are used.",
+      "Raw .rdc files contain resident game resources and potentially launch/UI data and are not copied into the repository."
+    ]
+  },
+  "failedMethods": [
+    "First clean-program hook also selected another deferred shader and failed compilation; discarded, hook narrowed to particle shaders.",
+    "Temporary native OpenGL query interposer produced no captures; no native count conclusions from it.",
+    "Initial RenderDoc all-child injection failed Chromium zygote startup.",
+    "Default Wayland capture reported EGL_BAD_MATCH while cloning the native GLES context.",
+    "X11 capture required correct working directory and exact browser PID; old capture notifications were resent on reconnect.",
+    "Second captured-frame replay aborted with exit 134 and: amdgpu: The CS has cancelled because the context is lost. This context is innocent. No valid counters from that replay; remaining frame replay not attempted."
+  ],
+  "nextQuestion": "Why does the clean spatial branch retain most of the portal GPU cost? The GLES assembly preserves conditional envelope reads and shows no spill/max-wave regression, while a desktop-GL baseline does not show several-fold invocation inflation. No exact GLES hardware scheduling or bandwidth cause established."
+}

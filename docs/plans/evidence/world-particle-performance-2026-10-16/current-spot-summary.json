@@ -1,0 +1,144 @@
+{
+  "date": "2026-10-16",
+  "status": "Current saved character location checked after user repositioning; ordinary production renderer, no shader modification.",
+  "context": {
+    "renderer": "ANGLE (AMD, AMD Radeon 780M Graphics (radeonsi phoenix ACO), OpenGL ES 3.2)",
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "graphics": {
+      "viewDistance": 6,
+      "ambientOcclusionEnabled": true,
+      "entityShadowMode": "shadow-maps",
+      "verticalFovDegrees": 75,
+      "textureFiltering": "anisotropic-2x",
+      "renderScale": 1,
+      "weatherEnabled": true
+    },
+    "camera": {
+      "cameraGeneration": 1,
+      "sequence": 58,
+      "kind": "advanced",
+      "reason": null,
+      "clearance": {
+        "projectionRevision": 1,
+        "radius": 0.17976225912570953
+      },
+      "initialLandblockId": 1210908689,
+      "finalLandblockId": 1210908689,
+      "position": {
+        "landblockId": 1210908689,
+        "coords": {
+          "x": 54.664920806884766,
+          "y": 11.999652862548828,
+          "z": 8.242405891418457
+        }
+      }
+    },
+    "viewport": {
+      "width": 1535,
+      "height": 919
+    },
+    "diagnosticGlobalsPresent": false
+  },
+  "method": "Five 4s production profile windows after 10s settling, native Radeon 780M GLES. No V8 sampling, draw hooks, readbacks, build or heavy analysis during measurement. Profiling disabled before disconnect.",
+  "timing": {
+    "frameWorkMs": {
+      "median": 9.116101694309105,
+      "min": 8.747302904910567,
+      "max": 9.39833333293597
+    },
+    "rendererCpuMs": {
+      "median": 5.727118641895763,
+      "min": 5.66094420575277,
+      "max": 6.172083333879709
+    },
+    "particleGpuMs": {
+      "median": 3.788042078512393,
+      "min": 3.7381449748954,
+      "max": 3.879512592274679
+    },
+    "gpuMs": {
+      "median": 8.687673008264465,
+      "min": 8.575720631799156,
+      "max": 8.935663849785405
+    },
+    "observedFps": {
+      "median": 59.74607916355489,
+      "min": 58.09025180752929,
+      "max": 60.00996015936255
+    },
+    "visibleDynamicEntities": {
+      "median": 294,
+      "min": 294,
+      "max": 294
+    },
+    "particleBatches": {
+      "median": 312,
+      "min": 312,
+      "max": 312
+    },
+    "particleInstances": {
+      "median": 1671,
+      "min": 1650,
+      "max": 1697
+    }
+  },
+  "portal": {
+    "selectedScopes": 1,
+    "selectedCrossings": 0,
+    "constantAcrossAllFiveWindows": true
+  },
+  "positionStableAcrossWindows": true,
+  "servedProductionAssets": {
+    "apps/holtburger-3d/dist/assets/ClientHudWindow-Dk6DZYoa.js": "9b5b004d5c62e9257e225196c40b085dd0a08391bf4f96a4b8682f9f9d1f8507",
+    "apps/holtburger-3d/dist/assets/ToggleField-Cb9ihpHP.js": "7eceb97c3be965ae15bc27041f4122f6e9bcfb8c8c76991a6266c5e889b0de16",
+    "apps/holtburger-3d/dist/assets/explorer-camera-input-controller-Bk72pTGm.js": "79d70c8d36615adf13b5498945d53923064fad37e1320f646b697f18d70a61c6",
+    "apps/holtburger-3d/dist/assets/static-object-geometry-worker.entry-CN3WfpC7.js": "00bde0c3daa199ab28e096f75c92c1f0a3be56f3eb48697ac45c521db4a01b3c",
+    "apps/holtburger-3d/dist/assets/ClientShortcutDock-Cbs_zJ22.js": "09914f0e5575b2daccb7a0e53779e6108c13f964585dc2e7949a58294fa08c31",
+    "apps/holtburger-3d/dist/assets/opaque-CM9n52f3.js": "dec1f4c19f2d4435781829a9ac7bdf341d622c466b693f6a2f93ef3935bba450",
+    "apps/holtburger-3d/dist/assets/ui-theme-DmDWGUJR.js": "63e4632e22342599a1cbc0fec5a4820442443f2cb455dcb4533e55406f1af362",
+    "apps/holtburger-3d/dist/assets/mount-CzBnFBaS.js": "7f953ca22e6bce54fa741d8b192d96df48a5d9ea49b8eac75750e5b4ab752c49",
+    "apps/holtburger-3d/dist/assets/explorer-D5m9pKQ9.js": "50e5edffa2fc6e50b1d863afb24b92efeb06255112226a6144d4a1f704b9e869",
+    "apps/holtburger-3d/dist/assets/BrowserHarnessApp-j97TkRvM.js": "fe9d3b767464be56ff514ebf60577415dc37f00dfc574975674543c2d59f274d",
+    "apps/holtburger-3d/dist/assets/browserHarness-CZLBKAbz.js": "1aaba96b44cae49e390a282aa49b95f6fecd07be2115b04ec2db07b1d23b4dd0",
+    "apps/holtburger-3d/dist/assets/base-DQVq1rlb.js": "418c206484b89b68ef5f067277831e583fc9193a62aadf4de269acaaeb12a85f",
+    "apps/holtburger-3d/dist/assets/client-DoqPiz2O.js": "0e03777aa2c0b181211134e7f031043d1b6ac023bbb4de6532f67d39da6563a7",
+    "apps/holtburger-3d/dist/assets/ClientWorldPanel-CkMiyIDk.js": "ee747d32dd1844d60792b5081a3e4a52ddf521c1805c9ebfec3dfce2168e3300",
+    "apps/holtburger-3d/dist/assets/world-map-source-DOUM2wC2.js": "5994c80f6b0842074e4dd3b62f68bdf09ff28b48873f678ead5150b5c05519d5",
+    "apps/holtburger-3d/dist/assets/ExplorerTexturePageModal-DMPfxAJB.js": "c259b2a6b7fd7d585f1283bd18c4837fc6fd33b827dfda33b25f98638a6ea74b",
+    "apps/holtburger-3d/dist/assets/input-context-BkRXUxgH.js": "9c899d27796f2ad2f0038d964dbd1dc77fc4b06155d62e29eea901cdfc080569",
+    "apps/holtburger-3d/dist/assets/layout-worker.entry-cEKrDYXU.js": "cf37eb1e59b96333b6abba0cfd50af071a0bbd0cddffb6c0cf13bd048626d225",
+    "apps/holtburger-3d/dist/assets/ClientCombatIndicatorSettings-BOsfgoyj.js": "a12cb650de02b9ca716e949ee5b014b29608bc07963ec8ce4881ce3ef8746a99",
+    "apps/holtburger-3d/dist/assets/map-renderer-Dak_cLIh.js": "ba48e1bc92eef7961c39ac4041eccaed2702ea3ecc224a2d108b50618f4426a3",
+    "apps/holtburger-3d/dist/assets/terrain-worker.entry-B8nvz7ku.js": "de7b009597e1726b8f95db41df51cb7032def7cc3dbbdae5bc25951d982f6d1f",
+    "apps/holtburger-3d/dist/assets/Minimap-BNUZTMEd.js": "7236d7f28837371623f48a3780a183c12669ee8f87182a9cc320ae4140db2743",
+    "apps/holtburger-3d/dist/assets/preload-helper-HclGiUj8.js": "bba5840eec0028b00854bcd58fba80694d02d41e98417656424c05b26db7120c",
+    "apps/holtburger-3d/dist/assets/binary-response-BTaM-rOL.js": "e3ad6d64a9c129409611be237a81ea47c4ab9f22b4397698aad86bf405e11139",
+    "apps/holtburger-3d/dist/assets/app-input-policy-context-DpJxm5LX.js": "b0e14a2f06487fc92e8adacb04301e90a91e03ce6aa18a09698012f98b35cf90",
+    "apps/holtburger-3d/dist/assets/explorer-fixed-tick-LoBi6wSj.js": "4b7790e5279dc6083d211ce4ec6494b7ba72c8b3beb9a637009f003cab284404",
+    "apps/holtburger-3d/dist/assets/client-Byl4ZGJg.js": "8a699d62c2267d15d06e677f24a31f52e18082bdeb68919b21a0831dc7057a06",
+    "apps/holtburger-3d/dist/assets/UiThemeHarness-Bt4Tul19.js": "c888f8cf261d3a1ce1f73286a13501b95a4c564a54f0f96217f3bd081a39ceea",
+    "apps/holtburger-3d/dist/assets/WorldMapHarness-C9T3WT5r.js": "c5a981f925ad202f749941a623dc7a17a739c4856df23032397e922bdfef0e77",
+    "apps/holtburger-3d/dist/assets/steel-BPPckljP.js": "99957a0e35b947efe3f2c826fdc71cae9663d470877885cdfe106664d4cc31f9",
+    "apps/holtburger-3d/dist/assets/portal-transition-controller-D5CoPzu_.js": "86f6c3b151a179328cdc112dddb4d1d50e931d24152f9ea37d8cc7c09d401ee2",
+    "apps/holtburger-3d/dist/assets/ClientHudIcon-ArgXpR0w.js": "3f70217a2e2bfa0e20ddd8a0e113bda7caf51b9fdf31d95d82799d2bbac3b041",
+    "apps/holtburger-3d/dist/assets/client-object-inspection-WWU-eEq8.js": "9557b2bfd9a613994ca6b6b8490c66ce7b0c7a55037953f7fe1b35354707a36b",
+    "apps/holtburger-3d/dist/assets/client-tuning-D2xRF4P9.js": "60edb2f080be62ddf836bbefba8ce6c49101e31cac8af013461af9846231c399",
+    "apps/holtburger-3d/dist/assets/LayoutHandleIcon-BABkcQxH.js": "acefba45269fdf572b0db835914602f9b37ae303ecd543f0f2c86874d85c9e6e",
+    "apps/holtburger-3d/dist/assets/page-build-worker.entry-DJqo63P-.js": "11c928644d4c174aa279871f85adf91f41471257d98a212187e22e1d021a19bc",
+    "apps/holtburger-3d/dist/assets/UiShowcase-CqPgwSJr.js": "0ce48656898ac95446304dd5cc32781d396c6526bdcf367501f7b4cc61633e23",
+    "apps/holtburger-3d/dist/assets/client-host-contract-CCD6WWgX.js": "5ca2b2c4847bb0a60c83563148542331efd88ff28f5dd376691dc6da39583079",
+    "apps/holtburger-3d/dist/assets/ClientHudHarness-ukwejUOC.js": "d76092a624eac5622e8d4668df0b516ac340640a9f2f04e343b8f1116db76ffa",
+    "apps/holtburger-3d/dist/assets/map-coordinates-DgfGYTP2.js": "b45949dfbf2a494074ad7e53bb4abe10b9a076b9f3885c06acfa0d8571026287",
+    "apps/holtburger-3d/dist/assets/pointer-gesture-DRdGIgNf.js": "e5704de443a5efa4cd750185e79476a6ed54687893fe2aa8fe914ac0d0e66224",
+    "apps/holtburger-3d/dist/assets/game-presentation-owner-Bj62kY4E.js": "277e01b7aee6f66296dbf1496dae4e4d275b5471e096068e215ca5295842fd6c",
+    "apps/holtburger-3d/dist/assets/object-preview-controller-DAVNYq7P.js": "00ea0c79f2664ae97865cc3a87429649eb06310f1000e18e7826492e9c410888"
+  },
+  "assessment": "Useful heavier particle baseline than the preceding lighter location. Zero selected portal crossings offers a separate exact no-exit shader-admission opportunity without two-way draw expansion. This control has not yet been implemented or measured at this spot.",
+  "limits": [
+    "Different location/camera/population/viewport from earlier captures; cross-view timing is context, not causal performance evidence.",
+    "Records host camera-path position and viewport, not complete rendered view/projection matrices or a guarantee of matching the user camera framing.",
+    "No dominant-mesh owner/draw census or numeric image footprint measured in this ordinary production check.",
+    "One selected scope and zero selected crossings describe this view only; no doorway/boundary or movement validation.",
+    "No visual acceptance check or production source edit."
+  ]
+}

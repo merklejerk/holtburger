@@ -1,0 +1,289 @@
+--- a/apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts
++++ b/apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts
+@@ -356,10 +356,16 @@
+  */
+ const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
+ 
++/** Temporary manual-review experiment. Set false to restore particle portal-envelope checks. */
++const BYPASS_PARTICLE_PORTAL_VISIBILITY_FOR_MANUAL_REVIEW = true;
++
+ /** Frontend-authored fallback decoded once for every clear path owned by this renderer. */
+ const FRONTEND_CLEAR_COLOR = normalizedRgbaColor(
+ 	SHARED_FRONTEND_TUNING.rendering.clearColor,
+ );
++
++/** Opaque background for sealed interiors and the isolated portal tunnel. */
++const BLACK_SCENE_CLEAR_COLOR = [0, 0, 0, 1] as const;
+ 
+ /** Stand-in before any emitter has published records, so the context is never partially built. */
+ const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
+@@ -386,6 +392,8 @@
+ }
+ 
+ interface SceneShading {
++	/** Environment/fog clear color shared by views that can see outdoors. */
++	readonly clearColor: readonly [number, number, number, number];
+ 	/** Effective optional near-field presentation policy resolved once for this frame. */
+ 	readonly ambientOcclusion: EffectiveAmbientOcclusionPolicy;
+ 	readonly fog: FrameInput["environment"]["distanceFog"];
+@@ -413,6 +421,12 @@
+  * resolved frame environment. Fog stays disabled exactly as this probe path always had it.
+  */
+ const PROBE_SHADING: SceneShading = {
++	clearColor: [
++		FRONTEND_CLEAR_COLOR.red,
++		FRONTEND_CLEAR_COLOR.green,
++		FRONTEND_CLEAR_COLOR.blue,
++		FRONTEND_CLEAR_COLOR.alpha,
++	],
+ 	ambientOcclusion: { kind: "disabled" },
+ 	fog: null,
+ 	// Probe views measure world draws only; the sky contributes no depth and no selection.
+@@ -674,6 +688,8 @@
+ 
+ /** Anchor-relative matrices and content reused by all passes for one view. */
+ interface PreparedViewGeometry extends PreparedPortalProjection {
++	/** Runtime-owned cell classification selecting this view's uncovered background. */
++	readonly cameraInsideSealedCell: boolean;
+ 	/** Independent retained outputs for this camera, shared by its color and auxiliary passes. */
+ 	readonly submissionStorage: ViewSubmissionStorage;
+ 	/** Camera position expressed in the view's anchor-relative render frame. */
+@@ -1648,7 +1664,9 @@
+ 			MAX_DYNAMIC_LIGHTS,
+ 		);
+ 		this.#frameSelectionMetrics.droppedLights += fittedDynamic.dropped;
++		const clear = fog?.color ?? input.environment.backgroundColor;
+ 		const shading: SceneShading = {
++			clearColor: [clear.red, clear.green, clear.blue, clear.alpha],
+ 			ambientOcclusion,
+ 			fog,
+ 			sky: input.environment.sky,
+@@ -1665,7 +1683,7 @@
+ 				input.views.some((view) => view.cameraInsideSealedCell),
+ 			),
+ 		};
+-		this.#beginFrame(input.environment, shading);
++		this.#beginFrame(shading.clearColor);
+ 		this.#particlePass?.beginFrame(this.#particleRecords);
+ 		if (profile && setupStartedAt !== undefined) {
+ 			profile.finishCpuPhase("setup", setupStartedAt);
+@@ -1710,13 +1728,6 @@
+ 				);
+ 			}
+ 		} else {
+-			const clear = fog?.color ?? input.environment.backgroundColor;
+-			const clearColor = [
+-				clear.red,
+-				clear.green,
+-				clear.blue,
+-				clear.alpha,
+-			] as const;
+ 			const pipeline = (this.#portalScopeAtlasPipeline ??=
+ 				new WebGL2PortalScopeAtlasPipeline(this.#gl));
+ 			const plans = input.views.map((view) => {
+@@ -1745,7 +1756,6 @@
+ 			for (const plan of plans) {
+ 				this.#executePortalScopeAtlasFrame(
+ 					plan,
+-					clearColor,
+ 					shading,
+ 					input.frameSettings,
+ 					profile,
+@@ -1792,7 +1802,7 @@
+ 		}
+ 
+ 		const target = this.#acquireFlatSceneTarget();
+-		this.#beginFlatOpaqueScene(target);
++		this.#beginFlatOpaqueScene(target, BLACK_SCENE_CLEAR_COLOR);
+ 		this.#drawPortalTransitionTunnel(
+ 			target,
+ 			input.frameSettings.showRetailHiddenGeometry,
+@@ -1972,12 +1982,6 @@
+ 		);
+ 		this.#executePortalScopeAtlasFrame(
+ 			plan,
+-			[
+-				FRONTEND_CLEAR_COLOR.red,
+-				FRONTEND_CLEAR_COLOR.green,
+-				FRONTEND_CLEAR_COLOR.blue,
+-				FRONTEND_CLEAR_COLOR.alpha,
+-			],
+ 			PROBE_SHADING,
+ 			frameSettings,
+ 			null,
+@@ -2050,15 +2054,14 @@
+ 	/** Execute the same already-prepared compositor schedule for continuous frames and probes. */
+ 	#executePortalScopeAtlasFrame(
+ 		plan: PreparedPortalView,
+-		clearColor: readonly [number, number, number, number],
+ 		shading: SceneShading,
+ 		frameSettings: FrameSettings,
+ 		profile: WebGL2FrameProfileCapture | null,
+ 		pipeline: WebGL2PortalScopeAtlasPipeline,
+ 	): void {
+ 		const { view, frame, particlesByScope } = plan;
++		const clearColor = this.#viewClearColor(view, shading);
+ 		this.#executeOutdoorShadows(plan.shadows, profile);
+-		const gl = this.#gl;
+ 		const target = this.#acquireFlatSceneTarget();
+ 		const setupGpu = profile?.beginGpuPhase("portalComposition") ?? null;
+ 		const setupStartedAt = profile?.beginCpuPhase();
+@@ -2066,10 +2069,7 @@
+ 			WebGL2PortalScopeAtlasPipeline["beginOpaqueScene"]
+ 		>;
+ 		try {
+-			// Explicit rather than inherited from `#beginFrame`, because the harness probe seam
+-			// reaches this schedule without one.
+-			gl.clearColor(...clearColor);
+-			this.#beginFlatOpaqueScene(target);
++			this.#beginFlatOpaqueScene(target, clearColor);
+ 			portalTargets = pipeline.beginOpaqueScene(frame, clearColor);
+ 		} finally {
+ 			if (profile && setupStartedAt !== undefined) {
+@@ -2376,18 +2376,18 @@
+ 		}
+ 	}
+ 
+-	#beginFrame(
+-		environment: FrameInput["environment"],
++	#viewClearColor(
++		view: PreparedViewGeometry,
+ 		shading: SceneShading,
+-	): void {
++	): readonly [number, number, number, number] {
++		return view.cameraInsideSealedCell
++			? BLACK_SCENE_CLEAR_COLOR
++			: shading.clearColor;
++	}
++
++	#beginFrame(clearColor: readonly [number, number, number, number]): void {
+ 		const gl = this.#gl;
+-		const clearColor = shading.fog?.color ?? environment.backgroundColor;
+-		gl.clearColor(
+-			clearColor.red,
+-			clearColor.green,
+-			clearColor.blue,
+-			clearColor.alpha,
+-		);
++		gl.clearColor(...clearColor);
+ 		gl.colorMask(true, true, true, true);
+ 		gl.depthMask(true);
+ 		gl.disable(gl.BLEND);
+@@ -2423,6 +2423,7 @@
+ 			anchorCoordinates,
+ 			anchorLandblockId,
+ 			camera,
++			cameraInsideSealedCell: input.cameraInsideSealedCell,
+ 			cameraPosition,
+ 			clipFromAnchor,
+ 			frustum: createFrustumFromClipMatrix(clipFromAnchor, cameraPosition),
+@@ -3633,7 +3634,13 @@
+ 				this.#frameClockSeconds,
+ 				1.0,
+ 			);
+-			pass.drawScoped(context, particlesByScope, portalPipeline);
++			pass.drawScoped(
++				context,
++				particlesByScope,
++				BYPASS_PARTICLE_PORTAL_VISIBILITY_FOR_MANUAL_REVIEW
++					? null
++					: portalPipeline,
++			);
+ 		});
+ 	}
+ 
+@@ -3646,7 +3653,7 @@
+ 		profile: WebGL2FrameProfileCapture | null,
+ 	): void {
+ 		const target = this.#acquireFlatSceneTarget();
+-		this.#beginFlatOpaqueScene(target);
++		this.#beginFlatOpaqueScene(target, this.#viewClearColor(view, shading));
+ 		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
+ 		if (domain === "exterior") {
+ 			this.#submitSkyPhase(view, shading, "before-world", profile, null);
+@@ -4069,6 +4076,7 @@
+ 				entityAnalyticShadows: null,
+ 			};
+ 			const portalShading: SceneShading = {
++				clearColor: BLACK_SCENE_CLEAR_COLOR,
+ 				authoredLightResponse: 0,
+ 				ambientOcclusion: { kind: "disabled" },
+ 				anchorOrigin: { x: 0, z: 0 },
+@@ -4122,6 +4130,8 @@
+ 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+ 		gl.viewport(0, 0, target.extent.width, target.extent.height);
+ 		gl.colorMask(true, true, true, true);
++		gl.enable(gl.DEPTH_TEST);
++		gl.depthFunc(gl.LEQUAL);
+ 		gl.depthMask(true);
+ 		gl.disable(gl.BLEND);
+ 		gl.disable(gl.CULL_FACE);
+@@ -4208,10 +4218,9 @@
+ 	/**
+ 	 * Write one finished scene target to the default framebuffer.
+ 	 *
+-	 * Both physical schedules end here, and this is the frame's only default-framebuffer write.
+-	 * That is a deliberate invariant rather than an incidental one: it is what lets a whole-frame
+-	 * presentation transform see every fragment — opaque, portal-composited, blended, and
+-	 * particle — exactly once. Anything drawn after this call would escape that transform.
++	 * Both physical schedules present the complete world here, so grading and transition composition
++	 * see every world fragment exactly once. Unplaced combat feedback draws afterward as a HUD
++	 * overlay and bypasses those transforms.
+ 	 */
+ 	#presentFlatScene(
+ 		target: WebGL2FlatSceneTargetSet,
+@@ -4300,17 +4309,24 @@
+ 		});
+ 	}
+ 
+-	/** Bind and clear one complete flat-scene target before any world submission. */
+-	#beginFlatOpaqueScene(target: WebGL2FlatSceneTargetSet): void {
++	/** Bind and clear one complete flat-scene target before any scene submission. */
++	#beginFlatOpaqueScene(
++		target: WebGL2FlatSceneTargetSet,
++		clearColor: readonly [number, number, number, number],
++	): void {
+ 		const gl = this.#gl;
+ 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+ 		gl.viewport(0, 0, target.extent.width, target.extent.height);
+ 		gl.colorMask(true, true, true, true);
++		// Opaque visibility must not depend on state left by presentation or HUD overlays.
++		gl.enable(gl.DEPTH_TEST);
++		gl.depthFunc(gl.LEQUAL);
+ 		gl.depthMask(true);
+ 		gl.disable(gl.BLEND);
+ 		gl.disable(gl.CULL_FACE);
+ 		gl.disable(gl.SCISSOR_TEST);
+ 		gl.disable(gl.STENCIL_TEST);
++		gl.clearColor(...clearColor);
+ 		gl.clearDepth(1);
+ 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+ 	}
+--- a/apps/holtburger-3d/src/lib/game/renderer/webgl2-particle-pass.ts
++++ b/apps/holtburger-3d/src/lib/game/renderer/webgl2-particle-pass.ts
+@@ -142,11 +142,14 @@
+ 		this.#draw(context, batches, null, null);
+ 	}
+ 
+-	/** Draw scope-grouped particles with one upload and one scalar scope route per physical draw. */
++	/**
++	 * Draw admitted scope-grouped particles with one upload. Null routing uses the ordinary shader
++	 * for the temporary manual-review bypass; batch order and opaque depth testing stay intact.
++	 */
+ 	drawScoped(
+ 		context: ParticleDrawContext,
+ 		batchesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>,
+-		routing: ParticlePortalScopeRouting,
++		routing: ParticlePortalScopeRouting | null,
+ 	): void {
+ 		this.#scopedBatches.length = 0;
+ 		this.#scopedRenderScopeKeys.length = 0;
+@@ -160,7 +163,7 @@
+ 		this.#draw(
+ 			context,
+ 			this.#scopedBatches,
+-			this.#scopedRenderScopeKeys,
++			routing === null ? null : this.#scopedRenderScopeKeys,
+ 			routing,
+ 		);
+ 	}

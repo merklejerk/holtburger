@@ -1,3 +1,8 @@
+/**
+ * Exact finite-screen reference semantics for portal composition. The particle category models
+ * fully scope-clipped reference effects for oracle/cost comparisons; production particles use
+ * CPU owner admission followed by ordinary scene depth and blending instead of that envelope.
+ */
 type Brand<Value, Name extends string> = Value & {
 	readonly __portalModelBrand: Name;
 };

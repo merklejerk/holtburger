@@ -1,0 +1,48 @@
+// Filtered native assembly lines from an asynchronously interleaved driver log.
+// Shader Stats: SGPRS: 108 VGPRS: 16 Code Size: 220 LDS: 0 Scratch: 0 Max Waves: 16 Spilled SGPRs: 0 Spilled VGPRs: 0 PrivMem VGPRs: 0 LSOutputs: 0 HSOutputs: 0 HSPatchOuts: 0 ESOutputs: 0 GSOutputs: 0 VSOutputs: 0 PSOutputs: 1 InlineUniforms: 2 DivergentLoop: 0 (PS, W64)
+// sourceBlake3=382c0c742f123fba8e0b8bf7c8d290c4890ddf20e714b41ed61365d81fc3022d
+// inlineUniformKey=1 (0x1, 0x0, 0x0, 0x0)
+ BB0:
+	s_mov_b32 s4, s3                                            ; be840003
+	s_movk_i32 s5, 0x8000                                       ; b0058000
+	s_clause 0x1                                                ; bf850001
+	s_load_b256 s[8:15], s[4:5], 0x400                          ; f40c0202 f8000400
+	s_load_b128 s[16:19], s[4:5], 0x430                         ; f4080402 f8000430
+	s_mov_b64 s[0:1], exec                                      ; be80017e
+	s_wqm_b64 exec, exec                                        ; befe1d7e
+	s_mov_b32 m0, s7                                            ; befd0007
+	lds_param_load v2, attr0.x wait_vdst:15                     ; ce0f0002
+	lds_param_load v3, attr0.y wait_vdst:15                     ; ce0f0103
+	s_mov_b64 s[4:5], exec                                      ; be84017e
+	v_interp_p10_f32 v4, v2, v0, v2 wait_exp:1                  ; cd000104 040a0102
+	v_interp_p10_f32 v0, v3, v0, v3 wait_exp:0                  ; cd000000 040e0103
+	s_delay_alu instid0(VALU_DEP_2)                             ; bf870002
+	v_interp_p2_f32 v4, v2, v1, v4 wait_exp:7                   ; cd010704 04120302
+	v_interp_p2_f32 v5, v3, v1, v0 wait_exp:7                   ; cd010705 04020303
+	s_mov_b64 exec, s[0:1]                                      ; befe0100
+	s_waitcnt lgkmcnt(0)                                        ; bf89fc07
+	image_sample v[0:1], v[4:5], s[8:15], s[16:19] dmask:0xf dim:SQ_RSRC_IMG_2D d16 ; f06e0f04 10020004
+	s_mov_b64 exec, s[4:5]                                      ; befe0104
+	s_mov_b32 s4, s2                                            ; be840002
+	s_bfm_b32 s5, 1, 15                                         ; 95058f81
+	s_mov_b32 s6, 32                                            ; be8600a0
+	s_mov_b32 s7, 0x30016fac                                    ; be8700ff 30016fac
+	s_buffer_load_b32 s2, s[4:7], 0x18                          ; f4200082 f8000018
+	s_waitcnt_depctr 0xffe3                                     ; bf88ffe3
+	lds_param_load v5, attr0.z wait_vdst:15                     ; ce0f0205
+	s_waitcnt vmcnt(0)                                          ; bf8903f7
+	v_mov_b16_e32 v6.l, v1.l                                    ; 7e0c3901
+	s_waitcnt expcnt(0)                                         ; bf89fff0
+	v_fma_mix_f32_e64_dpp v5, v5, v1, neg(0) op_sel:[0,1,0] op_sel_hi:[0,1,0] quad_perm:[0,0,0,0] row_mask:0xf bank_mask:0xf bound_ctrl:1 fi:1 ; cc201005 920202fa ff0c0005
+	s_waitcnt lgkmcnt(0)                                        ; bf89fc07
+	s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_3) | instid1(VALU_DEP_1) ; bf8700c1
+	v_cmp_gt_f32_e32 vcc, s2, v5                                ; 7c280a02
+	s_and_not1_b64 exec, s[0:1], vcc                            ; 91fe6a00
+	s_cbranch_execz BB1                                         ; bfa50005
+	v_cvt_pk_rtz_f16_f32_e32 v8, v5, v5                         ; 5e100b05
+	v_mov_b16_e32 v6.h, v8.l                                    ; 7f0c3908
+	exp mrt0 v0, v6, off, off done                              ; f8000803 80800600
+	s_endpgm                                                    ; bfb00000
+BB1:
+	exp mrt0 off, off, off, off done                            ; f8000800 80808080
+	s_endpgm                                                    ; bfb00000

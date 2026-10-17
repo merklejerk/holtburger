@@ -1,0 +1,79 @@
+debug_parse_flags_option: help for AMD_DEBUG:
+|              info [0x0000000000000001] Print driver information
+|               tex [0x0000000000000002] Print texture info
+|           compute [0x0000000000000004] Print compute info
+|                vm [0x0000000000000008] Print virtual addresses when creating resources
+|       cache_stats [0x0000000000000010] Print shader cache statistics.
+|                ib [0x0000000000000020] Print command buffers.
+|          elements [0x0000000000000040] Print vertex elements.
+|              nowc [0x0000000000000080] Disable GTT write combining
+|        nowcstream [0x0000000000000100] Disable GTT write combining for streaming uploads
+|          check_vm [0x0000000000000200] Check VM faults and dump debug info.
+|      reserve_vmid [0x0000000000000400] Force VMID reservation per context.
+|        shadowregs [0x0000000000000800] Enable CP register shadowing.
+| userqnoshadowregs [0x0000000000001000] Disable register shadowing in userqueue.
+|       nofastdlist [0x0000000000002000] Disable fast display lists
+|      nodmashaders [0x0000000000004000] Disable uploading shaders via CP DMA and map them directly.
+|             nongg [0x0000000000008000] Disable NGG and use the legacy pipeline.
+|              nggc [0x0000000000010000] Always use NGG culling even when it can hurt.
+|            nonggc [0x0000000000020000] Disable NGG culling.
+|     switch_on_eop [0x0000000000040000] Program WD/IA to switch on end-of-packet.
+|      nooutoforder [0x0000000000080000] Disable out-of-order rasterization
+|            nodpbb [0x0000000000100000] Disable DPBB. Overrules the dpbb enable option.
+|              dpbb [0x0000000000200000] Enable DPBB for gfx9 dGPU. Default enabled for gfx9 APU and >= gfx10.
+|          nohyperz [0x0000000000400000] Disable Hyper-Z
+|              no2d [0x0000000000800000] Disable 2D tiling
+|          notiling [0x0000000001000000] Disable tiling
+|   nodisplaytiling [0x0000000002000000] Disable display tiling
+|      nodisplaydcc [0x0000000004000000] Disable display DCC
+|     noexporteddcc [0x0000000008000000] Disable DCC for all exported buffers (via DMABUF, etc.)
+|             nodcc [0x0000000010000000] Disable DCC.
+|        nodccclear [0x0000000020000000] Disable DCC fast clear.
+|        nodccstore [0x0000000040000000] Disable DCC stores
+|          dccstore [0x0000000080000000] Enable DCC stores
+|         nodccmsaa [0x0000000100000000] Disable DCC for MSAA
+|           nofmask [0x0000000200000000] Disable MSAA compression
+|             nodma [0x0000000400000000] Disable SDMA-copy for DRI_PRIME
+|      forcegfxblit [0x0000000800000000] Force the use of fragment shaders for image clears, copies, blits, and resolve.
+|  forcecomputeblit [0x0000001000000000] Force the use of compute shaders for image clears, copies, blits, and resolve.
+|    forcefastclear [0x0000002000000000] Force the use of image "fast clear" when possible. For debug only.
+|          extra_md [0x0000004000000000] Set UMD metadata for all textures and with additional fields for umr
+|               tmz [0x0000008000000000] Force allocation of scanout/depth/stencil buffer as encrypted
+|              sqtt [0x0000010000000000] Enable SQTT
+|   export_modifier [0x0000020000000000] Export real modifier instead of DRM_FORMAT_MOD_INVALID
+debug_parse_flags_option: help for AMD_DEBUG:
+|           vs [0x0000000000000001] Print vertex shaders
+|           ps [0x0000000000000010] Print pixel shaders
+|           gs [0x0000000000000008] Print geometry shaders
+|          tcs [0x0000000000000002] Print tessellation control shaders
+|          tes [0x0000000000000004] Print tessellation evaluation shaders
+|           cs [0x0000000000000020] Print compute shaders
+|           ts [0x0000000000000040] Print task shaders
+|           ms [0x0000000000000080] Print mesh shaders
+|      initnir [0x0000000000000100] Print initial input NIR when shaders are created
+|          nir [0x0000000000000200] Print final NIR after lowering when shader variants are created
+|     initllvm [0x0000000000000400] Print initial LLVM IR before optimizations
+|         llvm [0x0000000000000800] Print final LLVM IR
+|      initaco [0x0000000000001000] Print initial ACO IR before optimizations
+|          aco [0x0000000000002000] Print final ACO IR
+|          asm [0x0000000000004000] Print final shaders in asm
+|        stats [0x0000000000008000] Print shader-db stats to stderr
+|        w32ge [0x0000000000010000] Use Wave32 for vertex, tessellation, and geometry shaders.
+|        w32ps [0x0000000000020000] Use Wave32 for pixel shaders.
+|        w32cs [0x0000000000040000] Use Wave32 for computes shaders.
+|        w64ge [0x0000000000080000] Use Wave64 for vertex, tessellation, and geometry shaders.
+|        w64ps [0x0000000000100000] Use Wave64 for pixel shaders.
+|        w64cs [0x0000000000200000] Use Wave64 for computes shaders.
+|      checkir [0x0000000000400000] Enable additional sanity checks on shader IR
+|         mono [0x0000000000800000] Use old-style monolithic shaders compiled on demand
+| nooptvariant [0x0000000001000000] Disable compiling optimized shader variants.
+|      usellvm [0x0000000002000000] Use LLVM as shader compiler when possible
+debug_parse_flags_option: help for AMD_DEBUG:
+|         noefc [0x0000000000000001] Disable hardware based encoder colour format conversion.
+| lowlatencydec [0x0000000000000002] Enable low latency decoding.
+| lowlatencyenc [0x0000000000000004] Enable low latency encoding.
+| novideotiling [0x0000000000000008] Disable tiling for video.
+|    nodectier1 [0x0000000000000010] Disable tier1 for video decode.
+|    nodectier2 [0x0000000000000020] Disable tier2 for video decode.
+|    nodectier3 [0x0000000000000040] Disable tier3 for video decode.
+|    noenctier2 [0x0000000000000080] Disable tier2 for video encode.

@@ -1,0 +1,379 @@
+{
+  "date": "2026-10-16",
+  "status": "Five paired current-position shader-selection trials completed. User-authorized temporary production bypass remains enabled; no further production edit.",
+  "context": {
+    "renderer": "ANGLE (AMD, AMD Radeon 780M Graphics (radeonsi phoenix ACO), OpenGL ES 3.2)",
+    "graphics": {
+      "viewDistance": 6,
+      "ambientOcclusionEnabled": true,
+      "entityShadowMode": "shadow-maps",
+      "verticalFovDegrees": 75,
+      "textureFiltering": "anisotropic-2x",
+      "renderScale": 1,
+      "weatherEnabled": true
+    },
+    "viewport": {
+      "width": 1550,
+      "height": 935
+    },
+    "camera": {
+      "cameraGeneration": 1,
+      "sequence": 58,
+      "kind": "advanced",
+      "reason": null,
+      "clearance": {
+        "projectionRevision": 1,
+        "radius": 0.17907749116420746
+      },
+      "initialLandblockId": 1210974236,
+      "finalLandblockId": 1210974236,
+      "position": {
+        "landblockId": 1210974236,
+        "coords": {
+          "x": 87.61276245117188,
+          "y": 85.29227447509766,
+          "z": 9.424565315246582
+        }
+      }
+    },
+    "locationObserverRestored": true
+  },
+  "productionSourceHashes": {
+    "apps/holtburger-3d/src/lib/game/renderer/dynamic-depth-preparation.ts": "67156f7a492b83f0cc4cdf8a0bdbff691e5b5f22fca67115954c9805b1628c8c",
+    "apps/holtburger-3d/src/lib/game/renderer/entity-grounding.ts": "e158eb7c21bba37dbd8ab7ced6f4ab6e986db5e31a239348229676c830f51a02",
+    "apps/holtburger-3d/src/lib/game/renderer/object-rendering-policy.ts": "3dc83b914e5b5fb6ffd3e243b4d43a1547c46d34d4909e6a353d18b9e1082ab3",
+    "apps/holtburger-3d/src/lib/game/renderer/outdoor-pssm-casters.ts": "6bd14fe47e02c936eb11bd1ef17549178fe01a8669743028207ffcbdcd68d6fc",
+    "apps/holtburger-3d/src/lib/game/renderer/render-world.ts": "a7fb93a87eb00897e1f207152af78baeef7a9a17a598ae26f91584eecdb9801d",
+    "apps/holtburger-3d/src/lib/game/renderer/webgl2-particle-pass.ts": "f1d63c48a88ed665e31ded803ab03f434906d032c66d7b73263c53adff18edb9",
+    "apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts": "6ffa6ec08fb93a68d2329331d8ab2aae819276f102aed2f7245f4b4b370fb4d3",
+    "apps/holtburger-3d/src/lib/game/scene/index.ts": "e45857174f766fd4a4d4401f959e63aa42f5c15bf285cb7a4649ccf0501e8286",
+    "apps/holtburger-3d/src/lib/game/scene/scene-graph.ts": "acf9423f91873a6c155cc6610895ab763968ae1e4f475b39b2a2e6ed6576ca92"
+  },
+  "diagnosticJsAssets": {
+    "terrain-worker.entry-B8nvz7ku.js": "de7b009597e1726b8f95db41df51cb7032def7cc3dbbdae5bc25951d982f6d1f",
+    "static-object-geometry-worker.entry-CN3WfpC7.js": "00bde0c3daa199ab28e096f75c92c1f0a3be56f3eb48697ac45c521db4a01b3c",
+    "page-build-worker.entry-DJqo63P-.js": "11c928644d4c174aa279871f85adf91f41471257d98a212187e22e1d021a19bc",
+    "layout-worker.entry-cEKrDYXU.js": "cf37eb1e59b96333b6abba0cfd50af071a0bbd0cddffb6c0cf13bd048626d225",
+    "world-map-source-DOUM2wC2.js": "5994c80f6b0842074e4dd3b62f68bdf09ff28b48873f678ead5150b5c05519d5",
+    "ui-theme-DmDWGUJR.js": "63e4632e22342599a1cbc0fec5a4820442443f2cb455dcb4533e55406f1af362",
+    "steel-BPPckljP.js": "99957a0e35b947efe3f2c826fdc71cae9663d470877885cdfe106664d4cc31f9",
+    "preload-helper-HclGiUj8.js": "bba5840eec0028b00854bcd58fba80694d02d41e98417656424c05b26db7120c",
+    "portal-transition-controller-PwgqvXrn.js": "bcd87a63d9dd8f35bf2a9cda4463f0c15051e729fa80de445f5effb80231ba8f",
+    "pointer-gesture-DRdGIgNf.js": "e5704de443a5efa4cd750185e79476a6ed54687893fe2aa8fe914ac0d0e66224",
+    "opaque-CM9n52f3.js": "dec1f4c19f2d4435781829a9ac7bdf341d622c466b693f6a2f93ef3935bba450",
+    "object-preview-controller-ZcRooXQi.js": "d5bed3c38b45e5d96e6861730f9c58aea35077da4f24de9f63c81ae5986be5eb",
+    "mount-BOolN_uh.js": "7f953ca22e6bce54fa741d8b192d96df48a5d9ea49b8eac75750e5b4ab752c49",
+    "map-renderer-Dak_cLIh.js": "ba48e1bc92eef7961c39ac4041eccaed2702ea3ecc224a2d108b50618f4426a3",
+    "map-coordinates-DgfGYTP2.js": "b45949dfbf2a494074ad7e53bb4abe10b9a076b9f3885c06acfa0d8571026287",
+    "input-context-BkRXUxgH.js": "9c899d27796f2ad2f0038d964dbd1dc77fc4b06155d62e29eea901cdfc080569",
+    "game-presentation-owner-CLYwuVnc.js": "40b5755b92a176a49c5b4de85352a620efb1c8452506b2aedaadaa7a3e0f71dc",
+    "explorer-fixed-tick-LoBi6wSj.js": "4b7790e5279dc6083d211ce4ec6494b7ba72c8b3beb9a637009f003cab284404",
+    "explorer-camera-input-controller-Bk72pTGm.js": "79d70c8d36615adf13b5498945d53923064fad37e1320f646b697f18d70a61c6",
+    "client-tuning-D2xRF4P9.js": "60edb2f080be62ddf836bbefba8ce6c49101e31cac8af013461af9846231c399",
+    "client-object-inspection-WWU-eEq8.js": "9557b2bfd9a613994ca6b6b8490c66ce7b0c7a55037953f7fe1b35354707a36b",
+    "client-host-contract-CCD6WWgX.js": "5ca2b2c4847bb0a60c83563148542331efd88ff28f5dd376691dc6da39583079",
+    "client-DoqPiz2O.js": "0e03777aa2c0b181211134e7f031043d1b6ac023bbb4de6532f67d39da6563a7",
+    "binary-response-BTaM-rOL.js": "e3ad6d64a9c129409611be237a81ea47c4ab9f22b4397698aad86bf405e11139",
+    "base-DQVq1rlb.js": "418c206484b89b68ef5f067277831e583fc9193a62aadf4de269acaaeb12a85f",
+    "app-input-policy-context-DpJxm5LX.js": "b0e14a2f06487fc92e8adacb04301e90a91e03ce6aa18a09698012f98b35cf90",
+    "WorldMapHarness-C9T3WT5r.js": "c5a981f925ad202f749941a623dc7a17a739c4856df23032397e922bdfef0e77",
+    "UiThemeHarness-DVCjk4FZ.js": "d2cff8f70a865e68b178141b8d318833f2f94a8d4f66c8896ffa324eec8ce3b4",
+    "UiShowcase-CgOYC8sH.js": "0c0faf457477f9c434fd65581575c834459664315c813225d23e66184b4aa22c",
+    "ToggleField-Cb9ihpHP.js": "7eceb97c3be965ae15bc27041f4122f6e9bcfb8c8c76991a6266c5e889b0de16",
+    "Minimap-BNUZTMEd.js": "7236d7f28837371623f48a3780a183c12669ee8f87182a9cc320ae4140db2743",
+    "LayoutHandleIcon-BABkcQxH.js": "acefba45269fdf572b0db835914602f9b37ae303ecd543f0f2c86874d85c9e6e",
+    "ExplorerTexturePageModal-DMPfxAJB.js": "c259b2a6b7fd7d585f1283bd18c4837fc6fd33b827dfda33b25f98638a6ea74b",
+    "ClientWorldPanel-CkMiyIDk.js": "ee747d32dd1844d60792b5081a3e4a52ddf521c1805c9ebfec3dfce2168e3300",
+    "ClientShortcutDock-Cbs_zJ22.js": "09914f0e5575b2daccb7a0e53779e6108c13f964585dc2e7949a58294fa08c31",
+    "ClientHudWindow-Dk6DZYoa.js": "9b5b004d5c62e9257e225196c40b085dd0a08391bf4f96a4b8682f9f9d1f8507",
+    "ClientHudIcon-ArgXpR0w.js": "3f70217a2e2bfa0e20ddd8a0e113bda7caf51b9fdf31d95d82799d2bbac3b041",
+    "ClientHudHarness-BLrgQgDr.js": "9e3ca044556a8f5967df7d969a21278a3c3e988050dfd5e11f85f9040797c1a2",
+    "ClientCombatIndicatorSettings-BOsfgoyj.js": "a12cb650de02b9ca716e949ee5b014b29608bc07963ec8ce4881ce3ef8746a99",
+    "BrowserHarnessApp-CcM0CoZ0.js": "cb749c8dbd83cbfe3cb2d31c7d40fb2c2ad399cffe1a1a1d2c07cea772b2462a",
+    "explorer-DubXxkWd.js": "80ad581763e2d5233516ca2ff7620b03fb81b4cf51577579d6d1bf5ae7b360c0",
+    "client-BafOnoU9.js": "f0825f962043cccbe7a58b3affacdf903e8e7b3a96235cb8bfcd471e489a3b76",
+    "browserHarness-TE2djLzw.js": "612edc85c6b288f5776e592c2dddca4ee8f999794ed08ab5bdd60d3c564eb0ae"
+  },
+  "method": {
+    "build": "Ordinary production Vite config plus a disposable pre-transform replacing only the manual particle switch use with a per-frame diagnostic global. Output/launcher isolated under /tmp. Baseline supplies normal routing; bypass supplies null and selects the existing ordinary particle program. Both preserve earlier CPU fixes and the same current source.",
+    "sampling": "Five matched pairs; portal then bypass on even rounds, reverse on odd rounds. Each variant settles 1.5s then measures 4s. Both shader programs are warmed before timing.",
+    "camera": "Capture both particle programs and view/projection locations during warmup. Remove the uniform-location observer before timing. Query current mode matrices after each window, requiring exact equality to warmup view/projection. Host camera-path position also retained per window. Uniform queries are outside measurement windows.",
+    "overhead": "Only common diagnostic shader-selection global plus renderer phase profiling during measurement. No prototype draw/uniform forwarding hooks, V8 sampling, pixel readback, build or heavy analysis overlaps timing. GPU fields remain rolling phase snapshots, not full-window hardware utilization.",
+    "scene": "Same camera and quality, live server. Other actors and particle counts can change; full population ranges and within-pair differences retained.",
+    "cleanup": {
+      "bypassRestored": true,
+      "observerRestored": true,
+      "profilingDisabled": true
+    }
+  },
+  "warmup": {
+    "bypassCamera": {
+      "portal": false,
+      "view": [
+        0.9361748099327087,
+        0.06983919441699982,
+        -0.3445275127887726,
+        0,
+        0,
+        0.9800665974617004,
+        0.19866937398910522,
+        0,
+        0.35153478384017944,
+        -0.18598926067352295,
+        0.9175136685371399,
+        0,
+        -52.038299560546875,
+        -31.25030517578125,
+        106.55491638183594,
+        1
+      ],
+      "projection": [
+        0.786139190196991,
+        0,
+        0,
+        0,
+        0,
+        1.3032253980636597,
+        0,
+        0,
+        0,
+        0,
+        -1.000100016593933,
+        -1,
+        0,
+        0,
+        -0.2000100016593933,
+        0
+      ]
+    },
+    "portalCamera": {
+      "portal": true,
+      "view": [
+        0.9361748099327087,
+        0.06983919441699982,
+        -0.3445275127887726,
+        0,
+        0,
+        0.9800665974617004,
+        0.19866937398910522,
+        0,
+        0.35153478384017944,
+        -0.18598926067352295,
+        0.9175136685371399,
+        0,
+        -52.038299560546875,
+        -31.25030517578125,
+        106.55491638183594,
+        1
+      ],
+      "projection": [
+        0.786139190196991,
+        0,
+        0,
+        0,
+        0,
+        1.3032253980636597,
+        0,
+        0,
+        0,
+        0,
+        -1.000100016593933,
+        -1,
+        0,
+        0,
+        -0.2000100016593933,
+        0
+      ]
+    }
+  },
+  "timing": {
+    "portal": {
+      "frameWorkMs": {
+        "median": 6.297916666418314,
+        "min": 6.06779661244255,
+        "max": 6.6560165973619805
+      },
+      "rendererCpuMs": {
+        "median": 3.933050845386618,
+        "min": 3.7127118663767638,
+        "max": 4.240663901651549
+      },
+      "particleSubmissionCpuMs": {
+        "median": 0.3449999988079071,
+        "min": 0.30847457834219527,
+        "max": 0.35381355780666157
+      },
+      "particleGpuMs": {
+        "median": 1.7777873208333326,
+        "min": 1.6573742448132773,
+        "max": 2.0431744110169476
+      },
+      "gpuMs": {
+        "median": 7.708379354166668,
+        "min": 7.07593992116182,
+        "max": 7.948874521186443
+      },
+      "observedFps": {
+        "median": 59.89518342899925,
+        "min": 58.8235294117647,
+        "max": 60.05482182905557
+      },
+      "visibleDynamicEntities": {
+        "median": 215,
+        "min": 215,
+        "max": 220
+      },
+      "particleBatches": {
+        "median": 227,
+        "min": 227,
+        "max": 252
+      },
+      "particleInstances": {
+        "median": 668,
+        "min": 639,
+        "max": 946
+      },
+      "selectedCrossings": {
+        "median": 4,
+        "min": 4,
+        "max": 4
+      },
+      "selectedScopes": {
+        "median": 7,
+        "min": 7,
+        "max": 7
+      }
+    },
+    "bypass": {
+      "frameWorkMs": {
+        "median": 6.387500000993411,
+        "min": 5.903404255116239,
+        "max": 7.008898306701143
+      },
+      "rendererCpuMs": {
+        "median": 4.029166668901841,
+        "min": 3.6719148957982974,
+        "max": 4.410788381248095
+      },
+      "particleSubmissionCpuMs": {
+        "median": 0.3337500005960464,
+        "min": 0.29617021337468574,
+        "max": 0.35550847346499814
+      },
+      "particleGpuMs": {
+        "median": 1.0338178680851065,
+        "min": 1.003050170124481,
+        "max": 1.2998617966101698
+      },
+      "gpuMs": {
+        "median": 7.025557944680852,
+        "min": 6.588884099585062,
+        "max": 7.094688149999998
+      },
+      "observedFps": {
+        "median": 59.880239520958085,
+        "min": 58.55968103663095,
+        "max": 60.039860488290984
+      },
+      "visibleDynamicEntities": {
+        "median": 215,
+        "min": 214,
+        "max": 220
+      },
+      "particleBatches": {
+        "median": 227,
+        "min": 227,
+        "max": 229
+      },
+      "particleInstances": {
+        "median": 646,
+        "min": 639,
+        "max": 667
+      },
+      "selectedCrossings": {
+        "median": 4,
+        "min": 4,
+        "max": 4
+      },
+      "selectedScopes": {
+        "median": 7,
+        "min": 7,
+        "max": 7
+      }
+    }
+  },
+  "pairedPortalMinusBypass": {
+    "frameWorkMs": {
+      "median": -0.008686441014715385,
+      "min": -0.9411016942585926,
+      "max": 0.3945124113020748,
+      "positiveRounds": 2
+    },
+    "rendererCpuMs": {
+      "median": -0.09611582351522241,
+      "min": -0.6203389829498223,
+      "max": 0.27600177235848555,
+      "positiveRounds": 2
+    },
+    "particleSubmissionCpuMs": {
+      "median": 0.020063557210615146,
+      "min": -0.04703389512280287,
+      "max": 0.04882978543322136,
+      "positiveRounds": 3
+    },
+    "particleGpuMs": {
+      "median": 0.7439694527482261,
+      "min": 0.39902254661016934,
+      "max": 0.9590749610169478,
+      "positiveRounds": 5
+    },
+    "gpuMs": {
+      "median": 0.7434081428191481,
+      "min": 0.48705582157675753,
+      "max": 0.8541863711864455,
+      "positiveRounds": 5
+    },
+    "observedFps": {
+      "median": 0.014961340764585884,
+      "min": -1.0716540172345503,
+      "max": 1.335502392368305,
+      "positiveRounds": 4
+    },
+    "visibleDynamicEntities": {
+      "median": 1,
+      "min": -5,
+      "max": 6,
+      "positiveRounds": 3
+    },
+    "particleBatches": {
+      "median": 0,
+      "min": -2,
+      "max": 23,
+      "positiveRounds": 1
+    },
+    "particleInstances": {
+      "median": 20,
+      "min": 0,
+      "max": 279,
+      "positiveRounds": 4
+    },
+    "selectedCrossings": {
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "positiveRounds": 0
+    },
+    "selectedScopes": {
+      "median": 0,
+      "min": 0,
+      "max": 0,
+      "positiveRounds": 0
+    }
+  },
+  "limits": [
+    "Output equivalence is intentionally not asserted: global particle portal clipping is disabled at user request. Prior user report found no apparent issue in their earlier manual view, not every possible location.",
+    "Position and orientation differ from earlier captures; compare causal timing within this run only.",
+    "Near-refresh-cap FPS and overlapping CPU/GPU work limit interpretation; do not sum phase savings or promise equivalent gains in other scenes.",
+    "No agent visual acceptance or new permanent visibility policy implemented."
+  ]
+}

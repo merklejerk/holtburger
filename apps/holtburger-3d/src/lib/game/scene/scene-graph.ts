@@ -36,6 +36,7 @@ import type {
 	SceneSpatialPlacement,
 	VisibleScene,
 	SceneCullingGroupFilter,
+	SceneNodeFilter,
 } from ".";
 import { cellContainsLandblockPoint } from "./cell-containment";
 import { scopeFor, sameScope, scopeKey } from "./scope";
@@ -222,13 +223,13 @@ export class SceneGraph {
 		};
 	}
 
-	/** Return one bounded node's colocated local envelope and resolved placement. */
-	getResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null {
+	/** Borrow bounds and placement synchronously; do not mutate or retain across scene changes. */
+	readResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null {
 		const node = this.#nodes.get(nodeId);
 		if (!node?.localBounds) return null;
 		return {
-			localBounds: node.localBounds.clone(),
-			placement: copyResolvedPlacement(node.resolved.placement),
+			localBounds: node.localBounds,
+			placement: node.resolved.placement,
 		};
 	}
 
@@ -440,13 +441,19 @@ export class SceneGraph {
 		anchorLandblockId: ScenePlacement["landblockId"],
 		scopes: readonly SceneScope[],
 		cullingGroupFilter: SceneCullingGroupFilter,
+		nodeFilter: SceneNodeFilter | null,
 	): VisibleScene {
 		this.#selectedScopeKeys.clear();
 		for (const scope of scopes) {
 			this.#requireResidentScope(scope);
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}
-		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter);
+		this.#selectEntries(
+			frustum,
+			anchorLandblockId,
+			cullingGroupFilter,
+			nodeFilter,
+		);
 		return this.#visibleScene;
 	}
 
@@ -466,7 +473,7 @@ export class SceneGraph {
 			this.#requireResidentScope(scope);
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}
-		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter);
+		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter, null);
 		return this.#visibleScene;
 	}
 
@@ -481,7 +488,7 @@ export class SceneGraph {
 		for (const { scope } of this.#envCellScopes.values()) {
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}
-		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter);
+		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter, null);
 		return this.#visibleScene;
 	}
 
@@ -535,6 +542,7 @@ export class SceneGraph {
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
 		cullingGroupFilter: SceneCullingGroupFilter,
+		nodeFilter: SceneNodeFilter | null,
 	): void {
 		this.#visibleEntries.length = 0;
 		this.#visibleEntryIds.clear();
@@ -556,6 +564,7 @@ export class SceneGraph {
 					)
 						continue;
 					for (const nodeId of group.entries) {
+						if (nodeFilter !== null && !nodeFilter(nodeId)) continue;
 						const entry = this.#spatialEntries.get(nodeId);
 						if (
 							entry &&

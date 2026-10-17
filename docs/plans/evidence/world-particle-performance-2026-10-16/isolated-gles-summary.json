@@ -1,0 +1,3514 @@
+{
+  "date": "2026-10-16",
+  "backend": "ANGLE (AMD, AMD Radeon 780M Graphics (radeonsi phoenix ACO), OpenGL ES 3.2)",
+  "productionSourceChanges": false,
+  "method": "Freeze application requestAnimationFrame callbacks after capturing all 206 dominant draws in one frame. Retain actual GPU mesh/records/material/samplers/portal metadata/envelope in the original GLES context; copy scene RGBA8 color and DEPTH_COMPONENT24 depth before the first dominant draw to a private framebuffer. Replay only captured dominant draws, resetting background color outside each elapsed GPU query. No DAT assets or pixel arrays exported.",
+  "timingContract": "EXT_disjoint_timer_query_webgl2; each sample times replay draw/uniform commands only, excludes background reset and readback. Eight warm-up replays discarded per window. No disjoint samples or GL errors accepted. Window means summarized by median/min/max, not a live FPS comparison.",
+  "captures": {
+    "first": {
+      "viewport": [
+        1499,
+        884
+      ],
+      "rect": [
+        460,
+        483,
+        1127,
+        592
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": null,
+      "variants": {
+        "normal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.85411835,
+            "min": 4.85164565,
+            "max": 4.866524825
+          },
+          "windowMeans": [
+            4.866524825,
+            4.85164565,
+            4.864402875,
+            4.85411835,
+            4.851810975
+          ]
+        },
+        "region": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.818841325,
+            "min": 4.79162955,
+            "max": 4.844443925
+          },
+          "windowMeans": [
+            4.818841325,
+            4.80482265,
+            4.82427865,
+            4.844443925,
+            4.79162955
+          ]
+        },
+        "direct-envelope": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.840852125,
+            "min": 4.7789886500000005,
+            "max": 4.85879015
+          },
+          "windowMeans": [
+            4.840852125,
+            4.828841275,
+            4.8550872,
+            4.85879015,
+            4.7789886500000005
+          ]
+        },
+        "region-direct": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.81344505,
+            "min": 4.7544208,
+            "max": 4.824763475
+          },
+          "windowMeans": [
+            4.7544208,
+            4.81344505,
+            4.810950325,
+            4.81562015,
+            4.824763475
+          ]
+        },
+        "no-portal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 2.486541925,
+            "min": 2.471580475,
+            "max": 2.530069625
+          },
+          "windowMeans": [
+            2.471580475,
+            2.525197425,
+            2.530069625,
+            2.486541925,
+            2.474867775
+          ]
+        },
+        "normal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 11.644095325,
+            "min": 11.644095325,
+            "max": 11.644095325
+          },
+          "windowMeans": [
+            11.644095325
+          ]
+        },
+        "no-portal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 5.6865009,
+            "min": 5.6865009,
+            "max": 5.6865009
+          },
+          "windowMeans": [
+            5.6865009
+          ]
+        }
+      }
+    },
+    "expanded": {
+      "viewport": [
+        1501,
+        887
+      ],
+      "rect": [
+        460,
+        485,
+        1129,
+        594
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "coordinate-kill",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": {
+        "unsafePixels": 0,
+        "finitePixels": 7956,
+        "uncoveredPixels": 0
+      },
+      "validation": null,
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.031644625,
+            "min": 4.995506,
+            "max": 5.048999291666667
+          },
+          "windowMeans": [
+            5.048999291666667,
+            5.031644625,
+            4.995506
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.949862541666667,
+            "min": 4.948459916666667,
+            "max": 4.965799583333333
+          },
+          "windowMeans": [
+            4.948459916666667,
+            4.949862541666667,
+            4.965799583333333
+          ]
+        },
+        "direct-envelope": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.021735791666667,
+            "min": 4.997798708333334,
+            "max": 5.070672125
+          },
+          "windowMeans": [
+            5.070672125,
+            5.021735791666667,
+            4.997798708333334
+          ]
+        },
+        "region-direct": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.942901,
+            "min": 4.937723,
+            "max": 4.949346625
+          },
+          "windowMeans": [
+            4.942901,
+            4.937723,
+            4.949346625
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.740266041666667,
+            "min": 4.729106458333334,
+            "max": 4.7682174999999996
+          },
+          "windowMeans": [
+            4.7682174999999996,
+            4.729106458333334,
+            4.740266041666667
+          ]
+        },
+        "zero-alpha": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.037245416666667,
+            "min": 4.980709458333333,
+            "max": 5.076912291666667
+          },
+          "windowMeans": [
+            5.076912291666667,
+            4.980709458333333,
+            5.037245416666667
+          ]
+        },
+        "region-zero-alpha": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.953773208333334,
+            "min": 4.949161208333333,
+            "max": 4.965129916666666
+          },
+          "windowMeans": [
+            4.949161208333333,
+            4.965129916666666,
+            4.953773208333334
+          ]
+        },
+        "coordinate-kill": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.779953083333333,
+            "min": 4.7352515,
+            "max": 4.7980707916666665
+          },
+          "windowMeans": [
+            4.779953083333333,
+            4.7980707916666665,
+            4.7352515
+          ]
+        },
+        "batch-normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.007543916666667,
+            "min": 4.911306,
+            "max": 5.040608291666667
+          },
+          "windowMeans": [
+            5.007543916666667,
+            5.040608291666667,
+            4.911306
+          ]
+        },
+        "batch-region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.003997083333333,
+            "min": 4.877967791666666,
+            "max": 5.0459902083333334
+          },
+          "windowMeans": [
+            5.0459902083333334,
+            4.877967791666666,
+            5.003997083333333
+          ]
+        },
+        "batch-no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.814029541666667,
+            "min": 4.745865,
+            "max": 4.820470041666667
+          },
+          "windowMeans": [
+            4.745865,
+            4.820470041666667,
+            4.814029541666667
+          ]
+        },
+        "color-normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.955755458333333,
+            "min": 4.829483875,
+            "max": 4.965066541666666
+          },
+          "windowMeans": [
+            4.965066541666666,
+            4.829483875,
+            4.955755458333333
+          ]
+        },
+        "color-region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.937519125,
+            "min": 4.932539625,
+            "max": 4.943228333333334
+          },
+          "windowMeans": [
+            4.943228333333334,
+            4.937519125,
+            4.932539625
+          ]
+        },
+        "color-direct-envelope": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.960990375,
+            "min": 4.955700291666667,
+            "max": 4.983625
+          },
+          "windowMeans": [
+            4.955700291666667,
+            4.983625,
+            4.960990375
+          ]
+        },
+        "color-region-direct": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.954965583333333,
+            "min": 4.950618958333333,
+            "max": 4.999628833333333
+          },
+          "windowMeans": [
+            4.950618958333333,
+            4.999628833333333,
+            4.954965583333333
+          ]
+        },
+        "color-no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.769955833333333,
+            "min": 4.714171416666667,
+            "max": 4.778316583333333
+          },
+          "windowMeans": [
+            4.778316583333333,
+            4.769955833333333,
+            4.714171416666667
+          ]
+        },
+        "normal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 16.79174785,
+            "min": 16.79174785,
+            "max": 16.79174785
+          },
+          "windowMeans": [
+            16.79174785
+          ]
+        },
+        "no-portal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 9.6668245,
+            "min": 9.6668245,
+            "max": 9.6668245
+          },
+          "windowMeans": [
+            9.6668245
+          ]
+        }
+      }
+    },
+    "narrow": {
+      "viewport": [
+        1502,
+        888
+      ],
+      "rect": [
+        461,
+        485,
+        1130,
+        594
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "coordinate-kill",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 147711,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 5.017431,
+            "min": 4.986498833333333,
+            "max": 5.068391041666667
+          },
+          "windowMeans": [
+            5.003080416666666,
+            5.047280958333333,
+            5.068391041666667,
+            4.986498833333333,
+            5.017431
+          ]
+        },
+        "region": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.915649208333333,
+            "min": 4.895352375,
+            "max": 4.921876
+          },
+          "windowMeans": [
+            4.895352375,
+            4.921876,
+            4.910210583333334,
+            4.916811458333333,
+            4.915649208333333
+          ]
+        },
+        "direct-envelope": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 5.0213150833333335,
+            "min": 4.9989207916666665,
+            "max": 5.0776554166666665
+          },
+          "windowMeans": [
+            5.017258916666667,
+            5.0776554166666665,
+            4.9989207916666665,
+            5.0577642916666665,
+            5.0213150833333335
+          ]
+        },
+        "region-direct": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.921006,
+            "min": 4.906159416666666,
+            "max": 4.944151791666667
+          },
+          "windowMeans": [
+            4.906159416666666,
+            4.944151791666667,
+            4.921006,
+            4.907318416666667,
+            4.936061333333333
+          ]
+        },
+        "no-portal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.74653625,
+            "min": 4.714538833333333,
+            "max": 4.7731485
+          },
+          "windowMeans": [
+            4.714538833333333,
+            4.749902625,
+            4.74653625,
+            4.7731485,
+            4.718509666666667
+          ]
+        },
+        "zero-alpha": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.997088916666667,
+            "min": 4.8996805,
+            "max": 5.011102208333333
+          },
+          "windowMeans": [
+            4.997088916666667,
+            4.9911075,
+            5.005150958333333,
+            4.8996805,
+            5.011102208333333
+          ]
+        },
+        "region-zero-alpha": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.9411811666666665,
+            "min": 4.9245494999999995,
+            "max": 4.943457
+          },
+          "windowMeans": [
+            4.94312475,
+            4.9411811666666665,
+            4.943457,
+            4.93973,
+            4.9245494999999995
+          ]
+        },
+        "coordinate-kill": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.7466882083333335,
+            "min": 4.734593583333333,
+            "max": 4.754628333333333
+          },
+          "windowMeans": [
+            4.754628333333333,
+            4.7466882083333335,
+            4.734593583333333,
+            4.750984625,
+            4.7406485
+          ]
+        },
+        "batch-normal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 5.218214,
+            "min": 5.016637791666667,
+            "max": 5.433277791666667
+          },
+          "windowMeans": [
+            5.36722725,
+            5.071119583333333,
+            5.433277791666667,
+            5.218214,
+            5.016637791666667
+          ]
+        },
+        "batch-region": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.981938583333333,
+            "min": 4.911010541666666,
+            "max": 5.113909291666666
+          },
+          "windowMeans": [
+            4.979760958333333,
+            5.113909291666666,
+            4.981938583333333,
+            4.997842166666667,
+            4.911010541666666
+          ]
+        },
+        "batch-no-portal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.923298708333333,
+            "min": 4.907543833333333,
+            "max": 5.0205335416666665
+          },
+          "windowMeans": [
+            4.911897083333333,
+            4.923298708333333,
+            5.0103942083333335,
+            4.907543833333333,
+            5.0205335416666665
+          ]
+        },
+        "normal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 16.6200556,
+            "min": 16.6200556,
+            "max": 16.6200556
+          },
+          "windowMeans": [
+            16.6200556
+          ]
+        },
+        "no-portal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 12.16534565,
+            "min": 12.16534565,
+            "max": 12.16534565
+          },
+          "windowMeans": [
+            12.16534565
+          ]
+        }
+      }
+    },
+    "minimal-repeat": {
+      "viewport": [
+        1503,
+        889
+      ],
+      "rect": [
+        461,
+        486,
+        1131,
+        595
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 146284,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.980866175,
+            "min": 4.9343948,
+            "max": 4.995324575
+          },
+          "windowMeans": [
+            4.995324575,
+            4.976435775,
+            4.986377675,
+            4.9343948,
+            4.980866175
+          ]
+        },
+        "region": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.93237505,
+            "min": 4.9207168249999995,
+            "max": 4.96223975
+          },
+          "windowMeans": [
+            4.96223975,
+            4.9207168249999995,
+            4.93237505,
+            4.9562785,
+            4.9298092
+          ]
+        },
+        "direct-envelope": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.95109255,
+            "min": 4.88959275,
+            "max": 4.969478475
+          },
+          "windowMeans": [
+            4.88959275,
+            4.9508361,
+            4.955899775,
+            4.95109255,
+            4.969478475
+          ]
+        },
+        "region-direct": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 4.9286779,
+            "min": 4.8988132250000005,
+            "max": 4.952255775
+          },
+          "windowMeans": [
+            4.8988132250000005,
+            4.9286779,
+            4.952255775,
+            4.9222428,
+            4.951576425
+          ]
+        },
+        "no-portal": {
+          "windows": 5,
+          "windowMeanGpuMs": {
+            "median": 2.5511275749999998,
+            "min": 2.54851465,
+            "max": 2.56902365
+          },
+          "windowMeans": [
+            2.5510895749999998,
+            2.56902365,
+            2.5511275749999998,
+            2.54851465,
+            2.5689015
+          ]
+        },
+        "normal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 11.40641865,
+            "min": 11.40641865,
+            "max": 11.40641865
+          },
+          "windowMeans": [
+            11.40641865
+          ]
+        },
+        "no-portal / depth disabled": {
+          "windows": 1,
+          "windowMeanGpuMs": {
+            "median": 7.846551,
+            "min": 7.846551,
+            "max": 7.846551
+          },
+          "windowMeans": [
+            7.846551
+          ]
+        }
+      }
+    }
+  },
+  "phased": [
+    {
+      "stage": "minimal",
+      "viewport": [
+        1505,
+        890
+      ],
+      "rect": [
+        461,
+        486,
+        1132,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148298,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.92192740625,
+            "min": 4.9112409375,
+            "max": 4.93694084375
+          },
+          "windowMeans": [
+            4.9112409375,
+            4.92192740625,
+            4.93694084375
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.879895125,
+            "min": 4.8739701250000005,
+            "max": 4.88458396875
+          },
+          "windowMeans": [
+            4.88458396875,
+            4.879895125,
+            4.8739701250000005
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 2.5297735625,
+            "min": 2.49220346875,
+            "max": 2.550106
+          },
+          "windowMeans": [
+            2.5297735625,
+            2.550106,
+            2.49220346875
+          ]
+        }
+      }
+    },
+    {
+      "stage": "narrow",
+      "viewport": [
+        1505,
+        890
+      ],
+      "rect": [
+        461,
+        486,
+        1132,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "coordinate-kill",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148298,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.02281409375,
+            "min": 5.01130090625,
+            "max": 5.037587125
+          },
+          "windowMeans": [
+            5.02281409375,
+            5.037587125,
+            5.01130090625
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.926234375,
+            "min": 4.9257334375,
+            "max": 4.95449809375
+          },
+          "windowMeans": [
+            4.9257334375,
+            4.926234375,
+            4.95449809375
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.748380125,
+            "min": 4.7384851875,
+            "max": 4.7746388125
+          },
+          "windowMeans": [
+            4.7746388125,
+            4.7384851875,
+            4.748380125
+          ]
+        },
+        "zero-alpha": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.0484466875,
+            "min": 5.0096140625,
+            "max": 5.0842445
+          },
+          "windowMeans": [
+            5.0842445,
+            5.0484466875,
+            5.0096140625
+          ]
+        },
+        "region-zero-alpha": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.93612565625,
+            "min": 4.9089264375,
+            "max": 4.97210396875
+          },
+          "windowMeans": [
+            4.93612565625,
+            4.97210396875,
+            4.9089264375
+          ]
+        },
+        "coordinate-kill": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.758781125,
+            "min": 4.7401245,
+            "max": 4.7835608125
+          },
+          "windowMeans": [
+            4.758781125,
+            4.7835608125,
+            4.7401245
+          ]
+        },
+        "batch-normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.0664795937500005,
+            "min": 4.9259750625,
+            "max": 5.07729640625
+          },
+          "windowMeans": [
+            4.9259750625,
+            5.0664795937500005,
+            5.07729640625
+          ]
+        },
+        "batch-region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.9131558125,
+            "min": 4.7646711875,
+            "max": 5.0100899375
+          },
+          "windowMeans": [
+            5.0100899375,
+            4.7646711875,
+            4.9131558125
+          ]
+        },
+        "batch-no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.77905340625,
+            "min": 4.7082201875,
+            "max": 4.78465290625
+          },
+          "windowMeans": [
+            4.7082201875,
+            4.77905340625,
+            4.78465290625
+          ]
+        }
+      }
+    },
+    {
+      "stage": "expanded",
+      "viewport": [
+        1505,
+        890
+      ],
+      "rect": [
+        461,
+        486,
+        1132,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "coordinate-kill",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "color-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": {
+        "unsafePixels": 0,
+        "finitePixels": 7999,
+        "uncoveredPixels": 0
+      },
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148298,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.024771625,
+            "min": 4.9827418125,
+            "max": 5.0936925625
+          },
+          "windowMeans": [
+            5.024771625,
+            4.9827418125,
+            5.0936925625
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.9610029375,
+            "min": 4.9121776875,
+            "max": 5.066409375
+          },
+          "windowMeans": [
+            4.9121776875,
+            5.066409375,
+            4.9610029375
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.73604553125,
+            "min": 4.71866371875,
+            "max": 4.75344228125
+          },
+          "windowMeans": [
+            4.71866371875,
+            4.75344228125,
+            4.73604553125
+          ]
+        },
+        "color-normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.9609453125,
+            "min": 4.85808609375,
+            "max": 4.9611544375
+          },
+          "windowMeans": [
+            4.9609453125,
+            4.9611544375,
+            4.85808609375
+          ]
+        },
+        "color-region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.921866,
+            "min": 4.65408715625,
+            "max": 4.9347454375
+          },
+          "windowMeans": [
+            4.9347454375,
+            4.921866,
+            4.65408715625
+          ]
+        },
+        "color-no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.7583841875,
+            "min": 4.73083565625,
+            "max": 4.81475134375
+          },
+          "windowMeans": [
+            4.73083565625,
+            4.7583841875,
+            4.81475134375
+          ]
+        }
+      }
+    },
+    {
+      "stage": "minimal-again",
+      "viewport": [
+        1505,
+        890
+      ],
+      "rect": [
+        461,
+        486,
+        1132,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148298,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.260274,
+            "min": 5.179002125,
+            "max": 5.30448796875
+          },
+          "windowMeans": [
+            5.179002125,
+            5.260274,
+            5.30448796875
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.8607725625,
+            "min": 4.5655590625,
+            "max": 4.986536375
+          },
+          "windowMeans": [
+            4.8607725625,
+            4.986536375,
+            4.5655590625
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.934821875,
+            "min": 4.93341428125,
+            "max": 4.95018484375
+          },
+          "windowMeans": [
+            4.934821875,
+            4.93341428125,
+            4.95018484375
+          ]
+        }
+      }
+    }
+  ],
+  "telemetry": [
+    {
+      "stage": "minimal",
+      "viewport": [
+        1506,
+        891
+      ],
+      "rect": [
+        462,
+        487,
+        1133,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148693,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.9523426875,
+            "min": 4.809287125,
+            "max": 4.95650184375
+          },
+          "windowMeans": [
+            4.95650184375,
+            4.809287125,
+            4.9523426875
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.9228015625,
+            "min": 4.9005981875,
+            "max": 4.931051
+          },
+          "windowMeans": [
+            4.9228015625,
+            4.9005981875,
+            4.931051
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 2.5161239375,
+            "min": 2.5155915625,
+            "max": 2.540322375
+          },
+          "windowMeans": [
+            2.5155915625,
+            2.540322375,
+            2.5161239375
+          ]
+        }
+      },
+      "perWindowTelemetry": [
+        {
+          "round": 0,
+          "label": "normal",
+          "gpuMeanMs": 4.95650184375,
+          "cpuSubmitMeanMs": 0.09687500260770321,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 10341000,
+            "min": 10030000,
+            "max": 20479000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 29,
+            "min": 26,
+            "max": 33
+          }
+        },
+        {
+          "round": 0,
+          "label": "region",
+          "gpuMeanMs": 4.9228015625,
+          "cpuSubmitMeanMs": 0.12499999813735485,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15426500.0,
+            "min": 10528000,
+            "max": 20544000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 39.5,
+            "min": 35,
+            "max": 43
+          }
+        },
+        {
+          "round": 0,
+          "label": "no-portal",
+          "gpuMeanMs": 2.5155915625,
+          "cpuSubmitMeanMs": 0.0937499962747097,
+          "samples": 2,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14831000.0,
+            "min": 11197000,
+            "max": 18465000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 46.0,
+            "min": 45,
+            "max": 47
+          }
+        },
+        {
+          "round": 1,
+          "label": "no-portal",
+          "gpuMeanMs": 2.540322375,
+          "cpuSubmitMeanMs": 0.11874999664723873,
+          "samples": 2,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 17015000.0,
+            "min": 13490000,
+            "max": 20540000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 49.0,
+            "min": 48,
+            "max": 50
+          }
+        },
+        {
+          "round": 1,
+          "label": "region",
+          "gpuMeanMs": 4.9005981875,
+          "cpuSubmitMeanMs": 0.09999999590218067,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 18252000,
+            "min": 18023000,
+            "max": 18462000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 52,
+            "min": 51,
+            "max": 53
+          }
+        },
+        {
+          "round": 1,
+          "label": "normal",
+          "gpuMeanMs": 4.809287125,
+          "cpuSubmitMeanMs": 0.08750000409781933,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 891000000
+          },
+          "powerMicrowatts": {
+            "median": 18164500.0,
+            "min": 14658000,
+            "max": 18923000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 56.5,
+            "min": 55,
+            "max": 58
+          }
+        },
+        {
+          "round": 2,
+          "label": "normal",
+          "gpuMeanMs": 4.9523426875,
+          "cpuSubmitMeanMs": 0.10000000707805157,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14510000,
+            "min": 12650000,
+            "max": 18388000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 60,
+            "min": 59,
+            "max": 60
+          }
+        },
+        {
+          "round": 2,
+          "label": "region",
+          "gpuMeanMs": 4.931051,
+          "cpuSubmitMeanMs": 0.06562500260770321,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 19076000.0,
+            "min": 18500000,
+            "max": 22136000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 61.5,
+            "min": 61,
+            "max": 63
+          }
+        },
+        {
+          "round": 2,
+          "label": "no-portal",
+          "gpuMeanMs": 2.5161239375,
+          "cpuSubmitMeanMs": 0.07500000298023224,
+          "samples": 2,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 18214000.0,
+            "min": 17100000,
+            "max": 19328000
+          },
+          "temperatureMilliC": {
+            "median": 55000.0,
+            "min": 55000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 63.0,
+            "min": 63,
+            "max": 63
+          }
+        }
+      ]
+    },
+    {
+      "stage": "zero-controls",
+      "viewport": [
+        1506,
+        891
+      ],
+      "rect": [
+        462,
+        487,
+        1133,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "coordinate-kill",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148693,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.08459384375,
+            "min": 5.05112915625,
+            "max": 5.0981234375
+          },
+          "windowMeans": [
+            5.0981234375,
+            5.08459384375,
+            5.05112915625
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.93017440625,
+            "min": 4.9237245625,
+            "max": 4.958389125
+          },
+          "windowMeans": [
+            4.93017440625,
+            4.9237245625,
+            4.958389125
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.78282190625,
+            "min": 4.77364825,
+            "max": 4.7841819375
+          },
+          "windowMeans": [
+            4.78282190625,
+            4.7841819375,
+            4.77364825
+          ]
+        },
+        "zero-alpha": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.08633346875,
+            "min": 5.0632935,
+            "max": 5.08778996875
+          },
+          "windowMeans": [
+            5.08633346875,
+            5.08778996875,
+            5.0632935
+          ]
+        },
+        "region-zero-alpha": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.93500478125,
+            "min": 4.7879979375,
+            "max": 4.9401870625
+          },
+          "windowMeans": [
+            4.9401870625,
+            4.93500478125,
+            4.7879979375
+          ]
+        },
+        "coordinate-kill": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.7601175,
+            "min": 4.75966284375,
+            "max": 4.77390121875
+          },
+          "windowMeans": [
+            4.7601175,
+            4.75966284375,
+            4.77390121875
+          ]
+        }
+      },
+      "perWindowTelemetry": [
+        {
+          "round": 0,
+          "label": "normal",
+          "gpuMeanMs": 5.0981234375,
+          "cpuSubmitMeanMs": 0.06874999962747097,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 17362000.0,
+            "min": 13471000,
+            "max": 19854000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 55.5,
+            "min": 54,
+            "max": 57
+          }
+        },
+        {
+          "round": 0,
+          "label": "region",
+          "gpuMeanMs": 4.93017440625,
+          "cpuSubmitMeanMs": 0.09375000558793545,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14063500.0,
+            "min": 12633000,
+            "max": 15394000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 59.5,
+            "min": 59,
+            "max": 60
+          }
+        },
+        {
+          "round": 0,
+          "label": "no-portal",
+          "gpuMeanMs": 4.78282190625,
+          "cpuSubmitMeanMs": 0.10312500596046448,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15957000,
+            "min": 13432000,
+            "max": 18488000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 61,
+            "min": 61,
+            "max": 62
+          }
+        },
+        {
+          "round": 0,
+          "label": "zero-alpha",
+          "gpuMeanMs": 5.08633346875,
+          "cpuSubmitMeanMs": 0.10625000298023224,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 847000000
+          },
+          "powerMicrowatts": {
+            "median": 13084000.0,
+            "min": 9586000,
+            "max": 18683000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 63.0,
+            "min": 63,
+            "max": 64
+          }
+        },
+        {
+          "round": 0,
+          "label": "region-zero-alpha",
+          "gpuMeanMs": 4.9401870625,
+          "cpuSubmitMeanMs": 0.09999999962747097,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 18395000,
+            "min": 16543000,
+            "max": 18556000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 64,
+            "min": 64,
+            "max": 65
+          }
+        },
+        {
+          "round": 0,
+          "label": "coordinate-kill",
+          "gpuMeanMs": 4.7601175,
+          "cpuSubmitMeanMs": 0.08125000074505806,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 16538000.0,
+            "min": 13025000,
+            "max": 17406000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 65.0,
+            "min": 65,
+            "max": 65
+          }
+        },
+        {
+          "round": 1,
+          "label": "coordinate-kill",
+          "gpuMeanMs": 4.75966284375,
+          "cpuSubmitMeanMs": 0.05625000037252903,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 13718000,
+            "min": 8617000,
+            "max": 15322000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 65,
+            "min": 65,
+            "max": 66
+          }
+        },
+        {
+          "round": 1,
+          "label": "region-zero-alpha",
+          "gpuMeanMs": 4.93500478125,
+          "cpuSubmitMeanMs": 0.08124999701976776,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14289000.0,
+            "min": 9677000,
+            "max": 16246000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 66.0,
+            "min": 66,
+            "max": 66
+          }
+        },
+        {
+          "round": 1,
+          "label": "zero-alpha",
+          "gpuMeanMs": 5.08778996875,
+          "cpuSubmitMeanMs": 0.08437500521540642,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 17157000,
+            "min": 16532000,
+            "max": 17725000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 67,
+            "min": 67,
+            "max": 67
+          }
+        },
+        {
+          "round": 1,
+          "label": "no-portal",
+          "gpuMeanMs": 4.7841819375,
+          "cpuSubmitMeanMs": 0.07812499813735485,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14304000.0,
+            "min": 12107000,
+            "max": 15834000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 67.0,
+            "min": 67,
+            "max": 67
+          }
+        },
+        {
+          "round": 1,
+          "label": "region",
+          "gpuMeanMs": 4.9237245625,
+          "cpuSubmitMeanMs": 0.08750000596046448,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 11083000,
+            "min": 9791000,
+            "max": 11509000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 67,
+            "min": 67,
+            "max": 67
+          }
+        },
+        {
+          "round": 1,
+          "label": "normal",
+          "gpuMeanMs": 5.08459384375,
+          "cpuSubmitMeanMs": 0.08437499217689037,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14282500.0,
+            "min": 7531000,
+            "max": 16813000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 67,
+            "max": 68
+          }
+        },
+        {
+          "round": 2,
+          "label": "normal",
+          "gpuMeanMs": 5.05112915625,
+          "cpuSubmitMeanMs": 0.08437499031424522,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15403000,
+            "min": 15064000,
+            "max": 19645000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 68,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 2,
+          "label": "region",
+          "gpuMeanMs": 4.958389125,
+          "cpuSubmitMeanMs": 0.08750000223517418,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 11813000.0,
+            "min": 7997000,
+            "max": 17585000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 2,
+          "label": "no-portal",
+          "gpuMeanMs": 4.77364825,
+          "cpuSubmitMeanMs": 0.08437499962747097,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 22034000,
+            "min": 13591000,
+            "max": 22963000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 56000
+          },
+          "gpuBusyPercent": {
+            "median": 68,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 2,
+          "label": "zero-alpha",
+          "gpuMeanMs": 5.0632935,
+          "cpuSubmitMeanMs": 0.078125,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15572500.0,
+            "min": 12352000,
+            "max": 17795000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 2,
+          "label": "region-zero-alpha",
+          "gpuMeanMs": 4.7879979375,
+          "cpuSubmitMeanMs": 0.07812499813735485,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 12090000,
+            "min": 9086000,
+            "max": 16491000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 68,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "coordinate-kill",
+          "gpuMeanMs": 4.77390121875,
+          "cpuSubmitMeanMs": 0.08125000074505806,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 12832000.0,
+            "min": 9059000,
+            "max": 17077000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 68,
+            "max": 68
+          }
+        }
+      ]
+    },
+    {
+      "stage": "batch-controls",
+      "viewport": [
+        1506,
+        891
+      ],
+      "rect": [
+        462,
+        487,
+        1133,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-zero-alpha",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "coordinate-kill",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "batch-no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148693,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.0353930625,
+            "min": 5.024279375,
+            "max": 5.0707225625
+          },
+          "windowMeans": [
+            5.0707225625,
+            5.024279375,
+            5.0353930625
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.92623178125,
+            "min": 4.8821555,
+            "max": 4.93196153125
+          },
+          "windowMeans": [
+            4.93196153125,
+            4.8821555,
+            4.92623178125
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.75638540625,
+            "min": 4.73356071875,
+            "max": 4.76700296875
+          },
+          "windowMeans": [
+            4.76700296875,
+            4.73356071875,
+            4.75638540625
+          ]
+        },
+        "batch-normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.0679511875,
+            "min": 4.929126125,
+            "max": 5.11118953125
+          },
+          "windowMeans": [
+            5.11118953125,
+            4.929126125,
+            5.0679511875
+          ]
+        },
+        "batch-region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.94563871875,
+            "min": 4.9400906875,
+            "max": 5.0075726875
+          },
+          "windowMeans": [
+            5.0075726875,
+            4.9400906875,
+            4.94563871875
+          ]
+        },
+        "batch-no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.89062284375,
+            "min": 4.82091928125,
+            "max": 4.89546965625
+          },
+          "windowMeans": [
+            4.82091928125,
+            4.89062284375,
+            4.89546965625
+          ]
+        }
+      },
+      "perWindowTelemetry": [
+        {
+          "round": 0,
+          "label": "normal",
+          "gpuMeanMs": 5.0707225625,
+          "cpuSubmitMeanMs": 0.09062499552965164,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 16192000,
+            "min": 14552000,
+            "max": 20133000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 58,
+            "min": 57,
+            "max": 59
+          }
+        },
+        {
+          "round": 0,
+          "label": "region",
+          "gpuMeanMs": 4.93196153125,
+          "cpuSubmitMeanMs": 0.0937499962747097,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15374500.0,
+            "min": 13394000,
+            "max": 21300000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 60.5,
+            "min": 60,
+            "max": 62
+          }
+        },
+        {
+          "round": 0,
+          "label": "no-portal",
+          "gpuMeanMs": 4.76700296875,
+          "cpuSubmitMeanMs": 0.08125000260770321,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 17643000,
+            "min": 13231000,
+            "max": 19225000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 63,
+            "min": 62,
+            "max": 63
+          }
+        },
+        {
+          "round": 0,
+          "label": "batch-normal",
+          "gpuMeanMs": 5.11118953125,
+          "cpuSubmitMeanMs": 0.046875,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 13136500.0,
+            "min": 9763000,
+            "max": 23489000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 64.0,
+            "min": 63,
+            "max": 64
+          }
+        },
+        {
+          "round": 0,
+          "label": "batch-region",
+          "gpuMeanMs": 5.0075726875,
+          "cpuSubmitMeanMs": 0.02500000037252903,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 18392000,
+            "min": 11246000,
+            "max": 21388000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 65,
+            "min": 64,
+            "max": 65
+          }
+        },
+        {
+          "round": 0,
+          "label": "batch-no-portal",
+          "gpuMeanMs": 4.82091928125,
+          "cpuSubmitMeanMs": 0.03437500074505806,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 833000000
+          },
+          "powerMicrowatts": {
+            "median": 15229500.0,
+            "min": 13296000,
+            "max": 16921000
+          },
+          "temperatureMilliC": {
+            "median": 54500.0,
+            "min": 53000,
+            "max": 56000
+          },
+          "gpuBusyPercent": {
+            "median": 66.0,
+            "min": 66,
+            "max": 66
+          }
+        },
+        {
+          "round": 1,
+          "label": "batch-no-portal",
+          "gpuMeanMs": 4.89062284375,
+          "cpuSubmitMeanMs": 0.03437499888241291,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 17199000,
+            "min": 11446000,
+            "max": 18666000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 67,
+            "min": 67,
+            "max": 67
+          }
+        },
+        {
+          "round": 1,
+          "label": "batch-region",
+          "gpuMeanMs": 4.9400906875,
+          "cpuSubmitMeanMs": 0.04062500409781933,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 13362000.0,
+            "min": 10953000,
+            "max": 16208000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 53000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 67.5,
+            "min": 67,
+            "max": 68
+          }
+        },
+        {
+          "round": 1,
+          "label": "batch-normal",
+          "gpuMeanMs": 4.929126125,
+          "cpuSubmitMeanMs": 0.0312499962747097,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 904000000
+          },
+          "powerMicrowatts": {
+            "median": 17221000,
+            "min": 13426000,
+            "max": 19116000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 1,
+          "label": "no-portal",
+          "gpuMeanMs": 4.73356071875,
+          "cpuSubmitMeanMs": 0.08125000447034836,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 17268000.0,
+            "min": 11087000,
+            "max": 19337000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 1,
+          "label": "region",
+          "gpuMeanMs": 4.8821555,
+          "cpuSubmitMeanMs": 0.09687500447034836,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 847000000
+          },
+          "powerMicrowatts": {
+            "median": 12534000,
+            "min": 12035000,
+            "max": 12714000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68,
+            "min": 68,
+            "max": 69
+          }
+        },
+        {
+          "round": 1,
+          "label": "normal",
+          "gpuMeanMs": 5.024279375,
+          "cpuSubmitMeanMs": 0.08124999888241291,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 12889000.0,
+            "min": 7943000,
+            "max": 15800000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 69.0,
+            "min": 68,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "normal",
+          "gpuMeanMs": 5.0353930625,
+          "cpuSubmitMeanMs": 0.08437500149011612,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15860000,
+            "min": 15061000,
+            "max": 18606000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 69,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "region",
+          "gpuMeanMs": 4.92623178125,
+          "cpuSubmitMeanMs": 0.08437499403953552,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 13859000.0,
+            "min": 9828000,
+            "max": 17094000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 68,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "no-portal",
+          "gpuMeanMs": 4.75638540625,
+          "cpuSubmitMeanMs": 0.06875000521540642,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15693000,
+            "min": 12474000,
+            "max": 21115000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 55000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 68,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "batch-normal",
+          "gpuMeanMs": 5.0679511875,
+          "cpuSubmitMeanMs": 0.02812499925494194,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 872000000
+          },
+          "powerMicrowatts": {
+            "median": 12806000.0,
+            "min": 8459000,
+            "max": 16935000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 69.0,
+            "min": 69,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "batch-region",
+          "gpuMeanMs": 4.94563871875,
+          "cpuSubmitMeanMs": 0.03437500260770321,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 849000000
+          },
+          "powerMicrowatts": {
+            "median": 15465000,
+            "min": 12981000,
+            "max": 20371000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 69,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "batch-no-portal",
+          "gpuMeanMs": 4.89546965625,
+          "cpuSubmitMeanMs": 0.03749999962747097,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 11093000,
+            "min": 10359000,
+            "max": 11674000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 69,
+            "max": 69
+          }
+        }
+      ]
+    },
+    {
+      "stage": "minimal-again",
+      "viewport": [
+        1506,
+        891
+      ],
+      "rect": [
+        462,
+        487,
+        1133,
+        596
+      ],
+      "comparisons": [
+        {
+          "label": "normal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "direct-envelope",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "region-direct",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        },
+        {
+          "label": "no-portal",
+          "differentPixels": 0,
+          "maxDifference": 0,
+          "totalDifference": 0
+        }
+      ],
+      "envelopeProof": null,
+      "validation": {
+        "differentPixels": 0,
+        "affectedPixels": 148693,
+        "externalDraws": 0,
+        "error": 0
+      },
+      "variants": {
+        "normal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.077043375,
+            "min": 5.06695796875,
+            "max": 5.09237625
+          },
+          "windowMeans": [
+            5.077043375,
+            5.09237625,
+            5.06695796875
+          ]
+        },
+        "region": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 5.068216625,
+            "min": 4.893199,
+            "max": 5.069481625
+          },
+          "windowMeans": [
+            5.069481625,
+            5.068216625,
+            4.893199
+          ]
+        },
+        "no-portal": {
+          "windows": 3,
+          "windowMeanGpuMs": {
+            "median": 4.90460078125,
+            "min": 4.768007375,
+            "max": 4.91055584375
+          },
+          "windowMeans": [
+            4.91055584375,
+            4.90460078125,
+            4.768007375
+          ]
+        }
+      },
+      "perWindowTelemetry": [
+        {
+          "round": 0,
+          "label": "normal",
+          "gpuMeanMs": 5.077043375,
+          "cpuSubmitMeanMs": 0.10312500596046448,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 16031000.0,
+            "min": 13771000,
+            "max": 17646000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 64.0,
+            "min": 63,
+            "max": 65
+          }
+        },
+        {
+          "round": 0,
+          "label": "region",
+          "gpuMeanMs": 5.069481625,
+          "cpuSubmitMeanMs": 0.08437499962747097,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 13375000,
+            "min": 8874000,
+            "max": 15489000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 65,
+            "min": 65,
+            "max": 66
+          }
+        },
+        {
+          "round": 0,
+          "label": "no-portal",
+          "gpuMeanMs": 4.91055584375,
+          "cpuSubmitMeanMs": 0.09375,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 13449500.0,
+            "min": 9375000,
+            "max": 14510000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 66.5,
+            "min": 66,
+            "max": 67
+          }
+        },
+        {
+          "round": 1,
+          "label": "no-portal",
+          "gpuMeanMs": 4.90460078125,
+          "cpuSubmitMeanMs": 0.09999999776482582,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15669000.0,
+            "min": 12551000,
+            "max": 16721000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 67.0,
+            "min": 67,
+            "max": 67
+          }
+        },
+        {
+          "round": 1,
+          "label": "region",
+          "gpuMeanMs": 5.068216625,
+          "cpuSubmitMeanMs": 0.07812500186264515,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 15149000,
+            "min": 8812000,
+            "max": 17190000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 68,
+            "min": 67,
+            "max": 68
+          }
+        },
+        {
+          "round": 1,
+          "label": "normal",
+          "gpuMeanMs": 5.09237625,
+          "cpuSubmitMeanMs": 0.08750000409781933,
+          "samples": 4,
+          "clockHz": {
+            "median": 800000000.0,
+            "min": 800000000,
+            "max": 853000000
+          },
+          "powerMicrowatts": {
+            "median": 16529500.0,
+            "min": 13560000,
+            "max": 21415000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 56000
+          },
+          "gpuBusyPercent": {
+            "median": 68.0,
+            "min": 68,
+            "max": 68
+          }
+        },
+        {
+          "round": 2,
+          "label": "normal",
+          "gpuMeanMs": 5.06695796875,
+          "cpuSubmitMeanMs": 0.0625000037252903,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 800000000
+          },
+          "powerMicrowatts": {
+            "median": 14249000,
+            "min": 14080000,
+            "max": 15388000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 68,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "region",
+          "gpuMeanMs": 4.893199,
+          "cpuSubmitMeanMs": 0.09062499925494194,
+          "samples": 4,
+          "clockHz": {
+            "median": 825500000.0,
+            "min": 811000000,
+            "max": 849000000
+          },
+          "powerMicrowatts": {
+            "median": 16602500.0,
+            "min": 14791000,
+            "max": 17417000
+          },
+          "temperatureMilliC": {
+            "median": 54000.0,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 69.0,
+            "min": 69,
+            "max": 69
+          }
+        },
+        {
+          "round": 2,
+          "label": "no-portal",
+          "gpuMeanMs": 4.768007375,
+          "cpuSubmitMeanMs": 0.07812500931322575,
+          "samples": 3,
+          "clockHz": {
+            "median": 800000000,
+            "min": 800000000,
+            "max": 824000000
+          },
+          "powerMicrowatts": {
+            "median": 13221000,
+            "min": 9120000,
+            "max": 15828000
+          },
+          "temperatureMilliC": {
+            "median": 54000,
+            "min": 54000,
+            "max": 54000
+          },
+          "gpuBusyPercent": {
+            "median": 69,
+            "min": 69,
+            "max": 69
+          }
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Frozen stationary view only; isolated cost excludes other particles, other rendering phases, CPU scene work, presentation, and reset blits. Viewports differ slightly between captures. Phased runs reuse the exact same frozen inputs.",
+    "A requestAnimationFrame freeze retains the live host connection for resource lifetime; this is not a portable fixture independent of live login. No extra live dominant draw calls were observed after freezing.",
+    "Batch diagnostic uses a 206-entry vertex uniform slot-remap array and one instanced draw. It preserves captured dominant draw order; all particles select per-record frames. Stale range-frame uniforms differ but are unread when uUsesRangeFrame is zero.",
+    "Color-envelope diagnostic copies the root viewport into an R32F color texture and rebinds it on unit 5; applies only to captured root-domain particles.",
+    "Pixel equality establishes this frozen output only, not general portal correctness or visual acceptance. Actual GLES shader invocation counts, occupancy, and memory stalls remain unmeasured.",
+    "Expanded diagnostics change the no-portal control timing on the same frozen inputs, so batching/format ablations cannot be used as clean production-optimization comparisons."
+  ],
+  "failedAttempts": [
+    "First expanded follow-up refused batching because stale, unused range-frame uniforms differed. No measurements from that attempt accepted; corrected guard requires uUsesRangeFrame=0 and permits only these unread differences.",
+    "Initial telemetry source failed Node syntax validation before client launch; corrected script is archived."
+  ],
+  "resolution": {
+    "status": "Resolved by later experiments",
+    "evidence": "readback-depth-summary.json",
+    "cause": "Repeated direct CPU reads of the measured color target, reaching a tenth-transfer APU layout heuristic; additional program creation itself is not required. Use staged-readback results for uncontaminated expanded ablations."
+  }
+}

@@ -2115,7 +2115,7 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 		"productionPackedHostileSamplerResolveMatchesOracle",
 		"productionPackedResolveMatchesOracle",
 		"propagatedResolveMatchesOracle",
-		"particleMatchesEquivalentTransparency",
+		"particleDepthCompositionMatchesOracle",
 		"rootOnlyResolveMatchesOracle",
 	]) {
 		if (fixture[field] !== true) {

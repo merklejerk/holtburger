@@ -1,0 +1,468 @@
+{
+  "date": "2026-10-16",
+  "productionSourceChanges": false,
+  "disposition": "Reject direct clip-depth-varying substitution: strict portal visibility decisions differ.",
+  "backend": "ANGLE (AMD, AMD Radeon 780M Graphics (radeonsi phoenix ACO), OpenGL ES 3.2)",
+  "viewport": {
+    "width": 96,
+    "height": 80
+  },
+  "depthRange": [
+    0,
+    1
+  ],
+  "gutterRadius": 2,
+  "method": {
+    "runs": 3,
+    "recordsExactlyRepeatAcrossFreshProcesses": true,
+    "summaryPerRun": {
+      "discardDecisionDifferences": 324856,
+      "originalMaskMismatches": 0,
+      "candidateMaskMismatches": 0,
+      "comparisons": 1296,
+      "coveredSamplePairs": 3649584,
+      "comparisonFailures": 562,
+      "coverageDifferences": 0,
+      "decisionDifferences": 324856,
+      "extraVisible": 216068,
+      "extraHidden": 108788,
+      "maxEncodedError": 9.566545486450195e-06
+    },
+    "depthFormats": {
+      "frontier": "DEPTH_COMPONENT24",
+      "envelope": "DEPTH_COMPONENT32F",
+      "scene": "DEPTH_COMPONENT24"
+    },
+    "debugColor": "RGBA32F",
+    "discardColor": "RGBA8",
+    "sceneDepthStates": [
+      "LEQUAL, writes disabled, scene cleared to 1",
+      "test disabled, D24 attachment retained"
+    ],
+    "geometryCases": [
+      "constant-mid",
+      "constant-far",
+      "sloping",
+      "perspective",
+      "wide-w-range",
+      "near-clipped",
+      "far-clipped",
+      "eye-crossing",
+      "steep-narrow"
+    ],
+    "clipTranslations": [
+      0,
+      0.0078125,
+      -0.01953125
+    ],
+    "ndcZOffsets": [
+      -1.52587890625e-05,
+      -9.5367431640625e-07,
+      -2.384185791015625e-07,
+      -5.960464477539063e-08,
+      -1.4901161193847656e-08,
+      0,
+      1.4901161193847656e-08,
+      5.960464477539063e-08,
+      2.384185791015625e-07,
+      9.5367431640625e-07,
+      1.52587890625e-05
+    ],
+    "envelopeModes": [
+      "finite triangle",
+      "finite triangle inside scissored window",
+      "unbounded clear 1",
+      "uncovered clear 0"
+    ]
+  },
+  "firstCounterexample": {
+    "name": "constant-mid",
+    "shift": 0,
+    "mode": "finite",
+    "offset": -5.960464477539063e-08,
+    "depthTest": true,
+    "pixel": [
+      2,
+      4
+    ],
+    "builtin": [
+      1,
+      0.3124999701976776,
+      0.3125,
+      1
+    ],
+    "candidate": [
+      0,
+      0.3125,
+      0.3125,
+      1
+    ],
+    "clipPositions": [
+      -0.949999988079071,
+      -0.8999999761581421,
+      0.25,
+      1,
+      0.9399999976158142,
+      -0.8399999737739563,
+      0.25,
+      1,
+      -0.6499999761581421,
+      0.9300000071525574,
+      0.25,
+      1
+    ]
+  },
+  "groupedByGeometry": {
+    "constant-mid": {
+      "comparisons": 144,
+      "failedComparisons": 24,
+      "coveredSamplePairs": 475776,
+      "decisionDifferences": 59972,
+      "extraVisible": 0,
+      "extraHidden": 59972,
+      "maxEncodedError": 2.9802322387695312e-08
+    },
+    "constant-far": {
+      "comparisons": 144,
+      "failedComparisons": 0,
+      "coveredSamplePairs": 475776,
+      "decisionDifferences": 0,
+      "extraVisible": 0,
+      "extraHidden": 0,
+      "maxEncodedError": 2.9802322387695312e-08
+    },
+    "sloping": {
+      "comparisons": 144,
+      "failedComparisons": 62,
+      "coveredSamplePairs": 475776,
+      "decisionDifferences": 14436,
+      "extraVisible": 11786,
+      "extraHidden": 2650,
+      "maxEncodedError": 5.960464477539063e-08
+    },
+    "perspective": {
+      "comparisons": 144,
+      "failedComparisons": 82,
+      "coveredSamplePairs": 475776,
+      "decisionDifferences": 72794,
+      "extraVisible": 72550,
+      "extraHidden": 244,
+      "maxEncodedError": 1.1920928955078125e-07
+    },
+    "wide-w-range": {
+      "comparisons": 144,
+      "failedComparisons": 64,
+      "coveredSamplePairs": 475776,
+      "decisionDifferences": 59176,
+      "extraVisible": 59120,
+      "extraHidden": 56,
+      "maxEncodedError": 8.940696716308594e-08
+    },
+    "near-clipped": {
+      "comparisons": 144,
+      "failedComparisons": 96,
+      "coveredSamplePairs": 443280,
+      "decisionDifferences": 32424,
+      "extraVisible": 29514,
+      "extraHidden": 2910,
+      "maxEncodedError": 3.973487764596939e-06
+    },
+    "far-clipped": {
+      "comparisons": 144,
+      "failedComparisons": 84,
+      "coveredSamplePairs": 356688,
+      "decisionDifferences": 17830,
+      "extraVisible": 5848,
+      "extraHidden": 11982,
+      "maxEncodedError": 4.470348358154297e-07
+    },
+    "eye-crossing": {
+      "comparisons": 144,
+      "failedComparisons": 90,
+      "coveredSamplePairs": 450384,
+      "decisionDifferences": 66450,
+      "extraVisible": 35956,
+      "extraHidden": 30494,
+      "maxEncodedError": 9.566545486450195e-06
+    },
+    "steep-narrow": {
+      "comparisons": 144,
+      "failedComparisons": 60,
+      "coveredSamplePairs": 20352,
+      "decisionDifferences": 1774,
+      "extraVisible": 1294,
+      "extraHidden": 480,
+      "maxEncodedError": 5.960464477539063e-08
+    }
+  },
+  "groupedByEnvelope": {
+    "finite": {
+      "comparisons": 594,
+      "failedComparisons": 306,
+      "coveredSamplePairs": 1672726,
+      "decisionDifferences": 239680,
+      "extraVisible": 158760,
+      "extraHidden": 80920,
+      "maxEncodedError": 9.566545486450195e-06
+    },
+    "window": {
+      "comparisons": 594,
+      "failedComparisons": 256,
+      "coveredSamplePairs": 1672726,
+      "decisionDifferences": 85176,
+      "extraVisible": 57308,
+      "extraHidden": 27868,
+      "maxEncodedError": 9.566545486450195e-06
+    },
+    "unbounded": {
+      "comparisons": 54,
+      "failedComparisons": 0,
+      "coveredSamplePairs": 152066,
+      "decisionDifferences": 0,
+      "extraVisible": 0,
+      "extraHidden": 0,
+      "maxEncodedError": 8.024275302886963e-06
+    },
+    "uncovered": {
+      "comparisons": 54,
+      "failedComparisons": 0,
+      "coveredSamplePairs": 152066,
+      "decisionDifferences": 0,
+      "extraVisible": 0,
+      "extraHidden": 0,
+      "maxEncodedError": 8.024275302886963e-06
+    }
+  },
+  "groupedByDepthTest": {
+    "True": {
+      "comparisons": 648,
+      "failedComparisons": 281,
+      "coveredSamplePairs": 1824792,
+      "decisionDifferences": 162428,
+      "extraVisible": 108034,
+      "extraHidden": 54394,
+      "maxEncodedError": 9.566545486450195e-06
+    },
+    "False": {
+      "comparisons": 648,
+      "failedComparisons": 281,
+      "coveredSamplePairs": 1824792,
+      "decisionDifferences": 162428,
+      "extraVisible": 108034,
+      "extraHidden": 54394,
+      "maxEncodedError": 9.566545486450195e-06
+    }
+  },
+  "groupedByOffset": {
+    "-1.52587890625e-05": {
+      "comparisons": 108,
+      "failedComparisons": 2,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 6,
+      "extraVisible": 0,
+      "extraHidden": 6,
+      "maxEncodedError": 8.612871170043945e-06
+    },
+    "-9.5367431640625e-07": {
+      "comparisons": 108,
+      "failedComparisons": 14,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 4264,
+      "extraVisible": 240,
+      "extraHidden": 4024,
+      "maxEncodedError": 2.9355287551879883e-06
+    },
+    "-2.384185791015625e-07": {
+      "comparisons": 108,
+      "failedComparisons": 44,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 11454,
+      "extraVisible": 3508,
+      "extraHidden": 7946,
+      "maxEncodedError": 6.765127182006836e-06
+    },
+    "-5.960464477539063e-08": {
+      "comparisons": 108,
+      "failedComparisons": 90,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 78614,
+      "extraVisible": 30024,
+      "extraHidden": 48590,
+      "maxEncodedError": 9.566545486450195e-06
+    },
+    "-1.4901161193847656e-08": {
+      "comparisons": 108,
+      "failedComparisons": 96,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 86354,
+      "extraVisible": 56368,
+      "extraHidden": 29986,
+      "maxEncodedError": 8.024275302886963e-06
+    },
+    "0": {
+      "comparisons": 216,
+      "failedComparisons": 84,
+      "coveredSamplePairs": 608264,
+      "decisionDifferences": 53616,
+      "extraVisible": 53616,
+      "extraHidden": 0,
+      "maxEncodedError": 8.024275302886963e-06
+    },
+    "1.4901161193847656e-08": {
+      "comparisons": 108,
+      "failedComparisons": 80,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 48250,
+      "extraVisible": 41830,
+      "extraHidden": 6420,
+      "maxEncodedError": 7.9423189163208e-06
+    },
+    "5.960464477539063e-08": {
+      "comparisons": 108,
+      "failedComparisons": 80,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 26250,
+      "extraVisible": 16380,
+      "extraHidden": 9870,
+      "maxEncodedError": 5.62518835067749e-06
+    },
+    "2.384185791015625e-07": {
+      "comparisons": 108,
+      "failedComparisons": 50,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 12758,
+      "extraVisible": 12736,
+      "extraHidden": 22,
+      "maxEncodedError": 3.2888492569327354e-06
+    },
+    "9.5367431640625e-07": {
+      "comparisons": 108,
+      "failedComparisons": 22,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 3290,
+      "extraVisible": 1366,
+      "extraHidden": 1924,
+      "maxEncodedError": 3.973487764596939e-06
+    },
+    "1.52587890625e-05": {
+      "comparisons": 108,
+      "failedComparisons": 0,
+      "coveredSamplePairs": 304132,
+      "decisionDifferences": 0,
+      "extraVisible": 0,
+      "extraHidden": 0,
+      "maxEncodedError": 7.331371307373047e-06
+    }
+  },
+  "representativeCases": [
+    {
+      "discardDifferences": 3309,
+      "originalMaskMismatches": 0,
+      "candidateMaskMismatches": 0,
+      "depthTest": true,
+      "name": "constant-mid",
+      "shift": 0,
+      "mode": "finite",
+      "offset": -5.960464477539063e-08,
+      "covered": 3309,
+      "coverageDifferences": 0,
+      "differences": 3309,
+      "acceptedOriginal": 3309,
+      "acceptedCandidate": 0,
+      "extraVisible": 0,
+      "extraHidden": 3309,
+      "maxEncodedError": 2.9802322387695312e-08
+    },
+    {
+      "discardDifferences": 337,
+      "originalMaskMismatches": 0,
+      "candidateMaskMismatches": 0,
+      "depthTest": true,
+      "name": "sloping",
+      "shift": 0,
+      "mode": "finite",
+      "offset": 0,
+      "covered": 3309,
+      "coverageDifferences": 0,
+      "differences": 337,
+      "acceptedOriginal": 0,
+      "acceptedCandidate": 337,
+      "extraVisible": 337,
+      "extraHidden": 0,
+      "maxEncodedError": 2.9802322387695312e-08
+    },
+    {
+      "discardDifferences": 2130,
+      "originalMaskMismatches": 0,
+      "candidateMaskMismatches": 0,
+      "depthTest": true,
+      "name": "perspective",
+      "shift": 0,
+      "mode": "finite",
+      "offset": 0,
+      "covered": 3309,
+      "coverageDifferences": 0,
+      "differences": 2130,
+      "acceptedOriginal": 0,
+      "acceptedCandidate": 2130,
+      "extraVisible": 2130,
+      "extraHidden": 0,
+      "maxEncodedError": 8.940696716308594e-08
+    },
+    {
+      "discardDifferences": 645,
+      "originalMaskMismatches": 0,
+      "candidateMaskMismatches": 0,
+      "depthTest": true,
+      "name": "near-clipped",
+      "shift": 0,
+      "mode": "finite",
+      "offset": 0,
+      "covered": 3079,
+      "coverageDifferences": 0,
+      "differences": 645,
+      "acceptedOriginal": 0,
+      "acceptedCandidate": 645,
+      "extraVisible": 645,
+      "extraHidden": 0,
+      "maxEncodedError": 2.1383166313171387e-06
+    },
+    {
+      "discardDifferences": 111,
+      "originalMaskMismatches": 0,
+      "candidateMaskMismatches": 0,
+      "depthTest": true,
+      "name": "eye-crossing",
+      "shift": 0,
+      "mode": "finite",
+      "offset": 0,
+      "covered": 3126,
+      "coverageDifferences": 0,
+      "differences": 111,
+      "acceptedOriginal": 0,
+      "acceptedCandidate": 111,
+      "extraVisible": 111,
+      "extraHidden": 0,
+      "maxEncodedError": 8.024275302886963e-06
+    }
+  ],
+  "sourceHashes": {
+    "portal-arrival-metadata.ts": "966d5a291b4a1f3512d9ad44bbc1dddf3f6c2bdb4f3c5bd0c4460344467b8f8d",
+    "portal-scope-atlas-metadata-glsl.ts": "ab5ea130d35dbf7f28da760d9c9c5dd1ce8f61ee9a08a9b15291ec782676761d",
+    "portal-envelope-sampling-glsl.ts": "f99411d8929e2852f0d1d205fb35db789505349262ed8d950f1c33addb6f6a05",
+    "portal-deferred-visibility-glsl.ts": "98a08d829a79cee6870ee861803ff8786de345c1dc21d7cb4d6b6592461c2ec8",
+    "webgl2-portal-scope-atlas-programs.ts": "18e3d5ca9172811029e1c17475173cff337110c3b033d22ea09fbab852bfa03c"
+  },
+  "limitations": [
+    "Synthetic isolated predicate test, not full portal traversal or particle material/motion pipeline.",
+    "Frontier D24 rasterization and finite-depth D32F reduction mirror production formats and expression.",
+    "No GPU timings; repeated readback intentionally allowed on this correctness-only target.",
+    "Shared test vertex stage emits a varying in both programs; original linker can remove the unused output.",
+    "Adversarial synthetic case counts are not the frequency or impact of artifacts in the live scene.",
+    "Three clip translations exercise raster phase, not a moving in-world camera or full indoor traversal.",
+    "No production shader modification, tolerance, cutoff, or alternate depth range introduced.",
+    "The repeated CPU readback target behavior is irrelevant to these correctness-only comparisons; no timings were taken.",
+    "D24 frontier outside triangle is rejected by a depth=1 sentinel in the isolated reduction; this is not production traversal/reduction routing.",
+    "Does not identify the hardware stall mechanism behind builtin fragment-Z cost."
+  ]
+}

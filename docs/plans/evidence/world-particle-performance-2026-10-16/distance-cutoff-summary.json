@@ -1,0 +1,100 @@
+{
+  "configuration": {
+    "frontend": "Vite development frontend, disposable probe",
+    "host": "Rust release",
+    "hardware": "Ryzen 7 PRO 7840U / Radeon 780M",
+    "landblock": "0x482dffff",
+    "viewport": {
+      "cssWidth": 1493,
+      "cssHeight": 879,
+      "drawingBufferWidth": 1493,
+      "drawingBufferHeight": 879
+    },
+    "renderScale": 1,
+    "viewDistance": 6,
+    "comparison": "five alternating pairs; 4-second measurement after 2-second settle"
+  },
+  "emitterAudit": {
+    "definition": "0x32000923",
+    "mesh": "0x01003fa7",
+    "distinctOwners": 206,
+    "createCount": 206,
+    "maxParticlesPerEmitter": 1,
+    "lifespanSeconds": 60,
+    "stableCreatesAcrossLifetime": [
+      206,
+      206,
+      206,
+      206,
+      206,
+      206,
+      206,
+      206,
+      206,
+      206
+    ],
+    "initialRecordBirthTimes": [
+      7.085100173950195
+    ],
+    "finalRecordBirthTimes": [
+      67.10160064697266
+    ],
+    "ownersWithin100": 73,
+    "allCreateHookOffsetsZero": true,
+    "allFrameTargetsEqualOwners": true
+  },
+  "retailEvidence": {
+    "CPhysicsPart_GetMaxDegradeDistance": "acclient-eor-source/acclient.c:302927; fallback 100 when no degrade record",
+    "ParticleEmitter_SetInfo": "acclient-eor-source/acclient.c:318042; cache maximum degrade distance",
+    "CPhysicsObj_ShouldDrawParticles": "acclient-eor-source/acclient.c:305645; gate by emitter physics-object distance and cell visibility",
+    "CPhysicsObj_UpdateViewerDistance": "acclient-eor-source/acclient.c:306310; distance to viewer",
+    "ParticleEmitter_UpdateParticles": "acclient-eor-source/acclient.c:318174; applies gate and persistent/finite off-screen policies",
+    "meshFlags": 2,
+    "hasDegradeDid": false,
+    "bundleAndRetailMeshBytesEqual": true,
+    "meshSha256": "9b5022df2c52d5daf6c18f034b75f37350d2d3c34af96ecd82e0907af8951541",
+    "ACE": "ACE/Source/ACE.Server/Physics/Particles/ParticleEmitter.cs:117 explicitly omits degrade distance in server physics"
+  },
+  "comparisons": {
+    "current": {
+      "gpuParticleMs": {
+        "median": 5.112850663793101,
+        "min": 5.048744621276593,
+        "max": 5.50410922123894
+      },
+      "gpuTotalMs": {
+        "median": 11.42028367672414,
+        "min": 11.273397063291144,
+        "max": 11.99336694690265
+      },
+      "frameWorkMs": {
+        "median": 13.030530971235933,
+        "min": 12.519409281795035,
+        "max": 13.450216450732508
+      }
+    },
+    "cutoff100": {
+      "gpuParticleMs": {
+        "median": 2.232964345991561,
+        "min": 2.0719972750000006,
+        "max": 2.8293973750000005
+      },
+      "gpuTotalMs": {
+        "median": 8.651669927966097,
+        "min": 8.396083887500001,
+        "max": 9.265362470833338
+      },
+      "frameWorkMs": {
+        "median": 10.052966101947478,
+        "min": 9.476249997566145,
+        "max": 11.189121339361039
+      }
+    }
+  },
+  "scope": [
+    "Distance filter applied only to dominant effect draw ranges; simulation, emissions, particle size, render scale and portal checks unchanged",
+    "This diagnoses the distance-gate gap; it is not a complete implementation of retail hidden-emitter lifecycle policy",
+    "No production source edits and no visual acceptance checks",
+    "No duplicate-emitter accumulation found in this captured scene; not a global claim about every effect"
+  ]
+}

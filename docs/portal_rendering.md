@@ -396,15 +396,23 @@ domain creates another arrival state, while its physical geometry still occupies
 
 ### Deferred objects, particles, and weather
 
-Portal visibility is not an alpha-sort key. Opaque resolve completes first. Transparent objects,
-additive effects, and particles retain the renderer's existing physical ordering and batching, then
-draw once to the output framebuffer. Their portal shader selects the owning authored scope and
-resolves its render domain, then rejects fragments beyond that domain's reduced visibility envelope.
+Portal visibility is not an alpha-sort key. Opaque resolve completes first. Transparent objects and
+additive object materials retain their physical ordering and batching, then draw to the output
+framebuffer with their owning render domain's reduced visibility-envelope check.
 
-Particle emitters remain owner-local until routing. Each selected source is packed/uploaded once,
-then compatible mesh/motion cohorts recoalesce without adding a path or portal id to the GPU batch
-key. This lets particles in the camera's EnvCell draw over an outdoor portal exactly as retail does,
-while particles belonging to a deeper scope remain clipped by that deeper scope's envelope.
+Particle emitters remain owner-local until CPU routing admits their scope. Admitted world batches
+retain their scope-group order and draw through one particle program against resolved opaque depth;
+sky batches keep their separate schedule. Particle records upload once per frame across sky, world
+and camera draws. Owner-local contiguous record ranges remain separate physical batches; routing
+does not repack or recoalesce disjoint slots.
+
+Particles deliberately omit per-fragment portal-envelope clipping. This renderer policy removes a
+measured fragment-depth input cost without adding draw calls. Large effects can extend across a
+scope boundary when ordinary opaque depth does not hide them; that visual trade-off was accepted
+by the user after a temporary manual check. Materials, alpha testing, blending, motion and CPU scope
+admission remain unchanged. Other geometry retains portal clipping. The finite-screen CPU portal
+models retain fully clipped particle reference semantics for oracle/cost comparisons; those models
+are not the production particle submission policy.
 
 Exterior sky and authored weather are rendered into the outdoor render-domain tile. Retail's existing
 inside/outside weather gate remains camera-residency policy and is independent from portal
@@ -527,7 +535,8 @@ Proven by synthetic tests and selected archive/browser fixtures:
 - immutable/arena differential equivalence over seeded topology and geometry corpora;
 - path-free arrival propagation through indoor/outdoor cycles and re-entry;
 - one physical opaque preparation/submission per selected scope;
-- transparent, additive, weather, and particle scope-envelope composition;
+- transparent/additive object and weather scope-envelope composition;
+- particle scope admission, ordinary opaque-depth rejection and alpha composition;
 - packed target format, byte accounting, resize, and disposal invariants;
 - near-plane straddles;
 - flat/portal lifecycle stability; and

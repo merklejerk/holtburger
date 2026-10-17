@@ -7,11 +7,6 @@ import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
-import {
-	bindWebGL2PortalDeferredVisibilityProgram,
-	PORTAL_DEFERRED_VISIBILITY_GLSL,
-	type WebGL2PortalDeferredVisibilityUniforms,
-} from "./portal-deferred-visibility-glsl";
 import { TRANSPARENT_CANVAS_EMISSION_GLSL } from "./transparent-canvas-emission";
 
 /** Sampler units bound once for the particle program's lifetime. */
@@ -298,20 +293,9 @@ void main() {
  * surface-derived blend staging, so a separate path would drift back toward this one anyway.
  * Per-particle animated translucency modulates alpha on top of that.
  */
-export function createParticleFragmentShader(
-	portalVisibility: boolean,
-): string {
-	const portalDeclarations = portalVisibility
-		? PORTAL_DEFERRED_VISIBILITY_GLSL
-		: "";
-	const portalApplication = portalVisibility
-		? "if (!portalDeferredFragmentVisible()) discard;"
-		: "";
-	return `#version 300 es
+export const PARTICLE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
-
-${portalDeclarations}
 
 in vec2 vTextureCoordinate;
 in float vTranslucency;
@@ -401,7 +385,6 @@ vec4 sampleMaterial() {
 }
 
 void main() {
-	${portalApplication}
 	vec4 color = sampleMaterial();
 	// Translucency is retail's sense: 1 is fully transparent, so alpha is its complement.
 	color.a *= (1.0 - clamp(vTranslucency, 0.0, 1.0)) * uOpacityScale;
@@ -409,12 +392,9 @@ void main() {
 	outColor = encodeTransparentCanvasEmission(color, uCanvasEmissionMode);
 }
 `;
-}
 
 export interface WebGL2ParticleProgram {
 	readonly program: WebGLProgram;
-	/** Null for ordinary draws; otherwise the sole per-draw authored-scope selector. */
-	readonly portalVisibilityUniforms: WebGL2PortalDeferredVisibilityUniforms | null;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
 		readonly canvasEmissionMode: WebGLUniformLocation;
@@ -444,7 +424,6 @@ export interface WebGL2ParticleProgram {
 /** Compile and link the particle program, binding its sampler units once. */
 export function createWebGL2ParticleProgram(
 	gl: WebGL2RenderingContext,
-	portalVisibility = false,
 ): WebGL2ParticleProgram {
 	const vertex = compileWebGL2Shader(
 		gl,
@@ -454,7 +433,7 @@ export function createWebGL2ParticleProgram(
 	const fragment = compileWebGL2Shader(
 		gl,
 		gl.FRAGMENT_SHADER,
-		createParticleFragmentShader(portalVisibility),
+		PARTICLE_FRAGMENT_SHADER,
 	);
 	const program = gl.createProgram();
 	gl.attachShader(program, vertex);
@@ -504,8 +483,5 @@ export function createWebGL2ParticleProgram(
 	gl.uniform1i(uniforms.base, PARTICLE_TEXTURE_UNITS.base);
 	gl.uniform1i(uniforms.palette, PARTICLE_TEXTURE_UNITS.palette);
 	gl.uniform1i(uniforms.particleRecords, PARTICLE_TEXTURE_UNITS.records);
-	const portalVisibilityUniforms = portalVisibility
-		? bindWebGL2PortalDeferredVisibilityProgram(gl, program)
-		: null;
-	return { portalVisibilityUniforms, program, uniforms };
+	return { program, uniforms };
 }

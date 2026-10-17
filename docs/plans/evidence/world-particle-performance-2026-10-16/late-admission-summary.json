@@ -1,0 +1,844 @@
+{
+  "date": "2026-10-16",
+  "status": "Investigation only; no production changes after the earlier shadow-query fix.",
+  "productionSourceHashes": {
+    "apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts": "c7020265151d51f80211493afd6292ccc4d4b94e46eca74a3959ea4ce0ce1b4e",
+    "apps/holtburger-3d/src/lib/game/renderer/render-world.ts": "91cc4054a5ddf992871bed3b8d4eb23e3ccabab38c0331c948a21eb3a3d35f36",
+    "apps/holtburger-3d/src/lib/game/renderer/dynamic-depth-preparation.ts": "17323f2f0c6841aefdf850ef0ce933d095dfe503f36abc6a5e3908cdf8cec6c4",
+    "apps/holtburger-3d/src/lib/game/renderer/entity-grounding.ts": "f874a6eacd8978b52730e22dc78b2ce5794ad0c6b223a766823ccf9610277774",
+    "apps/holtburger-3d/src/lib/game/renderer/entity-shadow-policy.ts": "2f043fbecdd49e7bf3b079ee2cb4f264772e94258faeebc6408433c6801dfb03",
+    "apps/holtburger-3d/src/lib/game/scene/scene-graph.ts": "5274b8ff39cbb1d3ff41c0c24ee3e3729c843d56f9947d7fb03549d2349f26b8",
+    "apps/holtburger-3d/src/lib/game/systems/dynamic-entity-system.ts": "f8e6a750100731f5849756fa8650a0ab0921bb272c6ac2c0031f12e666f4060d",
+    "apps/holtburger-3d/src/lib/game/systems/particle-system.ts": "767d81681044819471e119504ff0db1120fcc3261c3d1654746165b23e269351",
+    "apps/holtburger-3d/src/lib/game/renderer/nameplate-selection.ts": "5bc712d2dfc17506770625d947a2d988be41e5ddcab7cfe47a9b37dc15fcfe24",
+    "apps/holtburger-3d/src/lib/game/renderer/webgl2-nameplate-texture-cache.ts": "58988c77f390fb59e3e941d67c761ddfefecfa00aaf978705832cf756e6a9734",
+    "apps/holtburger-3d/src/lib/game/renderer/nameplate-icon-repository.ts": "3cf9398406bec5437d7a3b145b4a4014fba1ffa65876b685ec4d2a8e123b7b50"
+  },
+  "method": {
+    "live": "Same stationary outdoor scene on original native GLES backend, release host and production-minified disposable frontend.",
+    "candidate": "Existing presentation-class predicate at the ordinary contribution grounding-block entrance, using class already carried by the descriptor. No query/geometry/quality change.",
+    "counts": "Six 2s count windows: baseline/early under mapped/simple/disabled shadows. Rows divided by their own frame counts. Depth cache hits checked before preparation; nonempty spans/parts/triangles count returned output, not physical range iterations or GPU draws.",
+    "timing": "Five alternating pairs per mode, 1.5s settling and 4s capture. Paired differences and min/max retained. Snapshots use rolling renderer phase means.",
+    "instrumentation": "Build-only globals, one early-mode condition and conditional count callbacks remain in both variants. Depth/particle prototype counter wrappers restored before timing; no V8 sampling, readback, heavy analysis or builds during timing.",
+    "control": "With shadows disabled, neither variant enters the block or evaluates its early predicate. Differences there expose ordinary live/timing variation. Mapped mode tests facts/membership removal without outdoor depth work.",
+    "correctness": "Synthetic fixture composes real index-batch compiler, depth preparer and grounding resolver across fixed classes/scopes/geometry/debug policy. It is not a full renderer or same-frame actor-selection proof.",
+    "production": "Regular repository dist left untouched; diagnostic build only in /tmp/h3d-late-admission-dist. Settings restored/persisted and hooks restored before disconnect."
+  },
+  "assessment": {
+    "simple": "Confirmed avoidable work; scene CPU paired median saving 0.197ms with mixed signs and overlapping ranges. No end-to-end gain demonstrated.",
+    "mapped": "No measurable benefit in this outdoor capture; non-caster depth preparation already absent from this ordinary contribution block.",
+    "control": "Disabled mode has identical grounding execution yet material timing drift.",
+    "priority": "Lower priority than the completed shadow-query fix for the current mapped outdoor scene. Scope early class admission and a narrower geometry-presence query before implementation.",
+    "proofBoundary": "150 frozen preparation/resolver cases passed; full renderer same-frame and live indoor acceptance remain required for a shipping change."
+  },
+  "timing": {
+    "simple": {
+      "baseline": {
+        "frameWorkMs": {
+          "median": 11.522916666666667,
+          "min": 10.276348546827483,
+          "max": 12.198728814468545
+        },
+        "rendererCpuMs": {
+          "median": 7.862083336462577,
+          "min": 6.9713692922315165,
+          "max": 8.357203393164328
+        },
+        "sceneCpuMs": {
+          "median": 3.0799999995434537,
+          "min": 2.738589212360224,
+          "max": 3.421610172017146
+        },
+        "shadowCpuMs": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "gpuMs": {
+          "median": 11.326818120833334,
+          "min": 10.845078377593353,
+          "max": 11.702439042372887
+        },
+        "particleGpuMs": {
+          "median": 5.285714095833331,
+          "min": 4.877554796680498,
+          "max": 5.503266067796607
+        },
+        "dynamicEntities": {
+          "median": 298,
+          "min": 298,
+          "max": 301
+        },
+        "fps": {
+          "median": 59.67180507210343,
+          "min": 58.472256780293606,
+          "max": 59.995021160069705
+        }
+      },
+      "early": {
+        "frameWorkMs": {
+          "median": 12.009543569750806,
+          "min": 11.360416667660077,
+          "max": 12.30583333397905
+        },
+        "rendererCpuMs": {
+          "median": 8.025726143255273,
+          "min": 7.39958333298564,
+          "max": 8.123728814266496
+        },
+        "sceneCpuMs": {
+          "median": 2.9583333298563956,
+          "min": 2.6854166659216085,
+          "max": 3.0258474567178952
+        },
+        "shadowCpuMs": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "gpuMs": {
+          "median": 11.668375610169491,
+          "min": 11.413402358333336,
+          "max": 11.806390233333335
+        },
+        "particleGpuMs": {
+          "median": 5.443775867219916,
+          "min": 5.341596970833334,
+          "max": 5.5394628958333385
+        },
+        "dynamicEntities": {
+          "median": 299,
+          "min": 298,
+          "max": 299
+        },
+        "fps": {
+          "median": 59.7758405977584,
+          "min": 58.7356893977103,
+          "max": 60.05482182905557
+        }
+      },
+      "pairedBaselineMinusEarly": {
+        "frameWorkMs": {
+          "median": -0.02245762666403195,
+          "min": -1.7331950229233222,
+          "max": 0.16249999900658985,
+          "positivePairs": 2
+        },
+        "rendererCpuMs": {
+          "median": 0.18970533387378463,
+          "min": -1.0543568510237566,
+          "max": 0.4625000034769373,
+          "positivePairs": 3
+        },
+        "sceneCpuMs": {
+          "median": 0.1971548102613676,
+          "min": -0.27593360600135153,
+          "max": 0.40250000183780976,
+          "positivePairs": 4
+        },
+        "shadowCpuMs": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "positivePairs": 0
+        },
+        "gpuMs": {
+          "median": -0.0865842375000021,
+          "min": -0.8651033070539498,
+          "max": 0.10621609429361278,
+          "positivePairs": 2
+        },
+        "particleGpuMs": {
+          "median": -0.05588287500000266,
+          "min": -0.5662210705394175,
+          "max": 0.10033772657348283,
+          "positivePairs": 2
+        },
+        "dynamicEntities": {
+          "median": 0,
+          "min": -1,
+          "max": 2,
+          "positivePairs": 1
+        },
+        "fps": {
+          "median": -0.10403552565497165,
+          "min": -0.9952724558347867,
+          "max": -0.058414410141928386,
+          "positivePairs": 0
+        }
+      }
+    },
+    "shadow-maps": {
+      "baseline": {
+        "frameWorkMs": {
+          "median": 13.209322034807528,
+          "min": 13.077405857989978,
+          "max": 13.49162995526444
+        },
+        "rendererCpuMs": {
+          "median": 8.735564856848457,
+          "min": 8.543514646496234,
+          "max": 8.860169490010051
+        },
+        "sceneCpuMs": {
+          "median": 2.70627615017871,
+          "min": 2.619246860927119,
+          "max": 2.769915255702148
+        },
+        "shadowCpuMs": {
+          "median": 1.2296610148781437,
+          "min": 1.2037656918230415,
+          "max": 1.2484581504624321
+        },
+        "gpuMs": {
+          "median": 12.133366518828455,
+          "min": 11.901310200836816,
+          "max": 12.388746748898672
+        },
+        "particleGpuMs": {
+          "median": 5.547820874476984,
+          "min": 5.399773569037656,
+          "max": 5.649772511013216
+        },
+        "dynamicEntities": {
+          "median": 299,
+          "min": 298,
+          "max": 299
+        },
+        "fps": {
+          "median": 58.85286783042394,
+          "min": 56.53798256537983,
+          "max": 59.51195219123506
+        }
+      },
+      "early": {
+        "frameWorkMs": {
+          "median": 13.492173912991648,
+          "min": 12.419831223880188,
+          "max": 13.550423728712534
+        },
+        "rendererCpuMs": {
+          "median": 8.893644065675089,
+          "min": 8.110126580870102,
+          "max": 8.957939914111927
+        },
+        "sceneCpuMs": {
+          "median": 2.7922746774464717,
+          "min": 2.3729957809931115,
+          "max": 2.869130434160647
+        },
+        "shadowCpuMs": {
+          "median": 1.2215189885992541,
+          "min": 1.1628691974068492,
+          "max": 1.2527896976777924
+        },
+        "gpuMs": {
+          "median": 12.208795639484979,
+          "min": 12.016764818565395,
+          "max": 12.469602995780585
+        },
+        "particleGpuMs": {
+          "median": 5.603596931330469,
+          "min": 5.42473607172996,
+          "max": 5.747685818565401
+        },
+        "dynamicEntities": {
+          "median": 298,
+          "min": 298,
+          "max": 300
+        },
+        "fps": {
+          "median": 58.64811133200795,
+          "min": 57.18547986076579,
+          "max": 58.98456943753111
+        }
+      },
+      "pairedBaselineMinusEarly": {
+        "frameWorkMs": {
+          "median": -0.13229613449345123,
+          "min": -0.41476805500166947,
+          "max": 0.7881185633734269,
+          "positivePairs": 2
+        },
+        "rendererCpuMs": {
+          "median": -0.09777042410187597,
+          "min": -0.4017027465185077,
+          "max": 0.6254382759783557,
+          "positivePairs": 2
+        },
+        "sceneCpuMs": {
+          "median": -0.022359421744323704,
+          "min": -0.24988357323352828,
+          "max": 0.33328036918559834,
+          "positivePairs": 2
+        },
+        "shadowCpuMs": {
+          "median": -0.00536474384067942,
+          "min": -0.023128682799648637,
+          "max": 0.07060360698787682,
+          "positivePairs": 2
+        },
+        "gpuMs": {
+          "median": -0.08085624688191295,
+          "min": -0.1919187209023132,
+          "max": 0.11660170026305927,
+          "positivePairs": 1
+        },
+        "particleGpuMs": {
+          "median": -0.0849785700927832,
+          "min": -0.13894696099148351,
+          "max": 0.12308480274702394,
+          "positivePairs": 1
+        },
+        "dynamicEntities": {
+          "median": 0,
+          "min": -1,
+          "max": 1,
+          "positivePairs": 1
+        },
+        "fps": {
+          "median": 0.6592082130875596,
+          "min": -2.446586872151279,
+          "max": 2.237692690203879,
+          "positivePairs": 4
+        }
+      }
+    },
+    "none": {
+      "baseline": {
+        "frameWorkMs": {
+          "median": 10.761825725003396,
+          "min": 9.912500000976284,
+          "max": 11.345000001539786
+        },
+        "rendererCpuMs": {
+          "median": 6.751452281761961,
+          "min": 6.2051724149235366,
+          "max": 7.16374999905626
+        },
+        "sceneCpuMs": {
+          "median": 2.21452282276391,
+          "min": 2.0318965531628708,
+          "max": 2.4522821601495703
+        },
+        "shadowCpuMs": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "gpuMs": {
+          "median": 11.458982614107883,
+          "min": 11.053525956896554,
+          "max": 11.722802816666679
+        },
+        "particleGpuMs": {
+          "median": 5.495079024896266,
+          "min": 5.311798176724137,
+          "max": 5.707852304166671
+        },
+        "dynamicEntities": {
+          "median": 301,
+          "min": 299,
+          "max": 304
+        },
+        "fps": {
+          "median": 59.67180507210343,
+          "min": 57.78331257783312,
+          "max": 59.920437593237196
+        }
+      },
+      "early": {
+        "frameWorkMs": {
+          "median": 10.762553191438634,
+          "min": 10.118828453778223,
+          "max": 11.5904564323267
+        },
+        "rendererCpuMs": {
+          "median": 7.090871369442999,
+          "min": 6.385774057031177,
+          "max": 7.507053942106571
+        },
+        "sceneCpuMs": {
+          "median": 2.423728812296512,
+          "min": 2.0736401674637737,
+          "max": 2.6925311204803437
+        },
+        "shadowCpuMs": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "gpuMs": {
+          "median": 11.404996958506219,
+          "min": 11.023266979253105,
+          "max": 11.778738389830508
+        },
+        "particleGpuMs": {
+          "median": 5.506750307053941,
+          "min": 5.274689946058089,
+          "max": 5.698143360169497
+        },
+        "dynamicEntities": {
+          "median": 299,
+          "min": 299,
+          "max": 304
+        },
+        "fps": {
+          "median": 59.615864305313046,
+          "min": 58.443173339965185,
+          "max": 59.995021160069705
+        }
+      },
+      "pairedBaselineMinusEarly": {
+        "frameWorkMs": {
+          "median": -0.20632845280193912,
+          "min": -0.7387782472254187,
+          "max": 0.2941908725069773,
+          "positivePairs": 1
+        },
+        "rendererCpuMs": {
+          "median": -0.18060164210764018,
+          "min": -0.60192796574895,
+          "max": 0.0744310076011292,
+          "positivePairs": 2
+        },
+        "sceneCpuMs": {
+          "median": -0.06390041162364213,
+          "min": -0.29497881363761635,
+          "max": 0.038352609084860045,
+          "positivePairs": 1
+        },
+        "shadowCpuMs": {
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "positivePairs": 0
+        },
+        "gpuMs": {
+          "median": 0.1579523349518741,
+          "min": -0.41272213149717984,
+          "max": 0.4357156348547786,
+          "positivePairs": 3
+        },
+        "particleGpuMs": {
+          "median": 0.09502002735056969,
+          "min": -0.21041338516949715,
+          "max": 0.22038907883817682,
+          "positivePairs": 3
+        },
+        "dynamicEntities": {
+          "median": 1,
+          "min": -5,
+          "max": 5,
+          "positivePairs": 3
+        },
+        "fps": {
+          "median": -0.059652003577141954,
+          "min": -1.832551727479924,
+          "max": 1.462369787054449,
+          "positivePairs": 2
+        }
+      }
+    }
+  },
+  "audits": [
+    {
+      "shadowMode": "shadow-maps",
+      "early": false,
+      "frames": 111,
+      "dominantOwners": 206,
+      "perFrame": {
+        "other": {
+          "visibleContributions": 280.5405405405405,
+          "withColorRanges": 249.54054054054055,
+          "groundingAttempts": 249.54054054054055,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 206.0,
+          "dominantDepthRequests": 0.0
+        },
+        "mob": {
+          "visibleContributions": 17.0,
+          "withColorRanges": 17.0,
+          "groundingAttempts": 17.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        },
+        "player": {
+          "visibleContributions": 1.0,
+          "withColorRanges": 1.0,
+          "groundingAttempts": 1.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        }
+      }
+    },
+    {
+      "shadowMode": "shadow-maps",
+      "early": true,
+      "frames": 114,
+      "dominantOwners": 206,
+      "perFrame": {
+        "other": {
+          "visibleContributions": 281.0,
+          "withColorRanges": 250.0,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 206.0,
+          "dominantDepthRequests": 0.0
+        },
+        "mob": {
+          "visibleContributions": 17.0,
+          "withColorRanges": 17.0,
+          "groundingAttempts": 17.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        },
+        "player": {
+          "visibleContributions": 1.0,
+          "withColorRanges": 1.0,
+          "groundingAttempts": 1.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        }
+      }
+    },
+    {
+      "shadowMode": "simple",
+      "early": false,
+      "frames": 116,
+      "dominantOwners": 206,
+      "perFrame": {
+        "other": {
+          "visibleContributions": 280.0,
+          "withColorRanges": 249.0,
+          "groundingAttempts": 249.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 249.0,
+          "prepareCalls": 249.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 249.0,
+          "nonemptyDepth": 249.0,
+          "depthSpans": 249.0,
+          "depthParts": 249.0,
+          "depthTriangles": 12789.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 206.0,
+          "dominantDepthRequests": 192.0
+        },
+        "mob": {
+          "visibleContributions": 17.0,
+          "withColorRanges": 17.0,
+          "groundingAttempts": 17.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 17.0,
+          "prepareCalls": 17.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 17.0,
+          "nonemptyDepth": 17.0,
+          "depthSpans": 18.0,
+          "depthParts": 182.0,
+          "depthTriangles": 12122.0,
+          "resolvedCasters": 17.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        },
+        "player": {
+          "visibleContributions": 1.0,
+          "withColorRanges": 1.0,
+          "groundingAttempts": 1.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 1.0,
+          "prepareCalls": 1.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 1.0,
+          "nonemptyDepth": 1.0,
+          "depthSpans": 1.0,
+          "depthParts": 13.0,
+          "depthTriangles": 793.0,
+          "resolvedCasters": 1.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        }
+      }
+    },
+    {
+      "shadowMode": "simple",
+      "early": true,
+      "frames": 113,
+      "dominantOwners": 206,
+      "perFrame": {
+        "other": {
+          "visibleContributions": 281.21238938053096,
+          "withColorRanges": 249.7787610619469,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 206.0,
+          "dominantDepthRequests": 0.0
+        },
+        "mob": {
+          "visibleContributions": 17.0,
+          "withColorRanges": 17.0,
+          "groundingAttempts": 17.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 17.0,
+          "prepareCalls": 17.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 17.0,
+          "nonemptyDepth": 17.0,
+          "depthSpans": 18.0,
+          "depthParts": 182.0,
+          "depthTriangles": 12122.0,
+          "resolvedCasters": 17.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        },
+        "player": {
+          "visibleContributions": 1.0,
+          "withColorRanges": 1.0,
+          "groundingAttempts": 1.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 1.0,
+          "prepareCalls": 1.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 1.0,
+          "nonemptyDepth": 1.0,
+          "depthSpans": 1.0,
+          "depthParts": 13.0,
+          "depthTriangles": 793.0,
+          "resolvedCasters": 1.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        }
+      }
+    },
+    {
+      "shadowMode": "none",
+      "early": false,
+      "frames": 121,
+      "dominantOwners": 206,
+      "perFrame": {
+        "other": {
+          "visibleContributions": 281.0,
+          "withColorRanges": 249.0,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 206.0,
+          "dominantDepthRequests": 0.0
+        },
+        "mob": {
+          "visibleContributions": 17.0,
+          "withColorRanges": 17.0,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        },
+        "player": {
+          "visibleContributions": 1.0,
+          "withColorRanges": 1.0,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        }
+      }
+    },
+    {
+      "shadowMode": "none",
+      "early": true,
+      "frames": 121,
+      "dominantOwners": 206,
+      "perFrame": {
+        "other": {
+          "visibleContributions": 280.02479338842977,
+          "withColorRanges": 249.01652892561984,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 206.0,
+          "dominantDepthRequests": 0.0
+        },
+        "mob": {
+          "visibleContributions": 17.0,
+          "withColorRanges": 17.0,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        },
+        "player": {
+          "visibleContributions": 1.0,
+          "withColorRanges": 1.0,
+          "groundingAttempts": 0.0,
+          "indoorDepthRequests": 0.0,
+          "simpleOutdoorDepthRequests": 0.0,
+          "prepareCalls": 0.0,
+          "cacheHits": 0.0,
+          "cacheMisses": 0.0,
+          "nonemptyDepth": 0.0,
+          "depthSpans": 0.0,
+          "depthParts": 0.0,
+          "depthTriangles": 0.0,
+          "resolvedCasters": 0.0,
+          "dominantVisits": 0.0,
+          "dominantDepthRequests": 0.0
+        }
+      }
+    }
+  ],
+  "fixture": {
+    "cases": 150,
+    "equal": true,
+    "nonCasterInputsUntouched": true,
+    "indoorCases": 100,
+    "nonemptyIndoorCases": 18,
+    "limits": [
+      "Synthetic composition uses the real index-batch compiler, depth preparer and grounding resolver; not full renderer selection or GPU proof.",
+      "No synthetic timing claim.",
+      "No live indoor scene or camera movement tested."
+    ]
+  },
+  "cleanup": {
+    "restoredShadowMode": "shadow-maps",
+    "hooksRestored": true
+  },
+  "findings": [
+    {
+      "status": "confirmed workload",
+      "path": "ordinary analytic grounding",
+      "finding": "Non-caster class rejection follows facts and optional full depth preparation; simple mode performs about 249 avoidable non-caster preparations per frame."
+    },
+    {
+      "status": "confirmed representation mismatch; cheaper alternative unimplemented",
+      "path": "analytic shadow geometry admission",
+      "finding": "Only the null/non-null depth result is used; complete depth spans and counts are discarded. Actor geometry eligibility could be narrower but must share opacity/ordering/retail visibility semantics and preserve invariant checks."
+    },
+    {
+      "status": "candidate; avoidability and saving unproved",
+      "path": "ordinary contribution descriptors",
+      "finding": "Copied placements/bounds precede footprint rejection. Existing synchronous scene read may help dynamic descriptors, but retention/inspection contracts need an audit."
+    },
+    {
+      "status": "existing early admission",
+      "path": "particle/nameplate/publication/mapped-budget paths",
+      "finding": "Hidden-particle admission, post-budget text rasterization, per-frame dynamic publication reuse, and mapped-root budgets already precede expensive work."
+    }
+  ],
+  "limits": [
+    "No live indoor capture or visual acceptance.",
+    "No shipping fix or full renderer equivalence proof in this follow-up.",
+    "Live timing is noisy; counts prove avoided work, not an end-to-end gain.",
+    "Depth preparation is CPU span construction, not GPU draw/upload work."
+  ]
+}

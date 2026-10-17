@@ -1,0 +1,124 @@
+{
+  "interpretation": "Raw controller notifications include stale capture events; do not use them as a shader-mode mapping. Baseline identity was independently verified by replay reflection. X11 proof bounds apply to their derived rectangle, not the older literal rectangle.",
+  "captureReport": {
+    "captures": [
+      {
+        "mode": "normal",
+        "messages": [
+          "6",
+          "8",
+          "9",
+          "8",
+          "8",
+          "4"
+        ],
+        "capture": {
+          "path": "/tmp/h3d-native-rdc_frame763.rdc",
+          "frame": 763,
+          "bytes": 77287221,
+          "api": "OpenGL",
+          "local": true
+        },
+        "ok": true
+      },
+      {
+        "mode": "region",
+        "messages": [
+          "6",
+          "4"
+        ],
+        "capture": {
+          "path": "/tmp/h3d-native-rdc_frame763.rdc",
+          "frame": 763,
+          "bytes": 77287221,
+          "api": "OpenGL",
+          "local": true
+        },
+        "ok": true
+      },
+      {
+        "mode": "no-portal",
+        "messages": [
+          "6",
+          "4"
+        ],
+        "capture": {
+          "path": "/tmp/h3d-native-rdc_frame763.rdc",
+          "frame": 763,
+          "bytes": 77287221,
+          "api": "OpenGL",
+          "local": true
+        },
+        "ok": true
+      }
+    ],
+    "proofs": [
+      {
+        "mode": "normal",
+        "bounds": {
+          "rect": [
+            448,
+            503,
+            1142,
+            616
+          ],
+          "rootTriangles": 34,
+          "rootCrossings": 13,
+          "eyePlaneFallback": false,
+          "width": 1498,
+          "height": 920,
+          "area": 78422
+        },
+        "skippedPixels": 1299738,
+        "unsafePixels": 0,
+        "unbounded": 1369632,
+        "finite": 8528,
+        "uncovered": 0
+      },
+      {
+        "mode": "region",
+        "bounds": {
+          "rect": [
+            448,
+            503,
+            1142,
+            616
+          ],
+          "rootTriangles": 34,
+          "rootCrossings": 13,
+          "eyePlaneFallback": false,
+          "width": 1498,
+          "height": 920,
+          "area": 78422
+        },
+        "skippedPixels": 1299738,
+        "unsafePixels": 0,
+        "unbounded": 1369622,
+        "finite": 8538,
+        "uncovered": 0
+      },
+      {
+        "mode": "no-portal",
+        "bounds": {
+          "rect": [
+            448,
+            503,
+            1142,
+            616
+          ],
+          "rootTriangles": 34,
+          "rootCrossings": 13,
+          "eyePlaneFallback": false,
+          "width": 1498,
+          "height": 920,
+          "area": 78422
+        },
+        "skippedPixels": 1299738,
+        "unsafePixels": 0,
+        "unbounded": 1369631,
+        "finite": 8529,
+        "uncovered": 0
+      }
+    ]
+  }
+}

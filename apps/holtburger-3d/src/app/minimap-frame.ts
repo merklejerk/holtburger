@@ -1,4 +1,5 @@
 import type { MapEntity } from "../lib/game/map/map-blips";
+import type { MapWaypointDisplay } from "../lib/game/map/map-waypoint";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import {
 	type MapAnchor,
@@ -49,6 +50,8 @@ export interface MinimapState {
 
 /** One imperative read of every hot input the map and compass render. */
 export interface MinimapFrame {
+	/** Local navigation display; null in modes without a waypoint or before one is set. */
+	readonly waypoint: MapWaypointDisplay | null;
 	/** Null until the runtime is ready; the map remains blank meanwhile. */
 	readonly source: MapTerrainSource | null;
 	/** Null until there is a coherent subject position and ownership. */

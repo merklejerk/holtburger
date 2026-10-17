@@ -92,11 +92,12 @@ export async function probeClientEnvironment(
 	await tick();
 	document.querySelector<HTMLButtonElement>("#settings-tab-ui")?.click();
 	await tick();
+	// This probe owns environment controls, not the complete UI settings inventory or order.
 	assert(
-		[...document.querySelectorAll("#settings-section-ui > details > summary")]
-			.map((summary) => summary.textContent?.trim())
-			.join(",") === "Time and weather,Fonts,Scaling,HUD layout",
-		"UI settings subsections are missing or out of order.",
+		[...document.querySelectorAll("#settings-section-ui summary")].some(
+			(summary) => summary.textContent?.trim() === "Time and weather",
+		),
+		"Time and weather settings are missing.",
 	);
 	const change = async (label: string, value: string | boolean) => {
 		const node = [

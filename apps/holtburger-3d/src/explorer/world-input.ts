@@ -1,13 +1,16 @@
 import type { EnvCellId, LandblockOwnerId } from "../lib/game/game-types";
 import type { SceneResidency } from "../lib/game/scene";
 import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
-import { landblockAxisFromPrintedDegree } from "../lib/game/map/map-coordinates";
+import { scenePointFromPrintedCoordinates } from "../lib/game/map/map-coordinates";
+import {
+	OUTDOOR_LANDBLOCK_COUNT,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+} from "../lib/game/landblocks";
 
 const HEX_PREFIX_PATTERN = /^(?:0x)?([0-9a-f]{4})$/i;
 const HEX_CELL_PATTERN = /^(?:0x)?([0-9a-f]{8})$/i;
 const MAP_COORDINATE_PATTERN =
 	/^\s*(\d+(?:\.\d+)?)\s*([ns])\s*,?\s*(\d+(?:\.\d+)?)\s*([ew])(?:\s*,?\s*-?\d+(?:\.\d+)?\s*z?)?\s*$/i;
-const MAX_OUTDOOR_LANDBLOCK_AXIS = 0xfe;
 
 /** Parsed residence explicitly supplied by Explorer's world controls. */
 export interface ParsedResidenceInput {
@@ -98,28 +101,30 @@ function createOutdoorResidenceFromMapCoordinates(coordinates: {
 	readonly eastWest: number;
 	readonly eastWestHemisphere: "E" | "W";
 }): ParsedResidenceInput {
-	const latitude =
-		coordinates.northSouthHemisphere === "N"
-			? coordinates.northSouth
-			: -coordinates.northSouth;
-	const longitude =
-		coordinates.eastWestHemisphere === "E"
-			? coordinates.eastWest
-			: -coordinates.eastWest;
-	const x = mapCoordinateToLandblockAxis(longitude);
-	const y = mapCoordinateToLandblockAxis(latitude);
+	const point = scenePointFromPrintedCoordinates({
+		latitude: {
+			magnitude: coordinates.northSouth,
+			hemisphere: coordinates.northSouthHemisphere,
+		},
+		longitude: {
+			magnitude: coordinates.eastWest,
+			hemisphere: coordinates.eastWestHemisphere,
+		},
+	});
+	const x = clampLandblockAxis(point.x);
+	const y = clampLandblockAxis(-point.z);
 	return createResidence(
 		`${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}ffff`,
 	);
 }
 
-/**
- * Clamp a printed degree onto AC's finite outdoor landblock grid.
- *
- * The input pattern accepts more decimals than AC ever prints, and they are still read as printed
- * notation, so a hand-typed extra digit lands up to the display bias away from where it reads.
- */
-function mapCoordinateToLandblockAxis(coordinate: number): number {
-	const axis = landblockAxisFromPrintedDegree(coordinate);
-	return Math.max(0, Math.min(MAX_OUTDOOR_LANDBLOCK_AXIS, axis));
+/** Explorer retains its permissive edge-clamping policy; waypoint validation is stricter. */
+function clampLandblockAxis(meters: number): number {
+	return Math.max(
+		0,
+		Math.min(
+			OUTDOOR_LANDBLOCK_COUNT - 1,
+			Math.floor(meters / OUTDOOR_LANDBLOCK_WORLD_SIZE),
+		),
+	);
 }

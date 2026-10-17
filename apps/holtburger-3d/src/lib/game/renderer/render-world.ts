@@ -3,6 +3,7 @@ import type { GeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import type {
 	ResolvedScenePlacement,
+	ResolvedSceneState,
 	ResolvedSceneBounds,
 	SceneSpatialMembership,
 	SceneNodeId,
@@ -11,6 +12,7 @@ import type {
 	SceneTopologyView,
 	VisibleScene,
 	SceneCullingGroupFilter,
+	SceneNodeFilter,
 } from "../scene";
 import type { AABB3 } from "../math/types";
 import type { OceanBackdropDrawUnit, TerrainDrawUnit } from "../terrain/types";
@@ -42,6 +44,11 @@ import { scopeKey } from "../scene/scope";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { NameplateContent } from "../systems/dynamic-presentation-source";
 import type { NameplateSourceVisual } from "./nameplate-policy";
+import { isEntityShadowCasterClass } from "./entity-shadow-policy";
+
+const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
+const isDynamicCullingGroup: SceneCullingGroupFilter = (group) =>
+	group === "dynamic";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
@@ -53,7 +60,8 @@ interface RenderWorldSystems {
 	};
 	readonly scene: {
 		getCullingGroup(nodeId: SceneNodeId): string | null;
-		getResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null;
+		readResolvedState(nodeId: SceneNodeId): ResolvedSceneState | undefined;
+		readResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null;
 		getResolvedPlacement(
 			nodeId: SceneNodeId,
 		): ResolvedScenePlacement | undefined;
@@ -67,6 +75,7 @@ interface RenderWorldSystems {
 			anchorLandblockId: LandblockOwnerId,
 			scopes: readonly SceneScope[],
 			cullingGroupFilter: SceneCullingGroupFilter,
+			nodeFilter: SceneNodeFilter | null,
 		): VisibleScene;
 		queryScopeSelectionFrustum(
 			frustum: Frustum,
@@ -150,7 +159,7 @@ export type ObjectPresentationFootprint =
 			readonly reason: "generated-instance-container";
 	  };
 
-/** One typed logical render contribution selected from a visible scene node. */
+/** Synchronous logical contribution; nested scene facts must not escape across scene mutations. */
 export type RenderContribution =
 	| {
 			readonly cullingGroup: string;
@@ -175,8 +184,9 @@ export interface ResolvedStaticDrawUnit {
 	readonly geometry: GeometryResourceKey;
 }
 
-/** One visible static node with its resolved landblock placement and device selections. */
+/** Static compilation inputs with an owned placement independent of later scene mutations. */
 export interface ResolvedStaticObjectNode {
+	/** Owned snapshot retained by compiled static submissions. */
 	readonly placement: ResolvedScenePlacement;
 	readonly drawUnits: readonly ResolvedStaticDrawUnit[];
 	readonly frameStreamedInstances: readonly {
@@ -215,6 +225,11 @@ export interface ResolvedGeometryDrawUnit<TDrawUnit> {
 /** Read-only renderer view of the runtime systems that own scene and resource state. */
 export class RenderWorld {
 	readonly #systems: RenderWorldSystems;
+	/** Read current publication policy before a shadow query tests or expands a root. */
+	readonly #isShadowCaster: SceneNodeFilter = (nodeId) => {
+		const entityClass = this.#systems.dynamics.getPresentationClass(nodeId);
+		return entityClass !== null && isEntityShadowCasterClass(entityClass);
+	};
 
 	constructor(systems: RenderWorldSystems) {
 		this.#systems = systems;
@@ -232,17 +247,17 @@ export class RenderWorld {
 		);
 	}
 
-	queryScopesScene(
+	/** Select current outdoor actor casters without expanding non-caster contributions. */
+	queryOutdoorShadowCasters(
 		frustum: Frustum,
 		anchorLandblockId: LandblockOwnerId,
-		scopes: readonly SceneScope[],
-		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
 		return this.#systems.scene.queryScopesFrustum(
 			frustum,
 			anchorLandblockId,
-			scopes,
-			cullingGroupFilter,
+			OUTDOOR_SCOPE,
+			isDynamicCullingGroup,
+			this.#isShadowCaster,
 		);
 	}
 
@@ -266,8 +281,8 @@ export class RenderWorld {
 
 	/** Resolve one resident scene owner to the renderer's canonical scope identity. */
 	getRenderScopeKey(nodeId: SceneNodeId): string | null {
-		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
-		return placement ? scopeKey(placement.scope) : null;
+		const resolved = this.#systems.scene.readResolvedState(nodeId);
+		return resolved ? scopeKey(resolved.placement.scope) : null;
 	}
 
 	/** Visual ocean has no scene-node or DAT identity; the renderer routes it through outdoor visibility. */
@@ -279,9 +294,8 @@ export class RenderWorld {
 		return this.#systems.terrain.getDrawUnit(nodeId);
 	}
 
-	getRenderContributionDescriptor(
-		nodeId: SceneNodeId,
-	): RenderContribution | null {
+	/** Borrow scene facts for immediate preparation; retained static submissions copy at compilation. */
+	readRenderContribution(nodeId: SceneNodeId): RenderContribution | null {
 		const staticObject = this.#systems.staticObjects.getRenderable(nodeId);
 		if (staticObject) {
 			const cullingGroup = this.#systems.scene.getCullingGroup(nodeId);
@@ -302,13 +316,16 @@ export class RenderWorld {
 			if (entityClass === null) {
 				throw new Error(`Dynamic entity ${nodeId} has no presentation class.`);
 			}
+			const resolved = this.#systems.scene.readResolvedState(nodeId);
+			if (resolved === undefined)
+				throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
 			return {
 				entityClass,
 				footprint: {
 					kind: "eligible",
 					localBounds: dynamicBounds,
 					objectClass: "authored-dynamic",
-					placement: this.#requiredPlacement(nodeId, "Dynamic entity"),
+					placement: resolved.placement,
 				},
 				kind: "dynamic",
 			};
@@ -361,7 +378,10 @@ export class RenderWorld {
 	getIndoorGroundingEnvCellFacts(
 		nodeId: SceneNodeId,
 	): IndoorGroundingEnvCellFacts {
-		const placement = this.#requiredPlacement(nodeId, "EnvCell shell");
+		const resolved = this.#systems.scene.readResolvedState(nodeId);
+		if (resolved === undefined)
+			throw new Error(`EnvCell shell node ${nodeId} no longer exists.`);
+		const { placement } = resolved;
 		if (placement.scope.kind !== "env-cell") {
 			throw new Error(`EnvCell shell node ${nodeId} has outdoor residency.`);
 		}
@@ -373,7 +393,7 @@ export class RenderWorld {
 				`EnvCell shell node ${nodeId} has no installed cell bounds.`,
 			);
 		}
-		return { bounds, scope: placement.scope };
+		return { bounds, scope: { ...placement.scope } };
 	}
 
 	getPortalDrawUnit(
@@ -391,16 +411,15 @@ export class RenderWorld {
 		}));
 	}
 
-	/** Resolve a visible static node without exposing mutable scene or resource systems. */
+	/** Copy placement for retained static compilation and resolve its immutable device selections. */
 	resolveStaticObjectNode(
 		nodeId: SceneNodeId,
 		renderable: StaticObjectRenderable,
-		footprint: ObjectPresentationFootprint,
 	): ResolvedStaticObjectNode {
-		const placement =
-			footprint.kind === "eligible"
-				? footprint.placement
-				: this.#requiredPlacement(nodeId, "Static object");
+		// Static submission caches retain this matrix beyond the synchronous scene read.
+		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
+		if (placement === undefined)
+			throw new Error(`Static object node ${nodeId} no longer exists.`);
 		return {
 			drawUnits: this.resolveStaticObjectRenderable(renderable),
 			frameStreamedInstances: renderable.frameStreamedInstances.map(
@@ -433,7 +452,7 @@ export class RenderWorld {
 				`Static object node ${nodeId} has unsupported culling group ${cullingGroup}.`,
 			);
 		}
-		const resolvedBounds = this.#systems.scene.getResolvedBounds(nodeId);
+		const resolvedBounds = this.#systems.scene.readResolvedBounds(nodeId);
 		if (!resolvedBounds)
 			throw new Error(`Static object node ${nodeId} has no resolved bounds.`);
 		return {
@@ -442,16 +461,6 @@ export class RenderWorld {
 			objectClass,
 			placement: resolvedBounds.placement,
 		};
-	}
-
-	#requiredPlacement(
-		nodeId: SceneNodeId,
-		label: "Dynamic entity" | "EnvCell shell" | "Static object",
-	): ResolvedScenePlacement {
-		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
-		if (!placement)
-			throw new Error(`${label} node ${nodeId} no longer exists.`);
-		return placement;
 	}
 
 	resolveEnvCellRenderable(

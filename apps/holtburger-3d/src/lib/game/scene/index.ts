@@ -171,7 +171,7 @@ export interface ResolvedSceneOrigin extends SceneResidency {
 	readonly landblockOrigin: Vec3;
 }
 
-/** One bounded scene node's colocated local envelope and resolved render placement. */
+/** Scene-owned bounds and placement borrowed synchronously until the next scene mutation. */
 export interface ResolvedSceneBounds {
 	/** Bounds retained in the selected node's own local coordinate frame. */
 	readonly localBounds: AABB3;
@@ -219,6 +219,12 @@ export interface VisibleScene {
 
 /** Frame-scoped producer-group predicate applied before broad-phase bounds work. */
 export type SceneCullingGroupFilter = (cullingGroup: string) => boolean;
+
+/**
+ * Synchronous admission before individual bounds tests. Must not mutate the scene or issue queries;
+ * its answer must remain stable for the duration of a query that borrows reused result storage.
+ */
+export type SceneNodeFilter = (nodeId: SceneNodeId) => boolean;
 
 /** Explicit unfiltered selection policy for callers outside renderer presentation. */
 export const INCLUDE_ALL_SCENE_CULLING_GROUPS: SceneCullingGroupFilter = () =>

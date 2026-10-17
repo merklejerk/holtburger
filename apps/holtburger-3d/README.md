@@ -499,6 +499,9 @@ particles. Portal frames retain their packed-atlas compositor; optional ambient
 occlusion consumes its planner-owned tiles after opaque submission without
 introducing an alternate portal execution path. Sky, weather, transparent
 objects, and particles remain outside ambient occlusion.
+Particle owners still pass CPU scope admission, while admitted particles use one
+program with ordinary depth testing and blending. They omit per-fragment portal
+clipping as an accepted visual/performance trade-off; other geometry retains it.
 The Explorer's Render quality panel adjusts AO strength, radius, bias, edge
 threshold, and distance fade live without reallocating its scratch targets.
 

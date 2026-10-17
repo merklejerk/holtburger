@@ -69,7 +69,7 @@ import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
-import { createParticleFragmentShader } from "./webgl2-particle-program";
+import { PARTICLE_FRAGMENT_SHADER } from "./webgl2-particle-program";
 
 // Tile interiors must exceed the resolve shader's 2-texel envelope gutter or confinement becomes
 // untestable: on the original 4x4 tiles the gutter's 5x5 search spanned every texel, so every
@@ -143,7 +143,9 @@ export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly productionPackedHostileSamplerResolveMatchesOracle: boolean;
 	readonly productionPackedResolveMatchesOracle: boolean;
 	readonly propagatedResolveMatchesOracle: boolean;
-	readonly particleMatchesEquivalentTransparency: boolean;
+	/** Particle alpha layers use resolved opaque depth; the independent oracle has no scope filter. */
+	readonly particleDepthCompositionMatchesOracle: boolean;
+	readonly expectedParticlePixels: readonly number[];
 	readonly particlePixels: readonly number[];
 	readonly rootOnlyResolveMatchesOracle: boolean;
 	readonly weatherPixels: readonly number[];
@@ -340,7 +342,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		return {
 			deferredCompositionMatchesOracle: pixelRgbMatches(
 				deferred.transparentPixels,
-				deferred.expectedPixels,
+				deferred.expectedTransparentPixels,
 			),
 			deferredPixels: [...deferred.transparentPixels],
 			exteriorWeatherComposesBehindChildOpaque: pixelsMatch(
@@ -378,10 +380,11 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				ordinaryPolicyStraddlePixels,
 				solidPixels(ROOT_COLOR),
 			),
-			particleMatchesEquivalentTransparency: pixelsMatch(
+			particleDepthCompositionMatchesOracle: pixelRgbMatches(
 				deferred.particlePixels,
-				deferred.transparentPixels,
+				deferred.expectedParticlePixels,
 			),
+			expectedParticlePixels: [...deferred.expectedParticlePixels],
 			particlePixels: [...deferred.particlePixels],
 			productionPackedResolveMatchesOracle: pixelsMatch(
 				productionPackedPixels,
@@ -1088,7 +1091,6 @@ interface DeferredFixtureProgram {
 
 interface ParticleFixtureProgram {
 	readonly program: WebGLProgram;
-	readonly portal: WebGL2PortalDeferredVisibilityUniforms;
 	readonly color: WebGLUniformLocation;
 	readonly depth: WebGLUniformLocation;
 	readonly translucency: WebGLUniformLocation;
@@ -1103,7 +1105,8 @@ function runDeferredCompositionFixture(
 		PortalPropagationMetadataStreamView,
 	frame: PortalScopeAtlasFrameView,
 ): {
-	readonly expectedPixels: Uint8Array;
+	readonly expectedTransparentPixels: Uint8Array;
+	readonly expectedParticlePixels: Uint8Array;
 	readonly particlePixels: Uint8Array;
 	readonly transparentPixels: Uint8Array;
 } {
@@ -1146,7 +1149,8 @@ function runDeferredCompositionFixture(
 		const particlePixels = readOutput(gl);
 
 		return {
-			expectedPixels: expectedDeferredCompositionPixels(),
+			expectedTransparentPixels: expectedDeferredCompositionPixels(),
+			expectedParticlePixels: expectedParticleCompositionPixels(),
 			particlePixels,
 			transparentPixels,
 		};
@@ -1207,19 +1211,19 @@ function drawParticleFixtureSchedule(
 ): void {
 	gl.useProgram(fixture.program);
 	gl.uniform1f(fixture.translucency, 0.5);
-	drawParticleFixture(gl, fixture, 0, 0.55, [0, 0, 1, 1]);
-	drawParticleFixture(gl, fixture, 1, 0.5, [1, 1, 0, 1]);
-	drawParticleFixture(gl, fixture, 0, 0.4, [1, 0, 1, 1]);
+	// The far green layer is visible over root depth 0.8, but occluded by child depth 0.6.
+	drawParticleFixture(gl, fixture, 0.7, [0, 1, 0, 1]);
+	drawParticleFixture(gl, fixture, 0.55, [0, 0, 1, 1]);
+	drawParticleFixture(gl, fixture, 0.5, [1, 1, 0, 1]);
+	drawParticleFixture(gl, fixture, 0.4, [1, 0, 1, 1]);
 }
 
 function drawParticleFixture(
 	gl: WebGL2RenderingContext,
 	fixture: ParticleFixtureProgram,
-	renderDomain: number,
 	depth: number,
 	color: readonly [number, number, number, number],
 ): void {
-	gl.uniform1ui(fixture.portal.renderDomain, renderDomain);
 	gl.uniform1f(fixture.depth, depth);
 	gl.uniform4f(fixture.color, ...color);
 	gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1247,7 +1251,7 @@ function createParticleFixtureProgram(
 	const program = linkFixtureProgram(
 		gl,
 		PARTICLE_FIXTURE_VERTEX_SHADER,
-		createParticleFragmentShader(true),
+		PARTICLE_FRAGMENT_SHADER,
 	);
 	gl.useProgram(program);
 	gl.uniform1i(requireWebGL2Uniform(gl, program, "uBase"), 0);
@@ -1257,10 +1261,10 @@ function createParticleFixtureProgram(
 	gl.uniform1f(requireWebGL2Uniform(gl, program, "uAlphaTest"), 0);
 	// Match production opacity; the uniform's initial zero otherwise hides every fixture particle.
 	gl.uniform1f(requireWebGL2Uniform(gl, program, "uOpacityScale"), 1);
+	gl.uniform1i(requireWebGL2Uniform(gl, program, "uCanvasEmissionMode"), 0);
 	return {
 		color: requireWebGL2Uniform(gl, program, "uMaterialColor"),
 		depth: requireWebGL2Uniform(gl, program, "uDepth"),
-		portal: bindWebGL2PortalDeferredVisibilityProgram(gl, program),
 		program,
 		translucency: requireWebGL2Uniform(gl, program, "uTranslucency"),
 	};
@@ -1336,6 +1340,24 @@ function bindFixtureMaterialTexture(
 function expectedDeferredCompositionPixels(): Uint8Array {
 	const outside = blendHalf(blendHalf(ROOT_COLOR, [0, 0, 255]), [255, 0, 255]);
 	const center = blendHalf(blendHalf(LEAF_COLOR, [255, 255, 0]), [255, 0, 255]);
+	const pixels = new Uint8Array(
+		DRAWING_EXTENT.width * DRAWING_EXTENT.height * 4,
+	);
+	for (let pixel = 0; pixel < pixels.length / 4; pixel += 1) {
+		pixels.set(CENTER_PIXELS.has(pixel) ? center : outside, pixel * 4);
+	}
+	return pixels;
+}
+
+/** Ordinary scene depth admits every near particle layer, independent of its source scope. */
+function expectedParticleCompositionPixels(): Uint8Array {
+	const layers = (background: readonly [number, number, number, number]) =>
+		blendHalf(
+			blendHalf(blendHalf(background, [0, 0, 255]), [255, 255, 0]),
+			[255, 0, 255],
+		);
+	const outside = layers(blendHalf(ROOT_COLOR, [0, 255, 0]));
+	const center = layers(LEAF_COLOR);
 	const pixels = new Uint8Array(
 		DRAWING_EXTENT.width * DRAWING_EXTENT.height * 4,
 	);

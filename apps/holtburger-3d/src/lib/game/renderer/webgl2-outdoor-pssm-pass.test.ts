@@ -253,13 +253,13 @@ function createFixture(withCaster = false): {
 			state.depthPreparations += 1;
 			return withCaster ? contribution : null;
 		},
-		getRenderContributionDescriptor: () => descriptor,
+		readRenderContribution: () => descriptor,
 		getEntityShadowDynamicFacts: () => ({
 			identity: NODE,
 			rigidBounds: new AABB3(Vec3.zero(), new Vec3(1, 2, 1)),
 			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		}),
-		queryScopesScene: () => {
+		queryOutdoorShadowCasters: () => {
 			state.queries += 1;
 			return { entries: withCaster ? [NODE] : [] };
 		},

@@ -6,12 +6,10 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import type { DatAssetId } from "../game-types";
 import type { ParticleDrawRange } from "./particle-render-routing";
-import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
 import {
 	WebGL2ParticlePass,
 	type ParticleDrawGeometry,
 } from "./webgl2-particle-pass";
-import { createParticleFragmentShader } from "./webgl2-particle-program";
 import {
 	PARTICLE_INSTANCE_FLOAT_COUNT,
 	PARTICLE_RECORDS_PER_ROW,
@@ -90,7 +88,6 @@ function fakeGl() {
 		DYNAMIC_DRAW: 5,
 		FLOAT: 6,
 		FRAGMENT_SHADER: 7,
-		INVALID_INDEX: 0xffff_ffff,
 		LINK_STATUS: 8,
 		TEXTURE0: 9,
 		TEXTURE1: 10,
@@ -105,7 +102,6 @@ function fakeGl() {
 		RGBA32F: 26,
 		TRIANGLES: 12,
 		UNSIGNED_INT: 13,
-		UNIFORM_BLOCK_DATA_SIZE: 18,
 		VERTEX_SHADER: 14,
 		ONE: 15,
 		ONE_MINUS_SRC_ALPHA: 16,
@@ -147,9 +143,6 @@ function fakeGl() {
 		getShaderParameter: () => true,
 		getUniformLocation: (_p: WebGLProgram, name: string) =>
 			({ name }) as unknown as WebGLUniformLocation,
-		getUniformBlockIndex: () => 0,
-		getActiveUniformBlockParameter: () =>
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 		linkProgram: () => undefined,
 		shaderSource: () => undefined,
 		texImage2D,
@@ -158,7 +151,6 @@ function fakeGl() {
 		uniform1f: () => undefined,
 		uniform1i: (location: { name: string }, value: number) =>
 			intUniforms.push([location.name, value]),
-		uniform1ui: () => undefined,
 		uniform3f: (location: { name: string }, x: number, y: number, z: number) =>
 			vec3Uniforms.push([location.name, x, y, z]),
 		uniform4f: (
@@ -170,7 +162,6 @@ function fakeGl() {
 		) => vec4Uniforms.push([location.name, x, y, z, w]),
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
-		uniformBlockBinding: () => undefined,
 		vertexAttribDivisor: () => undefined,
 		vertexAttribPointer: () => undefined,
 	} as unknown as WebGL2RenderingContext;
@@ -209,7 +200,7 @@ const context = (
 });
 
 describe("WebGL2ParticlePass", () => {
-	it("uploads once across flat and scoped draws, then consumes changes on the same mirror next frame", () => {
+	it("uploads once across sky and world draws, then consumes changes on the same mirror next frame", () => {
 		const { calls, draws, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 		const records = {
@@ -221,7 +212,6 @@ describe("WebGL2ParticlePass", () => {
 		const drawContext = context(gl);
 		const sky = [batch(2, 1)];
 		const world = new Map([["outdoor", [batch(2, 2)]]]);
-		const routing = { routeDeferredSubmission: vi.fn() };
 
 		pass.beginFrame(records);
 		pass.draw(drawContext, []);
@@ -229,14 +219,14 @@ describe("WebGL2ParticlePass", () => {
 		pass.draw(drawContext, sky);
 		expect(calls.texImage2D).toHaveBeenCalledTimes(1);
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(1);
-		pass.drawScoped(drawContext, world, routing);
+		pass.drawWorld(drawContext, world);
 		expect(calls.texSubImage2D).not.toHaveBeenCalled();
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
 
 		// The mirror and dirty-range identities persist while their contents change.
 		records.data[0] = 42;
 		pass.beginFrame(records);
-		pass.drawScoped(drawContext, world, routing);
+		pass.drawWorld(drawContext, world);
 		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(1);
 		pass.draw(drawContext, sky);
@@ -246,7 +236,7 @@ describe("WebGL2ParticlePass", () => {
 
 		pass.beginFrame({ data: records.data, dirtySlots: null });
 		pass.draw(drawContext, sky);
-		pass.drawScoped(drawContext, world, routing);
+		pass.drawWorld(drawContext, world);
 		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
 	});
@@ -359,44 +349,28 @@ describe("WebGL2ParticlePass", () => {
 		]);
 	});
 
-	it("routes scoped batches without splitting their one frame upload", () => {
+	it("submits world scope groups in order with one upload and keeps sky separate", () => {
 		const { calls, draws, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const createProgram = vi.spyOn(gl, "createProgram");
 		pass.beginFrame(emptyRecordFrame());
-		const routedScopes: string[] = [];
 
-		pass.drawScoped(
+		pass.drawWorld(
 			context(gl),
 			new Map([
-				["outdoor", [batch(2, 3)]],
+				["outdoor", [batch(2, 3), batch(9, 2)]],
+				["sky", [batch(11, 5)]],
 				["env-cell:0101/01010001", [batch(5, 7)]],
 			]),
-			{
-				routeDeferredSubmission: (renderScopeKey) =>
-					routedScopes.push(renderScopeKey),
-			},
 		);
+		pass.draw(context(gl), [batch(11, 5)]);
 
-		expect(draws).toEqual([3, 7]);
-		expect(routedScopes).toEqual(["outdoor", "env-cell:0101/01010001"]);
+		expect(draws).toEqual([3, 2, 7, 5]);
+		expect(createProgram).toHaveBeenCalledTimes(1);
 		expect(
 			calls.texImage2D.mock.calls.length +
 				calls.texSubImage2D.mock.calls.length,
 		).toBe(1);
-	});
-
-	it("rejects portal-hidden fragments before particle material sampling", () => {
-		const shader = createParticleFragmentShader(true);
-		const visibilityIndex = shader.indexOf(
-			"if (!portalDeferredFragmentVisible()) discard;",
-		);
-
-		expect(shader).toContain("uniform uint uPortalRenderDomain");
-		expect(shader).toContain("uniform highp sampler2D uPortalEnvelopeDepth;");
-		expect(visibilityIndex).toBeGreaterThanOrEqual(0);
-		expect(visibilityIndex).toBeLessThan(
-			shader.indexOf("vec4 color = sampleMaterial()"),
-		);
 	});
 
 	it("selects a blend mode per batch instead of inheriting one", () => {

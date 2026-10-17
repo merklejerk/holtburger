@@ -2,6 +2,67 @@ import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import type { RetailGeometryVisibility } from "../resolution/presentation";
 import { retainsRetailGeometry } from "./retail-geometry-visibility";
+import type { DynamicAppearance } from "../systems/dynamic-appearance";
+import type { ActiveDynamicPart } from "../systems/components";
+
+/** Frame-current admission shared by source-range metrics, nameplates, and analytic grounding. */
+export interface DynamicRangeAdmission {
+	/** Distinct authored source cohorts retained even when physical materials split their ranges. */
+	readonly sourceRangeGroupCount: number;
+	/** At least one authored opaque range survives opacity and retail visibility policy. */
+	readonly hasMaterialFreeShadowGeometry: boolean;
+}
+
+/** Explicit admission for unavailable, preparing, or hidden publications. */
+export const EMPTY_DYNAMIC_RANGE_ADMISSION: DynamicRangeAdmission = {
+	sourceRangeGroupCount: 0,
+	hasMaterialFreeShadowGeometry: false,
+};
+
+/** Material-free depth cannot evaluate cutouts; partial opaque fades retain their shadow geometry. */
+export function retainsDynamicShadowRange(
+	ordering: ObjectMaterialOrdering,
+	opacity: number,
+	visibility: RetailGeometryVisibility,
+	showRetailHiddenGeometry: boolean,
+): boolean {
+	return (
+		ordering === "opaque" &&
+		opacity !== 0 &&
+		retainsRetailGeometry(visibility, showRetailHiddenGeometry)
+	);
+}
+
+/** Complete the existing source walk, including validation after an eligible range is found. */
+export function summarizeDynamicRangeAdmission(
+	appearance: DynamicAppearance,
+	parts: readonly Pick<ActiveDynamicPart, "frameInstance">[],
+	showRetailHiddenGeometry: boolean,
+	groups: Set<DynamicAppearance["ranges"][number]["transparentSort"]>,
+): DynamicRangeAdmission {
+	groups.clear();
+	let hasMaterialFreeShadowGeometry = false;
+	for (const range of appearance.ranges) {
+		const part = parts[range.partSelector];
+		if (part === undefined)
+			throw new Error("Dynamic appearance references a missing part.");
+		const opacity = part.frameInstance.color.a;
+		if (
+			opacity !== 0 &&
+			retainsRetailGeometry(range.retailVisibility, showRetailHiddenGeometry)
+		)
+			groups.add(range.transparentSort);
+		hasMaterialFreeShadowGeometry ||= retainsDynamicShadowRange(
+			range.ordering,
+			opacity,
+			range.retailVisibility,
+			showRetailHiddenGeometry,
+		);
+	}
+	const sourceRangeGroupCount = groups.size;
+	groups.clear();
+	return { sourceRangeGroupCount, hasMaterialFreeShadowGeometry };
+}
 
 /** Dynamic color-pass eligibility; view selection and sort order belong to each renderer. */
 export function dynamicObjectPhase(

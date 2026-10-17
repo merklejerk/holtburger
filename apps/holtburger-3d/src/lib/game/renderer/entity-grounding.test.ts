@@ -74,7 +74,6 @@ describe("entity grounding", () => {
 	it("combines a transformed rigid footprint with authoritative root height", () => {
 		const caster = resolveEntityShadowCaster(
 			{
-				entityClass: "mob",
 				identity: "guid:1",
 				rigidBounds: new AABB3(new Vec3(-1, -20, -2), new Vec3(1, 40, 2)),
 				placement: placementAt(3, 5, 7),
@@ -99,7 +98,6 @@ describe("entity grounding", () => {
 
 	it("keeps root contact stable while rigid-pose center and radius animate", () => {
 		const common = {
-			entityClass: "mob" as const,
 			identity: "guid:animated",
 			placement: placementAt(3, 5, 7),
 			spatialMembership: membership(CELL_A),
@@ -132,7 +130,6 @@ describe("entity grounding", () => {
 		const createAt = (y: number) =>
 			resolveEntityShadowCaster(
 				{
-					entityClass: "npc",
 					identity: "guid:moving",
 					rigidBounds,
 					placement: placementAt(0, 0, y),
@@ -151,7 +148,6 @@ describe("entity grounding", () => {
 
 	it("retains outdoor-only membership and rejects a zero horizontal radius", () => {
 		const common = {
-			entityClass: "mob" as const,
 			identity: "guid:1",
 			placement: placementAt(0, 0),
 		};
@@ -241,22 +237,6 @@ describe("entity grounding", () => {
 			createOutdoorDirectionalShadowSelectionScratch(),
 		);
 		expect(selection.count).toBe(0);
-	});
-
-	it("rejects categories outside the shared actor-caster policy", () => {
-		expect(
-			resolveEntityShadowCaster(
-				{
-					entityClass: "other",
-					identity: "ordinary-item",
-					rigidBounds: new AABB3(Vec3.zero(), new Vec3(1, 1, 1)),
-					placement: placementAt(0, 0),
-					spatialMembership: membership(CELL_A),
-				},
-				ISLANDS,
-				SETTINGS,
-			),
-		).toBeNull();
 	});
 
 	it("shares a seam caster across same-island cells but rejects a stacked island", () => {
@@ -390,7 +370,6 @@ function requiredCaster(
 ) {
 	const caster = resolveEntityShadowCaster(
 		{
-			entityClass: "npc",
 			identity,
 			rigidBounds: new AABB3(new Vec3(-1, 0, -1), new Vec3(1, 2, 1)),
 			placement: placementAt(x - 192, 384),
@@ -409,7 +388,6 @@ function outdoorCaster(identity: string, x: number) {
 	localToLandblock.m43 = -1;
 	const caster = resolveEntityShadowCaster(
 		{
-			entityClass: "npc",
 			identity,
 			rigidBounds: new AABB3(new Vec3(-1, 0, -1), new Vec3(1, 2, 1)),
 			placement: {

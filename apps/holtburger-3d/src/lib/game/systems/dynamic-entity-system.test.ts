@@ -47,6 +47,31 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it("publishes class changes only when a staged visual replacement commits", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const original = source("classification");
+		const installation = system.replaceOwner("owner", [original]);
+		await installation.ready;
+		commit(installation);
+		const root = requiredAt(installation.nodeIds, 0);
+		for (const commitReplacement of [false, true]) {
+			const replacement = await system.stageVisualReplacement("owner", root, {
+				...original.source,
+				entityClass: "mob",
+			});
+			if (replacement.kind !== "staged")
+				throw new Error("Compatible replacement rejected.");
+			expect(system.getPresentationClass(root)).toBe(
+				original.source.entityClass,
+			);
+			if (commitReplacement) replacement.commit();
+			replacement.release();
+			expect(system.getPresentationClass(root)).toBe(
+				commitReplacement ? "mob" : original.source.entityClass,
+			);
+		}
+		system.destroy();
+	});
 	it.each([0, 101, 0xffff])(
 		"uses requested placement %s and updates a resident pose",
 		async (requested) => {

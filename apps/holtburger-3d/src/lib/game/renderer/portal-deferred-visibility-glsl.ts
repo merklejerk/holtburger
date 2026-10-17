@@ -13,7 +13,7 @@ export interface WebGL2PortalDeferredVisibilityUniforms {
 }
 
 /**
- * Fragment-stage render-domain envelope predicate shared by transparent objects and particles.
+ * Fragment-stage render-domain envelope predicate for transparent objects and scoped overlays.
  *
  * Opaque depth remains ordinary fixed-function depth testing. This predicate only answers whether
  * the fragment lies inside any admitted appearance of its owning domain and before that domain's

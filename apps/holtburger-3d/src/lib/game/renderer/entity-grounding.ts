@@ -5,7 +5,6 @@ import {
 } from "../landblocks";
 import { getMat4Translation, transformAABB3 } from "../math/matrices";
 import { AABB3, Vec3 } from "../math/types";
-import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type {
 	ResolvedScenePlacement,
 	SceneScope,
@@ -16,7 +15,6 @@ import type {
 import { scopeKey } from "../scene/scope";
 import {
 	MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER,
-	isEntityShadowCasterClass,
 	type IndoorGroundingSettings,
 	type OutdoorDirectionalShadowSettings,
 } from "./entity-shadow-policy";
@@ -114,10 +112,9 @@ export function indexIndoorVisibilityIslands(
 	return out;
 }
 
-/** Construct one world-space proxy from rigid horizontal bounds and stable root height. */
+/** Construct an admitted actor's world-space proxy from rigid bounds and stable root height. */
 export function resolveEntityShadowCaster(
 	input: {
-		readonly entityClass: DynamicEntityPresentationClass;
 		readonly identity: string;
 		readonly rigidBounds: AABB3;
 		readonly placement: ResolvedScenePlacement;
@@ -126,7 +123,6 @@ export function resolveEntityShadowCaster(
 	visibilityIslands: ReadonlyMap<string, SceneVisibilityIslandId>,
 	settings: IndoorGroundingSettings,
 ): ResolvedEntityShadowCaster | null {
-	if (!isEntityShadowCasterClass(input.entityClass)) return null;
 	const islandIds: SceneVisibilityIslandId[] = [];
 	let reachesOutdoors = false;
 	for (const scope of input.spatialMembership.scopes) {

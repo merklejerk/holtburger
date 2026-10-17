@@ -43,6 +43,7 @@ import {
 } from "./color-grade-policy";
 import {
 	createEntityShadowSettings,
+	isEntityShadowCasterClass,
 	isOutdoorPssmReceiverFootprint,
 	type EntityShadowSettings,
 } from "./entity-shadow-policy";
@@ -244,6 +245,8 @@ import {
 	type ObjectSubmissionPhases,
 	type PreparedObjectTextureBinding,
 	type TransparentObjectRange,
+	EMPTY_DYNAMIC_RANGE_ADMISSION,
+	summarizeDynamicRangeAdmission,
 } from "./object-rendering-policy";
 import {
 	BakedDrawMergeCensusCollector,
@@ -1339,11 +1342,12 @@ export class WebGL2Renderer implements Renderer {
 			{
 				getDynamicDepth: (nodeId, showRetailHiddenGeometry) =>
 					this.#dynamicDepths.prepare(nodeId, showRetailHiddenGeometry),
-				getRenderContributionDescriptor: (nodeId) =>
-					world.getRenderContributionDescriptor(nodeId),
+				readRenderContribution: (nodeId) =>
+					world.readRenderContribution(nodeId),
 				getEntityShadowDynamicFacts: (nodeId) =>
 					world.getEntityShadowDynamicFacts(nodeId),
-				queryScopesScene: (...args) => world.queryScopesScene(...args),
+				queryOutdoorShadowCasters: (...args) =>
+					world.queryOutdoorShadowCasters(...args),
 			},
 		);
 		this.#outdoorPssmReceiverPrograms = new WebGL2OutdoorPssmReceiverPrograms(
@@ -2136,7 +2140,7 @@ export class WebGL2Renderer implements Renderer {
 			compositionGpu?.finish();
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
-		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
+		this.#drawWorldParticles(view, particlesByScope, profile);
 		this.#drawNameplates(view, pipeline);
 		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
@@ -2541,7 +2545,7 @@ export class WebGL2Renderer implements Renderer {
 		};
 		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
 		for (const nodeId of visibleEntries) {
-			const contribution = this.#world.getRenderContributionDescriptor(nodeId);
+			const contribution = this.#world.readRenderContribution(nodeId);
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
 				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
@@ -2592,28 +2596,16 @@ export class WebGL2Renderer implements Renderer {
 									portalVisibility,
 								),
 							};
-				let retainedDynamicContributionCount = 0;
+				let admission = EMPTY_DYNAMIC_RANGE_ADMISSION;
 				if (renderTarget !== null) {
 					retainOffset(renderTarget.landblockId);
 					const { presentation } = renderTarget;
-					// Preserve the historical source-range count even when material selectors split it.
-					for (const range of presentation.visual.appearance.ranges) {
-						const part = presentation.visual.parts[range.partSelector];
-						if (part === undefined)
-							throw new Error("Dynamic appearance references a missing part.");
-						if (
-							part.frameInstance.color.a !== 0 &&
-							retainsRetailGeometry(
-								range.retailVisibility,
-								frameSettings.showRetailHiddenGeometry,
-							)
-						) {
-							this.#dynamicSourceRangeGroups.add(range.transparentSort);
-						}
-					}
-					retainedDynamicContributionCount =
-						this.#dynamicSourceRangeGroups.size;
-					this.#dynamicSourceRangeGroups.clear();
+					admission = summarizeDynamicRangeAdmission(
+						presentation.visual.appearance,
+						presentation.visual.parts,
+						frameSettings.showRetailHiddenGeometry,
+						this.#dynamicSourceRangeGroups,
+					);
 					const appearance = this.#dynamicAppearances.get(
 						presentation.visual.appearance,
 					);
@@ -2736,7 +2728,11 @@ export class WebGL2Renderer implements Renderer {
 						}
 					}
 				}
-				if (entityShadowsEnabled && retainedDynamicContributionCount > 0) {
+				if (
+					entityShadowsEnabled &&
+					isEntityShadowCasterClass(contribution.entityClass) &&
+					admission.hasMaterialFreeShadowGeometry
+				) {
 					const facts = this.#world.getEntityShadowDynamicFacts(nodeId);
 					const reachesIndoor = facts.spatialMembership.scopes.some(
 						(scope) => scope.kind === "env-cell",
@@ -2744,18 +2740,10 @@ export class WebGL2Renderer implements Renderer {
 					const reachesOutdoors = facts.spatialMembership.scopes.some(
 						(scope) => scope.kind === "outdoor",
 					);
-					const depth =
-						reachesIndoor || (simpleOutdoorShadows && reachesOutdoors)
-							? this.#dynamicDepths.prepare(
-									nodeId,
-									frameSettings.showRetailHiddenGeometry,
-								)
-							: null;
 					const caster =
-						depth !== null
+						reachesIndoor || (simpleOutdoorShadows && reachesOutdoors)
 							? resolveEntityShadowCaster(
 									{
-										entityClass: contribution.entityClass,
 										identity: facts.identity,
 										rigidBounds: facts.rigidBounds,
 										placement: contribution.footprint.placement,
@@ -2784,7 +2772,7 @@ export class WebGL2Renderer implements Renderer {
 				if (
 					renderTarget !== null &&
 					renderTarget.renderScopeKeys.length > 0 &&
-					retainedDynamicContributionCount > 0 &&
+					admission.sourceRangeGroupCount > 0 &&
 					(frameSettings.nameplates.maximumVisible > 0 || required)
 				) {
 					const facts = this.#world.getEntityNameplateFacts(nodeId);
@@ -2827,7 +2815,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicSourceRangeCount +=
-					retainedDynamicContributionCount;
+					admission.sourceRangeGroupCount;
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
@@ -3146,7 +3134,6 @@ export class WebGL2Renderer implements Renderer {
 		const node = this.#world.resolveStaticObjectNode(
 			nodeId,
 			contribution.renderable,
-			contribution.footprint,
 		);
 		const scope = node.placement.scope;
 		const renderScopeKey = scopeKey(scope);
@@ -3632,10 +3619,9 @@ export class WebGL2Renderer implements Renderer {
 		});
 	}
 
-	#drawScopedParticles(
+	#drawWorldParticles(
 		view: PreparedView,
 		particlesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		this.#executeParticlePass(profile, (pass) => {
@@ -3644,7 +3630,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#frameClockSeconds,
 				1.0,
 			);
-			pass.drawScoped(context, particlesByScope, portalPipeline);
+			pass.drawWorld(context, particlesByScope);
 		});
 	}
 

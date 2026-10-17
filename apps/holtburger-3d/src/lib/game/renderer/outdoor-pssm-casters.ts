@@ -11,19 +11,14 @@ import type { SceneNodeId } from "../scene";
 import type { PreparedDynamicDepth } from "./dynamic-depth-preparation";
 import type { RenderWorld } from "./render-world";
 import type { EntityShadowCasterShape } from "./entity-grounding";
-import {
-	isEntityShadowCasterClass,
-	type OutdoorShadowCasterBudget,
-} from "./entity-shadow-policy";
+import type { OutdoorShadowCasterBudget } from "./entity-shadow-policy";
 
-const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
-const DYNAMIC_CULLING_GROUP = "dynamic";
 /** RenderWorld operations needed by one independent outdoor caster query. */
 export type OutdoorPssmCasterWorld = Pick<
 	RenderWorld,
 	| "getEntityShadowDynamicFacts"
-	| "getRenderContributionDescriptor"
-	| "queryScopesScene"
+	| "readRenderContribution"
+	| "queryOutdoorShadowCasters"
 > & {
 	/** Frame-cached material-free geometry; querying does not upload poses or draw. */
 	getDynamicDepth(
@@ -104,8 +99,9 @@ export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSele
 /**
  * Consume one light-frustum query before SceneGraph reuses its entry storage.
  *
- * Presentation-class and outdoor-domain checks happen before depth preparation where possible. A root enters the
- * shared animation-liveness set only after at least one draw-visible outdoor part survives.
+ * The query admits caster classes before individual bounds tests; outdoor-domain checks precede
+ * depth preparation. A root enters the shared animation-liveness set only after at least one
+ * draw-visible outdoor part survives.
  */
 export function planOutdoorShadowCastersForView(
 	world: OutdoorPssmCasterWorld,
@@ -146,12 +142,7 @@ export function planOutdoorShadowCastersForView(
 		if (frustum === undefined) {
 			throw new Error(`Outdoor PSSM cascade ${cascadeIndex} has no frustum.`);
 		}
-		const visible = world.queryScopesScene(
-			frustum,
-			anchorLandblockId,
-			OUTDOOR_SCOPE,
-			isDynamicCullingGroup,
-		);
+		const visible = world.queryOutdoorShadowCasters(frustum, anchorLandblockId);
 		const cascadeBit = 1 << cascadeIndex;
 		// SceneGraph reuses `entries`, so consume every root before issuing the next query.
 		for (const nodeId of visible.entries) {
@@ -165,13 +156,8 @@ export function planOutdoorShadowCastersForView(
 	const anchorOrigin = createLandblockWorldOrigin(anchorLandblockId);
 	let candidateCount = 0;
 	for (const [nodeId, cascadeMask] of rootCascadeMasks) {
-		const descriptor = world.getRenderContributionDescriptor(nodeId);
-		if (
-			descriptor?.kind !== "dynamic" ||
-			!isEntityShadowCasterClass(descriptor.entityClass)
-		) {
-			continue;
-		}
+		const descriptor = world.readRenderContribution(nodeId);
+		if (descriptor?.kind !== "dynamic") continue;
 		const facts = world.getEntityShadowDynamicFacts(nodeId);
 		if (!facts.spatialMembership.scopes.some(isOutdoorScope)) continue;
 		const placement = descriptor.footprint.placement;
@@ -313,10 +299,6 @@ function distanceSquaredToBounds(point: Vec3, bounds: AABB3): number {
 	const y = Math.max(bounds.min.y - point.y, 0, point.y - bounds.max.y);
 	const z = Math.max(bounds.min.z - point.z, 0, point.z - bounds.max.z);
 	return x * x + y * y + z * z;
-}
-
-function isDynamicCullingGroup(cullingGroup: string): boolean {
-	return cullingGroup === DYNAMIC_CULLING_GROUP;
 }
 
 function isOutdoorScope(scope: { readonly kind: string }): boolean {

@@ -36,14 +36,13 @@ function metrics() {
 }
 
 describe("outdoor PSSM caster selection", () => {
-	it("retains eligible outdoor whole roots, preserving the visual-scope and empty-geometry checks", () => {
-		const [player, npc, other, indoor, empty] = [1, 2, 3, 4, 5].map(node);
-		if (!player || !npc || !other || !indoor || !empty)
-			throw new Error("Fixture requires five roots.");
+	it("retains queried outdoor whole roots, preserving the visual-scope and empty-geometry checks", () => {
+		const [player, npc, indoor, empty] = [1, 2, 4, 5].map(node);
+		if (!player || !npc || !indoor || !empty)
+			throw new Error("Fixture requires four roots.");
 		const presentations = new Map<SceneNodeId, PreparedDynamicDepth | null>([
 			[player, depth(player)],
 			[npc, depth(npc)],
-			[other, depth(other)],
 			[
 				indoor,
 				{
@@ -63,22 +62,13 @@ describe("outdoor PSSM caster selection", () => {
 		const world: OutdoorPssmCasterWorld = {
 			getDynamicDepth,
 			getEntityShadowDynamicFacts: dynamicFacts,
-			getRenderContributionDescriptor: (id) =>
+			readRenderContribution: (id) =>
 				dynamicDescriptor(
-					id === other
-						? "other"
-						: id === player
-							? "player"
-							: id === npc
-								? "npc"
-								: "mob",
+					id === player ? "player" : id === npc ? "npc" : "mob",
 				),
-			queryScopesScene: (_frustum, anchor, scopes, filter) => {
+			queryOutdoorShadowCasters: (_frustum, anchor) => {
 				expect(anchor).toBe(ANCHOR);
-				expect(scopes).toEqual([{ kind: "outdoor" }]);
-				expect(filter("dynamic")).toBe(true);
-				expect(filter("buildings")).toBe(false);
-				return { entries: [player, npc, other, indoor, empty] };
+				return { entries: [player, npc, indoor, empty] };
 			},
 		};
 		const selected = new Set<SceneNodeId>();
@@ -126,8 +116,8 @@ describe("outdoor PSSM caster selection", () => {
 		const world: OutdoorPssmCasterWorld = {
 			getDynamicDepth,
 			getEntityShadowDynamicFacts: dynamicFacts,
-			getRenderContributionDescriptor: () => dynamicDescriptor("mob"),
-			queryScopesScene: () => {
+			readRenderContribution: () => dynamicDescriptor("mob"),
+			queryOutdoorShadowCasters: () => {
 				if (queries++ === 1) entries.splice(0, 2, shared, last);
 				return { entries };
 			},
@@ -192,8 +182,10 @@ describe("outdoor PSSM caster selection", () => {
 				...dynamicFacts(id),
 				identity: find(id).identity,
 			}),
-			getRenderContributionDescriptor: (id) => dynamicDescriptorAt(find(id).x),
-			queryScopesScene: () => ({ entries: roots.map(({ nodeId }) => nodeId) }),
+			readRenderContribution: (id) => dynamicDescriptorAt(find(id).x),
+			queryOutdoorShadowCasters: () => ({
+				entries: roots.map(({ nodeId }) => nodeId),
+			}),
 		};
 		const analytic: EntityShadowCasterShape[] = [];
 		const result = metrics();
@@ -267,8 +259,10 @@ describe("outdoor PSSM caster selection", () => {
 				...dynamicFacts(id),
 				identity: find(id).identity,
 			}),
-			getRenderContributionDescriptor: (id) => dynamicDescriptorAt(find(id).x),
-			queryScopesScene: () => ({ entries: roots.map(({ nodeId }) => nodeId) }),
+			readRenderContribution: (id) => dynamicDescriptorAt(find(id).x),
+			queryOutdoorShadowCasters: () => ({
+				entries: roots.map(({ nodeId }) => nodeId),
+			}),
 		};
 		const analytic: EntityShadowCasterShape[] = [];
 		const selected = new Set<SceneNodeId>();

@@ -585,6 +585,7 @@ export class ClientPresentationSession {
 				? null
 				: owner.runtime.spawnedEntityPlacement(playerGuid);
 		return {
+			waypoint: null,
 			cameraFovRadians:
 				((this.#lastPrimaryView?.camera.fov ?? this.#fieldOfView) * Math.PI) /
 				180,

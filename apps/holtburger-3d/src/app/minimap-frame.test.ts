@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
+import { scenePointFromPrintedCoordinates } from "../lib/game/map/map-coordinates";
 import type {
 	MinimapFrame,
 	MinimapGpuDrawState,
@@ -75,6 +76,31 @@ describe("minimap GPU draw state", () => {
 		expect(sameMinimapGpuDrawState(before, after)).toBe(true);
 	});
 
+	it("keeps terrain current when a navigation target changes", () => {
+		const source = mapSource();
+		const initial = frame({ source });
+		const next: MinimapFrame = {
+			...initial,
+			waypoint: {
+				kind: "paused",
+				reason: "Waypoint · paused indoors",
+				target: {
+					label: "0.0N, 0.0E",
+					position: scenePointFromPrintedCoordinates({
+						latitude: { magnitude: 0, hemisphere: "N" },
+						longitude: { magnitude: 0, hemisphere: "E" },
+					}),
+				},
+			},
+		};
+		expect(
+			sameMinimapGpuDrawState(
+				gpuDrawState(initial, minimapState()),
+				gpuDrawState(next, minimapState()),
+			),
+		).toBe(true);
+	});
+
 	it("does not redraw detached terrain for subject translation alone", () => {
 		const source = mapSource();
 		const center = { worldX: 50, worldZ: 60 };
@@ -138,6 +164,7 @@ function frame(
 	} = {},
 ): MinimapFrame {
 	return {
+		waypoint: null,
 		cameraFovRadians: overrides.cameraFovRadians ?? 1,
 		cameraHeadingRadians: overrides.cameraHeadingRadians ?? 0,
 		presentedEntities: () => [],

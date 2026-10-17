@@ -6,7 +6,8 @@ import {
 	MAP_DEGREE_ORIGIN,
 	METERS_PER_MAP_DEGREE,
 	formatWorldMapCoordinates,
-	landblockAxisFromPrintedDegree,
+	parsePrintedMapCoordinates,
+	scenePointFromPrintedCoordinates,
 } from "./map-coordinates";
 
 /** Place a world point on exact map degrees, so fixtures state intent rather than raw meters. */
@@ -16,23 +17,6 @@ function worldPointAt(latitude: number, longitude: number): Vec3 {
 		0,
 		-(latitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
 	);
-}
-
-/** Read AC's printed notation back into signed degrees, as a viewer retyping it would. */
-function signedDegrees(printed: string): {
-	readonly latitude: number;
-	readonly longitude: number;
-} {
-	const match = /^(\d+\.\d)([NS]), (\d+\.\d)([EW])$/.exec(printed);
-	if (match === null) {
-		throw new Error(`Printed map coordinate is unreadable: ${printed}`);
-	}
-	const [, latitude, latitudeHemisphere, longitude, longitudeHemisphere] =
-		match;
-	return {
-		latitude: Number(latitude) * (latitudeHemisphere === "S" ? -1 : 1),
-		longitude: Number(longitude) * (longitudeHemisphere === "W" ? -1 : 1),
-	};
 }
 
 describe("AC map coordinates", () => {
@@ -59,13 +43,65 @@ describe("AC map coordinates", () => {
 			{ latitude: 11, longitude: 1 },
 		]) {
 			const point = worldPointAt(latitude, longitude);
-			const printed = signedDegrees(formatWorldMapCoordinates(point));
-			expect(landblockAxisFromPrintedDegree(printed.latitude)).toBe(
+			const parsed = parsePrintedMapCoordinates(
+				formatWorldMapCoordinates(point),
+			);
+			if (parsed === null) throw new Error("Fixture coordinate did not parse.");
+			const printed = scenePointFromPrintedCoordinates(parsed.coordinates);
+			expect(Math.floor(-printed.z / OUTDOOR_LANDBLOCK_WORLD_SIZE)).toBe(
 				Math.floor(-point.z / OUTDOOR_LANDBLOCK_WORLD_SIZE),
 			);
-			expect(landblockAxisFromPrintedDegree(printed.longitude)).toBe(
+			expect(Math.floor(printed.x / OUTDOOR_LANDBLOCK_WORLD_SIZE)).toBe(
 				Math.floor(point.x / OUTDOOR_LANDBLOCK_WORLD_SIZE),
 			);
 		}
+	});
+});
+
+describe("printed coordinate parsing", () => {
+	it.each(["N", "S"] as const)("preserves %s even at zero", (hemisphere) => {
+		for (const longitude of ["E", "W"] as const) {
+			const parsed = parsePrintedMapCoordinates(
+				` 0.00${hemisphere.toLowerCase()}  0.0${longitude.toLowerCase()} `,
+			);
+			if (parsed === null) throw new Error("Fixture did not parse");
+			expect(parsed.label).toBe(`0.00${hemisphere}, 0.0${longitude}`);
+			const point = scenePointFromPrintedCoordinates(parsed.coordinates);
+			expect(point.x).toBe(
+				(MAP_DEGREE_ORIGIN +
+					(longitude === "E" ? 1 : -1) * MAP_DEGREE_DISPLAY_BIAS) *
+					METERS_PER_MAP_DEGREE,
+			);
+			expect(point.z).toBe(
+				-(
+					MAP_DEGREE_ORIGIN +
+					(hemisphere === "N" ? 1 : -1) * MAP_DEGREE_DISPLAY_BIAS
+				) * METERS_PER_MAP_DEGREE,
+			);
+		}
+	});
+	it("retains extra numeric precision", () => {
+		const parsed = parsePrintedMapCoordinates("42.345N,12.7890W");
+		if (parsed === null) throw new Error("Fixture did not parse");
+		expect(parsed.label).toBe("42.345N, 12.7890W");
+		expect(scenePointFromPrintedCoordinates(parsed.coordinates).x).toBe(
+			(MAP_DEGREE_ORIGIN - 12.789 - MAP_DEGREE_DISPLAY_BIAS) *
+				METERS_PER_MAP_DEGREE,
+		);
+	});
+	it.each([
+		"",
+		"42 12",
+		"42N",
+		"42E 12N",
+		"-42S 12E",
+		"+42N 12W",
+		"42N 12E 0Z",
+		"42N 12E junk",
+		"0xda55ffff",
+		"InfinityN 12E",
+		`${"9".repeat(400)}N 12E`,
+	])("rejects %s", (input) => {
+		expect(parsePrintedMapCoordinates(input)).toBeNull();
 	});
 });

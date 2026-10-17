@@ -40,6 +40,9 @@
 
 <script lang="ts">
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
+	import MapWaypointIcon from "../assets/icons/map-waypoint.svg?component";
+	import MapWaypointDirectionIcon from "../assets/icons/map-waypoint-direction.svg?component";
+	import { formatWaypointReadout } from "../lib/game/map/map-waypoint";
 	import { onDestroy, onMount, type Snippet } from "svelte";
 	import LayoutControls from "./LayoutControls.svelte";
 
@@ -145,6 +148,8 @@
 		 * camera or entity moved; overlays pull at display cadence and the WebGL map pulls at its cap.
 		 */
 		readonly readFrame: () => MinimapFrame;
+		/** Session-owned clear action; null in modes without navigation intent. */
+		readonly onClearWaypoint: (() => void) | null;
 		readonly viewState: MinimapState;
 		/** Whether shell-owned placement and sizing controls are currently available. */
 		readonly editable: boolean;
@@ -157,14 +162,15 @@
 		readonly onSelectEntity: (guid: number | null) => void;
 		/** Let the mode-owned notice surface confirm a successful clipboard write. */
 		readonly onCoordinatesCopied?: () => void;
-		/** Mode-owned content beneath the shared coordinate readout. */
-		readonly footer?: Snippet;
+		/** Mode-owned information alongside the shared coordinate readout. */
+		readonly coordinateDetails?: Snippet;
 		/** Complete below-disc footprint, consumed by client placement and anchoring. */
 		readonly onFooterExtentChange?: (extent: MinimapFooterExtent) => void;
 	}
 
 	const {
 		readFrame,
+		onClearWaypoint,
 		viewState,
 		editable,
 		minSize,
@@ -172,9 +178,63 @@
 		onStateChange,
 		onSelectEntity,
 		onCoordinatesCopied,
-		footer,
+		coordinateDetails,
 		onFooterExtentChange,
 	}: Props = $props();
+	let waypointMarker: SVGGElement;
+	let waypointPointer: SVGGElement;
+	let waypointRow: HTMLButtonElement;
+	let waypointReadout: HTMLSpanElement;
+
+	/** Apply only presentation from this frame; no entity-selection or terrain involvement. */
+	function drawWaypoint(
+		frame: MinimapFrame,
+		overlay: ProjectedMapView | null,
+	): void {
+		const display = frame.waypoint;
+		waypointRow.hidden = display === null;
+		const text = display === null ? "" : formatWaypointReadout(display);
+		if (waypointReadout.textContent !== text)
+			waypointReadout.textContent = text;
+		waypointRow.title =
+			display === null
+				? "Clear waypoint"
+				: `Clear waypoint: ${display.target.label}`;
+		waypointRow.setAttribute(
+			"aria-description",
+			display === null ? "Waypoint" : `${display.target.label} · ${text}`,
+		);
+		waypointPointer.style.display = "none";
+		waypointMarker.style.display = "none";
+		if (display === null || display.kind === "paused" || overlay === null)
+			return;
+		const point = projectMapWorldPoint(
+			overlay.worldToClip,
+			overlay.view,
+			display.target.position.x,
+			display.target.position.z,
+		);
+		// Geographic visibility belongs to the viewed map, including its current pan and zoom.
+		if (Math.hypot(point[0], point[1]) <= 1) {
+			waypointMarker.style.display = "";
+			waypointMarker.setAttribute(
+				"transform",
+				`translate(${point[0] * DISC_RADIUS} ${-point[1] * DISC_RADIUS})`,
+			);
+		} else if (display.kind === "guiding") {
+			waypointPointer.style.display = "";
+			waypointPointer.setAttribute(
+				"transform",
+				`rotate(${(display.relativeBearingRadians * 180) / Math.PI})`,
+			);
+		}
+	}
+
+	function clearWaypoint(): void {
+		if (onClearWaypoint === null)
+			throw new Error("Waypoint clear action is unavailable.");
+		onClearWaypoint();
+	}
 
 	/** No faster than this; only the expensive WebGL map picture is cadence-limited. */
 	const MINIMUM_GPU_FRAME_INTERVAL_MS = 1000 / 30;
@@ -574,6 +634,7 @@
 		frame: MinimapFrame,
 		overlay: ProjectedMapView | null,
 	): void {
+		drawWaypoint(frame, overlay);
 		const anchor = frame.subject?.anchor ?? null;
 		const subjectClip =
 			overlay === null || anchor === null
@@ -868,6 +929,22 @@
 					>
 				{/each}
 			</g>
+			<g clip-path="url(#minimap-disc-clip)">
+				<g
+					bind:this={waypointMarker}
+					class="minimap-waypoint-marker"
+					style:display="none"><MapWaypointIcon /></g
+				>
+			</g>
+			<g
+				bind:this={waypointPointer}
+				class="minimap-waypoint-pointer"
+				style:display="none"
+			>
+				<g transform={`translate(0 ${-DISC_RADIUS})`}
+					><MapWaypointDirectionIcon /></g
+				>
+			</g>
 			<!-- Free-camera explorer mode has an anchor but no controlled character. -->
 			<circle
 				bind:this={freeAnchorElement}
@@ -909,21 +986,37 @@
 		/>
 	{/if}
 	<div bind:this={footerElement} class="minimap-footer">
-		<button
-			bind:this={coordinatesElement}
-			type="button"
-			class="minimap-coordinates ui-hud-button ui-readout"
-			disabled
-			aria-label="Copy minimap coordinates"
-			title="Copy coordinates"
-			onclick={(event) => copyCoordinates(event.currentTarget.innerText)}
-		></button>
+		<div class="minimap-location-row ui-hud-group">
+			<button
+				bind:this={coordinatesElement}
+				type="button"
+				class="minimap-coordinates ui-hud-button ui-readout"
+				disabled
+				aria-label="Copy minimap coordinates"
+				title="Copy coordinates"
+				onclick={(event) => copyCoordinates(event.currentTarget.innerText)}
+			></button>
+			{#if coordinateDetails}
+				<span aria-hidden="true">•</span>
+				{@render coordinateDetails()}
+			{/if}
+		</div>
 		{#if clipboardError !== null}
 			<span class="minimap-copy-error ui-error" role="status"
 				>{clipboardError}</span
 			>
 		{/if}
-		{#if footer}{@render footer()}{/if}
+		<button
+			bind:this={waypointRow}
+			type="button"
+			class="minimap-waypoint-row ui-readout ui-hud-button"
+			aria-label="Clear waypoint"
+			onclick={clearWaypoint}
+			hidden
+		>
+			<span bind:this={waypointReadout}></span>
+			<span aria-hidden="true">×</span>
+		</button>
 	</div>
 </section>
 
@@ -1039,12 +1132,28 @@
 			transform: translateX(-50%);
 		}
 
+		.minimap-location-row {
+			display: flex;
+			align-items: center;
+			white-space: nowrap;
+		}
 		.minimap-coordinates {
 			pointer-events: auto;
 			padding: 4px 10px;
 			font-variant-numeric: tabular-nums;
 			line-height: 1.15;
 			white-space: nowrap;
+		}
+		.minimap-waypoint-row {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			white-space: nowrap;
+			font-variant-numeric: tabular-nums;
+			pointer-events: auto;
+		}
+		.minimap-waypoint-row[hidden] {
+			display: none;
 		}
 		.minimap-copy-error {
 			max-width: 240px;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeClientWaypoint } from "./client-waypoint-probe.mjs";
 import { probePreciseJumpCamera } from "./client-precise-camera-probe.mjs";
 import { probeBindingControls } from "./client-binding-controls-probe.mjs";
 import { probeVendor } from "./client-vendor-probe.mjs";
@@ -138,6 +139,12 @@ try {
 			evidence: result.housing,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientWaypoint) {
+		report = {
+			suite: "client-waypoint",
+			evidence: result.clientWaypoint,
+			browserErrors,
+		};
 	} else if (options.clientWorldMap) {
 		report = {
 			suite: "client-world-map",
@@ -154,6 +161,7 @@ try {
 			contention: result.contention,
 			partial: result.partial,
 			markerProjection: result.markerProjection,
+			waypoint: result.waypoint,
 			controls: result.controls,
 			settlements: result.settlements,
 			teleport: result.teleport,
@@ -541,6 +549,7 @@ function parseArgs(args) {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		worldMap: false,
 		clientWorldMap: false,
+		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
 		clientLoadouts: false,
@@ -698,6 +707,10 @@ function parseArgs(args) {
 				break;
 			case "--world-map":
 				parsed.worldMap = true;
+				break;
+			case "--client-waypoint":
+				parsed.clientHud = true;
+				parsed.clientWaypoint = true;
 				break;
 			case "--client-world-map":
 				parsed.clientHud = true;
@@ -1991,6 +2004,7 @@ Options:
   --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
+  --client-waypoint     Verify coordinate commands, compass guidance, both maps, and waypoint lifetime.
   --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
@@ -4600,6 +4614,12 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 				consoleMessages,
 			};
+		if (options.clientWaypoint)
+			return {
+				clientWaypoint: await probeClientWaypoint(client, evaluateExpression),
+				state: { error: null, ready: true },
+				consoleMessages,
+			};
 		if (options.clientWorldMap)
 			return {
 				worldMapPanel: await probeClientWorldMap(client),
@@ -7089,6 +7109,7 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 	).data;
 	const initial = await until("ready");
 	const controls = await evaluateExpression(client, `${api}.controlsProbe()`);
+	const waypoint = await evaluateExpression(client, `${api}.waypointProbe()`);
 	const readyTeleport = await evaluateExpression(
 		client,
 		`${api}.teleportProbe()`,
@@ -7225,6 +7246,7 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 		partial,
 		markerProjection,
 		controls,
+		waypoint,
 		settlements: { streaming: streamingSettlements, ready: readySettlements },
 		teleport: { streaming: streamingTeleport, ready: readyTeleport },
 		hardware,

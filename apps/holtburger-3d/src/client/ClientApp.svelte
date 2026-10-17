@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientLocationCommand } from "./client-location-command";
 	import {
 		compactInputHint,
@@ -86,7 +87,10 @@
 		type CharacterDriveIntent,
 		type CharacterInputEdge,
 	} from "../lib/game/controls/character-input-controller";
-	import { CLIENT_TUNING } from "./client-tuning";
+	import {
+		CLIENT_TUNING,
+		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
+	} from "./client-tuning";
 	import { recordSentChat } from "./client-chat-input-history";
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { HostTransport } from "../lib/host/host-transport";
@@ -233,6 +237,9 @@
 	);
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
+	const navigationWaypoint = new ClientNavigationWaypointOwner(
+		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
+	);
 	const emptySpellBarBindings = initialSpellBarBindings();
 	let selectedSpellTab = $state<InputDigitIndex>(0);
 	let characterSettings = $state.raw<ClientCharacterSettingsState>({
@@ -584,6 +591,7 @@
 	): void {
 		characterSettingsOwner.change(key, value);
 	}
+
 	function acceptCharacterName(characterGuid: number, name: string): void {
 		characterSettingsOwner.acceptName(characterGuid, name);
 	}
@@ -829,6 +837,7 @@
 				appearanceOptions = event.options;
 				return;
 			case "current-state":
+				navigationWaypoint.acceptCurrentState(event.state);
 				housing = event.state.housing;
 				canTeleportFromMap = event.state.canTeleportFromMap;
 				recallDestinations = event.state.recallDestinations;
@@ -870,6 +879,7 @@
 				appearanceOptions = null;
 				return;
 			case "lifecycle":
+				navigationWaypoint.acceptLifecycle(event.lifecycle);
 				if (event.lifecycle.kind !== "in-world") {
 					canTeleportFromMap = false;
 					recallDestinations = [];
@@ -938,6 +948,7 @@
 				return;
 			case "local-player-established":
 				acceptCharacterGuid(event.identity.playerGuid);
+				navigationWaypoint.acceptCharacter(event.identity.playerGuid);
 				return;
 			case "player-entered":
 				if (event.player.playerGuid === session?.state().playerGuid) {
@@ -956,6 +967,7 @@
 				return;
 			}
 			case "exit-requested":
+				navigationWaypoint.acceptCharacter(null);
 				inputGate.cancel();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "exit",
@@ -1059,15 +1071,21 @@
 		const currentSession = session;
 		if (currentSession === null)
 			throw new Error("Chat session is unavailable.");
-		const handled = await runClientLocationCommand(
-			message,
-			() => {
-				if (presentationSession === null)
-					throw new Error("World presentation is unavailable.");
-				return presentationSession.readLocationReport();
-			},
-			appendChatLine,
-		);
+		const handled =
+			navigationWaypoint.runCommand(
+				message,
+				() => readMinimapFrame().waypoint,
+				appendChatLine,
+			) ||
+			(await runClientLocationCommand(
+				message,
+				() => {
+					if (presentationSession === null)
+						throw new Error("World presentation is unavailable.");
+					return presentationSession.readLocationReport();
+				},
+				appendChatLine,
+			));
 		if (!handled) await currentSession.sendChat(message);
 		sentChatHistory = recordSentChat(
 			sentChatHistory,
@@ -1257,16 +1275,25 @@
 	}
 
 	function readMinimapFrame(): MinimapFrame {
-		return (
-			presentationSession?.readMinimapFrame() ?? {
-				cameraFovRadians: 0,
-				cameraHeadingRadians: 0,
-				presentedEntities: () => [],
-				selectedGuid: selectedEntityGuid,
-				source: null,
-				subject: null,
-			}
-		);
+		const frame = presentationSession?.readMinimapFrame() ?? {
+			waypoint: null,
+			cameraFovRadians: 0,
+			cameraHeadingRadians: 0,
+			presentedEntities: () => [],
+			selectedGuid: selectedEntityGuid,
+			source: null,
+			subject: null,
+		};
+		return {
+			...frame,
+			waypoint: navigationWaypoint.read(
+				frame.subject,
+				lifecycle.kind === "in-world" &&
+					session !== null &&
+					!session.mirror.isAwaitingSnapshot() &&
+					presentationSession?.status().kind === "ready",
+			),
+		};
 	}
 
 	function readSelectedEntity(): ClientSelectedEntity | null {
@@ -1765,6 +1792,7 @@
 			spellReferences.dispose();
 			spells = null;
 			retireCharacterSettings();
+			navigationWaypoint.acceptCharacter(null);
 			inventoryOwner.destroy();
 			containerOwner.destroy();
 			tradeOwner.destroy();
@@ -1927,6 +1955,7 @@
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
 			{readMinimapFrame}
+			onClearWaypoint={() => navigationWaypoint.clear()}
 			characterGuid={characterSettings.kind === "absent"
 				? null
 				: characterSettings.characterGuid}

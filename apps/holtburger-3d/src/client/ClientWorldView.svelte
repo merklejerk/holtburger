@@ -245,6 +245,8 @@
 		readonly cameraController: ClientViewportCameraController | null;
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
+		/** Clear session-owned navigation intent without changing selection. */
+		readonly onClearWaypoint: () => void;
 		/** Static host capability, owned by the mounted transport lifetime. */
 		readonly worldMapSource: WorldMapSource | null;
 		/** Cold identity for character-scoped map search selection. */
@@ -414,6 +416,7 @@
 		cameraController,
 		debugEnabled,
 		readMinimapFrame,
+		onClearWaypoint,
 		worldMapSource,
 		characterGuid,
 		housing,
@@ -987,6 +990,7 @@
 
 	<Minimap
 		readFrame={readMinimapFrame}
+		{onClearWaypoint}
 		viewState={minimap}
 		minSize={CLIENT_UI_DEFAULTS.minimap.minSize}
 		resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
@@ -1002,7 +1006,7 @@
 		{onSelectEntity}
 		{onCoordinatesCopied}
 	>
-		{#snippet footer()}<ClientMinimapEnvironment
+		{#snippet coordinateDetails()}<ClientMinimapEnvironment
 				readEnvironment={readServerEnvironment}
 				{clockFormat}
 			/>{/snippet}

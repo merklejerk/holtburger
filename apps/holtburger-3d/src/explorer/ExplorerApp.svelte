@@ -308,6 +308,7 @@
 		const controlledAnchor = anchorFromPossession();
 		const freeCameraAnchor = anchorFromCamera();
 		return {
+			waypoint: null,
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
@@ -2080,6 +2081,7 @@
 		/>
 		{#if startupError === null}
 			<Minimap
+				onClearWaypoint={null}
 				readFrame={readMinimapFrame}
 				viewState={minimap}
 				editable={true}

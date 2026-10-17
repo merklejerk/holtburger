@@ -150,6 +150,7 @@
 	} from "../../client/client-object-inspection-contract";
 	import {
 		CLIENT_CONNECTION_BADGE_TUNING,
+		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
 		CLIENT_TUNING,
 	} from "../../client/client-tuning";
 	import { recordSentChat } from "../../client/client-chat-input-history";
@@ -173,6 +174,11 @@
 		ClientCombatMode,
 		ClientCombatStatus,
 	} from "../../client/client-host-contract";
+	import {
+		probeClientWaypoint,
+		type WaypointProbeControls,
+	} from "./client-waypoint-probe";
+	import { ClientNavigationWaypointOwner } from "../../client/client-navigation-waypoint";
 	import type { MinimapFrame } from "../../app/minimap-frame";
 	import type { MapEntity } from "../../lib/game/map/map-blips";
 	import { Mat4 } from "../../lib/game/math/types";
@@ -1035,6 +1041,10 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Focused navigation controls, using the production owner and actual map consumers. */
+		readonly waypoint: WaypointProbeControls;
+		/** Automated waypoint DOM and lifecycle assertions through production map consumers. */
+		readonly probeWaypoint: () => ReturnType<typeof probeClientWaypoint>;
 		/** DOM/lifecycle checks for the production party HUD, without visual acceptance. */
 		readonly probePartyHud: typeof probePartyHud;
 		/** Prepare the production HUD with a full synthetic roster for literal screenshots. */
@@ -3391,7 +3401,7 @@
 	}
 	let minimapSubjectWorldX = 100;
 	const minimapSubjectWorldY = 20;
-	const minimapSubjectWorldZ = -200;
+	let minimapSubjectWorldZ = -200;
 	let minimapSubjectGuid: number | null = 1;
 	let minimapSubjectIndoor = false;
 	let readMinimapOverlayArcCalls = (): number => 0;
@@ -3449,23 +3459,45 @@
 		};
 	}
 
+	const waypointOwner = new ClientNavigationWaypointOwner(
+		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
+	);
+	let waypointProbeEnabled = false;
+	let waypointAvailable = true;
+	let waypointHeading = 0;
+	let waypointCameraHeading = 0;
+	const waypointMessages: ClientChatMessage[] = [];
+	const waypointServerMessages: string[] = [];
+	function submitWaypointChat(message: string): void {
+		if (
+			!waypointOwner.runCommand(
+				message,
+				() => readMinimapFrame().waypoint,
+				(line) => waypointMessages.push(line),
+			)
+		)
+			waypointServerMessages.push(message);
+	}
 	function readMinimapFrame(): MinimapFrame {
-		return {
+		const frame: MinimapFrame = {
+			waypoint: null,
 			cameraFovRadians: Math.PI / 3,
-			cameraHeadingRadians: 0,
+			cameraHeadingRadians: waypointCameraHeading,
 			presentedEntities: () =>
 				minimapSubjectGuid === null ? [] : [minimapEntity()],
 			selectedGuid,
 			source: null,
 			subject: {
 				anchor: {
-					headingRadians: 0,
+					headingRadians: waypointHeading,
 					residency: minimapSubjectIndoor
 						? {
 								envCellId: "0x01020100",
 								landblockId: "0x0102ffff",
 							}
-						: null,
+						: waypointProbeEnabled
+							? { landblockId: "0x0102ffff", envCellId: null }
+							: null,
 					worldX: minimapSubjectWorldX,
 					worldY: minimapSubjectWorldY,
 					worldZ: minimapSubjectWorldZ,
@@ -3474,6 +3506,10 @@
 					? { kind: "free-camera" as const }
 					: { guid: minimapSubjectGuid, kind: "controlled-entity" as const }),
 			},
+		};
+		return {
+			...frame,
+			waypoint: waypointOwner.read(frame.subject, waypointAvailable),
 		};
 	}
 
@@ -4239,7 +4275,49 @@
 		const harnessGlobal = globalThis as typeof globalThis & {
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
+		const waypointControls: WaypointProbeControls = {
+			enable: () => {
+				waypointProbeEnabled = true;
+				minimapSubjectGuid = 1;
+				waypointOwner.acceptCharacter(1);
+			},
+			chat: submitWaypointChat,
+			player: (x, z, heading, camera, indoor, available) => {
+				minimapSubjectWorldX = x;
+				minimapSubjectWorldZ = z;
+				waypointHeading = heading;
+				waypointCameraHeading = camera;
+				minimapSubjectIndoor = indoor;
+				waypointAvailable = available;
+			},
+			character: (guid) => waypointOwner.acceptCharacter(guid),
+			lifecycle: (lifecycle) => waypointOwner.acceptLifecycle(lifecycle),
+			read: () => ({
+				frame: readMinimapFrame(),
+				messages: waypointMessages.slice(),
+				sent: waypointServerMessages.slice(),
+				gameActive: keyboard.gameActive,
+			}),
+			placeAtBottom: () => {
+				userSettings = {
+					...userSettings,
+					hudLayout: {
+						...userSettings.hudLayout,
+						minimap: {
+							...userSettings.hudLayout.minimap,
+							vertical: { alignment: "end", offset: 0 },
+							// Keep the lowest footer row clear of the centered action bar and right dock.
+							horizontal: { alignment: "start", offset: 900 },
+							preferredWidth: CLIENT_UI_DEFAULTS.minimap.minSize,
+							preferredHeight: CLIENT_UI_DEFAULTS.minimap.minSize,
+						},
+					},
+				};
+			},
+		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			waypoint: waypointControls,
+			probeWaypoint: () => probeClientWaypoint(waypointControls),
 			probeVitalWarnings: async () => {
 				const previousVitals = warningVitals;
 				const previousEnabled = vitalWarningsEnabled;
@@ -4635,6 +4713,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		onClearWaypoint={() => waypointOwner.clear()}
 		{partyHudPresent}
 		readPartyHudDisplay={() =>
 			presentPartyHud(
@@ -4852,6 +4931,7 @@
 		chatMessages={messages}
 		{sentChatHistory}
 		onSendChat={async (message) => {
+			if (waypointProbeEnabled) submitWaypointChat(message);
 			sentChatHistory = recordSentChat(
 				sentChatHistory,
 				message,

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ClientNavigationWaypointOwner } from "../../client/client-navigation-waypoint";
+	import { CLIENT_WAYPOINT_NEAR_RADIUS_METERS } from "../../client/client-tuning";
 	import { emptyHousing } from "../../client/client-housing-contract";
 	import {
 		recallDestinationSchema,
@@ -67,24 +69,31 @@
 			return batch;
 		},
 	};
-	const readFrame = (): MinimapFrame => ({
-		source: null,
-		subject: {
-			kind: "controlled-entity",
-			guid: 1,
-			anchor: {
-				worldX: 42000,
-				worldY: 0,
-				worldZ: -16500,
-				headingRadians: 0,
-				residency: { landblockId: "0xda55ffff", envCellId: null },
+	const navigation = new ClientNavigationWaypointOwner(
+		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
+	);
+	const readFrame = (): MinimapFrame => {
+		const frame: MinimapFrame = {
+			source: null,
+			subject: {
+				kind: "controlled-entity",
+				guid: 1,
+				anchor: {
+					worldX: 42000,
+					worldY: 0,
+					worldZ: -16500,
+					headingRadians: 0,
+					residency: { landblockId: "0xda55ffff", envCellId: null },
+				},
 			},
-		},
-		presentedEntities: () => [],
-		selectedGuid: null,
-		cameraFovRadians: 1,
-		cameraHeadingRadians: 0,
-	});
+			presentedEntities: () => [],
+			selectedGuid: null,
+			waypoint: null,
+			cameraFovRadians: 1,
+			cameraHeadingRadians: 0,
+		};
+		return { ...frame, waypoint: navigation.read(frame.subject, true) };
+	};
 	const owner = (): WorldMapOwner => {
 		const value = panel?.readOwner();
 		if (!value) throw new Error("Map owner is not mounted.");
@@ -471,6 +480,84 @@
 		}
 	}
 
+	/** Exact projection, clipping, overlap, and stationary changes through the real map owner. */
+	async function waypointProbe() {
+		const original = owner().readView();
+		if (original === null)
+			throw new Error("Waypoint probe requires a map view");
+		navigation.acceptCharacter(1);
+		const command = (text: string) =>
+			navigation.runCommand(
+				text,
+				() => readFrame().waypoint,
+				() => {},
+			);
+		command("@waypoint 42.0N 33.5E");
+		const display = readFrame().waypoint;
+		if (display === null) throw new Error("Missing waypoint fixture");
+		const view = {
+			centerX: display.target.position.x,
+			centerZ: display.target.position.z,
+			spanMeters: 4096,
+		};
+		const marker = (): SVGGElement => {
+			const element = document.querySelector<SVGGElement>(
+				".world-waypoint-target",
+			);
+			if (element === null) throw new Error("Missing waypoint marker");
+			return element;
+		};
+		const settle = async () => {
+			await tick();
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		};
+		owner().setView(view);
+		await owner().drawSettled();
+		await settle();
+		const transform = marker().transform.baseVal.consolidate()?.matrix;
+		if (
+			!transform ||
+			Math.abs(transform.e - canvas().clientWidth / 2) > 0.001 ||
+			Math.abs(transform.f - canvas().clientHeight / 2) > 0.001
+		)
+			throw new Error(
+				"Waypoint projection missed the exact requested coordinate",
+			);
+		const bounds = canvas().getBoundingClientRect();
+		canvas().dispatchEvent(
+			new PointerEvent("pointermove", {
+				clientX: bounds.left + bounds.width / 2,
+				clientY: bounds.top + bounds.height / 2,
+				bubbles: true,
+			}),
+		);
+		const tooltip = document.querySelector(".world-map-tooltip");
+		if (
+			!tooltip?.textContent?.includes("Waypoint · 42.0N, 33.5E") ||
+			!tooltip.textContent.includes("Holtburg")
+		)
+			throw new Error("Overlapping waypoint hid the settlement tooltip");
+		owner().setView({ ...view, centerX: view.centerX + view.spanMeters });
+		await owner().drawSettled();
+		if (marker().style.display !== "none")
+			throw new Error("Off-viewport waypoint was not hidden");
+		owner().setView(view);
+		await owner().drawSettled();
+		command("@wp clear");
+		await settle();
+		if (marker().style.display !== "none")
+			throw new Error("Stationary World map retained cleared waypoint");
+		owner().setView(original);
+		await owner().drawSettled();
+		canvas().dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
+		return {
+			exactProjection: true,
+			clipped: true,
+			stationaryClear: true,
+			overlapTooltip: true,
+		};
+	}
+
 	/** Real panel controls exercise retained tab state, viewport bounds, and reset behavior. */
 	async function controlsProbe() {
 		const state = owner().read();
@@ -716,6 +803,7 @@
 			controlsProbe,
 			settlementProbe,
 			teleportProbe,
+			waypointProbe,
 			visibility,
 			zoom,
 			benchmark,

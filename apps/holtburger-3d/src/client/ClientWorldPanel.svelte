@@ -30,6 +30,8 @@
 	import { WorldMapSettlementOverlay } from "../lib/game/world-map/settlement-overlay";
 	import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
+	import MapWaypointIcon from "../assets/icons/map-waypoint.svg?component";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import WorldMapPlayerIcon from "../assets/icons/world-map-player.svg?component";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 
@@ -178,6 +180,13 @@
 
 	let canvas: HTMLCanvasElement;
 	let playerMarker: SVGGElement;
+	let waypointMarker: SVGGElement;
+	/** Last completed overlay placement, used by stationary hover as well as pointer events. */
+	let waypointPlacement: {
+		readonly target: MapWaypointTarget;
+		readonly x: number;
+		readonly y: number;
+	} | null = null;
 	let homeMarker: SVGGElement;
 	let settlementRoot: SVGGElement;
 	let settlementOverlay: WorldMapSettlementOverlay | null = null;
@@ -259,13 +268,19 @@
 			clearHover();
 			return;
 		}
-		// Player motion is sampled between draws; map gestures update the marker in the image RAF.
-		const timer = setInterval(drawPlayer, 1000 / 30);
+		// Player motion and waypoint changes are sampled between image draws; gestures reproject both in the image RAF.
+		const update = () => {
+			drawPositionMarkers();
+			drawTooltip();
+		};
+		// Initial marker/hover data must not become dependencies of the visibility-owned timer.
+		untrack(update);
+		const timer = setInterval(update, 1000 / 30);
 		return () => clearInterval(timer);
 	});
 
 	function drawOverlays(): void {
-		drawPlayer();
+		drawPositionMarkers();
 		if (!owner) return;
 		const view = owner.readView();
 		if (view) {
@@ -316,11 +331,21 @@
 			position && settlementOverlay ? settlementOverlay.hit(x, y) : null;
 		if (!position) return;
 		const contractText = contractOverlay?.hit(x, y);
-		const text = contractText
-			? contractText
-			: settlement
-				? `${settlement.name} · ${formatWorldMapCoordinates({ x: settlement.position[0], z: settlement.position[2] })}`
-				: formatWorldMapCoordinates(position);
+		const waypoint = waypointPlacement;
+		const waypointText =
+			waypoint !== null &&
+			Math.abs(waypoint.x - x) <= 8 &&
+			Math.abs(waypoint.y - y) <= 8
+				? `Waypoint · ${waypoint.target.label}`
+				: "";
+		const settlementText =
+			settlement === null
+				? ""
+				: `${settlement.name} · ${formatWorldMapCoordinates({ x: settlement.position[0], z: settlement.position[2] })}`;
+		const text =
+			[waypointText, contractText, settlementText]
+				.filter(Boolean)
+				.join("\n\n") || formatWorldMapCoordinates(position);
 		if (positionTooltip.textContent !== text)
 			positionTooltip.textContent = text;
 		// Flip away from the lower/right edges so the tooltip stays inside the surface.
@@ -336,12 +361,14 @@
 		positionTooltip.style.top = `${Math.max(0, top)}px`;
 	}
 
-	function drawPlayer(): void {
+	function drawPositionMarkers(): void {
 		if (!visible || activeTab !== "world" || !owner) return;
 		const view = owner.readView();
 		if (!view) {
 			playerMarker.style.display = "none";
 			homeMarker.style.display = "none";
+			waypointMarker.style.display = "none";
+			waypointPlacement = null;
 			return;
 		}
 		const home = housingMapPosition(housing);
@@ -358,8 +385,29 @@
 				`translate(${point[0]} ${point[1]})`,
 			);
 		}
+		const frame = readFrame();
+		const target = frame.waypoint?.target ?? null;
+		waypointPlacement = null;
+		if (target !== null) {
+			const [x, y] = projectWorldMapPoint(
+				target.position,
+				view,
+				canvas.clientWidth,
+				canvas.clientHeight,
+			);
+			if (
+				x >= 0 &&
+				y >= 0 &&
+				x <= canvas.clientWidth &&
+				y <= canvas.clientHeight
+			) {
+				waypointPlacement = { target, x, y };
+				waypointMarker.setAttribute("transform", `translate(${x} ${y})`);
+			}
+		}
+		waypointMarker.style.display = waypointPlacement === null ? "none" : "";
 		const position = worldMapPlayer(
-			readFrame().subject,
+			frame.subject,
 			view,
 			canvas.clientWidth,
 			canvas.clientHeight,
@@ -491,6 +539,11 @@
 						class="world-settlements ui-world-map-settlements"
 					/>
 					<g bind:this={contractRoot} class="world-contracts" />
+					<g
+						bind:this={waypointMarker}
+						class="world-waypoint-target"
+						style:display="none"><MapWaypointIcon /></g
+					>
 					<g
 						bind:this={playerMarker}
 						class="world-player-target"

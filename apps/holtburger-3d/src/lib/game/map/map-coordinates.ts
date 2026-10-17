@@ -1,5 +1,77 @@
-import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import type { Vec3 } from "../math/types";
+
+declare const sceneMapSpace: unique symbol;
+
+/** Retained horizontal position in canonical scene space; carries no elevation. */
+export interface SceneMapPoint {
+	readonly [sceneMapSpace]: true;
+	/** East-positive world meters. */
+	readonly x: number;
+	/** South-positive world meters (north is negative Z). */
+	readonly z: number;
+}
+
+/** Printed magnitudes retain hemisphere identity even at zero. */
+export interface PrintedMapCoordinates {
+	/** Latitude magnitude and its north/south hemisphere. */
+	readonly latitude: {
+		readonly magnitude: number;
+		readonly hemisphere: "N" | "S";
+	};
+	/** Longitude magnitude and its east/west hemisphere. */
+	readonly longitude: {
+		readonly magnitude: number;
+		readonly hemisphere: "E" | "W";
+	};
+}
+
+/** Parsed coordinate intent, including entered precision for chat and tooltips. */
+export interface ParsedMapCoordinates {
+	/** Hemisphere-aware coordinates used for conversion. */
+	readonly coordinates: PrintedMapCoordinates;
+	/** Uppercase hemispheres and consistent separator; numeric precision is preserved. */
+	readonly label: string;
+}
+
+/** Read only latitude/longitude; Explorer's additional residence grammar stays local. */
+export function parsePrintedMapCoordinates(
+	input: string,
+): ParsedMapCoordinates | null {
+	const match =
+		/^\s*(\d+(?:\.\d+)?)\s*([ns])\s*,?\s*(\d+(?:\.\d+)?)\s*([ew])\s*$/i.exec(
+			input,
+		);
+	if (match === null) return null;
+	// The successful pattern has exactly four required captures; type that producer guarantee here.
+	const [latitude, northSouth, longitude, eastWest] = match.slice(1) as [
+		string,
+		string,
+		string,
+		string,
+	];
+	const latitudeMagnitude = Number(latitude),
+		longitudeMagnitude = Number(longitude);
+	if (
+		!Number.isFinite(latitudeMagnitude) ||
+		!Number.isFinite(longitudeMagnitude)
+	)
+		return null;
+	const latitudeHemisphere = northSouth.toUpperCase() === "N" ? "N" : "S";
+	const longitudeHemisphere = eastWest.toUpperCase() === "E" ? "E" : "W";
+	return {
+		coordinates: {
+			latitude: {
+				magnitude: latitudeMagnitude,
+				hemisphere: latitudeHemisphere,
+			},
+			longitude: {
+				magnitude: longitudeMagnitude,
+				hemisphere: longitudeHemisphere,
+			},
+		},
+		label: `${latitude}${latitudeHemisphere}, ${longitude}${longitudeHemisphere}`,
+	};
+}
 
 /**
  * World-space meters spanned by one AC map degree.
@@ -41,17 +113,23 @@ export function formatWorldMapCoordinates(
 }
 
 /**
- * Resolve the outdoor landblock axis containing a printed map degree.
- *
- * This is the exact inverse of `formatWorldMapCoordinates`. ACE's own inverse is asymmetric — it
- * shifts the signed value, which only inverts its display in the southern and western hemispheres
- * — so this un-biases the magnitude instead and round-trips on all four.
+ * Resolve a representative point for printed notation, without clamping to the outdoor grid.
+ * Unbias magnitude before applying hemisphere sign. Printed coordinates are quantized, so this
+ * does not recover the original position; extra decimals retain the same printed convention.
  */
-export function landblockAxisFromPrintedDegree(printed: number): number {
-	// Printing discards everything finer than the bias, so aim at the middle of the printed band.
-	const degrees = printed + Math.sign(printed) * MAP_DEGREE_DISPLAY_BIAS;
-	const meters = (degrees + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE;
-	return Math.floor(meters / OUTDOOR_LANDBLOCK_WORLD_SIZE);
+export function scenePointFromPrintedCoordinates(
+	coordinates: PrintedMapCoordinates,
+): SceneMapPoint {
+	const latitude =
+		(coordinates.latitude.magnitude + MAP_DEGREE_DISPLAY_BIAS) *
+		(coordinates.latitude.hemisphere === "N" ? 1 : -1);
+	const longitude =
+		(coordinates.longitude.magnitude + MAP_DEGREE_DISPLAY_BIAS) *
+		(coordinates.longitude.hemisphere === "E" ? 1 : -1);
+	return {
+		x: (longitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
+		z: -(latitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
+	} as SceneMapPoint;
 }
 
 function formatDegree(

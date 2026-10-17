@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import BigNumber from "bignumber.js";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ScenePortalCrossingInput, SceneTopologyScope } from ".";
 import { SceneGraph } from ".";
 import {
 	JUNCTION_OVERLAP_AREA_MINIMUM,
+	JUNCTION_OVERLAP_AREA_EPSILON,
 	JUNCTION_PLANE_OFFSET_EPSILON,
 	resolvePortalJunctions,
 } from "./portal-junctions";
@@ -149,9 +149,7 @@ function authoredAperture(
 	};
 }
 
-/** 0D4A0122/0116: valid convex rings with a positive projected overlap near 7.25e-9 m².
- * polygon-clipping 0.15.7 fails to assemble the output ring for this pair.
- */
+/** Authored near-contact boundaries from 0D4A0122/0116, including their nonplanarity. */
 function nearlyTouchingAuthoredApertures(): readonly [Aperture, Aperture] {
 	return [
 		authoredAperture(
@@ -177,8 +175,8 @@ function nearlyTouchingAuthoredApertures(): readonly [Aperture, Aperture] {
 	];
 }
 
-/** 0D4A0122/0119: exposes polyclip-ts's insufficient 20-decimal-place division default. */
-function divisionSensitiveAuthoredApertures(): readonly [Aperture, Aperture] {
+/** A second authored near-contact pair from 0D4A0122/0119. */
+function slopedAuthoredApertures(): readonly [Aperture, Aperture] {
 	return [
 		authoredAperture(
 			"sloped",
@@ -203,47 +201,34 @@ function divisionSensitiveAuthoredApertures(): readonly [Aperture, Aperture] {
 }
 
 describe("resident portal junctions", () => {
-	it("resolves the division-sensitive authored pair without changing caller precision", () => {
-		const previous = BigNumber.config();
-		try {
-			BigNumber.config({
-				DECIMAL_PLACES: 3,
-				ROUNDING_MODE: BigNumber.ROUND_DOWN,
-			});
-			const callerPrecision = BigNumber.config();
-			const [a, b] = divisionSensitiveAuthoredApertures();
-			expectSeparate([...doorway("a", a), ...doorway("b", b)]);
-			expect(BigNumber.config()).toEqual(callerPrecision);
-		} finally {
-			BigNumber.config(previous);
-		}
+	it("keeps the sloped authored near-contact pair separate in either input order", () => {
+		const [a, b] = slopedAuthoredApertures();
+		expectSeparate([...doorway("a", a), ...doorway("b", b)]);
+		expectSeparate([...doorway("b", b), ...doorway("a", a)]);
 	});
 	it("resolves the authored thin overlap without inventing a junction", () => {
 		const [a, b] = nearlyTouchingAuthoredApertures();
 		expectSeparate([...doorway("a", a), ...doorway("b", b)]);
 		expectSeparate([...doorway("b", b), ...doorway("a", a)]);
 	});
-	it("retains the authored thin overlap when proving competing exits", () => {
-		const [a, b] = nearlyTouchingAuthoredApertures();
-		const bridge: Aperture = {
-			...a,
-			id: "portal-aperture:bridge",
-			vertices: new Float32Array([
-				70, 15, -72, 95, 15, -72, 95, 42, -72, 70, 42, -72,
-			]),
-			landblockBounds: new AABB3(new Vec3(70, 15, -72), new Vec3(95, 42, -72)),
-		};
-		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			expectSeparate([
-				...doorway("a", a),
-				...doorway("b", b),
-				...doorway("bridge", bridge),
-			]);
-			expect(warning).toHaveBeenCalledOnce();
-		} finally {
-			warning.mockRestore();
-		}
+	it("ignores contact inside the numerical area dead zone", () => {
+		// Coordinates near zero keep this subthreshold displacement representable in f32.
+		const halfWidth = 1;
+		const overlapHeight = JUNCTION_OVERLAP_AREA_EPSILON / (4 * halfWidth);
+		expectJoined([
+			...doorway(
+				"tall",
+				aperture("tall", WEST, 0, -1, 1, -halfWidth, halfWidth),
+			),
+			...doorway(
+				"lower",
+				aperture("lower", WEST, 0, -1, overlapHeight, -halfWidth, halfWidth),
+			),
+			...doorway(
+				"upper",
+				aperture("upper", WEST, 0, 0, 1, -halfWidth, halfWidth),
+			),
+		]);
 	});
 	it("joins the two sides of a landblock boundary in a nearby comparison frame", () => {
 		expectJoined([

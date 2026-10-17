@@ -33,9 +33,8 @@ import {
 import { acFrameTransform, renderScale } from "./ac-frame";
 
 const MAGIC = "HBEC";
-// v5 packs cellBounds only for structures with a non-null render-geometry bound.
-// Non-rendering cells retain their topology without synthetic shell extents.
-export const ENV_CELL_RECORD_VERSION = 5;
+// v6 leaves coincident-junction assignment to composed resident scene topology.
+export const ENV_CELL_RECORD_VERSION = 6;
 const VERSION = ENV_CELL_RECORD_VERSION;
 const HEADER_LENGTH = 16;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
@@ -150,7 +149,6 @@ const crossingSchema = z.object({
 	acceptedSide: z.enum(["positive", "negative"]),
 	exactMatch: z.boolean(),
 	maskDepthPolicy: z.enum(["allow-equal-depth", "reject-equal-depth"]),
-	junctionGroupId: z.number().int().positive().nullable(),
 	reciprocalCrossingIndex: z.number().int().nonnegative().nullable(),
 	sourcePortal,
 	spatialRelationship,

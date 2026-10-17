@@ -80,7 +80,7 @@ commit, revision, owner, publication, and eviction lifecycle.
 | Boundary                                              | Owned invariant                                                                                                                                         |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `host/src/landblock_source_batch.rs`                  | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
-| `host/src/env_cell_source.rs`                         | HBEC v5 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
+| `host/src/env_cell_source.rs`                         | HBEC v6 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
 | `host/src/cell_struct_projection.rs`                  | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
 | `src/lib/assets/decode-env-cell-record.ts`            | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
 | `game/commit/env-cell-materialization.ts`             | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
@@ -92,6 +92,7 @@ commit, revision, owner, publication, and eviction lifecycle.
 | `game/systems/animation-system.ts`                    | Independent deterministic playback clocks, retail semantic traversal, discontinuity handling, and fractional rigid-pose sampling.                       |
 | `game/systems/effect-system.ts`                       | Persistent `SetOmega` and per-part translucency state, deterministic timelines, bounded provenance, and fractional effect sampling.                     |
 | `game/scene/scene-graph.ts`                           | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
+| `game/scene/portal-junctions.ts`                      | Equal-depth junction permission derived once per resident topology revision, including cross-landblock apertures and competing-exit rejection.          |
 | `game/renderer/render-world.ts`                       | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
 | `game/renderer/portal-view-window.ts`                 | Readable exact normalized window construction, convex source decomposition, projection, clipping, and immutable proof admission.                        |
 | `game/renderer/portal-scope-window-culler.ts`         | Fixed-capacity, arena-backed breadth-first traversal with atomic whole-frontier cutoff and reusable non-retained frame views.                           |
@@ -115,7 +116,7 @@ sequenceDiagram
     Interest->>Pipeline: landblock + EnvCells revision
     Pipeline->>Host: HBLB request including EnvCells
     Host->>Host: resolve interior, CellStructs, materials, residents, portals
-    Host-->>Decoder: HBEC v5 record
+    Host-->>Decoder: HBEC v6 record
     Decoder-->>Planner: ResolvedEnvCellLayerSource
     Planner->>Planner: shells + scopes + crossings + per-cell resident jobs
     Realizer->>Realizer: prepare shared static geometry and atlas requirements
@@ -392,9 +393,11 @@ imports shared behavior through an outdoor-owned module.
 - The old object-only detail owner is gone. Active-region static detail owns building,
   environment, and object roles as one generation.
 - Apertures have `PortalGeometryKey`/`PortalDrawUnit` resources and no textured material ranges.
-- HBEC has one live version, v5. Cell bounds are packed only for cells whose structure has
+- HBEC has one live version, v6. Cell bounds are packed only for cells whose structure has
   render geometry; non-rendering cells retain their scope without shell bounds or shell draws.
   No older decoder or compatibility path remains.
+- Junction identities belong to the composed resident scene. HBEC carries no local junction IDs,
+  and no owner-qualified junction packing remains. Renderers consume resolved scene crossings.
 - Paired renderer apertures, stencil labels, and domain-owned contribution schedules are absent
   from production and tests.
 - `visibilityProvenance` is source-validation evidence. Runtime diagnostics aggregate the resulting

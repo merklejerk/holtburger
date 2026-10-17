@@ -8,6 +8,7 @@
 		"src/harness/browser/client-jump-hud-probe.ts",
 		"src/harness/browser/dynamic-material-table-probe.ts",
 		"src/harness/browser/portal-traversal-investigation.ts",
+		"src/harness/browser/portal-seam-probe.ts",
 		"src/svg.d.ts",
 		"electron/main.ts",
 		"electron/preload.cts",

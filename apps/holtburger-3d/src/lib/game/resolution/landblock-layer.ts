@@ -231,11 +231,6 @@ export interface ResolvedPortalCrossing {
 	readonly exactMatch: boolean;
 	/** Whether an authored visible source surface owns fragments tying the aperture depth. */
 	readonly maskDepthPolicy: "allow-equal-depth" | "reject-equal-depth";
-	/**
-	 * Host-proven coincident-junction identity shared by every crossing on one coplanar
-	 * overlapping footprint, or null. Equal ids license the compositor's equal-depth advance.
-	 */
-	readonly junctionGroupId: number | null;
 	readonly reciprocalCrossingIndex: number | null;
 	readonly sourcePortal:
 		| {

@@ -21,6 +21,7 @@ import type {
 	ScenePlacement,
 	SceneEnvCellScopeInput,
 	ScenePortalCrossingInput,
+	ScenePortalCrossing,
 	SceneScope,
 	SceneScopeSelection,
 	SceneTopologyScope,
@@ -38,14 +39,16 @@ import type {
 	SceneCullingGroupFilter,
 	SceneNodeFilter,
 } from ".";
+import { resolvePortalJunctions } from "./portal-junctions";
 import { cellContainsLandblockPoint } from "./cell-containment";
 import { scopeFor, sameScope, scopeKey } from "./scope";
 import { createSceneNodeId } from "./utils";
 
-const EMPTY_PORTAL_CROSSINGS: readonly ScenePortalCrossingInput[] =
-	Object.freeze([]);
+const EMPTY_PORTAL_CROSSINGS: readonly ScenePortalCrossing[] = Object.freeze(
+	[],
+);
 
-type ScenePortalAperture = ScenePortalCrossingInput["sourceAperture"];
+type ScenePortalAperture = ScenePortalCrossing["sourceAperture"];
 
 type SceneNodeRecord = {
 	/** Scene-owned resolved facts, refreshed before any descendant or query consumes them. */
@@ -108,11 +111,6 @@ export class SceneGraph {
 	readonly #portalApertureCopies = new WeakMap<
 		ScenePortalAperture,
 		ScenePortalAperture
-	>();
-	/** Directed topology indexed once at publication rather than scanned during traversal. */
-	readonly #outgoingCrossings = new Map<
-		string,
-		Map<PortalCrossingId, ScenePortalCrossingInput>
 	>();
 	/** Reused by every visibility query; contains only primitive selections. */
 	readonly #visibleEntries: SceneNodeId[] = [];
@@ -406,28 +404,15 @@ export class SceneGraph {
 	}
 
 	upsertPortalCrossing(input: ScenePortalCrossingInput): void {
-		const existing = this.#portalCrossings.get(input.id);
-		if (existing) {
-			this.#removeOutgoingCrossing(existing);
-		}
-		const crossing = copyPortalCrossing(input, this.#portalApertureCopies);
-		this.#portalCrossings.set(input.id, crossing);
-		const sourceKey = scopeKey(crossing.source);
-		const outgoing =
-			this.#outgoingCrossings.get(sourceKey) ??
-			new Map<PortalCrossingId, ScenePortalCrossingInput>();
-		outgoing.set(crossing.id, crossing);
-		this.#outgoingCrossings.set(sourceKey, outgoing);
+		this.#portalCrossings.set(
+			input.id,
+			copyPortalCrossing(input, this.#portalApertureCopies),
+		);
 		this.#markTopologyChanged();
 	}
 
 	removePortalCrossing(crossingId: PortalCrossingId): void {
-		const crossing = this.#portalCrossings.get(crossingId);
-		if (crossing) {
-			this.#removeOutgoingCrossing(crossing);
-			this.#portalCrossings.delete(crossingId);
-			this.#markTopologyChanged();
-		}
+		if (this.#portalCrossings.delete(crossingId)) this.#markTopologyChanged();
 	}
 
 	/**
@@ -513,20 +498,18 @@ export class SceneGraph {
 					visibilityIslandId,
 				})),
 		];
-		const crossings = [...this.#portalCrossings.values()].sort((left, right) =>
+		const inputs = [...this.#portalCrossings.values()].sort((left, right) =>
 			left.id.localeCompare(right.id),
 		);
-		const outgoing = new Map<string, readonly ScenePortalCrossingInput[]>();
-		for (const [source, sourceCrossings] of this.#outgoingCrossings) {
-			outgoing.set(
-				source,
-				Object.freeze(
-					[...sourceCrossings.values()].sort((left, right) =>
-						left.id.localeCompare(right.id),
-					),
-				),
-			);
+		const crossings = resolvePortalJunctions(inputs, scopes);
+		const outgoing = new Map<string, ScenePortalCrossing[]>();
+		for (const crossing of crossings) {
+			const key = scopeKey(crossing.source);
+			const entries = outgoing.get(key);
+			if (entries) entries.push(crossing);
+			else outgoing.set(key, [crossing]);
 		}
+		for (const entries of outgoing.values()) Object.freeze(entries);
 		const view: SceneTopologyView = {
 			crossings: Object.freeze(crossings),
 			outgoing: (scope) =>
@@ -901,13 +884,6 @@ export class SceneGraph {
 		}
 	}
 
-	#removeOutgoingCrossing(crossing: ScenePortalCrossingInput): void {
-		const sourceKey = scopeKey(crossing.source);
-		const outgoing = this.#outgoingCrossings.get(sourceKey);
-		outgoing?.delete(crossing.id);
-		if (outgoing?.size === 0) this.#outgoingCrossings.delete(sourceKey);
-	}
-
 	#frustumIntersectsEntry(
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
@@ -1071,7 +1047,6 @@ function copyPortalCrossing(
 		acceptedSide: crossing.acceptedSide,
 		exactMatch: crossing.exactMatch,
 		id: crossing.id,
-		junctionGroupId: crossing.junctionGroupId,
 		maskDepthPolicy: crossing.maskDepthPolicy,
 		reciprocalCrossingId: crossing.reciprocalCrossingId,
 		source: { ...crossing.source },

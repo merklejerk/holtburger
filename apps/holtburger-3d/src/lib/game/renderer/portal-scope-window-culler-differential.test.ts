@@ -3,7 +3,7 @@ import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec2, Vec3 } from "../math/types";
 import type {
 	PortalCrossingId,
-	ScenePortalCrossingInput,
+	ScenePortalCrossing,
 	SceneScope,
 	SceneTopologyScope,
 	SceneTopologyView,
@@ -146,7 +146,7 @@ describe("portal scope-window culler differential", () => {
 			topologyScope(OUTDOOR_SCOPE, null),
 			topologyScope(selected, "sparse-selected"),
 		];
-		const crossings: ScenePortalCrossingInput[] = [
+		const crossings: ScenePortalCrossing[] = [
 			crossing(
 				"sparse-selected",
 				OUTDOOR_SCOPE,
@@ -714,7 +714,7 @@ function differentialCase(
 	ordinal: number,
 	input: PortalScopeWindowReferenceInput,
 	scopes: readonly SceneTopologyScope[],
-	crossings: readonly ScenePortalCrossingInput[],
+	crossings: readonly ScenePortalCrossing[],
 	revision: number,
 ): DifferentialCase {
 	const topologySummary = crossings
@@ -760,9 +760,9 @@ function mutateCase(
 }
 
 function reorderCrossingTriangles(
-	edge: ScenePortalCrossingInput,
+	edge: ScenePortalCrossing,
 	ordinal: number,
-): ScenePortalCrossingInput {
+): ScenePortalCrossing {
 	const sourceAperture = reorderSceneAperture(edge.sourceAperture, ordinal);
 	return {
 		...edge,
@@ -775,9 +775,9 @@ function reorderCrossingTriangles(
 }
 
 function reorderSceneAperture(
-	aperture: ScenePortalCrossingInput["sourceAperture"],
+	aperture: ScenePortalCrossing["sourceAperture"],
 	ordinal: number,
-): ScenePortalCrossingInput["sourceAperture"] {
+): ScenePortalCrossing["sourceAperture"] {
 	const triangles = Array.from(
 		{ length: aperture.indices.length / 3 },
 		(_, triangle) => {
@@ -896,7 +896,7 @@ function assertDifferential(fixture: DifferentialCase): DifferentialOutput {
 
 /** Independent geometric assertion in the aperture's authored coordinate space. */
 function sourceFacesCamera(
-	edge: ScenePortalCrossingInput,
+	edge: ScenePortalCrossing,
 	input: PortalScopeWindowReferenceInput,
 ): boolean {
 	const offset = createLandblockOffset(
@@ -1174,10 +1174,10 @@ function affineClipMatrix(
 
 function topology(
 	scopes: readonly SceneTopologyScope[],
-	crossings: readonly ScenePortalCrossingInput[],
+	crossings: readonly ScenePortalCrossing[],
 	revision: number,
 ): SceneTopologyView {
-	const outgoingByScope = new Map<string, ScenePortalCrossingInput[]>();
+	const outgoingByScope = new Map<string, ScenePortalCrossing[]>();
 	for (const edge of crossings) {
 		const key = scopeIdentity(edge.source);
 		const outgoing = outgoingByScope.get(key) ?? [];
@@ -1226,7 +1226,7 @@ function crossing(
 		readonly landblockId?: string;
 		readonly reciprocalCrossingId?: PortalCrossingId | null;
 	} = {},
-): ScenePortalCrossingInput {
+): ScenePortalCrossing {
 	const sceneAperture = scenePortalAperture(
 		`portal-aperture:${id}`,
 		aperture,
@@ -1254,7 +1254,7 @@ function scenePortalAperture(
 	id: `portal-aperture:${string}`,
 	aperture: PlanarAperture,
 	landblockId: string,
-): ScenePortalCrossingInput["sourceAperture"] {
+): ScenePortalCrossing["sourceAperture"] {
 	return {
 		id,
 		indices: aperture.indices,

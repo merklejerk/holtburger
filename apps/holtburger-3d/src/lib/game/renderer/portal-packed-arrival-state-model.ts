@@ -231,7 +231,7 @@ export function executePackedPortalArrivalStateModel(
 					continue;
 				}
 				if (entryDepth !== null && depth <= entryDepth) {
-					// Mirrors the propagation shader: a shared host-proven junction id licenses
+					// Mirrors the propagation shader: a shared scene-proven junction id licenses
 					// the equal-depth advance through a zero-thickness transit.
 					const junction = routeJunctionGroup(metadata, currentState);
 					const sameJunction =

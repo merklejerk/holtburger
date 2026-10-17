@@ -1,4 +1,4 @@
-import type { ScenePortalCrossingInput } from "../scene";
+import type { ScenePortalCrossing } from "../scene";
 import {
 	PORTAL_QUERY_EPSILON,
 	type PlanarAperturePlane,
@@ -36,7 +36,7 @@ export function writeOrientedPortalArrivalPlane(
 	target: Float32Array,
 	floatOffset: number,
 	plane: PlanarAperturePlane,
-	acceptedSide: ScenePortalCrossingInput["acceptedSide"],
+	acceptedSide: ScenePortalCrossing["acceptedSide"],
 	landblockOffsetX: number,
 	landblockOffsetZ: number,
 ): void {

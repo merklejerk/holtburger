@@ -44,6 +44,8 @@ use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{ContactMotionSegment, PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
+/// Retail building-entry sphere BSP allowance (`acclient.c:347929–347958`).
+const BUILDING_ENTRY_SPHERE_TOLERANCE: f32 = 0.01;
 static NEXT_COLLISION_SCENE_LINEAGE: AtomicU64 = AtomicU64::new(1);
 
 /// Invalid collision-query geometry rejected before traversal.
@@ -1823,13 +1825,28 @@ impl CollisionScene {
         request: PlacedMotionPathRequest<'_>,
     ) -> Result<PlacedMotionPath, CollisionQueryError> {
         validate_motion_waypoints(request.waypoints)?;
-        let (initial_placement, initial_recovery) = self.infer_placement_from_cell(
-            request.anchor,
-            request.start,
-            request.radius,
-            request.previous_cell,
-            false,
-        )?;
+        let (initial_placement, initial_recovery) = match request.previous_cell {
+            Some(cell) => self.infer_placement_from_cell(
+                request.anchor,
+                request.start,
+                request.radius,
+                Some(cell),
+                false,
+            )?,
+            // A new body query may enter a building after the preceding query committed
+            // outdoors and rebased the body. Ray roots and path endpoints retain their
+            // explicit domain instead; they do not start a fresh body-placement search.
+            None => (
+                self.transit_cell_allow_uncovered(CellTransitRequest {
+                    anchor: request.anchor,
+                    previous_cell: None,
+                    center: request.start,
+                    radius: request.radius,
+                })?
+                .value,
+                None,
+            ),
+        };
         let mut path = PlacedMotionPath {
             anchor: landblock_key(request.anchor),
             initial: PlacedMotionPoint {
@@ -1869,7 +1886,7 @@ impl CollisionScene {
                 false,
             )?;
 
-            let inferred = self.infer_placement_from_cell(
+            let inferred = self.placement_for_committed_cell(
                 request.anchor,
                 waypoint.center,
                 request.radius,
@@ -2097,13 +2114,9 @@ impl CollisionScene {
                 .value;
             return Ok((placement, recovery));
         }
-        if recovery.is_some() {
-            return Ok((placement, recovery));
-        }
         if previous_cell.is_none() {
-            // Outdoor placement has no cell selector to seed traversal. Motion transitions own
-            // entry into an EnvCell; an endpoint containment scan alone must not choose among
-            // coincident building entries or synthesize an untraversed indoor transition.
+            // Explicit outdoor ray roots and already traversed path endpoints keep their
+            // selected domain. A fresh body query performs its own initial placement above.
             placement.committed_cell = None;
             placement.reaches_outdoors = true;
         }
@@ -2309,8 +2322,8 @@ impl CollisionScene {
     ///
     /// Retail adds outdoor land cells to the same `CELLARRAY` and continues expanding them into
     /// building entries (`CEnvCell::find_transit_cells`, `acclient.c:334180-334430`). Our outdoor
-    /// domain is implicit, so a just-beyond placement query performs that same expansion and this
-    /// method collapses the two coincident boundaries into one authoritative placement change.
+    /// domain is implicit, so a just-beyond placement query supplies candidate geometry. Body
+    /// entry retains retail's source query frame; zero-radius rays follow geometric connectivity.
     fn coincident_outdoor_target_after_crossing(
         &self,
         segment: PlacementMotionSegment<'_>,
@@ -2320,6 +2333,7 @@ impl CollisionScene {
     ) -> Option<Guid> {
         let probe_fraction = (fraction + minimum_advance).min(1.0);
         let probe = interpolate_point(segment.start, segment.end, probe_fraction);
+        let entry_point = anchor_to_landblock(probe, segment.anchor, landblock_key(source_cell));
         let placement = self.transit_cell_installed(
             CellTransitRequest {
                 previous_cell: Some(source_cell),
@@ -2347,7 +2361,13 @@ impl CollisionScene {
                             .is_some_and(|volume| {
                                 let local_start = volume.placement.to_local_space(landblock_start);
                                 let local_end = volume.placement.to_local_space(landblock_end);
-                                volume_reaches(volume, local, 0.0)
+                                (segment.radius == 0.0
+                                    || retail_building_entry_reaches(
+                                        volume,
+                                        entry_point,
+                                        segment.radius,
+                                    ))
+                                    && volume_reaches(volume, local, 0.0)
                                     && volume.portals.iter().any(|portal| {
                                         portal.target == CellCollisionPortalTarget::Outdoor
                                             && directed_plane_crossing_fraction(
@@ -2843,12 +2863,18 @@ fn containing_reached_cell(
     landblock_point: Vector3,
     placement: &SpatialMembership,
 ) -> Option<Guid> {
-    placement.reached_env_cells.iter().copied().find(|cell| {
-        asset
-            .static_geometry
-            .cell_volume((cell.0 & 0xffff) as u16)
-            .is_some_and(|volume| volume_reaches(volume, landblock_point, 0.0))
-    })
+    placement
+        .reached_env_cells
+        .iter()
+        .copied()
+        // Selectors are owner-local; a reached neighbor can reuse this asset's selector.
+        .filter(|cell| landblock_key(*cell).0 == asset.landblock_id)
+        .find(|cell| {
+            asset
+                .static_geometry
+                .cell_volume((cell.0 & 0xffff) as u16)
+                .is_some_and(|volume| volume_reaches(volume, landblock_point, 0.0))
+        })
 }
 
 /// Retains, in order, the tail elements from `start` that satisfy the predicate.
@@ -2926,6 +2952,20 @@ fn terrain_contact(
             normal: contact.normal,
             depth: contact.depth,
         })
+}
+
+/// RETAIL QUIRK: Building entry transforms a sphere in its current query-owner frame through
+/// the destination cell frame without an owner offset (`acclient.c:333984–334032`). Only selecting
+/// outdoors rebases that query (`:302532–302548`). Correcting the entry coordinates collapses
+/// the outdoor pose needed by unmodified ACE. The 13-owner regional survey found two castle
+/// junctions; 72 dynamic-body cases reproduce the skip, with 42 same-owner reference controls.
+/// Geometry reach remains owner-correct; this predicate owns only body entry permission.
+fn retail_building_entry_reaches(volume: &CellVolume, query_point: Vector3, radius: f32) -> bool {
+    let local = volume.placement.to_local_space(query_point);
+    volume
+        .planes
+        .iter()
+        .all(|plane| plane.distance_to_point(&local) > -(radius + BUILDING_ENTRY_SPHERE_TOLERANCE))
 }
 
 fn volume_reaches(
@@ -4821,6 +4861,128 @@ mod tests {
         assert_eq!(placement.committed_cell(), Some(target_cell));
         assert!(placement.reaches_outdoors());
         assert_eq!(placement.reached_env_cells(), &[source_cell, target_cell]);
+    }
+
+    #[test]
+    fn cross_owner_junction_preserves_body_entry_order_and_ray_connectivity() {
+        let west = Guid(0xda55_ffff);
+        let east = Guid(0xdb55_ffff);
+        let west_cell = Guid(0xda55_010a);
+        // Adjacent owners may reuse the same local cell selector.
+        for east_cell in [Guid(0xdb55_010b), Guid(0xdb55_010a)] {
+            let chamber = |selector, origin, inward| CellVolume {
+                cell_selector: selector,
+                placement: LandblockPlacement {
+                    origin: Vector3::new(origin, 0.0, 0.0),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![
+                    Plane {
+                        normal: Vector3::new(inward, 0.0, 0.0),
+                        d: 0.0,
+                    },
+                    Plane {
+                        normal: Vector3::new(-inward, 0.0, 0.0),
+                        d: OUTDOOR_CELL_METERS,
+                    },
+                ],
+                portals: vec![portal(-inward, 0.0, CellCollisionPortalTarget::Outdoor)],
+            };
+            let mut scene = placement_scene(vec![chamber(0x010a, METERS_PER_LANDBLOCK, -1.0)]);
+            scene
+                .insert(LandblockCollisionAsset {
+                    landblock_id: east.0,
+                    terrain: TerrainCollisionSurface::empty(),
+                    static_geometry: LandblockColliders::new(
+                        Vec::new(),
+                        vec![chamber((east_cell.0 & 0xffff) as u16, 0.0, 1.0)],
+                    ),
+                })
+                .unwrap();
+            let radius = 0.3;
+            let advance = radius * 0.5;
+            for (anchor, source, target, boundary, direction, next_anchor, next_x) in [
+                (
+                    west,
+                    west_cell,
+                    east_cell,
+                    METERS_PER_LANDBLOCK,
+                    1.0,
+                    east,
+                    advance,
+                ),
+                (
+                    east,
+                    east_cell,
+                    west_cell,
+                    0.0,
+                    -1.0,
+                    west,
+                    METERS_PER_LANDBLOCK - advance,
+                ),
+            ] {
+                let point = |x| Vector3::new(x, OUTDOOR_CELL_METERS * 2.0, 10.0);
+                let ray = scene
+                    .traverse_surface_ray(
+                        StaticSurfaceRayRequest {
+                            anchor,
+                            start: point(boundary - direction * advance),
+                            direction: Vector3::new(direction, 0.0, 0.0),
+                            maximum_distance: advance * 2.0,
+                            previous_cell: Some(source),
+                            filter: PhysicalCollisionFilter::ALL,
+                        },
+                        CollisionQueryPolicy::RequireCollisionCoverage,
+                        PortalTraversalPolicy::Physical,
+                        |_, _| false,
+                        |interval, placement| {
+                            // A surface in the destination domain must remain reachable by rays.
+                            Ok::<_, CollisionQueryError>(
+                                (placement.committed_cell() == Some(target))
+                                    .then_some((interval.maximum_distance * 0.5, ())),
+                            )
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    ray.value.hit.unwrap().placement.committed_cell(),
+                    Some(target)
+                );
+                let first = scene
+                    .transit_motion_path(PlacedMotionPathRequest {
+                        anchor,
+                        previous_cell: Some(source),
+                        start: point(boundary - direction * advance),
+                        radius,
+                        waypoints: &[MotionWaypoint {
+                            center: point(boundary + direction * advance),
+                            end_fraction: 1.0,
+                            placement: MotionWaypointPlacement::Traverse,
+                        }],
+                    })
+                    .unwrap();
+                assert_eq!(first.final_point().placement().committed_cell(), None);
+                assert!(first.final_point().placement().reaches_outdoors());
+                let next = scene
+                    .transit_motion_path(PlacedMotionPathRequest {
+                        anchor: next_anchor,
+                        previous_cell: None,
+                        start: point(next_x),
+                        radius,
+                        waypoints: &[MotionWaypoint {
+                            center: point(next_x + direction * advance),
+                            end_fraction: 1.0,
+                            placement: MotionWaypointPlacement::Traverse,
+                        }],
+                    })
+                    .unwrap();
+                assert_eq!(next.initial().placement().committed_cell(), Some(target));
+                assert_eq!(
+                    next.final_point().placement().committed_cell(),
+                    Some(target)
+                );
+            }
+        }
     }
 
     #[test]

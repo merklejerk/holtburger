@@ -817,6 +817,7 @@ describe("SceneGraph", () => {
 	it("owns one defensive aperture copy per immutable producer aperture", () => {
 		const scene = new SceneGraph();
 		const aperture = portalAperture("shared");
+		createBoundedRoot(scene, "0x0001ffff", "cell");
 		const outdoor = outdoorScope();
 		const cell = envCellScope("0x0001ffff", "cell");
 		upsertCrossing(scene, "first", outdoor, cell, aperture);
@@ -1003,7 +1004,6 @@ function upsertCrossing(
 		exactMatch: true,
 		id: `portal-crossing:${id}`,
 		maskDepthPolicy: "allow-equal-depth",
-		junctionGroupId: null,
 		reciprocalCrossingId: null,
 		source,
 		sourceAperture: aperture,

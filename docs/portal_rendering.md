@@ -185,7 +185,7 @@ intersects the two coplanar authored apertures once and serializes the result as
 material-free effective aperture. Static provenance records the reciprocal aperture and
 intersection evidence.
 
-This preprocessing occurs while producing the HBEC v2 source record. It is not repeated per frame.
+This preprocessing occurs while producing the HBEC source record (currently v6). It is not repeated per frame.
 It does not modify authored crossing geometry, Cell BSP containment, collision, or movement
 queries.
 
@@ -200,32 +200,44 @@ overlap in area, chaining their cells through a zero-thickness slab of the outdo
 of `0xF418FFFF` found twelve such junctions; the arrangement recurs across the archive but is not
 common.
 
-At HBEC source production the host detects these pairs with the same planar machinery that
-synthesizes reciprocal visibility apertures: crossings whose source apertures are coplanar within
-tolerance and share interior area form one junction group. Groups are connected components over
-that pairwise predicate; each receives a record-local ordinal emitted as `junctionGroupId` on every
-member crossing. Pure reciprocal pairs — every ordinary doorway's two directed crossings — receive
-no id, because reciprocal suppression already covers them.
+`SceneGraph` resolves these junctions over the complete resident topology, once per topology
+revision. `scene/portal-junctions.ts` compares authored source apertures in a nearby landblock
+frame, including apertures owned by different landblocks. Coplanar pairs with more than
+0.0001 m² shared interior area connect into components. Pure reciprocal pairs — every ordinary
+doorway's two directed crossings — receive no id because reciprocal suppression covers them.
+Every pair of planes in an admitted component must also coincide, preventing a chain of small
+plane offsets from licensing a non-coincident continuation.
 
-The exemption this licenses is bounded. A component is declined, with a logged warning and no ids,
-when any single render domain contributes more than two member crossings; visibility islands are
-derived host-side (union-find over proven depth-continuous seams, emitted as the
-`cellIslandIndices` section) precisely so this bound counts per render domain rather than per
-authored cell. Within the bound, a same-depth walk can take at most one junction step —
-reciprocal suppression removes one of the two same-domain exits — before depth strictly increases
-again, so the compositor's convergence measure survives. An archive census never observed a
-component whose domain contributed more than two.
+The exemption is bounded per pixel. A component is declined, with a logged warning and no ids,
+when three exits from one render domain overlap pairwise. Any positive overlap counts towards
+that ambiguity proof, including slivers below the component-connectivity threshold. The triangle
+test is conservative: it can decline pairwise overlaps without a common triple intersection.
+Disjoint partition pieces can share a component with a larger opposite opening without competing
+at a pixel. Within the bound, reciprocal suppression leaves at most one equal-depth continuation.
+The host still derives visibility islands from proven depth-continuous seams and emits
+`cellIslandIndices`; junction ambiguity counts per island, with one outdoor domain for the whole scene.
 
-The frontend qualifies record-local ids scene-globally (landblock grid packed above the ordinal)
-because outdoor is one render domain across landblocks. The propagation shader and every CPU model
-then admit an equal-depth advance exactly when the arrival and candidate crossings share one
-junction id; all other equal-or-shallower candidates remain rejected as backtracking.
+Polygon intersections use `polyclip-ts` with scoped 80-decimal-place division precision through
+its shared `bignumber.js` constructor. Authored 0D4A regression geometry exposes ring-connectivity
+failures at the library's default precision. The synchronous call restores the caller's precision
+in `finally`; no geometry is snapped and no tolerance is enlarged.
+
+HBEC v6 carries source facts without junction IDs. The scene derives `junctionGroupId` only on
+`ScenePortalCrossing`, and its immutable topology view and outgoing index share those resolved
+crossings. IDs are local to that topology revision and are rebuilt on load, replacement, rollback,
+or eviction. The propagation shader and CPU models admit an equal-depth advance when the arrival
+and candidate crossings share an id; other equal-or-shallower candidates remain rejected.
 
 The strict entry test itself is Holtburger's construct, not retail compatibility: retail's
 `PView::ClipPortals` terminates indoor traversal at exterior endpoints and re-enters buildings from
 the outdoor pass (`acclient.c:441813-441942`, `:442040-442090`), so it never compares entry depths
 at all. The test exists here as the path-free propagation's convergence measure, and the junction
-fact is the host-proven exemption that keeps it from rejecting authored zero-thickness geometry.
+fact is the scene-proven exemption that keeps it from rejecting authored zero-thickness geometry.
+
+Movement entry permission is separate from this render junction proof. Shared world traversal
+preserves retail's source query frame during building entry, commits the outdoor domain when
+required, and permits indoor entry on the next rebased query. The ordinary core position publisher
+reports accepted cell changes. Render junction IDs do not grant movement or server publication permission.
 
 ## Potentially-Visible Lists
 

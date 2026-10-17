@@ -103,11 +103,6 @@ export interface ScenePortalCrossingInput {
 	readonly exactMatch: boolean;
 	/** Equal-depth mask ownership resolved from the authored source portal surface. */
 	readonly maskDepthPolicy: "allow-equal-depth" | "reject-equal-depth";
-	/**
-	 * Host-proven coincident-junction identity shared by every crossing on one coplanar
-	 * overlapping footprint, or null. Equal ids license the compositor's equal-depth advance.
-	 */
-	readonly junctionGroupId: number | null;
 	/** Stable reciprocal crossing, when the host proved one. */
 	readonly reciprocalCrossingId: PortalCrossingId | null;
 	/** Host-classified seam semantics retained for later rendering policy. */
@@ -128,6 +123,12 @@ export interface ScenePortalCrossingInput {
 	readonly sourceAperture: ScenePortalAperture;
 	/** Host-resolved geometry used exclusively by render planning and material-free masks. */
 	readonly visibilityAperture: ScenePortalAperture;
+}
+
+/** Scene-owned crossing resolved against the complete resident topology revision. */
+export interface ScenePortalCrossing extends ScenePortalCrossingInput {
+	/** Shared equal-depth permission, or null when no safe junction is proven. */
+	readonly junctionGroupId: number | null;
 }
 
 /** Atomic transform and residency update for the root of a transform tree. */
@@ -248,8 +249,8 @@ export interface SceneTopologyScope {
 export interface SceneTopologyView {
 	readonly revision: number;
 	readonly scopes: readonly SceneTopologyScope[];
-	readonly crossings: readonly ScenePortalCrossingInput[];
-	outgoing(scope: SceneScope): readonly ScenePortalCrossingInput[];
+	readonly crossings: readonly ScenePortalCrossing[];
+	outgoing(scope: SceneScope): readonly ScenePortalCrossing[];
 }
 
 export { SceneGraph } from "./scene-graph";

@@ -360,8 +360,8 @@ void main() {
 	// A scene-proven coincident junction licenses a zero-thickness advance: when the arrival and the
 	// candidate crossing share one junction group, equal entry-plane depth is authored geometry,
 	// not backtracking. Reciprocal suppression above still rejects the immediate return, and the
-	// scene preparation bounds same-domain junction exits at two per interior point, so at most
-	// one same-junction candidate can survive here.
+	// scene preparation rejects competing same-domain junction exits outside its numerical overlap
+	// tolerance, leaving the intended forward candidate after reciprocal suppression.
 	bool sameJunction = arrival.route.w != 0u
 		&& arrival.route.w == uArrivals[vOutputArrival - 1u].route.w;
 	if (!sameJunction

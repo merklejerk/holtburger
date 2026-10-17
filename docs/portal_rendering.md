@@ -208,19 +208,27 @@ doorway's two directed crossings — receive no id because reciprocal suppressio
 Every pair of planes in an admitted component must also coincide, preventing a chain of small
 plane offsets from licensing a non-coincident continuation.
 
-The exemption is bounded per pixel. A component is declined, with a logged warning and no ids,
-when three exits from one render domain overlap pairwise. Any positive overlap counts towards
-that ambiguity proof, including slivers below the component-connectivity threshold. The triangle
-test is conservative: it can decline pairwise overlaps without a common triple intersection.
+The exemption is bounded per pixel up to a numerical overlap tolerance. A component is declined,
+with a logged warning and no ids, when three exits from one render domain overlap pairwise by more
+than `JUNCTION_OVERLAP_AREA_EPSILON` (1e-12 m²). This is separate from the larger
+component-connectivity threshold, so smaller meaningful overlaps still count towards ambiguity.
+The graph triangle test is conservative: it can decline pairwise overlaps without a common triple
+intersection.
 Disjoint partition pieces can share a component with a larger opposite opening without competing
-at a pixel. Within the bound, reciprocal suppression leaves at most one equal-depth continuation.
+at a pixel. Outside the numerical contact tolerance, reciprocal suppression leaves at most one
+equal-depth continuation.
 The host still derives visibility islands from proven depth-continuous seams and emits
 `cellIslandIndices`; junction ambiguity counts per island, with one outdoor domain for the whole scene.
 
-Polygon intersections use `polyclip-ts` with scoped 80-decimal-place division precision through
-its shared `bignumber.js` constructor. Authored 0D4A regression geometry exposes ring-connectivity
-failures at the library's default precision. The synchronous call restores the caller's precision
-in `finally`; no geometry is snapped and no tolerance is enlarged.
+Overlap area is the sum of pairwise intersections of the aperture's existing non-overlapping
+triangles, using ordinary-number half-plane clipping. This preserves concave, disconnected, and
+holed triangulations without rebuilding boundary rings or changing authored vertices. The area
+dead zone ignores clipping residue and projection-dependent contacts in slightly nonplanar
+content; it is an empirical geometry tolerance, not a claim of exact arithmetic. A comparison
+over 167 owners, covering all 764 reachable Environment templates and 3,134 CellStruct selectors,
+retained all assignments across 158,541 crossings and all 923 ambiguity rejections. That census
+covers every reachable template, not every placed instance. Asset-free tests cover numerical
+contact, meaningful subthreshold overlap, and the triangle intersection shapes.
 
 HBEC v6 carries source facts without junction IDs. The scene derives `junctionGroupId` only on
 `ScenePortalCrossing`, and its immutable topology view and outgoing index share those resolved

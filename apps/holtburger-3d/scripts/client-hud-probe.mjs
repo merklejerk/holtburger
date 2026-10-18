@@ -1114,6 +1114,15 @@ export async function probeClientHud(
 	await delay(20);
 	const viewportLifecycleCancelled = await capture();
 
+	const assertMinimapCursor = async (expected) => {
+		const cursor = await evaluateExpression(
+			client,
+			`getComputedStyle(document.querySelector('.minimap-overlay-canvas')).cursor`,
+		);
+		if (cursor !== expected)
+			throw new Error(`Minimap cursor: expected ${expected}, got ${cursor}.`);
+	};
+
 	const emptyMapPoint = {
 		x:
 			viewportLifecycleCancelled.minimapOverlayCanvas.left +
@@ -1129,6 +1138,7 @@ export async function probeClientHud(
 		type: "mousePressed",
 		...emptyMapPoint,
 	});
+	await assertMinimapCursor("grabbing");
 	await client.send("Input.dispatchMouseEvent", {
 		button: "left",
 		buttons: 0,
@@ -1138,9 +1148,11 @@ export async function probeClientHud(
 	});
 	await delay(50);
 	const minimapCleared = await capture();
+	await assertMinimapCursor("grab");
 	await dispatchPrimaryGesture(minimapCleared.minimapOverlayCanvas, []);
 	await delay(50);
 	const minimapSelected = await capture();
+	await assertMinimapCursor("pointer");
 
 	await dispatchPrimaryGesture(minimapSelected.minimapOverlayCanvas, [
 		{ x: 32, y: 18 },
@@ -1177,6 +1189,7 @@ export async function probeClientHud(
 			);
 			await dispatchPrimaryGesture(minimapSelected.minimapOverlayCanvas, []);
 			const selected = await capture();
+			await assertMinimapCursor("pointer");
 			if (options.screenshotPath && !indoor) {
 				const shot = await client.send("Page.captureScreenshot", {
 					captureBeyondViewport: false,
@@ -1200,6 +1213,7 @@ export async function probeClientHud(
 				);
 				await dispatchPrimaryGesture(minimapSelected.minimapOverlayCanvas, []);
 				const cleared = await capture();
+				await assertMinimapCursor("grab");
 				if (cleared.selectedGuid !== null)
 					throw new Error(`${category}: invisible marker remained selectable`);
 			}
@@ -1241,6 +1255,7 @@ export async function probeClientHud(
 		});
 		if (!hover.result.value?.includes("Selection Fixture"))
 			throw new Error("Door endpoint hover missing");
+		await assertMinimapCursor("pointer");
 		for (const type of ["mousePressed", "mouseReleased"])
 			await client.send("Input.dispatchMouseEvent", {
 				type,

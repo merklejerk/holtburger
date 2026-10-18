@@ -395,7 +395,7 @@
 
 	function clearOverlayCanvas(): void {
 		blipHitTargets = [];
-		reconcileBlipTooltip();
+		reconcileBlipHover();
 		const context = overlayCanvas?.getContext("2d");
 		if (overlayCanvas) {
 			context?.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
@@ -498,7 +498,7 @@
 			drawSelectedBlipRing(context, frame, blip.guid, x, y);
 		}
 		blipHitTargets = hitTargets;
-		reconcileBlipTooltip();
+		reconcileBlipHover();
 	}
 
 	function drawSelectedBlipRing(
@@ -553,17 +553,18 @@
 			clientX: event.clientX,
 			clientY: event.clientY,
 		};
-		reconcileBlipTooltip();
+		reconcileBlipHover();
 	}
 
 	/** Keep hover output valid as either the pointer or presentation-rate markers move. */
-	function reconcileBlipTooltip(): void {
+	function reconcileBlipHover(): void {
 		const hover = blipHoverPoint;
+		const canvas = overlayCanvas;
 		if (!hover) {
+			canvas?.classList.remove("minimap-entity-hovered");
 			if (tooltip !== null) tooltip = null;
 			return;
 		}
-		const canvas = overlayCanvas;
 		const canvasBounds = canvas?.getBoundingClientRect();
 		const frameBounds = canvas
 			?.closest(".minimap-frame")
@@ -575,6 +576,7 @@
 			canvasBounds.width <= 0 ||
 			canvasBounds.height <= 0
 		) {
+			canvas?.classList.remove("minimap-entity-hovered");
 			if (tooltip !== null) tooltip = null;
 			return;
 		}
@@ -594,6 +596,7 @@
 					.map((target) => target.name),
 			),
 		];
+		canvas.classList.toggle("minimap-entity-hovered", names.length > 0);
 		if (names.length === 0) {
 			if (tooltip !== null) tooltip = null;
 			return;
@@ -616,7 +619,7 @@
 
 	function clearBlipTooltip(): void {
 		blipHoverPoint = null;
-		reconcileBlipTooltip();
+		reconcileBlipHover();
 	}
 
 	function sameNames(
@@ -778,6 +781,7 @@
 			canvas.releasePointerCapture(event.pointerId);
 		}
 		if (!dragged) onSelectEntity(closestBlipGuid(event.clientX, event.clientY));
+		if (canvas?.matches(":hover")) showBlipTooltip(event);
 	}
 
 	function cancelMinimapPan(): void {
@@ -1056,6 +1060,12 @@
 
 		.minimap-disc:active {
 			cursor: grabbing;
+		}
+
+		/* Hover shares marker hit testing; an active pan keeps the inherited grabbing cursor. */
+		.minimap-disc:not(:active)
+			.minimap-overlay-canvas:global(.minimap-entity-hovered) {
+			cursor: pointer;
 		}
 
 		.minimap-canvas {

@@ -6,13 +6,28 @@ export async function probeClientWaypoint(client, evaluate) {
 	const evidence = await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeWaypoint()",
-	);
+	).catch(async (error) => {
+		const snapshot = await evaluate(
+			client,
+			`({ frame: ${api}.read().frame.waypoint, row: document.querySelector('.minimap-waypoint-row')?.outerHTML, world: document.querySelector('.world-waypoint-target')?.outerHTML })`,
+		);
+		throw new Error(
+			`${error.message}\nWaypoint state: ${JSON.stringify(snapshot)}`,
+		);
+	});
 	await evaluate(
 		client,
 		`${api}.character(1); ${api}.chat('@waypoint 0N 0E'); (() => { const target = ${api}.read().frame.waypoint.target.position; ${api}.player(target.x - 500, target.z, 0, 0, false, true); })()`,
 	);
 	const settle = () =>
-		evaluate(client, "new Promise(resolve => setTimeout(resolve, 100))");
+		evaluate(
+			client,
+			`(async () => {
+			await new Promise(resolve => setTimeout(resolve, 100));
+			// Presentation pulls navigation on animation frames; timer expiry alone is insufficient.
+			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		})()`,
+		);
 	await evaluate(
 		client,
 		`document.querySelector('section[aria-label="World"] button[aria-label="Close World"]').click()`,
@@ -82,12 +97,113 @@ export async function probeClientWaypoint(client, evaluate) {
 		throw new Error(
 			`Real clear-button input failed navigation or keyboard ownership: ${JSON.stringify({ clear, cleared })}`,
 		);
+	// Set through the actual World panel callback chain and verify app-style toast composition.
+	await evaluate(
+		client,
+		`${api}.character(1); document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="World"]').click()`,
+	);
+	await settle();
+	await evaluate(
+		client,
+		`document.querySelector('button[aria-label="Map visibility"]').click()`,
+	);
+	await settle();
+	await evaluate(
+		client,
+		`[...document.querySelectorAll('[role="menu"][aria-label="Map visibility"] > button')].find(row=>row.getAttribute('aria-haspopup')==='menu').click()`,
+	);
+	await settle();
+	const submenu = await evaluate(
+		client,
+		`(() => { const root=document.querySelector('[role="menu"][aria-label="Map visibility"]'), child=document.querySelector('.popup-menu-child'); return {root:root.getBoundingClientRect().toJSON(),child:child.getBoundingClientRect().toJSON(),style:child.getAttribute('style'),open:child.matches(':popover-open'),viewport:{width:innerWidth,height:innerHeight}}; })()`,
+	);
+	if (
+		!submenu.open ||
+		submenu.child.width <= 0 ||
+		submenu.child.left < 0 ||
+		submenu.child.top < 0 ||
+		submenu.child.right > submenu.viewport.width ||
+		submenu.child.bottom > submenu.viewport.height
+	)
+		throw new Error(`Submenu geometry: ${JSON.stringify(submenu)}`);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Tab",
+		code: "Tab",
+		windowsVirtualKeyCode: 9,
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Tab",
+		code: "Tab",
+		windowsVirtualKeyCode: 9,
+	});
+	await settle();
+	const mapPoint = await evaluate(
+		client,
+		`(() => {const rect=document.querySelector('canvas[aria-label="World terrain map"]').getBoundingClientRect();return {x:Math.round(rect.left+rect.width/2),y:Math.round(rect.top+rect.height/2),messages:${api}.read().messages.length,history:${api}.read().history.length};})()`,
+	);
+	for (const type of ["mousePressed", "mouseReleased"])
+		await client.send("Input.dispatchMouseEvent", {
+			type,
+			x: mapPoint.x,
+			y: mapPoint.y,
+			button: "right",
+			buttons: type === "mousePressed" ? 2 : 0,
+			clickCount: 1,
+		});
+	await settle();
+	await evaluate(
+		client,
+		`(() => {const row=[...document.querySelectorAll('[aria-label="Map actions"] button')].find(row=>row.textContent.trim()==='Set waypoint');if(!row)throw new Error('Real map context press did not open actions');row.click();})()`,
+	);
+	await settle();
+	const mapWaypoint = await evaluate(
+		client,
+		`(() => {const current=${api}.read();return {target:current.frame.waypoint?.target,toast:[...document.querySelectorAll('.client-toast')].some(toast=>toast.textContent.includes(current.frame.waypoint?.target.label)),sameChat:current.messages.length===${mapPoint.messages},sameHistory:current.history.length===${mapPoint.history},closed:!document.querySelector('[aria-label="Map actions"]')};})()`,
+	);
+	if (
+		!mapWaypoint.target ||
+		!mapWaypoint.toast ||
+		!mapWaypoint.sameChat ||
+		!mapWaypoint.sameHistory ||
+		!mapWaypoint.closed
+	)
+		throw new Error(`Map waypoint flow failed: ${JSON.stringify(mapWaypoint)}`);
+	await evaluate(
+		client,
+		`document.querySelector('button[aria-label="Map visibility"]').click()`,
+	);
+	await settle();
+	await evaluate(
+		client,
+		`[...document.querySelectorAll('[aria-label="Map visibility"] > button')].find(row=>row.textContent.replace('✓','').trim()==='Waypoints').click()`,
+	);
+	await settle();
+	const hiddenWorldWaypoint = await evaluate(
+		client,
+		`${api}.read().frame.waypoint !== null && !document.querySelector('.minimap-waypoint-row').hidden && document.querySelector('.world-waypoint-target').style.display === 'none'`,
+	);
+	if (!hiddenWorldWaypoint)
+		throw new Error(
+			"World waypoint visibility affected minimap guidance or retained its pin",
+		);
+	await evaluate(
+		client,
+		`[...document.querySelectorAll('[aria-label="Map visibility"] > button')].find(row=>row.textContent.replace('✓','').trim()==='Waypoints').click()`,
+	);
+	await evaluate(
+		client,
+		`document.querySelector('section[aria-label="World"] button[aria-label="Close World"]').click()`,
+	);
 	const content = await probeWaypointContent(client, evaluate);
 	return {
 		...evidence,
 		realPointerPan: true,
 		realPointerClear: true,
 		pinAppearance,
+		mapWaypoint,
+		hiddenWorldWaypoint,
 		content,
 	};
 }

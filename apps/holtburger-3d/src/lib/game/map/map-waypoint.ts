@@ -5,6 +5,7 @@ import {
 	scenePointFromPrintedCoordinates,
 	PRINTED_MAP_COORDINATE_PAIR,
 	parsePrintedMapCoordinates,
+	formatWorldMapCoordinates,
 } from "./map-coordinates";
 import type { MapAnchor } from "./map-view";
 
@@ -108,4 +109,13 @@ export function waypointTextSpans(text: string): readonly WaypointTextSpan[] {
 	}
 	if (end < text.length) spans.push({ text: text.slice(end), target: null });
 	return spans;
+}
+
+/** Prepare an exact canonical destination; printed labels never become navigation geometry. */
+export function waypointFromMapPoint(
+	position: SceneMapPoint,
+): MapWaypointTarget | null {
+	return isOutdoorMapPoint(position)
+		? { position, label: formatWorldMapCoordinates(position) }
+		: null;
 }

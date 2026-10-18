@@ -1388,6 +1388,7 @@
 					{onRefreshHousing}
 					{onSearchHousing}
 					{canTeleportFromMap}
+					{onSetWaypoint}
 					{recallDestinations}
 					{onRecall}
 					{onTeleportToMapPosition}

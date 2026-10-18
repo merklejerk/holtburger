@@ -7,6 +7,10 @@ minimap waypoint label shows an SVG pin, destination coordinates, and distance o
 Source-level dry run completed for the extension on 2026-10-17. The scope was subsequently
 simplified; implementation and verification evidence are recorded at the end.
 
+Content linking and presentation refinements were committed as `f29b323e9`. The **World map menus and waypoint placement**
+increment at the end of this document is implemented and verified. It supersedes the original
+exclusion of map click-to-set gestures.
+
 ## Context and boundaries
 
 Give the player one local navigation waypoint, set through `@waypoint` (alias `@wp`), with distance and
@@ -737,3 +741,311 @@ submodule state was excluded.
   build, formatting, and the waypoint/content/theme browser probe passed before this review; only
   documentation changed during the review. Earlier keyboard, book, inspection, contracts, and
   real-content World-map regression evidence remains recorded above.
+
+## Extension: World map menus and waypoint placement
+
+Status: implemented and verified on 2026-10-18. No visual acceptance or new live-server test has
+been performed.
+
+### Goal, boundaries, and north stars
+
+Consolidate World map visibility controls into one menu and let the player set the current waypoint
+from a map context menu, with privileged teleport available through the existing capability.
+
+- Keep map presentation, filter choices, and menu state in the H3D frontend. Reuse the existing
+  waypoint owner and core teleport admission; no new host, protocol, or shared-crate API is needed.
+- Replace the separate housing selector, contract toggle, and town-label toggle with one visibility
+  icon button. Keep Recall and Reset as separate actions and retain the Housing tab.
+- Use plain text menu rows with a reserved leading checkmark column, empty when unchecked.
+  Housing's parent row is checked whenever a housing type is selected.
+- Make a clean gesture cutover: remove privileged left-click teleport; left-drag pans and
+  right-click opens map actions. Retain wheel zoom.
+- Preserve one session-local waypoint. Exclude saved destinations, multiple waypoints, routing,
+  Explorer changes, persisted filter settings, extra map actions, and permission discovery work.
+- Prefer a narrow extension of the existing popup over a map-specific menu or general menu framework.
+
+### Ground truth and affected layers
+
+This table records the baseline inspected before implementation; completed changes are recorded below.
+
+| Source                                                                           | Evidence and responsibility                                                                                                                                                         |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/holtburger-3d/src/client/ClientWorldPanel.svelte`                          | Frontend presentation owner: existing filters, housing search state, overlays, recall popup, pan and left-click teleport.                                                           |
+| `apps/holtburger-3d/src/app/PopupMenu.svelte`                                    | App UI primitive: element anchoring, command lists/grids, keyboard scope, popover placement, outside dismissal. Currently lacks checked rows, submenus, and cursor anchoring.       |
+| `apps/holtburger-3d/src/lib/game/world-map/view.ts`                              | Frontend map geometry: `worldMapPosition` maps canvas CSS pixels to canonical horizontal coordinates and rejects fit margins.                                                       |
+| `apps/holtburger-3d/src/lib/game/world-map/pointer-gesture.ts`                   | Frontend gesture tracking: distinguishes a click from a pan; currently invokes the teleport click callback.                                                                         |
+| `apps/holtburger-3d/src/client/ClientWorldView.svelte` and `ClientApp.svelte`    | Frontend composition: existing `onSetWaypoint`, status-toast callback, teleport callback, and live `canTeleportFromMap` handoff. The World panel still needs the waypoint callback. |
+| `apps/holtburger-3d/src/client/client-navigation-waypoint.ts`                    | Frontend navigation intent owner: character eligibility, target replacement, feedback, and retirement.                                                                              |
+| `apps/holtburger-3d/src/lib/game/map/map-coordinates.ts` and `map-waypoint.ts`   | Coordinate formatting, half-open outdoor bounds, and prepared waypoint contract.                                                                                                    |
+| `crates/holtburger-core/src/client/map_teleport.rs`                              | Shared behavior: in-world admission from `IsAdmin`, `IsArch`, or `IsPsr`, capability changes, destination validation, and dispatch-time recheck.                                    |
+| `ACE/Source/ACE.Entity/Enum/Properties/PropertyBool.cs`                          | All three permission flags are marked `SendOnLogin` (44, 45, 97).                                                                                                                   |
+| `ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionAdvocateTeleport.cs` | Server checks the same three flags, rejects entirely-water landblocks, resolves destination height, and performs teleport.                                                          |
+| `acclient-eor-source/acclient.c:424750` and `:424767`                            | Retail `PlayerIsPSRLead`/`PlayerIsPSR` combine those same permissions. Existing map-click behavior is at `:208796`.                                                                 |
+
+The capability is reliable for deciding whether to offer Teleport. It is broader than an Admin-only
+flag: Arch and PSR are also eligible. Do not infer permission from account names or add another
+admin model. The server still owns whether a particular destination can be reached.
+
+### Visibility menu contract
+
+```text
+[Visibility icon]
+    Town names       [empty prefix initially]
+  ✓ Contracts
+  ✓ Waypoints
+    Housing       >  [checked when selection is not None]
+      ✓ None
+        Cottage
+        Villa
+        Mansion
+```
+
+The illustration shows the Housing submenu contents; render it as a child popup beside the parent
+row, flipping at viewport edges. Selected housing rows also use a checkmark, not radio-circle artwork.
+
+| Entry                           | Initial state and effect                                                                                               |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Town names                      | Off. Toggle all settlement names; settlement markers remain visible and hover still supplies names.                    |
+| Contracts                       | On for an active character. Preserve existing unavailable-source disabling and overlay subscriptions.                  |
+| Waypoints                       | On. Hide/show only the World map destination pin and its hover hit; never clear the waypoint or hide minimap guidance. |
+| Housing                         | Derived parent checkmark: selected type is not None. Opening this row opens the submenu, without toggling search.      |
+| Housing → None                  | Selected initially. Clear the selected search overlay without submitting a search.                                     |
+| Housing → Cottage/Villa/Mansion | Exclusive choice. Use the existing search callback and results; only display results matching the selected type.       |
+
+- Keep the menu open after filter or housing selection so several choices can be adjusted. Ordinary
+  command menus retain close-before-dispatch behavior.
+- Preserve housing's pending-search disabling, searching indication, and zero-results feedback.
+  None remains available while a search is pending; a late result must not restore a cleared filter.
+- Keep the player's own home marker always visible independently of housing availability searches.
+- Retain choices across panel/tab closure; reset all visibility choices to the defaults above on
+  character replacement. The Housing parent checkmark is derived from selection, never stored twice.
+- Checkmarks use inherited menu text color; reuse existing themed surface, highlight, disabled,
+  spacing, and focus treatment. Reuse an appropriate visibility icon through the current SVG pipeline.
+- Give the trigger an accessible name, expanded state, and menu relationship. Toggle rows expose
+  `menuitemcheckbox`; housing choices expose `menuitemradio` with checked state despite checkmark
+  artwork. Housing's parent remains a submenu item with `aria-haspopup`/`aria-expanded`; its visual
+  checkmark summarizes selection and must also have an accessible equivalent.
+
+### Context menu and exact destination flow
+
+```text
+Right-click valid map point
+  → capture canonical {x, z} once using the current view
+  → open cursor-anchored menu
+      Set waypoint → prepared target → existing app callback → waypoint owner → status toast
+      Teleport     → existing app callback → host/core admission → server
+```
+
+- Offer Set waypoint for an active character and Teleport only while `canTeleportFromMap` is true.
+  Use those exact labels. No extra clear or report action is introduced.
+- Cancel an active pan and clear the hover tooltip before opening. Suppress the native browser
+  context menu on the map canvas. Right-click does not pan, teleport, or set a target by itself.
+- Resolve the point with `worldMapPosition` and validate navigable outdoor bounds. Fit margins,
+  invalid/exclusive landscape edges, or a map without a usable view produce no action menu.
+  Streaming maps with valid manifest/view remain usable as today.
+- Retain canonical geometry in the menu intent. Format the waypoint label for display; never
+  round and reparse it. Reuse canonical target preparation where it is already available, or
+  consolidate the existing contract-target preparation if this reveals a second identical caller.
+- A marker under the pointer does not change targeting: use the map point beneath it.
+- Selection dispatches exactly once and closes the menu. Preserve existing status-toast set
+  confirmation and app-owned teleport error feedback. The map does not write success to chat.
+- Recheck active character/capability at activation and retain core's dispatch-time permission
+  check. Revocation removes Teleport from an open menu without changing the captured point.
+- Keep at most one map-owned menu open (visibility, context, or recall). Close transient menus on
+  tab/panel closure, character change, view-changing gestures, and component retirement. No menu
+  lifetime may recreate the map owner, dataset, canvas, or overlay resources.
+
+### Popup integration and interaction constraints
+
+Extend `PopupMenu` only for the demonstrated consumers: typed checked choices, a housing submenu,
+and an anchor union distinguishing an element trigger from a viewport point. Separate placement
+from trigger containment: a cursor anchor must not treat the whole canvas as an exempt trigger.
+Do not manufacture invisible DOM buttons as point anchors.
+
+The root menu owns dismissal and keyboard input for its child submenu. A press inside either
+surface must count as inside the same menu; mounting independent popups with competing outside
+handlers would dismiss the parent before the child can act. Keep existing list/grid consumers
+working without changing their command meaning.
+
+- Up/Down navigates enabled rows; Home/End retain current behavior.
+- Right arrow or activation opens Housing; Left arrow returns to its parent. Escape closes the
+  child first, then the root. Pointer users can cross directly from parent to child without closure.
+- Enter/Space changes a checked choice without closing; command activation closes before dispatch.
+- Outside press dismisses without beginning a pan or forwarding a game action. Tab dismisses
+  through the current keyboard policy. No panel-local focus/blur workaround is introduced.
+- Clamp/flip both surfaces inside the viewport and preserve scrolling for constrained windows.
+
+### Implementation phases and acceptance
+
+#### Phase 9: Extend the existing popup
+
+- [x] Add checked text rows, one coherent submenu interaction path, and point anchoring to
+      `PopupMenu.svelte`; retain existing element-anchor and symbol-grid consumers.
+- [x] Exercise keyboard navigation, nested outside dismissal, disabled rows, dynamic item removal,
+      viewport edge placement, and checked-choice retention with the browser harness.
+- [x] Verify existing recall, selected-entity, loadout, and action-bar popup consumers still work.
+
+Acceptance: both new menu forms run through the shared popup and keyboard policy, with no
+feature-specific menu framework or duplicate outside handlers.
+
+#### Phase 10: Consolidate World map visibility
+
+- [x] Replace the three separate controls with the visibility trigger and agreed menu rows in
+      `ClientWorldPanel.svelte`. Remove obsolete markup, callbacks, positioning styles, and selectors.
+- [x] Add the default-on World waypoint visibility choice and gate both pin drawing and hover.
+- [x] Preserve housing request behavior and feedback in the exclusive submenu; derive its parent
+      checkmark directly from selection. Align all choices with character-scoped reset behavior.
+- [x] Verify defaults, toggle retention/reset, pending/empty housing search, late results after
+      None, contract updates, and minimap independence in production-component harness composition.
+
+Acceptance: all visibility choices live in one menu; disabling Waypoints changes only World map
+presentation; choosing None and character replacement cannot revive stale housing overlays.
+
+#### Phase 11: Map context actions and gesture cutover
+
+- [x] Wire `onSetWaypoint` through `ClientWorldView` into `ClientWorldPanel` and update every
+      harness caller of the panel's props.
+- [x] Capture/validate the canonical map point and add Set waypoint plus capability-gated Teleport.
+- [x] Remove left-click teleport. Inspect `trackWorldMapGesture` callers/tests and simplify its
+      click branch if it has no remaining consumer; do not retain a no-op click abstraction.
+- [x] Verify exact geometry under zoom/pan, map margins/exclusive edges, one dispatch per menu
+      selection, no left-click dispatch, unchanged drag/zoom, toast confirmation, and permission
+      revocation while open. Check character/panel/tab retirement closes menus.
+
+Acceptance: both map actions use existing owners, ordinary characters never see Teleport, privileged
+characters teleport only after selecting it, and setting a target preserves full point precision.
+
+#### Phase 12: Cleanup and completion review
+
+- [x] Remove obsolete direct-control and left-click probe assumptions; replace them with user-action
+      coverage. Sweep dead styles, callbacks, props, and terminology in touched files.
+- [x] Run affected unit tests plus `npm run check`, `npm run lint:ts`, `npm run lint:dead`,
+      `npm run build`, and touched-document/source formatting checks using existing package tooling.
+- [x] Run affected browser probes: World map, waypoint/content, contracts, housing, keyboard,
+      and existing popup consumers. Record which actual production components/compositions ran.
+- [x] Review the final diff for menu complexity, duplicated state, resource lifetime changes, and
+      accidental shared-crate scope. Keep new code proportional to checked rows, one submenu, and
+      cursor anchoring; reassess before introducing a recursive menu framework or hover-delay machinery.
+- [x] Record evidence and leave visual acceptance to the user; do not mark pending checks complete.
+
+### Risks, concessions, and definition of done
+
+- Housing is a server query as well as a display filter. Preserve existing request admission and
+  matching-result rules rather than silently converting it into a client-only visibility toggle.
+- Existing popup dismissal consumes outside presses. The submenu must participate in that same
+  boundary; separate popovers cannot each independently decide that the other is outside.
+- Image bounds include a visual edge that cannot belong to a navigable landblock. Reuse the
+  navigable-point predicate for both menu actions without changing map-image projection bounds.
+- Teleport capability predicts permission, not destination success; ACE may reject water or other
+  destinations. Existing server feedback remains authoritative; no optimistic teleport outcome.
+- A source-level trace established permission availability. No new live-server or visual test has
+  been performed for this increment. No unresolved product decision blocks implementation.
+
+Done means all Phase 9–12 tasks pass, the agreed text/checkmark menus replace the old filters,
+Housing's parent accurately summarizes selection, exact map-point waypoint creation uses the
+existing toast flow, and teleport is available solely through the capability-gated context action.
+
+### Implementation evidence and review (2026-10-18)
+
+- The World panel owns one discriminated menu intent for visibility, context actions, or recall.
+  Context intent retains a prepared exact target. Repeated context openings replace the popup
+  instance so cursor placement and keyboard activation follow the new point.
+- Checked text rows reuse shared popup appearance and keyboard policy. Housing is a nested manual
+  popover inside the same DOM subtree, with one root keyboard scope/outside handler. The top layer
+  prevents the themed root's backdrop filter from offsetting its child. Placement measures fractional
+  bounding rectangles; rounded `offsetHeight` had allowed a 0.1875-pixel viewport overflow.
+- A callback captures the exact target before command dismissal clears reactive menu state.
+  `waypointFromMapPoint` consolidates exact canonical target preparation with contract navigation.
+  The pan tracker no longer has a click branch or callback.
+- Initial contract overlay drawing is untracked so reading the waypoint visibility choice cannot
+  become a contract subscription dependency. Browser coverage proves both directions of toggling
+  Waypoints retain the same contract marker nodes.
+- Affected unit run: 113 tests across seven files passed, covering map views/gestures, coordinate
+  preparation, waypoint owner behavior, contract placement, and keyboard policy.
+- `--world-map` passed with real content, streaming and ready images: submenu hit testing and
+  viewport bounds, checked state, keyboard navigation, Housing summary/None, character resets,
+  outside dismissal, exact fitted/zoomed/panned context placement, invalid map margins, permission
+  revocation, inert left-clicks, retained image/view resources, and owner disposal.
+- `--client-waypoint` passed its original 26 assertions plus real pointer pan/clear, real map
+  right-click/Set waypoint, submenu bounds, status-toast confirmation, unchanged chat/history,
+  World-only waypoint visibility, content links, clipboard/native selection, and theme hooks.
+- `--client-contracts`, `--client-housing`, `--client-keyboard`, `--client-selected-actions`, and
+  `--client-loadouts` passed. These cover housing-panel behavior, contract node retention, keyboard ownership, selected-entity
+  commands, symbol grids, and action-bar menus. Housing-search map assertions belong to the separate
+  `--client-world-map` suite; the final review below records its execution.
+- Probe waits now include animation frames to match imperative minimap presentation. Toast checks
+  find the requested message while an outgoing keyed toast may still be fading. Early hot-reloaded
+  or failed runs are not counted as verification evidence.
+- Final gates passed: `npm run check` (zero Svelte errors/warnings, app/node/test/Electron types),
+  `npm run lint:ts`, `npm run lint:dead`, `npm run build`, touched-file Prettier checks, and
+  `git diff --check`. Existing Vite chunk-size/plugin-timing advisories remain. No shared Rust,
+  protocol, host, or permission contract changed. Browser teleport callbacks collect requests;
+  existing core/server dispatch was source-traced rather than tested against a new live session.
+- Final review covered popup callers, nested input ownership, filter lifetimes, exact geometry,
+  notification wiring, and map/overlay resource lifetimes. The only identified dependency issue was
+  corrected and regression-tested. No further blocker was found within this scope.
+- Visual acceptance remains with the user. The previously documented fresh drag-selection automation
+  limitation is unchanged and was already resolved by the user's manual acceptance. Unrelated ACE
+  submodule state remains untouched and is excluded from this increment.
+
+Verification logs for this run are in `/tmp/world-menu-tests-final.log`,
+`/tmp/world-menu-browser.log`, `/tmp/world-menu-waypoint-browser.log`,
+`/tmp/world-menu-contracts-final.log`, `/tmp/world-menu-housing-final.log`,
+`/tmp/world-menu-keyboard-browser.log`, `/tmp/world-menu-selected-browser.log`,
+`/tmp/world-menu-loadouts-browser.log`, `/tmp/world-menu-check-reviewed.log`,
+`/tmp/world-menu-lint-reviewed.log`, `/tmp/world-menu-dead-reviewed.log`,
+`/tmp/world-menu-build-reviewed.log`, and `/tmp/world-menu-format-check.log`.
+
+### Final code-quality review before commit (2026-10-18)
+
+Review baseline: `f29b323e9`. Scope: the complete World map menu increment, including all changed
+production code, probes, tests, removed controls/gesture behavior, and this plan. Unrelated ACE
+submodule contents are excluded.
+
+Resolved findings:
+
+- The shared popup originally exposed recursively nested children and unchecked child commands,
+  while its renderer/keyboard handling supported one submenu of checked leaves. Narrowed its type
+  to command, checked leaf, or summary-with-checked-children variants. Unsupported nesting and
+  child commands are now rejected by the contract; existing command/grid consumers retain their
+  behavior. Removed the child renderer's optional-selection recovery and filter-specific wording
+  from the shared summary label.
+- Verification attribution was too broad: `--client-housing` does not execute the map search cases
+  in `probeClientWorldMap`. The explicit `--client-world-map` run exposed a surviving left-click
+  teleport assertion, which was migrated to real right-click menu selection through the session
+  transport. Its ordinary/revoked/privileged checks now assert the intended context action and inert
+  left-click behavior. The suite also dismisses the retained menu before map gestures and waits
+  for ResizeObserver/animation-frame publication before checking resized housing markers.
+
+Seam coverage:
+
+- Inspected popup item producers in World, recall, selected-entity actions, action bars, and loadout
+  icon menus together with root/child rendering, keyboard ownership, positioning, and dismissal.
+- Traced canonical click projection/preparation through the World callback, `ClientWorldView`,
+  `ClientApp`, waypoint owner, toast callback, and map/minimap consumers. Printed command labels
+  retain entered precision; canonical contract/map targets share preparation without reparsing.
+- Traced teleport capability snapshots/updates and lifecycle resets through app props to menu
+  visibility and dispatch; inspected session validation, core admission, and ACE's permission rule.
+  Existing in-world admission is deliberately retained rather than adding separate permission state.
+- Inspected filter intent resets, pending/late housing replies, retained map resources, overlay
+  subscriptions, and pan/zoom/context interruption. The character reset effects stay local because
+  remounting the panel would discard retained image/view resources.
+
+Accepted distinctions: image versus navigable bounds, retained navigation intent versus World-only
+pin visibility, command dismissal versus checked-choice retention, and parent/child highlight state.
+No additional menu framework, shared Rust model, saved-setting path, or theme artwork mechanism is
+justified. No new live-server or agent visual acceptance was performed during review.
+
+Verdict: **ready within the reviewed scope**. No unresolved finding remains. Fresh review checks
+passed: 113 affected unit tests, full `npm run check` with zero Svelte errors/warnings, TypeScript
+and dead-code lint, production build, `--world-map`, and the complete `--client-world-map` suite.
+The latter now supplies the previously missing search/late-reply/clustering/resize evidence through
+production World-panel/session composition. Touched-file formatting and diff checks also passed.
+Earlier content, contracts, housing-panel, keyboard, selected-action, and loadout regression evidence
+is retained above; those complete suites were not rerun during this review. Existing build advisories
+and the previously accepted fresh-drag automation limitation remain unchanged.
+
+Review logs: `/tmp/world-menu-review-tests.log`, `/tmp/world-menu-review-check.log`,
+`/tmp/world-menu-review-lint-final.log`, `/tmp/world-menu-review-dead.log`,
+`/tmp/world-menu-review-build.log`, `/tmp/world-menu-review-world-map.log`, and
+`/tmp/world-menu-review-client-map.log`.

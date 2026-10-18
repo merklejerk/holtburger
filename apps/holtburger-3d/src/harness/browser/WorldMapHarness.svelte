@@ -31,6 +31,7 @@
 	);
 	let visible = $state(true);
 	let canTeleportFromMap = $state(false);
+	let characterGuid = $state(1);
 	const mapTeleports: { x: number; z: number }[] = [];
 	const recalls: RecallDestination[] = [];
 	let mounted = $state(true);
@@ -139,19 +140,196 @@
 		};
 	};
 
-	/** Exercise the production overlay while streaming or ready, without live entity residency. */
+	async function visibilityChoice(label: string): Promise<HTMLButtonElement> {
+		if (!document.querySelector('[role="menu"][aria-label="Map visibility"]')) {
+			document
+				.querySelector<HTMLButtonElement>('button[aria-label="Map visibility"]')
+				?.click();
+			await tick();
+		}
+		const row = [
+			...document.querySelectorAll<HTMLButtonElement>(
+				'[role="menu"][aria-label="Map visibility"] > button',
+			),
+		].find((row) => row.textContent?.replace(/[✓›]/g, "").trim() === label);
+		if (!row) throw new Error(`Missing visibility choice ${label}`);
+		return row;
+	}
+	function dismissMenu(): void {
+		document
+			.querySelector<HTMLElement>('[role="menu"][aria-label="Map visibility"]')
+			?.dispatchEvent(
+				new KeyboardEvent("keydown", {
+					key: "Tab",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+	}
+	/** Menu geometry, shared keyboard ownership, checked state, and character lifetime. */
+	async function menuProbe() {
+		const assert = (condition: boolean, message: string) => {
+			if (!condition) throw new Error(message);
+		};
+		const key = async (key: string) => {
+			for (const type of ["keydown", "keyup"])
+				document.dispatchEvent(
+					new KeyboardEvent(type, {
+						key,
+						code: key,
+						bubbles: true,
+						cancelable: true,
+					}),
+				);
+			await tick();
+		};
+		navigation.acceptCharacter(1);
+		navigation.runCommand(
+			"@waypoint 0N 0E",
+			() => readFrame().waypoint,
+			() => {},
+			() => {},
+		);
+		const row = await visibilityChoice("Waypoints");
+		assert(
+			row.getAttribute("aria-checked") === "true",
+			"Waypoints must default on",
+		);
+		row.click();
+		await tick();
+		assert(
+			row.getAttribute("aria-checked") === "false" &&
+				!!document.querySelector('[role="menu"][aria-label="Map visibility"]'),
+			"Checked choice closed menu or failed to toggle",
+		);
+		assert(
+			readFrame().waypoint !== null &&
+				document.querySelector<SVGGElement>(".world-waypoint-target")?.style
+					.display === "none",
+			"World visibility cleared intent or retained marker",
+		);
+		await visibility(false);
+		await visibility(true);
+		const retained = await visibilityChoice("Waypoints");
+		assert(
+			retained.getAttribute("aria-checked") === "false",
+			"Visibility reset on panel close",
+		);
+		retained.click();
+		await tick();
+		const housing = await visibilityChoice("Housing");
+		assert(
+			housing.querySelector(".popup-menu-check")?.textContent === "",
+			"Housing summary starts checked",
+		);
+		await key("End");
+		await key("ArrowRight");
+		const child = document.querySelector<HTMLElement>(".popup-menu-child");
+		if (!child) throw new Error("Keyboard did not open housing submenu");
+		const rect = child.getBoundingClientRect();
+		assert(
+			rect.width > 0 &&
+				rect.left >= 0 &&
+				rect.top >= 0 &&
+				rect.right <= innerWidth &&
+				rect.bottom <= innerHeight,
+			`Submenu escaped viewport: ${JSON.stringify({ rect: rect.toJSON(), style: child.getAttribute("style"), open: child.matches(":popover-open"), root: document.querySelector('[role="menu"][aria-label="Map visibility"]')?.getBoundingClientRect().toJSON(), viewport: [innerWidth, innerHeight] })}`,
+		);
+		const choices = [...child.querySelectorAll<HTMLButtonElement>("button")];
+		const choiceRect = choices[1].getBoundingClientRect();
+		const hit = document.elementFromPoint(
+			choiceRect.left + choiceRect.width / 2,
+			choiceRect.top + choiceRect.height / 2,
+		);
+		assert(choices[1].contains(hit), "Submenu is clipped or covered");
+		// A child press must remain inside the parent's dismissal boundary.
+		choices[1].dispatchEvent(
+			new PointerEvent("pointerdown", { bubbles: true, cancelable: true }),
+		);
+		choices[1].click();
+		await tick();
+		assert(
+			choices[1].getAttribute("aria-checked") === "true" &&
+				housing.querySelector(".popup-menu-check")?.textContent === "✓",
+			"Housing choice or parent checkmark failed",
+		);
+		await key("Escape");
+		assert(
+			!document.querySelector(".popup-menu-child") &&
+				!!document.querySelector('[role="menu"][aria-label="Map visibility"]'),
+			"Escape did not close only child",
+		);
+		await key("ArrowRight");
+		await key("Home");
+		await key("Enter");
+		assert(
+			housing.querySelector(".popup-menu-check")?.textContent === "",
+			"None did not clear Housing summary",
+		);
+		await key("ArrowLeft");
+		await key("Escape");
+		assert(
+			!document.querySelector('[role="menu"][aria-label="Map visibility"]'),
+			"Root Escape failed",
+		);
+		await visibilityChoice("Town names");
+		const outside = new PointerEvent("pointerdown", {
+			bubbles: true,
+			cancelable: true,
+			button: 0,
+			pointerId: 4,
+		});
+		canvas().dispatchEvent(outside);
+		await tick();
+		assert(
+			outside.defaultPrevented &&
+				!document.querySelector('[role="menu"][aria-label="Map visibility"]'),
+			"Outside dismissal leaked canvas press",
+		);
+		(await visibilityChoice("Town names")).click();
+		await tick();
+		characterGuid = 2;
+		await tick();
+		assert(
+			!document.querySelector('[role="menu"][aria-label="Map visibility"]'),
+			"Character change retained menu",
+		);
+		assert(
+			(await visibilityChoice("Town names")).getAttribute("aria-checked") ===
+				"false",
+			"Character change retained labels",
+		);
+		assert(
+			(await visibilityChoice("Waypoints")).getAttribute("aria-checked") ===
+				"true",
+			"Character change retained hidden waypoint choice",
+		);
+		characterGuid = 1;
+		navigation.clear();
+		await tick();
+		return {
+			checkedChoices: true,
+			housingSummary: true,
+			childHitTesting: true,
+			keyboard: true,
+			outsideDismissal: true,
+			characterReset: true,
+		};
+	}
+	/** Exercise both context actions through production menus while streaming or ready. */
 	async function teleportProbe() {
 		const original = owner().readView();
-		if (!original) throw new Error("Teleport probe requires a map view.");
+		if (!original) throw new Error("Context probe requires a map view.");
 		owner().fit();
 		await owner().drawSettled();
-		const surface = canvas();
-		const rect = surface.getBoundingClientRect();
+		navigation.acceptCharacter(1);
+		const surface = canvas(),
+			rect = surface.getBoundingClientRect();
 		const point = {
-			clientX: rect.left + rect.width / 2,
-			clientY: rect.top + rect.height / 2,
+			clientX: Math.round(rect.left + rect.width / 2 + 0.375),
+			clientY: Math.round(rect.top + rect.height / 2 + 0.625),
 		};
-		const event = (type: string, dx = 0) =>
+		const pointer = (type: string, dx = 0) =>
 			new PointerEvent(type, {
 				...point,
 				clientX: point.clientX + dx,
@@ -159,88 +337,181 @@
 				button: 0,
 				bubbles: true,
 			});
-		const down = () => surface.dispatchEvent(event("pointerdown"));
-		const up = () => window.dispatchEvent(event("pointerup"));
-		const assertCount = (count: number) => {
-			if (mapTeleports.length !== count)
-				throw new Error(
-					`Expected ${count} map requests, got ${mapTeleports.length}.`,
-				);
+		const assert = (condition: boolean, message: string) => {
+			if (!condition) throw new Error(message);
 		};
+		const open = async () => {
+			surface.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					...point,
+					button: 2,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await tick();
+		};
+		const action = (label: string) =>
+			[
+				...document.querySelectorAll<HTMLButtonElement>(
+					'[aria-label="Map actions"] button',
+				),
+			].find((row) => row.textContent?.replace(/[✓›]/g, "").trim() === label);
 		mapTeleports.length = 0;
 		canTeleportFromMap = false;
 		await tick();
-		down();
-		up();
-		assertCount(0);
+		await open();
+		assert(
+			!action("Teleport") && !!action("Set waypoint"),
+			"Ordinary character menu has incorrect actions",
+		);
+		action("Set waypoint")?.click();
+		await tick();
+		const display = readFrame().waypoint;
+		if (!display) throw new Error("Context waypoint was not set");
+		const fitted = owner().readView();
+		if (!fitted) throw new Error("Missing context projection");
+		const expected = {
+			x:
+				fitted.centerX +
+				((point.clientX - rect.left - rect.width / 2) * fitted.spanMeters) /
+					rect.width,
+			z:
+				fitted.centerZ +
+				((point.clientY - rect.top - rect.height / 2) * fitted.spanMeters) /
+					rect.width,
+		};
+		assert(
+			Math.abs(display.target.position.x - expected.x) < 1e-8 &&
+				Math.abs(display.target.position.z - expected.z) < 1e-8,
+			"Waypoint lost exact clicked geometry",
+		);
+		assert(
+			!document.querySelector('[aria-label="Map actions"]'),
+			"Waypoint command retained menu",
+		);
 		canTeleportFromMap = true;
 		await tick();
-		down();
-		up();
-		assertCount(1);
-		const fitted = owner().readView();
-		if (
-			!fitted ||
-			mapTeleports[0].x !== fitted.centerX ||
-			mapTeleports[0].z !== fitted.centerZ
-		)
-			throw new Error(
-				"Map click did not preserve its exact projected location.",
-			);
-		const travel = SHARED_FRONTEND_TUNING.worldMap.panThresholdPixels + 10;
-		down();
-		window.dispatchEvent(event("pointermove", travel));
-		window.dispatchEvent(event("pointermove"));
-		up();
-		assertCount(1);
-		down();
-		window.dispatchEvent(event("pointercancel"));
-		up();
-		assertCount(1);
-		down();
+		surface.dispatchEvent(pointer("pointerdown"));
+		window.dispatchEvent(pointer("pointerup"));
+		assert(mapTeleports.length === 0, "Left click dispatched teleport");
+		await open();
+		assert(!!action("Teleport"), "Privilege did not offer Teleport");
+		action("Teleport")?.click();
+		await tick();
+		assert(
+			mapTeleports.length === 1 &&
+				Math.abs(mapTeleports[0].x - expected.x) < 1e-8 &&
+				Math.abs(mapTeleports[0].z - expected.z) < 1e-8,
+			"Context teleport lost point or dispatch count",
+		);
+		await open();
 		canTeleportFromMap = false;
 		await tick();
-		up();
-		assertCount(1);
-		canTeleportFromMap = true;
-		await tick();
-		down();
+		assert(
+			!action("Teleport") && !!action("Set waypoint"),
+			"Open menu retained revoked permission",
+		);
 		visible = false;
 		await tick();
-		up();
-		assertCount(1);
+		assert(
+			!document.querySelector('[aria-label="Map actions"]'),
+			"Hidden map retained menu",
+		);
 		visible = true;
+		canTeleportFromMap = true;
 		await tick();
-		down();
-		const housing = document.querySelector<HTMLButtonElement>(
-			'[role="tab"][aria-controls$="-housing"]',
+		await open();
+		document
+			.querySelector<HTMLButtonElement>(
+				'[role="tab"][aria-controls$="-housing"]',
+			)
+			?.click();
+		await tick();
+		assert(
+			!document.querySelector('[aria-label="Map actions"]'),
+			"Hidden tab retained menu",
 		);
-		const world = document.querySelector<HTMLButtonElement>(
-			'[role="tab"][aria-controls$="-world"]',
+		document
+			.querySelector<HTMLButtonElement>('[role="tab"][aria-controls$="-world"]')
+			?.click();
+		await tick();
+		const travel = SHARED_FRONTEND_TUNING.worldMap.panThresholdPixels + 10;
+		surface.dispatchEvent(pointer("pointerdown"));
+		window.dispatchEvent(pointer("pointermove", travel));
+		window.dispatchEvent(pointer("pointerup", travel));
+		assert(mapTeleports.length === 1, "Pan dispatched a map action");
+		owner().setView({
+			centerX: 20000,
+			centerZ: -22000,
+			spanMeters: SHARED_FRONTEND_TUNING.worldMap.minimumSpanMeters * 4,
+		});
+		await owner().drawSettled();
+		await open();
+		action("Set waypoint")?.click();
+		await tick();
+		const zoomed = owner().readView(),
+			zoomedTarget = readFrame().waypoint?.target;
+		if (!zoomed || !zoomedTarget) throw new Error("Missing zoomed waypoint");
+		assert(
+			Math.abs(
+				zoomedTarget.position.x -
+					(zoomed.centerX +
+						((point.clientX - rect.left - rect.width / 2) * zoomed.spanMeters) /
+							rect.width),
+			) < 1e-8 &&
+				Math.abs(
+					zoomedTarget.position.z -
+						(zoomed.centerZ +
+							((point.clientY - rect.top - rect.height / 2) *
+								zoomed.spanMeters) /
+								rect.width),
+				) < 1e-8,
+			"Zoomed/panned map lost exact context placement",
 		);
-		if (!housing || !world) throw new Error("Missing map tabs.");
-		housing.click();
+		await open();
+		surface.dispatchEvent(
+			new WheelEvent("wheel", {
+				deltaY: -120,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
 		await tick();
-		up();
-		assertCount(1);
-		world.click();
-		await tick();
-		// At world fit, threshold travel is still a drag even though clamp keeps the view fixed.
+		assert(
+			!document.querySelector('[aria-label="Map actions"]'),
+			"Zoom retained a context menu",
+		);
 		owner().fit();
 		await owner().drawSettled();
-		down();
-		window.dispatchEvent(event("pointermove", travel));
-		up();
-		assertCount(1);
+		surface.dispatchEvent(
+			new MouseEvent("contextmenu", {
+				clientX: rect.left,
+				clientY: rect.top,
+				button: 2,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		await tick();
+		assert(
+			!document.querySelector('[aria-label="Map actions"]'),
+			"Fit margin/exclusive corner offered actions",
+		);
 		const state = owner().read();
 		canTeleportFromMap = false;
+		navigation.clear();
 		owner().setView(original);
 		await tick();
 		await owner().drawSettled();
 		return {
 			kind: state.kind,
 			requests: mapTeleports.slice(),
-			cancelledCases: 6,
+			exactWaypoint: true,
+			permissionRevocation: true,
+			leftClickInert: true,
+			zoomedPlacement: true,
+			invalidMapMargin: true,
 		};
 	}
 
@@ -255,11 +526,10 @@
 		const nodes = [...root.querySelectorAll<SVGGElement>("g[data-settlement]")];
 		if (nodes.length !== WORLD_MAP_SETTLEMENTS.length)
 			throw new Error("Settlement nodes were not retained.");
-		const labelToggle = document.querySelector<HTMLButtonElement>(
-			'button[aria-label="Show settlement labels"]',
-		);
-		if (!labelToggle || labelToggle.getAttribute("aria-pressed") !== "false")
-			throw new Error("Settlement labels must default to hidden.");
+		let labelToggle = await visibilityChoice("Town names");
+		if (labelToggle.getAttribute("aria-checked") !== "false")
+			throw new Error("Town names must default off");
+
 		canvas().dispatchEvent(new PointerEvent("pointerleave", { bubbles: true }));
 		const verify = () => {
 			const view = owner().readView();
@@ -299,7 +569,7 @@
 				if (!text) throw new Error("Missing settlement label.");
 				const shown = getComputedStyle(text).visibility === "visible";
 				if (shown) labels++;
-				if (shown !== (labelToggle.getAttribute("aria-pressed") === "true"))
+				if (shown !== (labelToggle.getAttribute("aria-checked") === "true"))
 					throw new Error("Settlement label disagreed with visibility toggle.");
 			}
 			return { visibleCount, labels };
@@ -318,6 +588,7 @@
 			throw new Error("Whole-world fit did not show settlement annotations.");
 		await visibility(false);
 		await visibility(true);
+		labelToggle = await visibilityChoice("Town names");
 		if (verify().labels !== whole.labels)
 			throw new Error("Label toggle was lost when reopening the map.");
 		const town = WORLD_MAP_SETTLEMENTS.find(
@@ -393,6 +664,8 @@
 		await tick();
 		if (verify().labels !== 0)
 			throw new Error("Labels stayed visible after switching the toggle off.");
+		dismissMenu();
+		await tick();
 		hoverCenter();
 		if (verify().labels !== 0)
 			throw new Error("Hover revealed an inline label with the toggle off.");
@@ -804,6 +1077,7 @@
 			controlsProbe,
 			settlementProbe,
 			teleportProbe,
+			menuProbe,
 			waypointProbe,
 			visibility,
 			zoom,
@@ -865,7 +1139,7 @@
 	>
 		<ClientWorldPanel
 			contracts={null}
-			characterGuid={1}
+			{characterGuid}
 			housingManagement={null}
 			housing={emptyHousing()}
 			onRefreshHousing={async () => {}}
@@ -873,6 +1147,10 @@
 			bind:this={panel}
 			{source}
 			{canTeleportFromMap}
+			onSetWaypoint={(target) => {
+				navigation.acceptCharacter(1);
+				navigation.set(target, () => {});
+			}}
 			recallDestinations={recallDestinationSchema.options}
 			onRecall={async (destination) => {
 				recalls.push(destination);

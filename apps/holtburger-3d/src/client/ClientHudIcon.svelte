@@ -64,7 +64,7 @@
 		/** Pointer over text for enabling chat-history selection. */
 		| "select-text"
 		| "add"
-		/** Eye for toggling map label visibility. */
+		/** Eye for opening map visibility controls. */
 		| "eye"
 		/** Portal and arrow for standard recall actions. */
 		| "teleport"

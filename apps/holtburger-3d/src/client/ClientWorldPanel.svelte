@@ -3,7 +3,7 @@
 	import { ContractMapOverlay } from "./client-contracts-map-overlay";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import PopupMenu from "../app/PopupMenu.svelte";
+	import PopupMenu, { type PopupMenuItem } from "../app/PopupMenu.svelte";
 	import { RECALL_LABELS } from "./client-recall";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
@@ -29,9 +29,15 @@
 	import { WORLD_MAP_SETTLEMENTS } from "../lib/game/world-map/world-map-settlements";
 	import { WorldMapSettlementOverlay } from "../lib/game/world-map/settlement-overlay";
 	import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
-	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
+	import {
+		formatWorldMapCoordinates,
+		sceneMapPoint,
+	} from "../lib/game/map/map-coordinates";
 	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
-	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
+	import {
+		waypointFromMapPoint,
+		type MapWaypointTarget,
+	} from "../lib/game/map/map-waypoint";
 	import WorldMapPlayerIcon from "../assets/icons/world-map-player.svg?component";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 
@@ -48,8 +54,10 @@
 		readonly onSearchHousing: (houseType: number) => Promise<void>;
 		/** One mounted transport's static map capability. */
 		readonly source: WorldMapSource;
-		/** Core admission is rechecked at release and command dispatch. */
+		/** Core admission is rechecked at menu selection and command dispatch. */
 		readonly canTeleportFromMap: boolean;
+		/** Reuse the app-owned waypoint setter and status toast. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		/** Attempts offered by core; the server validates undisclosed prerequisites. */
 		readonly recallDestinations: readonly RecallDestination[];
 		/** Dispatch the selected standard recall through the app shell. */
@@ -72,6 +80,7 @@
 		onSearchHousing,
 		source,
 		canTeleportFromMap,
+		onSetWaypoint,
 		recallDestinations,
 		onRecall,
 		onTeleportToMapPosition,
@@ -90,9 +99,9 @@
 		searchSelection.character === characterGuid ? searchSelection.type : 0,
 	);
 	const searchTypes = [
-		{ value: 1, label: "Cottage" },
-		{ value: 2, label: "Villa" },
-		{ value: 3, label: "Mansion" },
+		{ value: 1, label: "Cottage", action: "housing-1" },
+		{ value: 2, label: "Villa", action: "housing-2" },
+		{ value: 3, label: "Mansion", action: "housing-3" },
 	] as const;
 	$effect(() => {
 		searchSelection = { character: characterGuid, type: 0 };
@@ -107,15 +116,48 @@
 			drawOverlays();
 		});
 	});
-	function selectHousing(event: Event): void {
-		if (!(event.currentTarget instanceof HTMLSelectElement)) return;
-		const type = Number(event.currentTarget.value);
+	function selectHousing(type: number): void {
 		if (type !== 0 && housing.search.pendingType !== null) return;
 		searchSelection = { character: characterGuid, type };
 		if (type !== 0) void onSearchHousing(type);
 	}
 
-	let recallAnchor = $state<HTMLButtonElement | null>(null);
+	/** A single open menu belongs to this character and visible map tab. */
+	let menu = $state<
+		| {
+				readonly kind: "recall" | "visibility";
+				readonly anchor: HTMLButtonElement;
+		  }
+		| {
+				readonly kind: "context";
+				readonly anchor: { readonly x: number; readonly y: number };
+				readonly target: MapWaypointTarget;
+		  }
+		| null
+	>(null);
+	const recallAnchor = $derived(menu?.kind === "recall" ? menu.anchor : null);
+	function toggleMenu(
+		kind: "recall" | "visibility",
+		anchor: HTMLButtonElement,
+	): void {
+		menu = menu?.kind === kind ? null : { kind, anchor };
+	}
+	const contextItems = $derived<
+		readonly PopupMenuItem<"waypoint" | "teleport">[]
+	>([
+		...(characterGuid === null
+			? []
+			: [
+					{
+						action: "waypoint" as const,
+						label: "Set waypoint",
+						disabled: false,
+					},
+				]),
+		...(canTeleportFromMap
+			? [{ action: "teleport" as const, label: "Teleport", disabled: false }]
+			: []),
+	]);
 	const recallItems = $derived(
 		recallDestinations.map((action) => ({
 			action,
@@ -124,8 +166,12 @@
 		})),
 	);
 	$effect(() => {
-		if (!visible || activeTab !== "world" || recallDestinations.length === 0)
-			recallAnchor = null;
+		if (
+			!visible ||
+			activeTab !== "world" ||
+			(menu?.kind === "recall" && recallDestinations.length === 0)
+		)
+			menu = null;
 	});
 
 	let contractRoot: SVGGElement;
@@ -164,7 +210,8 @@
 			overlay.setFacts(source.readFacts());
 			drawOverlays();
 		};
-		refresh();
+		// Overlay drawing reads independent display choices; they must not own this subscription.
+		untrack(refresh);
 		const unsubscribe = source.subscribeFacts(refresh);
 		const timer = setInterval(() => {
 			overlay.refreshTooltips(source.readFacts());
@@ -199,6 +246,102 @@
 	let activeTab = $state<"world" | "housing">("world");
 	/** Cold toggle markup; defaults to names shown only in the tooltip. */
 	let showAllLabels = $state(false);
+	/** World map presentation only; navigation intent and minimap guidance remain active. */
+	let showWaypoints = $state(true);
+	$effect(() => {
+		// All filter choices and open menus belong to the current character.
+		void characterGuid;
+		showAllLabels = false;
+		showWaypoints = true;
+		menu = null;
+		untrack(() => {
+			settlementOverlay?.showLabels(false);
+			drawOverlays();
+		});
+	});
+	/** Stable intents for the three map layers and exclusive housing search choices. */
+	type VisibilityAction =
+		| "names"
+		| "contracts"
+		| "waypoints"
+		| "housing"
+		| "housing-0"
+		| "housing-1"
+		| "housing-2"
+		| "housing-3";
+	const visibilityItems = $derived<readonly PopupMenuItem<VisibilityAction>[]>([
+		{
+			action: "names",
+			label: "Town names",
+			disabled: false,
+			selection: { kind: "checkbox", checked: showAllLabels },
+		},
+		{
+			action: "contracts",
+			label: "Contracts",
+			disabled: contracts === null || characterGuid === null,
+			selection: { kind: "checkbox", checked: showContracts },
+		},
+		{
+			action: "waypoints",
+			label: "Waypoints",
+			disabled: false,
+			selection: { kind: "checkbox", checked: showWaypoints },
+		},
+		{
+			action: "housing",
+			label: "Housing",
+			disabled: characterGuid === null,
+			selection: { kind: "summary", checked: searchType !== 0 },
+			children: [
+				{
+					action: "housing-0",
+					label: "None",
+					disabled: false,
+					selection: { kind: "radio", checked: searchType === 0 },
+				},
+				...searchTypes.map((type) => ({
+					action: type.action,
+					label: `${type.label}${housing.search.pendingType === type.value ? " — Searching…" : housing.search.results?.houseType === type.value && housing.search.results.totalAvailable === 0 ? " (0)" : ""}`,
+					disabled: housing.search.pendingType !== null,
+					selection: {
+						kind: "radio" as const,
+						checked: searchType === type.value,
+					},
+				})),
+			],
+		},
+	]);
+	function selectVisibility(action: VisibilityAction): void {
+		switch (action) {
+			case "names":
+				showAllLabels = !showAllLabels;
+				settlementOverlay?.showLabels(showAllLabels);
+				break;
+			case "contracts":
+				contractsChoice = { character: characterGuid, enabled: !showContracts };
+				break;
+			case "waypoints":
+				showWaypoints = !showWaypoints;
+				drawPositionMarkers();
+				break;
+			case "housing-0":
+				selectHousing(0);
+				break;
+			case "housing-1":
+				selectHousing(1);
+				break;
+			case "housing-2":
+				selectHousing(2);
+				break;
+			case "housing-3":
+				selectHousing(3);
+				break;
+			case "housing":
+				break;
+		}
+		drawTooltip();
+	}
 	const tabs = [
 		{
 			value: "world",
@@ -387,7 +530,7 @@
 			);
 		}
 		const frame = readFrame();
-		const target = frame.waypoint?.target ?? null;
+		const target = showWaypoints ? (frame.waypoint?.target ?? null) : null;
 		waypointPlacement = null;
 		if (target !== null) {
 			const [x, y] = projectWorldMapPoint(
@@ -427,6 +570,7 @@
 		if (!view || event.button !== 0 || !owner) return;
 		event.preventDefault();
 		event.stopPropagation();
+		menu = null;
 		const mounted = owner;
 		const scale = view.spanMeters / Math.max(1, canvas.clientWidth);
 		cancelPan?.();
@@ -441,14 +585,18 @@
 					centerZ: view.centerZ - deltaY * scale,
 				});
 			},
-			teleport,
 		);
 	}
-	function teleport(event: PointerEvent): void {
-		if (!visible || activeTab !== "world" || !canTeleportFromMap || !owner)
-			return;
-		const state = owner.read();
-		const view = owner.readView();
+	function openContextMenu(event: MouseEvent): void {
+		event.preventDefault();
+		event.stopPropagation();
+		cancelPan?.();
+		cancelPan = null;
+		menu = null;
+		clearHover();
+		if (!visible || activeTab !== "world" || !owner) return;
+		const state = owner.read(),
+			view = owner.readView();
 		if (!view || (state.kind !== "streaming" && state.kind !== "ready")) return;
 		const rect = canvas.getBoundingClientRect();
 		const position = worldMapPosition(
@@ -459,19 +607,34 @@
 			rect.width,
 			rect.height,
 		);
-		// The visual outer edge is inclusive; authored landblock ownership is exclusive.
-		if (
-			!position ||
-			position.x === state.manifest.bounds.maxX ||
-			position.z === state.manifest.bounds.minZ
-		)
-			return;
-		// RETAIL DIVERGENCE: acclient.c:208815 uses fixed local X/Y=10 for map clicks.
-		// Preserve clicked X/Y instead; ACE resolves terrain/building height at that point.
-		// Scope: the privileged map-click action only; no authored content placement changes.
-		void onTeleportToMapPosition(position);
+		if (!position || contextItems.length === 0) return;
+		const target = waypointFromMapPoint(sceneMapPoint(position.x, position.z));
+		if (target === null) return;
+		menu = {
+			kind: "context",
+			anchor: { x: event.clientX, y: event.clientY },
+			target,
+		};
 	}
+	/** Capture geometry before PopupMenu dismisses and retires the reactive menu intent. */
+	function mapActionSelection(
+		target: MapWaypointTarget,
+	): (action: "waypoint" | "teleport") => void {
+		return (action) => {
+			if (!visible || activeTab !== "world") return;
+			if (action === "waypoint" && characterGuid !== null)
+				onSetWaypoint(target);
+			if (action === "teleport" && canTeleportFromMap) {
+				// RETAIL DIVERGENCE: acclient.c:208815 uses fixed local X/Y=10 for map clicks.
+				// Preserve clicked X/Y instead; ACE resolves terrain/building height at that point.
+				// Scope: the privileged map action only; no authored content placement changes.
+				void onTeleportToMapPosition(target.position);
+			}
+		};
+	}
+
 	function zoom(event: WheelEvent): void {
+		menu = null;
 		event.preventDefault();
 		event.stopPropagation();
 		cancelPan?.();
@@ -526,6 +689,7 @@
 						clearHover();
 					}}
 					onpointerdown={pan}
+					oncontextmenu={openContextMenu}
 					onwheel={zoom}
 				></canvas>
 				<svg class="world-map-overlay" aria-hidden="true">
@@ -553,31 +717,6 @@
 						<WorldMapPlayerIcon />
 					</g>
 				</svg>
-				<label class="world-map-housing-filter"
-					>Housing
-					<select
-						class="ui-input"
-						aria-label="Housing search"
-						aria-busy={housing.search.pendingType !== null}
-						value={searchType}
-						onchange={selectHousing}
-					>
-						<option value={0}>None</option>
-						{#each searchTypes as type}
-							<option
-								value={type.value}
-								disabled={housing.search.pendingType !== null}
-								>{type.label}{housing.search.pendingType === type.value
-									? " — Searching…"
-									: housing.search.results?.houseType === type.value &&
-										  housing.search.results.totalAvailable === 0
-										? " (0)"
-										: ""}</option
-							>
-						{/each}
-					</select></label
-				>
-
 				<button
 					class="ui-hud-button world-map-recall"
 					type="button"
@@ -587,36 +726,22 @@
 					title="Recall destinations"
 					disabled={recallDestinations.length === 0}
 					onclick={(event) => {
-						recallAnchor = recallAnchor === null ? event.currentTarget : null;
+						toggleMenu("recall", event.currentTarget);
 						if (recallAnchor !== null && housing.home.kind === "unqueried")
 							void onRefreshHousing();
 					}}><ClientHudIcon name="teleport" /></button
 				>
 				<button
-					class="ui-hud-button world-map-contracts"
+					class="ui-hud-button world-map-visibility"
 					type="button"
-					aria-label="Show contracts"
-					aria-pressed={showContracts}
-					title="Show contracts"
-					disabled={contracts === null || characterGuid === null}
-					onclick={() => {
-						contractsChoice = {
-							character: characterGuid,
-							enabled: !showContracts,
-						};
-					}}><ClientHudIcon name="journal" /></button
+					aria-label="Map visibility"
+					aria-haspopup="menu"
+					aria-expanded={menu?.kind === "visibility"}
+					title="Map visibility"
+					onclick={(event) => toggleMenu("visibility", event.currentTarget)}
+					><ClientHudIcon name="eye" /></button
 				>
-				<button
-					class="ui-hud-button world-map-labels"
-					type="button"
-					aria-label="Show settlement labels"
-					aria-pressed={showAllLabels}
-					title="Show all settlement labels"
-					onclick={() => {
-						showAllLabels = !showAllLabels;
-						settlementOverlay?.showLabels(showAllLabels);
-					}}><ClientHudIcon name="eye" /></button
-				>
+
 				<button
 					bind:this={resetButton}
 					hidden
@@ -697,9 +822,33 @@
 			void onRecall(destination);
 		}}
 		onclose={() => {
-			recallAnchor = null;
+			menu = null;
 		}}
 	/>
+{/if}
+
+{#if menu?.kind === "visibility"}
+	<PopupMenu
+		anchor={menu.anchor}
+		label="Map visibility"
+		items={visibilityItems}
+		onselect={selectVisibility}
+		onclose={() => {
+			menu = null;
+		}}
+	/>
+{:else if menu?.kind === "context"}
+	{#key menu}
+		<PopupMenu
+			anchor={menu.anchor}
+			label="Map actions"
+			items={contextItems}
+			onselect={mapActionSelection(menu.target)}
+			onclose={() => {
+				menu = null;
+			}}
+		/>
+	{/key}
 {/if}
 
 <style>
@@ -717,16 +866,6 @@
 			min-height: 0;
 			overflow: hidden;
 		}
-		.world-map-housing-filter {
-			position: absolute;
-			bottom: 8px;
-			left: 50%;
-			transform: translateX(-50%);
-			height: 30px;
-			display: flex;
-			align-items: center;
-			gap: 6px;
-		}
 		.world-map-recall {
 			position: absolute;
 			top: 8px;
@@ -734,8 +873,7 @@
 			width: 30px;
 			height: 30px;
 		}
-		.world-map-contracts,
-		.world-map-labels,
+		.world-map-visibility,
 		.world-map-reset {
 			position: absolute;
 			bottom: 8px;
@@ -744,13 +882,10 @@
 			display: grid;
 			place-items: center;
 		}
-		.world-map-contracts {
-			left: 46px;
-		}
 		.world-contracts {
 			color: var(--ui-color-accent);
 		}
-		.world-map-labels {
+		.world-map-visibility {
 			left: 8px;
 		}
 		.world-map-reset {

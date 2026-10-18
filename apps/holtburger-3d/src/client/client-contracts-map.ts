@@ -4,9 +4,11 @@ import { WORLD_MAP_EXTENT } from "../lib/game/world-map/types";
 import {
 	formatWorldMapCoordinates,
 	sceneMapPoint,
-	isOutdoorMapPoint,
 } from "../lib/game/map/map-coordinates";
-import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
+import {
+	waypointFromMapPoint,
+	type MapWaypointTarget,
+} from "../lib/game/map/map-waypoint";
 import { contractStatusLabel } from "./client-contracts-view";
 import type {
 	ContractRow,
@@ -157,7 +159,5 @@ export function contractLocationWaypoint(
 	if (location.kind !== "outdoor") return null;
 	const source = contractLocationPosition(location);
 	const position = sceneMapPoint(source[0], source[2]);
-	return isOutdoorMapPoint(position)
-		? { position, label: formatWorldMapCoordinates(position) }
-		: null;
+	return waypointFromMapPoint(position);
 }

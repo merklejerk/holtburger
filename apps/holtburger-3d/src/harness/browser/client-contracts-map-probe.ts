@@ -71,10 +71,22 @@ export async function probeContractMap(options: {
 		);
 		await settle();
 	};
-	const toggle = () =>
-		get<HTMLButtonElement>(
-			`${rootSelector} button[aria-label="Show contracts"]`,
-		);
+	const visibilityChoice = async (label: string) => {
+		if (!document.querySelector('[role="menu"][aria-label="Map visibility"]')) {
+			get<HTMLButtonElement>(
+				`${rootSelector} button[aria-label="Map visibility"]`,
+			).click();
+			await settle();
+		}
+		const row = [
+			...document.querySelectorAll<HTMLButtonElement>(
+				'[aria-label="Map visibility"] [role="menuitemcheckbox"]',
+			),
+		].find((row) => row.textContent?.replace("✓", "").trim() === label);
+		if (!row) throw new Error(`Missing visibility choice ${label}`);
+		return row;
+	};
+	const toggle = () => visibilityChoice("Contracts");
 	const markers = () => [
 		...document.querySelectorAll<SVGGElement>(
 			`${rootSelector} [data-contract-marker]`,
@@ -125,17 +137,31 @@ export async function probeContractMap(options: {
 		)
 			await settle();
 		await settle();
-		require(toggle().getAttribute("aria-pressed") === "true" &&
+		require((await toggle()).getAttribute("aria-checked") === "true" &&
 			markers().length === 3, "Contract layer was not default on");
-		toggle().click();
+		const retainedMarkers = markers();
+		const waypointToggle = await visibilityChoice("Waypoints");
+		waypointToggle.click();
+		await settle();
+		require(markers().length === retainedMarkers.length &&
+			markers().every(
+				(node, index) => node === retainedMarkers[index],
+			), "Waypoint visibility rebuilt contract geometry");
+		waypointToggle.click();
+		await settle();
+		require(markers().every(
+			(node, index) => node === retainedMarkers[index],
+		), "Restoring waypoint visibility rebuilt contract geometry");
+
+		(await toggle()).click();
 		await settle();
 		close();
 		await settle();
 		launch();
 		await settle();
-		require(toggle().getAttribute("aria-pressed") === "false" &&
+		require((await toggle()).getAttribute("aria-checked") === "false" &&
 			markers().length === 0, "Map reopen lost the disabled contract choice");
-		toggle().click();
+		(await toggle()).click();
 		await settle();
 		require(markers().length ===
 			3, "Contact/area projection or coincident grouping failed");
@@ -211,7 +237,7 @@ export async function probeContractMap(options: {
 			hiddenReads, "Hidden map kept sampling contract display facts");
 		launch();
 		await settle();
-		require(toggle().getAttribute("aria-pressed") === "true" &&
+		require((await toggle()).getAttribute("aria-checked") === "true" &&
 			markers().length === 3, "Map reopen lost toggle or hidden updates");
 		const tab = (name: string) => {
 			const button = [
@@ -229,7 +255,7 @@ export async function probeContractMap(options: {
 		require(reads === tabReads, "Hidden World tab retained contract sampling");
 		tab("World");
 		await settle();
-		require(toggle().getAttribute("aria-pressed") === "true" &&
+		require((await toggle()).getAttribute("aria-checked") === "true" &&
 			markers().length === 3, "World tab switch lost toggle/facts");
 		baseline(1, { rows });
 		await settle();
@@ -240,7 +266,7 @@ export async function probeContractMap(options: {
 			worldGeneration: 2,
 		});
 		await settle();
-		require(toggle().getAttribute("aria-pressed") === "true" &&
+		require((await toggle()).getAttribute("aria-checked") === "true" &&
 			markers().length ===
 				3, "Portal travel retired contract markers or toggle");
 		emit("client-lifecycle-changed", { kind: "in-world" });
@@ -345,7 +371,7 @@ export async function probeContractMap(options: {
 				mapBounds.bottom, "Long tooltip escaped map bounds");
 		replace(remaining);
 		await settle();
-		toggle().click();
+		(await toggle()).click();
 		await settle();
 		const offReads = reads;
 		await waitTimer();
@@ -353,7 +379,7 @@ export async function probeContractMap(options: {
 			reads === offReads, "Disabled layer retained work or markers");
 		baseline(2, { rows: remaining });
 		await settle();
-		require(toggle().getAttribute("aria-pressed") === "true" &&
+		require((await toggle()).getAttribute("aria-checked") === "true" &&
 			markers().length === 1 &&
 			tooltip()
 				.hidden, "Character replacement failed to restore the default or retire stale hover");
@@ -361,6 +387,7 @@ export async function probeContractMap(options: {
 			markers: 3,
 			defaultOn: true,
 			independentJournal: true,
+			independentWaypointLayer: true,
 			roleTooltips: true,
 			overlappingHits: true,
 			fixedSize: true,

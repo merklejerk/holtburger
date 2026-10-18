@@ -48,6 +48,9 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	const settle = async () => {
 		await tick();
 		await new Promise((resolve) => setTimeout(resolve, 100));
+		await new Promise((resolve) =>
+			requestAnimationFrame(() => requestAnimationFrame(resolve)),
+		);
 	};
 	const visible = (selector: string) =>
 		getComputedStyle(node(selector)).display !== "none";
@@ -267,7 +270,7 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	await click('button[aria-label="Clear waypoint"]');
 	assert(
 		row().hidden && !visible(".world-waypoint-target"),
-		"Clear button failed to remove both markers",
+		`Clear button failed to remove both markers: ${JSON.stringify({ rowHidden: row().hidden, worldVisible: visible(".world-waypoint-target"), target: controls.read().frame.waypoint })}`,
 	);
 	assert(
 		controls.read().gameActive,

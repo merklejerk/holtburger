@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { waypointTextSpans } from "./map-waypoint";
+import { waypointTextSpans, waypointFromMapPoint } from "./map-waypoint";
+
+import { sceneMapPoint, formatWorldMapCoordinates } from "./map-coordinates";
+import { WORLD_MAP_EXTENT } from "../world-map/types";
+
+describe("exact map destinations", () => {
+	it("formats a label while retaining exact canonical geometry", () => {
+		const position = sceneMapPoint(12345.6789, -23456.7891);
+		const target = waypointFromMapPoint(position);
+		expect(target).toEqual({
+			position,
+			label: formatWorldMapCoordinates(position),
+		});
+		expect(target?.position).toBe(position);
+	});
+	it.each([
+		sceneMapPoint(WORLD_MAP_EXTENT, -1),
+		sceneMapPoint(1, -WORLD_MAP_EXTENT),
+		sceneMapPoint(-1, -1),
+		sceneMapPoint(NaN, -1),
+	])("rejects points outside navigable landscape: %s", (position) => {
+		expect(waypointFromMapPoint(position)).toBeNull();
+	});
+});
 
 describe("waypoint prose recognition", () => {
 	it("preserves prose and the spelling of independently clickable coordinate pairs", () => {

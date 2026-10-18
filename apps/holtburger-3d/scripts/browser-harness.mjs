@@ -2004,7 +2004,7 @@ Options:
   --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
-  --client-waypoint     Verify coordinate commands, compass guidance, both maps, and waypoint lifetime.
+  --client-waypoint     Verify commands, content links, compass guidance, both maps, and waypoint lifetime.
   --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.

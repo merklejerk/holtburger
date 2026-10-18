@@ -1067,6 +1067,11 @@
 		}
 	}
 
+	/** Present waypoint activation feedback through the app status surface. */
+	function notifyWaypoint(message: string): void {
+		toastCenter.publish({ message, tone: "status" });
+	}
+
 	async function sendChat(message: string): Promise<void> {
 		const currentSession = session;
 		if (currentSession === null)
@@ -1076,6 +1081,7 @@
 				message,
 				() => readMinimapFrame().waypoint,
 				appendChatLine,
+				notifyWaypoint,
 			) ||
 			(await runClientLocationCommand(
 				message,
@@ -1956,6 +1962,7 @@
 			{debugEnabled}
 			{readMinimapFrame}
 			onClearWaypoint={() => navigationWaypoint.clear()}
+			onSetWaypoint={(target) => navigationWaypoint.set(target, notifyWaypoint)}
 			characterGuid={characterSettings.kind === "absent"
 				? null
 				: characterSettings.characterGuid}

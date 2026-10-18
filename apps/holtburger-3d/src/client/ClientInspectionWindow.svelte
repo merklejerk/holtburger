@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { onDestroy } from "svelte";
 	import type { HexRgbaColor } from "../lib/frontend-color";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
@@ -21,6 +23,8 @@
 	} from "./client-hud-layout";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly inspection: ObjectInspection;
 		readonly nameColor: HexRgbaColor | null;
 		readonly preview: ClientObjectPreviewState | null;
@@ -35,6 +39,7 @@
 		readonly onPreviewHeightChange: (height: number) => void;
 	}
 	const {
+		onSetWaypoint,
 		inspection,
 		nameColor,
 		preview,
@@ -48,6 +53,7 @@
 		onPlacementChange,
 		onPreviewHeightChange,
 	}: Props = $props();
+	const { keyboard } = useAppInputPolicy();
 	const previewHeightTuning = CLIENT_TUNING.objectPreview.height;
 	let cancelPreviewResize: (() => void) | null = null;
 
@@ -102,8 +108,12 @@
 	minHeight={CLIENT_UI_DEFAULTS.inspection.minSize.height}
 >
 	{#if inspection.details.kind === "item"}
-		<div class="inspection-scroll">
+		<div
+			class="inspection-scroll"
+			use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+		>
 			<ClientItemInspection
+				{onSetWaypoint}
 				{inspection}
 				item={inspection.details.details}
 				{spells}
@@ -173,8 +183,12 @@
 					onkeydown={resizePreviewWithKeyboard}
 				></div>
 			</div>
-			<div class="inspection-scroll">
+			<div
+				class="inspection-scroll"
+				use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+			>
 				<ClientCreatureInspection
+					{onSetWaypoint}
 					{inspection}
 					creature={inspection.details.details}
 				/>

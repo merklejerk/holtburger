@@ -1,4 +1,8 @@
 import type { Vec3 } from "../math/types";
+import {
+	isOutdoorLandblock,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+} from "../landblocks";
 
 declare const sceneMapSpace: unique symbol;
 
@@ -33,14 +37,17 @@ export interface ParsedMapCoordinates {
 	readonly label: string;
 }
 
+/** Shared lexical pair; exact command parsing and prose scanning supply their own boundaries. */
+export const PRINTED_MAP_COORDINATE_PAIR = String.raw`(\d+(?:\.\d+)?)\s*([ns])\s*,?\s*(\d+(?:\.\d+)?)\s*([ew])`;
+
 /** Read only latitude/longitude; Explorer's additional residence grammar stays local. */
 export function parsePrintedMapCoordinates(
 	input: string,
 ): ParsedMapCoordinates | null {
-	const match =
-		/^\s*(\d+(?:\.\d+)?)\s*([ns])\s*,?\s*(\d+(?:\.\d+)?)\s*([ew])\s*$/i.exec(
-			input,
-		);
+	const match = new RegExp(
+		`^\\s*${PRINTED_MAP_COORDINATE_PAIR}\\s*$`,
+		"i",
+	).exec(input);
 	if (match === null) return null;
 	// The successful pattern has exactly four required captures; type that producer guarantee here.
 	const [latitude, northSouth, longitude, eastWest] = match.slice(1) as [
@@ -126,10 +133,10 @@ export function scenePointFromPrintedCoordinates(
 	const longitude =
 		(coordinates.longitude.magnitude + MAP_DEGREE_DISPLAY_BIAS) *
 		(coordinates.longitude.hemisphere === "E" ? 1 : -1);
-	return {
-		x: (longitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
-		z: -(latitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
-	} as SceneMapPoint;
+	return sceneMapPoint(
+		(longitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
+		-(latitude + MAP_DEGREE_ORIGIN) * METERS_PER_MAP_DEGREE,
+	);
 }
 
 function formatDegree(
@@ -142,4 +149,21 @@ function formatDegree(
 	// does not guard against. Clamping keeps that 12 m reading at "0.0" instead of "-0.1".
 	const magnitude = Math.max(0, Math.abs(degrees) - MAP_DEGREE_DISPLAY_BIAS);
 	return `${magnitude.toFixed(1)}${hemisphere}`;
+}
+
+/** Construct a canonical plane point from already-converted scene meters; carries no elevation. */
+export function sceneMapPoint(x: number, z: number): SceneMapPoint {
+	return { x, z } as SceneMapPoint;
+}
+
+/** Navigation uses the finite, half-open outdoor grid rather than the map image's closed edge. */
+export function isOutdoorMapPoint(position: SceneMapPoint): boolean {
+	return (
+		Number.isFinite(position.x) &&
+		Number.isFinite(position.z) &&
+		isOutdoorLandblock(
+			Math.floor(position.x / OUTDOOR_LANDBLOCK_WORLD_SIZE),
+			Math.floor(-position.z / OUTDOOR_LANDBLOCK_WORLD_SIZE),
+		)
+	);
 }

@@ -1,4 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" x="-8" y="-8" width="16" height="16" viewBox="-8 -8 16 16">
-  <path d="M0-7 7 0 0 7-7 0Z" fill="var(--ui-color-accent, #f0cf78)" stroke="var(--ui-color-well, #20252c)" stroke-width="1.5" />
-  <circle r="2" fill="var(--ui-color-well, #20252c)" />
-</svg>

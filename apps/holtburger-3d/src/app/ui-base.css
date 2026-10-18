@@ -444,6 +444,25 @@
 		box-shadow: none;
 	}
 
+	/* Inline actions share typography with their surrounding prose. */
+	.ui-theme .ui-inline-button {
+		appearance: none;
+		display: inline;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: var(--ui-color-accent);
+		font: inherit;
+		text-align: inherit;
+		white-space: inherit;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.ui-theme .ui-inline-button:where(:hover:not(:disabled)) {
+		color: var(--ui-color-highlight);
+	}
+
 	.ui-theme .ui-button {
 		min-height: 24px;
 		padding: 2px 7px;
@@ -547,7 +566,14 @@
 	.ui-theme .ui-input[aria-invalid="true"] {
 		border-color: var(--ui-input-border-color, var(--ui-color-danger));
 	}
-	.ui-theme :is(.ui-button, .ui-tab, .ui-option, .ui-input):focus-visible {
+	.ui-theme
+		:is(
+			.ui-button,
+			.ui-inline-button,
+			.ui-tab,
+			.ui-option,
+			.ui-input
+		):focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: 2px;
 	}
@@ -803,7 +829,9 @@
 	.ui-theme .ui-hud-button svg {
 		transition: transform 0.25s var(--ui-easing);
 	}
-	.ui-theme .ui-hud-button:where(:hover:not(:disabled)) svg {
+	.ui-theme
+		.ui-hud-button:where(:hover:not(:disabled))
+		svg:not(.ui-waypoint-pin) {
 		transform: scale(1.5);
 	}
 	.ui-theme .ui-hud-button:where(:disabled) {
@@ -859,6 +887,16 @@
 		.ui-world-map-settlements:not(.ui-world-map-labels-visible)
 		.ui-world-map-label {
 		visibility: hidden;
+	}
+	/* Shared waypoint artwork inherits the consumer's color; map markers use the accent. */
+	.ui-theme .ui-waypoint-pin {
+		display: block;
+		flex: none;
+		fill: currentColor;
+		pointer-events: none;
+	}
+	.ui-theme .ui-waypoint-marker {
+		color: var(--ui-color-accent);
 	}
 	.ui-theme .ui-world-map-label {
 		font: var(--ui-world-map-label-font, 11px var(--ui-font-body));

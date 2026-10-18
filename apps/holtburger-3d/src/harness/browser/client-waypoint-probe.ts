@@ -24,8 +24,12 @@ export interface WaypointProbeControls {
 	readonly read: () => {
 		readonly frame: MinimapFrame;
 		readonly messages: readonly ClientChatMessage[];
+		/** Status notifications let selection checks detect accidental activation. */
+		readonly notices: readonly string[];
 		readonly sent: readonly string[];
 		readonly gameActive: boolean;
+		/** Actual UI sent history; content links must leave it untouched. */
+		readonly history: readonly string[];
 	};
 }
 
@@ -90,8 +94,10 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	);
 	await move(-500, 0);
 	assert(
-		!row().hidden && row().textContent?.includes("500 m") === true,
-		"Minimap distance missing",
+		!row().hidden &&
+			row().textContent?.includes("500 m") === true &&
+			row().textContent?.includes("42.0N, 33.5E") === true,
+		"Minimap destination coordinates or distance missing",
 	);
 	const coordinates = node<HTMLElement>(
 		".minimap-coordinates",
@@ -157,9 +163,9 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	);
 	await move(-CLIENT_WAYPOINT_NEAR_RADIUS_METERS / 2, 0);
 	assert(
-		row().textContent?.includes("Near waypoint") === true &&
+		row().querySelector("span")?.textContent === "42.0N, 33.5E" &&
 			!visible(".minimap-waypoint-pointer"),
-		"Near waypoint did not suppress pointer",
+		"Near waypoint did not retain compact coordinates and suppress pointer",
 	);
 	assert(
 		visible(".minimap-waypoint-marker"),
@@ -167,7 +173,7 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	);
 	await move(-500, 0, 0, 0, true);
 	assert(
-		row().textContent?.includes("indoors") === true &&
+		row().querySelector("span")?.textContent === "42.0N, 33.5E" &&
 			!visible(".minimap-waypoint-marker") &&
 			!visible(".minimap-waypoint-pointer"),
 		"Indoor waypoint was not paused",
@@ -179,7 +185,9 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	);
 	await move(-500, 0, 0, 0, false, false);
 	assert(
-		!visible(".minimap-waypoint-pointer") && visible(".world-waypoint-target"),
+		row().querySelector("span")?.textContent === "42.0N, 33.5E" &&
+			!visible(".minimap-waypoint-pointer") &&
+			visible(".world-waypoint-target"),
 		"Unavailable player lost target or retained guidance",
 	);
 	controls.lifecycle({

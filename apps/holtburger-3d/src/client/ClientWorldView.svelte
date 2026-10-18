@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import ClientLoadoutBuilder from "./ClientLoadoutBuilder.svelte";
 	import {
 		captureLoadout,
@@ -150,6 +151,8 @@
 	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		/** Session-lifetime party presentation owner. */
 		readonly party: ClientPartyState | null;
 		/** Session-owned cold visibility fact; vitals remain imperative. */
@@ -357,6 +360,7 @@
 	}
 
 	let {
+		onSetWaypoint,
 		hudLayout,
 		party,
 		partyHudPresent,
@@ -1187,6 +1191,7 @@
 		onPlacementChange={(placement) => changeHudPlacement("chat", placement)}
 	>
 		<ClientChat
+			{onSetWaypoint}
 			messages={chatMessages}
 			sentHistory={sentChatHistory}
 			onSend={onSendChat}
@@ -1329,6 +1334,7 @@
 	{#if objectInspection.kind === "ready"}
 		{#key objectInspection.guid}
 			<ClientInspectionWindow
+				{onSetWaypoint}
 				inspection={objectInspection.inspection}
 				nameColor={objectInspection.nameColor}
 				preview={objectInspection.preview}
@@ -1348,6 +1354,7 @@
 	{#if bookReader.kind !== "idle"}
 		{#key bookReader.revision}
 			<ClientBookWindow
+				{onSetWaypoint}
 				reader={bookReader}
 				placement={hudLayout.book}
 				{viewport}
@@ -1432,6 +1439,7 @@
 					changeHudPlacement("journal", placement)}
 			>
 				<ClientJournalPanel
+					{onSetWaypoint}
 					owner={contracts}
 					visible={activePanel === "journal"}
 					onNotice={onSocialNotice}

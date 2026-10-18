@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import type {
 		CreatureInspection,
 		ObjectInspection,
@@ -9,10 +11,12 @@
 	} from "./client-object-inspection-format";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly inspection: ObjectInspection;
 		readonly creature: CreatureInspection;
 	}
-	const { inspection, creature }: Props = $props();
+	const { inspection, creature, onSetWaypoint }: Props = $props();
 	const profile = $derived(creature.attributesAndVitals);
 	const maxHealthBonus = $derived(creature.maxHealthBonus);
 	const armorLocations = $derived.by(() => {
@@ -74,7 +78,7 @@
 	{#if inspection.description !== null}<p
 			class="inspection-description inspection-creature-description"
 		>
-			{inspection.description}
+			<ClientWaypointText text={inspection.description} {onSetWaypoint} />
 		</p>{/if}
 
 	<section class="inspection-vitals" aria-label="Creature vitals">

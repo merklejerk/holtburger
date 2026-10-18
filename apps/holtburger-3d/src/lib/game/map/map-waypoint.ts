@@ -1,11 +1,18 @@
-import type { SceneMapPoint } from "./map-coordinates";
+import {
+	type SceneMapPoint,
+	type ParsedMapCoordinates,
+	isOutdoorMapPoint,
+	scenePointFromPrintedCoordinates,
+	PRINTED_MAP_COORDINATE_PAIR,
+	parsePrintedMapCoordinates,
+} from "./map-coordinates";
 import type { MapAnchor } from "./map-view";
 
 /** One local surface destination; elevation and pathfinding are deliberately absent. */
 export interface MapWaypointTarget {
 	/** Canonical horizontal point used by both map projections. */
 	readonly position: SceneMapPoint;
-	/** Normalized printed notation, preserving the precision entered by the player. */
+	/** Printed destination label; prose preserves entered precision, authored positions use map formatting. */
 	readonly label: string;
 }
 
@@ -59,8 +66,46 @@ export function formatWaypointDistance(meters: number): string {
 		: `${(meters / 1000).toFixed(1)} km`;
 }
 
-/** One wording policy for command reports and the imperative HUD row. */
+/** Descriptive state and distance for waypoint command reports. */
 export function formatWaypointReadout(display: MapWaypointDisplay): string {
 	if (display.kind === "paused") return display.reason;
 	return `${display.kind === "near" ? "Near waypoint" : "Waypoint"} · ${formatWaypointDistance(display.distanceMeters)}`;
+}
+
+/** Prepare printed intent once; invalid prose stays plain and commands report their own errors. */
+export function waypointFromPrintedCoordinates(
+	parsed: ParsedMapCoordinates,
+): MapWaypointTarget | null {
+	const position = scenePointFromPrintedCoordinates(parsed.coordinates);
+	return isOutdoorMapPoint(position) ? { position, label: parsed.label } : null;
+}
+
+/** Original source spans with destinations for complete, valid pairs; the renderer owns escaping. */
+export type WaypointTextSpan = {
+	/** Exact source substring, including entered whitespace and punctuation. */
+	readonly text: string;
+	/** Null for prose or an invalid candidate. */
+	readonly target: MapWaypointTarget | null;
+};
+
+/** Link complete pairs without recognizing a suffix of an identifier, signed number, or decimal. */
+export function waypointTextSpans(text: string): readonly WaypointTextSpan[] {
+	const pattern = new RegExp(
+		String.raw`(?<![\p{L}\p{N}_.+\-])${PRINTED_MAP_COORDINATE_PAIR}(?![\p{L}\p{N}_]|\.\d)`,
+		"giu",
+	);
+	const spans: WaypointTextSpan[] = [];
+	let end = 0;
+	for (const match of text.matchAll(pattern)) {
+		const parsed = parsePrintedMapCoordinates(match[0]);
+		const target =
+			parsed === null ? null : waypointFromPrintedCoordinates(parsed);
+		if (target === null) continue;
+		if (match.index > end)
+			spans.push({ text: text.slice(end, match.index), target: null });
+		spans.push({ text: match[0], target });
+		end = match.index + match[0].length;
+	}
+	if (end < text.length) spans.push({ text: text.slice(end), target: null });
+	return spans;
 }

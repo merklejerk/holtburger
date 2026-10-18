@@ -30,7 +30,7 @@
 	import { WorldMapSettlementOverlay } from "../lib/game/world-map/settlement-overlay";
 	import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
-	import MapWaypointIcon from "../assets/icons/map-waypoint.svg?component";
+	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import WorldMapPlayerIcon from "../assets/icons/world-map-player.svg?component";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
@@ -332,10 +332,11 @@
 		if (!position) return;
 		const contractText = contractOverlay?.hit(x, y);
 		const waypoint = waypointPlacement;
+		// The 15 px pin rises above its geographic tip; hover follows the pin body.
 		const waypointText =
 			waypoint !== null &&
 			Math.abs(waypoint.x - x) <= 8 &&
-			Math.abs(waypoint.y - y) <= 8
+			Math.abs(waypoint.y - 7.5 - y) <= 8
 				? `Waypoint · ${waypoint.target.label}`
 				: "";
 		const settlementText =
@@ -541,8 +542,8 @@
 					<g bind:this={contractRoot} class="world-contracts" />
 					<g
 						bind:this={waypointMarker}
-						class="world-waypoint-target"
-						style:display="none"><MapWaypointIcon /></g
+						class="world-waypoint-target ui-waypoint-marker"
+						style:display="none"><MapWaypointPinIcon /></g
 					>
 					<g
 						bind:this={playerMarker}

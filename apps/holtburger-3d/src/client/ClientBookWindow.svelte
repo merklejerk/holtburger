@@ -1,4 +1,7 @@
 <script lang="ts">
+	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import type {
@@ -8,6 +11,8 @@
 	import type { ClientBookReaderState } from "./client-book-reader";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly reader: Exclude<ClientBookReaderState, { readonly kind: "idle" }>;
 		readonly placement: ClientHudPlacement;
 		readonly viewport: ClientHudViewport;
@@ -17,6 +22,7 @@
 	}
 
 	const {
+		onSetWaypoint,
 		reader,
 		placement,
 		viewport,
@@ -24,6 +30,7 @@
 		onRetry,
 		onPlacementChange,
 	}: Props = $props();
+	const { keyboard } = useAppInputPolicy();
 	const hasText = $derived(reader.book.pages.some((page) => page.text !== ""));
 </script>
 
@@ -37,7 +44,10 @@
 	minWidth={CLIENT_UI_DEFAULTS.book.minSize.width}
 	minHeight={CLIENT_UI_DEFAULTS.book.minSize.height}
 >
-	<div class="book-scroll">
+	<div
+		class="book-scroll"
+		use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+	>
 		{#if reader.kind === "loading"}
 			<p role="status">Loading pages {reader.loaded} of {reader.total}…</p>
 		{:else if reader.kind === "failed"}
@@ -48,7 +58,12 @@
 			{#each reader.book.pages as page (page.index)}
 				{#if page.text !== "" || page.authorName !== ""}
 					<section class="book-page">
-						<p class="book-text">{page.text}</p>
+						<p class="book-text">
+							{#if page.text !== null}<ClientWaypointText
+									text={page.text}
+									{onSetWaypoint}
+								/>{/if}
+						</p>
 						{#if page.authorName !== ""}<p class="book-author">
 								— {page.authorName}
 							</p>{/if}
@@ -56,7 +71,7 @@
 				{/if}
 			{/each}
 			{#if reader.book.inscription}<blockquote>
-					{reader.book.inscription}
+					<ClientWaypointText text={reader.book.inscription} {onSetWaypoint} />
 				</blockquote>{/if}
 			{#if reader.book.authorName}<p class="book-author">
 					— {reader.book.authorName}

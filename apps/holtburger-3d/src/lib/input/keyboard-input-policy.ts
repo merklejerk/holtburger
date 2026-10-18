@@ -18,6 +18,8 @@ export interface KeyboardScope {
 	readonly transient?: boolean;
 	/** Allow deliberate keyboard focus and Tab traversal; pointer clicks do not acquire ownership. */
 	readonly nativeControls?: boolean;
+	/** Explicit interactive text surfaces may reacquire their scope when clicked for selection. */
+	readonly pointerActivation?: boolean;
 	/** Optional command that enters this scope from the game or another explicit scope. */
 	readonly activation?: (event: KeyboardEvent) => boolean;
 	/** Scope-local behavior runs before native editing. */
@@ -526,6 +528,7 @@ export class KeyboardInputPolicy {
 		if (!(target instanceof HTMLElement)) return;
 		if (
 			isEditor(target) ||
+			this.#scopes.get(target)?.pointerActivation === true ||
 			(this.#nativeControlsFor(target) && target !== this.#pointerControl) ||
 			this.#modals.at(-1)?.element.contains(target)
 		) {

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { tick } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
@@ -18,6 +20,8 @@
 	} from "./client-chat-policy";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly messages: readonly ClientChatLine[];
 		/** App-owned locally queued input, oldest first. */
 		readonly sentHistory: readonly string[];
@@ -29,6 +33,7 @@
 	}
 
 	const {
+		onSetWaypoint,
 		messages,
 		sentHistory,
 		onSend,
@@ -194,7 +199,11 @@
 			role="log"
 			aria-live="polite"
 			aria-label="Chat messages"
-			use:keyboard.scope={{ keydown: scrollHistory }}
+			use:keyboard.scope={{
+				nativeControls: true,
+				pointerActivation: true,
+				keydown: scrollHistory,
+			}}
 		>
 			{#each visibleMessages as line (line.id)}
 				{@const tone = clientChatTone(line)}
@@ -213,7 +222,12 @@
 					class:chat-emote={line.kind === "emote"}
 				>
 					<strong>{linePrefix(line)}:</strong>
-					<span class="chat-message">{line.message}</span>
+					<span class="chat-message"
+						>{#if historyInteractive}<ClientWaypointText
+								text={line.message}
+								{onSetWaypoint}
+							/>{:else}{line.message}{/if}</span
+					>
 				</p>
 			{/each}
 		</div>
@@ -326,6 +340,8 @@
 		}
 		.chat-history.interactive .chat-buffer {
 			user-select: text;
+			/* Native control clicks return keyboard ownership to the game without ending this mode. */
+			pointer-events: auto;
 		}
 		.chat-history-toggle {
 			position: absolute;

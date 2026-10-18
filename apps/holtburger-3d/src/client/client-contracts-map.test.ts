@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
 	contractMapMarkers,
+	contractLocationWaypoint,
 	contractMapTooltips,
 } from "./client-contracts-map";
 import {
@@ -192,5 +193,51 @@ describe("contract map projection", () => {
 			},
 		};
 		expect(contractMapMarkers({ rows: [offMap] })).toEqual([]);
+	});
+});
+
+describe("contract journal waypoints", () => {
+	it("uses exact authored offsets even when the visible cell label is zero", () => {
+		const row = contact();
+		if (row.contact?.location.kind !== "outdoor")
+			throw new Error("Expected outdoor fixture");
+		const location = { ...row.contact.location, latitude: 0, longitude: 0 };
+		const target = contractLocationWaypoint(location);
+		const marker = contractMapMarkers({
+			rows: [{ ...row, contact: { ...row.contact, location } }],
+		})[0];
+		expect(target?.position).toMatchObject({
+			x: marker?.position[0],
+			z: marker?.position[2],
+		});
+		expect(target?.label).toBe(
+			formatWorldMapCoordinates({
+				x: 128 * OUTDOOR_LANDBLOCK_WORLD_SIZE + 6,
+				z: -(128 * OUTDOOR_LANDBLOCK_WORLD_SIZE + 12),
+			}),
+		);
+	});
+	it("leaves missing, indoor, and upper-grid-edge destinations noninteractive", () => {
+		expect(contractLocationWaypoint({ kind: "missing" })).toBeNull();
+		expect(
+			contractLocationWaypoint({ kind: "indoor", cellId: 0x80800100 }),
+		).toBeNull();
+		const row = contact();
+		if (row.contact?.location.kind !== "outdoor")
+			throw new Error("Expected outdoor fixture");
+		const location = {
+			...row.contact.location,
+			position: {
+				...row.contact.location.position,
+				landblockId: 0xfe800001,
+				coords: { x: OUTDOOR_LANDBLOCK_WORLD_SIZE, y: 0, z: 0 },
+			},
+		};
+		expect(contractLocationWaypoint(location)).toBeNull();
+		expect(
+			contractMapMarkers({
+				rows: [{ ...row, contact: { ...row.contact, location } }],
+			}),
+		).toHaveLength(1);
 	});
 });

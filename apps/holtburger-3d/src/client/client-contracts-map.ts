@@ -1,7 +1,12 @@
 import { sceneVector3, type SceneVector3 } from "../lib/assets/ac-frame";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import { WORLD_MAP_EXTENT } from "../lib/game/world-map/types";
-import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
+import {
+	formatWorldMapCoordinates,
+	sceneMapPoint,
+	isOutdoorMapPoint,
+} from "../lib/game/map/map-coordinates";
+import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 import { contractStatusLabel } from "./client-contracts-view";
 import type {
 	ContractRow,
@@ -67,16 +72,7 @@ export function contractMapMarkers(
 			});
 		for (const { entry, location } of locations) {
 			if (location.kind !== "outdoor") continue;
-			const source = location.position;
-			const origin = createLandblockWorldOrigin({
-				x: source.landblockId >>> 24,
-				y: (source.landblockId >>> 16) & 0xff,
-			});
-			const position = sceneVector3([
-				origin.x + source.coords.x,
-				source.coords.z,
-				origin.z - source.coords.y,
-			]);
+			const position = contractLocationPosition(location);
 			if (
 				position[0] < 0 ||
 				position[0] > WORLD_MAP_EXTENT ||
@@ -136,4 +132,32 @@ export function contractMapTooltips(
 				.join("\n\n"),
 		]),
 	);
+}
+
+/** One authored AC placement conversion for contract map markers and journal navigation. */
+function contractLocationPosition(
+	location: Extract<ContractLocation, { kind: "outdoor" }>,
+): SceneVector3 {
+	const source = location.position;
+	const origin = createLandblockWorldOrigin({
+		x: source.landblockId >>> 24,
+		y: (source.landblockId >>> 16) & 0xff,
+	});
+	return sceneVector3([
+		origin.x + source.coords.x,
+		source.coords.z,
+		origin.z - source.coords.y,
+	]);
+}
+
+/** Structured labels are cell-based; navigate to authored geometry without reparsing the label. */
+export function contractLocationWaypoint(
+	location: ContractLocation,
+): MapWaypointTarget | null {
+	if (location.kind !== "outdoor") return null;
+	const source = contractLocationPosition(location);
+	const position = sceneMapPoint(source[0], source[2]);
+	return isOutdoorMapPoint(position)
+		? { position, label: formatWorldMapCoordinates(position) }
+		: null;
 }

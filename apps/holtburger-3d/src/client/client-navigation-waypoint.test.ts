@@ -46,9 +46,11 @@ function fixture() {
 	const owner = new ClientNavigationWaypointOwner(NEAR_RADIUS);
 	owner.acceptCharacter(CHARACTER);
 	const append = vi.fn();
+	const notify = vi.fn();
 	const read = () => owner.read(subject(100, 0), true);
-	const command = (message: string) => owner.runCommand(message, read, append);
-	return { owner, append, read, command };
+	const command = (message: string) =>
+		owner.runCommand(message, read, append, notify);
+	return { owner, append, notify, read, command };
 }
 
 describe("waypoint geometry", () => {
@@ -110,6 +112,10 @@ describe("@waypoint", () => {
 			});
 			expect(f.command(` ${command.toUpperCase()} 0.0n, 0.0e `)).toBe(true);
 			expect(f.read()?.target).toEqual(target);
+			expect(f.notify).toHaveBeenCalledExactlyOnceWith(
+				"Waypoint set: 0.0N, 0.0E.",
+			);
+			expect(f.append).toHaveBeenCalledTimes(1);
 			f.command(command);
 			expect(f.append).toHaveBeenLastCalledWith({
 				kind: "system",
@@ -282,6 +288,21 @@ describe("@waypoint", () => {
 		const f = fixture();
 		f.command("@waypoint 0N 0E");
 		f.owner.acceptLifecycle(lifecycle);
+		expect(f.read()).toBeNull();
+	});
+});
+
+describe("content waypoint activation", () => {
+	it("sets and confirms through the same owner without entering command routing", () => {
+		const f = fixture();
+		f.owner.set(target, f.notify);
+		expect(f.read()?.target).toEqual(target);
+		expect(f.notify).toHaveBeenCalledExactlyOnceWith(
+			"Waypoint set: 0.0N, 0.0E.",
+		);
+		expect(f.append).not.toHaveBeenCalled();
+		f.owner.acceptCharacter(null);
+		expect(() => f.owner.set(target, f.notify)).toThrow("Select a character");
 		expect(f.read()).toBeNull();
 	});
 });

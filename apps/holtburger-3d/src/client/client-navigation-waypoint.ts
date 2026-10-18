@@ -1,15 +1,9 @@
 import type { MinimapSubject } from "../app/minimap-frame";
-import {
-	isOutdoorLandblock,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-} from "../lib/game/landblocks";
-import {
-	parsePrintedMapCoordinates,
-	scenePointFromPrintedCoordinates,
-} from "../lib/game/map/map-coordinates";
+import { parsePrintedMapCoordinates } from "../lib/game/map/map-coordinates";
 import {
 	formatWaypointReadout,
 	mapWaypointGuidance,
+	waypointFromPrintedCoordinates,
 	type MapWaypointDisplay,
 	type MapWaypointTarget,
 } from "../lib/game/map/map-waypoint";
@@ -95,11 +89,20 @@ export class ClientNavigationWaypointOwner {
 		return mapWaypointGuidance(target, subject.anchor, this.#nearRadiusMeters);
 	}
 
+	/** Commit a prepared destination through the same character check and confirmation for all inputs. */
+	set(target: MapWaypointTarget, notify: (message: string) => void): void {
+		if (this.#characterGuid === null)
+			throw new Error("Select a character before setting a waypoint.");
+		this.#target = target;
+		notify(`Waypoint set: ${target.label}.`);
+	}
+
 	/** Exact-token interception, including invalid arguments, keeps recognized commands local. */
 	runCommand(
 		message: string,
 		readDisplay: () => MapWaypointDisplay | null,
 		append: (message: ClientChatMessage) => void,
+		notify: (message: string) => void,
 	): boolean {
 		const match = /^@(?:waypoint|wp)(?=\s|$)/i.exec(message.trim());
 		if (match === null) return false;
@@ -126,18 +129,10 @@ export class ClientNavigationWaypointOwner {
 				throw new Error(
 					"Use latitude and longitude, for example @waypoint 42.3N, 12.7E. Clear with @waypoint clear. Alias: @wp.",
 				);
-			const position = scenePointFromPrintedCoordinates(parsed.coordinates);
-			if (
-				!isOutdoorLandblock(
-					Math.floor(position.x / OUTDOOR_LANDBLOCK_WORLD_SIZE),
-					Math.floor(-position.z / OUTDOOR_LANDBLOCK_WORLD_SIZE),
-				)
-			)
+			const target = waypointFromPrintedCoordinates(parsed);
+			if (target === null)
 				throw new Error("Waypoint coordinates are outside the outdoor world.");
-			if (this.#characterGuid === null)
-				throw new Error("Select a character before setting a waypoint.");
-			this.#target = { position, label: parsed.label };
-			append({ kind: "system", message: `Waypoint set: ${parsed.label}.` });
+			this.set(target, notify);
 		}
 		return true;
 	}

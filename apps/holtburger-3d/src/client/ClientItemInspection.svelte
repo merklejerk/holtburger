@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { formatDuration } from "../app/duration-format";
 	import type { SpellReference } from "../app/spell-references";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
@@ -26,6 +28,8 @@
 	} from "./client-object-inspection-format";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly inspection: ObjectInspection;
 		readonly nameColor: HexRgbaColor | null;
 		readonly item: ItemInspection;
@@ -33,7 +37,8 @@
 		readonly icons: UiIconRepository | null;
 	}
 
-	const { inspection, nameColor, item, spells, icons }: Props = $props();
+	const { inspection, nameColor, item, spells, icons, onSetWaypoint }: Props =
+		$props();
 	const statuses = $derived(formatItemStatuses(item.status));
 	const imbues = $derived(formatInspectionImbuedEffects(item.imbuedEffects));
 	const collapsedDescription = $derived(
@@ -194,19 +199,22 @@
 				</p>{/if}
 			{#if item.portalDestination !== null}
 				<p class="inspection-description" data-inspection-portal-destination>
-					Destination: {item.portalDestination}
+					Destination: <ClientWaypointText
+						text={item.portalDestination}
+						{onSetWaypoint}
+					/>
 				</p>
 			{/if}
 			{#if inspection.description !== null}<p class="inspection-description">
 					{#if collapsedDescription !== null && !descriptionExpanded}
-						{collapsedDescription}…
+						<ClientWaypointText text={collapsedDescription} {onSetWaypoint} />…
 					{:else}
-						{inspection.description}
+						<ClientWaypointText text={inspection.description} {onSetWaypoint} />
 					{/if}
 					{#if collapsedDescription !== null}
 						{" "}<button
 							type="button"
-							class="inspection-description-toggle"
+							class="inspection-description-toggle ui-inline-button"
 							aria-expanded={descriptionExpanded}
 							onclick={() => (descriptionExpanded = !descriptionExpanded)}
 						>
@@ -439,7 +447,9 @@
 	{#if item.inscription !== null}
 		<section>
 			<h3>Inscription</h3>
-			<blockquote>{item.inscription.text}</blockquote>
+			<blockquote>
+				<ClientWaypointText text={item.inscription.text} {onSetWaypoint} />
+			</blockquote>
 			{#if item.inscription.scribe !== null && item.inscription.scribe.length > 0}<p
 					class="inspection-scribe"
 				>
@@ -448,18 +458,3 @@
 		</section>
 	{/if}
 </article>
-
-<style>
-	@layer components {
-		.inspection-description-toggle {
-			appearance: none;
-			padding: 0;
-			border: 0;
-			background: transparent;
-			color: var(--ui-color-accent);
-			font: inherit;
-			text-decoration: underline;
-			cursor: pointer;
-		}
-	}
-</style>

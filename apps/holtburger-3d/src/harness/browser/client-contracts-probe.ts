@@ -88,6 +88,14 @@ export async function probeContracts(options: {
 		if (row === undefined) throw new Error(`Missing contract: ${name}`);
 		return row;
 	};
+	const removeFromJournal = (entry: HTMLDetailsElement): void => {
+		const button = [...entry.querySelectorAll("button")].find(
+			(node) => node.textContent?.trim() === "Remove from journal",
+		);
+		if (button === undefined)
+			throw new Error("Missing contract removal control");
+		button.click();
+	};
 	const launch = (): void =>
 		get<HTMLButtonElement>(
 			'nav[aria-label="Game shortcuts"] button[aria-label="Journal"]',
@@ -233,7 +241,7 @@ export async function probeContracts(options: {
 		const unresolved = named("Contract #99");
 		unresolved.querySelector<HTMLElement>("summary")?.click();
 		await settle();
-		unresolved.querySelector<HTMLButtonElement>("button")?.click();
+		removeFromJournal(unresolved);
 		await settle();
 		require(document
 			.querySelector(".client-message-dialog")
@@ -259,7 +267,7 @@ export async function probeContracts(options: {
 			), "Removal did not reach the host transport");
 		require(owner.read().journal?.total === rows.length &&
 			named("Contract #99"), "Dispatch optimistically removed the row");
-		unresolved.querySelector<HTMLButtonElement>("button")?.click();
+		removeFromJournal(unresolved);
 		await settle();
 		const stale = owner.question();
 		if (stale === null) throw new Error("Missing second removal question");
@@ -338,7 +346,7 @@ export async function probeContracts(options: {
 			throw new Error("Missing contract before character replacement");
 		retainedQuest.querySelector<HTMLElement>("summary")?.click();
 		await settle();
-		retainedQuest.querySelector<HTMLButtonElement>("button")?.click();
+		removeFromJournal(retainedQuest);
 		await settle();
 		require(owner.question() !== null &&
 			owner.read().expanded.size >

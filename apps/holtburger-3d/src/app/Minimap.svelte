@@ -40,9 +40,9 @@
 
 <script lang="ts">
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
-	import MapWaypointIcon from "../assets/icons/map-waypoint.svg?component";
 	import MapWaypointDirectionIcon from "../assets/icons/map-waypoint-direction.svg?component";
-	import { formatWaypointReadout } from "../lib/game/map/map-waypoint";
+	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
+	import { formatWaypointDistance } from "../lib/game/map/map-waypoint";
 	import { onDestroy, onMount, type Snippet } from "svelte";
 	import LayoutControls from "./LayoutControls.svelte";
 
@@ -193,7 +193,12 @@
 	): void {
 		const display = frame.waypoint;
 		waypointRow.hidden = display === null;
-		const text = display === null ? "" : formatWaypointReadout(display);
+		const text =
+			display === null
+				? ""
+				: display.kind === "guiding"
+					? `${display.target.label} · ${formatWaypointDistance(display.distanceMeters)}`
+					: display.target.label;
 		if (waypointReadout.textContent !== text)
 			waypointReadout.textContent = text;
 		waypointRow.title =
@@ -202,7 +207,7 @@
 				: `Clear waypoint: ${display.target.label}`;
 		waypointRow.setAttribute(
 			"aria-description",
-			display === null ? "Waypoint" : `${display.target.label} · ${text}`,
+			display === null ? "Waypoint" : text,
 		);
 		waypointPointer.style.display = "none";
 		waypointMarker.style.display = "none";
@@ -932,8 +937,8 @@
 			<g clip-path="url(#minimap-disc-clip)">
 				<g
 					bind:this={waypointMarker}
-					class="minimap-waypoint-marker"
-					style:display="none"><MapWaypointIcon /></g
+					class="minimap-waypoint-marker ui-waypoint-marker"
+					style:display="none"><MapWaypointPinIcon /></g
 				>
 			</g>
 			<g
@@ -1014,6 +1019,7 @@
 			onclick={clearWaypoint}
 			hidden
 		>
+			<MapWaypointPinIcon />
 			<span bind:this={waypointReadout}></span>
 			<span aria-hidden="true">×</span>
 		</button>

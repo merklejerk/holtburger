@@ -491,6 +491,7 @@
 				text,
 				() => readFrame().waypoint,
 				() => {},
+				() => {},
 			);
 		command("@waypoint 42.0N 33.5E");
 		const display = readFrame().waypoint;

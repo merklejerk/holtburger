@@ -1,4 +1,9 @@
 <script lang="ts">
+	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
+	import ClientWaypointLink from "./ClientWaypointLink.svelte";
+	import { contractLocationWaypoint } from "./client-contracts-map";
+	import type { ContractLocation } from "./client-contracts-contract";
 	import AvailableIcon from "../assets/icons/contract-available.svg?component";
 	import CompletedIcon from "../assets/icons/contract-completed.svg?component";
 	import UnresolvedIcon from "../assets/icons/contract-unresolved.svg?component";
@@ -18,6 +23,8 @@
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
+		/** Set the current local destination without submitting chat. */
+		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		/** Session-owned facts and local journal controls. */
 		readonly owner: ClientContractsState;
 		/** Retained visibility owns display cadence and transient confirmation. */
@@ -25,7 +32,7 @@
 		/** Existing app notice presentation for dispatch failures. */
 		readonly onNotice: (message: string) => void;
 	}
-	const { owner, visible, onNotice }: Props = $props();
+	const { owner, visible, onNotice, onSetWaypoint }: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	/** Markup-only snapshot pulled at a bounded cadence; scene/network producers do not own it. */
 	let view = $state<ReturnType<ClientContractsState["read"]> | null>(null);
@@ -58,6 +65,17 @@
 		};
 	});
 </script>
+
+{#snippet locationLink(location: ContractLocation)}
+	{@const target = contractLocationWaypoint(location)}
+	{#if target === null}{contractLocationText(
+			location,
+		)}{:else}<ClientWaypointLink
+			text={contractLocationText(location)}
+			{target}
+			{onSetWaypoint}
+		/>{/if}
+{/snippet}
 
 <div
 	class="ui-body journal-panel"
@@ -199,14 +217,24 @@
 										Contract definition #{row.id} is missing from client content.
 									</p>
 								{:else}
-									<p>{row.description}</p>
+									<p>
+										<ClientWaypointText
+											text={row.description}
+											{onSetWaypoint}
+										/>
+									</p>
 									<dl>
 										<dt>Status</dt>
 										<dd>{label}</dd>
 
 										{#if row.status.kind === "inProgress" && row.status.progress !== null}
 											<dt>Progress</dt>
-											<dd>{row.status.progress}</dd>
+											<dd>
+												<ClientWaypointText
+													text={row.status.progress}
+													{onSetWaypoint}
+												/>
+											</dd>
 										{/if}
 
 										{#if row.status.kind === "waitingToRepeat"}
@@ -227,11 +255,11 @@
 											</dt>
 											<dd>{row.contact.name}</dd>
 											<dt>Contact location</dt>
-											<dd>{contractLocationText(row.contact.location)}</dd>
+											<dd>{@render locationLink(row.contact.location)}</dd>
 										{/if}
 
 										<dt>Quest area</dt>
-										<dd>{contractLocationText(row.area)}</dd>
+										<dd>{@render locationLink(row.area)}</dd>
 
 										{#if row.deadline !== null}
 											<dt>Time remaining</dt>

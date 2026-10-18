@@ -1,3 +1,5 @@
+import { probeWaypointContent } from "./client-waypoint-content-probe.mjs";
+
 /** Production DOM/owner assertions followed by real pointer capture and clear-button input. */
 export async function probeClientWaypoint(client, evaluate) {
 	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.waypoint";
@@ -47,7 +49,27 @@ export async function probeClientWaypoint(client, evaluate) {
 		);
 	const clear = await evaluate(
 		client,
-		`(() => { const rect = document.querySelector('.minimap-waypoint-row > span:first-child').getBoundingClientRect(); return {x: rect.x + rect.width/2, y: rect.y + rect.height/2, hit: document.elementFromPoint(rect.x + rect.width/2, rect.y + rect.height/2)?.outerHTML}; })()`,
+		`(() => { const rect = document.querySelector('.minimap-waypoint-row > span:first-of-type').getBoundingClientRect(); return {x: rect.x + rect.width/2, y: rect.y + rect.height/2, hit: document.elementFromPoint(rect.x + rect.width/2, rect.y + rect.height/2)?.outerHTML}; })()`,
+	);
+	await mouse("mouseMoved", clear.x, clear.y, false);
+	await settle();
+	const pinAppearance = await evaluate(
+		client,
+		`(() => {
+		const row = document.querySelector('.minimap-waypoint-row');
+		const pin = row.querySelector('.ui-waypoint-pin');
+		const normal = getComputedStyle(pin);
+		if (normal.fill !== getComputedStyle(row).color || normal.transform !== 'none')
+			throw new Error('Hovered waypoint pin lost text color or enlarged');
+		const style = document.createElement('style');
+		style.textContent = '@layer overrides { .ui-theme .ui-waypoint-marker { color: rgb(11, 22, 33); } .ui-theme .ui-waypoint-pin { fill: rgb(44, 55, 66); } }';
+		document.head.append(style);
+		try {
+			if (getComputedStyle(document.querySelector('.world-waypoint-target')).color !== 'rgb(11, 22, 33)' || getComputedStyle(pin).fill !== 'rgb(44, 55, 66)')
+				throw new Error('Waypoint theme hooks ignored stylesheet overrides');
+			return true;
+		} finally { style.remove(); }
+	})()`,
 	);
 	await mouse("mousePressed", clear.x, clear.y, true);
 	await mouse("mouseReleased", clear.x, clear.y, false);
@@ -60,5 +82,12 @@ export async function probeClientWaypoint(client, evaluate) {
 		throw new Error(
 			`Real clear-button input failed navigation or keyboard ownership: ${JSON.stringify({ clear, cleared })}`,
 		);
-	return { ...evidence, realPointerPan: true, realPointerClear: true };
+	const content = await probeWaypointContent(client, evaluate);
+	return {
+		...evidence,
+		realPointerPan: true,
+		realPointerClear: true,
+		pinAppearance,
+		content,
+	};
 }

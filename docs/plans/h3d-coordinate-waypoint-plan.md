@@ -1,6 +1,11 @@
 # H3D coordinate waypoint plan
 
-Status: Implemented on 2026-10-17; final verification and completion audit recorded below.
+Status: Original waypoint feature implemented and committed as `0381168ca` on 2026-10-17.
+Content-coordinate linking is implemented below. Automated checks pass; the user confirmed manual
+selection and contract-panel behavior on 2026-10-17. Successful sets now use status toasts, and the
+minimap waypoint label shows an SVG pin, destination coordinates, and distance only while guiding.
+Source-level dry run completed for the extension on 2026-10-17. The scope was subsequently
+simplified; implementation and verification evidence are recorded at the end.
 
 ## Context and boundaries
 
@@ -20,7 +25,8 @@ Out of scope:
 
 - Route finding, obstacle avoidance, automatic movement, elevation targets, and dungeon navigation.
 - Multiple waypoints, names, lists, saved destinations, settings persistence, and automatic clearing.
-- Click-to-set map gestures, chat-coordinate links, and Explorer navigation controls.
+- Click-to-set map gestures and Explorer navigation controls. Content-coordinate links were
+  excluded from the original increment and are now scoped in the extension below.
 - Protocol/host commands, shared Rust crate changes, and retail compatibility claims for this new UX.
 
 ## Agreed behavior
@@ -139,7 +145,7 @@ Suggested files:
 - `src/lib/game/map/map-waypoint.ts`: app-local display contract and pure horizontal geometry.
 - `src/client/client-navigation-waypoint.ts`: intent owner and narrow command handler, with
   colocated tests. Split the handler only if it materially improves readability.
-- `src/assets/icons/map-waypoint.svg` and `map-waypoint-direction.svg`: authored static artwork.
+- `src/assets/icons/map-waypoint-pin.svg` and `map-waypoint-direction.svg`: authored static artwork.
 
 Use a discriminated display contract with these valid shapes:
 
@@ -245,7 +251,7 @@ test-owned radii; integration tests import runtime tuning. No asset-dependent te
 
 - [x] Implement the owner with set/replace/clear/read and explicit availability/identity handling.
 - [x] Wire exact-token local command interception into `ClientApp.sendChat` alongside `@loc`.
-- [x] Keep failed parsing atomic, normal chat forwarding intact, and feedback in durable chat.
+- [x] Keep failed parsing atomic, normal chat forwarding intact, and set feedback in status toasts; report/clear feedback stays in chat.
 - [x] Extend/enrich `MinimapFrame` and update every producer/fixture, including Explorer.
 - [x] Wire identity, portal-space, resync/current-state, exit, and cleanup paths.
 - [x] Test set/replace/report/clear, no-target behavior, invalid-input retention, server-send
@@ -363,3 +369,371 @@ on the visibility-owned timer. Tooltip preparation runs once after the relevant 
 been projected, rather than twice during image redraws. No additional abstraction was needed.
 
 Review does not establish live-server behavior or replace the user's visual acceptance.
+
+## Extension: Set waypoints from content
+
+Make coordinate text in chat, books, examine descriptions, inscriptions, and contracts clickable
+so the player can replace the current waypoint without retyping coordinates. This extends the
+completed feature; phases 1–4 and their evidence describe the original increment only.
+
+### Scope and agreed interaction
+
+| Surface      | Included content                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Chat         | Message bodies across channels, including system messages; retain sender prefixes and filtering.                  |
+| Books        | Loaded page text and book-level inscriptions.                                                                     |
+| Examine      | Item and creature descriptions, including the existing item description disclosure, plus portal destination text. |
+| Inscriptions | Item inscription text; retain scribe attribution.                                                                 |
+| Contracts    | Description and progress text, plus structured outdoor contact and quest-area locations.                          |
+
+- Activate a coordinate to replace the one current waypoint. Preserve existing lifecycle,
+  paused/near behavior, minimap clear, and command aliases.
+- Link each valid coordinate occurrence independently, preserving the source text exactly.
+  Whitespace, line breaks, punctuation, coordinate precision, and surrounding prose remain intact.
+- Use an underlined inline native button styled as a link: this is a local action, with no browser
+  destination. Supply a descriptive accessible name/title such as `Set waypoint: 42.3N, 12.7E`.
+  Reuse the app's input policy for pointer activation and deliberate keyboard navigation.
+- Chat coordinates become links only while the existing chat-history interactive/select-copy mode
+  is enabled. In normal mode, message bodies remain plain text with the existing click-through
+  behavior; no coordinate controls or keyboard tab stops are present. Turning interaction off
+  restores plain text without changing the waypoint. Other content surfaces remain link-enabled.
+- Selecting/copying content must not set a waypoint. A pointer drag that creates a text selection
+  must not activate a link on release. Verify selection behavior in interactive chat and the other
+  linked content surfaces; normal chat has no coordinate actions to suppress. Native selection and
+  copying through links are verified; fresh drag-selection creation still needs the user check below.
+- Successful activation uses the existing status toast surface for the local waypoint confirmation. Clicks never send server
+  chat or enter sent-command history.
+- Reuse existing session teardown and the waypoint owner's character check. Do not add a dedicated
+  activation-rejection flow, click-error UI, captured permission, or stale-click machinery. Invalid
+  coordinates remain plain text. Command validation and error presentation remain unchanged.
+  Setting indoors remains allowed.
+
+Out of scope: a general rich-text/HTML renderer, URL auto-linking, arbitrary command links, map-click
+gestures, multi-waypoint storage, persistence, pathfinding, guessing entrances for indoor contracts,
+and protocol or Rust changes. Author names, sender names, item names, and unrelated numeric stats
+are not new scanning surfaces in this increment.
+
+### Ground truth and integration points
+
+App paths are relative to `apps/holtburger-3d/` unless otherwise stated.
+
+| Owner or consumer             | Reference and implication                                                                                                                                                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordinate syntax/conversion  | `src/lib/game/map/map-coordinates.ts`: exact pair parser, hemisphere preservation, printed bias, branded horizontal point.                                                                                                                           |
+| Intent mutation               | `src/client/client-navigation-waypoint.ts`: setting is currently embedded in `runCommand`; extract the shared typed operation here.                                                                                                                  |
+| Client composition            | `src/client/ClientApp.svelte`, `ClientWorldView.svelte`: existing session lifetime, local confirmation, and callbacks to mounted consumers.                                                                                                          |
+| Chat text/input               | `src/client/ClientChat.svelte`: plain message interpolation, click-through buffer, explicit select/copy mode, keyboard scope.                                                                                                                        |
+| Book content                  | `src/client/ClientBookWindow.svelte`, `client-book-reader.ts`: page loading/replacement and book inscription rendering.                                                                                                                              |
+| Examine content               | `src/client/ClientInspectionWindow.svelte`, `ClientItemInspection.svelte`, `ClientCreatureInspection.svelte`: description, portal destination, and inscription rendering.                                                                            |
+| Description truncation        | `src/client/client-object-inspection-format.ts:truncateInspectionDescription` and `ClientItemInspection.svelte`: collapsed text can otherwise cut a coordinate in half.                                                                              |
+| Journal content               | `src/client/ClientJournalPanel.svelte`, `client-contracts-view.ts`: plain prose and structured location labels.                                                                                                                                      |
+| Exact contract placement      | `src/client/client-contracts-map.ts:contractMapMarkers`: existing AC-local-to-scene conversion and outdoor bounds checks.                                                                                                                            |
+| Contract coordinate semantics | Repository-root `crates/holtburger-world/src/state/contracts.rs:ContractLocation::from_position`: journal latitude/longitude are cell-based labels; original authored placement is retained separately. Retail citations are already recorded there. |
+| UI/input reuse                | `src/app/ui-base.css`, `src/lib/input/`, and existing native client controls: reuse theme and ownership policy; inspect existing inline description-toggle styling before adding shared link styling.                                                |
+| Behavioral evidence           | `src/harness/browser/ClientHudHarness.svelte`, `client-waypoint-probe.ts`, contract/book/inspection fixtures, and `scripts/browser-harness.mjs`.                                                                                                     |
+
+The inspected fixture `src/client/fixtures/object-inspection-wire.json` contains the portal
+destination `Holtburg (42.1N, 33.6E).`, establishing parentheses and trailing punctuation as concrete
+cases. `host/src/client_projection.rs:ClientBookWire::from_world` copies page text and inscriptions
+without formatting; `ACE/Source/ACE.Server/WorldObjects/Book.cs:AddPage/ModifyPage` stores page text.
+No host change is needed to expose these strings. Start with the existing supported notation and
+representative examples; no broad content census is required. Extend recognition when actual content
+demonstrates another format.
+
+### Ownership and contracts
+
+```text
+free text -> pure coordinate scanner -> text spans / prepared coordinate spans
+                                                  |
+                                         shared inline renderer
+                                                  |
+structured contract location -> exact destination control
+                                                  |
+                                     typed client set-waypoint action
+                                                  |
+@waypoint / @wp -> parse --------------------------+-> existing waypoint owner
+                                                         |
+                                              existing frame -> both maps
+```
+
+- Recognition and coordinate conversion belong in the frontend map/text utilities. Add a pure
+  scanner beside the existing coordinate parser, sharing lexical rules rather than maintaining
+  divergent regexes for command and prose parsing. Do not turn the exact command parser into a
+  permissive substring parser or change Explorer's independent grammar.
+- Begin with explicit N/S latitude followed by E/W longitude: case-insensitive integer or decimal
+  magnitudes, optional comma, whitespace, and existing precision semantics. Delimit matches so
+  embedded identifiers, signed invalid inputs, malformed decimals, or a valid-looking suffix of
+  an invalid number cannot accidentally become links. Test punctuation and multiline pairs.
+- In prose, malformed/nonfinite/out-of-world candidates stay plain text without unsolicited
+  errors. Command input retains its existing rejection behavior. Share destination preparation
+  and bounds validation so rendering eligibility and mutation cannot disagree.
+- A scanner span carries its original source text and a prepared typed destination for the inline
+  renderer. It need not retain a duplicate source string, signed degrees, or a parsed command.
+  Raw text stays escaped by Svelte; never generate HTML strings or use DOM-wide text rewriting.
+  Keep existing description truncation and scan the displayed text. Complete coordinate pairs
+  become links; a cut-off pair stays plain text until expansion. No retained offsets or
+  coordinate-aware truncation are required.
+- The reusable inline renderer owns link appearance and activation behavior, not target state,
+  character lifetime, or distance. Prefer one explicit typed callback through the existing client
+  component tree. Do not introduce a navigation context, event bus, or global registry merely to
+  avoid a few prop handoffs. Migrate harness callers with each changed prop contract.
+  `ClientChat` selects plain message interpolation or the shared renderer using its existing
+  `historyInteractive` state; no second interaction flag, global permission, or per-link pointer
+  override is needed for normal chat.
+- Extract one typed set operation from the navigation owner's command branch. The owner checks
+  character eligibility and commits only a valid target; client composition supplies the existing
+  local confirmation. Both entry paths preserve atomic replacement and reuse existing lifetime checks.
+  Avoid simulating command submission from clicks or giving leaf components chat-session access.
+- Use normal Svelte derivation for text spans. No dedicated rescanning guarantees, performance
+  assertions for countdown updates, persistent match cache, or new polling timer are required.
+
+### Input integration
+
+Start with the inline native control and existing input policy. Verify clicking, selecting/copying
+text, and keyboard activation in the browser. Change shared input policy only if these checks
+reproduce a problem; do not prescribe selectable-control opt-ins or custom gesture machinery in
+advance. Selection dragging must not set a waypoint, and an unrelated old selection must not block
+an intentional click.
+
+The source review found that `KeyboardInputPolicy.#pointerDown` prevents button pointer defaults;
+this is a reason to test selection, not evidence that a new mechanism is required.
+
+Keep keyboard accessibility through existing scopes. `ClientJournalPanel` already has
+`nativeControls: true`; extend the chat-history scope and wire book/inspection content scopes as
+needed for deliberate keyboard navigation. Preserve Escape and game key routing. Chat links exist
+only in interactive mode, so normal chat needs no new hit-testing policy.
+
+### Structured contracts preserve exact placement
+
+Journal location labels are rounded cell-based coordinates and may omit the hemisphere at zero.
+They are not equivalent to ordinary printed player-position coordinates. Feeding those labels
+through the prose parser would lose authored offsets and can disagree with the contract map icon.
+
+For an outdoor contact or area, keep the journal label as visible text but supply a destination
+prepared directly from its retained authored position. Reuse the conversion currently owned by
+`contractMapMarkers`; extract only that proven common calculation and use it in both consumers.
+The waypoint point constructor must preserve the branded coordinate contract without caller casts.
+Use the normal waypoint coordinate formatter for the target's canonical location label; the journal
+keeps its original label. Make the action tooltip identify the destination being set.
+
+Share coordinate conversion without accidentally unifying different bounds policies. The current
+contract map includes points on its outer image edge, while waypoint eligibility uses a half-open
+outdoor grid. A boundary-only map point may remain visible but is not a valid navigation target;
+render its journal label as plain text. Do not silently change map-overlay visibility while
+extracting conversion. Use one finite, half-open destination validator for both prose and structured
+waypoint preparation. Conversion from authored positions belongs with the contract adapter; the
+canonical point factory and grid eligibility belong with the frontend map primitives.
+
+Missing and indoor locations remain noninteractive. Do not infer an exterior entrance or treat
+missing data as zero coordinates. Quest-area text can be clickable wherever the journal displays a
+valid outdoor area; do not inherit the map overlay's in-progress-only visibility policy. Contract
+description/progress prose uses the ordinary scanner and its printed-coordinate semantics.
+
+### Remaining implementation phases
+
+#### Phase 5: Recognition and shared destination preparation
+
+- [x] Use the existing coordinate notation with representative prose examples; add formats only
+      when encountered in actual content.
+- [x] Add pure span scanning with shared lexical rules, preserving source text byte-for-byte.
+- [x] Extract typed destination preparation, bounds validation, and the owner's atomic set operation;
+      route existing commands through it without changing command errors/history.
+- [x] Share exact outdoor contract conversion with the existing contract map consumer. Keep
+      journal formatting, free-text parsing, and map visibility policy distinct.
+- [x] Add focused unit cases for punctuation, adjacency, multiple/multiline matches, malformed
+      prefixes/suffixes, nonfinite magnitudes, world edges, precision, and zero hemispheres.
+- [x] Verify reconstruction of all spans equals original input and retain existing owner coverage
+      for invalid command replacement and character lifetime.
+
+Acceptance: one lexical definition and one owner mutation path serve commands and content; exact
+contract targets match existing map placements, including nonzero local offsets and zero labels.
+
+#### Phase 6: Inline rendering across the requested surfaces
+
+- [x] Add one shared coordinate-text renderer and explicit typed activation callback.
+- [x] Integrate chat bodies, loaded book pages/inscriptions, item/creature descriptions, portal
+      destination text, item inscriptions, and contract descriptions/progress.
+- [x] Render structured journal outdoor locations using their exact prepared destinations.
+- [x] Preserve source text, wrapping, attribution, disclosure controls, and loading/error states.
+- [x] Preserve existing description truncation; link complete pairs in displayed text and leave
+      cut-off pairs plain until expanded.
+- [x] Render chat coordinate controls only while `historyInteractive` is true; otherwise retain
+      plain message interpolation and existing click-through behavior. Preserve select/copy and
+      verify that selection dragging in linked content does not activate a waypoint.
+- [x] Route the existing local success confirmation through client composition and update all
+      harness consumers. Add no dedicated content-activation rejection flow.
+- [x] Register or extend native-control scopes on the affected content containers without changing
+      pointer-acquired keyboard ownership; preserve the Journal's existing scope.
+
+Acceptance: every listed text surface uses the shared path; structured locations use exact geometry;
+no content click calls `sendChat`, modifies command history, or creates a second waypoint state.
+
+#### Phase 7: Reassess integration and verify behavior
+
+- [x] Check supported notation, existing truncation, contract conversion reuse, and input ownership
+      against representative cases.
+- [x] Extend browser probes using production renderer/owner code and representative text fixtures.
+- [x] With chat interaction off, verify coordinate text has no actionable/focusable controls and
+      retains normal click-through. With it on, verify pointer activation, selection dragging/copying,
+      and existing keyboard ownership. Toggle off again and verify links disappear while the target
+      remains. Verify deliberate keyboard activation through existing native-control navigation.
+- [x] Verify selection/copying across links, ordinary activation with an unrelated selection, and
+      no world pointer action from link activation. Add input machinery only for reproduced problems.
+- [x] Exercise multiple links and replacement from each requested surface, newly loaded book text,
+      collapsed/expanded descriptions, contract progress refresh, and exact structured destinations.
+- [x] Verify no outgoing server messages/history changes, no action for invalid prose, no target
+      leakage across character/session retirement, and both maps updating while stationary.
+- [x] Source-trace the `ClientApp` callback through `ClientWorldView` to the text consumers and
+      waypoint owner. Browser automation exercises the real components and owner through harness
+      composition, including toast output and server/history exclusion; it does not mount `ClientApp`
+      or independently prove its one-line toast wiring. No production adapter was added for testing.
+- [x] Run affected unit tests, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run build`,
+      and relevant browser probes from the app directory; check touched-file formatting.
+
+- [x] User verified that the interaction works, including the contracts panel, after the requested
+      manual drag-selection check (2026-10-17).
+
+Acceptance: behavioral evidence covers actual component-to-owner composition, not just isolated
+tokenizer fixtures. No live asset dependency is introduced into permanent unit tests.
+
+#### Phase 8: Cleanup and completion review
+
+- [x] Remove duplicate regexes, conversion/validation branches, dead command preparation, and
+      feature-local styling that an existing shared control can provide.
+- [x] Review producer/callback/consumer contracts, retained window lifetime, and source-text fidelity.
+- [x] Record actual checks, limitations, and any evidence-driven grammar changes in this extension.
+- [x] Leave visual acceptance to the user; report remaining appearance/readability choices.
+
+Extension definition of done: all requested surfaces are covered, prose links preserve visible text,
+structured contract links agree with authored map positions, input policy and selection still work,
+one owner controls replacement/lifetime, and applicable automated checks pass. Completion of phases
+1–4 does not imply completion of this extension. Implementation was authorized by the subsequent user goal; no commit is requested for this increment.
+
+### Risks and remaining decisions
+
+- False positives: use explicit hemisphere pairs and lexical boundary tests; expand notation only
+  with content evidence. Bare number pairs remain plain text.
+- Chat interaction: reuse the existing mode as the sole gate. Normal chat remains entirely
+  click-through; interactive links must never also trigger a world action. No mixed hit-testing
+  policy is introduced into normal chat.
+- Text selection: verify real drag/release, not only synthetic `.click()` assertions.
+- Native-control integration: verify ordinary native controls with existing input policy before
+  considering any shared-policy changes; preserve keyboard accessibility.
+- Structured label/position differences: preserve exact authored positions and show the actual target
+  in the action tooltip; never round-trip the journal label through the printed-coordinate parser.
+- Scope estimate: a small scanner and inline renderer, focused owner/conversion extraction, and
+  wiring across existing components should suffice. If implementation grows into a general rich-text
+  engine, command dispatcher, or navigation framework, stop and reassess the design.
+
+No blocking product questions remain from the agreed scope. Start with existing coordinate notation;
+consider additional formats when encountered rather than requiring a content census.
+The dry run traced normal activation, malformed prose, an invalid world edge, description collapse,
+book updates, contract countdown refresh, and existing character retirement through immediate
+callers. It did not execute browser input experiments or establish a complete authored-content census.
+
+### Extension implementation evidence and quality review
+
+- `npm run test:ts -- src/lib/game/map/map-coordinates.test.ts src/lib/game/map/map-waypoint.test.ts src/client/client-navigation-waypoint.test.ts src/client/client-contracts-map.test.ts src/explorer/world-input.test.ts src/lib/input/keyboard-input-policy.test.ts src/client/client-location-command.test.ts src/client/client-book-reader.test.ts src/client/client-object-inspection-format.test.ts src/app/minimap-frame.test.ts`: 131 tests across ten files passed.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run build` passed. Svelte reported
+  zero errors/warnings. The existing Vite large-chunk advisory remains; no suppression was added.
+- `--client-waypoint`: original 26 assertions and real pointer pan/clear checks pass, plus content
+  activation across chat, loaded/deferred book pages, both inscription surfaces, item/creature
+  descriptions, portal destinations, and contract prose/progress/contact/area. The probe verifies
+  native Tab/Enter activation, native selection through links, actual clipboard transfer, a drag
+  with an existing selection causing no navigation, unrelated selection allowing activation,
+  local confirmation, no server/history changes, and no camera/entity-selection changes from links.
+- `--client-keyboard`, `--client-book`, `--client-inspection`, `--client-contracts`, and real-content
+  `--world-map` regression probes passed. Inspection's synthetic artwork-failure scenario emits
+  its expected icon-preparation warning. No visual acceptance was performed.
+- Fresh character/word drag-selection creation could not be verified: it also failed in an isolated
+  iframe containing ordinary text without app handlers. Native word selection plus Shift-click
+  extension and clipboard transfer pass. The content report explicitly records
+  `dragSelectionCreationVerified: false`; this records the automation limitation. The user subsequently
+  confirmed that the interaction works, including the contracts panel, resolving manual acceptance.
+- Real pointer input reproduced loss of chat hit testing when a native-control click ended keyboard
+  ownership. Interactive-mode CSS now owns buffer pointer availability; normal mode remains plain
+  and click-through. The keyboard probe now distinguishes explicit interaction mode from focus.
+- Native-control traversal requires the chat buffer's `nativeControls` scope. Its existing native
+  copy regression failed after that change until explicit text-scope pointer reactivation was
+  allowed. `KeyboardScope.pointerActivation` is a small opt-in consumed only by chat's text container;
+  ordinary buttons retain existing ownership policy. No selectable-control attributes, custom
+  gesture trackers, focus-rejection timers, or per-panel focus/blur repairs were retained.
+- The Journal regression assumed the first button in a resolved row was removal. Coordinate
+  buttons invalidated that assumption. Its probe now finds the named removal control; production
+  removal behavior was unchanged and the full regression passes.
+- `ClientApp` directly invokes the production owner setter with a status-toast callback; the callback has
+  no server or history path. Unit coverage proves that setter's character check and confirmation;
+  browser coverage uses the same setter with the actual text components and toast overlay, and checks that activation leaves chat unchanged.
+  No action adapter was added solely for testing this one-line composition.
+- Quality review traced lexical parsing/preparation through both command and content inputs,
+  canonical geometry through contract map and Journal consumers, every UI callback handoff, and
+  character/session retirement. Intent remains owned by the existing frontend owner. The shared
+  inline style also replaces the inspection disclosure's duplicate style. No additional structural
+  blocker was found within that scope; manual selection acceptance was subsequently confirmed.
+- Unrelated ACE submodule state remains untouched. No files were staged or committed.
+
+### Post-acceptance feedback refinement (2026-10-17)
+
+- Successful sets from both command aliases and content links publish a status toast through the
+  existing toast center. Report, usage, and clear command responses retain their chat behavior.
+- The minimap waypoint row shows a dedicated SVG pin and the stored destination label. Distance
+  appears only while guiding; near and paused states show coordinates alone. The inline clear
+  affordance and whole-label click behavior remain. The accessible description uses the same text.
+- Focused unit checks cover the separate notification and chat sinks. The waypoint browser probe
+  checks the destination coordinates in the HUD, actual toast text, and unchanged chat on activation.
+- Validation after this refinement: 61 focused tests, full Svelte/TypeScript checks (zero errors
+  or warnings), TypeScript/dead-code lint, production build, touched-file formatting, and the
+  waypoint/content browser probe passed. The existing Vite large-chunk advisory remains.
+- Compact-label follow-up: the waypoint browser probe passes all 26 assertions plus content
+  interactions, including coordinates-only near/paused labels and real-pointer clearing. The probe
+  now selects the first text span by type because the SVG precedes it. Build, lint, and formatting
+  pass; no visual acceptance was performed.
+- The minimap and World destination markers share the label's SVG pin. Its SVG viewport places
+  the tip at the projected coordinate; map consumers retain accent coloring while the label uses
+  its text color. The obsolete diamond asset was removed. The off-disc direction cue is unchanged.
+
+### Theme styling cleanup (2026-10-18)
+
+- Shared `.ui-waypoint-pin` and `.ui-waypoint-marker` CSS hooks replace inline pin presentation
+  and map colors. Pins inherit their consumer color; markers default to the shared accent.
+- Decorative waypoint pins are excluded from the shared HUD hover enlargement rather than
+  overriding transforms inside the SVG. Themes can style the hooks through the existing cascade.
+- Shared inline actions use the highlight color on hover and the existing themed keyboard focus
+  ring. No waypoint-specific palette variables or theme-supplied artwork mechanism were added.
+- SVG dimensions/offsets remain authored geometry: the map pin tip and hover area must agree.
+  The minimap edge cue retains its authored shape and existing fill/outline palette variables.
+- Browser verification passes existing navigation/content checks plus stylesheet overrides for
+  pin fill and map color, fixed-size/text-colored hover behavior, and native keyboard focus styling.
+  Production build, lint, and touched-file formatting pass; no visual acceptance was performed.
+
+### Final code-quality review (2026-10-18)
+
+Verdict: ready within the reviewed feature scope. The baseline is `0381168ca`; all accumulated
+waypoint changes, including new files and the removed diamond asset, were included. Unrelated ACE
+submodule state was excluded.
+
+- Traced command and content parsing/preparation through `ClientWaypointText`/`ClientWaypointLink`,
+  `ClientWorldView`, `ClientApp`, and `ClientNavigationWaypointOwner` to toast and map consumers.
+  Commands and content reuse the same setter without giving leaf components server access.
+- Inspected both authored contract consumers: map markers and Journal navigation reuse one exact
+  placement conversion. Their closed-image versus half-open navigable bounds remain intentionally
+  distinct; rounded cell labels never become navigation geometry.
+- Inspected character replacement, portal transitions, unavailable/indoor placement, clearing, and
+  session cleanup. The existing owner retains intent; maps own only derived presentation.
+- Reviewed keyboard-policy producers/consumers, chat interaction gating, native selection handling,
+  book/inspection scopes, CSS theme hooks, SVG placement, and browser fixture changes. No extra
+  navigation registry, cache, custom selection gesture tracker, or shared-crate dependency was added.
+- Consolidation retained shared coordinate grammar, exact contract conversion, and inline action
+  styling. Plain-text spans and prepared destinations remain distinct; descriptive command reports
+  and the compact HUD intentionally use different wording.
+- Corrected the plan's composition-test claim: app wiring was source-traced, while browser tests
+  exercise actual components and the owner in harness composition. Fresh drag creation remains a
+  headless automation limitation previously resolved by user verification. No visual acceptance or
+  new live-server test was performed during this review.
+- Accepted constraint: SVG dimensions and the World-map hover offset describe the same fixed pin
+  geometry. Arbitrary theme-driven resizing and replacement artwork are outside the agreed scope.
+  No blocking correctness, ownership, or maintainability finding remains within this boundary.
+- Final affected unit run: 131 tests passed across 10 files. Latest production type checks, lint,
+  build, formatting, and the waypoint/content/theme browser probe passed before this review; only
+  documentation changed during the review. Earlier keyboard, book, inspection, contracts, and
+  real-content World-map regression evidence remains recorded above.

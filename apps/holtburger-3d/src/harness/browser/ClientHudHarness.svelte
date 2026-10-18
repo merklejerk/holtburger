@@ -89,7 +89,11 @@
 	import { probeSquelch } from "./client-squelch-probe";
 	import { probeOverlayTheme } from "./overlay-theme-probe";
 	import { probeSelectedActions } from "./client-selected-actions-probe";
-	import type { ContractsSnapshot } from "../../client/client-contracts-contract";
+	import {
+		contractsUpdatedSchema,
+		type ContractsSnapshot,
+	} from "../../client/client-contracts-contract";
+	import contractFixture from "./fixtures/contracts.json";
 	import { probeContractMap } from "./client-contracts-map-probe";
 	import { probeContracts } from "./client-contracts-probe";
 	import { probeFriends } from "./client-friends-probe";
@@ -1041,6 +1045,10 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Prepare text-bearing production surfaces for the coordinate-link probe. */
+		readonly showWaypointContent: (
+			surface: "chat" | "book" | "item" | "creature" | "contracts",
+		) => Promise<void>;
 		/** Focused navigation controls, using the production owner and actual map consumers. */
 		readonly waypoint: WaypointProbeControls;
 		/** Automated waypoint DOM and lifecycle assertions through production map consumers. */
@@ -1698,8 +1706,9 @@
 					inspection: {
 						guid,
 						name: "Holtmage",
-						description:
-							"An adventurer fixture with disclosed character appraisal details.",
+						description: waypointContentProbeEnabled
+							? "Meet at 40.0N, 20.0E."
+							: "An adventurer fixture with disclosed character appraisal details.",
 						level: 126,
 						details: {
 							kind: "creature",
@@ -1814,7 +1823,9 @@
 				inspection: {
 					guid,
 					name: "Ancient Atlan Sword of the Long Appraisal",
-					description: longItemDescription,
+					description: waypointContentProbeEnabled
+						? `Meet at 42.1N, 33.6E. ${longItemDescription} Finish at 1.2S, 3.4W.`
+						: longItemDescription,
 					level: 80,
 					details: {
 						kind: "item",
@@ -1918,7 +1929,9 @@
 								},
 							],
 							inscription: {
-								text: "May this blade remember every long road through Dereth, every fellowship at its side, and every hand that kept its edge bright.",
+								text: waypointContentProbeEnabled
+									? "Remember 0.00S, 0.0W."
+									: "May this blade remember every long road through Dereth, every fellowship at its side, and every hand that kept its edge bright.",
 								scribe: "Harness Artisan",
 							},
 							imbuedEffects: 0x4001,
@@ -3409,7 +3422,7 @@
 	/** Keep the keyboard fixture's two submitted entries regardless of product tuning. */
 	const chatHistoryLimit = 2;
 	let sentChatHistory = $state<readonly string[]>([]);
-	const messages: readonly ClientChatLine[] = [
+	let messages = $state<readonly ClientChatLine[]>([
 		line(1, {
 			kind: "system",
 			message:
@@ -3446,7 +3459,7 @@
 			message: "You hit a Drudge for 37 slashing damage. Critical hit.",
 			emphasized: true,
 		}),
-	];
+	]);
 
 	function line(
 		id: number,
@@ -3463,17 +3476,24 @@
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
 	);
 	let waypointProbeEnabled = false;
+	let waypointContentProbeEnabled = false;
 	let waypointAvailable = true;
 	let waypointHeading = 0;
 	let waypointCameraHeading = 0;
 	const waypointMessages: ClientChatMessage[] = [];
 	const waypointServerMessages: string[] = [];
+	const waypointNotices: string[] = [];
+	function notifyWaypoint(message: string): void {
+		waypointNotices.push(message);
+		toast = { id: waypointNotices.length, message, tone: "status" };
+	}
 	function submitWaypointChat(message: string): void {
 		if (
 			!waypointOwner.runCommand(
 				message,
 				() => readMinimapFrame().waypoint,
 				(line) => waypointMessages.push(line),
+				notifyWaypoint,
 			)
 		)
 			waypointServerMessages.push(message);
@@ -4295,8 +4315,10 @@
 			read: () => ({
 				frame: readMinimapFrame(),
 				messages: waypointMessages.slice(),
+				notices: waypointNotices.slice(),
 				sent: waypointServerMessages.slice(),
 				gameActive: keyboard.gameActive,
+				history: sentChatHistory,
 			}),
 			placeAtBottom: () => {
 				userSettings = {
@@ -4316,6 +4338,61 @@
 			},
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			showWaypointContent: async (surface) => {
+				waypointContentProbeEnabled = true;
+				waypointControls.enable();
+				objectInspectionOwner.close();
+				bookReaderOwner.close();
+				if (surface === "chat") {
+					messages = [
+						line(100, {
+							kind: "system",
+							message:
+								"Meet at (42.1N, 33.6E), then 0.00S, 0.0W. Invalid: 102N 0E.",
+						}),
+					];
+				} else if (surface === "book") {
+					emitInteractionEvent("client-book-opened", {
+						name: "Waypoint Journal",
+						book: {
+							guid: 42,
+							inscription: "Inscribed at 2.0N, 3.0E.",
+							authorName: "Traveler",
+							pages: [
+								{
+									index: 0,
+									authorName: "Writer",
+									text: "First stop: 42.1N, 33.6E.\nNext page follows.",
+								},
+								{ index: 1, authorName: "Writer", text: null },
+							],
+						},
+					});
+				} else if (surface === "contracts") {
+					const facts = contractsUpdatedSchema.parse(contractFixture).contracts;
+					if (facts === null) throw new Error("Missing contract fixture");
+					emitInteractionBaseline(1, {
+						rows: facts.rows.map((row) =>
+							row.kind === "resolved"
+								? {
+										...row,
+										description: "Travel to 1.2S, 3.4W.",
+										status:
+											row.status.kind === "inProgress"
+												? { kind: "inProgress", progress: "Next: 4.5N, 6.7E." }
+												: row.status,
+									}
+								: row,
+						),
+					});
+				} else {
+					await objectInspectionOwner.examine(7);
+					emitInteractionEvent(
+						"client-object-inspection-result",
+						inspectionResult(surface, 7),
+					);
+				}
+			},
 			waypoint: waypointControls,
 			probeWaypoint: () => probeClientWaypoint(waypointControls),
 			probeVitalWarnings: async () => {
@@ -4714,6 +4791,7 @@
 {#if !previewCharacters}
 	<ClientWorldView
 		onClearWaypoint={() => waypointOwner.clear()}
+		onSetWaypoint={(target) => waypointOwner.set(target, notifyWaypoint)}
 		{partyHudPresent}
 		readPartyHudDisplay={() =>
 			presentPartyHud(

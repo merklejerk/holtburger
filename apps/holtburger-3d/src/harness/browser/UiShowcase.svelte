@@ -430,6 +430,8 @@
 					onSplit={() => {}}
 				/>{/snippet}
 			{#snippet chat()}<ClientChat
+					onSetWaypoint={(target) =>
+						(toastMessage = `Waypoint set: ${target.label}.`)}
 					{messages}
 					{sentHistory}
 					onSend={send}

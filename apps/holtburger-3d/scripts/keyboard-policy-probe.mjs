@@ -516,6 +516,13 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		);
 		await click("#keyboard-viewport");
 		assert.equal((await capture()).gameActive, true);
+		assert.equal(
+			(await historyState()).pointerEvents,
+			"auto",
+			"Explicit interactive mode survives returning keys to the game",
+		);
+		await click(historyToggle);
+		assert.equal((await historyState()).pressed, "false");
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseMoved",
 			...word,
@@ -523,18 +530,17 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		assert.equal(
 			(await historyState()).pointerEvents,
 			"none",
-			"Hover styling must not make an unfocused chat buffer intercept pointers",
+			"Hover styling must not make noninteractive chat intercept pointers",
 		);
 		assert.equal(
 			await evaluate(
 				`document.elementFromPoint(${word.x}, ${word.y})?.closest('[data-game-viewport]') !== null`,
 			),
 			true,
-			"An unfocused chat buffer exposes the gameplay viewport beneath it",
+			"Noninteractive chat exposes the gameplay viewport beneath it",
 		);
 		await press("Escape", "Escape", 27);
 		assert.equal((await capture()).gameActive, true);
-		await click(historyToggle);
 		assert.equal((await historyState()).pressed, "false");
 
 		// A real HUD window and an independently active command share one recency order.

@@ -115,6 +115,8 @@ export async function probeParty(options: {
 				canInteract: true,
 			}),
 			readCanSplit: () => false,
+			readCanCorpsePermission: () => false,
+			onCorpsePermission: () => {},
 			readCanSwear: () => false,
 			onSwear: () => {},
 			readCanInvite: () => owner.canInvite(10),

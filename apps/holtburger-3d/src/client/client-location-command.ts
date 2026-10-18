@@ -47,7 +47,7 @@ export async function runClientLocationCommand(
 	readReport: () => string,
 	appendMessage: (message: ClientChatMessage) => void,
 ): Promise<boolean> {
-	if (message.trim().toLowerCase() !== "@loc") return false;
+	if (!/^[/@]loc$/i.test(message.trim())) return false;
 	const report = readReport();
 	appendMessage({ kind: "system", message: report });
 	try {

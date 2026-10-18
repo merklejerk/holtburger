@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientLocationCommand } from "./client-location-command";
+	import { ClientDeathCommands } from "./client-death-commands";
+	import { runRecallCommand } from "./client-recall-command";
+	import { runClientHelpCommand } from "./client-command-help";
 	import {
 		compactInputHint,
 		inputDisplayPlatform,
@@ -128,14 +131,10 @@
 		ClientCharacterMotionRejection,
 		ClientAppearanceOption,
 		ClientAppearanceOptions,
-		ClientChatMessage,
 		ClientDriveRequest,
 		ClientVital,
 	} from "./client-host-contract";
-	import type {
-		ClientChatErrorMessage,
-		ClientChatLine,
-	} from "./client-chat-policy";
+	import type { ClientChatEntry, ClientChatLine } from "./client-chat-policy";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
 	import {
 		resolveTextureFilteringPolicy,
@@ -236,6 +235,7 @@
 		initialClientLifecycleUiState(),
 	);
 	const debugEnabled = clientDebugEnabled(window.location.search);
+	let deathCommands: ClientDeathCommands | null = null;
 	let session = $state<ClientLifecycleSession | null>(null);
 	const navigationWaypoint = new ClientNavigationWaypointOwner(
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
@@ -982,9 +982,7 @@
 		}
 	}
 
-	function appendChatLine(
-		message: ClientChatMessage | ClientChatErrorMessage,
-	): void {
+	function appendChatLine(message: ClientChatEntry): void {
 		const line: ClientChatLine = {
 			...message,
 			id: nextChatMessageId++,
@@ -1073,10 +1071,22 @@
 	}
 
 	async function sendChat(message: string): Promise<void> {
+		sentChatHistory = recordSentChat(
+			sentChatHistory,
+			message,
+			CLIENT_TUNING.chat.sentHistoryLimit,
+		);
+		if (runClientHelpCommand(message, appendChatLine)) return;
 		const currentSession = session;
 		if (currentSession === null)
 			throw new Error("Chat session is unavailable.");
+		if (deathCommands === null)
+			throw new Error("Command session is unavailable.");
 		const handled =
+			(await deathCommands.run(message)) ||
+			(await runRecallCommand(message, (destination) =>
+				currentSession.recall(destination),
+			)) ||
 			navigationWaypoint.runCommand(
 				message,
 				() => readMinimapFrame().waypoint,
@@ -1093,11 +1103,6 @@
 				appendChatLine,
 			));
 		if (!handled) await currentSession.sendChat(message);
-		sentChatHistory = recordSentChat(
-			sentChatHistory,
-			message,
-			CLIENT_TUNING.chat.sentHistoryLimit,
-		);
 	}
 
 	async function recall(destination: RecallDestination): Promise<void> {
@@ -1703,7 +1708,10 @@
 		const spellReferences = new SpellReferences(transport);
 		const spellState = new ClientSpellState(owner, spellReferences, icons);
 		spells = spellState;
+		const deathOwner = new ClientDeathCommands(owner, appendChatLine);
+		deathCommands = deathOwner;
 		const dialogOwner = new ClientDialogs(owner);
+		const unbindDeathDialogs = dialogOwner.bindLocal(deathOwner);
 		dialogs = dialogOwner;
 		const unbindHousingDialogs = dialogOwner.bindLocal(housingManagementOwner);
 		const unbindPartyDialogs = dialogOwner.bindLocal(partyOwner);
@@ -1820,6 +1828,9 @@
 			unbindItems();
 			items.destroy();
 			itemInteractions = null;
+			unbindDeathDialogs();
+			deathOwner.destroy();
+			deathCommands = null;
 			dialogOwner.destroy();
 			unsubscribeDialogs();
 			dialogs = null;
@@ -2048,6 +2059,21 @@
 			onPreciseJumpPowerAdjust={(steps) =>
 				preciseJumpSession?.adjustPower(steps)}
 			onPreciseJumpActivate={activatePreciseJump}
+			readCanSetCorpsePermission={() =>
+				session?.state().lifecycle?.kind === "in-world"}
+			onCorpsePermission={(name, granted) => {
+				const current = session;
+				if (current === null || current.state().lifecycle?.kind !== "in-world")
+					return;
+				void current
+					.setCorpsePermission(name, granted)
+					.catch((error: unknown) =>
+						toastCenter.publish({
+							message: diagnostic(error),
+							tone: "warning",
+						}),
+					);
+			}}
 			onSocialNotice={(message) =>
 				toastCenter.publish({ message, tone: "warning" })}
 			onInventoryNotice={(message) =>
@@ -2112,6 +2138,7 @@
 			{chatMessages}
 			{sentChatHistory}
 			onSendChat={sendChat}
+			onSendChatError={appendChatError}
 			onCanvas={(canvas) => (canvasElement = canvas)}
 		/>
 	{:else}

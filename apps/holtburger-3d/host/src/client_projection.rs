@@ -1167,6 +1167,8 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Requested historical death locations for frontend-owned chat output.
+    DeathLocations(holtburger_core::client::corpse::DeathLocationResult),
     /// Housing replacement level, independent of window-opening policy.
     HousingUpdated(holtburger_core::client::housing::HousingSnapshot),
     /// Accepted full crystal receipt for the active character.
@@ -1578,6 +1580,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::SpellInspectionResult(result) => {
             Some(ClientHostEvent::SpellInspectionResult(result))
         }
+        ClientViewEvent::DeathLocations(result) => Some(ClientHostEvent::DeathLocations(result)),
         ClientViewEvent::ItemUseResult(result) => Some(ClientHostEvent::ItemUseResult(result)),
         ClientViewEvent::ItemUseTargetResult(result) => {
             Some(ClientHostEvent::ItemUseTargetResult(result))
@@ -1994,6 +1997,42 @@ mod tests {
         CreatureRatings, InspectionContext, InspectionSupplement, ObjectInspection,
         ObjectInspectionOutcome, ObjectInspectionResult,
     };
+
+    #[test]
+    fn death_query_projection_preserves_character_cell_and_unavailable_samples() {
+        use holtburger_core::client::corpse::{DeathLocationResult, DeathLocations};
+        let position = holtburger_common::position::WorldPosition {
+            landblock_id: Guid(0xda550100),
+            coords: holtburger_common::math::Vector3::new(12.0, 34.0, 56.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+        let event = project_client_event(ClientViewEvent::DeathLocations(DeathLocationResult {
+            character: Guid(7),
+            locations: DeathLocations::Recent {
+                positions: vec![Some(position), None],
+            },
+        }))
+        .unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let sink = crate::protocol::StdioEventSink::new(sender);
+        crate::host_event_sink::ClientEventSink::publish_client_event(&sink, event).unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("death result must publish an event frame");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(wire["event"], "client-death-locations");
+        assert_eq!(wire["payload"]["character"], 7);
+        assert_eq!(wire["payload"]["locations"]["kind"], "recent");
+        assert_eq!(
+            wire["payload"]["locations"]["positions"][0]["landblockId"],
+            position.landblock_id.0
+        );
+        assert_eq!(
+            wire["payload"]["locations"]["positions"][0]["coords"]["z"],
+            56.0
+        );
+        assert!(wire["payload"]["locations"]["positions"][1].is_null());
+    }
 
     #[test]
     fn progression_wire_preserves_large_xp_totals_as_decimal_strings() {

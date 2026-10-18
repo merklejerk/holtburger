@@ -416,6 +416,31 @@ pub enum ClientHostCommand {
     RecallClient {
         destination: holtburger_core::client::recall::RecallDestination,
     },
+    /// Read saved or session-observed death locations on demand.
+    QueryClientDeathLocations {
+        /// Which core-owned historical facts to return.
+        query: holtburger_core::client::corpse::DeathLocationQuery,
+    },
+    /// Manage received corpse permissions; grammar and help are frontend-owned.
+    ManageClientCorpseConsent {
+        /// Incoming list operation, distinct from granting access to somebody else.
+        action: holtburger_core::client::corpse::CorpseConsentAction,
+    },
+    /// Grant or revoke permission for a captured player name.
+    SetClientCorpsePermission {
+        /// Name captured when the frontend command or selected-player action runs.
+        #[serde(rename = "playerName")]
+        player_name: String,
+        /// True grants access; false revokes it. This is intent, not known server state.
+        granted: bool,
+    },
+    /// Change only whether this character accepts incoming corpse permits.
+    SetClientCorpseConsent {
+        /// Requested value for AcceptCorpseLootingPermissions only.
+        enabled: bool,
+    },
+    /// Frontend has already confirmed the user's intent.
+    KillClientCharacter,
     SendClientChat {
         message: String,
     },
@@ -495,6 +520,11 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_squelch",
     "submit_client_allegiance",
     "set_client_party_updates",
+    "query_client_death_locations",
+    "manage_client_corpse_consent",
+    "set_client_corpse_permission",
+    "set_client_corpse_consent",
+    "kill_client_character",
     "send_client_chat",
     "recall_client",
     "teleport_client_to_map_position",
@@ -787,7 +817,7 @@ impl ClientHostRuntime {
         self.send_command(ClientCommand::Disconnect).await
     }
 
-    /// Submit chat text; core recognizes retail recall commands before ordinary speech.
+    /// Submit ordinary chat text after app-local command handling.
     pub async fn send_chat(&self, message: String) -> Result<()> {
         if message.trim().is_empty() {
             bail!("client chat message must contain visible text");
@@ -1093,6 +1123,41 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        QueryClientDeathLocations { query } => runtime
+            .send_command(ClientCommand::QueryDeathLocations(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ManageClientCorpseConsent { action } => runtime
+            .send_command(ClientCommand::ManageCorpseConsent(action))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCorpsePermission {
+            player_name,
+            granted,
+        } => runtime
+            .send_command(if granted {
+                ClientCommand::AddPlayerPermission { player_name }
+            } else {
+                ClientCommand::RemovePlayerPermission { player_name }
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCorpseConsent { enabled } => runtime
+            .send_command(ClientCommand::SetCharacterOption {
+                option: holtburger_common::CharacterOption::AcceptCorpseLootingPermissions,
+                value: enabled,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        KillClientCharacter => runtime
+            .send_command(ClientCommand::Suicide)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SendClientChat { message } => runtime
             .send_chat(message)
             .await
@@ -1207,6 +1272,39 @@ mod tests {
             search,
             ClientHostCommand::SearchClientHousing { house_type: 4 }
         ));
+    }
+
+    #[test]
+    fn death_commands_decode_frontend_names_and_typed_actions() {
+        let permission = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "set_client_corpse_permission", "playerName": "Best Friend", "granted": false,
+        })).unwrap();
+        assert!(
+            matches!(permission, ClientHostCommand::SetClientCorpsePermission { player_name, granted: false } if player_name == "Best Friend")
+        );
+        let remove = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "manage_client_corpse_consent", "action": { "kind": "remove", "playerName": "Best Friend" },
+        })).unwrap();
+        assert!(
+            matches!(remove, ClientHostCommand::ManageClientCorpseConsent { action: holtburger_core::client::corpse::CorpseConsentAction::Remove { player_name } } if player_name == "Best Friend")
+        );
+        let query = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "query_client_death_locations", "query": "last-outdoor",
+        }))
+        .unwrap();
+        assert!(matches!(
+            query,
+            ClientHostCommand::QueryClientDeathLocations {
+                query: holtburger_core::client::corpse::DeathLocationQuery::LastOutdoor
+            }
+        ));
+        for command in ["set_client_corpse_consent", "kill_client_character"] {
+            let mut payload = serde_json::json!({ "command": command });
+            if command == "set_client_corpse_consent" {
+                payload["enabled"] = false.into();
+            }
+            assert!(serde_json::from_value::<ClientHostCommand>(payload).is_ok());
+        }
     }
 
     #[test]

@@ -6,6 +6,7 @@ use holtburger_core::client::recall::RecallDestination;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::context::normalize_name_for_lookup;
+use std::borrow::Cow;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
     match raw {
@@ -114,28 +115,14 @@ fn parse_run_command(command: &str) -> Option<(&str, &str)> {
 }
 
 fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a str>> {
-    for alias in aliases {
-        if command == *alias {
-            return Some(None);
-        }
-
-        let Some(rest) = command.strip_prefix(alias) else {
-            continue;
-        };
-
-        let Some(first) = rest.chars().next() else {
-            return Some(None);
-        };
-
-        if !first.is_whitespace() {
-            continue;
-        }
-
-        let topic = rest.trim();
-        return Some(if topic.is_empty() { None } else { Some(topic) });
+    let (verb, rest) = command
+        .split_once(char::is_whitespace)
+        .unwrap_or((command, ""));
+    if !aliases.iter().any(|alias| verb.eq_ignore_ascii_case(alias)) {
+        return None;
     }
-
-    None
+    let topic = rest.trim();
+    Some((!topic.is_empty()).then_some(topic))
 }
 
 fn display_absolute_path(path: &std::path::Path) -> String {
@@ -158,7 +145,7 @@ impl GameState {
             .unwrap_or_else(|| "My Fellowship".to_string())
     }
 
-    fn finish_input_command_submission(&mut self, command: &str) -> UpdateResult {
+    pub(super) fn finish_input_command_submission(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
         result.actions.push(
             AppUiAction::FinishInputCommandSubmission {
@@ -269,7 +256,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /promote, /leave, /uninvite, /options, /option"
+            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /corpse, /corpses, /consent, /die, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /promote, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -282,7 +269,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Corpse permissions: /permit <PLAYER>, /unpermit <PLAYER>".to_string(),
+            "Death and corpse commands: /help death".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -312,7 +299,8 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Use /help <COMMAND> for detailed help on a specific command.".to_string(),
+            "Use /help <COMMAND> for detailed help on a specific command. Commands accept / or @."
+                .to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -323,7 +311,7 @@ impl GameState {
     fn command_help_lines(&self, raw_topic: &str) -> Option<Vec<String>> {
         let topic = raw_topic
             .trim()
-            .trim_start_matches('/')
+            .trim_start_matches(['/', '@'])
             .to_ascii_lowercase();
 
         let lines = match topic.as_str() {
@@ -357,6 +345,7 @@ impl GameState {
                 "Usage: /swear <NAME>".to_string(),
                 "Attempt to swear allegiance to the named player.".to_string(),
             ],
+            "death" => super::corpse::death_help(),
             "permit" => vec![
                 "Usage: /permit <PLAYER>".to_string(),
                 "Grant corpse-looting permission to the named player.".to_string(),
@@ -501,7 +490,7 @@ impl GameState {
         }
     }
 
-    fn handle_options_command(&mut self, command: &str) -> UpdateResult {
+    fn handle_options_command(&mut self, command: &str, submitted_command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
         let parts: Vec<_> = command.split_whitespace().collect();
 
@@ -526,7 +515,7 @@ impl GameState {
                         ),
                     );
                 }
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
             }
             ["/option", raw_name, raw_value] => {
                 let Some(option) = CuratedCharacterOption::parse(raw_name) else {
@@ -553,7 +542,7 @@ impl GameState {
                         if value { "on" } else { "off" }
                     ),
                 );
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
             }
             _ => {
                 self.log_options_usage();
@@ -564,32 +553,43 @@ impl GameState {
         result
     }
 
-    pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
+    pub(super) fn handle_prefixed_command(&mut self, submitted_command: &str) -> UpdateResult {
+        // Normalize only local matching; history and unknown server commands retain the input.
+        let local_command = submitted_command.trim_start();
+        let normalized_command = match local_command.strip_prefix('@') {
+            Some(body) => Cow::Owned(format!("/{body}")),
+            None => Cow::Borrowed(local_command),
+        };
+        let command = normalized_command.as_ref();
         let mut result = UpdateResult::new();
 
-        match RecallDestination::from_chat(command) {
+        match super::recall::parse_recall_command(submitted_command) {
             Ok(Some(destination)) => {
                 result.commands.push(ClientCommand::Recall(destination));
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 return result.with_redraw(true);
             }
             Err(error) => {
                 self.chat.log(ChatMessageTags::error(), error.to_string());
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 return result.with_redraw(true);
             }
             Ok(None) => {}
         }
 
+        if let Some(result) = self.handle_death_command(submitted_command) {
+            return result;
+        }
+
         if command.trim() == "/version" {
             self.chat
                 .log(ChatMessageTags::system(), crate::version::display_version());
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
         if command.trim() == "/logopolis" {
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             result.actions.push(
                 AppUiAction::ChangeContextView {
                     view: ContextView::Logopolis,
@@ -604,7 +604,7 @@ impl GameState {
                 basename: basename.to_string(),
                 args: args.to_string(),
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -615,7 +615,7 @@ impl GameState {
 
         if command.trim() == "/unrun" {
             result.actions.push(crate::types::AppAction::UnrunScript);
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -623,7 +623,7 @@ impl GameState {
             result.actions.push(crate::types::AppAction::ScriptCommand {
                 msg: message.to_string(),
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -634,7 +634,7 @@ impl GameState {
 
         if command.trim() == "/scripts" {
             self.log_scripts_overview();
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -643,7 +643,7 @@ impl GameState {
                 target: target.to_string(),
                 message: message.to_string(),
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -665,7 +665,7 @@ impl GameState {
                 target,
                 message: message.to_string(),
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -679,7 +679,7 @@ impl GameState {
                 channel: ChatChannelKind::Allegiance,
                 message: message.to_string(),
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -707,7 +707,7 @@ impl GameState {
                 ChatMessageTags::system(),
                 format!("Swearing allegiance to {}...", player_name),
             );
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -723,7 +723,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppUiAction::OpenUnswearConfirmation { target }.into());
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -737,13 +737,13 @@ impl GameState {
                 channel: ChatChannelKind::Fellowship,
                 message: message.to_string(),
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
         if command == "/party" {
             result.commands.push(ClientCommand::ShowPartyStatus);
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -761,7 +761,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::Scoot { distance_m });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -769,7 +769,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::Scoot { distance_m: 1.0 });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -789,7 +789,7 @@ impl GameState {
                     name.to_string()
                 },
             });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -805,7 +805,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::InviteToParty { target });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -843,7 +843,7 @@ impl GameState {
                 ChatMessageTags::system(),
                 format!("Promoting {} to party leader...", member.name),
             );
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -854,7 +854,7 @@ impl GameState {
 
         if command == "/leave" {
             result.commands.push(ClientCommand::LeaveParty);
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
@@ -870,38 +870,12 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::UninviteFromParty { target });
-            result.merge(self.finish_input_command_submission(command));
+            result.merge(self.finish_input_command_submission(submitted_command));
             return result.with_redraw(true);
         }
 
         if command == "/uninvite" {
             self.log_command_usage("Usage: /uninvite <PLAYER>");
-            return result.with_redraw(true);
-        }
-
-        if let Some(player_name) = parse_single_argument_command(command, &["/permit"]) {
-            result.commands.push(ClientCommand::AddPlayerPermission {
-                player_name: player_name.to_string(),
-            });
-            result.merge(self.finish_input_command_submission(command));
-            return result.with_redraw(true);
-        }
-
-        if command == "/permit" {
-            self.log_command_usage("Usage: /permit <PLAYER>");
-            return result.with_redraw(true);
-        }
-
-        if let Some(player_name) = parse_single_argument_command(command, &["/unpermit"]) {
-            result.commands.push(ClientCommand::RemovePlayerPermission {
-                player_name: player_name.to_string(),
-            });
-            result.merge(self.finish_input_command_submission(command));
-            return result.with_redraw(true);
-        }
-
-        if command == "/unpermit" {
-            self.log_command_usage("Usage: /unpermit <PLAYER>");
             return result.with_redraw(true);
         }
 
@@ -929,39 +903,36 @@ impl GameState {
                 result.actions.push(crate::types::AppAction::SetCombatMode {
                     on: !crate::pages::game::state::domains::is_in_combat_mode(self),
                 });
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 result.with_redraw(true)
             }
             "/arena" => {
                 result
                     .commands
                     .push(ClientCommand::Recall(RecallDestination::PkLiteArena));
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 result.with_redraw(true)
             }
             "/pkl" => {
                 result.commands.push(ClientCommand::EnterPkLite);
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 result.with_redraw(true)
             }
             "/hq" => {
                 result
                     .commands
                     .push(ClientCommand::Recall(RecallDestination::AllegianceHousing));
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 result.with_redraw(true)
             }
-            "/rip" => {
-                result.commands.push(ClientCommand::Suicide);
-                result.merge(self.finish_input_command_submission(command));
-                result.with_redraw(true)
+            _ if command.starts_with("/option") => {
+                self.handle_options_command(command, submitted_command)
             }
-            _ if command.starts_with("/option") => self.handle_options_command(command),
             _ => {
-                result.merge(self.finish_input_command_submission(command));
+                result.merge(self.finish_input_command_submission(submitted_command));
                 result
                     .commands
-                    .push(ClientCommand::Talk(command.to_string()));
+                    .push(ClientCommand::Talk(submitted_command.to_string()));
                 result.with_redraw(true)
             }
         }
@@ -977,6 +948,65 @@ mod tests {
     use holtburger_common::CharacterOption;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
     use holtburger_core::PlayerCharacterOptions;
+
+    #[test]
+    fn both_prefixes_dispatch_local_commands_and_preserve_submitted_text() {
+        for prefix in ['/', '@'] {
+            let mut state =
+                GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+            let submitted = format!("  {prefix}tell Bestie keep @this /payload");
+            let result = state.handle_prefixed_command(&submitted);
+            assert!(
+                matches!(result.commands.first(), Some(ClientCommand::Tell { target, message })
+                if target == "Bestie" && message == "keep @this /payload")
+            );
+            assert!(result.actions.iter().any(|action| matches!(action,
+                AppAction::UiAction { action: AppUiAction::FinishInputCommandSubmission { command } }
+                    if command == &submitted)));
+
+            let result =
+                state.handle_prefixed_command(&format!("{prefix}option craft-success-dialog on"));
+            assert!(matches!(
+                result.commands.first(),
+                Some(ClientCommand::SetCharacterOption {
+                    option: CharacterOption::UseCraftingChanceOfSuccessDialog,
+                    value: true,
+                })
+            ));
+
+            let result = state.handle_prefixed_command(&format!("{prefix}help {prefix}version"));
+            assert!(result.commands.is_empty());
+            assert!(
+                state
+                    .chat
+                    .messages
+                    .iter()
+                    .any(|message| message.text == "Usage: /version")
+            );
+
+            let unknown = format!("{prefix}wave hello @Bestie");
+            let result = state.handle_prefixed_command(&unknown);
+            assert!(
+                matches!(result.commands.first(), Some(ClientCommand::Talk(text)) if text == &unknown)
+            );
+        }
+    }
+
+    #[test]
+    fn death_topic_uses_the_help_catalog_with_both_prefixes_and_case() {
+        for command in ["/HeLp DEATH", "@HeLp DEATH", "/? death", "@? death"] {
+            let mut state = GameState::default();
+            let result = state.handle_prefixed_command(command);
+            assert!(result.commands.is_empty());
+            assert!(
+                state
+                    .chat
+                    .messages
+                    .iter()
+                    .any(|message| message.text.starts_with("Death commands:"))
+            );
+        }
+    }
 
     #[test]
     fn help_command_lists_options_surface() {
@@ -1021,9 +1051,13 @@ mod tests {
                 .iter()
                 .any(|message| message.text.contains(":<MSG>"))
         );
-        assert!(state.chat.messages.iter().any(|message| {
-            message.text == "Use /help <COMMAND> for detailed help on a specific command."
-        }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text.contains("Use /help <COMMAND>") })
+        );
         assert!(
             state
                 .chat
@@ -1057,6 +1091,7 @@ mod tests {
     #[test]
     fn retail_recall_subcommands_dispatch_from_the_input_bar() {
         for (command, destination) in [
+            ("  @LS  ", RecallDestination::Lifestone),
             ("/hou re", RecallDestination::House),
             (
                 "/house mansion_recall",

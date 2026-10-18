@@ -9,7 +9,7 @@ import {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("@loc", () => {
+describe("location command", () => {
 	it("keeps frame and cell identity while rounding poses into two compact lines", () => {
 		const report = formatClientLocation(
 			{
@@ -32,22 +32,25 @@ describe("@loc", () => {
 		);
 	});
 
-	it("prints and copies identical content for the local command", async () => {
-		const writeText = vi.fn().mockResolvedValue(undefined);
-		vi.stubGlobal("navigator", { clipboard: { writeText } });
-		const append = vi.fn();
-		const report = "Player pose\nCamera pose";
-		expect(await runClientLocationCommand(" @LOC ", () => report, append)).toBe(
-			true,
-		);
-		expect(append).toHaveBeenCalledExactlyOnceWith({
-			kind: "system",
-			message: report,
-		});
-		expect(writeText).toHaveBeenCalledExactlyOnceWith(report);
-	});
+	it.each([" @LOC ", " /LOC "])(
+		"prints and copies identical content for %s",
+		async (command) => {
+			const writeText = vi.fn().mockResolvedValue(undefined);
+			vi.stubGlobal("navigator", { clipboard: { writeText } });
+			const append = vi.fn();
+			const report = "Player pose\nCamera pose";
+			expect(
+				await runClientLocationCommand(command, () => report, append),
+			).toBe(true);
+			expect(append).toHaveBeenCalledExactlyOnceWith({
+				kind: "system",
+				message: report,
+			});
+			expect(writeText).toHaveBeenCalledExactlyOnceWith(report);
+		},
+	);
 
-	it.each(["hello", "@location", "@loc extra", "/loc"])(
+	it.each(["hello", "@location", "@loc extra", "/loc extra"])(
 		"leaves %s to normal chat routing",
 		async (message) => {
 			const read = vi.fn();

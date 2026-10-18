@@ -81,6 +81,8 @@
 			})}
 			readCanSplit={() => menu}
 			readCanInvite={() => false}
+			readCanCorpsePermission={() => false}
+			onCorpsePermission={() => {}}
 			readCanSwear={() => false}
 			readCanAddFriend={() => false}
 			readCanIgnoreAccount={() => false}

@@ -34,7 +34,8 @@ const quaternionSchema = z.object({
 	z: finiteNumber,
 });
 
-const worldPositionSchema = z.object({
+/** Exact AC cell/pose as authored by the host, including saved character positions. */
+export const worldPositionSchema = z.object({
 	// Wire spelling follows WorldPosition; the value is an exact cell, never a terrain owner.
 	landblockId: cellIdSchema,
 	coords: vector3Schema,

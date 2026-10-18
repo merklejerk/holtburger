@@ -2430,6 +2430,11 @@ fn test_player_description_initialization() {
         coords: Vector3::new(12.0, 34.0, 56.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
+    let saved_death = WorldPosition {
+        landblock_id: Guid(0x56780001),
+        coords: Vector3::new(42.0, 24.0, 9.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
     let options1 =
         CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG | CharacterOptions1::HEAR_ALLEGIANCE_CHAT;
     let options2 = CharacterOptions2::SHOW_HELM | CharacterOptions2::HEAR_GENERAL_CHAT;
@@ -2448,7 +2453,7 @@ fn test_player_description_initialization() {
         wee_type: 1,
         pos: Some(bootstrap_pos),
         properties,
-        positions: std::collections::BTreeMap::new(),
+        positions: [(PositionType::LastOutsideDeath as u32, saved_death)].into(),
         attributes: std::collections::BTreeMap::new(),
         skills: std::collections::BTreeMap::new(),
         enchantments: Vec::new(),
@@ -2466,7 +2471,7 @@ fn test_player_description_initialization() {
     };
 
     let event = GameEvent::PlayerDescription(Box::new(data));
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+    let mut msg = GameMessage::GameEvent(Box::new(GameEventMessage {
         target: player_guid,
         sequence: 1,
         event,
@@ -2474,6 +2479,12 @@ fn test_player_description_initialization() {
 
     let events = state.handle_message(&msg);
 
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        Some(saved_death),
+    );
     assert_eq!(state.player.guid, player_guid);
     assert_eq!(state.player_name(), player_name);
     assert_eq!(state.player_position(), Some(bootstrap_pos));
@@ -2519,6 +2530,57 @@ fn test_player_description_initialization() {
         !state
             .player
             .character_option_enabled(CharacterOption::ListenToTradeChat)
+    );
+    let replacement = WorldPosition {
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..saved_death
+    };
+    state.handle_message(&GameMessage::PrivateUpdatePosition(Box::new(
+        PrivateUpdatePositionData {
+            sequence: 1,
+            position_type: PositionType::LastOutsideDeath,
+            pos: replacement,
+        },
+    )));
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        Some(replacement)
+    );
+    assert_eq!(state.player_position(), Some(bootstrap_pos));
+
+    let GameMessage::GameEvent(envelope) = &mut msg else {
+        unreachable!()
+    };
+    let GameEvent::PlayerDescription(description) = &mut envelope.event else {
+        unreachable!()
+    };
+    description.positions.clear();
+    state.handle_message(&msg);
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        None
+    );
+
+    state
+        .player
+        .set_local_position_overlay(PositionType::LastOutsideDeath, saved_death);
+    let GameMessage::GameEvent(envelope) = &mut msg else {
+        unreachable!()
+    };
+    let GameEvent::PlayerDescription(description) = &mut envelope.event else {
+        unreachable!()
+    };
+    description.guid = Guid(player_guid.0 + 1);
+    state.handle_message(&msg);
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        None
     );
 }
 

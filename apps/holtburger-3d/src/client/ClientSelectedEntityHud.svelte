@@ -37,6 +37,10 @@
 		/** Dispatch selected-player shortcuts through their app owners. */
 		readonly onAddFriend: () => void;
 		readonly onIgnoreAccount: () => void;
+		/** Other known selected player and active session; no guessed permission status. */
+		readonly readCanCorpsePermission: () => boolean;
+		/** Dispatch the requested operation using the selection captured at activation. */
+		readonly onCorpsePermission: (granted: boolean) => void;
 		/** Sample allegiance-owned swear admission with the selected display. */
 		readonly readCanSwear: () => boolean;
 		/** Server confirmation owns the selected-player swear request. */
@@ -64,6 +68,8 @@
 		readCanIgnoreAccount,
 		onAddFriend,
 		onIgnoreAccount,
+		readCanCorpsePermission,
+		onCorpsePermission,
 		readCanSwear,
 		onSwear,
 		onInvite,
@@ -79,6 +85,7 @@
 	let canInvite = $state(false);
 	let canAddFriend = $state(false);
 	let canIgnoreAccount = $state(false);
+	let canCorpsePermission = $state(false);
 	let canSwear = $state(false);
 	/** Eligible selected-entity command; the source remains mounted for follow-up dialogs. */
 	type SelectedAction = {
@@ -95,7 +102,13 @@
 		(
 			| { readonly action: "interact" | "split"; readonly description: string }
 			| {
-					readonly action: "swear" | "invite" | "friend" | "ignore";
+					readonly action:
+						| "swear"
+						| "invite"
+						| "friend"
+						| "ignore"
+						| "grant-corpse"
+						| "revoke-corpse";
 					readonly description?: never;
 			  }
 		);
@@ -142,6 +155,22 @@
 				disabled: false,
 				activate: onIgnoreAccount,
 			});
+		if (canCorpsePermission) {
+			available.push({
+				action: "grant-corpse",
+				label: "Grant corpse access",
+				icon: "add",
+				disabled: false,
+				activate: () => onCorpsePermission(true),
+			});
+			available.push({
+				action: "revoke-corpse",
+				label: "Revoke corpse access",
+				icon: "remove",
+				disabled: false,
+				activate: () => onCorpsePermission(false),
+			});
+		}
 		if (canSplit)
 			available.push({
 				action: "split",
@@ -191,6 +220,7 @@
 			canInvite = guid !== null && readCanInvite();
 			canAddFriend = guid !== null && readCanAddFriend();
 			canIgnoreAccount = guid !== null && readCanIgnoreAccount();
+			canCorpsePermission = guid !== null && readCanCorpsePermission();
 			canSwear = guid !== null && readCanSwear();
 		});
 	});
@@ -205,6 +235,7 @@
 			canInvite = selectedGuid !== null && readCanInvite();
 			canAddFriend = selectedGuid !== null && readCanAddFriend();
 			canIgnoreAccount = selectedGuid !== null && readCanIgnoreAccount();
+			canCorpsePermission = selectedGuid !== null && readCanCorpsePermission();
 			canSwear = selectedGuid !== null && readCanSwear();
 		};
 		const interval = window.setInterval(

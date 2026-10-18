@@ -121,6 +121,7 @@ pub enum HostEvent {
     ClientBookOpened(crate::client_projection::ClientBookOpenedWire),
     ClientBookUpdated(crate::client_projection::ClientBookWire),
     ClientObjectPreviewResult(holtburger_core::client::object_preview::ObjectPreviewResult),
+    ClientDeathLocations(holtburger_core::client::corpse::DeathLocationResult),
     ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
@@ -464,6 +465,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::BookUpdated(book) => {
                 HostEvent::ClientBookUpdated(book)
+            }
+            crate::client_projection::ClientHostEvent::DeathLocations(result) => {
+                HostEvent::ClientDeathLocations(result)
             }
             crate::client_projection::ClientHostEvent::ObjectInspectionResult(result) => {
                 HostEvent::ClientObjectInspectionResult(result)

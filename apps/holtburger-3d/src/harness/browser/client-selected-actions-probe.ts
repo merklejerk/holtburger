@@ -1,7 +1,12 @@
+import type { ClientChatLine } from "../../client/client-chat-policy";
 import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
+import ClientChat from "../../client/ClientChat.svelte";
+import { deathLocationLines } from "../../client/client-death-commands";
+import { runClientHelpCommand } from "../../client/client-command-help";
+import { deathLocationResultSchema } from "../../client/client-death-contract";
 import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
 import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 import { CLIENT_TUNING } from "../../client/client-tuning";
@@ -59,6 +64,10 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			readCanSplit: () => split,
 			readCanInvite: () => invite,
 			readCanSwear: () => swear,
+			readCanCorpsePermission: () => friend,
+			onCorpsePermission: (granted: boolean) => {
+				calls.push(granted ? "grant-corpse" : "revoke-corpse");
+			},
 			readCanAddFriend: () => friend,
 			readCanIgnoreAccount: () => ignore,
 			onAddFriend: () => {
@@ -127,7 +136,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			target.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
 		);
 		require(rows.map((row) => row.textContent?.trim()).join("|") ===
-			`Trade (Ctrl + f)|Swear allegiance|Invite to party|Add friend|Ignore account|${splitLabel}`, "Menu action labels or order are incorrect");
+			`Trade (Ctrl + f)|Swear allegiance|Invite to party|Add friend|Ignore account|Grant corpse access|Revoke corpse access|${splitLabel}`, "Menu action labels or order are incorrect");
 		require(rows.every(
 			(row) => !row.hasAttribute("title"),
 		), "Labeled menu actions should not have redundant tooltips");
@@ -142,6 +151,8 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			"Invite to party",
 			"Add friend",
 			"Ignore account",
+			"Grant corpse access",
+			"Revoke corpse access",
 			splitLabel,
 		]) {
 			if (menu() === null) await open();
@@ -154,7 +165,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			require(menu() === null, "Choosing an action must close the menu");
 		}
 		require(calls.join() ===
-			"trade,trade,swear,invite,friend,ignore,split", "Menu dispatched the wrong actions");
+			"trade,trade,swear,invite,friend,ignore,grant-corpse,revoke-corpse,split", "Menu dispatched the wrong actions");
 		await open();
 		const triggerPress = new PointerEvent("pointerdown", {
 			bubbles: true,
@@ -196,7 +207,122 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		require(menu() === null &&
 			button("Trade")
 				.isConnected, "Eligibility change must restore the single action and dismiss the menu");
-		return { passed: true, calls };
+		// Feed typed death-query output through production chat and its explicit waypoint link.
+		const query = deathLocationResultSchema.parse({
+			character: 7,
+			locations: {
+				kind: "recent",
+				positions: [
+					{
+						landblockId: 0xda550001,
+						coords: { x: 12, y: 34, z: 56 },
+						rotation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					{
+						landblockId: 0xda550100,
+						coords: { x: 12, y: 34, z: 56 },
+						rotation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					null,
+				],
+			},
+		});
+		let waypointActivations = 0;
+		const messages: ClientChatLine[] = deathLocationLines(query).map(
+			(message, id) => ({
+				kind: "system",
+				message,
+				id,
+				receivedAt: new Date(0),
+			}),
+		);
+		runClientHelpCommand("/help", (entry) => {
+			messages.push({ ...entry, id: messages.length, receivedAt: new Date(0) });
+		});
+		messages.push({
+			kind: "formatted-system",
+			id: messages.length,
+			receivedAt: new Date(0),
+			rows: [
+				{
+					indented: true,
+					spans: [{ kind: "code", text: "<i>literal</i> 42.0N, 12.0E" }],
+				},
+			],
+		});
+		const chatTarget = document.createElement("div");
+		target.append(chatTarget);
+		const chat = mount(ClientChat, {
+			target: chatTarget,
+			context,
+			props: {
+				messages,
+				sentHistory: [],
+				enabledTags: ["chat", "combat"],
+				onEnabledTagsChange: () => {},
+				onSend: async () => {
+					throw new Error("Coordinate clicks must not submit chat");
+				},
+				onSendError: (message) => {
+					throw new Error(`Unexpected chat submission failure: ${message}`);
+				},
+				onSetWaypoint: () => {
+					waypointActivations += 1;
+				},
+			},
+		});
+		try {
+			await settle();
+			const help = Array.from(chatTarget.querySelectorAll("p")).find((row) =>
+				row.textContent?.includes("Available commands"),
+			);
+			if (help === undefined)
+				throw new Error("Missing formatted help response");
+			require(help.querySelectorAll("strong").length ===
+				1, "Help needs one timestamp for the entire response");
+			require(help.querySelector("code")?.textContent ===
+				"/help [command]", "Help commands must render as code");
+			const heading = help.querySelector("em");
+			require(heading !== null &&
+				getComputedStyle(heading).fontStyle ===
+					"italic", "Help headings must render in italics");
+			const indented = help.querySelector<HTMLElement>(".indented");
+			require(indented !== null &&
+				parseFloat(getComputedStyle(indented).paddingInlineStart) >
+					0, "Help command rows must be indented");
+			require(chatTarget.textContent?.includes("<i>literal</i>") &&
+				chatTarget.querySelector("i") ===
+					null, "Formatted spans must preserve literal markup as text");
+			require(waypointActivations ===
+				0, "Query output must not create a waypoint automatically");
+			const historyToggle = chatTarget.querySelector<HTMLButtonElement>(
+				'button[aria-label="Interact with chat history"]',
+			);
+			if (historyToggle === null)
+				throw new Error("Missing chat history interaction control");
+			historyToggle.click();
+			await settle();
+			const links = chatTarget.querySelectorAll<HTMLButtonElement>(
+				"button.waypoint-link",
+			);
+			require(links.length ===
+				2, "Outdoor history and formatted coordinates should each offer a waypoint");
+			require(chatTarget.textContent?.includes(
+				"0xda550100",
+			), "Indoor output must preserve its cell");
+			links[0].click();
+			await settle();
+			require(waypointActivations ===
+				1, "Explicit coordinate activation must set one waypoint");
+			links[1].click();
+			await settle();
+			require(waypointActivations ===
+				2, "Formatted code coordinates must retain waypoint activation");
+		} finally {
+			await unmount(chat);
+			chatTarget.remove();
+		}
+		return { passed: true, calls, waypointActivations };
 	} finally {
 		await unmount(component);
 		target.remove();

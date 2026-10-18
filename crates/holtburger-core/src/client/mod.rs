@@ -32,6 +32,7 @@ pub mod combat_tuning;
 mod commands;
 pub mod connection;
 mod contracts;
+pub mod corpse;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
 mod entity_cues;
@@ -189,6 +190,8 @@ pub struct ClientRuntime {
     closing_containers: std::collections::BTreeMap<Guid, Instant>,
     /// Bounded successful-open history used only by corpse-selection conveniences.
     opened_corpses: world_container::OpenedCorpseHistory,
+    /// Bounded approximate death locations for this character session.
+    recent_deaths: corpse::RecentDeaths,
     /// Single-item replacement owner, retaining its existing receipt-dependent progression.
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
     /// One peace prerequisite plus bounded recent equipment-set error attribution.
@@ -854,6 +857,7 @@ impl ClientRuntime {
             if self.progression.clear() {
                 self.emit_progression_guards();
             }
+            self.recent_deaths.clear();
             self.world.player.character_titles = None;
             self.reset_friends();
             self.reset_contracts();

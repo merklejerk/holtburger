@@ -1,3 +1,4 @@
+import type { DeathLocationResult } from "../../client/client-death-contract";
 import type { ClientCombatOutcome } from "../../client/client-host-contract";
 import type {
 	ContractsSnapshot,
@@ -156,6 +157,11 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_squelch",
 	"submit_client_allegiance",
 	"set_client_party_updates",
+	"query_client_death_locations",
+	"manage_client_corpse_consent",
+	"set_client_corpse_permission",
+	"set_client_corpse_consent",
+	"kill_client_character",
 	"send_client_chat",
 	"teleport_client_to_map_position",
 	"recall_client",
@@ -247,6 +253,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-vendor-result",
 	"client-vendor-phase",
 	"client-item-use-result",
+	"client-death-locations",
 	"client-item-use-target-result",
 	"client-spell-inspection-context",
 	"client-spell-inspection-result",
@@ -353,6 +360,7 @@ export interface HostEventPayloadMap {
 	"client-vendor-result": VendorResult;
 	"client-vendor-phase": VendorPhase;
 	"client-item-use-result": ClientItemUseResult;
+	"client-death-locations": DeathLocationResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;
 	"client-spell-inspection-context": SpellInspectionContext;
 	"client-spell-inspection-result": SpellInspectionResult;

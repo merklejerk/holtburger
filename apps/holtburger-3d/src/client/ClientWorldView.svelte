@@ -239,6 +239,10 @@
 		onPickInventoryTarget: ClientViewportTargetPicker;
 		/** Ordinary inventory refusal feedback. */
 		onInventoryNotice: (message: string) => void;
+		/** Session eligibility; target identity remains selection-owned. */
+		readonly readCanSetCorpsePermission: () => boolean;
+		/** Captured name and requested grant/revoke operation, with no optimistic status. */
+		readonly onCorpsePermission: (playerName: string, granted: boolean) => void;
 		/** Surface social dispatch failures even when the Social panel is closed. */
 		readonly onSocialNotice: (message: string) => void;
 		/** Shell-owned confirmation after the minimap clipboard write succeeds. */
@@ -356,6 +360,8 @@
 		/** App-session input recall entries, independent of received chat lines. */
 		readonly sentChatHistory: readonly string[];
 		readonly onSendChat: (message: string) => Promise<void>;
+		/** Report a chat submission failure through the retained chat history. */
+		readonly onSendChatError: (message: string) => void;
 		readonly onCanvas: (canvas: HTMLCanvasElement | null) => void;
 	}
 
@@ -448,6 +454,8 @@
 		onSelectContentsItem,
 		onPickInventoryTarget,
 		onInventoryNotice,
+		readCanSetCorpsePermission,
+		onCorpsePermission,
 		onSocialNotice,
 		onCoordinatesCopied,
 		onInteractEntity,
@@ -494,6 +502,7 @@
 		chatMessages,
 		sentChatHistory,
 		onSendChat,
+		onSendChatError,
 		onCanvas,
 	}: Props = $props();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
@@ -1195,6 +1204,7 @@
 			messages={chatMessages}
 			sentHistory={sentChatHistory}
 			onSend={onSendChat}
+			onSendError={onSendChatError}
 			enabledTags={chatFilters}
 			onEnabledTagsChange={onChatFiltersChange}
 		/>
@@ -1230,6 +1240,13 @@
 				{input}
 				{displayPlatform}
 				selectedGuid={selectedEntityGuid}
+				readCanCorpsePermission={() =>
+					readCanSetCorpsePermission() && selectedPlayer() !== null}
+				onCorpsePermission={(granted) => {
+					const target = selectedPlayer();
+					if (target !== null && readCanSetCorpsePermission())
+						onCorpsePermission(target.name, granted);
+				}}
 				readCanSplit={canSplitSelectedEntity}
 				readCanAddFriend={() => friendTarget() !== null}
 				readCanIgnoreAccount={() => ignoreTarget() !== null}

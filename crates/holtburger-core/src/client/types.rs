@@ -751,6 +751,8 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Requested historical locations, never a claim about remaining corpses.
+    DeathLocations(super::corpse::DeathLocationResult),
     /// Replacement housing facts; this event never requests opening a window.
     HousingUpdated(super::housing::HousingSnapshot),
     /// Full accepted crystal receipt; the frontend owns whether to open its HUD.
@@ -1097,8 +1099,12 @@ pub enum ClientCommand {
     },
     RestoreCharacter(Guid),
     EnterWorld,
-    /// User chat text; recognized retail recall commands dispatch travel instead of speech.
+    /// Ordinary chat text after frontend-owned command parsing.
     Talk(String),
+    /// Read death locations without sending a game action.
+    QueryDeathLocations(super::corpse::DeathLocationQuery),
+    /// Manage permissions received from other corpse owners.
+    ManageCorpseConsent(super::corpse::CorpseConsentAction),
     Tell {
         target: String,
         message: String,

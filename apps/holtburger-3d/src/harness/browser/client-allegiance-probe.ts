@@ -390,6 +390,8 @@ export async function probeAllegiance(options: {
 				onAddFriend: () => {},
 				onIgnoreAccount: () => {},
 				onInvite: () => {},
+				readCanCorpsePermission: () => false,
+				onCorpsePermission: () => {},
 				readCanSwear: () => session.allegiance.canSwear(patron.guid),
 				onSwear: () => {
 					void session.allegiance.request({ kind: "swear", guid: patron.guid });

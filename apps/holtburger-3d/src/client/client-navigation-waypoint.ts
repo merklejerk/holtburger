@@ -104,7 +104,7 @@ export class ClientNavigationWaypointOwner {
 		append: (message: ClientChatMessage) => void,
 		notify: (message: string) => void,
 	): boolean {
-		const match = /^@(?:waypoint|wp)(?=\s|$)/i.exec(message.trim());
+		const match = /^[/@](?:waypoint|wp)(?=\s|$)/i.exec(message.trim());
 		if (match === null) return false;
 		const input = message.trim().slice(match[0].length).trim();
 		if (input.toLowerCase() === "clear") {

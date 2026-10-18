@@ -100,8 +100,8 @@ describe("waypoint geometry", () => {
 	});
 });
 
-describe("@waypoint", () => {
-	it.each(["@waypoint", "@wp"])(
+describe("waypoint commands", () => {
+	it.each(["@waypoint", "@wp", "/waypoint", "/wp"])(
 		"sets, replaces, reports, and clears through %s",
 		(command) => {
 			const f = fixture();
@@ -139,6 +139,8 @@ describe("@waypoint", () => {
 	it.each([
 		"@waypoint garbage",
 		"@wp garbage",
+		"/waypoint garbage",
+		"/wp clear extra",
 		"@wp clear extra",
 		"@wp 102N 0E",
 		"@waypoint clear extra",
@@ -161,7 +163,7 @@ describe("@waypoint", () => {
 			expect(f.read()?.target).toEqual(target);
 		},
 	);
-	it.each(["hello", "@loc", "@waypoints", "@wpx", "/waypoint 0N 0E"])(
+	it.each(["hello", "@loc", "@waypoints", "@wpx", "/waypoints 0N 0E"])(
 		"leaves %s to normal routing",
 		(input) => {
 			const f = fixture(),

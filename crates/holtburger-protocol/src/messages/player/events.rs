@@ -105,7 +105,7 @@ pub struct PlayerDescriptionEventData {
     pub pos: Option<WorldPosition>,
     /// All sparse properties (ints, floats, dids, etc.).
     pub properties: WorldObjectProperties,
-    /// Visual sub-positions for specific equipment slots or parts.
+    /// Character positions keyed by PositionType, including the saved last outdoor death.
     pub positions: BTreeMap<u32, WorldPosition>,
     /// Primary character attributes (Strength, Endurance, etc.).
     pub attributes: BTreeMap<u32, Attribute>,

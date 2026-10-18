@@ -1,4 +1,6 @@
 mod commands;
+mod corpse;
+mod recall;
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
@@ -237,8 +239,8 @@ impl GameState {
                         return result;
                     }
                     self.chat_input.record_history_submission(&command);
-                    if command.starts_with('/') {
-                        return self.handle_slash_command(&command);
+                    if command.trim_start().starts_with(['/', '@']) {
+                        return self.handle_prefixed_command(&command);
                     }
                     if let Some(emote) = command.strip_prefix(':') {
                         result.actions.push(

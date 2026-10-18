@@ -229,6 +229,27 @@ impl ProtocolPack for RemovePlayerPermissionActionData {
     }
 }
 
+/// Discard permission received from the named corpse owner.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoveFromPlayerConsentListActionData {
+    /// Name of the player who granted access.
+    pub player_name: String,
+}
+
+impl ProtocolUnpack for RemoveFromPlayerConsentListActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Some(Self {
+            player_name: read_string16(data, offset)?,
+        })
+    }
+}
+
+impl ProtocolPack for RemoveFromPlayerConsentListActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        write_string16(writer, &self.player_name);
+    }
+}
+
 /// Request a displayed character title (retail acclient.c:668249).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TitleSetActionData {
@@ -357,6 +378,31 @@ mod tests {
 
         let fixture = hex::decode("443322111E00000042000050").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn corpse_consent_actions_match_ace_payloads() {
+        // ACE GameActionType and Clear/Display/RemoveFromPlayerConsentList handlers.
+        for (action, wire) in [
+            (GameAction::ClearPlayerConsentList, "0403020116020000"),
+            (GameAction::DisplayPlayerConsentList, "0403020117020000"),
+            (
+                GameAction::RemoveFromPlayerConsentList(Box::new(
+                    RemoveFromPlayerConsentListActionData {
+                        player_name: "Bestie".into(),
+                    },
+                )),
+                "04030201180200000600426573746965",
+            ),
+        ] {
+            assert_pack_unpack_parity(
+                &hex::decode(wire).unwrap(),
+                &GameActionMessage {
+                    sequence: 0x01020304,
+                    action,
+                },
+            );
+        }
     }
 
     #[test]

@@ -560,12 +560,12 @@ pub enum GameActionOpcode {
     // StopMovementCommand = 0xF661,
 
     // --- Miscellaneous & Permissions ---
-    // /// C2S: Clear the list of players with corpse-looting consent.
-    // ClearPlayerConsentList = 0x0216,
-    // /// C2S: Request the current corpse-looting consent list.
-    // DisplayPlayerConsentList = 0x0217,
-    // /// C2S: Revoke corpse-looting consent from a player.
-    // RemoveFromPlayerConsentList = 0x0218,
+    /// C2S: Clear received corpse-looting permissions.
+    ClearPlayerConsentList = 0x0216,
+    /// C2S: Request received corpse-looting permissions.
+    DisplayPlayerConsentList = 0x0217,
+    /// C2S: Remove a received corpse-looting permission.
+    RemoveFromPlayerConsentList = 0x0218,
     // /// C2S: Add a specific interaction permission for a player.
     // AddPlayerPermission = 0x0219,
     // /// C2S: Revoke a specific interaction permission from a player.

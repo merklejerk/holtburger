@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import ClientChatFormattedText from "./ClientChatFormattedText.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { tick } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -26,6 +27,8 @@
 		/** App-owned locally queued input, oldest first. */
 		readonly sentHistory: readonly string[];
 		readonly onSend: (message: string) => Promise<void>;
+		/** Append submission failures to the app-owned durable chat buffer. */
+		readonly onSendError: (message: string) => void;
 		readonly enabledTags: readonly ClientChatFilterTag[];
 		readonly onEnabledTagsChange: (
 			value: readonly ClientChatFilterTag[],
@@ -37,6 +40,7 @@
 		messages,
 		sentHistory,
 		onSend,
+		onSendError,
 		enabledTags,
 		onEnabledTagsChange,
 	}: Props = $props();
@@ -48,7 +52,6 @@
 	/** Navigation is local to the mounted editor; the sent entries outlive it. */
 	let recall = $state<ChatInputRecall | null>(null);
 	let sending = $state(false);
-	let failure = $state<string | null>(null);
 	let bufferElement = $state<HTMLDivElement | null>(null);
 	/** Explicit history interaction enables selection and preserves the reader's scroll position. */
 	let historyInteractive = $state(false);
@@ -70,7 +73,6 @@
 			event.preventDefault();
 			message = "";
 			recall = null;
-			failure = null;
 			keyboard.returnToGame();
 		} else if (
 			!event.ctrlKey &&
@@ -121,16 +123,15 @@
 		const text = message.trim();
 		if (sending || text.length === 0) return;
 		sending = true;
-		failure = null;
 		try {
 			await onSend(text);
+		} catch (error) {
+			onSendError(error instanceof Error ? error.message : String(error));
+		} finally {
+			sending = false;
 			message = "";
 			recall = null;
 			if (document.activeElement === inputElement) keyboard.returnToGame();
-		} catch (error) {
-			failure = error instanceof Error ? error.message : "Chat send failed.";
-		} finally {
-			sending = false;
 		}
 	}
 
@@ -223,7 +224,11 @@
 				>
 					<strong>{linePrefix(line)}:</strong>
 					<span class="chat-message"
-						>{#if historyInteractive}<ClientWaypointText
+						>{#if line.kind === "formatted-system"}<ClientChatFormattedText
+								rows={line.rows}
+								interactive={historyInteractive}
+								{onSetWaypoint}
+							/>{:else if historyInteractive}<ClientWaypointText
 								text={line.message}
 								{onSetWaypoint}
 							/>{:else}{line.message}{/if}</span
@@ -260,7 +265,6 @@
 			</button>
 		{/each}
 	</div>
-	{#if failure}<div class="chat-failure" role="alert">{failure}</div>{/if}
 	<form
 		class="ui-hud-surface"
 		onsubmit={(event) => {
@@ -313,7 +317,7 @@
 			display: grid;
 			box-sizing: border-box;
 			height: 100%;
-			grid-template-rows: minmax(0, 1fr) auto auto auto;
+			grid-template-rows: minmax(0, 1fr) auto auto;
 			color: var(--ui-color-text);
 			font: inherit;
 			line-height: 1.25;
@@ -470,11 +474,6 @@
 		}
 		.chat-tone-society {
 			color: var(--ui-chat-society-text);
-		}
-		.chat-failure {
-			padding: 3px 7px;
-			background: var(--ui-color-well);
-			color: var(--ui-color-danger);
 		}
 		form {
 			display: grid;

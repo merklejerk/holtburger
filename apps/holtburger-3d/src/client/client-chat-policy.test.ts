@@ -5,15 +5,12 @@ import {
 	clientChatChannelLabel,
 	clientChatFiltersAllow,
 	clientChatTone,
-	type ClientChatErrorMessage,
+	type ClientChatEntry,
 	type ClientChatLine,
 } from "./client-chat-policy";
-import type { ClientChatMessage } from "./client-host-contract";
 
-function line(
-	message: ClientChatMessage | ClientChatErrorMessage,
-): ClientChatLine {
-	return { ...message, id: 1, receivedAt: new Date(0) } as ClientChatLine;
+function line(message: ClientChatEntry): ClientChatLine {
+	return { ...message, id: 1, receivedAt: new Date(0) };
 }
 
 describe("client chat presentation policy", () => {
@@ -39,6 +36,12 @@ describe("client chat presentation policy", () => {
 		expect(clientChatFiltersAllow(["combat"], speech)).toBe(false);
 		expect(clientChatFiltersAllow([], system)).toBe(true);
 		expect(clientChatFiltersAllow([], error)).toBe(true);
+		const formatted = line({
+			kind: "formatted-system",
+			rows: [{ indented: false, spans: [{ kind: "emphasis", text: "Help" }] }],
+		});
+		expect(clientChatFiltersAllow([], formatted)).toBe(true);
+		expect(clientChatTone(formatted)).toBe("system");
 	});
 
 	it("assigns combat feedback its dedicated color family", () => {

@@ -421,6 +421,8 @@
 					readCanIgnoreAccount={() => false}
 					onAddFriend={() => {}}
 					onIgnoreAccount={() => {}}
+					readCanCorpsePermission={() => false}
+					onCorpsePermission={() => {}}
 					readCanSwear={() => false}
 					onSwear={() => {}}
 					onInvite={() => {}}
@@ -435,6 +437,17 @@
 					{messages}
 					{sentHistory}
 					onSend={send}
+					onSendError={(message) => {
+						messages = [
+							...messages,
+							{
+								kind: "error",
+								message,
+								id: messages.length + 1,
+								receivedAt: new Date(),
+							},
+						];
+					}}
 					enabledTags={chatFilters}
 					onEnabledTagsChange={(value) => (chatFilters = value)}
 				/>{/snippet}

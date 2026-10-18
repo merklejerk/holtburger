@@ -123,6 +123,7 @@ impl ClientRuntime {
             self.emit_progression_guards();
         }
         self.reset_container_access();
+        self.recent_deaths.clear();
         self.clear_busy_operation();
         // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.
         self.event_ordering = Some(super::event_ordering::GameEventOrdering::new(player_guid));
@@ -395,12 +396,15 @@ impl ClientRuntime {
         {
             self.clear_busy_operation();
             self.reset_container_access();
+            self.recent_deaths.clear();
         }
         if let GameMessage::GameEvent(event) = &message {
             self.observe_trade_reply(&event.event);
             self.observe_allegiance_reply(&event.event);
         }
         let previous_container_root = self.world.world_container().root();
+
+        self.observe_death_count(&message);
 
         // Pass to world state for tracking positioning and spawning
         let world_events = if let GameMessage::UpdateMotion(data) = &message

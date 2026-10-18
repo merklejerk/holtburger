@@ -555,6 +555,8 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
+    /// Dispatch only after the local death confirmation is accepted.
+    Suicide,
     Nothing,
     TransitionToGame {
         guid: Guid,

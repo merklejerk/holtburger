@@ -274,7 +274,7 @@ fn classify_pre_world_action_result(reason: &ActionResultReason) -> Option<Boots
         ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
             Some(BootstrapEventOutcome::Fatal { message })
         }
-        ActionResultReason::Weenie(_, _) => None,
+        ActionResultReason::Weenie(_, _) | ActionResultReason::EquipmentSet { .. } => None,
         ActionResultReason::Transport(_) => Some(BootstrapEventOutcome::Fatal { message }),
     }
 }

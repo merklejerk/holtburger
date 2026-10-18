@@ -2,7 +2,7 @@
 
 use super::types::{ActionResultReason, ActionResultSource};
 use super::{ClientLifecycleState, ClientRuntime, ClientViewEvent};
-use anyhow::{Result, bail};
+use anyhow::Result;
 use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessors};
 use holtburger_protocol::messages::*;
 use holtburger_world::housing::HomeKnowledge;
@@ -29,44 +29,6 @@ pub enum RecallDestination {
 }
 
 impl RecallDestination {
-    /// Recognize retail travel commands before sending ordinary speech to ACE.
-    /// Unknown commands remain server chat; malformed recognized recalls fail locally.
-    pub fn from_chat(text: &str) -> Result<Option<Self>> {
-        let Some(command) = text.trim().strip_prefix(['@', '/']) else {
-            return Ok(None);
-        };
-        let mut words = command.split_whitespace();
-        let Some(verb) = words.next() else {
-            return Ok(None);
-        };
-        // Retail registrations: acclient.c:409594–409909 and 410236–410436.
-        let destination = match verb.to_ascii_lowercase().as_str() {
-            "lifestone" | "lif" | "ls" => Self::Lifestone,
-            "marketplace" | "mar" | "mp" => Self::Marketplace,
-            "pkarena" | "pka" => Self::PkArena,
-            "pklarena" | "pla" => Self::PkLiteArena,
-            "hor" | "hr" => Self::House,
-            "hom" | "hoa" => Self::AllegianceHousing,
-            "house" | "hou" => match words.next().map(str::to_ascii_lowercase).as_deref() {
-                // DoHouse: acclient.c:406889–406929.
-                Some("recall" | "re") => Self::House,
-                Some("mansion_recall" | "alleg_recall" | "ma") => Self::AllegianceHousing,
-                _ => return Ok(None),
-            },
-            "allegiance" | "all" => match words.next().map(str::to_ascii_lowercase).as_deref() {
-                // DoAllegiance: acclient.c:404233–404245.
-                // Retail dispatches hometown immediately, without checking trailing arguments.
-                Some("hometown" | "ho") => return Ok(Some(Self::AllegianceHometown)),
-                _ => return Ok(None),
-            },
-            _ => return Ok(None),
-        };
-        if words.next().is_some() {
-            bail!("Recall commands do not accept extra arguments");
-        }
-        Ok(Some(destination))
-    }
-
     fn game_action(self) -> GameAction {
         match self {
             Self::Lifestone => GameAction::TeleToLifestone(Box::new(TeleToLifestoneActionData)),
@@ -169,54 +131,6 @@ mod tests {
     }
 
     #[test]
-    fn retail_aliases_accept_both_prefixes_and_case() {
-        use RecallDestination::*;
-        for (destination, commands) in [
-            (Lifestone, vec!["ls", "lif", "lifestone"]),
-            (Marketplace, vec!["mp", "mar", "marketplace"]),
-            (House, vec!["hr", "hor", "house recall", "hou re"]),
-            (
-                AllegianceHousing,
-                vec![
-                    "hom",
-                    "hoa",
-                    "house mansion_recall",
-                    "house alleg_recall",
-                    "hou ma",
-                ],
-            ),
-            (AllegianceHometown, vec!["allegiance hometown", "all ho"]),
-            (PkArena, vec!["pkarena", "pka"]),
-            (PkLiteArena, vec!["pklarena", "pla"]),
-        ] {
-            for command in commands {
-                for prefix in ['@', '/'] {
-                    let text = format!("  {prefix}{}  ", command.to_uppercase());
-                    assert_eq!(
-                        RecallDestination::from_chat(&text).unwrap(),
-                        Some(destination),
-                        "{text}"
-                    );
-                }
-            }
-        }
-        assert_eq!(
-            RecallDestination::from_chat("@house guest add Someone").unwrap(),
-            None
-        );
-        assert_eq!(
-            RecallDestination::from_chat("@allegiance info").unwrap(),
-            None
-        );
-        assert_eq!(
-            RecallDestination::from_chat("meet me at @ls").unwrap(),
-            None
-        );
-        assert!(RecallDestination::from_chat("@ls extra").is_err());
-        assert!(RecallDestination::from_chat("@house recall extra").is_err());
-    }
-
-    #[test]
     fn recall_wire_actions_match_ace_opcodes_without_payloads() {
         // ACE Network/GameAction/GameActionType.cs and the seven payload-free action handlers.
         for (destination, opcode) in [
@@ -305,25 +219,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_chat_recall_reports_feedback_without_sending_or_disconnecting() {
-        let mut client = client();
-        let mut events = client.subscribe_client_view_events();
-        client
-            .handle_command(ClientCommand::Talk("@house recall extra".into()))
-            .await
-            .unwrap();
-        assert_eq!(client.state, ClientState::InWorld);
-        assert_eq!(client.session.game_action_sequence, 0);
-        assert!(matches!(
-            events.try_recv().unwrap(),
-            ClientViewEvent::ActionResult {
-                source: ActionResultSource::Client,
-                reason: ActionResultReason::General(_)
-            }
-        ));
-    }
-
-    #[tokio::test]
     async fn recall_before_character_entry_reports_feedback_without_dispatch() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
@@ -342,10 +237,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chat_recall_and_button_dispatch_each_send_one_action() {
+    async fn typed_recall_destinations_each_send_one_action() {
         let mut client = client();
         client
-            .handle_command(ClientCommand::Talk("@all ho".into()))
+            .handle_command(ClientCommand::Recall(RecallDestination::AllegianceHometown))
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);

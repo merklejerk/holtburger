@@ -9,8 +9,35 @@ export interface ClientChatErrorMessage {
 	readonly message: string;
 }
 
+/** One flat app-authored text run; strings remain text rather than markup. */
+interface ClientChatTextSpan {
+	/** Plain prose, italic emphasis, or a monospace command/example. */
+	readonly kind: "plain" | "emphasis" | "code";
+	/** Literal displayed text; coordinate recognition still applies during history interaction. */
+	readonly text: string;
+}
+
+/** One displayed row, with a single optional indentation step for command descriptions. */
+export interface ClientChatTextRow {
+	/** Indent the complete row, including wrapped text. */
+	readonly indented: boolean;
+	/** Ordered text runs; no nested formatting or duplicated plain-text representation. */
+	readonly spans: readonly ClientChatTextSpan[];
+}
+
+/** App-local formatted response; the host and server chat contracts remain plain text. */
+export interface ClientChatFormattedSystemMessage {
+	readonly kind: "formatted-system";
+	/** All rows belong to one retained message and share its timestamp. */
+	readonly rows: readonly ClientChatTextRow[];
+}
+
+/** Frontend presentation input before assigning retention identity and display time. */
+export type ClientChatEntry =
+	ClientChatMessage | ClientChatErrorMessage | ClientChatFormattedSystemMessage;
+
 /** Retained chat line with app-local ordering and display time. */
-export type ClientChatLine = (ClientChatMessage | ClientChatErrorMessage) & {
+export type ClientChatLine = ClientChatEntry & {
 	readonly id: number;
 	readonly receivedAt: Date;
 };
@@ -53,6 +80,7 @@ export function clientChatFiltersAllow(
 	line: ClientChatLine,
 ): boolean {
 	switch (line.kind) {
+		case "formatted-system":
 		case "system":
 		case "error":
 			return true;
@@ -79,6 +107,7 @@ export function clientChatTone(line: ClientChatLine): ClientChatTone {
 			return "emote";
 		case "combat":
 			return "combat";
+		case "formatted-system":
 		case "system":
 			return "system";
 		case "error":

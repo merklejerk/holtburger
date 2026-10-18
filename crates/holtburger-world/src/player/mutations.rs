@@ -317,6 +317,15 @@ impl PlayerState {
         // PlayerDescription begins a new registry baseline even for the same GUID.
         self.character_titles = None;
         self.guid = data.guid;
+        // A description replaces the character baseline, including absent saved positions.
+        self.local_position_overlays.clear();
+        for (&key, &position) in &data.positions {
+            if let Some(position_type) = PositionType::from_repr(key)
+                && position_type != PositionType::Location
+            {
+                self.set_local_position_overlay(position_type, position);
+            }
+        }
         self.enchantments.replace(&data.enchantments);
 
         self.spells = data.spells.clone();

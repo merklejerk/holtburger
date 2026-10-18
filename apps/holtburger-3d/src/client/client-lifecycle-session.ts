@@ -1,4 +1,10 @@
 import {
+	deathLocationResultSchema,
+	type DeathLocationResult,
+	type DeathLocationQuery,
+	type CorpseConsentAction,
+} from "./client-death-contract";
+import {
 	ClientPartyUpdates,
 	type PartyUpdateConsumer,
 } from "./client-party-updates";
@@ -241,6 +247,11 @@ type ClientCommandName = Extract<
 	| "submit_client_allegiance"
 	| "submit_client_party"
 	| "set_client_party_updates"
+	| "query_client_death_locations"
+	| "manage_client_corpse_consent"
+	| "set_client_corpse_permission"
+	| "set_client_corpse_consent"
+	| "kill_client_character"
 	| "send_client_chat"
 	| "teleport_client_to_map_position"
 	| "recall_client"
@@ -297,6 +308,7 @@ type ClientEventName = Extract<
 	| "client-vendor-preview"
 	| "client-vendor-result"
 	| "client-vendor-phase"
+	| "client-death-locations"
 	| "client-item-use-target-result"
 	| "client-spell-inspection-context"
 	| "client-spell-inspection-result"
@@ -400,6 +412,7 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "death-locations"; readonly result: DeathLocationResult }
 	| {
 			readonly type: "contract-membership-change";
 			readonly change: ContractMembershipChange;
@@ -1045,7 +1058,31 @@ export class ClientLifecycleSession {
 	partyHudPresent(): boolean {
 		return this.#partyHudPresent;
 	}
-	/** Submit chat text, including retail recall commands. */
+	/** On-demand data query; the app owns command grammar and presentation. */
+	async queryDeathLocations(query: DeathLocationQuery): Promise<void> {
+		await this.#transport.invoke("query_client_death_locations", { query });
+	}
+	async manageCorpseConsent(action: CorpseConsentAction): Promise<void> {
+		await this.#transport.invoke("manage_client_corpse_consent", { action });
+	}
+	async setCorpsePermission(
+		playerName: string,
+		granted: boolean,
+	): Promise<void> {
+		await this.#transport.invoke("set_client_corpse_permission", {
+			playerName,
+			granted,
+		});
+	}
+	async setCorpseConsent(enabled: boolean): Promise<void> {
+		await this.#transport.invoke("set_client_corpse_consent", { enabled });
+	}
+	/** Caller owns user confirmation; no dialog policy crosses the host boundary. */
+	async killCharacter(): Promise<void> {
+		await this.#transport.invoke("kill_client_character", {});
+	}
+
+	/** Submit ordinary chat text after app-local command handling. */
 	async sendChat(message: string): Promise<void> {
 		if (message.trim().length === 0) {
 			throw new Error("Chat message must contain visible text.");
@@ -1416,6 +1453,14 @@ export class ClientLifecycleSession {
 					"client-precise-jump-transaction-feedback",
 					(payload) => this.#receivePreciseJumpTransactionFeedback(payload),
 				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-death-locations", (payload) => {
+					this.#emit({
+						type: "death-locations",
+						result: deathLocationResultSchema.parse(payload),
+					});
+				}),
 			);
 			unlisteners.push(
 				await this.#transport.listen(

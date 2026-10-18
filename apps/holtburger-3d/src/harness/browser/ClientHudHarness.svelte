@@ -4924,6 +4924,14 @@
 		onPreciseJumpActivate={() => {
 			preciseJumpActivationCount += 1;
 		}}
+		readCanSetCorpsePermission={() => true}
+		onCorpsePermission={(name, granted) => {
+			toast = {
+				id: 1,
+				message: `corpse-permission:${name}:${granted}`,
+				tone: "status",
+			};
+		}}
 		onSocialNotice={(message) => {
 			toast = { id: 1, message, tone: "warning" };
 		}}
@@ -5009,12 +5017,18 @@
 		chatMessages={messages}
 		{sentChatHistory}
 		onSendChat={async (message) => {
-			if (waypointProbeEnabled) submitWaypointChat(message);
 			sentChatHistory = recordSentChat(
 				sentChatHistory,
 				message,
 				chatHistoryLimit,
 			);
+			if (waypointProbeEnabled) submitWaypointChat(message);
+		}}
+		onSendChatError={(message) => {
+			messages = [
+				...messages,
+				line(messages.length + 1, { kind: "error", message }),
+			];
 		}}
 		onCanvas={() => {}}
 	/>

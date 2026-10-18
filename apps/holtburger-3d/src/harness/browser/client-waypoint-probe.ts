@@ -90,7 +90,7 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 		await settle();
 	};
 	controls.enable();
-	await submit("@wp 42.0N, 33.5E");
+	await submit("/wp 42.0N, 33.5E");
 	assert(
 		controls.read().frame.waypoint !== null,
 		"Chat did not set navigation intent",
@@ -287,6 +287,21 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 	assert(
 		rejected && controls.read().frame.waypoint !== null,
 		"Invalid command did not retain target",
+	);
+	await submit("@waypoint invalid");
+	assert(
+		Array.from(node(".chat-buffer").querySelectorAll(".chat-tone-error")).some(
+			(line) => line.textContent?.includes("Use latitude and longitude"),
+		),
+		"Submission failure did not enter the chat buffer",
+	);
+	assert(
+		node<HTMLInputElement>('[aria-label="Chat message"]').value === "",
+		"Failed submission must clear the input",
+	);
+	assert(
+		controls.read().history.at(-1) === "@waypoint invalid",
+		"Failed submission must remain available in input history",
 	);
 	assert(
 		JSON.stringify(controls.read().sent) === JSON.stringify(["hello"]),

@@ -1,4 +1,3 @@
-use super::recall::RecallDestination;
 use crate::client::progression::{
     ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,
     ClientProgressionRejection,
@@ -203,6 +202,13 @@ impl ClientRuntime {
             | ClientCommand::RestoreCharacter(_)
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
+            ClientCommand::QueryDeathLocations(query) => {
+                self.query_death_locations(query);
+                Ok(())
+            }
+            ClientCommand::ManageCorpseConsent(action) => {
+                self.send_game_action(action.game_action()).await
+            }
             ClientCommand::QueryAllegiance => self.query_allegiance().await,
             ClientCommand::AddFriend { name } => self.add_friend(name).await,
             ClientCommand::AddIgnore { name, scope } => self.add_ignore(name, scope).await,
@@ -495,20 +501,10 @@ impl ClientRuntime {
 
     async fn handle_chat_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::Talk(text) => match RecallDestination::from_chat(&text) {
-                Ok(Some(destination)) => self.recall(destination).await,
-                Ok(None) => {
-                    log::info!(">>> You say: \"{}\"", text);
-                    self.send_talk(&text).await
-                }
-                Err(error) => {
-                    self.emit_action_result(
-                        ActionResultSource::Client,
-                        ActionResultReason::General(error.to_string()),
-                    );
-                    Ok(())
-                }
-            },
+            ClientCommand::Talk(text) => {
+                log::info!(">>> You say: \"{}\"", text);
+                self.send_talk(&text).await
+            }
             ClientCommand::Tell { target, message } => {
                 log::info!(">>> You tell {}, \"{}\"", target, message);
                 self.send_game_action(GameAction::Tell(Box::new(TellActionData {

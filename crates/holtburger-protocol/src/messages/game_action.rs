@@ -69,6 +69,12 @@ pub enum GameAction {
     Tell(Box<TellActionData>),
     SwearAllegiance(Box<SwearAllegianceActionData>),
     BreakAllegiance(Box<BreakAllegianceActionData>),
+    /// Clear all permissions received from other corpse owners.
+    ClearPlayerConsentList,
+    /// Ask ACE to print permissions received from other corpse owners.
+    DisplayPlayerConsentList,
+    /// Discard one permission received from a named corpse owner.
+    RemoveFromPlayerConsentList(Box<RemoveFromPlayerConsentListActionData>),
     AddPlayerPermission(Box<AddPlayerPermissionActionData>),
     RemovePlayerPermission(Box<RemovePlayerPermissionActionData>),
     Emote(Box<EmoteActionData>),
@@ -191,6 +197,13 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::BreakAllegiance => GameAction::BreakAllegiance(Box::new(
                     BreakAllegianceActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::ClearPlayerConsentList => GameAction::ClearPlayerConsentList,
+                GameActionOpcode::DisplayPlayerConsentList => GameAction::DisplayPlayerConsentList,
+                GameActionOpcode::RemoveFromPlayerConsentList => {
+                    GameAction::RemoveFromPlayerConsentList(Box::new(
+                        RemoveFromPlayerConsentListActionData::unpack(data, offset)?,
+                    ))
+                }
                 GameActionOpcode::AddPlayerPermission => GameAction::AddPlayerPermission(Box::new(
                     AddPlayerPermissionActionData::unpack(data, offset)?,
                 )),
@@ -511,6 +524,19 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::BreakAllegiance(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::BreakAllegiance as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ClearPlayerConsentList => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::ClearPlayerConsentList as u32)
+                    .unwrap();
+            }
+            GameAction::DisplayPlayerConsentList => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::DisplayPlayerConsentList as u32)
+                    .unwrap();
+            }
+            GameAction::RemoveFromPlayerConsentList(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RemoveFromPlayerConsentList as u32)
                     .unwrap();
                 data.pack(buf);
             }

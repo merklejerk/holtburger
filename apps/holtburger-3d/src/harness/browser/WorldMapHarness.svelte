@@ -15,6 +15,10 @@
 	import { httpWorldMapSource } from "../../lib/assets/world-map-source";
 	import type { WorldMapSource } from "../../lib/game/world-map/types";
 	import type { WorldMapOwner } from "../../lib/game/world-map/owner";
+	import {
+		worldMapPosition,
+		projectWorldMapPoint,
+	} from "../../lib/game/world-map/view";
 	import { WorldMapRenderer } from "../../lib/game/world-map/renderer";
 	import type { MinimapFrame } from "../../app/minimap-frame";
 	import { WORLD_MAP_SETTLEMENTS } from "../../lib/game/world-map/world-map-settlements";
@@ -166,6 +170,80 @@
 				}),
 			);
 	}
+	/** Wheel delivery preserves the geographic point beneath an off-center cursor. */
+	async function wheelZoomProbe() {
+		const original = owner().readView();
+		const state = owner().read();
+		if (!original || (state.kind !== "ready" && state.kind !== "streaming"))
+			throw new Error("Zoom probe requires a map view");
+		const bounds = state.manifest.bounds;
+		owner().setView({
+			centerX: (bounds.minX + bounds.maxX) / 2,
+			centerZ: (bounds.minZ + bounds.maxZ) / 2,
+			spanMeters: SHARED_FRONTEND_TUNING.worldMap.minimumSpanMeters * 8,
+		});
+		await owner().drawSettled();
+		const surface = canvas(),
+			rect = surface.getBoundingClientRect();
+		const clientX = Math.round(rect.left + rect.width * 0.73),
+			clientY = Math.round(rect.top + rect.height * 0.31);
+		const x = ((clientX - rect.left) * surface.clientWidth) / rect.width,
+			y = ((clientY - rect.top) * surface.clientHeight) / rect.height;
+		const view = owner().readView();
+		if (!view) throw new Error("Missing zoom probe view");
+		const anchor = worldMapPosition(
+			x,
+			y,
+			view,
+			bounds,
+			surface.clientWidth,
+			surface.clientHeight,
+		);
+		if (!anchor) throw new Error("Missing cursor map point");
+		for (const [deltaY, deltaMode] of [
+			[-120, 0],
+			[120, 0],
+			[-2, 1],
+			[2, 1],
+			[-0.1, 2],
+			[0.1, 2],
+		]) {
+			surface.dispatchEvent(
+				new WheelEvent("wheel", {
+					clientX,
+					clientY,
+					deltaY,
+					deltaMode,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await owner().drawSettled();
+			const next = owner().readView();
+			if (!next) throw new Error("Zoom retired the map view");
+			const projected = projectWorldMapPoint(
+				anchor,
+				next,
+				surface.clientWidth,
+				surface.clientHeight,
+			);
+			if (
+				Math.abs(projected[0] - x) > 0.001 ||
+				Math.abs(projected[1] - y) > 0.001
+			)
+				throw new Error(
+					"Wheel zoom moved the geographic point under the cursor",
+				);
+		}
+		owner().setView(original);
+		await owner().drawSettled();
+		return {
+			kind: state.kind,
+			anchored: true,
+			wheelUnits: ["pixel", "line", "page"],
+		};
+	}
+
 	/** Menu geometry, shared keyboard ownership, checked state, and character lifetime. */
 	async function menuProbe() {
 		const assert = (condition: boolean, message: string) => {
@@ -472,6 +550,7 @@
 		await open();
 		surface.dispatchEvent(
 			new WheelEvent("wheel", {
+				...point,
 				deltaY: -120,
 				bubbles: true,
 				cancelable: true,
@@ -1078,6 +1157,7 @@
 			settlementProbe,
 			teleportProbe,
 			menuProbe,
+			wheelZoomProbe,
 			waypointProbe,
 			visibility,
 			zoom,

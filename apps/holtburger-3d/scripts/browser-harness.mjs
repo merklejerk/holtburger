@@ -163,6 +163,7 @@ try {
 			markerProjection: result.markerProjection,
 			waypoint: result.waypoint,
 			controls: result.controls,
+			menus: result.menus,
 			settlements: result.settlements,
 			teleport: result.teleport,
 			initial: result.initial,
@@ -4779,11 +4780,23 @@ async function runClientHudHarness({ viteUrl }) {
 			);
 			await delay(50);
 			const toggleSelector =
-				'section.hud-window[aria-label="World"] button[aria-label="Show contracts"]';
+				'section.hud-window[aria-label="World"] button[aria-label="Map visibility"]';
 			await evaluateExpression(
 				client,
-				`document.querySelector(${JSON.stringify(toggleSelector)}).focus()`,
+				`document.querySelector(${JSON.stringify(toggleSelector)}).click()`,
 			);
+			await client.send("Input.dispatchKeyEvent", {
+				type: "keyDown",
+				key: "ArrowDown",
+				code: "ArrowDown",
+				windowsVirtualKeyCode: 40,
+			});
+			await client.send("Input.dispatchKeyEvent", {
+				type: "keyUp",
+				key: "ArrowDown",
+				code: "ArrowDown",
+				windowsVirtualKeyCode: 40,
+			});
 			for (const type of ["keyDown", "keyUp"])
 				await client.send("Input.dispatchKeyEvent", {
 					type,
@@ -4796,7 +4809,7 @@ async function runClientHudHarness({ viteUrl }) {
 			if (
 				(await evaluateExpression(
 					client,
-					`document.querySelector(${JSON.stringify(toggleSelector)}).getAttribute('aria-pressed')`,
+					`[...document.querySelectorAll('[role=menuitemcheckbox]')].find(row=>row.textContent.replace('✓','').trim()==='Contracts').getAttribute('aria-checked')`,
 				)) !== "false"
 			)
 				throw new Error("Contracts map toggle did not respond to native Enter");
@@ -7109,6 +7122,7 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 	).data;
 	const initial = await until("ready");
 	const controls = await evaluateExpression(client, `${api}.controlsProbe()`);
+	const menus = await evaluateExpression(client, `${api}.menuProbe()`);
 	const waypoint = await evaluateExpression(client, `${api}.waypointProbe()`);
 	const readyTeleport = await evaluateExpression(
 		client,
@@ -7246,6 +7260,7 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 		partial,
 		markerProjection,
 		controls,
+		menus,
 		waypoint,
 		settlements: { streaming: streamingSettlements, ready: readySettlements },
 		teleport: { streaming: streamingTeleport, ready: readyTeleport },
@@ -7887,29 +7902,57 @@ async function probeClientWorldMap(client) {
 		);
 	const partialAfter = await read(`${api}.readWorldMapFixture()`);
 	// Exercise browser pointer delivery through the real panel and session transport boundary.
-	const mapClick = async () => {
-		await client.send("Input.dispatchMouseEvent", {
-			type: "mousePressed",
-			...partialPoint,
-			button: "left",
-			buttons: 1,
-			clickCount: 1,
-		});
-		await client.send("Input.dispatchMouseEvent", {
-			type: "mouseReleased",
-			...partialPoint,
-			button: "left",
-			buttons: 0,
-			clickCount: 1,
-		});
+	const mapClick = async (button) => {
+		for (const type of ["mousePressed", "mouseReleased"])
+			await client.send("Input.dispatchMouseEvent", {
+				type,
+				...partialPoint,
+				button,
+				buttons: type === "mousePressed" ? (button === "right" ? 2 : 1) : 0,
+				clickCount: 1,
+			});
 		await delay(20);
 	};
-	await mapClick();
-	if ((await read(`${api}.readMapTeleports()`)).length !== 0)
-		throw new Error("Ordinary map click dispatched teleport.");
+	const hasTeleport = () =>
+		read(
+			`Array.from(document.querySelectorAll('[aria-label="Map actions"] button')).some(row=>row.textContent.trim()==='Teleport')`,
+		);
+	const dismissMapMenu = async () => {
+		for (const type of ["keyDown", "keyUp"])
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "Tab",
+				code: "Tab",
+				windowsVirtualKeyCode: 9,
+			});
+		await delay(20);
+	};
+	await mapClick("left");
+	await mapClick("right");
+	if (
+		(await read(`${api}.readMapTeleports()`)).length !== 0 ||
+		(await hasTeleport())
+	)
+		throw new Error("Ordinary map input offered or dispatched teleport.");
+	await dismissMapMenu();
 	await read(`${api}.setMapTeleportPermission(true)`);
 	await delay(20);
-	await mapClick();
+	await mapClick("left");
+	if ((await read(`${api}.readMapTeleports()`)).length !== 0)
+		throw new Error("Privileged left click dispatched teleport.");
+	await mapClick("right");
+	const teleportPoint = await read(
+		`(() => {const row=Array.from(document.querySelectorAll('[aria-label="Map actions"] button')).find(row=>row.textContent.trim()==='Teleport');if(!row)throw new Error('Missing privileged Teleport command');const rect=row.getBoundingClientRect();return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};})()`,
+	);
+	for (const type of ["mousePressed", "mouseReleased"])
+		await client.send("Input.dispatchMouseEvent", {
+			type,
+			...teleportPoint,
+			button: "left",
+			buttons: type === "mousePressed" ? 1 : 0,
+			clickCount: 1,
+		});
+	await delay(20);
 	const mapRequests = await read(`${api}.readMapTeleports()`);
 	if (
 		mapRequests.length !== 1 ||
@@ -7917,13 +7960,20 @@ async function probeClientWorldMap(client) {
 		!Number.isFinite(mapRequests[0].args?.position?.z)
 	)
 		throw new Error(
-			"Privileged click did not reach the session with map coordinates.",
+			"Context teleport did not reach the session with map coordinates.",
 		);
 	await read(`${api}.setMapTeleportPermission(false)`);
 	await delay(20);
-	await mapClick();
-	if ((await read(`${api}.readMapTeleports()`)).length !== 1)
-		throw new Error("Revoked map permission still dispatched.");
+	await mapClick("right");
+	if (
+		(await read(`${api}.readMapTeleports()`)).length !== 1 ||
+		(await hasTeleport())
+	)
+		throw new Error(
+			"Revoked map permission still offered or dispatched teleport.",
+		);
+	await dismissMapMenu();
+
 	if (JSON.stringify(partialBefore) !== JSON.stringify(partialAfter))
 		throw new Error(
 			"Partial map gestures requested content or changed the game camera.",
@@ -8557,17 +8607,30 @@ async function probeClientWorldMap(client) {
 		`document.querySelector('[role="tab"][aria-controls$="-world"]').click()`,
 	);
 	await delay(50);
+	const housingMenu = `async () => {
+		if (!document.querySelector('[role="menu"][aria-label="Map visibility"]')) {
+			document.querySelector('button[aria-label="Map visibility"]').click();
+			await new Promise(resolve=>setTimeout(resolve,0));
+		}
+		if (!document.querySelector('.popup-menu-child')) {
+			[...document.querySelectorAll('[aria-label="Map visibility"] > button')].find(row=>row.getAttribute('aria-haspopup')==='menu').click();
+			await new Promise(resolve=>setTimeout(resolve,0));
+		}
+		return [...document.querySelectorAll('.popup-menu-child button')];
+	}`;
 	const chooseHousing = async (type) => {
 		await read(
-			`(() => { const select=document.querySelector('[aria-label="Housing search"]'); select.value='${type}'; select.dispatchEvent(new Event('change',{bubbles:true})); })()`,
+			`(async()=>{const rows=await (${housingMenu})(); rows[${type}].click();})()`,
 		);
 		await delay(50);
 	};
+	await read(`(${housingMenu})()`);
+
 	const markerCount = () =>
 		read(`document.querySelectorAll('[data-housing-search-areas]').length`);
 	if (
 		!(await read(
-			`(() => {const select=document.querySelector('[aria-label="Housing search"]');return select.value==='0' && [...select.options].every(option=>option.value!=='4') && ${api}.readHousingSearches().length===0;})()`,
+			`(async () => {const rows=await (${housingMenu})();return rows[0].getAttribute('aria-checked')==='true' && rows.length===4 && ${api}.readHousingSearches().length===0;})()`,
 		))
 	)
 		throw new Error(
@@ -8584,7 +8647,7 @@ async function probeClientWorldMap(client) {
 		);
 	if (
 		!(await read(
-			`(() => {const select=document.querySelector('[aria-label="Housing search"]');return select.getAttribute('aria-busy')==='true' && !select.options[0].disabled && [...select.options].slice(1).every(option=>option.disabled);})()`,
+			`(async () => {const rows=await (${housingMenu})();return !rows[0].disabled && rows.slice(1).every(row=>row.disabled) && rows[2].textContent.includes('Searching');})()`,
 		))
 	)
 		throw new Error(
@@ -8610,13 +8673,14 @@ async function probeClientWorldMap(client) {
 	await delay(100);
 	if (
 		!(await read(
-			`document.querySelector('.client-toast[role="alert"]').textContent.includes('Housing search timed out') && !document.querySelector('[aria-label="Housing search"] option[value="1"]').disabled`,
+			`document.querySelector('.client-toast[role="alert"]').textContent.includes('Housing search timed out') && !document.querySelectorAll('.popup-menu-child button')[1].disabled`,
 		)) ||
 		(await read(`${api}.readHousingSearches()`)).length !== 2
 	)
 		throw new Error(
 			"Timeout failed to restore map admission with a toast or resent search.",
 		);
+	await dismissMapMenu();
 	const denseAreas = Array.from(
 		{ length: 25 },
 		(_, index) =>
@@ -8761,18 +8825,22 @@ async function probeClientWorldMap(client) {
 		);
 	await read(`document.querySelector('.world-map-reset').click()`);
 	await delay(50);
-	const beforeResize = await read(
-		`document.querySelector('.world-housing-search').innerHTML`,
-	);
+	const resizeSnapshot = `() => ({width:document.querySelector('[aria-label="World terrain map"]').clientWidth,markers:document.querySelectorAll('[data-housing-search-areas]').length,html:document.querySelector('.world-housing-search').innerHTML})`;
+	const beforeResize = await read(`(${resizeSnapshot})()`);
 	await read(`document.querySelector('.world-map-surface').style.width='75%'`);
-	await delay(100);
+	// ResizeObserver and the owner publish on animation frames, not on timer expiry.
+	const afterResize = await read(
+		`(async()=>{let current;for(let frame=0;frame<120;frame++){await new Promise(resolve=>requestAnimationFrame(resolve));current=(${resizeSnapshot})();if(current.width!==${beforeResize.width}&&current.markers>0&&current.html!==${JSON.stringify(beforeResize.html)})return current;}return current;})()`,
+	);
 	if (
-		(await markerCount()) === 0 ||
-		(await read(
-			`document.querySelector('.world-housing-search').innerHTML`,
-		)) === beforeResize
+		afterResize.width === beforeResize.width ||
+		afterResize.markers === 0 ||
+		afterResize.html === beforeResize.html
 	)
-		throw new Error("Map resize did not reproject housing areas.");
+		throw new Error(
+			`Map resize did not reproject housing areas: ${JSON.stringify({ before: beforeResize, after: afterResize })}`,
+		);
+
 	await read(`document.querySelector('.world-map-surface').style.width=''`);
 	await delay(100);
 	await click("Close World");
@@ -8780,7 +8848,7 @@ async function probeClientWorldMap(client) {
 	await delay(50);
 	if (
 		!(await read(
-			`document.querySelector('[aria-label="Housing search"]').value==='2' && ${api}.readHousingSearches().length===2`,
+			`(async()=>{const rows=await (${housingMenu})();return rows[2].getAttribute('aria-checked')==='true' && ${api}.readHousingSearches().length===2;})()`,
 		))
 	)
 		throw new Error("Panel hiding lost the filter or resent the request.");
@@ -8805,7 +8873,7 @@ async function probeClientWorldMap(client) {
 	if (
 		(await markerCount()) !== 0 ||
 		!(await read(
-			`document.querySelector('[aria-label="Housing search"] option:checked').textContent.includes('(0)')`,
+			`(async()=>{const rows=await (${housingMenu})();return rows.find(row=>row.getAttribute('aria-checked')==='true').textContent.includes('(0)');})()`,
 		))
 	)
 		throw new Error("Empty map search was not indicated in the selector.");
@@ -8838,7 +8906,7 @@ async function probeClientWorldMap(client) {
 		);
 	if (
 		!(await read(
-			`document.querySelector('[aria-label="Housing search"]').value === '0' && document.querySelectorAll('[data-housing-search-areas]').length === 0`,
+			`(async()=>{const rows=await (${housingMenu})();return rows[0].getAttribute('aria-checked')==='true' && document.querySelectorAll('[data-housing-search-areas]').length===0;})()`,
 		))
 	)
 		throw new Error(

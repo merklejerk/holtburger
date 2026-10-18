@@ -64,11 +64,12 @@ export async function probeWaypointContent(client, evaluate) {
 			await read(`${api}.waypoint.read().notices.at(-1)`),
 			confirmation,
 		);
+		// The outgoing keyed toast can remain during its fade; inspect the requested message.
 		assert.equal(
 			await read(
-				`document.querySelector('.client-toast[role="status"]').textContent.trim()`,
+				`Array.from(document.querySelectorAll('.client-toast[role="status"]'), node => node.textContent.trim()).includes(${JSON.stringify(confirmation)})`,
 			),
-			confirmation,
+			true,
 		);
 		assert.equal(
 			await read("document.querySelector('.chat-buffer').textContent"),

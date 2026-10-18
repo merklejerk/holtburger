@@ -1,10 +1,9 @@
-/** Track one map click or pan; crossing the threshold permanently retires the click. */
+/** Track one map pan; once crossed, the travel threshold stays crossed. */
 export function trackWorldMapGesture(
 	target: Window,
 	start: PointerEvent,
 	thresholdPixels: number,
 	pan: (deltaX: number, deltaY: number) => void,
-	click: (event: PointerEvent) => void,
 ): () => void {
 	let active = true;
 	let dragged = false;
@@ -28,10 +27,7 @@ export function trackWorldMapGesture(
 	}
 	function release(event: PointerEvent): void {
 		if (event.pointerId !== start.pointerId) return;
-		// A release may carry travel that never produced a move event.
-		travel(event);
 		cancel();
-		if (!dragged) click(event);
 	}
 	function abort(event: PointerEvent): void {
 		if (event.pointerId === start.pointerId) cancel();

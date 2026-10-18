@@ -639,8 +639,7 @@
 		event.stopPropagation();
 		cancelPan?.();
 		cancelPan = null;
-		const view = owner?.readView();
-		if (!view || !owner) return;
+		if (!owner) return;
 		// Normalize browser wheel units before applying the app's zoom policy.
 		const pixels =
 			event.deltaY *
@@ -649,12 +648,13 @@
 				: event.deltaMode === 2
 					? canvas.clientHeight
 					: 1);
-		owner.setView({
-			...view,
-			spanMeters:
-				view.spanMeters *
-				Math.exp(pixels * SHARED_FRONTEND_TUNING.worldMap.wheelZoomRate),
-		});
+		const rect = canvas.getBoundingClientRect();
+		// Match the renderer's client dimensions even when layout has fractional CSS pixels.
+		owner.zoomAt(
+			((event.clientX - rect.left) * canvas.clientWidth) / rect.width,
+			((event.clientY - rect.top) * canvas.clientHeight) / rect.height,
+			Math.exp(pixels * SHARED_FRONTEND_TUNING.worldMap.wheelZoomRate),
+		);
 	}
 </script>
 

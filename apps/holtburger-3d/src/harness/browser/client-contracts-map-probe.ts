@@ -207,8 +207,12 @@ export async function probeContractMap(options: {
 				3, "Journal query changes rebuilt or filtered map facts");
 		const width = end.querySelector("svg")?.getAttribute("width");
 		const beforeZoom = end.getAttribute("transform");
-		get<HTMLCanvasElement>(`${rootSelector} canvas`).dispatchEvent(
+		const zoomCanvas = get<HTMLCanvasElement>(`${rootSelector} canvas`);
+		const zoomBounds = zoomCanvas.getBoundingClientRect();
+		zoomCanvas.dispatchEvent(
 			new WheelEvent("wheel", {
+				clientX: zoomBounds.left + zoomBounds.width / 2,
+				clientY: zoomBounds.top + zoomBounds.height / 2,
 				deltaY: -120,
 				bubbles: true,
 				cancelable: true,

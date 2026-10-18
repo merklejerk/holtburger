@@ -164,6 +164,7 @@ try {
 			waypoint: result.waypoint,
 			controls: result.controls,
 			menus: result.menus,
+			wheelZoom: result.wheelZoom,
 			settlements: result.settlements,
 			teleport: result.teleport,
 			initial: result.initial,
@@ -7109,6 +7110,10 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 		throw new Error(
 			"Settlement overlay was not exercised during tile streaming.",
 		);
+	const streamingWheelZoom = await evaluateExpression(
+		client,
+		`${api}.wheelZoomProbe()`,
+	);
 	const coldContent = await evaluateExpression(client, `${api}.contentProbe()`);
 	const streamingTeleport = await evaluateExpression(
 		client,
@@ -7123,6 +7128,10 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 	const initial = await until("ready");
 	const controls = await evaluateExpression(client, `${api}.controlsProbe()`);
 	const menus = await evaluateExpression(client, `${api}.menuProbe()`);
+	const readyWheelZoom = await evaluateExpression(
+		client,
+		`${api}.wheelZoomProbe()`,
+	);
 	const waypoint = await evaluateExpression(client, `${api}.waypointProbe()`);
 	const readyTeleport = await evaluateExpression(
 		client,
@@ -7261,6 +7270,7 @@ async function probeWorldMap(client, consoleMessages, browserWebSocketUrl) {
 		markerProjection,
 		controls,
 		menus,
+		wheelZoom: { streaming: streamingWheelZoom, ready: readyWheelZoom },
 		waypoint,
 		settlements: { streaming: streamingSettlements, ready: readySettlements },
 		teleport: { streaming: streamingTeleport, ready: readyTeleport },
@@ -8732,7 +8742,7 @@ async function probeClientWorldMap(client) {
 			deltaY: -400,
 		});
 		await delay(40);
-		// Zoom is center-based. Keep the fixture areas in view before zooming again.
+		// Keep fixture areas in view while exercising repeated zoom and pan.
 		const visibleMarker = await read(
 			`(() => {const node=document.querySelector('[data-housing-search-areas] circle');if(!node)return null;const rect=node.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};})()`,
 		);

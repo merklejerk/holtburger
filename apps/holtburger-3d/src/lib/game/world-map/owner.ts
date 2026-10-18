@@ -104,6 +104,27 @@ export class WorldMapOwner {
 		);
 		this.#redraw();
 	}
+	/** Zoom around a canvas CSS-pixel point; landscape bounds take priority at the edges. */
+	zoomAt(x: number, y: number, factor: number): void {
+		const presentation = this.#presentation;
+		const width = this.#canvas.clientWidth,
+			height = this.#canvas.clientHeight;
+		if (!presentation || width <= 0 || height <= 0) return;
+		const view = presentation.view;
+		// Clamp scale first: more wheel input at a zoom limit must not translate the center.
+		const { spanMeters } = clampWorldMap(
+			{ ...view, spanMeters: view.spanMeters * factor },
+			presentation.manifest.bounds,
+			this.#aspect(),
+		);
+		const shift = (view.spanMeters - spanMeters) / width;
+		this.setView({
+			centerX: view.centerX + (x - width / 2) * shift,
+			centerZ: view.centerZ + (y - height / 2) * shift,
+			spanMeters,
+		});
+	}
+
 	fit(): void {
 		const presentation = this.#presentation;
 		if (presentation)

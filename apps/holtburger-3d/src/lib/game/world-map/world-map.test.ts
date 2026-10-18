@@ -225,6 +225,84 @@ describe("world-map hover projection", () => {
 });
 
 describe("retained progressive world image", () => {
+	it.each([
+		[600, 400],
+		[400, 600],
+		[600, 600],
+	])(
+		"anchors zoom in and out to the cursor in a %s × %s viewport",
+		async (width, height) => {
+			const browser = canvasFixture();
+			Object.defineProperties(browser.canvas, {
+				clientWidth: { value: width },
+				clientHeight: { value: height },
+			});
+			const fixture = createWorldMapFixture();
+			const owner = new WorldMapOwner(fixture.source, browser.canvas);
+			await owner.load();
+			const state = owner.read();
+			if (state.kind !== "ready") throw new Error("Expected a ready map");
+			const fitted = fitWorldMap(state.manifest.bounds, width / height);
+			const view = {
+				...fitted,
+				spanMeters: SHARED_FRONTEND_TUNING.worldMap.minimumSpanMeters * 8,
+			};
+			owner.setView(view);
+			const x = width * 0.73,
+				y = height * 0.31;
+			const anchor = worldMapPosition(
+				x,
+				y,
+				view,
+				state.manifest.bounds,
+				width,
+				height,
+			);
+			if (!anchor) throw new Error("Expected a map point under the cursor");
+			for (const factor of [0.5, 2]) {
+				owner.zoomAt(x, y, factor);
+				const next = owner.readView();
+				if (!next) throw new Error("Expected a retained view");
+				const point = worldMapPosition(
+					x,
+					y,
+					next,
+					state.manifest.bounds,
+					width,
+					height,
+				);
+				expect(point?.x).toBeCloseTo(anchor.x, 9);
+				expect(point?.z).toBeCloseTo(anchor.z, 9);
+			}
+			expect(owner.readView()?.spanMeters).toBe(view.spanMeters);
+			owner.destroy();
+		},
+	);
+
+	it("does not drift at either zoom limit and bounds the center near landscape edges", async () => {
+		const browser = canvasFixture();
+		const owner = new WorldMapOwner(
+			createWorldMapFixture().source,
+			browser.canvas,
+		);
+		await owner.load();
+		const fitted = owner.readView();
+		if (!fitted) throw new Error("Expected a fitted map");
+		owner.zoomAt(450, 100, 10);
+		expect(owner.readView()).toEqual(fitted);
+		const minimum = SHARED_FRONTEND_TUNING.worldMap.minimumSpanMeters;
+		const tight = { ...fitted, spanMeters: minimum };
+		owner.setView(tight);
+		owner.zoomAt(450, 100, 0.1);
+		owner.zoomAt(450, 100, 0.1);
+		expect(owner.readView()).toEqual(tight);
+		owner.setView({ ...tight, centerX: minimum / 2 });
+		owner.zoomAt(0, 200, 2);
+		expect(owner.readView()?.centerX).toBe(minimum);
+		expect(owner.readView()?.spanMeters).toBe(minimum * 2);
+		owner.destroy();
+	});
+
 	it("preserves reset across resizing and retains a user's zoom", async () => {
 		const fixture = createWorldMapFixture();
 		const browser = canvasFixture();

@@ -310,7 +310,7 @@
 			{/each}
 			<button
 				type="button"
-				class="more-filters"
+				class="more-filters ui-inline-button"
 				aria-expanded={showMoreFilters}
 				onclick={() => (showMoreFilters = !showMoreFilters)}
 				>{showMoreFilters
@@ -439,7 +439,7 @@
 			min-width: 0;
 		}
 		.controls input,
-		.controls button:not(.ui-filter-pill) {
+		.controls button:not(.ui-filter-pill, .ui-inline-button) {
 			font: inherit;
 			color: inherit;
 			background: var(--ui-color-well);
@@ -457,19 +457,6 @@
 			flex-wrap: wrap;
 			gap: var(--ui-spell-filter-gap);
 			padding-block: var(--ui-spell-filter-gap);
-		}
-		.controls .more-filters {
-			border: 0;
-			background: transparent;
-			padding-inline: var(--ui-spell-filter-gap);
-			color: var(--ui-enchantments-filter-toggle-color);
-			text-decoration: var(--ui-enchantments-filter-toggle-decoration);
-			text-underline-offset: var(
-				--ui-enchantments-filter-toggle-underline-offset
-			);
-		}
-		.controls .more-filters:hover {
-			color: var(--ui-enchantments-filter-toggle-hover-color);
 		}
 		[data-filter-category="disposition"] {
 			--filter-color: var(--ui-spell-filter-disposition-color);
@@ -611,7 +598,6 @@
 		}
 		.spell-header:focus-visible,
 		.tree-toggle:focus-visible,
-		.more-filters:focus-visible,
 		.sort-button:focus-visible {
 			outline: 2px solid var(--ui-color-focus);
 		}

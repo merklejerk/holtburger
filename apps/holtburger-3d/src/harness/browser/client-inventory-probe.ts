@@ -34,6 +34,7 @@ function item(
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			aetheriaActivation: null,
 			burden: null,
 			equipLocations: null,
 			consumable: null,
@@ -160,6 +161,7 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: 12345,
+				aetheriaActivation: null,
 				burden: null,
 				equipLocations: null,
 				consumable: null,
@@ -188,6 +190,7 @@ export async function probeClientInventory(options: {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				aetheriaActivation: null,
 				burden: null,
 				equipLocations: null,
 				consumable: null,
@@ -294,6 +297,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			aetheriaActivation: null,
 			burden: null,
 			equipLocations: null,
 			consumable: null,
@@ -317,6 +321,7 @@ export async function probeClientInventory(options: {
 			wcid: 123,
 			weenieType: "Food",
 			pyrealBalance: null,
+			aetheriaActivation: null,
 			burden: null,
 			equipLocations: null,
 			consumable: null,
@@ -876,6 +881,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			aetheriaActivation: null,
 			burden: null,
 			equipLocations: null,
 			consumable: null,
@@ -1062,6 +1068,7 @@ export async function probeClientInventory(options: {
 			wcid: null,
 			weenieType: null,
 			pyrealBalance: null,
+			aetheriaActivation: null,
 			burden: null,
 			equipLocations: null,
 			consumable: null,
@@ -1410,8 +1417,16 @@ export async function probeClientInventory(options: {
 		URL.revokeObjectURL = revokeObjectURL;
 	}
 	// Isolate a complete currency roster after the grid and icon-lifetime scenarios.
-	const root = records.find((record) => record.guid === 1);
-	if (root === undefined) throw new Error("Missing inventory root");
+	const rootRecord = records.find((record) => record.guid === 1);
+	if (rootRecord?.description.kind !== "known")
+		throw new Error("Missing known inventory root");
+	const root = {
+		...rootRecord,
+		description: {
+			...rootRecord.description,
+			aetheriaActivation: { blue: true, yellow: true, red: true },
+		},
+	};
 	const [currencyWcid, currencyName] = INVENTORY_CURRENCIES[0];
 	const currencyRecord = owned(90, 1, 0);
 	if (currencyRecord.description.kind !== "known")
@@ -1483,6 +1498,54 @@ export async function probeClientInventory(options: {
 		".inventory-equipment-strip",
 	);
 	if (equipment === null) throw new Error("Equipment strip missing");
+	const aetheriaRows = () =>
+		[
+			...equipment.querySelectorAll<HTMLElement>("[data-equipment-slot]"),
+		].filter((row) => row.getAttribute("aria-label")?.includes("aetheria"));
+	for (const activation of [
+		null,
+		{ blue: true, yellow: false, red: true },
+		{ blue: false, yellow: true, red: false },
+		{ blue: false, yellow: false, red: false },
+		root.description.aetheriaActivation,
+	]) {
+		update({
+			...root,
+			description: { ...root.description, aetheriaActivation: activation },
+		});
+		await sample();
+		const states =
+			activation === null
+				? [null, null, null]
+				: [activation.blue, activation.yellow, activation.red];
+		const rows = aetheriaRows();
+		if (rows.length !== states.length)
+			throw new Error("Aetheria rows disappeared during activation update");
+		rows.forEach((row, index) => {
+			const state = states[index];
+			const availability =
+				state === null ? "pending" : state ? "available" : "locked";
+			const label =
+				state === null
+					? "Activation unknown"
+					: state
+						? "Empty"
+						: "Not activated";
+			if (
+				row.dataset.equipmentAvailability !== availability ||
+				(row.querySelector(".equipment-lock") !== null) !== (state === false) ||
+				!row
+					.querySelector(".item-grid-cell")
+					?.getAttribute("aria-label")
+					?.endsWith(label)
+			) {
+				throw new Error(
+					`Aetheria slot did not reflect live ${availability} state`,
+				);
+			}
+		});
+	}
+
 	for (const [label, guid] of [
 		["Shirt", 92],
 		["Pants", 93],
@@ -1784,6 +1847,7 @@ export async function probeClientInventory(options: {
 		equipmentHover: true,
 		dropSelectionPreserved: true,
 		equipmentStrip: true,
+		aetheriaActivation: true,
 		ambientCurrencyOverlay: true,
 		initial,
 		wide,

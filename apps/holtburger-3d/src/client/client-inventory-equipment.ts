@@ -153,18 +153,24 @@ export const EQUIPMENT_SLOTS = [
 	{
 		mask: 0x10000000,
 		label: "Blue aetheria",
+		/** World-resolved activation field required by this sigil slot. */
+		activation: "blue",
 		compactLabel: "Aeth. (B)",
 		symbol: "sigil",
 	},
 	{
 		mask: 0x20000000,
 		label: "Yellow aetheria",
+		/** World-resolved activation field required by this sigil slot. */
+		activation: "yellow",
 		compactLabel: "Aeth. (Y)",
 		symbol: "sigil",
 	},
 	{
 		mask: 0x40000000,
 		label: "Red aetheria",
+		/** World-resolved activation field required by this sigil slot. */
+		activation: "red",
 		compactLabel: "Aeth. (R)",
 		symbol: "sigil",
 	},
@@ -174,12 +180,34 @@ export const EQUIPMENT_SLOTS = [
 export interface InventoryEquipmentRow {
 	readonly slot: (typeof EQUIPMENT_SLOTS)[number];
 	readonly item: ClientEntityFacts | null;
+	/** Slot admission shown by the strip, independent of occupancy and item requirements. */
+	readonly availability: "available" | "locked" | "pending";
 }
 
 /** Unknown locations keep the strip pending instead of claiming empty slots. */
 export interface InventoryEquipment {
 	readonly rows: readonly InventoryEquipmentRow[];
 	readonly pending: boolean;
+}
+
+/** Resolve one slot against a coherent level for sampled display and current gesture admission. */
+export function equipmentSlotAvailability(
+	slot: InventoryEquipmentRow["slot"],
+	level: ClientEntityLevel,
+): InventoryEquipmentRow["availability"] {
+	if (!("activation" in slot)) return "available";
+	const player =
+		level.playerGuid === null
+			? undefined
+			: level.entities.get(level.playerGuid);
+	if (
+		player?.description.kind !== "known" ||
+		player.description.aetheriaActivation === null
+	)
+		return "pending";
+	return player.description.aetheriaActivation[slot.activation]
+		? "available"
+		: "locked";
 }
 
 /** Occupancy uses accepted current locations, never allowed locations or visuals. */
@@ -201,7 +229,11 @@ export function inventoryEquipment(
 			);
 			if (occupants.length > 1)
 				throw new Error(`Multiple equipped items occupy ${slot.label}`);
-			return { slot, item: occupants[0]?.item ?? null };
+			return {
+				slot,
+				item: occupants[0]?.item ?? null,
+				availability: equipmentSlotAvailability(slot, level),
+			};
 		}),
 	};
 }

@@ -124,6 +124,10 @@ pub enum EntityDescription {
         /// Local player's encumbrance/capacity ratio for inventory presentation; absent until
         /// the root roster and required world inputs arrive, and on non-player entities.
         burden: Option<f32>,
+        /// Local-player sigil activation for equipment UI; absent before PlayerDescription
+        /// and on non-player entities. Consumers never interpret raw property bits.
+        #[serde(rename = "aetheriaActivation")]
+        aetheria_activation: Option<crate::equipment::AetheriaActivation>,
         /// Consumed by the effective health subscription controller.
         #[serde(rename = "healthQuery")]
         health_query: HealthQueryEligibility,
@@ -346,6 +350,11 @@ impl WorldState {
                         && self.storage_coverage(guid) == Some(RosterCoverage::Announced)
                     {
                         self.player_burden()
+                    } else {
+                        None
+                    },
+                    aetheria_activation: if guid == self.player.guid {
+                        self.player_aetheria_activation()
                     } else {
                         None
                     },
@@ -592,6 +601,7 @@ mod tests {
                 weenie_type: None,
                 pyreal_balance: None,
                 burden: None,
+                aetheria_activation: None,
                 ..
             }
         ));
@@ -721,6 +731,7 @@ mod tests {
                 weenie_type: None,
                 pyreal_balance: None,
                 burden: None,
+                aetheria_activation: None,
                 health_query: HealthQueryEligibility::Ineligible,
             }
         );
@@ -773,6 +784,7 @@ mod tests {
                 weenie_type: None,
                 pyreal_balance: None,
                 burden: None,
+                aetheria_activation: None,
                 health_query: HealthQueryEligibility::Eligible,
             }
         );

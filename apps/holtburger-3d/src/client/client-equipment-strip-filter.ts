@@ -55,7 +55,9 @@ class EquipmentStripFilter {
 			const dimmed =
 				this.#drag === undefined &&
 				this.#hover !== undefined &&
-				(this.#hover === null || (this.#hover & mask) === 0);
+				(row.dataset.equipmentAvailability !== "available" ||
+					this.#hover === null ||
+					(this.#hover & mask) === 0);
 			if (dimmed) row.dataset.hoverDimmed = "true";
 			else delete row.dataset.hoverDimmed;
 		}

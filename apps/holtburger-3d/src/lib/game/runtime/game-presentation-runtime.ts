@@ -3484,7 +3484,7 @@ export class GamePresentationRuntime {
 		this.#selectedEntityGuid = guid;
 	}
 
-	/** Hover affects nameplate admission only, never authoritative selection. */
+	/** Hover affects nameplate admission and visibility, never authoritative selection. */
 	setHoveredEntityGuid(guid: number | null): void {
 		this.#hoveredEntityGuid = guid;
 	}

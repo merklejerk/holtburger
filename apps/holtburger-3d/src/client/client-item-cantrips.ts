@@ -3,11 +3,10 @@ import {
 	type CantripTier,
 	type SpellReference,
 } from "../app/spell-references";
+import type { ItemInspection } from "./client-object-inspection-contract";
 
-interface ItemSpell {
-	readonly id: number;
-	readonly activeEnchantment: boolean;
-}
+/** Inspection-owned identity and activation role consumed by the cantrip summary. */
+type ItemSpell = ItemInspection["spells"][number];
 
 interface ItemCantripPill {
 	readonly tier: CantripTier;
@@ -38,7 +37,7 @@ export type ItemCantripSummary =
 			readonly incompleteCount: number;
 	  };
 
-/** Summarize unique intrinsic spell identities without counting active enchantments. */
+/** Summarize unique item spell identities, excluding activation spells and active enchantments. */
 export function summarizeItemCantrips(
 	spells: readonly ItemSpell[],
 	references: readonly SpellReference[] | null,
@@ -46,9 +45,7 @@ export function summarizeItemCantrips(
 ): ItemCantripSummary {
 	const intrinsicIds = [
 		...new Set(
-			spells
-				.filter(({ activeEnchantment }) => !activeEnchantment)
-				.map(({ id }) => id),
+			spells.filter(({ role }) => role === "item").map(({ id }) => id),
 		),
 	];
 	if (intrinsicIds.length === 0) return { kind: "hidden" };

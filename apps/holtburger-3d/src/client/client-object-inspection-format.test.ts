@@ -6,6 +6,7 @@ import {
 	formatInspectionEffect,
 	formatInspectionImbuedEffects,
 	formatInspectionNumber,
+	formatInspectionVitalChange,
 	formatItemStatuses,
 	formatPlayerKillerStatus,
 	formatWieldRequirement,
@@ -15,6 +16,20 @@ import {
 } from "./client-object-inspection-format";
 
 describe("object inspection formatting", () => {
+	it("describes signed base vital changes, including the full i32 range", () => {
+		expect(formatInspectionVitalChange({ vital: "Health", amount: 50 })).toBe(
+			"Restores 50 Health.",
+		);
+		expect(formatInspectionVitalChange({ vital: "Stamina", amount: -20 })).toBe(
+			"Depletes 20 Stamina.",
+		);
+		expect(formatInspectionVitalChange({ vital: "Mana", amount: 0 })).toBe(
+			"Restores 0 Mana.",
+		);
+		expect(
+			formatInspectionVitalChange({ vital: "Health", amount: -2147483648 }),
+		).toBe("Depletes 2,147,483,648 Health.");
+	});
 	it("measures item progress within the earned level and fills the capped state", () => {
 		const progression = {
 			level: 2,

@@ -1,8 +1,9 @@
 use crate::utils::wrap_text;
 use holtburger_common::properties::AttunedStatus;
 use holtburger_world::inspection::{
-    BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, ItemInspection,
-    ItemManaKind, ObjectInspection, ObjectInspectionDetails, WieldRequirement,
+    BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, InspectionSpellRole,
+    InspectionUseEffect, ItemInspection, ItemManaKind, ObjectInspection, ObjectInspectionDetails,
+    WieldRequirement,
 };
 use holtburger_world::item_progression::ItemAdvancement;
 use holtburger_world::spell::SpellCatalog;
@@ -108,11 +109,79 @@ pub fn get_assess_info(
     lines
 }
 
+fn push_item_on_use(
+    lines: &mut Vec<Line<'static>>,
+    item: &ItemInspection,
+    spell_lookup: Option<&SpellCatalog>,
+) {
+    if item.use_effect.is_some()
+        || item
+            .spells
+            .iter()
+            .any(|spell| spell.role == InspectionSpellRole::OnUse)
+    {
+        push_section(lines, "On use");
+        if let Some(effect) = &item.use_effect {
+            match effect {
+                InspectionUseEffect::VitalChange { vital, amount } => {
+                    let verb = if *amount < 0 { "Depletes" } else { "Restores" };
+                    lines.push(Line::from(format!(
+                        "  {verb} {} {}.",
+                        amount.unsigned_abs(),
+                        vital
+                    )));
+                }
+                InspectionUseEffect::HealingKit {
+                    skill_bonus,
+                    restoration_multiplier,
+                } => {
+                    if let Some(bonus) = skill_bonus {
+                        push_labeled(lines, "Bonus to Healing Skill", bonus, Color::White);
+                    }
+                    if let Some(multiplier) = restoration_multiplier {
+                        push_labeled(
+                            lines,
+                            "Restoration Bonus",
+                            format!("{:.0}%", multiplier * 100.0),
+                            Color::White,
+                        );
+                    }
+                }
+            }
+        }
+        for spell in item
+            .spells
+            .iter()
+            .filter(|spell| spell.role == InspectionSpellRole::OnUse)
+        {
+            if let Some(info) = spell_lookup.and_then(|catalog| catalog.get(spell.id)) {
+                lines.push(Line::from(format!("  Casts {}", info.name)));
+                let description = if info.description.is_empty() {
+                    "No description available."
+                } else {
+                    &info.description
+                };
+                lines.extend(
+                    wrap_text(description, 36)
+                        .into_iter()
+                        .map(|line| Line::from(format!("  {line}"))),
+                );
+            } else {
+                lines.push(Line::from(format!(
+                    "  Casts spell {} (definition unavailable)",
+                    spell.id
+                )));
+            }
+        }
+    }
+}
+
 fn push_item_info(
     lines: &mut Vec<Line<'static>>,
     item: &ItemInspection,
     spell_lookup: Option<&SpellCatalog>,
 ) {
+    push_item_on_use(lines, item, spell_lookup);
     if let Some(progression) = &item.progression {
         push_labeled(
             lines,
@@ -319,14 +388,22 @@ fn push_item_info(
         }
     }
 
-    if !item.spells.is_empty() {
+    if item
+        .spells
+        .iter()
+        .any(|spell| spell.role != InspectionSpellRole::OnUse)
+    {
         push_section(lines, "Spells");
-        for spell in &item.spells {
+        for spell in item
+            .spells
+            .iter()
+            .filter(|spell| spell.role != InspectionSpellRole::OnUse)
+        {
             let name = spell_lookup
                 .and_then(|catalog| catalog.get(spell.id))
                 .map(|info| info.name.clone())
                 .unwrap_or_else(|| format!("Unknown Spell ({})", spell.id));
-            let suffix = if spell.active_enchantment {
+            let suffix = if spell.role == InspectionSpellRole::ActiveEnchantment {
                 " (active)"
             } else {
                 ""
@@ -631,6 +708,70 @@ mod tests {
             holtburger_world::inspection::InspectionContext::new(&titles),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn assess_output_explains_consumable_use_effects_and_spells_once() {
+        use holtburger_common::properties::PropertyDataId;
+        use holtburger_dat::file_type::spell_table::SpellBase;
+        let mut entity = Entity::new(Guid(1), "Potion".into(), WorldPosition::default());
+        entity.flags = ObjectDescriptionFlag::FOOD;
+        entity.set_int_prop(PropertyInt::BoosterEnum, 4);
+        entity.set_did_prop(PropertyDataId::Spell, Guid(42));
+        entity.spell_book = vec![42];
+        let catalog = SpellCatalog {
+            spells: [(
+                42,
+                SpellBase {
+                    name: "Test Restoration".into(),
+                    description: "Restores your vitality.".into(),
+                    ..Default::default()
+                }
+                .into(),
+            )]
+            .into(),
+            ..Default::default()
+        };
+        for (amount, expected) in [
+            (50, "Restores 50 Stamina."),
+            (-20, "Depletes 20 Stamina."),
+            (i32::MIN, "Depletes 2147483648 Stamina."),
+        ] {
+            entity.set_int_prop(PropertyInt::BoostValue, amount);
+            let text = get_assess_info(&inspect_entity(&entity), Some(&catalog))
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("On use:"));
+            assert!(text.contains(expected));
+            assert!(text.contains("Restores your vitality."));
+            assert_eq!(text.matches("Test Restoration").count(), 1);
+        }
+        let text = get_assess_info(&inspect_entity(&entity), None)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Casts spell 42 (definition unavailable)"));
+    }
+
+    #[test]
+    fn assess_output_shows_healing_kit_skill_and_restoration_bonuses() {
+        use holtburger_common::properties::PropertyFloat;
+        let mut entity = Entity::new(Guid(1), "Healing Kit".into(), WorldPosition::default());
+        entity.flags = ObjectDescriptionFlag::HEALER;
+        entity.set_int_prop(PropertyInt::BoostValue, 50);
+        for (multiplier, percent) in [(1.3, "130%"), (1.1, "110%")] {
+            entity.set_float_prop(PropertyFloat::HealkitMod, multiplier);
+            let text = get_assess_info(&inspect_entity(&entity), None)
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("Bonus to Healing Skill:  50"));
+            assert!(text.contains(&format!("Restoration Bonus:  {percent}")));
+        }
     }
 
     #[test]

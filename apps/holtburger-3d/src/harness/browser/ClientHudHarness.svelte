@@ -1738,6 +1738,9 @@
 		| "item-maximum"
 		| "item-zero"
 		| "item-plain"
+		| "consumable"
+		| "consumable-depletion"
+		| "healing-kit"
 		| "creature"
 		| "rejected"
 		| "unavailable"
@@ -1782,6 +1785,49 @@
 		kind: InspectionResponseKind,
 		guid: number,
 	): ObjectInspectionResult {
+		if (
+			kind === "consumable" ||
+			kind === "consumable-depletion" ||
+			kind === "healing-kit"
+		) {
+			const result = inspectionResult("item-plain", guid);
+			if (
+				result.outcome.kind !== "ready" ||
+				result.outcome.inspection.details.kind !== "item"
+			)
+				throw new Error("Expected an item inspection fixture");
+			return {
+				...result,
+				outcome: {
+					kind: "ready",
+					inspection: {
+						...result.outcome.inspection,
+						name:
+							kind === "healing-kit" ? "Harness Healing Kit" : "Harness Potion",
+						details: {
+							kind: "item",
+							details: {
+								...result.outcome.inspection.details.details,
+								useEffect:
+									kind === "healing-kit"
+										? {
+												kind: "healing-kit",
+												skillBonus: 50,
+												restorationMultiplier: 1.3,
+											}
+										: {
+												kind: "vital-change",
+												vital: "Stamina",
+												amount: kind === "consumable" ? 50 : -20,
+											},
+								spells:
+									kind === "healing-kit" ? [] : [{ id: 2001, role: "on-use" }],
+							},
+						},
+					},
+				},
+			};
+		}
 		if (kind === "unavailable")
 			return decodeObjectInspectionResult({
 				guid,
@@ -2066,16 +2112,17 @@
 									data: { creatureType: "Olthoi", bonus: 0.2 },
 								},
 							],
+							useEffect: null,
 							portalDestination: "Holtburg (42.1N, 33.6E).",
 							useText: "Use this item to recall to a remembered sanctuary.",
 							spells: [
-								{ id: 2000, activeEnchantment: true },
-								{ id: 2001, activeEnchantment: false },
-								{ id: 2002, activeEnchantment: false },
-								{ id: 2003, activeEnchantment: false },
-								{ id: 2004, activeEnchantment: false },
-								{ id: 2005, activeEnchantment: false },
-								{ id: 999999, activeEnchantment: false },
+								{ id: 2000, role: "active-enchantment" as const },
+								{ id: 2001, role: "item" as const },
+								{ id: 2002, role: "item" as const },
+								{ id: 2003, role: "item" as const },
+								{ id: 2004, role: "item" as const },
+								{ id: 2005, role: "item" as const },
+								{ id: 999999, role: "item" as const },
 							],
 						},
 					},

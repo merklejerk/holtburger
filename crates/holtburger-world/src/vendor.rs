@@ -3,7 +3,7 @@ use crate::identify::{self, IdentifyTarget};
 use crate::inspection::InspectionSupplement;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, PropertyUpdate, WorldObjectProperties,
+    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PropertyUpdate, WorldObjectProperties,
 };
 use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::types::{
@@ -24,6 +24,8 @@ pub struct CoreVendorItem {
     pub wcid: u32,
     pub vendor_supply: Option<u32>,
     pub properties: WorldObjectProperties,
+    /// Server public classification retained for the same inspection semantics as live entities.
+    pub public_flags: ObjectDescriptionFlag,
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
     pub weapon_profile: Option<WeaponProfile>,
@@ -65,6 +67,7 @@ impl CoreVendorItem {
             wcid: item.description.wcid,
             vendor_supply: decode_vendor_item_supply(item.packed_stack_size),
             properties,
+            public_flags: item.description.obj_desc_flags,
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,

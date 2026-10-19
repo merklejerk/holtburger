@@ -2624,6 +2624,14 @@ mod tests {
             "Test Item".into(),
             holtburger_common::position::WorldPosition::default(),
         );
+        item.flags = ObjectDescriptionFlag::FOOD;
+        item.set_int_prop(PropertyInt::BoosterEnum, 4);
+        item.set_int_prop(PropertyInt::BoostValue, 50);
+        item.set_did_prop(
+            holtburger_common::properties::PropertyDataId::Spell,
+            Guid(42),
+        );
+        item.spell_book = vec![43, 42, 0x8000_002A];
         item.set_string_prop(
             PropertyString::AppraisalPortalDestination,
             "Holtburg (42.1N, 33.6E).".into(),
@@ -2735,6 +2743,22 @@ mod tests {
         let titles = holtburger_content::CharacterTitleCatalog::from_assets(&mapper, &strings)
             .expect("synthetic character title should join");
         let inspection_context = InspectionContext::new(&titles);
+        let mut healing_kit = item.clone();
+        healing_kit.flags = ObjectDescriptionFlag::HEALER;
+        healing_kit.set_float_prop(
+            holtburger_common::properties::PropertyFloat::HealkitMod,
+            1.3,
+        );
+        let healing_kit_wire = serde_json::to_value(
+            ObjectInspection::from_entity(&healing_kit, inspection_context).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            healing_kit_wire["details"]["details"]["useEffect"],
+            serde_json::json!({
+                "kind": "healing-kit", "skillBonus": 50, "restorationMultiplier": 1.3,
+            })
+        );
         let mut unsupported_item = item.clone();
         unsupported_item.set_int_prop(PropertyInt::ItemXpStyle, 3);
         let cases = [

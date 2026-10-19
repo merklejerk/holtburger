@@ -20,6 +20,7 @@
 		formatInspectionImbuedEffects,
 		formatInspectionNumber,
 		formatInspectionPercent,
+		formatInspectionVitalChange,
 		formatItemStatuses,
 		formatWieldRequirement,
 		humanizeInspectionName,
@@ -54,18 +55,23 @@
 	let descriptionExpanded = $state(false);
 	let spellReferences = $state<readonly SpellReference[] | null>(null);
 	let spellFailure = $state<string | null>(null);
+	const onUseIndexes = $derived(
+		item.spells.flatMap((spell, index) =>
+			spell.role === "on-use" ? [index] : [],
+		),
+	);
 	const spellGroups = $derived(
 		[
 			{
 				heading: "Spells",
 				indexes: item.spells.flatMap((spell, index) =>
-					spell.activeEnchantment ? [] : [index],
+					spell.role === "item" ? [index] : [],
 				),
 			},
 			{
 				heading: "Active Spells",
 				indexes: item.spells.flatMap((spell, index) =>
-					spell.activeEnchantment ? [index] : [],
+					spell.role === "active-enchantment" ? [index] : [],
 				),
 			},
 		].filter(({ indexes }) => indexes.length > 0),
@@ -125,7 +131,11 @@
 			{@const reference = spellReferences?.[index]}
 			<li>
 				<details class="inspection-spell">
-					<summary>{spellLabel(index)}</summary>
+					<summary
+						>{item.spells[index]?.role === "on-use" ? "Casts " : ""}{spellLabel(
+							index,
+						)}</summary
+					>
 					<div class="inspection-spell-description">
 						{#if reference?.kind === "known"}
 							<p>
@@ -226,6 +236,37 @@
 				</p>{/if}
 		</div>
 	</header>
+
+	{#if item.useEffect !== null || onUseIndexes.length > 0}
+		<section
+			data-inspection-on-use
+			aria-busy={onUseIndexes.length > 0 &&
+				spellReferences === null &&
+				spellFailure === null}
+		>
+			<h3>On use</h3>
+			{#if item.useEffect?.kind === "vital-change"}<p>
+					{formatInspectionVitalChange(item.useEffect)}
+				</p>{/if}
+			{#if item.useEffect?.kind === "healing-kit"}
+				<dl class="inspection-facts">
+					{#if item.useEffect.skillBonus !== null}<div>
+							<dt>Bonus to Healing Skill</dt>
+							<dd>{formatInspectionNumber(item.useEffect.skillBonus)}</dd>
+						</div>{/if}
+					{#if item.useEffect.restorationMultiplier !== null}<div>
+							<dt>Restoration Bonus</dt>
+							<dd>
+								{formatInspectionPercent(item.useEffect.restorationMultiplier)}
+							</dd>
+						</div>{/if}
+				</dl>
+			{/if}
+			{#if onUseIndexes.length > 0}
+				{@render spellList(onUseIndexes)}
+			{/if}
+		</section>
+	{/if}
 
 	{#if item.progression !== null}
 		{@const progression = item.progression}

@@ -213,8 +213,36 @@ const effectSchema = z.discriminatedUnion("type", [
 		.strict(),
 ]);
 
+const itemXpSchema = z
+	.string()
+	.regex(/^(0|[1-9]\d*)$/)
+	.refine((value) => BigInt(value) <= 0xffff_ffff_ffff_ffffn);
+
 const itemInspectionSchema = z
 	.object({
+		progression: z
+			.object({
+				level: u32,
+				maxLevel: u32,
+				totalXp: itemXpSchema,
+				advancement: z.discriminatedUnion("kind", [
+					z
+						.object({
+							kind: z.literal("advancing"),
+							levelStartXp: itemXpSchema,
+							nextLevelXp: itemXpSchema,
+						})
+						.strict(),
+					z
+						.object({
+							kind: z.literal("maximum"),
+							maxLevelXp: itemXpSchema,
+						})
+						.strict(),
+				]),
+			})
+			.strict()
+			.nullable(),
 		artwork: clientIconAppearanceSchema
 			.unwrap()
 			.extend({ itemType: u32 })
@@ -403,6 +431,9 @@ const objectInspectionResultSchema = z
 				.strict(),
 			z.object({ kind: z.literal("rejected") }).strict(),
 			z.object({ kind: z.literal("missing") }).strict(),
+			z
+				.object({ kind: z.literal("unavailable"), reason: z.string().min(1) })
+				.strict(),
 		]),
 	})
 	.strict();

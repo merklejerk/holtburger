@@ -288,6 +288,8 @@ pub struct ViewState {
 
 #[derive(Clone, Default)]
 struct GamePageRuntimeState {
+    /// At most one appraisal request or scheduled refresh for the visible Assess pane.
+    inspection_refresh: Option<domains::object_interaction::InspectionRefresh>,
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
+	import { formatQuantity, progressPercent } from "../app/quantity-format";
 	import {
 		progressionIntentKey,
 		progressionTargetKey,
@@ -103,14 +104,7 @@
 		return value.replace(/Attr$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 	}
 	function xp(value: string | number): string {
-		return BigInt(value).toLocaleString();
-	}
-	// Keep exact large balances in bigint arithmetic; only the bounded fill becomes a number.
-	function progressPercent(value: string, maximum: string): number {
-		const limit = BigInt(maximum);
-		if (limit === 0n) return 0;
-		const amount = BigInt(value);
-		return Number(((amount > limit ? limit : amount) * 10000n) / limit) / 100;
+		return formatQuantity(BigInt(value));
 	}
 	function effectGroups(stat: EffectStat) {
 		if (enchantments === null) return [];
@@ -508,11 +502,12 @@
 						>
 					</div>
 					<progress
+						class="ui-progress"
 						aria-label="Level experience"
 						max="100"
 						value={progressPercent(
-							sheet.level.xpIntoLevel,
-							sheet.level.xpForNextLevel,
+							BigInt(sheet.level.xpIntoLevel),
+							BigInt(sheet.level.xpForNextLevel),
 						)}
 					></progress>
 				</div>
@@ -539,12 +534,13 @@
 						>
 					</div>
 					<progress
+						class="ui-progress"
 						aria-label="Luminance capacity"
 						title="Available luminance versus storage capacity"
 						max="100"
 						value={progressPercent(
-							sheet.level.availableLuminance,
-							sheet.maximumLuminance,
+							BigInt(sheet.level.availableLuminance),
+							BigInt(sheet.maximumLuminance),
 						)}
 					></progress>
 				</div>
@@ -769,25 +765,6 @@
 	}
 	.track-label span:first-child {
 		font-weight: 600;
-	}
-	.progress-track progress {
-		width: 100%;
-		height: 0.45rem;
-		appearance: none;
-		border: 0;
-		border-radius: 0.2rem;
-		overflow: hidden;
-		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);
-		color: var(--ui-character-xp-color, var(--ui-color-accent));
-	}
-	.progress-track progress::-webkit-progress-bar {
-		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);
-	}
-	.progress-track progress::-webkit-progress-value {
-		background: currentColor;
-	}
-	.progress-track progress::-moz-progress-bar {
-		background: currentColor;
 	}
 	.luminance-track progress {
 		color: var(--ui-character-luminance-color, var(--ui-color-success));

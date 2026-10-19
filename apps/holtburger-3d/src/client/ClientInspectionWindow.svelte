@@ -558,7 +558,7 @@
 			justify-content: space-between;
 			margin-bottom: 3px;
 		}
-		.inspection-scroll :global(progress) {
+		.inspection-scroll :global(.inspection-vital progress) {
 			display: block;
 			width: 100%;
 			height: 10px;

@@ -148,6 +148,24 @@ pub enum ObjectInspectionOutcome {
     Rejected,
     /// Response target no longer resolves to an entity or vendor item.
     Missing,
+    /// Appraisal succeeded, but its disclosed facts cannot be interpreted by this client.
+    Unavailable {
+        /// Concrete local failure, distinct from a server appraisal rejection.
+        reason: String,
+    },
+}
+
+impl From<Result<ObjectInspection, ObjectInspectionError>> for ObjectInspectionOutcome {
+    fn from(result: Result<ObjectInspection, ObjectInspectionError>) -> Self {
+        match result {
+            Ok(inspection) => Self::Ready {
+                inspection: Box::new(inspection),
+            },
+            Err(error) => Self::Unavailable {
+                reason: error.to_string(),
+            },
+        }
+    }
 }
 
 /// Subject-specific inspection facts selected once by the authoritative world layer.
@@ -163,6 +181,14 @@ pub enum ObjectInspectionDetails {
 /// Failure to populate a semantically valid inspection from retained world facts.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ObjectInspectionError {
+    /// Disclosed item progression cannot be interpreted safely.
+    #[error("item {guid} has invalid progression: {source}")]
+    ItemProgression {
+        /// Identity of the item whose appraisal could not be populated.
+        guid: Guid,
+        /// Precise progression failure retained for the unavailable outcome.
+        source: crate::item_progression::ItemProgressionError,
+    },
     /// A player appraisal has not yet supplied the creature profile required by its presentation.
     #[error("player {guid} has no appraised creature profile")]
     MissingPlayerCreatureProfile { guid: holtburger_common::Guid },
@@ -172,6 +198,8 @@ pub enum ObjectInspectionError {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemInspection {
+    /// Earned item level and XP thresholds, absent for items without progression.
+    pub progression: Option<crate::item_progression::ItemProgression>,
     /// Complete server-authored inputs for the existing UI icon compositor.
     pub artwork: ItemInspectionArtwork,
     /// Appraised pyreal value; absence remains distinct from zero.
@@ -1053,7 +1081,7 @@ impl ObjectInspection {
                 object, context,
             )))
         } else {
-            ObjectInspectionDetails::Item(Box::new(ItemInspection::from_object(object)))
+            ObjectInspectionDetails::Item(Box::new(ItemInspection::from_object(object)?))
         };
 
         Ok(Self {
@@ -1086,8 +1114,15 @@ impl ObjectInspection {
 }
 
 impl ItemInspection {
-    fn from_object(object: &InspectionSource<'_>) -> Self {
-        Self {
+    fn from_object(object: &InspectionSource<'_>) -> Result<Self, ObjectInspectionError> {
+        Ok(Self {
+            progression: crate::item_progression::ItemProgression::from_properties(
+                object.properties,
+            )
+            .map_err(|source| ObjectInspectionError::ItemProgression {
+                guid: object.guid,
+                source,
+            })?,
             artwork: ItemInspectionArtwork {
                 appearance: EntityIconAppearance::from_properties(object),
                 item_type: object.item_type().unwrap_or_default().bits(),
@@ -1150,7 +1185,7 @@ impl ItemInspection {
                 .copied()
                 .map(InspectionSpell::from_wire_id)
                 .collect(),
-        }
+        })
     }
 }
 
@@ -1961,6 +1996,57 @@ mod tests {
     fn inspect_entity(entity: &Entity) -> Result<ObjectInspection, ObjectInspectionError> {
         let titles = CharacterTitleCatalog::default();
         ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
+
+    #[test]
+    fn item_progression_is_derived_from_merged_appraisal_and_keeps_ordinary_level_separate() {
+        use crate::item_progression::ItemAdvancement;
+        use holtburger_common::properties::PropertyInt64;
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Cloak".into(), WorldPosition::default());
+        let mut response = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            flags: IdentifyResponseFlags::INT_STATS_TABLE
+                | IdentifyResponseFlags::INT64_STATS_TABLE,
+            success: true,
+            ..Default::default()
+        };
+        response.properties.set_int_prop(PropertyInt::Level, 80);
+        response
+            .properties
+            .set_int_prop(PropertyInt::ItemMaxLevel, 5);
+        response
+            .properties
+            .set_int_prop(PropertyInt::ItemXpStyle, 2);
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemBaseXp, 100);
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemTotalXp, 350);
+        assert!(entity.apply_identify_response(&response));
+        let inspection = inspect_entity(&entity).unwrap();
+        assert_eq!(inspection.level, Some(80));
+        let ObjectInspectionDetails::Item(item) = inspection.details else {
+            panic!("item appraisal")
+        };
+        let progression = item.progression.unwrap();
+        assert_eq!(progression.level, 2);
+        assert_eq!(
+            progression.advancement,
+            ItemAdvancement::Advancing {
+                level_start_xp: 300,
+                next_level_xp: 700
+            }
+        );
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemTotalXp, 700);
+        assert!(entity.apply_identify_response(&response));
+        let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details else {
+            panic!("item appraisal")
+        };
+        assert_eq!(item.progression.unwrap().level, 3);
     }
 
     #[test]

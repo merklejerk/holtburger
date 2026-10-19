@@ -155,6 +155,9 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
                 ObjectInspectionOutcome::Missing => {
                     vec![Line::from("The object is no longer available.")]
                 }
+                ObjectInspectionOutcome::Unavailable { reason } => {
+                    vec![Line::from(format!("Appraisal unavailable: {reason}"))]
+                }
             }
         }
         ContextView::Debug(target) => {

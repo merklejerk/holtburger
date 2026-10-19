@@ -20,7 +20,10 @@
 						},
 						"value": null,
 						"burden": null,
-						"capacity": { "items": null, "containers": null },
+						"capacity": {
+							"items": null,
+							"containers": null
+						},
 						"material": null,
 						"tinkering": null,
 						"spellcraft": null,
@@ -47,7 +50,17 @@
 						"effects": [],
 						"portalDestination": "Holtburg (42.1N, 33.6E).",
 						"useText": null,
-						"spells": []
+						"spells": [],
+						"progression": {
+							"level": 2,
+							"maxLevel": 5,
+							"totalXp": "350000000",
+							"advancement": {
+								"kind": "advancing",
+								"levelStartXp": "300000000",
+								"nextLevelXp": "700000000"
+							}
+						}
 					}
 				}
 			}
@@ -65,9 +78,15 @@
 				"details": {
 					"kind": "creature",
 					"details": {
-						"identity": { "kind": "creature", "lineage": null },
+						"identity": {
+							"kind": "creature",
+							"lineage": null
+						},
 						"health": {
-							"effective": { "current": 25, "max": 50 },
+							"effective": {
+								"current": 25,
+								"max": 50
+							},
 							"unbuffed": null,
 							"enchantment": null
 						},
@@ -100,21 +119,51 @@
 							"playerKillerStatus": "non-player-killer"
 						},
 						"health": {
-							"effective": { "current": 100, "max": 100 },
+							"effective": {
+								"current": 100,
+								"max": 100
+							},
 							"unbuffed": null,
 							"enchantment": null
 						},
 						"attributesAndVitals": null,
 						"armorCoverage": {
-							"head": { "level": 312, "enchantable": true },
-							"chest": { "level": 507, "enchantable": true },
-							"abdomen": { "level": 484, "enchantable": true },
-							"upperArm": { "level": 181, "enchantable": true },
-							"lowerArm": { "level": 181, "enchantable": true },
-							"hand": { "level": 277, "enchantable": true },
-							"upperLeg": { "level": 484, "enchantable": true },
-							"lowerLeg": { "level": 484, "enchantable": false },
-							"foot": { "level": 490, "enchantable": true }
+							"head": {
+								"level": 312,
+								"enchantable": true
+							},
+							"chest": {
+								"level": 507,
+								"enchantable": true
+							},
+							"abdomen": {
+								"level": 484,
+								"enchantable": true
+							},
+							"upperArm": {
+								"level": 181,
+								"enchantable": true
+							},
+							"lowerArm": {
+								"level": 181,
+								"enchantable": true
+							},
+							"hand": {
+								"level": 277,
+								"enchantable": true
+							},
+							"upperLeg": {
+								"level": 484,
+								"enchantable": true
+							},
+							"lowerLeg": {
+								"level": 484,
+								"enchantable": false
+							},
+							"foot": {
+								"level": 490,
+								"enchantable": true
+							}
 						},
 						"ratings": {
 							"damageRating": 5,
@@ -134,7 +183,10 @@
 						},
 						"maxHealthBonus": 25,
 						"characterDetails": {
-							"allegianceRank": { "rank": 2, "title": "Baronet" },
+							"allegianceRank": {
+								"rank": 2,
+								"title": "Baronet"
+							},
 							"allegianceName": "Test Allegiance",
 							"patron": null,
 							"monarch": null,
@@ -155,10 +207,21 @@
 	},
 	"rejected": {
 		"guid": 1610612737,
-		"outcome": { "kind": "rejected" }
+		"outcome": {
+			"kind": "rejected"
+		}
 	},
 	"missing": {
 		"guid": 1610612737,
-		"outcome": { "kind": "missing" }
+		"outcome": {
+			"kind": "missing"
+		}
+	},
+	"unavailable": {
+		"guid": 1610612737,
+		"outcome": {
+			"kind": "unavailable",
+			"reason": "item 60000001 has invalid progression: unsupported item XP style: 3"
+		}
 	}
 }

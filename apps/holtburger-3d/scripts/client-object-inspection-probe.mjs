@@ -292,7 +292,37 @@ export async function probeObjectInspection(
 		assert.ok(equipmentPresentation.harmful > 0);
 		assert.ok(equipmentPresentation.unbuffed > 0);
 		assert.match(item.window.text, /Unenchantable/);
+		const progressionBar = () =>
+			read(`(() => {
+			const section = document.querySelector('[data-inspection-progression]');
+			const bar = section?.querySelector('progress');
+			return section === null ? null : {text: section.textContent, value: bar.value, max: bar.max, label: bar.getAttribute('aria-label'), description: bar.getAttribute('aria-valuetext')};
+		})()`);
+		let progression = await progressionBar();
+		assert.equal(progression.value, 12.5);
+		assert.equal(progression.max, 100);
+		assert.equal(progression.label, "Item level experience");
+		assert.match(progression.text, /350,000,000 \/ 700,000,000/);
 		await screenshot("inspection-item");
+
+		// Exercise refresh through the production request owner, retaining the same window.
+		for (const [kind, expected] of [
+			["item-zero", 0],
+			["item-maximum", 100],
+			["item-plain", null],
+		]) {
+			await read(`${probe}.select(7)`);
+			await click('button[aria-label="Examine"]');
+			await respond(kind, 7);
+			await settle(50);
+			progression = await progressionBar();
+			if (expected === null) assert.equal(progression, null);
+			else assert.equal(progression.value, expected);
+			if (kind === "item-maximum") {
+				assert.equal(progression.description, "Maximum level");
+			}
+		}
+		item = await snapshot();
 
 		const commandsBeforeClose = item.commandCount;
 		await click('button[aria-label^="Close Ancient Atlan Sword"]');
@@ -422,6 +452,15 @@ export async function probeObjectInspection(
 		failure = await snapshot();
 		assert.equal(failure.failure, "That object is no longer available.");
 		assert.equal(failure.state.kind, "idle");
+		await click('button[aria-label="Examine"]');
+		await respond("unavailable", 7);
+		failure = await snapshot();
+		assert.equal(
+			failure.failure,
+			"Appraisal unavailable: unsupported item XP style: 3",
+		);
+		assert.equal(failure.state.kind, "idle");
+		assert.equal(failure.window, null);
 
 		// Re-open the long item, then exercise native drag and border resize.
 		await click('button[aria-label="Examine"]');

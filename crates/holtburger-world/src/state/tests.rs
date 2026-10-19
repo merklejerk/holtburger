@@ -5919,6 +5919,50 @@ fn successful_identify_merges_before_publishing_ready_inspection() {
 }
 
 #[test]
+fn invalid_item_progression_publishes_an_unavailable_appraisal_without_losing_identification() {
+    use crate::inspection::{ObjectInspectionOutcome, ObjectInspectionResult};
+    use holtburger_common::properties::PropertyInt64;
+    for (style, base, total, failure) in [
+        (3, 100, 0, "unsupported item XP style: 3"),
+        (1, 100, -1, "negative accumulated item XP: -1"),
+        (2, i64::MAX, i64::MAX, "item XP threshold exceeds"),
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x60001001);
+        world
+            .entities
+            .insert(Entity::new(guid, "Cloak".into(), WorldPosition::default()));
+        let mut response = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            success: true,
+            flags: IdentifyResponseFlags::INT_STATS_TABLE
+                | IdentifyResponseFlags::INT64_STATS_TABLE,
+            ..Default::default()
+        };
+        response
+            .properties
+            .set_int_prop(PropertyInt::ItemXpStyle, style);
+        response
+            .properties
+            .set_int_prop(PropertyInt::ItemMaxLevel, 5);
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemBaseXp, base);
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemTotalXp, total);
+        let events = world.handle_message(&identify_response_message(response));
+        assert!(events.iter().any(
+            |event| matches!(event, WorldEvent::EntityIdentified(entity) if entity.guid == guid)
+        ));
+        assert!(events.iter().any(|event| matches!(event,
+            WorldEvent::ObjectInspectionResult(ObjectInspectionResult { guid: result_guid, outcome: ObjectInspectionOutcome::Unavailable { reason } })
+                if *result_guid == guid && reason.contains(failure)
+        )));
+    }
+}
+
+#[test]
 fn rejected_identify_does_not_merge_partial_properties() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x60001002);
@@ -6020,6 +6064,29 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
             guid: result_guid,
             outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
         }) if *result_guid == guid
+    )));
+
+    let mut unsupported = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        success: true,
+        flags: IdentifyResponseFlags::INT_STATS_TABLE | IdentifyResponseFlags::INT64_STATS_TABLE,
+        ..Default::default()
+    };
+    unsupported
+        .properties
+        .set_int_prop(PropertyInt::ItemXpStyle, 3);
+    unsupported
+        .properties
+        .set_int_prop(PropertyInt::ItemMaxLevel, 5);
+    unsupported.properties.set_int64_prop(
+        holtburger_common::properties::PropertyInt64::ItemBaseXp,
+        100,
+    );
+    let events = world.handle_message(&identify_response_message(unsupported));
+    assert!(events.iter().any(|event| matches!(event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            outcome: crate::inspection::ObjectInspectionOutcome::Unavailable { reason }, ..
+        }) if reason.contains("unsupported item XP style: 3")
     )));
 }
 

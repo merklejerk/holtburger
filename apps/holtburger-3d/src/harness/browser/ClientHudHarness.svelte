@@ -1742,7 +1742,15 @@
 		handler(payload);
 	}
 
-	type InspectionResponseKind = "item" | "creature" | "rejected" | "missing";
+	type InspectionResponseKind =
+		| "item"
+		| "item-maximum"
+		| "item-zero"
+		| "item-plain"
+		| "creature"
+		| "rejected"
+		| "unavailable"
+		| "missing";
 	const itemDescriptionPrefix = "Archived appraisal context. ";
 	const longItemDescription = `${itemDescriptionPrefix.repeat(
 		Math.floor(
@@ -1783,6 +1791,11 @@
 		kind: InspectionResponseKind,
 		guid: number,
 	): ObjectInspectionResult {
+		if (kind === "unavailable")
+			return decodeObjectInspectionResult({
+				guid,
+				outcome: { kind, reason: "unsupported item XP style: 3" },
+			});
 		if (kind === "rejected" || kind === "missing")
 			return decodeObjectInspectionResult({
 				guid,
@@ -1920,6 +1933,36 @@
 					details: {
 						kind: "item",
 						details: {
+							progression:
+								kind === "item-plain"
+									? null
+									: {
+											level:
+												kind === "item-maximum"
+													? 5
+													: kind === "item-zero"
+														? 0
+														: 2,
+											maxLevel: 5,
+											totalXp:
+												kind === "item-maximum"
+													? "3100000000"
+													: kind === "item-zero"
+														? "0"
+														: "350000000",
+											advancement:
+												kind === "item-maximum"
+													? { kind: "maximum", maxLevelXp: "3100000000" }
+													: {
+															kind: "advancing",
+															levelStartXp:
+																kind === "item-zero" ? "0" : "300000000",
+															nextLevelXp:
+																kind === "item-zero"
+																	? "100000000"
+																	: "700000000",
+														},
+										},
 							artwork: {
 								base: 777,
 								overlay: 778,

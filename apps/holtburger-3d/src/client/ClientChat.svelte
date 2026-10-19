@@ -9,6 +9,7 @@
 	import { tick } from "svelte";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import type { ClientChatComposer } from "./client-chat-composer.svelte";
+	import type { ClientClockFormat } from "./client-environment-settings";
 	import {
 		CHAT_CHANNEL_DESTINATIONS,
 		resolveChatCompose,
@@ -34,6 +35,8 @@
 		/** Set the current local destination without submitting chat. */
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly messages: readonly ClientChatLine[];
+		/** User-selected clock format for all buffered message timestamps. */
+		readonly clockFormat: ClientClockFormat;
 		/** App-owned locally queued input, oldest first. */
 		readonly sentHistory: readonly string[];
 		readonly onSend: (
@@ -53,6 +56,7 @@
 	const {
 		onSetWaypoint,
 		messages,
+		clockFormat,
 		sentHistory,
 		onSend,
 		composer,
@@ -360,6 +364,7 @@
 		const time = line.receivedAt.toLocaleTimeString([], {
 			hour: "2-digit",
 			minute: "2-digit",
+			hourCycle: clockFormat === "24-hour" ? "h23" : "h12",
 		});
 		const channel = ` [${clientChatMessageLabel(line)}]`;
 		const sender = "sender" in line ? ` ${line.sender}` : "";

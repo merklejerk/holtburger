@@ -1211,6 +1211,7 @@
 				composer={chatComposer}
 				{onSetWaypoint}
 				messages={chatMessages}
+				{clockFormat}
 				sentHistory={sentChatHistory}
 				onSend={onSendChat}
 				onSendError={onSendChatError}

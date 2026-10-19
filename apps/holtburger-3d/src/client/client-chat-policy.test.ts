@@ -15,6 +15,59 @@ function line(message: ClientChatEntry): ClientChatLine {
 }
 
 describe("client chat presentation policy", () => {
+	it.each(["emote", "soul-emote"] as const)(
+		"presents %s without a label while preserving speaker colors",
+		(kind) => {
+			for (const [speakerKind, tone] of [
+				["player", "emote"],
+				["unknown", "emote"],
+				["non-player", "npc"],
+			] as const) {
+				const message = line({
+					kind,
+					sender: "Mira",
+					speakerKind,
+					message: "waves.",
+				});
+				expect(clientChatMessageLabel(message)).toBeNull();
+				expect(clientChatTone(message)).toBe(tone);
+			}
+		},
+	);
+
+	it.each([
+		["player", null],
+		["unknown", null],
+		["non-player", "NPC"],
+	] as const)("labels local chat from %s speakers", (speakerKind, expected) => {
+		for (const message of [
+			{
+				kind: "speech",
+				category: "speech",
+				sender: "Mira",
+				speakerKind,
+				message: "Hello",
+			},
+			{
+				kind: "tell",
+				category: "speech",
+				target: null,
+				sender: "Mira",
+				speakerKind,
+				message: "Hello",
+			},
+		] as const)
+			expect(clientChatMessageLabel(line(message))).toBe(expected);
+	});
+
+	it("omits the local category prefix from server text", () => {
+		expect(
+			clientChatMessageLabel(
+				line({ kind: "server", category: "speech", message: "Hello" }),
+			),
+		).toBeNull();
+	});
+
 	it("preserves server text categories while keeping the existing coarse filters", () => {
 		const outgoing = line({
 			kind: "server",

@@ -366,9 +366,12 @@
 			minute: "2-digit",
 			hourCycle: clockFormat === "24-hour" ? "h23" : "h12",
 		});
-		const channel = ` [${clientChatMessageLabel(line)}]`;
+		const label = clientChatMessageLabel(line);
+		const channel = label === null ? "" : ` [${label}]`;
 		const sender = "sender" in line ? ` ${line.sender}` : "";
-		return `[${time}]${channel}${sender}`;
+		const separator =
+			line.kind === "emote" || line.kind === "soul-emote" ? "" : ":";
+		return `[${time}]${channel}${sender}${separator}`;
 	}
 </script>
 
@@ -418,7 +421,7 @@
 							class:chat-emote={line.kind === "emote" ||
 								line.kind === "soul-emote"}
 						>
-							<strong>{linePrefix(line)}:</strong>
+							<strong>{linePrefix(line)}</strong>
 							<span class="chat-message"
 								>{#if line.kind === "formatted-system"}<ClientChatFormattedText
 										rows={line.rows}

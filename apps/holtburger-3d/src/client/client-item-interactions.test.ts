@@ -1,6 +1,10 @@
 import { emptyHousing } from "./client-housing-contract";
 import { describe, expect, it, vi } from "vitest";
-import { ClientItemInteractions } from "./client-item-interactions";
+import {
+	ClientItemInteractions,
+	GIVE_CONFIRMATION_SUPPRESSION_MS,
+} from "./client-item-interactions";
+import { ClientEntitySelection } from "./client-entity-selection";
 import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { entityFacts } from "./client-entity-mirror.test-support";
@@ -16,15 +20,17 @@ async function fixture() {
 			return () => handlers.delete(name);
 		},
 	});
-	let selected: number | null = null;
-	let previous: number | null = null;
+	const selection = new ClientEntitySelection({
+		lifecycle,
+		presentation: () => null,
+	});
 	const failure = vi.fn();
 	const beginAcquisition = vi.fn();
 	const beginTrade = vi.fn();
 	const interactions = new ClientItemInteractions({
 		beginTrade,
 		session: lifecycle,
-		selection: { selectedGuid: () => selected, previousGuid: () => previous },
+		selection,
 		reportFailure: failure,
 		reportNotice: failure,
 		beginAcquisition,
@@ -135,12 +141,11 @@ async function fixture() {
 			});
 		},
 		emit,
-		select: (guid: number | null) => {
-			previous = guid === null ? null : selected;
-			selected = guid;
-		},
+		selection,
+		select: (guid: number | null) => selection.select(guid),
 		destroy: () => {
 			interactions.destroy();
+			selection.destroy();
 			lifecycle.stop();
 		},
 	};
@@ -265,37 +270,123 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		f.destroy();
 	});
-	it("gives the selected item to the previous recipient and cancels use targeting", async () => {
-		const f = await fixture();
-		const give = vi
-			.spyOn(f.lifecycle, "submitInventory")
-			.mockResolvedValue(undefined);
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			worldContainer: null,
-			upserts: [entityFacts(4, { canReceiveGive: true })],
-			removed: [],
-		});
+	it("confirms keyboard gives and restores the recipient for consecutive hand-ins", async () => {
+		const f = await giveFixture();
 		f.select(4);
 		f.select(2);
 		f.interactions.use(2, false);
 		f.interactions.giveSelected();
-		expect(f.interactions.snapshot().kind).toBe("idle");
-		expect(give).toHaveBeenCalledExactlyOnceWith({
+		expect(f.give).not.toHaveBeenCalled();
+		expect(f.interactions.question()).toMatchObject({
+			acceptLabel: "Give",
+			cancelLabel: "Cancel",
+		});
+		const question = f.question();
+		f.interactions.respond(question.requestId, true);
+		expect(f.give).toHaveBeenCalledExactlyOnceWith({
 			item: 2,
 			target: { kind: "give", guid: 4 },
 		});
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			worldContainer: null,
-			upserts: [],
-			removed: [4],
-		});
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.select(3);
 		f.interactions.giveSelected();
-		expect(give).toHaveBeenCalledTimes(1);
+		f.interactions.respond(f.question().requestId, true);
+		expect(f.give).toHaveBeenLastCalledWith({
+			item: 3,
+			target: { kind: "give", guid: 4 },
+		});
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.destroy();
+	});
+
+	it("keeps direct give identities while selection changes and ignores repeated acceptance", async () => {
+		const f = await giveFixture();
+		f.select(2);
+		f.interactions.give(2, 4);
+		const question = f.question();
+		f.select(5);
+		f.interactions.respond(question.requestId, true);
+		f.interactions.respond(question.requestId, true);
+		expect(f.give).toHaveBeenCalledExactlyOnceWith({
+			item: 2,
+			target: { kind: "give", guid: 4 },
+		});
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.destroy();
+	});
+
+	it("cancels without enabling suppression or changing selection", async () => {
+		const f = await giveFixture();
+		f.select(2);
+		f.interactions.give(2, 4);
+		f.interactions.respond(f.question().requestId, false, true);
+		expect(f.give).not.toHaveBeenCalled();
+		expect(f.selection.selectedGuid()).toBe(2);
+		f.interactions.give(2, 5);
+		expect(f.interactions.question()).not.toBeNull();
+		f.destroy();
+	});
+
+	it("suppresses all recipients for one hour without extending the deadline on subsequent gives", async () => {
+		const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+		const f = await giveFixture();
+		try {
+			f.interactions.give(2, 4);
+			f.interactions.respond(f.question().requestId, true, true);
+			now.mockReturnValue(1_000 + GIVE_CONFIRMATION_SUPPRESSION_MS - 1);
+			f.select(3);
+			f.interactions.give(3, 5);
+			expect(f.interactions.question()).toBeNull();
+			expect(f.give).toHaveBeenLastCalledWith({
+				item: 3,
+				target: { kind: "give", guid: 5 },
+			});
+			now.mockReturnValue(1_000 + GIVE_CONFIRMATION_SUPPRESSION_MS);
+			f.interactions.give(2, 4);
+			expect(f.interactions.question()).not.toBeNull();
+			expect(f.give).toHaveBeenCalledTimes(2);
+		} finally {
+			now.mockRestore();
+			f.destroy();
+		}
+	});
+
+	it("retains suppression through portals and clears it on logout", async () => {
+		const f = await giveFixture();
+		f.interactions.give(2, 4);
+		f.interactions.respond(f.question().requestId, true, true);
+		f.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		f.emit("client-lifecycle-changed", { kind: "in-world" });
+		f.interactions.give(2, 5);
+		expect(f.interactions.question()).toBeNull();
+		expect(f.give).toHaveBeenCalledTimes(2);
+		f.emit("client-lifecycle-changed", {
+			kind: "character-selection",
+			characters: [],
+		});
+		f.emit("client-lifecycle-changed", { kind: "in-world" });
+		f.interactions.give(2, 4);
+		expect(f.interactions.question()).not.toBeNull();
+		expect(f.give).toHaveBeenCalledTimes(2);
+		f.destroy();
+	});
+
+	it("reports invalid recipients and submission failures", async () => {
+		const f = await giveFixture();
+		f.interactions.give(2, 99);
 		expect(f.failure).toHaveBeenLastCalledWith(
-			"The previous selection cannot receive an item.",
+			"This recipient cannot receive an item.",
 		);
+		expect(f.interactions.question()).toBeNull();
+		f.give.mockRejectedValueOnce(new Error("Give rejected"));
+		f.interactions.give(2, 4);
+		f.interactions.respond(f.question().requestId, true);
+		await Promise.resolve();
+		expect(f.failure).toHaveBeenLastCalledWith("Error: Give rejected");
 		f.destroy();
 	});
 
@@ -515,13 +606,13 @@ describe("shared frontend item interaction flow", () => {
 		const state = f.interactions.snapshot();
 		if (state.kind !== "confirming") throw new Error("Expected local question");
 		expect(f.interactions.question()).toEqual({
-			requestId: state.question.id,
+			requestId: state.question.requestId,
 			text: state.question.text,
 		});
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		f.select(1);
-		f.interactions.respond(state.question.id, true);
-		f.interactions.respond(state.question.id, true);
+		f.interactions.respond(state.question.requestId, true);
+		f.interactions.respond(state.question.requestId, true);
 		expect(f.submit).toHaveBeenCalledTimes(2);
 		expect(f.request().intent).toEqual({
 			kind: "targeted",
@@ -556,7 +647,7 @@ describe("shared frontend item interaction flow", () => {
 			});
 			const state = f.interactions.snapshot();
 			if (state.kind !== "confirming") throw new Error("Expected question");
-			return state.question.id;
+			return state.question.requestId;
 		};
 		f.interactions.respond(question(), false);
 		expect(f.interactions.snapshot().kind).toBe("idle");
@@ -618,3 +709,29 @@ it("player interaction initiates trade through the ordinary Interact flow", asyn
 	expect(f.interactions.snapshot().kind).toBe("idle");
 	f.destroy();
 });
+
+/** Two recipient kinds share the same give policy and suppression deadline. */
+async function giveFixture() {
+	const f = await fixture();
+	const give = vi
+		.spyOn(f.lifecycle, "submitInventory")
+		.mockResolvedValue(undefined);
+	f.emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		worldContainer: null,
+		upserts: [
+			entityFacts(4, { canReceiveGive: true }),
+			entityFacts(5, { canReceiveGive: true, canTrade: true }),
+		],
+		removed: [],
+	});
+	return {
+		...f,
+		give,
+		question: () => {
+			const question = f.interactions.question();
+			if (question === null) throw new Error("Expected give confirmation");
+			return question;
+		},
+	};
+}

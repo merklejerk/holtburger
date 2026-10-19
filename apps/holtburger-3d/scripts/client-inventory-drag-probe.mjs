@@ -643,8 +643,54 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	)
 		throw new Error("Entity release did not resolve give");
 	await reply(givePreview.sequence, { kind: "give" });
-	if ((await submissions()).length !== giveBefore + 1)
-		throw new Error("Give release did not submit once");
+	const giveDialog = "dialog.client-message-dialog[open]";
+	if (
+		(await submissions()).length !== giveBefore ||
+		!(await read(`document.querySelector('${giveDialog}') !== null`))
+	)
+		throw new Error("Give drop bypassed confirmation");
+	await read(
+		`document.querySelector('${giveDialog} input[type="checkbox"]').click()`,
+	);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Escape",
+		code: "Escape",
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Escape",
+		code: "Escape",
+	});
+	if (
+		(await submissions()).length !== giveBefore ||
+		(await read(`${api}.capture().selectedGuid`)) !== 91
+	)
+		throw new Error("Cancelling give changed selection or submitted an item");
+	const retryPoint = await begin(source, viewport);
+	await release(retryPoint);
+	await reply((await lastPreview()).sequence, { kind: "give" });
+	if (
+		!(await read(
+			`document.querySelector('${giveDialog} input[type="checkbox"]')?.checked === false`,
+		))
+	)
+		throw new Error("Cancelled give retained suppression in the next question");
+	const acceptGive = () =>
+		read(`(() => {
+		const button = [...document.querySelectorAll('${giveDialog} button')].find(button => button.textContent.trim() === 'Give');
+		if (!button) throw new Error('Give confirmation missing');
+		button.click();
+	})()`);
+	await acceptGive();
+	if (
+		(await submissions()).length !== giveBefore + 1 ||
+		(await read(`${api}.capture().selectedGuid`)) !== 7
+	)
+		throw new Error(
+			"Give release did not submit once and reselect its recipient",
+		);
+	await read(`document.querySelector(${JSON.stringify(source)}).click()`);
 	const binding = await read(`${api}.giveProbe.binding`);
 	const giveKey = {
 		key: binding.key ?? "Unidentified",
@@ -662,6 +708,15 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		autoRepeat: true,
 	});
 	await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...giveKey });
+	if (
+		(await submissions()).length !== giveBefore + 1 ||
+		!(await read(`document.querySelector('${giveDialog}') !== null`))
+	)
+		throw new Error("Keyboard give bypassed confirmation");
+	await read(
+		`document.querySelector('${giveDialog} input[type="checkbox"]').click()`,
+	);
+	await acceptGive();
 	const given = await submissions();
 	if (
 		given.length !== giveBefore + 2 ||
@@ -671,6 +726,16 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error(
 			"Configured give key did not use selection history exactly once",
 		);
+	const suppressedPoint = await begin(source, viewport);
+	await release(suppressedPoint);
+	await reply((await lastPreview()).sequence, { kind: "give" });
+	if (
+		(await submissions()).length !== giveBefore + 3 ||
+		(await read(`document.querySelector('${giveDialog}') !== null`))
+	)
+		throw new Error(
+			"Keyboard suppression did not apply to a later viewport give",
+		);
 	for (const result of [
 		{ kind: "entity", guid: 94 },
 		{ kind: "unavailable", reason: "Injected unavailable picking" },
@@ -678,7 +743,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		await read(`${api}.giveProbe.setTarget(${JSON.stringify(result)})`);
 		const p = await begin(source, viewport);
 		await release(p);
-		if ((await submissions()).length !== giveBefore + 2)
+		if ((await submissions()).length !== giveBefore + 3)
 			throw new Error("Failed give became an inventory action");
 		if (await read('document.querySelector("[data-item-dragging]") !== null'))
 			throw new Error("Unavailable destination left a gesture pending");
@@ -697,13 +762,13 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		code: "Escape",
 	});
 	await read(`${api}.giveProbe.reply({kind: "entity", guid: 7})`);
-	if ((await submissions()).length !== giveBefore + 2)
+	if ((await submissions()).length !== giveBefore + 3)
 		throw new Error("Cancelled world pick submitted give");
 	const removedPoint = await begin(source, viewport);
 	await release(removedPoint);
 	const removedSource = await read(`${api}.giveProbe.removeSource(91)`);
 	await read(`${api}.giveProbe.reply({kind: "entity", guid: 7})`);
-	if ((await submissions()).length !== giveBefore + 2)
+	if ((await submissions()).length !== giveBefore + 3)
 		throw new Error("Removed source submitted a late give");
 	if (await read('document.querySelector("[data-item-dragging]") !== null'))
 		throw new Error("Source removal left a world pick active");
@@ -716,6 +781,10 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		nativeSubmission: true,
 		aetheriaDropAdmission: true,
 		worldGive: true,
+		giveConfirmation: true,
+		giveCancellation: true,
+		giveRecipientReselection: true,
+		giveSuppressionAcrossInputs: true,
 		configuredGiveHotkey: true,
 		giveFailureNeverDrops: true,
 		groundDrop: true,

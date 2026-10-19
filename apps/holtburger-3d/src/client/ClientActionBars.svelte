@@ -248,6 +248,7 @@
 			vendor,
 			trade,
 			houseCrystal,
+			(source, recipient) => interactions.give(source, recipient),
 		);
 		onDragOwner(drag);
 		const repository = inventory.icons;

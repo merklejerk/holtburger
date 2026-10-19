@@ -6,7 +6,11 @@
 		/** Current app-owned dialog; confirmation identity is supplied back unchanged. */
 		readonly presentation: ClientDialogPresentation;
 		readonly onDismiss: (id: number) => void;
-		readonly onRespond: (requestId: string, accepted: boolean) => void;
+		readonly onRespond: (
+			requestId: string,
+			accepted: boolean,
+			suppress?: boolean,
+		) => void;
 	}
 	const { presentation, onDismiss, onRespond }: Props = $props();
 	const submitting = $derived(
@@ -21,6 +25,16 @@
 	);
 	/** Scope typed input to its question so replacing a modal cannot inherit acceptance. */
 	let typedAnswer = $state({ requestId: "", value: "" });
+	/** Replaced questions always start with suppression unchecked. */
+	let suppression = $state({ requestId: "", checked: false });
+	const localRequest = $derived(
+		presentation.kind === "local-confirmation" ? presentation.request : null,
+	);
+	const suppress = $derived(
+		localRequest !== null &&
+			suppression.requestId === localRequest.requestId &&
+			suppression.checked,
+	);
 	const answer = $derived(
 		presentation.kind !== "popup" &&
 			typedAnswer.requestId === presentation.request.requestId
@@ -35,7 +49,7 @@
 
 	function accept(): void {
 		if (presentation.kind !== "popup" && canAccept)
-			onRespond(presentation.request.requestId, true);
+			onRespond(presentation.request.requestId, true, suppress);
 	}
 
 	function cancel(): void {
@@ -77,6 +91,22 @@
 			/>
 		</label>
 	{/if}
+	{#if localRequest?.suppressionLabel !== undefined}
+		<label>
+			<input
+				type="checkbox"
+				checked={suppress}
+				onchange={(event) => {
+					if (localRequest !== null)
+						suppression = {
+							requestId: localRequest.requestId,
+							checked: event.currentTarget.checked,
+						};
+				}}
+			/>
+			{localRequest.suppressionLabel}
+		</label>
+	{/if}
 	<div class="client-message-actions ui-dialog-actions">
 		{#if presentation.kind === "popup"}
 			<button class="ui-button" onclick={() => onDismiss(presentation.id)}
@@ -87,10 +117,12 @@
 				class="ui-button"
 				disabled={submitting}
 				onclick={() => onRespond(presentation.request.requestId, false)}
-				>{typedConfirmation === undefined ? "Decline" : "Cancel"}</button
+				>{localRequest?.cancelLabel ??
+					(typedConfirmation === undefined ? "Decline" : "Cancel")}</button
 			>
 			<button class="ui-button" disabled={!canAccept} onclick={accept}
-				>{typedConfirmation === undefined ? "Accept" : "Abandon home"}</button
+				>{localRequest?.acceptLabel ??
+					(typedConfirmation === undefined ? "Accept" : "Abandon home")}</button
 			>
 		{/if}
 	</div>

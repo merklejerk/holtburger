@@ -215,6 +215,8 @@ export class ClientItemDrag {
 			ClientHouseCrystalState,
 			"acceptsDrop" | "add" | "captureRow" | "clearRow"
 		> | null,
+		/** The item interaction owner applies confirmation policy to every give path. */
+		private readonly give: (source: number, recipient: number) => void,
 	) {
 		this.#root = root;
 		this.#ghost = document.createElement("div");
@@ -1031,6 +1033,10 @@ export class ClientItemDrag {
 			);
 		}
 		if (!rejected && result.preview.kind !== "noop") {
+			if (intent.target.kind === "give") {
+				this.give(intent.item, intent.target.guid);
+				return;
+			}
 			void this.session
 				.submitInventory(intent)
 				.catch((error: unknown) =>

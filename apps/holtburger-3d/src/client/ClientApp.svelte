@@ -1963,8 +1963,8 @@
 		<ClientMessageDialog
 			{presentation}
 			onDismiss={(id) => dialogs?.dismissPopup(id)}
-			onRespond={(id, accepted) => {
-				void dialogs?.respond(id, accepted);
+			onRespond={(id, accepted, suppress) => {
+				void dialogs?.respond(id, accepted, suppress);
 			}}
 		/>
 	{/each}

@@ -7,6 +7,36 @@ use holtburger_common::properties::{
 use crate::entity::Entity;
 use holtburger_common::stats::SkillType;
 
+/// Independently activated aetheria slots, consumed by equipment presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AetheriaActivation {
+    /// Blue sigil slot activation (AetheriaBitfield::Blue).
+    pub blue: bool,
+    /// Yellow sigil slot activation (AetheriaBitfield::Yellow).
+    pub yellow: bool,
+    /// Red sigil slot activation (AetheriaBitfield::Red).
+    pub red: bool,
+}
+
+impl crate::WorldState {
+    /// PlayerDescription establishes omitted flags as zero; before it arrives activation is unknown.
+    pub fn player_aetheria_activation(&self) -> Option<AetheriaActivation> {
+        if !self.player.property_retention.description_received {
+            return None;
+        }
+        // ACE Player_Properties.cs:AetheriaFlags defaults an omitted property to zero.
+        // Retail gmPaperDollUI::UpdateAetheria (acclient.c:210193) reads these same bits.
+        let flags = self
+            .player_int_property(PropertyInt::AetheriaBitfield)
+            .unwrap_or(0);
+        Some(AetheriaActivation {
+            blue: flags & 1 != 0,
+            yellow: flags & 2 != 0,
+            red: flags & 4 != 0,
+        })
+    }
+}
+
 /// Actual hand locations, independent of which weapon class occupies the main hand.
 pub const MAIN_HAND_LOCATIONS: EquipMask = EquipMask::from_bits_retain(
     EquipMask::MELEE_WEAPON.bits()

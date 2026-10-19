@@ -6,6 +6,7 @@
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { InventoryEquipment } from "./client-inventory-equipment";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
+	import ClientHudIcon from "./ClientHudIcon.svelte";
 
 	interface Props {
 		/** Sampled slot projection; unknown occupancy must not be labeled empty. */
@@ -36,8 +37,9 @@
 
 	const attentionIndexes = $derived(
 		new Set(
-			equipment.rows.flatMap(({ slot }, index) =>
+			equipment.rows.flatMap(({ slot, availability }, index) =>
 				!updating &&
+				availability === "available" &&
 				hoveredEquipLocations !== undefined &&
 				hoveredEquipLocations !== null &&
 				(hoveredEquipLocations & slot.mask) !== 0
@@ -57,36 +59,61 @@
 	}}
 >
 	<ItemGridStrip {attentionIndexes}>
-		{#each equipment.rows as { slot, item } (slot.mask)}
+		{#each equipment.rows as { slot, item, availability } (slot.mask)}
 			{@const description = item?.description}
 			{@const name =
 				description?.kind === "known" ? description.name : "Loading item…"}
+			{@const status =
+				availability === "locked"
+					? "Not activated"
+					: availability === "pending"
+						? "Activation unknown"
+						: null}
+			{@const contents =
+				item === null
+					? updating
+						? "Updating equipment…"
+						: (status ?? "Empty")
+					: name}
+			{@const label = `${slot.label}: ${contents}${item !== null && status !== null ? ` (${status})` : ""}`}
 			<div
 				class="equipment-row"
 				data-equipment-slot={slot.mask}
+				data-equipment-availability={availability}
+				title={status === null ? slot.label : `${slot.label}: ${status}`}
 				role="group"
-				aria-label={slot.label}
-				onpointerenter={() => onHoverSlot(slot.mask)}
+				aria-label={status === null ? slot.label : `${slot.label}: ${status}`}
+				onpointerenter={() =>
+					onHoverSlot(availability === "available" ? slot.mask : null)}
 				onpointerleave={() => onHoverSlot(null)}
 			>
 				<EquipmentSlotIcon {slot} />
-				<ItemGridCell
-					label={`${slot.label}: ${item === null ? (updating ? "Updating equipment…" : "Empty") : name}`}
-					itemGuid={item?.guid ?? null}
-					display={item === null ? undefined : iconFor(item.guid)}
-					equipped={item?.location.kind === "equipped"}
-					showEquipped={false}
-					capacity={item === null ? null : capacities.get(item.guid)}
-					count={description?.kind === "known" ? description.stackCount : null}
-					structure={description?.kind === "known"
-						? description.structure
-						: null}
-					selected={item !== null && item.guid === selectedGuid}
-					disabled={updating || description?.kind !== "known"}
-					onselect={() => {
-						if (item !== null) onSelectItem(item.guid);
-					}}
-				></ItemGridCell>
+				<div class="equipment-cell">
+					<ItemGridCell
+						{label}
+						itemGuid={item?.guid ?? null}
+						display={item === null ? undefined : iconFor(item.guid)}
+						equipped={item?.location.kind === "equipped"}
+						showEquipped={false}
+						capacity={item === null ? null : capacities.get(item.guid)}
+						count={description?.kind === "known"
+							? description.stackCount
+							: null}
+						structure={description?.kind === "known"
+							? description.structure
+							: null}
+						selected={item !== null && item.guid === selectedGuid}
+						disabled={updating || description?.kind !== "known"}
+						onselect={() => {
+							if (item !== null) onSelectItem(item.guid);
+						}}
+					></ItemGridCell>
+					{#if availability === "locked"}
+						<span class="equipment-lock" aria-hidden="true"
+							><ClientHudIcon name="locked" /></span
+						>
+					{/if}
+				</div>
 			</div>
 		{/each}
 	</ItemGridStrip>
@@ -101,6 +128,16 @@
 					var(--ui-inventory-equipment-slot-gap) +
 					var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
 			);
+		}
+		.equipment-cell {
+			display: grid;
+			position: relative;
+		}
+		.equipment-lock {
+			position: absolute;
+			inset: 25%;
+			pointer-events: none;
+			color: var(--ui-inventory-equipment-slot-icon-color);
 		}
 		.equipment-row:global([hidden]) {
 			display: none;

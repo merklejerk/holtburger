@@ -77,6 +77,48 @@ describe("inventory equipment rows", () => {
 			["Pants", pants.guid],
 		]);
 	});
+	it("projects independent activation without changing slot occupancy", () => {
+		const player = entityFacts(1);
+		if (player.description.kind !== "known")
+			throw new Error("Known player required");
+		const blue = equipped(2, slotMask("Blue aetheria"));
+		const root = {
+			...player,
+			description: {
+				...player.description,
+				aetheriaActivation: { blue: true, yellow: false, red: true },
+			},
+		};
+		const aetheria = (entities: readonly ClientEntityFacts[]) =>
+			project(...entities).rows.filter(({ slot }) => "activation" in slot);
+		expect(
+			aetheria([root, blue]).map(({ availability, item }) => [
+				availability,
+				item?.guid ?? null,
+			]),
+		).toEqual([
+			["available", blue.guid],
+			["locked", null],
+			["available", null],
+		]);
+		expect(aetheria([player]).map(({ availability }) => availability)).toEqual([
+			"pending",
+			"pending",
+			"pending",
+		]);
+		expect(
+			aetheria([
+				{
+					...root,
+					description: {
+						...root.description,
+						aetheriaActivation: { blue: false, yellow: false, red: false },
+					},
+				},
+			]).map(({ availability }) => availability),
+		).toEqual(["locked", "locked", "locked"]);
+	});
+
 	it("rejects competing occupants of the same display slot", () => {
 		expect(() =>
 			project(equipped(2, slotMask("Head")), equipped(3, slotMask("Head"))),

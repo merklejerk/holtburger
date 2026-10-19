@@ -322,6 +322,148 @@ mod tests {
         )))
     }
 
+    #[test]
+    fn aetheria_activation_publishes_login_updates_and_resets() {
+        use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::equipment::AetheriaActivation;
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        let activation = |description: &EntityDescription| match description {
+            EntityDescription::Known {
+                aetheria_activation,
+                ..
+            } => *aetheria_activation,
+            EntityDescription::Pending => panic!("player description must be known"),
+        };
+        let mut publication = EntityFactsPublication::default();
+        let initial = publication.collect(&mut world).unwrap();
+        assert_eq!(
+            activation(
+                &initial
+                    .upserts
+                    .iter()
+                    .find(|record| record.guid == PLAYER)
+                    .unwrap()
+                    .description
+            ),
+            None
+        );
+
+        let baseline = |flags: Option<i32>| {
+            let mut message = player_baseline();
+            let GameMessage::GameEvent(event) = &mut message else {
+                unreachable!()
+            };
+            let GameEvent::PlayerDescription(data) = &mut event.event else {
+                unreachable!()
+            };
+            data.properties
+                .set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            if let Some(flags) = flags {
+                data.properties
+                    .set_int_prop(PropertyInt::AetheriaBitfield, flags);
+            }
+            message
+        };
+        // Omission means locked only after a complete login baseline. Each color is independent.
+        let states = [
+            (
+                baseline(None),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: false,
+                    red: false,
+                },
+            ),
+            (
+                baseline(Some(1)),
+                AetheriaActivation {
+                    blue: true,
+                    yellow: false,
+                    red: false,
+                },
+            ),
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AetheriaBitfield as u32,
+                    value: 2,
+                })),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: true,
+                    red: false,
+                },
+            ),
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 2,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AetheriaBitfield as u32,
+                    value: 4,
+                })),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: false,
+                    red: true,
+                },
+            ),
+            (
+                baseline(Some(7)),
+                AetheriaActivation {
+                    blue: true,
+                    yellow: true,
+                    red: true,
+                },
+            ),
+            // Enlightenment uses an explicit zero private update.
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 3,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AetheriaBitfield as u32,
+                    value: 0,
+                })),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: false,
+                    red: false,
+                },
+            ),
+        ];
+        for (message, expected) in states {
+            for event in world.handle_message(&message) {
+                publication.observe(&event);
+            }
+            let delta = publication.collect(&mut world).unwrap();
+            let record = delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == PLAYER)
+                .expect("activation change must republish player facts");
+            assert_eq!(activation(&record.description), Some(expected));
+            assert_eq!(
+                activation(
+                    &ClientEntitySnapshot::from_world(&world)
+                        .unwrap()
+                        .entities
+                        .iter()
+                        .find(|record| record.guid == PLAYER)
+                        .unwrap()
+                        .description
+                ),
+                Some(expected)
+            );
+        }
+    }
+
     #[tokio::test]
     async fn projectile_supply_hydrates_once_and_publishes_counts_with_equipment() {
         use holtburger_common::properties::{CombatUse, ItemType};

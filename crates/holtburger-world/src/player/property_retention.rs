@@ -8,6 +8,8 @@ use holtburger_common::properties::{PropertyUpdate, WorldObjectProperties};
 /// Values remain authoritative on the player's Entity; public-only keys are not retained.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PlayerPropertyRetention {
+    /// Distinguishes omitted login properties from a character baseline not yet received.
+    pub(crate) description_received: bool,
     ints: HashSet<u32>,
     int64s: HashSet<u32>,
     bools: HashSet<u32>,
@@ -21,6 +23,7 @@ impl PlayerPropertyRetention {
     /// A new PlayerDescription starts a fresh character baseline and retires prior provenance.
     pub(crate) fn from_description(properties: &WorldObjectProperties) -> Self {
         Self {
+            description_received: true,
             ints: properties.ints.0.keys().map(|key| *key as u32).collect(),
             int64s: properties.int64s.0.keys().map(|key| *key as u32).collect(),
             bools: properties.bools.0.keys().map(|key| *key as u32).collect(),

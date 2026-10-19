@@ -247,6 +247,7 @@ describe("sortContentsItems", () => {
 				wcid: null,
 				weenieType: null,
 				pyrealBalance: null,
+				aetheriaActivation: null,
 				burden: null,
 				equipLocations: null,
 				consumable: null,

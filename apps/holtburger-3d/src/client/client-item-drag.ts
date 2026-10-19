@@ -1,5 +1,9 @@
 import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
 import { filterDraggedEquipment } from "./client-equipment-strip-filter";
+import {
+	EQUIPMENT_SLOTS,
+	equipmentSlotAvailability,
+} from "./client-inventory-equipment";
 import type { ClientTradeState } from "./client-trade-state";
 import type {
 	ClientHouseCrystalState,
@@ -685,11 +689,15 @@ export class ClientItemDrag {
 				this.#worldTarget(hit, force);
 				return;
 			} else if (equipment !== null && source?.ownedByPlayer) {
-				element = equipment;
-				target = {
-					kind: "equipment",
-					mask: Number(equipment.dataset.equipmentSlot),
-				};
+				// Slot activation is independent of item coverage; locked/pending rows
+				// must not advertise an accepted drop or submit an equipment request.
+				if (this.#equipmentAvailable(Number(equipment.dataset.equipmentSlot))) {
+					element = equipment;
+					target = {
+						kind: "equipment",
+						mask: Number(equipment.dataset.equipmentSlot),
+					};
+				}
 			} else if (surface !== null && header !== null) {
 				element = header;
 				target = { kind: "container", guid: Number(header.dataset.itemGuid) };
@@ -828,8 +836,10 @@ export class ClientItemDrag {
 		const target = gesture.kind === "pressed" ? null : gesture.target;
 		const invalidTarget =
 			target?.kind === "inventory" &&
-			target.surface !== null &&
-			this.#surface(target.element)?.root !== target.surface.root;
+			((target.surface !== null &&
+				this.#surface(target.element)?.root !== target.surface.root) ||
+				(target.intent.target.kind === "equipment" &&
+					!this.#equipmentAvailable(target.intent.target.mask)));
 		if (
 			invalidSource ||
 			invalidTarget ||
@@ -842,6 +852,17 @@ export class ClientItemDrag {
 			return false;
 		}
 		return true;
+	}
+
+	/** Delayed previews and pointer release use current authority, independent of sampled DOM. */
+	#equipmentAvailable(mask: number): boolean {
+		const slot = EQUIPMENT_SLOTS.find((slot) => slot.mask === mask);
+		if (slot === undefined) throw new Error("Unknown equipment strip slot");
+		const read = this.session.entities.read();
+		return (
+			read.kind === "current" &&
+			equipmentSlotAvailability(slot, read.level) === "available"
+		);
 	}
 
 	#worldEntity(guid: number) {

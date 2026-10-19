@@ -62,6 +62,7 @@
 	} from "../../client/client-entity-mirror";
 	import {
 		CASTER_EQUIP_MASK,
+		EQUIPMENT_SLOTS,
 		inventoryEquipment,
 	} from "../../client/client-inventory-equipment";
 	import type {
@@ -1179,6 +1180,8 @@
 		readonly spellBarProbe: typeof spellBarProbe;
 		/** Render and manipulate the production melee/missile HUD without a live server. */
 		readonly combatBarProbe: typeof combatBarProbe;
+		/** Controlled sigil activation exercises production drop admission. */
+		readonly aetheriaDropProbe: typeof aetheriaDropProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
 		/** Observe immutable captures and exercise failure feedback without a live server. */
@@ -1386,6 +1389,7 @@
 						wcid: guid === 7 ? 42 : null,
 						weenieType: null,
 						pyrealBalance: null,
+						aetheriaActivation: null,
 						burden: null,
 						equipLocations: null,
 						consumable: null,
@@ -1548,6 +1552,59 @@
 	let inventoryWorldResult: ClientViewportTargetResult | null = {
 		kind: "empty",
 	};
+	/** Original authority retained while CDP exercises sigil drop admission. */
+	let aetheriaDropRecords: readonly ClientEntityFacts[] = [];
+	const aetheriaDropProbe = {
+		setActivation: (activated: boolean | null) => {
+			const slot = EQUIPMENT_SLOTS.find(
+				(slot) => "activation" in slot && slot.activation === "red",
+			);
+			if (slot === undefined) throw new Error("Red aetheria slot missing");
+			const read = interactionLifecycle.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Aetheria fixture requires current authority");
+			if (aetheriaDropRecords.length === 0) {
+				aetheriaDropRecords = [1, 91].map((guid) => {
+					const record = read.level.entities.get(guid);
+					if (record?.description.kind !== "known")
+						throw new Error("Aetheria fixture record missing");
+					return record;
+				});
+			}
+			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
+				worldContainer: null,
+				removed: [],
+				upserts: aetheriaDropRecords.map((record) => {
+					if (record.description.kind !== "known")
+						throw new Error("Aetheria fixture requires known descriptions");
+					return {
+						...record,
+						description:
+							record.guid === 1
+								? {
+										...record.description,
+										aetheriaActivation:
+											activated === null
+												? null
+												: { blue: false, yellow: false, red: activated },
+									}
+								: { ...record.description, equipLocations: slot.mask },
+					};
+				}),
+			});
+		},
+		restore: () => {
+			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
+				worldContainer: null,
+				removed: [],
+				upserts: aetheriaDropRecords,
+			});
+			aetheriaDropRecords = [];
+		},
+	};
+
 	let pendingInventoryWorldPick: ClientViewportTargetDestination | null = null;
 	let releaseGiveKeys: (() => void) | null = null;
 	const giveProbe = {
@@ -4791,6 +4848,7 @@
 				},
 			},
 			inventoryDragCommands: () => interactionCommands,
+			aetheriaDropProbe,
 			loadoutProbe,
 			selectInventoryItem: (guid) =>
 				selection.selectContentsItem(guid, "select"),

@@ -90,6 +90,83 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			buttons: 0,
 			clickCount: 1,
 		});
+	const sampleActivation = async (activated) => {
+		await read(
+			`${api}.aetheriaDropProbe.setActivation(${JSON.stringify(activated)})`,
+		);
+		const interval = await read(
+			"import('/src/client/client-tuning.ts').then(({ CLIENT_TUNING }) => CLIENT_TUNING.inventory.displayIntervalMs)",
+		);
+		await read(`new Promise(resolve => setTimeout(resolve, ${interval * 2}))`);
+	};
+	const sigilMask = await read(
+		"import('/src/client/client-inventory-equipment.ts').then(({ EQUIPMENT_SLOTS }) => EQUIPMENT_SLOTS.find(slot => slot.activation === 'red').mask)",
+	);
+	const sigilSlot = `.equipment-row[data-equipment-slot="${sigilMask}"]`;
+	for (const activated of [false, null]) {
+		await sampleActivation(activated);
+		// Crossing the drag threshold can preview an inventory cell before reaching the slot.
+		const before = (await commands()).length;
+		const position = await begin(source, sigilSlot);
+		if (
+			await read(
+				`document.querySelector('${sigilSlot}[data-inventory-drop="accepted"]') !== null`,
+			)
+		)
+			throw new Error("Unavailable aetheria slot advertised an accepted drop");
+		await release(position);
+		if (
+			(await commands())
+				.slice(before)
+				.some(
+					(entry) =>
+						entry.command === "submit_client_inventory" ||
+						(entry.command === "preview_client_inventory" &&
+							entry.args?.request?.intent?.target?.kind === "equipment"),
+				)
+		)
+			throw new Error(
+				"Unavailable aetheria drop requested preview or submission",
+			);
+	}
+	for (const unavailable of [false, null]) {
+		await sampleActivation(true);
+		const submitted = (await submissions()).length;
+		const activatedPosition = await begin(source, sigilSlot);
+		const activatedHover = await lastPreview();
+		if (
+			activatedHover.intent.target.kind !== "equipment" ||
+			activatedHover.intent.target.mask !== sigilMask
+		)
+			throw new Error("Activated sigil slot did not admit equipment preview");
+		await release(activatedPosition);
+		const releasedPreview = await lastPreview();
+		// Deliver the reset and stale answer together, before sampled DOM can catch up.
+		await read(`(() => {
+            ${api}.aetheriaDropProbe.setActivation(${JSON.stringify(unavailable)});
+            ${api}.replyInventoryPreview(${JSON.stringify({ sequence: releasedPreview.sequence, preview: { kind: "equip", displaced: [] } })});
+        })()`);
+		if ((await submissions()).length !== submitted)
+			throw new Error(
+				"Late preview submitted equipment after sigil activation was lost",
+			);
+		if (
+			await read(
+				`document.querySelector('${sigilSlot}[data-inventory-drop="accepted"]') !== null`,
+			)
+		)
+			throw new Error(
+				"Late preview restored an accepted unavailable sigil target",
+			);
+	}
+	await read(`${api}.aetheriaDropProbe.restore()`);
+	// The next gesture samples the restored authority before measuring its target.
+	const displayInterval = await read(
+		"import('/src/client/client-tuning.ts').then(({ CLIENT_TUNING }) => CLIENT_TUNING.inventory.displayIntervalMs)",
+	);
+	await read(
+		`new Promise(resolve => setTimeout(resolve, ${displayInterval * 2}))`,
+	);
 	const countBefore = (await submissions()).length;
 	const position = await begin(source, target);
 	const ghost = await read(`(() => {
@@ -637,6 +714,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 
 	return {
 		nativeSubmission: true,
+		aetheriaDropAdmission: true,
 		worldGive: true,
 		configuredGiveHotkey: true,
 		giveFailureNeverDrops: true,

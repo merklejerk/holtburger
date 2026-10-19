@@ -130,6 +130,16 @@ const clientEntityFactsSchema = z
 					weenieType: z.string().nullable(),
 					/** Server aggregate across packs; null until received. */
 					pyrealBalance: guid.nullable(),
+					/** World-resolved local-player activation; null before the character baseline. */
+					aetheriaActivation: z
+						.object({
+							blue: z.boolean(),
+							yellow: z.boolean(),
+							red: z.boolean(),
+						})
+						.strict()
+						.readonly()
+						.nullable(),
 					/** World-owned local-player burden ratio, unknown before hydration. */
 					burden: z.number().finite().nonnegative().nullable(),
 					healthQuery: z.enum(["eligible", "ineligible"]),

@@ -294,8 +294,32 @@ const itemInspectionSchema = z
 		/** Server-authored portal destination display text, absent when undisclosed. */
 		portalDestination: z.string().nullable(),
 		useText: z.string().nullable(),
+		/** World-classified on-use behavior; healing-kit modifiers are distinct from flat restoration. */
+		useEffect: z
+			.discriminatedUnion("kind", [
+				z
+					.object({
+						kind: z.literal("vital-change"),
+						vital: z.enum(["Health", "Stamina", "Mana"]),
+						amount: i32,
+					})
+					.strict(),
+				z
+					.object({
+						kind: z.literal("healing-kit"),
+						skillBonus: i32.nullable(),
+						restorationMultiplier: finiteNumber.nullable(),
+					})
+					.strict(),
+			])
+			.nullable(),
 		spells: z.array(
-			z.object({ id: u32, activeEnchantment: z.boolean() }).strict(),
+			z
+				.object({
+					id: u32,
+					role: z.enum(["item", "on-use", "active-enchantment"]),
+				})
+				.strict(),
 		),
 	})
 	.strict();

@@ -4,6 +4,16 @@ import type {
 } from "./client-object-inspection-contract";
 import { progressPercent } from "../app/quantity-format";
 
+/** Describe appraised base points without predicting player-specific restoration. */
+export function formatInspectionVitalChange(
+	change: Omit<
+		Extract<NonNullable<ItemInspection["useEffect"]>, { kind: "vital-change" }>,
+		"kind"
+	>,
+): string {
+	return `${change.amount < 0 ? "Depletes" : "Restores"} ${formatInspectionNumber(Math.abs(change.amount))} ${change.vital}.`;
+}
+
 /** Fill within the current item level, or a full bar when advancement is complete. */
 export function itemProgressPercent(
 	progression: NonNullable<ItemInspection["progression"]>,

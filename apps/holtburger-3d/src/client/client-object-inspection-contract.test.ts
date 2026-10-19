@@ -3,6 +3,58 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves independently disclosed healing-kit modifiers and rejects mixed effects", () => {
+		const item = structuredClone(fixture.item);
+		const details = item.outcome.inspection.details.details;
+		for (const [skillBonus, restorationMultiplier] of [
+			[50, 1.3],
+			[0, null],
+			[null, 1],
+		]) {
+			Object.assign(details, {
+				useEffect: { kind: "healing-kit", skillBonus, restorationMultiplier },
+			});
+			expect(decodeObjectInspectionResult(item)).toEqual(item);
+		}
+		for (const useEffect of [
+			{ kind: "healing-kit", skillBonus: 50, restorationMultiplier: Infinity },
+			{ kind: "healing-kit", skillBonus: 1.5, restorationMultiplier: 1.3 },
+			{
+				kind: "healing-kit",
+				skillBonus: 50,
+				restorationMultiplier: 1.3,
+				amount: 50,
+				vital: "Health",
+			},
+		]) {
+			Object.assign(details, { useEffect });
+			expect(() => decodeObjectInspectionResult(item)).toThrow();
+		}
+	});
+	it("accepts vital changes and spell roles while rejecting invalid effect contracts", () => {
+		const item = structuredClone(fixture.item);
+		const details = item.outcome.inspection.details.details;
+		Object.assign(details, {
+			useEffect: { kind: "vital-change", vital: "Stamina", amount: -20 },
+			spells: [{ id: 42, role: "on-use" }],
+		});
+		expect(decodeObjectInspectionResult(item)).toEqual(item);
+		for (const useEffect of [
+			{ vital: "MaxHealth", amount: 50 },
+			{ vital: "Mana", amount: 1.5 },
+			{ vital: "Health", amount: 2147483648 },
+		]) {
+			Object.assign(details, {
+				useEffect: { kind: "vital-change", ...useEffect },
+			});
+			expect(() => decodeObjectInspectionResult(item)).toThrow();
+		}
+		Object.assign(details, {
+			useEffect: null,
+			spells: [{ id: 42, role: "passive" }],
+		});
+		expect(() => decodeObjectInspectionResult(item)).toThrow();
+	});
 	it("preserves exact item XP and rejects malformed progression payloads", () => {
 		const item = structuredClone(fixture.item);
 		item.outcome.inspection.details.details.progression.totalXp =

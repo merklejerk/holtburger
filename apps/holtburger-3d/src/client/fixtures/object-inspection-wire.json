@@ -50,7 +50,20 @@
 						"effects": [],
 						"portalDestination": "Holtburg (42.1N, 33.6E).",
 						"useText": null,
-						"spells": [],
+						"spells": [
+							{
+								"id": 43,
+								"role": "item"
+							},
+							{
+								"id": 42,
+								"role": "on-use"
+							},
+							{
+								"id": 42,
+								"role": "active-enchantment"
+							}
+						],
 						"progression": {
 							"level": 2,
 							"maxLevel": 5,
@@ -60,6 +73,11 @@
 								"levelStartXp": "300000000",
 								"nextLevelXp": "700000000"
 							}
+						},
+						"useEffect": {
+							"kind": "vital-change",
+							"vital": "Stamina",
+							"amount": 50
 						}
 					}
 				}

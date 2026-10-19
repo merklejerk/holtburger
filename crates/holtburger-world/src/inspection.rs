@@ -10,10 +10,10 @@ use holtburger_common::properties::{
     ObjectDescriptionFlag, PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType,
     WorldObjectExt as _, WorldObjectProperties, WorldObjectPropertyAccessors,
 };
-use holtburger_common::stats::{CreatureType, SkillType};
+use holtburger_common::stats::{CreatureType, SkillType, VitalType as CurrentVital};
 use holtburger_content::CharacterTitleCatalog;
 use holtburger_protocol::messages::object::types::{
-    ArmorLevels, ArmorProfile, CreatureBuffs, CreatureProfile, WeaponProfile,
+    ArmorLevels, ArmorProfile, CreatureBuffs, CreatureProfile, HookProfile, WeaponProfile,
 };
 use strum_macros::{Display, FromRepr};
 
@@ -30,6 +30,8 @@ pub struct InspectionSource<'a> {
     pub supplement: Option<&'a InspectionSupplement>,
     /// Live public-description flags used for semantics that retail does not read from appraisal properties.
     pub public_flags: ObjectDescriptionFlag,
+    /// Hooked-item classification supplied by appraisal, including healing-kit semantics.
+    pub hook_profile: Option<&'a HookProfile>,
     /// Appraised armor protection profile.
     pub armor_profile: Option<&'a ArmorProfile>,
     /// Appraised creature health and optional attribute profile.
@@ -72,6 +74,7 @@ impl<'a> InspectionSource<'a> {
             properties: &entity.properties,
             supplement: entity.inspection_supplement.as_ref(),
             public_flags: entity.flags,
+            hook_profile: entity.hook_profile.as_ref(),
             armor_profile: entity.armor_profile.as_ref(),
             creature_profile: entity.creature_profile.as_ref(),
             weapon_profile: entity.weapon_profile.as_ref(),
@@ -91,7 +94,8 @@ impl<'a> InspectionSource<'a> {
             wcid: Some(item.wcid),
             properties: &item.properties,
             supplement: item.inspection_supplement.as_ref(),
-            public_flags: ObjectDescriptionFlag::empty(),
+            public_flags: item.public_flags,
+            hook_profile: item.hook_profile.as_ref(),
             armor_profile: item.armor_profile.as_ref(),
             creature_profile: item.creature_profile.as_ref(),
             weapon_profile: item.weapon_profile.as_ref(),
@@ -181,6 +185,20 @@ pub enum ObjectInspectionDetails {
 /// Failure to populate a semantically valid inspection from retained world facts.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ObjectInspectionError {
+    /// A disclosed healing-kit multiplier cannot be represented consistently by both clients.
+    #[error("item {guid} has a non-finite healing-kit restoration multiplier")]
+    NonFiniteHealingKitRestorationMultiplier {
+        /// Identity of the item whose disclosed multiplier is invalid.
+        guid: Guid,
+    },
+    /// A disclosed boost targets neither a current vital nor the explicit undefined value.
+    #[error("item {guid} has invalid booster vital {value}")]
+    InvalidBoosterVital {
+        /// Identity of the item whose boost could not be interpreted.
+        guid: Guid,
+        /// Uninterpretable secondary-attribute identifier.
+        value: i32,
+    },
     /// Disclosed item progression cannot be interpreted safely.
     #[error("item {guid} has invalid progression: {source}")]
     ItemProgression {
@@ -198,6 +216,8 @@ pub enum ObjectInspectionError {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemInspection {
+    /// Appraised on-use effect, distinguishing direct vital changes from healing-kit bonuses.
+    pub use_effect: Option<InspectionUseEffect>,
     /// Earned item level and XP thresholds, absent for items without progression.
     pub progression: Option<crate::item_progression::ItemProgression>,
     /// Complete server-authored inputs for the existing UI icon compositor.
@@ -243,7 +263,7 @@ pub struct ItemInspection {
     pub portal_destination: Option<String>,
     /// Server-authored use text.
     pub use_text: Option<String>,
-    /// Item and active-enchantment spells with the wire marker decoded.
+    /// Appraisal spells classified as ordinary item spells, on-use spells, or active enchantments.
     pub spells: Vec<InspectionSpell>,
 }
 
@@ -888,23 +908,121 @@ pub enum ItemManaKind {
     Charge,
 }
 
-/// One appraised spell with ACE's high-bit active-enchantment marker decoded.
+/// Mutually exclusive on-use semantics, classified once for both inspector presentations.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum InspectionUseEffect {
+    /// Direct base points, independent of player ratings and remaining vital capacity.
+    VitalChange {
+        /// Current vital affected; maximum-vital attribute IDs are not accepted.
+        vital: CurrentVital,
+        /// Signed base points: nonnegative restores, negative depletes.
+        amount: i32,
+    },
+    /// Healing-kit modifiers, independently absent when appraisal does not disclose them.
+    HealingKit {
+        /// Additive healing-skill modifier used by ACE Healer.DoSkillCheck.
+        skill_bonus: Option<i32>,
+        /// Authored healing-amount multiplier; retail displays 1.3 as 130%, not +30%.
+        restoration_multiplier: Option<f64>,
+    },
+}
+
+impl InspectionUseEffect {
+    // ACE HookFlags::IsHealer; retail reads the same bit at acclient.c:455712.
+    const HOOK_IS_HEALER: u32 = 0x2;
+
+    fn from_object(object: &InspectionSource<'_>) -> Result<Option<Self>, ObjectInspectionError> {
+        // Retail acclient.c:221749 distinguishes healing skill bonuses from vital changes;
+        // hooked healer classification is decoded at acclient.c:455712 (HookFlags::IsHealer).
+        if object.public_flags.contains(ObjectDescriptionFlag::HEALER)
+            || object
+                .hook_profile
+                .is_some_and(|hook| hook.flags & Self::HOOK_IS_HEALER != 0)
+        {
+            // Retail acclient.c:221795 shows only disclosed values, with no default multiplier.
+            let skill_bonus = object.get_int_prop(PropertyInt::BoostValue);
+            let restoration_multiplier = object.get_float_prop(PropertyFloat::HealkitMod);
+            // JSON turns non-finite floats into null, which would disguise invalid data as
+            // an undisclosed modifier while the TUI still renders the invalid number.
+            if restoration_multiplier.is_some_and(|multiplier| !multiplier.is_finite()) {
+                return Err(
+                    ObjectInspectionError::NonFiniteHealingKitRestorationMultiplier {
+                        guid: object.guid,
+                    },
+                );
+            }
+            return Ok(
+                (skill_bonus.is_some() || restoration_multiplier.is_some()).then_some(
+                    Self::HealingKit {
+                        skill_bonus,
+                        restoration_multiplier,
+                    },
+                ),
+            );
+        }
+        let (Some(value), Some(amount)) = (
+            object.get_int_prop(PropertyInt::BoosterEnum),
+            object.get_int_prop(PropertyInt::BoostValue),
+        ) else {
+            return Ok(None);
+        };
+        let vital = match value {
+            0 => return Ok(None),
+            2 => CurrentVital::Health,
+            4 => CurrentVital::Stamina,
+            6 => CurrentVital::Mana,
+            _ => {
+                return Err(ObjectInspectionError::InvalidBoosterVital {
+                    guid: object.guid,
+                    value,
+                });
+            }
+        };
+        Ok(Some(Self::VitalChange { vital, amount }))
+    }
+}
+
+/// Meaning of an appraisal spell, derived once before frontend grouping or cantrip summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InspectionSpellRole {
+    /// Ordinary item spell; the appraisal does not establish an activation trigger.
+    Item,
+    /// Primary activation spell of food/drink, proven by ACE Food.ApplyConsumable.
+    OnUse,
+    /// ACE's high-bit marker identifies an enchantment currently applied to the item.
+    ActiveEnchantment,
+}
+
+/// One appraised spell with its activation meaning and wire marker decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InspectionSpell {
     /// Underlying spell-table identifier with bit 31 cleared.
     pub id: u32,
-    /// Whether ACE sourced this entry from an active item enchantment.
-    pub active_enchantment: bool,
+    /// Authoritative grouping consumed by inspection renderers and cantrip summaries.
+    pub role: InspectionSpellRole,
 }
 
 impl InspectionSpell {
     const ACTIVE_ENCHANTMENT_MASK: u32 = 0x8000_0000;
 
-    fn from_wire_id(value: u32) -> Self {
+    fn from_wire_id(value: u32, on_use_spell: Option<u32>) -> Self {
+        let id = value & !Self::ACTIVE_ENCHANTMENT_MASK;
         Self {
-            id: value & !Self::ACTIVE_ENCHANTMENT_MASK,
-            active_enchantment: value & Self::ACTIVE_ENCHANTMENT_MASK != 0,
+            id,
+            role: if value & Self::ACTIVE_ENCHANTMENT_MASK != 0 {
+                InspectionSpellRole::ActiveEnchantment
+            } else if on_use_spell == Some(id) {
+                InspectionSpellRole::OnUse
+            } else {
+                InspectionSpellRole::Item
+            },
         }
     }
 }
@@ -1115,7 +1233,15 @@ impl ObjectInspection {
 
 impl ItemInspection {
     fn from_object(object: &InspectionSource<'_>) -> Result<Self, ObjectInspectionError> {
+        // ACE Food.cs applies SpellDID on consumption. Other item spells may be procs or
+        // equipment spells, so neither appraisal order nor mere spell presence proves on-use.
+        let on_use_spell = object
+            .public_flags
+            .contains(ObjectDescriptionFlag::FOOD)
+            .then(|| object.spell().filter(|id| *id != Guid::NULL).map(|id| id.0))
+            .flatten();
         Ok(Self {
+            use_effect: InspectionUseEffect::from_object(object)?,
             progression: crate::item_progression::ItemProgression::from_properties(
                 object.properties,
             )
@@ -1183,7 +1309,7 @@ impl ItemInspection {
                 .spell_book
                 .iter()
                 .copied()
-                .map(InspectionSpell::from_wire_id)
+                .map(|value| InspectionSpell::from_wire_id(value, on_use_spell))
                 .collect(),
         })
     }
@@ -1999,6 +2125,230 @@ mod tests {
     }
 
     #[test]
+    fn inspection_preserves_base_changes_to_each_current_vital() {
+        use holtburger_common::stats::VitalType;
+        let mut entity = Entity::new(Guid(1), "Food".into(), WorldPosition::default());
+        for (id, vital) in [
+            (2, VitalType::Health),
+            (4, VitalType::Stamina),
+            (6, VitalType::Mana),
+        ] {
+            entity.set_int_prop(PropertyInt::BoosterEnum, id);
+            for amount in [50, -20, 0, i32::MIN] {
+                entity.set_int_prop(PropertyInt::BoostValue, amount);
+                let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details
+                else {
+                    panic!("item inspection")
+                };
+                assert_eq!(
+                    item.use_effect,
+                    Some(InspectionUseEffect::VitalChange { vital, amount })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inspection_distinguishes_undisclosed_undefined_and_invalid_boosts() {
+        let mut entity = Entity::new(Guid(1), "Food".into(), WorldPosition::default());
+        for (vital, amount) in [
+            (None, None),
+            (Some(2), None),
+            (None, Some(50)),
+            (Some(0), Some(50)),
+        ] {
+            entity.properties.ints = Default::default();
+            if let Some(vital) = vital {
+                entity.set_int_prop(PropertyInt::BoosterEnum, vital);
+            }
+            if let Some(amount) = amount {
+                entity.set_int_prop(PropertyInt::BoostValue, amount);
+            }
+            let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details
+            else {
+                panic!("item inspection")
+            };
+            assert_eq!(item.use_effect, None);
+        }
+        for value in [-1, 1, 3, 5, 7] {
+            entity.set_int_prop(PropertyInt::BoosterEnum, value);
+            entity.set_int_prop(PropertyInt::BoostValue, 50);
+            assert_eq!(
+                inspect_entity(&entity),
+                Err(ObjectInspectionError::InvalidBoosterVital {
+                    guid: entity.guid,
+                    value
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn healing_kit_effects_preserve_each_disclosed_bonus_for_ordinary_and_hooked_kits() {
+        for hooked in [false, true] {
+            for (skill_bonus, restoration_multiplier) in [
+                (Some(50), Some(1.3)),
+                (Some(0), None),
+                (None, Some(1.0)),
+                (None, None),
+            ] {
+                let mut entity =
+                    Entity::new(Guid(1), "Healing Kit".into(), WorldPosition::default());
+                entity.set_int_prop(PropertyInt::BoosterEnum, 2);
+                if hooked {
+                    entity.hook_profile = Some(HookProfile {
+                        flags: InspectionUseEffect::HOOK_IS_HEALER,
+                        valid_locations: holtburger_common::properties::EquipMask::empty(),
+                        ammo_type: 0,
+                    });
+                } else {
+                    entity.flags = ObjectDescriptionFlag::HEALER;
+                }
+                if let Some(bonus) = skill_bonus {
+                    entity.set_int_prop(PropertyInt::BoostValue, bonus);
+                }
+                if let Some(multiplier) = restoration_multiplier {
+                    entity.set_float_prop(PropertyFloat::HealkitMod, multiplier);
+                }
+                let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details
+                else {
+                    panic!("item inspection")
+                };
+                let expected = (skill_bonus.is_some() || restoration_multiplier.is_some())
+                    .then_some(InspectionUseEffect::HealingKit {
+                        skill_bonus,
+                        restoration_multiplier,
+                    });
+                assert_eq!(item.use_effect, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn healing_kit_inspection_rejects_non_finite_restoration_multipliers() {
+        let mut entity = Entity::new(Guid(1), "Healing Kit".into(), WorldPosition::default());
+        entity.flags = ObjectDescriptionFlag::HEALER;
+        entity.set_int_prop(PropertyInt::BoostValue, 50);
+        for multiplier in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            entity.set_float_prop(PropertyFloat::HealkitMod, multiplier);
+            assert_eq!(
+                inspect_entity(&entity),
+                Err(
+                    ObjectInspectionError::NonFiniteHealingKitRestorationMultiplier {
+                        guid: entity.guid
+                    }
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn food_spells_are_classified_by_primary_identity_and_preserve_active_provenance() {
+        use holtburger_common::properties::PropertyDataId;
+        let mut entity = Entity::new(Guid(1), "Potion".into(), WorldPosition::default());
+        entity.set_did_prop(PropertyDataId::Spell, Guid(42));
+        entity.spell_book = vec![43, 42, 0x8000_002A];
+        for (flags, primary_role) in [
+            (ObjectDescriptionFlag::FOOD, InspectionSpellRole::OnUse),
+            (ObjectDescriptionFlag::empty(), InspectionSpellRole::Item),
+        ] {
+            entity.flags = flags;
+            let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details
+            else {
+                panic!("item inspection")
+            };
+            assert_eq!(
+                item.spells,
+                vec![
+                    InspectionSpell {
+                        id: 43,
+                        role: InspectionSpellRole::Item
+                    },
+                    InspectionSpell {
+                        id: 42,
+                        role: primary_role
+                    },
+                    InspectionSpell {
+                        id: 42,
+                        role: InspectionSpellRole::ActiveEnchantment
+                    }
+                ]
+            );
+        }
+        entity.flags = ObjectDescriptionFlag::FOOD;
+        entity.properties.dids = Default::default();
+        let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details else {
+            panic!("item inspection")
+        };
+        assert_eq!(item.spells[1].role, InspectionSpellRole::Item);
+    }
+
+    #[test]
+    fn vendor_inspection_retains_public_food_and_healer_classification() {
+        use holtburger_protocol::messages::object::messages::description::PublicWeenieDescription;
+        use holtburger_protocol::messages::trade::events::VendorItemEventData;
+        let titles = CharacterTitleCatalog::default();
+        for (flags, expected_role, expected_effect) in [
+            (
+                ObjectDescriptionFlag::FOOD,
+                InspectionSpellRole::OnUse,
+                InspectionUseEffect::VitalChange {
+                    vital: CurrentVital::Stamina,
+                    amount: 50,
+                },
+            ),
+            (
+                ObjectDescriptionFlag::HEALER,
+                InspectionSpellRole::Item,
+                InspectionUseEffect::HealingKit {
+                    skill_bonus: Some(50),
+                    restoration_multiplier: Some(1.3),
+                },
+            ),
+        ] {
+            let mut vendor = CoreVendorItem::from_protocol(&VendorItemEventData {
+                description: PublicWeenieDescription {
+                    guid: Guid(1),
+                    name: Some("Vendor Item".into()),
+                    obj_desc_flags: flags,
+                    spell: Some(Guid(42)),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            assert_eq!(vendor.public_flags, flags);
+            let mut appraisal = IdentifyObjectResponseEventData {
+                object_guid: vendor.guid,
+                flags: IdentifyResponseFlags::INT_STATS_TABLE
+                    | IdentifyResponseFlags::FLOAT_STATS_TABLE
+                    | IdentifyResponseFlags::SPELL_BOOK,
+                success: true,
+                spell_book: vec![42],
+                ..Default::default()
+            };
+            appraisal
+                .properties
+                .set_int_prop(PropertyInt::BoosterEnum, 4);
+            appraisal
+                .properties
+                .set_int_prop(PropertyInt::BoostValue, 50);
+            appraisal
+                .properties
+                .set_float_prop(PropertyFloat::HealkitMod, 1.3);
+            assert!(vendor.apply_identify_response(&appraisal));
+            let ObjectInspectionDetails::Item(item) =
+                ObjectInspection::from_vendor_item(&vendor, InspectionContext::new(&titles))
+                    .unwrap()
+                    .details
+            else {
+                panic!("vendor item inspection")
+            };
+            assert_eq!(item.use_effect, Some(expected_effect));
+            assert_eq!(item.spells[0].role, expected_role);
+        }
+    }
+
+    #[test]
     fn item_progression_is_derived_from_merged_appraisal_and_keeps_ordinary_level_separate() {
         use crate::item_progression::ItemAdvancement;
         use holtburger_common::properties::PropertyInt64;
@@ -2351,11 +2701,11 @@ mod tests {
             vec![
                 InspectionSpell {
                     id: 42,
-                    active_enchantment: false,
+                    role: InspectionSpellRole::Item,
                 },
                 InspectionSpell {
                     id: 43,
-                    active_enchantment: true,
+                    role: InspectionSpellRole::ActiveEnchantment,
                 },
             ]
         );

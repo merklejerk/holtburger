@@ -29,6 +29,15 @@ function known(id: number, cantripTier: CantripTier | null): SpellReference {
 }
 
 describe("item cantrip summary", () => {
+	it("excludes activation spells even when their definitions have a cantrip tier", () => {
+		expect(
+			summarizeItemCantrips(
+				[{ id: 1, role: "on-use" }],
+				[known(1, "legendary")],
+				false,
+			),
+		).toEqual({ kind: "hidden" });
+	});
 	it("uses the compact label vocabulary for every tier", () => {
 		const tiers: readonly CantripTier[] = [
 			"feeble",
@@ -40,7 +49,7 @@ describe("item cantrip summary", () => {
 			"other",
 		];
 		const summary = summarizeItemCantrips(
-			tiers.map((_, index) => ({ id: index + 1, activeEnchantment: false })),
+			tiers.map((_, index) => ({ id: index + 1, role: "item" as const })),
 			tiers.map((tier, index) => known(index + 1, tier)),
 			false,
 		);
@@ -53,10 +62,10 @@ describe("item cantrip summary", () => {
 
 	it("counts unique intrinsic spell identities in display order", () => {
 		const spells = [
-			{ id: 1, activeEnchantment: false },
-			{ id: 1, activeEnchantment: false },
-			{ id: 2, activeEnchantment: false },
-			{ id: 3, activeEnchantment: false },
+			{ id: 1, role: "item" as const },
+			{ id: 1, role: "item" as const },
+			{ id: 2, role: "item" as const },
+			{ id: 3, role: "item" as const },
 		];
 		expect(
 			summarizeItemCantrips(
@@ -91,9 +100,9 @@ describe("item cantrip summary", () => {
 
 	it("ignores active-only spells and does not double-count an intrinsic duplicate", () => {
 		const spells = [
-			{ id: 1, activeEnchantment: true },
-			{ id: 1, activeEnchantment: false },
-			{ id: 2, activeEnchantment: true },
+			{ id: 1, role: "active-enchantment" as const },
+			{ id: 1, role: "item" as const },
+			{ id: 2, role: "active-enchantment" as const },
 		];
 		expect(
 			summarizeItemCantrips(
@@ -116,7 +125,7 @@ describe("item cantrip summary", () => {
 	});
 
 	it("distinguishes loading and incomplete definitions without guessing", () => {
-		const spells = [{ id: 1, activeEnchantment: false }];
+		const spells = [{ id: 1, role: "item" as const }];
 		expect(summarizeItemCantrips(spells, null, false)).toEqual({
 			kind: "loading",
 		});
@@ -129,14 +138,18 @@ describe("item cantrip summary", () => {
 
 	it("hides when an item has no intrinsic spells", () => {
 		expect(
-			summarizeItemCantrips([{ id: 1, activeEnchantment: true }], null, false),
+			summarizeItemCantrips(
+				[{ id: 1, role: "active-enchantment" as const }],
+				null,
+				false,
+			),
 		).toEqual({ kind: "hidden" });
 	});
 
 	it("omits a completed summary when known intrinsic spells are not cantrips", () => {
 		expect(
 			summarizeItemCantrips(
-				[{ id: 1, activeEnchantment: false }],
+				[{ id: 1, role: "item" as const }],
 				[known(1, null)],
 				false,
 			),

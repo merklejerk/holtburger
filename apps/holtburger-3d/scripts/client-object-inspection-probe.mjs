@@ -620,6 +620,84 @@ export async function probeObjectInspection(
 		assert.deepEqual(actionCell.commands.at(-1)?.args, { guid: 300 });
 		await respond("missing", 300);
 
+		// Consumable effects share the retained window and spell-reference service.
+		for (const [kind, expected] of [
+			["consumable", "Restores 50 Stamina."],
+			["consumable-depletion", "Depletes 20 Stamina."],
+		]) {
+			// The preceding geometry checks leave the inspector over the HUD's Examine button.
+			await read(
+				"document.querySelector('button[aria-label=\"Close Harness Potion\"]')?.click()",
+			);
+			await select(7);
+			await click('button[aria-label="Examine"]');
+			await respond(kind, 7);
+			await waitFor(
+				(value) =>
+					value.window?.title === "Harness Potion" &&
+					value.window.text.includes(expected),
+				"Consumable effect did not render",
+			);
+			assert.equal(
+				await read(
+					"document.querySelector('[data-inspection-on-use] .inspection-spell > summary').textContent.trim()",
+				),
+				"Casts Impenetrability I",
+			);
+			assert.equal(
+				await read(
+					"[...document.querySelectorAll('.inspection-item section > h3')].some((heading) => heading.textContent === 'Spells')",
+				),
+				false,
+			);
+			await click("[data-inspection-on-use] .inspection-spell > summary");
+			assert.equal(
+				await read(
+					"document.querySelector('[data-inspection-on-use] .inspection-spell').open",
+				),
+				true,
+			);
+			assert.equal(
+				await read(
+					"document.querySelector('[data-inspection-on-use] .inspection-spell-description').textContent.trim()",
+				),
+				"Fixture spell description.",
+			);
+			assert.equal(
+				await read(
+					"document.querySelector('.inspection-cantrip-pill') === null",
+				),
+				true,
+			);
+		}
+
+		// Healing-kit modifiers use their own labels, without flat restoration wording.
+		await read(
+			"document.querySelector('button[aria-label=\"Close Harness Potion\"]').click()",
+		);
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("healing-kit", 7);
+		await waitFor(
+			(value) => value.window?.title === "Harness Healing Kit",
+			"Healing kit inspection did not open",
+		);
+		assert.deepEqual(
+			await read(
+				"[...document.querySelectorAll('[data-inspection-on-use] .inspection-facts > div')].map((row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])",
+			),
+			[
+				["Bonus to Healing Skill", "50"],
+				["Restoration Bonus", "130%"],
+			],
+		);
+		assert.equal(
+			await read(
+				"document.querySelector('[data-inspection-on-use]').textContent.includes('Restores')",
+			),
+			false,
+		);
+
 		// Lifecycle reset owns teardown; no selection mutation is required.
 		await read(probe + ".resync()");
 		const reset = await snapshot();
@@ -659,6 +737,12 @@ export async function probeObjectInspection(
 				narrow: narrow.window.rectangle,
 			},
 			latestTargetFiltered: true,
+			consumableEffects: [
+				"restoration",
+				"depletion",
+				"on-use spell",
+				"healing-kit bonuses",
+			],
 			lifecycleReset: true,
 			rightClickTargets: ["viewport", "inventory", "action"],
 		};

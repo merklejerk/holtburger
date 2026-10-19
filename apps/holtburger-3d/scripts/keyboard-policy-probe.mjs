@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { probeClientChat } from "./client-chat-probe.mjs";
 
-/** Drive actual browser defaults; DOM-dispatched keyboard events cannot prove focus or native control behavior. */
-export async function probeKeyboardPolicy(client, evaluateExpression) {
+/** Shared real-browser input operations for keyboard and focused select regressions. */
+function keyboardProbeDriver(client, evaluateExpression) {
 	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
 	const evaluate = (expression) => evaluateExpression(client, expression);
 	const invoke = (method) => evaluate(`${api}.keyboardProbe().${method}()`);
@@ -40,6 +40,13 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		await key("keyDown", value, code, virtualKey, extra);
 		await key("keyUp", value, code, virtualKey);
 	};
+	return { api, evaluate, invoke, capture, click, key, press };
+}
+
+/** Drive actual browser defaults; DOM-dispatched keys cannot prove native focus behavior. */
+export async function probeKeyboardPolicy(client, evaluateExpression) {
+	const driver = keyboardProbeDriver(client, evaluateExpression);
+	const { api, evaluate, invoke, capture, click, key, press } = driver;
 	await evaluate(`${api}.beginKeyboardProbe()`);
 	try {
 		await key("keyDown", "w", "KeyW", 87);
@@ -341,15 +348,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			"A removed scope cannot be restored by modal dismissal",
 		);
 
-		await click("#keyboard-select");
-		await press("ArrowDown", "ArrowDown", 40);
-		await press("Enter", "Enter", 13);
-		state = await capture();
-		assert.equal(
-			state.selected,
-			"second",
-			"Native select retains keyboard operation",
-		);
+		await probeSelectControl(driver);
 		await click("#keyboard-viewport");
 		await key("keyDown", "w", "KeyW", 87);
 		await invoke("blurWindow");
@@ -762,4 +761,116 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 	} finally {
 		await invoke("dispose");
 	}
+}
+
+/** Isolate scaled picker checks from unrelated chat and HUD browser scenarios. */
+export async function probeSelectPicker(client, evaluateExpression) {
+	const driver = keyboardProbeDriver(client, evaluateExpression);
+	await driver.evaluate(`${driver.api}.beginKeyboardProbe()`);
+	try {
+		return await probeSelectControl(driver);
+	} finally {
+		await driver.invoke("dispose");
+	}
+}
+
+/** Both the full keyboard suite and the fractional-scale regression use the same controls. */
+async function probeSelectControl({
+	evaluate,
+	invoke,
+	capture,
+	click,
+	key,
+	press,
+}) {
+	// A narrow control at the right edge reproduces CSS/DIP clipping below scale one.
+	await evaluate(`(() => {
+		const select = document.querySelector('#keyboard-select');
+		select.style.cssText = 'position:fixed;right:4px;top:100px;width:80px';
+	})()`);
+	await click("#keyboard-select");
+	assert.equal(
+		await evaluate(
+			`document.querySelector('#keyboard-select').matches(':open')`,
+		),
+		true,
+		"The in-page picker opens at the viewport's right edge",
+	);
+	assert.equal((await capture()).gameActive, false);
+	assert.equal(
+		await evaluate(`document.activeElement instanceof HTMLOptionElement`),
+		true,
+		"Picker options retain editor keyboard ownership",
+	);
+	const pickerBounds = await evaluate(`(() => {
+		const options = [...document.querySelector('#keyboard-select').options];
+		const rects = options.map(option => option.getBoundingClientRect());
+		return { left: Math.min(...rects.map(rect => rect.left)),
+			right: Math.max(...rects.map(rect => rect.right)), width: innerWidth };
+	})()`);
+	assert.ok(
+		pickerBounds.left >= 0 &&
+			pickerBounds.right > pickerBounds.left &&
+			pickerBounds.right <= pickerBounds.width,
+		"Picker options have visible bounds within the viewport",
+	);
+	await key("keyDown", "ArrowDown", "ArrowDown", 40);
+	await key("keyDown", "ArrowDown", "ArrowDown", 40, { autoRepeat: true });
+	await key("keyUp", "ArrowDown", "ArrowDown", 40);
+	await press("Enter", "Enter", 13);
+	const state = await capture();
+	assert.equal(
+		state.selected,
+		"third",
+		"Held arrow navigation skips disabled options without releasing the editor",
+	);
+	await click("#keyboard-select");
+	await press("Escape", "Escape", 27);
+	assert.equal(
+		await evaluate(
+			`document.querySelector('#keyboard-select').matches(':open')`,
+		),
+		false,
+		"Escape dismisses the picker through the browser default",
+	);
+	assert.equal((await capture()).focused, "keyboard-select");
+	assert.equal((await capture()).gameActive, false);
+	await press("Escape", "Escape", 27);
+	assert.equal((await capture()).gameActive, true);
+	await click("#keyboard-select");
+	await click("#keyboard-viewport");
+	assert.equal(
+		await evaluate(
+			`document.querySelector('#keyboard-select').matches(':open')`,
+		),
+		false,
+		"Clicking the game dismisses the picker",
+	);
+	assert.equal((await capture()).gameActive, true);
+	await invoke("openModal");
+	await click("#keyboard-modal-select");
+	assert.equal(
+		await evaluate(
+			`document.querySelector('#keyboard-modal-select').matches(':open')`,
+		),
+		true,
+	);
+	await press("Escape", "Escape", 27);
+	assert.equal(
+		await evaluate(`document.querySelector('#keyboard-modal').open`),
+		true,
+		"Picker dismissal must not cancel its containing modal",
+	);
+	assert.equal((await capture()).focused, "keyboard-modal-select");
+	await press("Escape", "Escape", 27);
+	assert.equal(
+		await evaluate(`document.querySelector('#keyboard-modal').open`),
+		false,
+	);
+	assert.equal((await capture()).gameActive, true);
+	return {
+		rightEdge: pickerBounds,
+		keyboardSelection: true,
+		modalEscape: true,
+	};
 }

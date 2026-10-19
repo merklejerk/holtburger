@@ -67,6 +67,9 @@ function isEditor(element: HTMLElement): boolean {
 		element.isContentEditable ||
 		element instanceof HTMLTextAreaElement ||
 		element instanceof HTMLSelectElement ||
+		// In-page select pickers focus their option elements instead of the select itself.
+		(element instanceof HTMLOptionElement &&
+			element.closest("select") !== null) ||
 		(element instanceof HTMLInputElement &&
 			![
 				"button",
@@ -361,6 +364,12 @@ export class KeyboardInputPolicy {
 		}
 		// A native press retains its release destination even if selection changes while held.
 		if (this.#presses.get(key) === "native") return;
+		// An open select owns navigation and dismissal before panel/game Escape handlers.
+		// This mirrors external pickers, whose keyboard events never entered the document.
+		if (this.#owner?.closest("select:open")) {
+			this.#presses.set(key, "native");
+			return;
+		}
 		// Selection does not focus an ordinary element. Keep its native copy command ahead of game
 		// bindings without turning every selectable panel into a persistent keyboard scope.
 		if (
@@ -507,6 +516,12 @@ export class KeyboardInputPolicy {
 
 	#setOwner(owner: HTMLElement | null): void {
 		if (this.#owner === owner) return;
+		// Option navigation changes DOM focus inside one editor, not keyboard ownership.
+		const select = owner?.closest("select");
+		if (select?.contains(this.#owner)) {
+			this.#owner = owner;
+			return;
+		}
 		if (this.#allowsGame(this.#owner) && this.#allowsGame(owner)) {
 			// Selecting or completing a command surface must not interrupt movement.
 			for (const key of this.#presses.keys()) {
@@ -541,7 +556,12 @@ export class KeyboardInputPolicy {
 		}
 	};
 
-	readonly #focusOut = (): void => {
+	readonly #focusOut = (event: FocusEvent): void => {
+		const next = event.relatedTarget;
+		// Picker dismissal can run microtasks before the select's restoring focusin.
+		// An explicit editor-to-editor handoff must finish before releasing ownership.
+		if (next instanceof HTMLElement && isEditor(next) && this.#eligible(next))
+			return;
 		// Focusout precedes focusin; resolve after the complete browser focus transition.
 		queueMicrotask(() => {
 			if (this.#document === null) return;

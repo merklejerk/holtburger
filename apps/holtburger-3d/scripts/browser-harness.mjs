@@ -9,7 +9,10 @@ import {
 	probeClientSettingsTabs,
 } from "./client-hud-probe.mjs";
 import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
-import { probeKeyboardPolicy } from "./keyboard-policy-probe.mjs";
+import {
+	probeKeyboardPolicy,
+	probeSelectPicker,
+} from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { probeLoadouts } from "./client-loadout-probe.mjs";
@@ -201,6 +204,13 @@ try {
 		};
 	} else if (options.clientAudio) {
 		report = { clientAudio: result.clientAudio, browserErrors };
+	} else if (options.clientSelectPicker) {
+		report = {
+			suite: "client-select-picker",
+			passed: true,
+			evidence: result.clientSelectPicker,
+			consoleMessages: result.consoleMessages,
+		};
 	} else if (options.clientKeyboard) {
 		report = {
 			suite: "client-keyboard",
@@ -561,6 +571,7 @@ function parseArgs(args) {
 		clientVitals: false,
 		clientPartyScreenshotDirectory: null,
 		clientKeyboard: false,
+		clientSelectPicker: false,
 		clientConnection: false,
 		clientAudio: false,
 		characterSheet: false,
@@ -729,6 +740,10 @@ function parseArgs(args) {
 			case "--client-keyboard":
 				parsed.clientHud = true;
 				parsed.clientKeyboard = true;
+				break;
+			case "--client-select-picker":
+				parsed.clientHud = true;
+				parsed.clientSelectPicker = true;
 				break;
 			case "--client-precise-jump":
 				parsed.clientHud = true;
@@ -2004,6 +2019,7 @@ Options:
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
   --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
+  --client-select-picker Verify right-edge select opening, keyboard selection, and modal dismissal.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-waypoint     Verify commands, content links, compass guidance, both maps, and waypoint lifetime.
@@ -4593,6 +4609,12 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
+		if (options.clientSelectPicker)
+			return {
+				clientSelectPicker: await probeSelectPicker(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientKeyboard)
 			return {
 				clientKeyboard: await probeKeyboardPolicy(client, evaluateExpression),

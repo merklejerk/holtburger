@@ -118,6 +118,12 @@ try {
 			screenshots: result.partyHudScreenshots,
 			browserErrors,
 		};
+	} else if (options.clientAttention) {
+		report = {
+			suite: "client-attention",
+			evidence: result.clientAttention,
+			browserErrors,
+		};
 	} else if (options.clientVitals) {
 		report = {
 			suite: "client-vitals",
@@ -579,6 +585,7 @@ function parseArgs(args) {
 		clientSettingsTabs: false,
 		clientEnvironment: false,
 		clientVitals: false,
+		clientAttention: false,
 		clientPartyScreenshotDirectory: null,
 		clientKeyboard: false,
 		clientSelectPicker: false,
@@ -711,6 +718,10 @@ function parseArgs(args) {
 				parsed.clientPartyScreenshotDirectory = resolve(
 					requireValue(args, ++index, arg),
 				);
+				break;
+			case "--client-attention":
+				parsed.clientHud = true;
+				parsed.clientAttention = true;
 				break;
 			case "--client-vitals":
 				parsed.clientHud = true;
@@ -2041,6 +2052,7 @@ Options:
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
+  --client-attention   Verify toast/status animations, theme overrides, and reduced motion.
   --client-vitals      Verify vital priority, pulse, reduced motion, recovery, and input passthrough.
   --client-environment Verify true minimap time/weather, local overrides, and footer placement.
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
@@ -4590,6 +4602,26 @@ async function runClientHudHarness({ viteUrl }) {
 			}
 			return {
 				partyHudScreenshots: screenshots,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientAttention) {
+			const probes = [];
+			for (const value of ["no-preference", "reduce"]) {
+				await client.send("Emulation.setEmulatedMedia", {
+					features: [{ name: "prefers-reduced-motion", value }],
+				});
+				probes.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeHudAttention",
+						[],
+					),
+				);
+			}
+			return {
+				clientAttention: probes,
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

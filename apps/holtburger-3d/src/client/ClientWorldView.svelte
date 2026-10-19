@@ -76,7 +76,7 @@
 	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
 	import ClientStatusTray from "./ClientStatusTray.svelte";
 	import ClientEnchantmentsPanel from "./ClientEnchantmentsPanel.svelte";
-	import { effectiveEnchantmentKinds } from "./client-enchantments-view";
+	import { presentEnchantmentTray } from "./client-enchantments-view";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatComposer } from "./client-chat-composer.svelte";
@@ -625,8 +625,8 @@
 		kind: "beneficial" | "harmful";
 		revision: number;
 	} | null>(null);
-	const enchantmentKinds = $derived(
-		effectiveEnchantmentKinds(enchantments?.resolved ?? null),
+	const enchantmentTray = $derived(
+		presentEnchantmentTray(enchantments?.resolved ?? null),
 	);
 	function openEnchantments(kind: "beneficial" | "harmful"): void {
 		enchantmentsOpen = true;
@@ -1138,7 +1138,7 @@
 		editable={hudMode === "layout"}
 		{viewport}
 		{inventory}
-		kinds={enchantmentKinds}
+		enchantments={enchantmentTray}
 		onOpenEnchantments={openEnchantments}
 		onOpenInventory={() => (activePanel = "inventory")}
 		onPlacementChange={(placement) =>

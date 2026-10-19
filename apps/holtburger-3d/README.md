@@ -205,6 +205,17 @@ Both modes use **Holtburger Standard** from
 and can evolve freely.
 CSS themes can replace variables and styling rules; component CSS owns layout.
 
+Toast entrances use `--ui-toast-pop-animation`, `--ui-toast-pop-duration`,
+`--ui-toast-pop-scale` (starting scale), `--ui-toast-pop-peak-scale` (overshoot),
+and `--ui-toast-pop-easing`.
+`--ui-toast-exit-duration` controls fade-out. Persistent guidance and layout previews do not pop.
+Status icons pulse on appearance or a category change using `--ui-hud-pulse-animation`,
+`--ui-hud-pulse-duration`, `--ui-hud-pulse-scale` (peak scale), and `--ui-hud-pulse-easing`.
+Defaults live in `src/app/ui-base.css`. Animation-name tokens accept a custom global
+CSS keyframe name or `none` to disable the effect; set the exit duration to `0s` to
+remove the toast fade. Reduced-motion preferences disable both animations and the fade.
+Enchantment countdown ticks do not pulse; burden pulses only on severity changes.
+
 The jump HUD uses `--ui-jump-bar-width`, `--ui-jump-readout-font-size`,
 `--ui-jump-gap` and `--ui-jump-fill-color` for density
 and appearance. The percentage follows the fill edge, with an underline extending left to the bar.

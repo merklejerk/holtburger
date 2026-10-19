@@ -5,7 +5,7 @@ import {
 	type ResolvedEnchantments,
 } from "./client-enchantments-contract";
 import {
-	effectiveEnchantmentKinds,
+	presentEnchantmentTray,
 	projectEnchantmentSections,
 } from "./client-enchantments-view";
 
@@ -119,6 +119,64 @@ const spells = new Map<number, SpellRow>([
 ]);
 
 describe("enchantment presentation projection", () => {
+	it("ignores countdowns and ordering while detecting category-local registry changes", () => {
+		const baseline = presentEnchantmentTray(resolved);
+		expect(
+			presentEnchantmentTray({
+				instances: resolved.instances
+					.toReversed()
+					.map((item) => ({ ...item, remainingSeconds: 1 })),
+				groups: resolved.groups.toReversed(),
+			}),
+		).toEqual(baseline);
+		const changed = presentEnchantmentTray({
+			...resolved,
+			instances: resolved.instances.map((item) =>
+				item.key === harmful ? { ...item, statModValue: 0.8 } : item,
+			),
+		});
+		expect(changed.beneficial).toEqual(baseline.beneficial);
+		expect(changed.harmful.identity).not.toBe(baseline.harmful.identity);
+		const added = {
+			...instance({ spellId: 99, layer: 1 }, "beneficial", 30, 1),
+		};
+		const withAddition = presentEnchantmentTray({
+			...resolved,
+			instances: [...resolved.instances, added],
+		});
+		expect(withAddition.beneficial.identity).not.toBe(
+			baseline.beneficial.identity,
+		);
+		expect(withAddition.harmful).toEqual(baseline.harmful);
+		// Removing an overridden effect still notifies its category while another remains visible.
+		const removed = presentEnchantmentTray({
+			instances: resolved.instances.filter((item) => item.key !== overridden),
+			groups: resolved.groups.map((group) => ({ ...group, overridden: [] })),
+		});
+		expect(removed.harmful.visible).toBe(true);
+		expect(removed.harmful.identity).not.toBe(baseline.harmful.identity);
+	});
+
+	it("detects a different effective contribution without a registry change", () => {
+		const baseline = presentEnchantmentTray(resolved);
+		const changed = presentEnchantmentTray({
+			...resolved,
+			groups: resolved.groups.map((group) => ({
+				...group,
+				effective: group.effective === ordinary ? attack : group.effective,
+			})),
+		});
+		expect(changed.beneficial.visible).toBe(baseline.beneficial.visible);
+		expect(changed.beneficial.identity).not.toBe(baseline.beneficial.identity);
+		expect(changed.harmful).toEqual(baseline.harmful);
+	});
+
+	it("rejects a contribution whose effective instance is missing", () => {
+		expect(() =>
+			presentEnchantmentTray({ instances: [], groups: resolved.groups }),
+		).toThrow("Enchantment group references missing instance 10:1");
+	});
+
 	it("validates the transported contribution context and layer identity", () => {
 		expect(decodeResolvedEnchantments(resolved)).toEqual(resolved);
 		expect(() =>
@@ -138,16 +196,19 @@ describe("enchantment presentation projection", () => {
 	});
 
 	it("counts only effective kinds even when one spell appears under several stats", () => {
-		expect(effectiveEnchantmentKinds(resolved)).toEqual({
-			beneficial: true,
-			harmful: true,
+		expect(presentEnchantmentTray(resolved)).toEqual({
+			beneficial: expect.objectContaining({ visible: true }),
+			harmful: expect.objectContaining({ visible: true }),
 		});
 		expect(
-			effectiveEnchantmentKinds({
+			presentEnchantmentTray({
 				...resolved,
 				groups: resolved.groups.slice(0, 3),
 			}),
-		).toEqual({ beneficial: true, harmful: false });
+		).toEqual({
+			beneficial: expect.objectContaining({ visible: true }),
+			harmful: expect.objectContaining({ visible: false }),
+		});
 	});
 
 	it("keeps independent effective roots in one stat and duplicates overlap by identity", () => {
@@ -187,13 +248,16 @@ describe("enchantment presentation projection", () => {
 			artwork: { kind: "failed", detail: "fixture" },
 		};
 		const references = new Map([[666, vitaeSpell]]);
-		expect(effectiveEnchantmentKinds(snapshot)).toEqual({
-			beneficial: false,
-			harmful: true,
+		expect(presentEnchantmentTray(snapshot)).toEqual({
+			beneficial: expect.objectContaining({ visible: false }),
+			harmful: expect.objectContaining({ visible: true }),
 		});
 		expect(
-			effectiveEnchantmentKinds({ instances: [cooldown], groups: [] }),
-		).toEqual({ beneficial: false, harmful: false });
+			presentEnchantmentTray({ instances: [cooldown], groups: [] }),
+		).toEqual({
+			beneficial: expect.objectContaining({ visible: false }),
+			harmful: expect.objectContaining({ visible: false }),
+		});
 		const query = (text: string, tags: ("harmful" | "beneficial")[]) =>
 			projectEnchantmentSections(snapshot, references, { text, tags }, "name");
 		const sections = query("penalty", ["harmful"]);

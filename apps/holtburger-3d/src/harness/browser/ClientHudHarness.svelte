@@ -7,6 +7,7 @@
 		presentPartyHud,
 	} from "../../client/client-party-hud";
 	import type { PartySnapshot } from "../../client/client-party-contract";
+	import { probeHudAttention } from "./client-hud-attention-probe";
 	import { probeVitalWarnings } from "./client-vital-warning-probe";
 	import {
 		MINIMUM_JUMP_POWER,
@@ -1076,6 +1077,8 @@
 		readonly showPartyHud: typeof showPartyHud;
 		/** Runtime overlay checks using real CSS and viewport hit testing. */
 		readonly probeVitalWarnings: () => ReturnType<typeof probeVitalWarnings>;
+		/** Themeable notification animation lifecycle, without visual acceptance. */
+		readonly probeHudAttention: () => ReturnType<typeof probeHudAttention>;
 		/** Deterministic production environment controls/readout integration. */
 		readonly probeEnvironment: () => ReturnType<typeof probeClientEnvironment>;
 		/** Replace housing without mounting a new World panel or replaying crystal intent. */
@@ -4590,6 +4593,19 @@
 			},
 			waypoint: waypointControls,
 			probeWaypoint: () => probeClientWaypoint(waypointControls),
+			probeHudAttention: async () => {
+				const previousToast = toast;
+				const previousEnchantments = enchantments;
+				try {
+					return await probeHudAttention((nextToast, resolved) => {
+						toast = nextToast;
+						enchantments = { resolved, receivedAtMs: performance.now() };
+					});
+				} finally {
+					toast = previousToast;
+					enchantments = previousEnchantments;
+				}
+			},
 			probeVitalWarnings: async () => {
 				const previousVitals = warningVitals;
 				const previousEnabled = vitalWarningsEnabled;

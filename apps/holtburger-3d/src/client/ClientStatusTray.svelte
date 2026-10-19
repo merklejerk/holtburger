@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { hudAttention } from "./client-hud-attention";
+	import type { EnchantmentTrayPresentation } from "./client-enchantments-view";
 	import { untrack } from "svelte";
 	import { presentClientBurden } from "./client-burden-presentation";
 	import type { ClientInventoryState } from "./client-inventory-state";
@@ -18,8 +20,8 @@
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
-		/** Presence of effective ordinary spells and the separately classified vitae penalty. */
-		readonly kinds: { readonly beneficial: boolean; readonly harmful: boolean };
+		/** Visibility and change identities for effective ordinary spells and the vitae penalty. */
+		readonly enchantments: EnchantmentTrayPresentation;
 		/** Session owner supplies world burden even while Inventory is closed. */
 		readonly inventory: ClientInventoryState | null;
 		readonly onOpenInventory: () => void;
@@ -31,7 +33,7 @@
 		editable,
 		viewport,
 		onPlacementChange,
-		kinds,
+		enchantments,
 		onOpenEnchantments,
 		inventory,
 		onOpenInventory,
@@ -58,23 +60,27 @@
 			name: ClientHudIconName;
 			label: string;
 			kind: "beneficial" | "harmful";
+			/** Category-local registry identity used only to restart its pulse. */
+			identity: string;
 		}[]
 	>([
-		...(kinds.beneficial
+		...(enchantments.beneficial.visible
 			? [
 					{
 						name: "buffed" as const,
 						label: "Beneficial enchantments",
 						kind: "beneficial" as const,
+						identity: enchantments.beneficial.identity,
 					},
 				]
 			: []),
-		...(kinds.harmful
+		...(enchantments.harmful.visible
 			? [
 					{
 						name: "debuffed" as const,
 						label: "Harmful enchantments",
 						kind: "harmful" as const,
+						identity: enchantments.harmful.identity,
 					},
 				]
 			: []),
@@ -89,10 +95,11 @@
 		{viewport}
 		{onPlacementChange}
 	>
-		{#each statuses as status}
+		{#each statuses as status (status.kind)}
 			<button
 				type="button"
 				class="status-icon ui-hud-button"
+				use:hudAttention={status.identity}
 				title={status.label}
 				aria-label={status.label}
 				onclick={() => onOpenEnchantments(status.kind)}
@@ -104,6 +111,7 @@
 			<button
 				type="button"
 				class="status-icon burden-icon ui-hud-button"
+				use:hudAttention={burdenPresentation.level}
 				data-level={burdenPresentation.level}
 				title={burdenPresentation.warning.tooltip}
 				aria-label={`${burdenPresentation.warning.label} — ${burdenPresentation.percent} burden. Open Inventory`}

@@ -201,11 +201,13 @@ impl ClientRuntime {
                 .and_then(|value| u32::try_from(value).ok())
                 .filter(|value| *value > 0)
                 .ok_or("Trade note stack value is not available")?;
-            let unit_value = entity
-                .get_int_prop(PropertyInt::StackUnitValue)
-                .and_then(|value| u32::try_from(value).ok())
-                .filter(|value| *value > 0)
-                .ok_or("Trade note denomination is not available")?;
+            // ACE sends total Value and StackSize in the public description, not
+            // StackUnitValue. SetStackSize maintains Value = StackUnitValue * count
+            // (ACE WorldObject_Properties.cs), so recover the denomination exactly.
+            if !stack_value.is_multiple_of(quantity) {
+                return Err("Trade note value disagrees with its stack quantity".into());
+            }
+            let unit_value = stack_value / quantity;
             HousingPaymentKind::TradeNote {
                 stack_value,
                 unit_value,
@@ -453,7 +455,6 @@ mod tests {
         item.set_int_prop(PropertyInt::StackSize, count);
         if let Some(value) = note {
             item.set_int_prop(PropertyInt::Value, value * count);
-            item.set_int_prop(PropertyInt::StackUnitValue, value);
         }
         client.world.add_entity(item);
         place(client, guid, PLAYER);
@@ -474,6 +475,59 @@ mod tests {
             } else {
                 HousingPreviewOperation::Quote
             },
+        }
+    }
+
+    #[test]
+    fn purchase_auto_fill_covers_coin_shortfall_with_notes_from_public_facts() {
+        let mut client = client();
+        let crystal = client.world.housing.crystal.as_mut().unwrap();
+        crystal.owner = Guid::NULL;
+        crystal.buy = std::mem::take(&mut crystal.rent);
+        source(&mut client, Guid(10), 3, None);
+        source(&mut client, Guid(11), 2, Some(10));
+        let mut request = request(vec![], true);
+        request.draft.purpose = HousingPaymentPurpose::Purchase;
+        let HousingPreviewOutcome::Ready {
+            items,
+            quote,
+            unavailable,
+        } = client.evaluate_housing_preview(&request).unwrap()
+        else {
+            panic!("Expected purchase preview");
+        };
+        assert_eq!(items, vec![Guid(10), Guid(11)]);
+        assert!(quote.complete);
+        assert!(unavailable.is_empty());
+        assert_eq!(quote.lines[0].credited, 13);
+        assert_eq!(quote.lines[0].excess, 0);
+        assert_eq!(quote.lines[0].consumption[0].item, Guid(10));
+        assert_eq!(quote.lines[0].consumption[0].quantity, 3);
+        assert_eq!(quote.lines[0].consumption[1].item, Guid(11));
+        assert_eq!(quote.lines[0].consumption[1].quantity, 1);
+        request.draft.items = items;
+        assert_eq!(quote, client.quote_housing_draft(&request.draft).unwrap());
+    }
+
+    #[test]
+    fn trade_note_denomination_requires_exact_positive_stack_value() {
+        let mut client = client();
+        source(&mut client, Guid(10), 2, Some(10));
+        for (value, expected) in [
+            (0, "Trade note stack value is not available"),
+            (-1, "Trade note stack value is not available"),
+            (21, "Trade note value disagrees with its stack quantity"),
+        ] {
+            client
+                .world
+                .entities
+                .get_mut(Guid(10))
+                .unwrap()
+                .set_int_prop(PropertyInt::Value, value);
+            assert_eq!(
+                client.resolve_housing_payment_item(Guid(10)).unwrap_err(),
+                expected
+            );
         }
     }
 

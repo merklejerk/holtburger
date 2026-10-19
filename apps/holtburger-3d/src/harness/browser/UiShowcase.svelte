@@ -11,6 +11,7 @@
 	import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 	import ClientChat from "../../client/ClientChat.svelte";
 	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
+	import { CLIENT_CLOCK_FORMAT_DEFAULT } from "../../client/client-environment-settings";
 	import { recordSentChat } from "../../client/client-chat-input-history";
 	import { CLIENT_TUNING } from "../../client/client-tuning";
 	import ClientFpsCounter from "../../client/ClientFpsCounter.svelte";
@@ -439,6 +440,7 @@
 					onSplit={() => {}}
 				/>{/snippet}
 			{#snippet chat()}<ClientChat
+					clockFormat={CLIENT_CLOCK_FORMAT_DEFAULT}
 					composer={chatComposer}
 					onSetWaypoint={(target) =>
 						(toastMessage = `Waypoint set: ${target.label}.`)}

@@ -94,8 +94,6 @@ fn melee_request_admitted(distance: f32, path: CombatStaticPath, stalled: bool) 
 struct PreparedSpellCast {
     /// Canonical spell identifier after stripping the frontend marker bit.
     spell_id: u32,
-    /// Catalog identity captured during validated preparation for named feedback correlation.
-    spell_name: String,
     /// Actual recipient after resolving self-target and untargeted spell routes.
     target: Option<Guid>,
 }
@@ -723,11 +721,7 @@ impl ClientRuntime {
         if self.world.player.guid == Guid::NULL {
             return Err("Character identity has not arrived yet.");
         }
-        Ok(PreparedSpellCast {
-            spell_id,
-            spell_name: spell.name.clone(),
-            target,
-        })
+        Ok(PreparedSpellCast { spell_id, target })
     }
 
     async fn cast_spell(&mut self, spell_id: u32, aim: SpellCastAim) -> Result<()> {
@@ -744,23 +738,32 @@ impl ClientRuntime {
             self.reject_combat_request("Wait for the current action to finish.");
             return Ok(());
         }
-        let target = action
-            .target
-            .filter(|target| *target != self.world.player.guid);
         let result = self.send_game_action(action.to_action()).await;
-        if let (Ok(()), Some(target)) = (&result, target) {
-            let name = self
-                .world
-                .entities
-                .get(target)
-                .and_then(|entity| entity.get_string_prop(PropertyString::Name));
-            self.combat_attribution
-                .sent_cast(target, name, &action.spell_name, Instant::now());
+        if let (Ok(()), Some(target)) = (&result, action.target) {
+            self.record_sent_targeted_spell(target, action.spell_id);
         }
         if result.is_err() {
             self.clear_busy_operation();
         }
         result
+    }
+
+    /// Both explicit casts and spell-bearing item uses supply the same cosmetic identity hints.
+    pub(super) fn record_sent_targeted_spell(&mut self, target: Guid, spell_id: u32) {
+        if target == self.world.player.guid || target == Guid::NULL {
+            return;
+        }
+        // Item use can proceed without catalog data; missing identity never invents attribution.
+        let Some(spell) = self.world.spell_catalog.get(spell_id) else {
+            return;
+        };
+        let name = self
+            .world
+            .entities
+            .get(target)
+            .and_then(|entity| entity.get_string_prop(PropertyString::Name));
+        self.combat_attribution
+            .sent_cast(target, name, &spell.name, Instant::now());
     }
 
     fn reject_combat_request(&mut self, message: &str) {
@@ -1012,6 +1015,128 @@ mod tests {
             outcome.context.attribution,
             CombatOutcomeAttribution::Unplaced
         );
+    }
+
+    #[tokio::test]
+    async fn targeted_item_spell_attributes_damage_and_resistance_after_use_completion() {
+        use super::super::types::{CombatOutcomeAttribution, ServerTextCombatOutcomeKind};
+        use holtburger_common::properties::PropertyDataId;
+        use holtburger_world::{entity::Entity, item_use::ItemUseIntent};
+
+        let mut client = client(0);
+        let mut wand = Entity::new(Guid(10), "Wand".into(), WorldPosition::default());
+        wand.set_did_prop(PropertyDataId::Spell, Guid(42));
+        client.world.entities.insert(wand);
+        for guid in [Guid(2), Guid(3)] {
+            client.world.entities.insert(Entity::new(
+                guid,
+                "Drudge".into(),
+                WorldPosition::default(),
+            ));
+        }
+        assert!(
+            client
+                .dispatch_item_use(&ItemUseIntent::Targeted {
+                    source: Guid(10),
+                    target: Guid(2),
+                })
+                .await
+                .unwrap()
+        );
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        for (text, kind) in [
+            (
+                "You burn Drudge for 37 points with Test Spell.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 37,
+                    critical_hit: false,
+                },
+            ),
+            (
+                "Drudge resists your spell",
+                ServerTextCombatOutcomeKind::Resisted,
+            ),
+        ] {
+            let outcome = receive_text(&mut client, ChatMessageType::Magic as u32, text)
+                .await
+                .unwrap();
+            assert_eq!(outcome.kind, kind);
+            assert_eq!(
+                outcome.context.attribution,
+                CombatOutcomeAttribution::Attributed { target: Guid(2) }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn item_use_requires_sent_targeted_spell_identity_for_attribution() {
+        use super::super::types::CombatOutcomeAttribution;
+        use holtburger_common::properties::PropertyDataId;
+        use holtburger_world::{entity::Entity, item_use::ItemUseIntent};
+
+        for mode in [
+            "ordinary",
+            "unknown-spell",
+            "direct",
+            "self",
+            "busy",
+            "failed",
+        ] {
+            let mut client = client(0);
+            let mut wand = Entity::new(Guid(10), "Wand".into(), WorldPosition::default());
+            if mode != "ordinary" {
+                wand.set_did_prop(
+                    PropertyDataId::Spell,
+                    Guid(if mode == "unknown-spell" { 99 } else { 42 }),
+                );
+            }
+            client.world.entities.insert(wand);
+            let target = if mode == "self" { Guid(1) } else { Guid(2) };
+            client.world.entities.insert(Entity::new(
+                target,
+                "Drudge".into(),
+                WorldPosition::default(),
+            ));
+            if mode == "busy" {
+                client.arm_busy_operation(super::super::PendingOperation::UseWithTarget);
+            }
+            if mode == "failed" {
+                client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+                    .await
+                    .unwrap();
+            }
+            let intent = if mode == "direct" {
+                ItemUseIntent::Direct {
+                    source: Guid(10),
+                    unrestricted: false,
+                }
+            } else {
+                ItemUseIntent::Targeted {
+                    source: Guid(10),
+                    target,
+                }
+            };
+            let result = client.dispatch_item_use(&intent).await;
+            assert_eq!(result.is_err(), mode == "failed", "{mode}");
+            if let Ok(dispatched) = result {
+                assert_eq!(dispatched, mode != "busy", "{mode}");
+            }
+            let outcome = client
+                .interpret_server_combat_text(
+                    ChatMessageType::Magic.into(),
+                    "You burn Drudge for 37 points with Test Spell.",
+                    Instant::now(),
+                )
+                .unwrap();
+            assert_eq!(
+                outcome.context.attribution,
+                CombatOutcomeAttribution::Unplaced,
+                "{mode}"
+            );
+        }
     }
 
     #[tokio::test]

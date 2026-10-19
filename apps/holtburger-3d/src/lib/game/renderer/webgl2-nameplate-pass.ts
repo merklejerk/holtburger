@@ -18,7 +18,7 @@ export interface NameplateDrawInstance {
 	/** Anchor-relative bottom-center position. */
 	readonly anchor: Vec3;
 	readonly binding: NameplateTextureBinding;
-	/** Selected entity plates overlay scene geometry; ordinary and hovered plates test depth. */
+	/** Selected and hovered entity plates overlay scene geometry; ordinary plates test depth. */
 	readonly depthTest: boolean;
 }
 

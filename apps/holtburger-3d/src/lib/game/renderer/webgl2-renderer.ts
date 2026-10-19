@@ -2799,7 +2799,7 @@ export class WebGL2Renderer implements Renderer {
 							);
 							nameplates.push({
 								anchor,
-								depthTest: this.#frameSelectionTarget?.nodeId !== nodeId,
+								depthTest: !required,
 								distanceSquared,
 								identity: facts.identity,
 								required,

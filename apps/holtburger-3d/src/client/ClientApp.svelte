@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientLocationCommand } from "./client-location-command";
 	import { ClientDeathCommands } from "./client-death-commands";
@@ -1437,7 +1438,7 @@
 		}
 
 		let cancelled = false;
-		let frameHandle = 0;
+		let stopFrameLoop: (() => void) | null = null;
 		let lastStatus: ClientPresentationStatus | null = null;
 		let lastErrorMessage: string | null = null;
 		const reportPresentationError = (error: unknown): void => {
@@ -1569,7 +1570,6 @@
 				workMs: frameFinishedAt - frameStartedAt,
 			});
 			reportPresentationStatus(nextStatus);
-			frameHandle = window.requestAnimationFrame(frame);
 		};
 		void presentation
 			.start()
@@ -1582,7 +1582,7 @@
 							preciseJumpSession.snapshot(),
 						);
 					}
-					frameHandle = window.requestAnimationFrame(frame);
+					stopFrameLoop = startPresentationFrameLoop(frame);
 				}
 			})
 			.catch(reportPresentationError);
@@ -1591,7 +1591,7 @@
 			cancelled = true;
 			weatherPresets = [];
 			environmentIssue = null;
-			window.cancelAnimationFrame(frameHandle);
+			stopFrameLoop?.();
 			void presentation.destroy().catch((error: unknown) => {
 				// The route is already leaving, so keep teardown failure visible to diagnostics
 				// without mutating an unmounted chat surface.

@@ -2,6 +2,20 @@ import type {
 	CharacterIdentity,
 	ItemInspection,
 } from "./client-object-inspection-contract";
+import { progressPercent } from "../app/quantity-format";
+
+/** Fill within the current item level, or a full bar when advancement is complete. */
+export function itemProgressPercent(
+	progression: NonNullable<ItemInspection["progression"]>,
+): number {
+	const advancement = progression.advancement;
+	if (advancement.kind === "maximum") return 100;
+	const start = BigInt(advancement.levelStartXp);
+	return progressPercent(
+		BigInt(progression.totalXp) - start,
+		BigInt(advancement.nextLevelXp) - start,
+	);
+}
 
 type WieldRequirement = ItemInspection["wieldRequirements"][number];
 type ItemEffect = ItemInspection["effects"][number];

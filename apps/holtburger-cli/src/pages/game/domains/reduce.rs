@@ -14,6 +14,7 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     result.merge(navigation::reduce_view_event(state, event));
     result.merge(party::reduce_view_event(state, event));
     result.merge(trade_vendor::reduce_view_event(state, event));
+    object_interaction::reconcile_refresh(state);
 
     result
 }
@@ -54,6 +55,7 @@ fn broadcast_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     result.merge(progression::reduce_action(state, action.clone()));
     result.merge(interaction::reduce_action(state, action.clone()));
     result.merge(ui::reduce_action(state, action));
+    object_interaction::reconcile_refresh(state);
 
     result
 }
@@ -63,6 +65,7 @@ pub(crate) fn reduce_tick(state: &mut GameState, elapsed: f64) -> UpdateResult {
     let now = Instant::now();
 
     inventory::apply_tick(state, now);
+    object_interaction::apply_tick(state, now, &mut result);
     player::apply_tick(state, &mut result);
     navigation::apply_tick(state, now, elapsed, &mut result);
     ui::apply_tick(state, elapsed, &mut result);

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ClientWaypointText from "./ClientWaypointText.svelte";
+	import { formatQuantity } from "../app/quantity-format";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { formatDuration } from "../app/duration-format";
 	import type { SpellReference } from "../app/spell-references";
@@ -24,6 +25,7 @@
 		humanizeInspectionName,
 		inspectionBonusLabel,
 		inspectionEnchantmentClass,
+		itemProgressPercent,
 		truncateInspectionDescription,
 	} from "./client-object-inspection-format";
 
@@ -224,6 +226,42 @@
 				</p>{/if}
 		</div>
 	</header>
+
+	{#if item.progression !== null}
+		{@const progression = item.progression}
+		{@const advancement = progression.advancement}
+		{@const percent = itemProgressPercent(progression)}
+		<section data-inspection-progression>
+			<h3>Item Progression</h3>
+			<dl class="inspection-facts">
+				<div>
+					<dt>Item Level</dt>
+					<dd>{progression.level} / {progression.maxLevel}</dd>
+				</div>
+				<div class="inspection-wide">
+					<dt>Item XP</dt>
+					<dd>
+						{formatQuantity(BigInt(progression.totalXp))} / {formatQuantity(
+							BigInt(
+								advancement.kind === "advancing"
+									? advancement.nextLevelXp
+									: advancement.maxLevelXp,
+							),
+						)}
+					</dd>
+				</div>
+			</dl>
+			<progress
+				class="ui-progress"
+				aria-label="Item level experience"
+				aria-valuetext={advancement.kind === "maximum"
+					? "Maximum level"
+					: `${percent}% toward next item level`}
+				max="100"
+				value={percent}
+			></progress>
+		</section>
+	{/if}
 
 	{#if item.value !== null || item.burden !== null || item.material !== null || item.tinkering !== null || item.spellcraft !== null}
 		<section>

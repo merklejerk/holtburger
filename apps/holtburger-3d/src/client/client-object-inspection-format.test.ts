@@ -1,4 +1,5 @@
 import { formatDuration } from "../app/duration-format";
+import { formatQuantity } from "../app/quantity-format";
 import { describe, expect, it } from "vitest";
 import {
 	formatInspectionDamageTypes,
@@ -9,10 +10,49 @@ import {
 	formatPlayerKillerStatus,
 	formatWieldRequirement,
 	humanizeInspectionName,
+	itemProgressPercent,
 	truncateInspectionDescription,
 } from "./client-object-inspection-format";
 
 describe("object inspection formatting", () => {
+	it("measures item progress within the earned level and fills the capped state", () => {
+		const progression = {
+			level: 2,
+			maxLevel: 5,
+			totalXp: "350000000",
+			advancement: {
+				kind: "advancing" as const,
+				levelStartXp: "300000000",
+				nextLevelXp: "700000000",
+			},
+		};
+		expect(itemProgressPercent(progression)).toBe(12.5);
+		expect(itemProgressPercent({ ...progression, totalXp: "300000000" })).toBe(
+			0,
+		);
+		expect(
+			itemProgressPercent({
+				...progression,
+				level: 5,
+				advancement: { kind: "maximum", maxLevelXp: "3100000000" },
+			}),
+		).toBe(100);
+	});
+	it("keeps large XP differences and labels exact beyond the number range", () => {
+		expect(
+			itemProgressPercent({
+				level: 1,
+				maxLevel: 2,
+				totalXp: "9007199254740993",
+				advancement: {
+					kind: "advancing",
+					levelStartXp: "9007199254740992",
+					nextLevelXp: "9007199254740996",
+				},
+			}),
+		).toBe(25);
+		expect(formatQuantity(9007199254740993n)).toBe("9,007,199,254,740,993");
+	});
 	it("humanizes open semantic enum names", () => {
 		expect(humanizeInspectionName("BlackGarnet")).toBe("Black Garnet");
 		expect(humanizeInspectionName("max-health")).toBe("Max Health");

@@ -188,14 +188,11 @@ pub(crate) fn handle_event(
                 }
                 let applied = entity.apply_identify_response(data);
                 debug_assert!(applied, "successful identify response must merge");
-                let inspection = ObjectInspection::from_entity(entity, inspection_context)
-                    .expect("successful player appraisal must contain a creature profile");
+                let outcome = ObjectInspection::from_entity(entity, inspection_context).into();
                 events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
                 events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                     guid,
-                    outcome: ObjectInspectionOutcome::Ready {
-                        inspection: Box::new(inspection),
-                    },
+                    outcome,
                 }));
                 true
             } else if let Some(vendor) = state.vendor.as_mut()
@@ -210,14 +207,11 @@ pub(crate) fn handle_event(
                 }
                 let applied = item.apply_identify_response(data);
                 debug_assert!(applied, "successful identify response must merge");
-                let inspection = ObjectInspection::from_vendor_item(item, inspection_context)
-                    .expect("vendor items cannot require a player creature profile");
+                let outcome = ObjectInspection::from_vendor_item(item, inspection_context).into();
                 events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
                 events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                     guid,
-                    outcome: ObjectInspectionOutcome::Ready {
-                        inspection: Box::new(inspection),
-                    },
+                    outcome,
                 }));
                 true
             } else {

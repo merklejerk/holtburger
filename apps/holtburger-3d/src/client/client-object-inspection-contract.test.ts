@@ -3,6 +3,19 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves exact item XP and rejects malformed progression payloads", () => {
+		const item = structuredClone(fixture.item);
+		item.outcome.inspection.details.details.progression.totalXp =
+			"9007199254740993";
+		expect(decodeObjectInspectionResult(item)).toEqual(item);
+		for (const totalXp of [123, "-1", "01", "18446744073709551616"]) {
+			const malformed = structuredClone(item);
+			Object.assign(malformed.outcome.inspection.details.details.progression, {
+				totalXp,
+			});
+			expect(() => decodeObjectInspectionResult(malformed)).toThrow();
+		}
+	});
 	it("accepts every Rust-serialized outcome and subject variant", () => {
 		for (const value of Object.values(fixture)) {
 			expect(decodeObjectInspectionResult(value)).toEqual(value);

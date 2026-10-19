@@ -18,6 +18,7 @@ import { CLIENT_TUNING } from "./client-tuning";
 const itemFixture = decodeObjectInspectionResult(fixture.item);
 const rejectedFixture = decodeObjectInspectionResult(fixture.rejected);
 const missingFixture = decodeObjectInspectionResult(fixture.missing);
+const unavailableFixture = decodeObjectInspectionResult(fixture.unavailable);
 const creatureFixture = decodeObjectInspectionResult(fixture.creature);
 const previewFixture = decodeObjectPreviewResult({
 	guid: fixture.creature.guid,
@@ -284,6 +285,10 @@ describe("ClientObjectInspection", () => {
 		for (const [result, message] of [
 			[rejectedFixture, "You could not examine that object."],
 			[missingFixture, "That object is no longer available."],
+			[
+				unavailableFixture,
+				`Appraisal unavailable: ${fixture.unavailable.outcome.reason}`,
+			],
 		] as const) {
 			const session = new FakeInspectionSession();
 			const observed: Array<{

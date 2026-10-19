@@ -4,6 +4,7 @@ use holtburger_world::inspection::{
     BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, ItemInspection,
     ItemManaKind, ObjectInspection, ObjectInspectionDetails, WieldRequirement,
 };
+use holtburger_world::item_progression::ItemAdvancement;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -112,6 +113,24 @@ fn push_item_info(
     item: &ItemInspection,
     spell_lookup: Option<&SpellCatalog>,
 ) {
+    if let Some(progression) = &item.progression {
+        push_labeled(
+            lines,
+            "Item Level",
+            format!("{} / {}", progression.level, progression.max_level),
+            Color::Cyan,
+        );
+        let threshold = match progression.advancement {
+            ItemAdvancement::Advancing { next_level_xp, .. } => next_level_xp,
+            ItemAdvancement::Maximum { max_level_xp } => max_level_xp,
+        };
+        push_labeled(
+            lines,
+            "Item XP",
+            format!("{} / {}", progression.total_xp, threshold),
+            Color::White,
+        );
+    }
     if let Some(value) = item.value.filter(|value| *value > 0) {
         push_labeled(lines, "Value", value, Color::White);
     }
@@ -612,6 +631,35 @@ mod tests {
             holtburger_world::inspection::InspectionContext::new(&titles),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn assess_output_shows_item_progression_and_maximum_level() {
+        use holtburger_common::properties::PropertyInt64;
+        let mut entity = Entity::new(
+            Guid(0x60000001),
+            "Test Cloak".into(),
+            WorldPosition::default(),
+        );
+        entity.set_int_prop(PropertyInt::ItemXpStyle, 2);
+        entity.set_int_prop(PropertyInt::ItemMaxLevel, 3);
+        entity.set_int64_prop(PropertyInt64::ItemBaseXp, 100);
+        entity.set_int64_prop(PropertyInt64::ItemTotalXp, 350);
+        let text = get_assess_info(&inspect_entity(&entity), None)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Item Level:  2 / 3"));
+        assert!(text.contains("Item XP:  350 / 700"));
+        entity.set_int64_prop(PropertyInt64::ItemTotalXp, 700);
+        let text = get_assess_info(&inspect_entity(&entity), None)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Item Level:  3 / 3"));
+        assert!(text.contains("Item XP:  700 / 700"));
     }
 
     #[test]

@@ -1173,3 +1173,25 @@
 		);
 	}
 }
+
+@layer components {
+	.ui-progress {
+		width: 100%;
+		height: 0.45rem;
+		appearance: none;
+		border: 0;
+		border-radius: 0.2rem;
+		overflow: hidden;
+		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);
+		color: var(--ui-character-xp-color, var(--ui-color-accent));
+	}
+	.ui-progress::-webkit-progress-bar {
+		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);
+	}
+	.ui-progress::-webkit-progress-value {
+		background: currentColor;
+	}
+	.ui-progress::-moz-progress-bar {
+		background: currentColor;
+	}
+}

@@ -2566,6 +2566,53 @@ mod tests {
     }
 
     #[test]
+    fn item_progression_wire_preserves_large_thresholds_in_both_advancement_states() {
+        use holtburger_world::item_progression::{ItemAdvancement, ItemProgression};
+        let total_xp = 9_007_199_254_740_993;
+        for advancement in [
+            ItemAdvancement::Advancing {
+                level_start_xp: total_xp - 1,
+                next_level_xp: total_xp + 3,
+            },
+            ItemAdvancement::Maximum {
+                max_level_xp: total_xp,
+            },
+        ] {
+            let progression = ItemProgression {
+                level: 1,
+                max_level: if matches!(advancement, ItemAdvancement::Maximum { .. }) {
+                    1
+                } else {
+                    2
+                },
+                total_xp,
+                advancement,
+            };
+            let wire = serde_json::to_value(&progression).unwrap();
+            assert_eq!(wire["totalXp"], total_xp.to_string());
+            match progression.advancement {
+                ItemAdvancement::Advancing { .. } => {
+                    assert_eq!(
+                        wire["advancement"]["levelStartXp"],
+                        (total_xp - 1).to_string()
+                    );
+                    assert_eq!(
+                        wire["advancement"]["nextLevelXp"],
+                        (total_xp + 3).to_string()
+                    );
+                }
+                ItemAdvancement::Maximum { .. } => {
+                    assert_eq!(wire["advancement"]["maxLevelXp"], total_xp.to_string())
+                }
+            }
+            assert_eq!(
+                serde_json::from_value::<ItemProgression>(wire).unwrap(),
+                progression
+            );
+        }
+    }
+
+    #[test]
     fn object_inspection_variants_match_the_shared_browser_fixture() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../src/client/fixtures/object-inspection-wire.json"
@@ -2585,6 +2632,16 @@ mod tests {
             equipment_unenchantable: Some(true),
             ..InspectionSupplement::default()
         });
+        item.set_int_prop(PropertyInt::ItemMaxLevel, 5);
+        item.set_int_prop(PropertyInt::ItemXpStyle, 2);
+        item.set_int64_prop(
+            holtburger_common::properties::PropertyInt64::ItemBaseXp,
+            100_000_000,
+        );
+        item.set_int64_prop(
+            holtburger_common::properties::PropertyInt64::ItemTotalXp,
+            350_000_000,
+        );
         let creature_guid = Guid(0x6000_0002);
         let mut creature = Entity::new(
             creature_guid,
@@ -2678,7 +2735,17 @@ mod tests {
         let titles = holtburger_content::CharacterTitleCatalog::from_assets(&mapper, &strings)
             .expect("synthetic character title should join");
         let inspection_context = InspectionContext::new(&titles);
+        let mut unsupported_item = item.clone();
+        unsupported_item.set_int_prop(PropertyInt::ItemXpStyle, 3);
         let cases = [
+            (
+                "unavailable",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspection::from_entity(&unsupported_item, inspection_context)
+                        .into(),
+                },
+            ),
             (
                 "item",
                 ObjectInspectionResult {

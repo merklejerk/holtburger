@@ -5,7 +5,7 @@ use crate::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_common::Guid;
 use serde::{Deserialize, Serialize};
 
-/// Decimal transport for character XP totals that may exceed JS's exact integer range.
+/// Decimal transport for XP totals that may exceed JS's exact integer range.
 pub mod decimal_u64 {
     use serde::{Deserialize, Deserializer, Serializer};
 

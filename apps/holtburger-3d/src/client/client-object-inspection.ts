@@ -202,6 +202,10 @@ export class ClientObjectInspection {
 			case "missing":
 				this.close();
 				this.#reportFailure("That object is no longer available.");
+				return;
+			case "unavailable":
+				this.close();
+				this.#reportFailure(`Appraisal unavailable: ${result.outcome.reason}`);
 		}
 	}
 

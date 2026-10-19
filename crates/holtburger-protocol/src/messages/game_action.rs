@@ -66,6 +66,8 @@ pub enum GameAction {
     StackableSplitTo3D(Box<StackableSplitTo3DActionData>),
     StackableSplitToWield(Box<StackableSplitToWieldActionData>),
     Talk(Box<TalkActionData>),
+    /// Entity-addressed creature dialogue; name-addressed player tells use Tell.
+    TalkDirect(Box<TalkDirectActionData>),
     Tell(Box<TellActionData>),
     SwearAllegiance(Box<SwearAllegianceActionData>),
     BreakAllegiance(Box<BreakAllegianceActionData>),
@@ -187,6 +189,9 @@ impl ProtocolUnpack for GameActionMessage {
                 }
                 GameActionOpcode::Tell => {
                     GameAction::Tell(Box::new(TellActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::TalkDirect => {
+                    GameAction::TalkDirect(Box::new(TalkDirectActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::AllegianceUpdateRequest => GameAction::AllegianceUpdateRequest(
                     Box::new(AllegianceUpdateRequestActionData::unpack(data, offset)?),
@@ -511,6 +516,10 @@ impl ProtocolPack for GameActionMessage {
             GameAction::Tell(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Tell as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TalkDirect(data) => {
+                (GameActionOpcode::TalkDirect as u32).pack(buf);
                 data.pack(buf);
             }
             GameAction::AllegianceUpdateRequest(data) => {

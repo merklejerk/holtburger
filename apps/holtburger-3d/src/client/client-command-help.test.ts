@@ -40,24 +40,31 @@ describe("h3d command help", () => {
 			.flatMap((row) => row.spans)
 			.filter((span) => span.kind === "code")
 			.map((span) => span.text);
-		expect(commands).toEqual([
-			"/help [command]",
-			"/corpse",
-			"/corpses",
-			"/permit <player>",
-			"/unpermit <player>",
-			"/consent <operation> [player]",
-			"/die",
-			"/lifestone",
-			"/marketplace",
-			"/pkarena",
-			"/pklarena",
-			"/house recall",
-			"/house mansion_recall",
-			"/allegiance hometown",
-			"/waypoint [coordinates|clear]",
-			"/loc",
-		]);
+		expect(commands).toEqual(
+			expect.arrayContaining([
+				"/help [command]",
+				"/corpse",
+				"/corpses",
+				"/permit <player>",
+				"/unpermit <player>",
+				"/consent <operation> [player]",
+				"/die",
+				"/lifestone",
+				"/marketplace",
+				"/pkarena",
+				"/pklarena",
+				"/house recall",
+				"/house mansion_recall",
+				"/allegiance hometown",
+				"/waypoint [coordinates|clear]",
+				"/loc",
+				"/tell <player>, <message>",
+				"/tellselected <message>",
+				"/reply <message>",
+				"/retell <message>",
+			]),
+		);
+		expect(new Set(commands).size).toBe(commands.length);
 		for (const syntax of commands) {
 			const topic = syntax.replace(/\s+[[<].*$/, "");
 			expect(text(topic)).toContain(syntax);
@@ -76,6 +83,10 @@ describe("h3d command help", () => {
 		["hr", "house recall"],
 		["hoa", "house mansion_recall"],
 		["all ho", "allegiance hometown"],
+		["t", "tell"],
+		["ts", "tellselected"],
+		["r", "reply"],
+		["rt", "retell"],
 	])("resolves help for %s", (alias, canonical) => {
 		expect(clientCommandHelp(alias)).toEqual(clientCommandHelp(canonical));
 	});

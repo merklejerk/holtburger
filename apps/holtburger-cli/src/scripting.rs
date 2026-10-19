@@ -848,6 +848,11 @@ fn map_chat_channel(kind: ChatChannelKind) -> ScriptChatChannelKind {
         ChatChannelKind::Roleplay => ScriptChatChannelKind::Roleplay,
         ChatChannelKind::Society => ScriptChatChannelKind::Society,
         ChatChannelKind::Olthoi => ScriptChatChannelKind::Olthoi,
+        ChatChannelKind::FellowshipBroadcast => ScriptChatChannelKind::FellowshipBroadcast,
+        ChatChannelKind::AllegianceBroadcast => ScriptChatChannelKind::AllegianceBroadcast,
+        ChatChannelKind::SocietyCelestialHand => ScriptChatChannelKind::SocietyCelestialHand,
+        ChatChannelKind::SocietyEldrytchWeb => ScriptChatChannelKind::SocietyEldrytchWeb,
+        ChatChannelKind::SocietyRadiantBlood => ScriptChatChannelKind::SocietyRadiantBlood,
         ChatChannelKind::Unknown => ScriptChatChannelKind::Unknown,
     }
 }
@@ -871,13 +876,13 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             sender: Some(speaker.name().to_string()),
             message: message.clone(),
         })),
-        ClientViewEvent::Tell { speaker, message } => {
-            Some(ScriptEvent::ChatMessage(ScriptChatEvent {
-                channel: ScriptChatChannelKind::Tell,
-                sender: Some(speaker.name().to_string()),
-                message: message.clone(),
-            }))
-        }
+        ClientViewEvent::Tell {
+            speaker, message, ..
+        } => Some(ScriptEvent::ChatMessage(ScriptChatEvent {
+            channel: ScriptChatChannelKind::Tell,
+            sender: Some(speaker.name().to_string()),
+            message: message.clone(),
+        })),
         ClientViewEvent::Emote { speaker, text } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::Emote,

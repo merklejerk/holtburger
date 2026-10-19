@@ -196,6 +196,7 @@ describe("client host wire contract", () => {
 		expect(
 			decodeClientChatMessage({
 				kind: "channel",
+				origin: { kind: "turbine", roomId: 2, typeId: 2 },
 				sender: "Mira",
 				speakerKind: "player",
 				channel: "general",
@@ -203,6 +204,7 @@ describe("client host wire contract", () => {
 			}),
 		).toEqual({
 			kind: "channel",
+			origin: { kind: "turbine", roomId: 2, typeId: 2 },
 			sender: "Mira",
 			speakerKind: "player",
 			channel: "general",
@@ -211,6 +213,7 @@ describe("client host wire contract", () => {
 		expect(() =>
 			decodeClientChatMessage({
 				kind: "channel",
+				origin: { kind: "turbine", roomId: 2, typeId: 2 },
 				sender: "Mira",
 				speakerKind: "player",
 				channel: "general",
@@ -232,12 +235,14 @@ describe("client host wire contract", () => {
 		expect(
 			decodeClientChatMessage({
 				kind: "speech",
+				category: "speech",
 				sender: "Drudge",
 				speakerKind: "non-player",
 				message: "Grrr.",
 			}),
 		).toEqual({
 			kind: "speech",
+			category: "speech",
 			sender: "Drudge",
 			speakerKind: "non-player",
 			message: "Grrr.",
@@ -245,6 +250,7 @@ describe("client host wire contract", () => {
 		expect(() =>
 			decodeClientChatMessage({
 				kind: "speech",
+				category: "speech",
 				sender: "Mira",
 				speakerKind: "player",
 				channel: "general",

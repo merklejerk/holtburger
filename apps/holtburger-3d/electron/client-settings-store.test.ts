@@ -45,6 +45,59 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("loads older keyboard maps with the chat toggle while preserving remaps, unbound actions and filters", async () => {
+		const path = await temporarySettingsPath();
+		try {
+			const defaults = createDefaultClientUserSettings(
+				{ width: 1440, height: 900 },
+				8,
+			);
+			const { toggleChatHistory: omittedToggle, ...oldClient } =
+				defaults.input.client;
+			const input = {
+				...defaults.input,
+				client: { ...oldClient, chat: [], splitStack: [{ key: "F6" }] },
+			};
+			await writeFile(
+				path,
+				JSON.stringify({
+					formatVersion: 1,
+					user: {
+						input: { version: 1, value: input },
+						chatFilters: { version: 1, value: ["combat"] },
+					},
+					characters: {},
+				}),
+			);
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			const loaded = store.readUser("persisted");
+			expect(loaded.unavailable).toEqual([]);
+			expect(loaded.sections.input?.client).toEqual({
+				...input.client,
+				toggleChatHistory: omittedToggle,
+			});
+			expect(loaded.sections.chatFilters).toEqual(["combat"]);
+			await store.saveUserPatch({
+				sections: {
+					input: {
+						...defaults.input,
+						client: { ...input.client, toggleChatHistory: [] },
+					},
+				},
+			});
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(
+				reloaded.readUser("persisted").sections.input?.client.toggleChatHistory,
+			).toEqual([]);
+			expect(reloaded.readUser("persisted").sections.chatFilters).toEqual([
+				"combat",
+			]);
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
 	it("reloads character-scoped loadouts and persists cell deletion independently", async () => {
 		const path = await temporarySettingsPath();
 		try {

@@ -79,6 +79,8 @@
 	import { effectiveEnchantmentKinds } from "./client-enchantments-view";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat from "./ClientChat.svelte";
+	import type { ClientChatComposer } from "./client-chat-composer.svelte";
+	import type { ChatComposeResolution } from "./client-chat-compose";
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
 	import type { ClientActionBar } from "./client-action-bar-state";
@@ -357,9 +359,13 @@
 		readonly onSelectPartyMember: (guid: number) => void;
 		readonly onSelectEntity: (guid: number | null) => void;
 		readonly chatMessages: readonly ClientChatLine[];
+		readonly chatComposer: ClientChatComposer;
 		/** App-session input recall entries, independent of received chat lines. */
 		readonly sentChatHistory: readonly string[];
-		readonly onSendChat: (message: string) => Promise<void>;
+		readonly onSendChat: (
+			message: string,
+			resolution: ChatComposeResolution,
+		) => Promise<void>;
 		/** Report a chat submission failure through the retained chat history. */
 		readonly onSendChatError: (message: string) => void;
 		readonly onCanvas: (canvas: HTMLCanvasElement | null) => void;
@@ -500,6 +506,7 @@
 		onSelectEntity,
 		onSelectPartyMember,
 		chatMessages,
+		chatComposer,
 		sentChatHistory,
 		onSendChat,
 		onSendChatError,
@@ -1199,15 +1206,18 @@
 		{viewport}
 		onPlacementChange={(placement) => changeHudPlacement("chat", placement)}
 	>
-		<ClientChat
-			{onSetWaypoint}
-			messages={chatMessages}
-			sentHistory={sentChatHistory}
-			onSend={onSendChat}
-			onSendError={onSendChatError}
-			enabledTags={chatFilters}
-			onEnabledTagsChange={onChatFiltersChange}
-		/>
+		{#key chatComposer.generation}
+			<ClientChat
+				composer={chatComposer}
+				{onSetWaypoint}
+				messages={chatMessages}
+				sentHistory={sentChatHistory}
+				onSend={onSendChat}
+				onSendError={onSendChatError}
+				enabledTags={chatFilters}
+				onEnabledTagsChange={onChatFiltersChange}
+			/>
+		{/key}
 	</ClientHudPanel>
 	<ClientHudPanel
 		label="Frame rate"

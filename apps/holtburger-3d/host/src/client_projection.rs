@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use holtburger_common::{CharacterOption, Guid, stats::VitalType};
 use holtburger_core::client::types::{
-    ChatChannelKind, ChatSpeakerKind, CombatFeedback, CombatOutcomeContext,
-    ServerTextCombatOutcomeKind,
+    ChatChannelKind, ChatChannelSource, ChatSpeakerKind, ChatTellTarget, CombatFeedback,
+    CombatOutcomeContext, ServerTextCombatOutcomeKind,
 };
 use holtburger_core::errors::{
     format_action_result_message, format_entity_use_feedback, format_weenie_error,
@@ -346,7 +346,9 @@ pub struct ClientVitalWire {
 #[serde(rename_all = "kebab-case")]
 pub enum ClientChatChannelWire {
     Fellowship,
+    FellowshipBroadcast,
     Allegiance,
+    AllegianceBroadcast,
     Vassals,
     Patron,
     Monarch,
@@ -356,6 +358,9 @@ pub enum ClientChatChannelWire {
     Lfg,
     Roleplay,
     Society,
+    SocietyCelestialHand,
+    SocietyEldrytchWeb,
+    SocietyRadiantBlood,
     Olthoi,
     Unknown,
 }
@@ -375,6 +380,11 @@ impl From<ChatChannelKind> for ClientChatChannelWire {
             ChatChannelKind::Roleplay => Self::Roleplay,
             ChatChannelKind::Society => Self::Society,
             ChatChannelKind::Olthoi => Self::Olthoi,
+            ChatChannelKind::FellowshipBroadcast => Self::FellowshipBroadcast,
+            ChatChannelKind::AllegianceBroadcast => Self::AllegianceBroadcast,
+            ChatChannelKind::SocietyCelestialHand => Self::SocietyCelestialHand,
+            ChatChannelKind::SocietyEldrytchWeb => Self::SocietyEldrytchWeb,
+            ChatChannelKind::SocietyRadiantBlood => Self::SocietyRadiantBlood,
             ChatChannelKind::Unknown => Self::Unknown,
         }
     }
@@ -399,6 +409,118 @@ impl From<ChatSpeakerKind> for ClientChatSpeakerKindWire {
     }
 }
 
+/// Preserved semantic server text category; reserved and unknown IDs remain explicit.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum ClientChatCategoryWire {
+    Known(ClientChatKnownCategoryWire),
+    Unknown { raw: u32 },
+}
+
+/// Display categories interpreted at the host boundary, independent of packet shape.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientChatKnownCategoryWire {
+    Broadcast,
+    AllChannels,
+    Speech,
+    Tell,
+    OutgoingTell,
+    System,
+    Combat,
+    Magic,
+    Channel,
+    ChannelSend,
+    Social,
+    SocialSend,
+    Emote,
+    Advancement,
+    Abuse,
+    Help,
+    Appraisal,
+    Spellcasting,
+    Allegiance,
+    Fellowship,
+    WorldBroadcast,
+    CombatEnemy,
+    CombatSelf,
+    Recall,
+    Craft,
+    Salvaging,
+    AdminTell,
+}
+
+impl From<ChatMessageTypeId> for ClientChatCategoryWire {
+    fn from(value: ChatMessageTypeId) -> Self {
+        match value.known() {
+            Some(ChatMessageType::Broadcast) => Self::Known(ClientChatKnownCategoryWire::Broadcast),
+            Some(ChatMessageType::AllChannels) => {
+                Self::Known(ClientChatKnownCategoryWire::AllChannels)
+            }
+            Some(ChatMessageType::Speech) => Self::Known(ClientChatKnownCategoryWire::Speech),
+            Some(ChatMessageType::Tell) => Self::Known(ClientChatKnownCategoryWire::Tell),
+            Some(ChatMessageType::OutgoingTell) => {
+                Self::Known(ClientChatKnownCategoryWire::OutgoingTell)
+            }
+            Some(ChatMessageType::System) => Self::Known(ClientChatKnownCategoryWire::System),
+            Some(ChatMessageType::Combat) => Self::Known(ClientChatKnownCategoryWire::Combat),
+            Some(ChatMessageType::Magic) => Self::Known(ClientChatKnownCategoryWire::Magic),
+            Some(ChatMessageType::Channel) => Self::Known(ClientChatKnownCategoryWire::Channel),
+            Some(ChatMessageType::ChannelSend) => {
+                Self::Known(ClientChatKnownCategoryWire::ChannelSend)
+            }
+            Some(ChatMessageType::Social) => Self::Known(ClientChatKnownCategoryWire::Social),
+            Some(ChatMessageType::SocialSend) => {
+                Self::Known(ClientChatKnownCategoryWire::SocialSend)
+            }
+            Some(ChatMessageType::Emote) => Self::Known(ClientChatKnownCategoryWire::Emote),
+            Some(ChatMessageType::Advancement) => {
+                Self::Known(ClientChatKnownCategoryWire::Advancement)
+            }
+            Some(ChatMessageType::Abuse) => Self::Known(ClientChatKnownCategoryWire::Abuse),
+            Some(ChatMessageType::Help) => Self::Known(ClientChatKnownCategoryWire::Help),
+            Some(ChatMessageType::Appraisal) => Self::Known(ClientChatKnownCategoryWire::Appraisal),
+            Some(ChatMessageType::Spellcasting) => {
+                Self::Known(ClientChatKnownCategoryWire::Spellcasting)
+            }
+            Some(ChatMessageType::Allegiance) => {
+                Self::Known(ClientChatKnownCategoryWire::Allegiance)
+            }
+            Some(ChatMessageType::Fellowship) => {
+                Self::Known(ClientChatKnownCategoryWire::Fellowship)
+            }
+            Some(ChatMessageType::WorldBroadcast) => {
+                Self::Known(ClientChatKnownCategoryWire::WorldBroadcast)
+            }
+            Some(ChatMessageType::CombatEnemy) => {
+                Self::Known(ClientChatKnownCategoryWire::CombatEnemy)
+            }
+            Some(ChatMessageType::CombatSelf) => {
+                Self::Known(ClientChatKnownCategoryWire::CombatSelf)
+            }
+            Some(ChatMessageType::Recall) => Self::Known(ClientChatKnownCategoryWire::Recall),
+            Some(ChatMessageType::Craft) => Self::Known(ClientChatKnownCategoryWire::Craft),
+            Some(ChatMessageType::Salvaging) => Self::Known(ClientChatKnownCategoryWire::Salvaging),
+            Some(ChatMessageType::AdminTell) => Self::Known(ClientChatKnownCategoryWire::AdminTell),
+            _ => Self::Unknown { raw: value.raw() },
+        }
+    }
+}
+
+/// The numeric identity has a different namespace in each channel transport.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientChatChannelSourceWire {
+    /// Legacy channels have no Turbine room or chat-type namespace.
+    Legacy { channel_id: u32 },
+    /// Unknown room/type values remain available to the history label without guessing meaning.
+    Turbine { room_id: u32, type_id: u32 },
+}
+
 /// One already-interpreted chat line with variant-specific fields enforced by the wire shape.
 #[derive(Debug, Clone, Serialize)]
 #[serde(
@@ -408,22 +530,34 @@ impl From<ChatSpeakerKind> for ClientChatSpeakerKindWire {
 )]
 pub enum ClientChatMessageWire {
     Speech {
+        category: ClientChatCategoryWire,
         sender: String,
         speaker_kind: ClientChatSpeakerKindWire,
         message: String,
     },
     Tell {
+        category: ClientChatCategoryWire,
+        target: Option<ChatTellTarget>,
         sender: String,
         speaker_kind: ClientChatSpeakerKindWire,
         message: String,
     },
     Channel {
         channel: ClientChatChannelWire,
+        origin: ClientChatChannelSourceWire,
         sender: String,
         speaker_kind: ClientChatSpeakerKindWire,
         message: String,
     },
+    Server {
+        category: ClientChatCategoryWire,
+        message: String,
+    },
     System {
+        message: String,
+    },
+    /// A refused chat action stays visible even when conversation filters are disabled.
+    Error {
         message: String,
     },
     Combat {
@@ -431,6 +565,11 @@ pub enum ClientChatMessageWire {
         emphasized: bool,
     },
     Emote {
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    SoulEmote {
         sender: String,
         speaker_kind: ClientChatSpeakerKindWire,
         message: String,
@@ -1688,6 +1827,24 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             })
         }
         ClientViewEvent::ActionResult { reason, .. } => {
+            if let ActionResultReason::Weenie(error, _) = &reason
+                && matches!(
+                    error,
+                    WeenieError::CharacterNotAvailable
+                        | WeenieError::MessageBlocked
+                        | WeenieError::ThatChannelDoesntExist
+                        | WeenieError::YouCantUseThatChannel
+                        | WeenieError::YouAreNotOnThatChannel
+                        | WeenieError::YouAreNotListeningToChannel
+                        | WeenieError::YouDoNotBelongToAFellowship
+                        | WeenieError::YouAreNotInAllegiance
+                        | WeenieError::YouDoNotHaveAuthorityInAllegiance
+                )
+            {
+                return Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Error {
+                    message: format_action_result_message(&reason),
+                }));
+            }
             if let ActionResultReason::EquipmentSet { bindings, message } = &reason {
                 return Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
                     message: message.clone(),
@@ -1817,21 +1974,36 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 visual,
             ))
         }
+        ClientViewEvent::ChatError { message } => {
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Error {
+                message,
+            }))
+        }
         ClientViewEvent::Chat {
-            speaker, message, ..
+            speaker,
+            message,
+            chat_type,
         } => {
             let (sender, speaker_kind) = speaker.into_name_and_kind();
             Some(ClientHostEvent::ChatMessage(
                 ClientChatMessageWire::Speech {
+                    category: chat_type.into(),
                     sender,
                     speaker_kind: speaker_kind.into(),
                     message,
                 },
             ))
         }
-        ClientViewEvent::Tell { speaker, message } => {
+        ClientViewEvent::Tell {
+            speaker,
+            message,
+            chat_type,
+        } => {
+            let target = speaker.tell_target();
             let (sender, speaker_kind) = speaker.into_name_and_kind();
             Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Tell {
+                category: chat_type.into(),
+                target,
                 sender,
                 speaker_kind: speaker_kind.into(),
                 message,
@@ -1842,9 +2014,21 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             speaker,
             message,
         } => {
+            let origin = match channel.source {
+                ChatChannelSource::Legacy { channel } => ClientChatChannelSourceWire::Legacy {
+                    channel_id: channel.raw(),
+                },
+                ChatChannelSource::Turbine {
+                    room_id, chat_type, ..
+                } => ClientChatChannelSourceWire::Turbine {
+                    room_id: room_id.raw(),
+                    type_id: chat_type.raw(),
+                },
+            };
             let (sender, speaker_kind) = speaker.into_name_and_kind();
             Some(ClientHostEvent::ChatMessage(
                 ClientChatMessageWire::Channel {
+                    origin,
                     channel: channel.kind.into(),
                     sender,
                     speaker_kind: speaker_kind.into(),
@@ -1852,13 +2036,23 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 },
             ))
         }
-        ClientViewEvent::Emote { speaker, text } | ClientViewEvent::SoulEmote { speaker, text } => {
+        ClientViewEvent::Emote { speaker, text } => {
             let (sender, speaker_kind) = speaker.into_name_and_kind();
             Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Emote {
                 sender,
                 speaker_kind: speaker_kind.into(),
                 message: text,
             }))
+        }
+        ClientViewEvent::SoulEmote { speaker, text } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(
+                ClientChatMessageWire::SoulEmote {
+                    sender,
+                    speaker_kind: speaker_kind.into(),
+                    message: text,
+                },
+            ))
         }
         ClientViewEvent::CombatFeedback(feedback) => project_combat_feedback_event(feedback),
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
@@ -1883,14 +2077,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
 }
 
 fn project_server_message(message: String, chat_type: ChatMessageTypeId) -> ClientChatMessageWire {
-    match chat_type.known() {
-        Some(ChatMessageType::Combat)
-        | Some(ChatMessageType::CombatEnemy)
-        | Some(ChatMessageType::CombatSelf) => ClientChatMessageWire::Combat {
-            message,
-            emphasized: false,
-        },
-        _ => ClientChatMessageWire::System { message },
+    ClientChatMessageWire::Server {
+        message,
+        category: chat_type.into(),
     }
 }
 
@@ -1986,9 +2175,13 @@ mod tests {
         DamageType, EquipMask, ObjectDescriptionFlag, PropertyInt, PropertyString,
         WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::client::types::ChatSpeaker;
+    use holtburger_core::client::types::{ChatChannelInfo, ChatSpeaker};
     use holtburger_dat::file_type::{EnumMapper, StringTable, StringTableData};
-    use holtburger_protocol::messages::ChatMessageType;
+    use holtburger_protocol::messages::{
+        ChatChannelId, ChatMessageType, TurbineChatChannelId, TurbineChatDispatchType,
+        TurbineChatTypeId,
+    };
+
     use holtburger_protocol::messages::combat::AttackConditions;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
@@ -1998,6 +2191,74 @@ mod tests {
         ObjectInspectionOutcome, ObjectInspectionResult,
     };
 
+    #[test]
+    fn npc_tell_projection_retains_reply_identity_and_unknown_category() {
+        let projected = project_client_event(ClientViewEvent::Tell {
+            speaker: ChatSpeaker::from_guid("Professor".to_string(), Guid(0x8000_0001)),
+            message: "Choose a level.".to_string(),
+            chat_type: ChatMessageTypeId::from_raw(0x1234),
+        });
+        let Some(ClientHostEvent::ChatMessage(message)) = projected else {
+            panic!("NPC tell must reach chat");
+        };
+        assert_eq!(
+            serde_json::to_value(message).unwrap(),
+            serde_json::json!({
+                "kind": "tell", "sender": "Professor", "speakerKind": "non-player", "message": "Choose a level.",
+                "category": { "raw": 0x1234 }, "target": { "kind": "npc", "guid": 0x8000_0001_u32, "name": "Professor" }
+            })
+        );
+    }
+
+    #[test]
+    fn vanished_npc_and_blocked_tell_refusals_reach_durable_history() {
+        for error in [
+            WeenieError::CharacterNotAvailable,
+            WeenieError::MessageBlocked,
+        ] {
+            let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Error { message })) =
+                project_client_event(ClientViewEvent::ActionResult {
+                    source: holtburger_core::ActionResultSource::Wire,
+                    reason: ActionResultReason::Weenie(error, None),
+                })
+            else {
+                panic!("Tell refusal must reach durable history");
+            };
+            assert_eq!(message, format_weenie_error(error, None));
+        }
+    }
+
+    #[test]
+    fn unknown_channel_projection_preserves_both_numeric_namespaces() {
+        for (channel, expected) in [
+            (
+                ChatChannelInfo::legacy(ChatChannelId::from_raw(0xCAFE)),
+                serde_json::json!({"kind":"legacy", "channelId":0xCAFE}),
+            ),
+            (
+                ChatChannelInfo::turbine(
+                    TurbineChatChannelId::from_raw(0xCAFE),
+                    TurbineChatTypeId::from_raw(0xBEEF),
+                    TurbineChatDispatchType::SendToRoomById,
+                ),
+                serde_json::json!({"kind":"turbine", "roomId":0xCAFE, "typeId":0xBEEF}),
+            ),
+        ] {
+            let Some(ClientHostEvent::ChatMessage(message)) =
+                project_client_event(ClientViewEvent::ChannelMessage {
+                    channel,
+                    speaker: ChatSpeaker::unknown(String::new()),
+                    message: "unknown channel".into(),
+                })
+            else {
+                panic!("Unknown channels must remain visible");
+            };
+            let wire = serde_json::to_value(message).unwrap();
+            assert_eq!(wire["channel"], "unknown");
+            assert_eq!(wire["sender"], "");
+            assert_eq!(wire["origin"], expected);
+        }
+    }
     #[test]
     fn death_query_projection_preserves_character_cell_and_unavailable_samples() {
         use holtburger_core::client::corpse::{DeathLocationResult, DeathLocations};
@@ -2882,6 +3143,7 @@ mod tests {
             sender,
             speaker_kind,
             message,
+            category,
         })) = projected
         else {
             panic!("speech should project to the chat contract");
@@ -2889,6 +3151,10 @@ mod tests {
         assert_eq!(sender, "Drudge");
         assert!(matches!(speaker_kind, ClientChatSpeakerKindWire::NonPlayer));
         assert_eq!(message, "Grrr.");
+        assert!(matches!(
+            category,
+            ClientChatCategoryWire::Known(ClientChatKnownCategoryWire::Speech)
+        ));
     }
 
     #[test]
@@ -2899,15 +3165,16 @@ mod tests {
             chat_type: ChatMessageType::Combat.into(),
         });
 
-        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Combat {
-            message,
-            emphasized,
-        })) = projected
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Server { message, category })) =
+            projected
         else {
             panic!("combat-typed server text should remain combat");
         };
         assert_eq!(message, "You enter combat.");
-        assert!(!emphasized);
+        assert!(matches!(
+            category,
+            ClientChatCategoryWire::Known(ClientChatKnownCategoryWire::Combat)
+        ));
     }
 
     #[test]

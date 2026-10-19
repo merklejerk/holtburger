@@ -530,6 +530,7 @@ impl ClientRuntime {
                             Guid(data.sender_id),
                         ),
                         message: data.message.clone(),
+                        chat_type: data.chat_type.into(),
                     });
                     Ok(())
                 }

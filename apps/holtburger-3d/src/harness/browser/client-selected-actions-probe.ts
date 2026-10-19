@@ -4,6 +4,7 @@ import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 import ClientChat from "../../client/ClientChat.svelte";
+import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
 import { deathLocationLines } from "../../client/client-death-commands";
 import { runClientHelpCommand } from "../../client/client-command-help";
 import { deathLocationResultSchema } from "../../client/client-death-contract";
@@ -257,6 +258,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			context,
 			props: {
 				messages,
+				composer: new ClientChatComposer(),
 				sentHistory: [],
 				enabledTags: ["chat", "combat"],
 				onEnabledTagsChange: () => {},

@@ -10,6 +10,8 @@ import {
 } from "./client-party-updates";
 import {
 	decodeClientCombatOutcome,
+	clientChatRequestSchema,
+	type ClientChatRequest,
 	type ClientCombatOutcome,
 } from "./client-host-contract";
 import { ClientContractsState } from "./client-contracts-state";
@@ -488,7 +490,13 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "confirmation";
 			readonly confirmation: ClientConfirmation | null;
 	  }
-	| { readonly type: "party-hud-presence"; readonly present: boolean }
+	| {
+			readonly type: "party-presence";
+			/** A solo fellowship is still a valid chat destination. */
+			readonly inParty: boolean;
+			/** HUD roster appears only when another member is present. */
+			readonly hudPresent: boolean;
+	  }
 	| { readonly type: "party-updates-failed"; readonly message: string }
 	| { readonly type: "entities" }
 	| { readonly type: "resyncing" }
@@ -588,8 +596,8 @@ export class ClientLifecycleSession {
 	readonly #dynamicSession: DynamicEntitySession;
 	#unlisten: readonly (() => void)[] | null = null;
 	readonly #partyUpdates: ClientPartyUpdates;
-	/** Cold visibility fact; vital updates never notify the UI graph. */
-	#partyHudPresent = false;
+	/** Cold membership/HUD publication excludes roster and vital updates. */
+	#partyPresence = { inParty: false, hudPresent: false };
 	#party: PartySnapshot | null = null;
 	#partyPreferences: PartyPreferences | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
@@ -1056,7 +1064,7 @@ export class ClientLifecycleSession {
 	}
 	/** Presence is computed by the session that owns player and roster identity. */
 	partyHudPresent(): boolean {
-		return this.#partyHudPresent;
+		return this.#partyPresence.hudPresent;
 	}
 	/** On-demand data query; the app owns command grammar and presentation. */
 	async queryDeathLocations(query: DeathLocationQuery): Promise<void> {
@@ -1082,12 +1090,11 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("kill_client_character", {});
 	}
 
-	/** Submit ordinary chat text after app-local command handling. */
-	async sendChat(message: string): Promise<void> {
-		if (message.trim().length === 0) {
-			throw new Error("Chat message must contain visible text.");
-		}
-		await this.#transport.invoke("send_client_chat", { message });
+	/** Enqueue explicit chat intent after app-local command handling. */
+	async sendChat(request: ClientChatRequest): Promise<void> {
+		await this.#transport.invoke("send_client_chat", {
+			request: clientChatRequestSchema.parse(request),
+		});
 	}
 
 	/** Attempt a standard recall without predicting server acceptance. */
@@ -1319,7 +1326,7 @@ export class ClientLifecycleSession {
 						.object({ party: partySnapshotSchema.nullable() })
 						.strict()
 						.parse(payload).party;
-					this.#updatePartyHudPresence();
+					this.#updatePartyPresence();
 				}),
 			);
 			unlisteners.push(
@@ -1962,18 +1969,23 @@ export class ClientLifecycleSession {
 		this.allegiance.reset();
 		this.#party = null;
 		this.#partyPreferences = null;
-		this.#updatePartyHudPresence();
+		this.#updatePartyPresence();
 	}
 
-	#updatePartyHudPresence(): void {
+	#updatePartyPresence(): void {
 		const player = this.#state.playerGuid;
-		const present =
+		const inParty = player !== null && this.#party !== null;
+		const hudPresent =
 			player !== null &&
 			this.#party !== null &&
 			this.#party.members.some((member) => member.guid !== player);
-		if (present === this.#partyHudPresent) return;
-		this.#partyHudPresent = present;
-		this.#emit({ type: "party-hud-presence", present });
+		if (
+			inParty === this.#partyPresence.inParty &&
+			hudPresent === this.#partyPresence.hudPresent
+		)
+			return;
+		this.#partyPresence = { inParty, hudPresent };
+		this.#emit({ type: "party-presence", inParty, hudPresent });
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {
@@ -1989,7 +2001,7 @@ export class ClientLifecycleSession {
 			event.type === "current-state" ||
 			event.type === "local-player-established"
 		) {
-			this.#updatePartyHudPresence();
+			this.#updatePartyPresence();
 			this.#partyUpdates.setActive(
 				this.#state.playerGuid !== null &&
 					this.#state.lifecycle?.kind === "in-world",

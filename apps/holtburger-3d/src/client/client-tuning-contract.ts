@@ -59,7 +59,11 @@ export interface ClientTuning {
 		readonly clusterSpacingCssPixels: number;
 	};
 	/** In-memory sent-chat input retained for this app session. */
-	readonly chat: { readonly sentHistoryLimit: number };
+	readonly chat: {
+		readonly sentHistoryLimit: number;
+		/** CSS pixel slack for fractional scroll geometry at the bottom. */
+		readonly bottomToleranceCssPixels: number;
+	};
 	/** Mounted spell-list artwork sampling; membership itself is event-driven. */
 	readonly spells: { readonly iconDisplayIntervalMs: number };
 	/** Mounted Character panel sampling; world stat publication remains host-owned. */

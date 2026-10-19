@@ -87,7 +87,7 @@ export async function probeActionBars(
 		const position = await read(`(() => {
    const menu = document.querySelector('[role="menu"]:popover-open');
    if (!menu) throw new Error('Action menu did not open');
-   const button = Array.from(menu.querySelectorAll('button')).find((button) => button.textContent === ${JSON.stringify(operation)});
+   const button = Array.from(menu.querySelectorAll('button')).find((button) => button.textContent.trim() === ${JSON.stringify(operation)});
    const r = button.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   })()`);
 		await click(position);
@@ -157,7 +157,7 @@ export async function probeActionBars(
 	const activeCommand = () =>
 		read(`(() => {
   const menu = document.querySelector('[role="menu"]:popover-open');
-  return document.getElementById(menu.getAttribute('aria-activedescendant')).textContent;
+  return document.getElementById(menu.getAttribute('aria-activedescendant')).textContent.trim();
  })()`);
 	const trigger = await point(".action-menu-strip");
 	assert.deepEqual(

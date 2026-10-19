@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { dismissDialogOnBackdrop } from "../app/dialog-backdrop-dismiss";
-	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import UiPanelDialog from "../app/UiPanelDialog.svelte";
 	interface Props {
 		/** Frontend-confirmed bounds; the owning operation validates again on submit. */
 		readonly request: {
@@ -17,7 +16,6 @@
 		readonly onCancel: () => void;
 	}
 	const { request, purpose = "split", onSubmit, onCancel }: Props = $props();
-	const { keyboard } = useAppInputPolicy();
 	let amount = $state<number | undefined>(1);
 	$effect(() => {
 		amount = request.initialAmount ?? 1;
@@ -25,126 +23,62 @@
 	const minimum = $derived(request.minAmount ?? 1);
 	const action = $derived(purpose === "buy" ? "Add to trade" : "Split");
 	let input: HTMLInputElement;
-	let dialog: HTMLDialogElement;
-	function handleKeydown(event: KeyboardEvent): void {
-		if (event.key === "Escape") {
-			event.preventDefault();
-			onCancel();
-		} else if (event.key === "Tab") {
-			// App input policy suppresses native Tab traversal; this local dialog owns its controls.
-			event.preventDefault();
-			const controls = [
-				...dialog.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
-					"input, button",
-				),
-			];
-			const current = controls.findIndex(
-				(control) => control === document.activeElement,
-			);
-			const next =
-				(current + (event.shiftKey ? -1 : 1) + controls.length) %
-				controls.length;
-			const control = controls[next];
-			if (control !== undefined) keyboard.activate(control);
-		} else if (
-			(event.key === "Enter" || event.key === " ") &&
-			event.target instanceof HTMLButtonElement
-		) {
-			event.preventDefault();
-			if (!event.repeat) event.target.click();
-		}
-	}
+
 	onMount(() => {
 		input.focus();
 		input.select();
 	});
 </script>
 
-<div
-	class="quantity-overlay ui-dialog-backdrop"
-	use:dismissDialogOnBackdrop={onCancel}
-	class:inventory-split-overlay={purpose === "split"}
+<UiPanelDialog
+	title={`${action} ${request.name}`}
+	className={`quantity-dialog ${purpose === "split" ? "inventory-split-dialog" : "vendor-quantity-dialog"}`}
+	overlayClassName={`quantity-overlay ${purpose === "split" ? "inventory-split-overlay" : ""}`}
+	{onCancel}
 >
-	<dialog
-		open
-		class="quantity-dialog ui-overlay-surface"
-		class:inventory-split-dialog={purpose === "split"}
-		class:vendor-quantity-dialog={purpose === "buy"}
-		aria-label={`${action} ${request.name}`}
-		bind:this={dialog}
+	<form
+		onsubmit={(event) => {
+			event.preventDefault();
+			if (amount !== undefined) onSubmit(amount);
+		}}
 	>
-		<form
-			onsubmit={(event) => {
-				event.preventDefault();
-				if (amount !== undefined) onSubmit(amount);
-			}}
+		<strong>{action} {request.name}</strong>
+		<label
+			>Amount <input
+				bind:this={input}
+				bind:value={amount}
+				class="ui-input"
+				type="number"
+				min={minimum}
+				max={request.maxAmount}
+				step="1"
+				required
+			/>{#if purpose === "split" || request.maxAmount <= 1000}<span
+					class="inventory-split-maximum"
+					>/ {request.maxAmount.toLocaleString()}</span
+				>{/if}</label
 		>
-			<strong>{action} {request.name}</strong>
-			<label
-				>Amount <input
-					bind:this={input}
-					use:keyboard.scope={{ keydown: handleKeydown }}
-					bind:value={amount}
-					class="ui-input"
-					type="number"
-					min={minimum}
-					max={request.maxAmount}
-					step="1"
-					required
-				/>{#if purpose === "split" || request.maxAmount <= 1000}<span
-						class="inventory-split-maximum"
-						>/ {request.maxAmount.toLocaleString()}</span
-					>{/if}</label
-			>
-			{#if minimum === request.maxAmount}
-				<p>Sold as one whole stack.</p>
-			{:else if request.maxAmount <= 1000}
-				<input
-					type="range"
-					use:keyboard.scope={{ keydown: handleKeydown }}
-					aria-label={`${action} amount`}
-					min={minimum}
-					max={request.maxAmount}
-					step="1"
-					bind:value={amount}
-				/>
-			{/if}
-			<div class="quantity-actions">
-				<button
-					type="button"
-					class="ui-button"
-					use:keyboard.scope={{ keydown: handleKeydown }}
-					onclick={onCancel}>Cancel</button
-				>
-				<button
-					type="submit"
-					class="ui-button"
-					use:keyboard.scope={{ keydown: handleKeydown }}>{action}</button
-				>
-			</div>
-		</form>
-	</dialog>
-</div>
+		{#if minimum === request.maxAmount}
+			<p>Sold as one whole stack.</p>
+		{:else if request.maxAmount <= 1000}
+			<input
+				type="range"
+				aria-label={`${action} amount`}
+				min={minimum}
+				max={request.maxAmount}
+				step="1"
+				bind:value={amount}
+			/>
+		{/if}
+		<div class="ui-dialog-actions">
+			<button type="button" class="ui-button" onclick={onCancel}>Cancel</button>
+			<button type="submit" class="ui-button">{action}</button>
+		</div>
+	</form>
+</UiPanelDialog>
 
 <style>
 	@layer components {
-		.quantity-overlay {
-			position: absolute;
-			inset: 0;
-			z-index: 5;
-			display: grid;
-			place-items: center;
-		}
-		.quantity-dialog {
-			position: relative;
-			margin: 8px;
-			max-width: calc(100% - 16px);
-		}
-		form {
-			display: grid;
-			gap: var(--ui-overlay-gap);
-			padding: var(--ui-dialog-padding, var(--ui-overlay-padding));
-		}
 		label {
 			display: flex;
 			align-items: center;
@@ -156,11 +90,6 @@
 		}
 		input[type="range"] {
 			width: 100%;
-		}
-		.quantity-actions {
-			display: flex;
-			justify-content: end;
-			gap: var(--ui-overlay-gap);
 		}
 	}
 </style>

@@ -296,12 +296,20 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 		"Submission failure did not enter the chat buffer",
 	);
 	assert(
-		node<HTMLInputElement>('[aria-label="Chat message"]').value === "",
-		"Failed submission must clear the input",
+		node<HTMLInputElement>('[aria-label="Chat message"]').value ===
+			"@waypoint invalid",
+		"Failed submission must preserve the draft for correction",
 	);
 	assert(
 		controls.read().history.at(-1) === "@waypoint invalid",
 		"Failed submission must remain available in input history",
+	);
+	const previousWaypoint = JSON.stringify(controls.read().frame.waypoint);
+	await submit("@waypoint 1N 1E");
+	assert(
+		node<HTMLInputElement>('[aria-label="Chat message"]').value === "" &&
+			JSON.stringify(controls.read().frame.waypoint) !== previousWaypoint,
+		"Corrected waypoint command must update the destination and clear the accepted draft",
 	);
 	assert(
 		JSON.stringify(controls.read().sent) === JSON.stringify(["hello"]),

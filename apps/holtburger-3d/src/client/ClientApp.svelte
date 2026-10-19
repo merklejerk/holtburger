@@ -135,6 +135,11 @@
 		ClientVital,
 	} from "./client-host-contract";
 	import type { ClientChatEntry, ClientChatLine } from "./client-chat-policy";
+	import { ClientChatComposer } from "./client-chat-composer.svelte";
+	import {
+		selectedChatRecipient,
+		type ChatComposeResolution,
+	} from "./client-chat-compose";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
 	import {
 		resolveTextureFilteringPolicy,
@@ -423,6 +428,8 @@
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
 	/** Sent input survives world-view remounts until this app closes. */
 	let sentChatHistory = $state<readonly string[]>([]);
+	const chatComposer = new ClientChatComposer();
+	let chatCharacterGuid: number | null = null;
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
 	let entryPending = $state(false);
@@ -599,7 +606,28 @@
 		characterSettingsOwner.retire();
 	}
 	function acceptCharacterGuid(characterGuid: number | null): void {
+		if (characterGuid !== null && characterGuid !== chatCharacterGuid) {
+			chatComposer.reset();
+			chatCharacterGuid = characterGuid;
+			chatComposer.inParty =
+				session !== null && session.partySnapshot() !== null;
+		}
 		characterSettingsOwner.acceptGuid(characterGuid);
+	}
+
+	function retireChatCharacter(): void {
+		chatComposer.reset();
+		chatCharacterGuid = null;
+	}
+
+	function refreshSelectedChatRecipient(): void {
+		const guid = entitySelection?.selectedGuid() ?? null;
+		const read = session?.entities.read();
+		const record =
+			guid !== null && read?.kind === "current"
+				? read.level.entities.get(guid)
+				: undefined;
+		chatComposer.setSelection(selectedChatRecipient(guid, record));
 	}
 	onMount(() => {
 		const flush = () => {
@@ -806,8 +834,12 @@
 	function receive(event: ClientLifecycleSessionEvent): void {
 		contractNotifications.receive(event);
 		switch (event.type) {
-			case "party-hud-presence":
-				partyHudPresent = event.present;
+			case "entities":
+				refreshSelectedChatRecipient();
+				return;
+			case "party-presence":
+				chatComposer.inParty = event.inParty;
+				partyHudPresent = event.hudPresent;
 				return;
 			case "party-updates-failed":
 				toastCenter.publish({ message: event.message, tone: "warning" });
@@ -837,12 +869,19 @@
 				appearanceOptions = event.options;
 				return;
 			case "current-state":
+				if (
+					event.state.lifecycle.kind === "character-selection" ||
+					event.state.lifecycle.kind === "exiting"
+				)
+					retireChatCharacter();
 				navigationWaypoint.acceptCurrentState(event.state);
 				housing = event.state.housing;
 				canTeleportFromMap = event.state.canTeleportFromMap;
 				recallDestinations = event.state.recallDestinations;
 				enchantments = session?.state().enchantments ?? null;
 				acceptCharacterGuid(event.state.localPlayerGuid);
+				chatComposer.inParty = event.state.party !== null;
+				refreshSelectedChatRecipient();
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
 				appearanceOptions = event.state.appearanceOptions;
@@ -879,6 +918,12 @@
 				appearanceOptions = null;
 				return;
 			case "lifecycle":
+				if (
+					event.lifecycle.kind === "character-selection" ||
+					event.lifecycle.kind === "exiting"
+				) {
+					retireChatCharacter();
+				}
 				navigationWaypoint.acceptLifecycle(event.lifecycle);
 				if (event.lifecycle.kind !== "in-world") {
 					canTeleportFromMap = false;
@@ -963,10 +1008,12 @@
 				enchantments = event.enchantments;
 				return;
 			case "chat": {
+				chatComposer.accept(event.message);
 				appendChatLine(event.message);
 				return;
 			}
 			case "exit-requested":
+				retireChatCharacter();
 				navigationWaypoint.acceptCharacter(null);
 				inputGate.cancel();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
@@ -1070,18 +1117,32 @@
 		toastCenter.publish({ message, tone: "status" });
 	}
 
-	async function sendChat(message: string): Promise<void> {
+	async function sendChat(
+		message: string,
+		resolution: ChatComposeResolution,
+	): Promise<void> {
 		sentChatHistory = recordSentChat(
 			sentChatHistory,
 			message,
 			CLIENT_TUNING.chat.sentHistoryLimit,
 		);
+		if (resolution.kind === "error") throw new Error(resolution.message);
+		if (resolution.kind === "send") {
+			const currentSession = session;
+			if (currentSession === null || lifecycle.kind !== "in-world")
+				throw new Error("Chat session is not in the world.");
+			await chatComposer.send(resolution.request, (request) =>
+				currentSession.sendChat(request),
+			);
+			return;
+		}
 		if (runClientHelpCommand(message, appendChatLine)) return;
 		const currentSession = session;
 		if (currentSession === null)
 			throw new Error("Chat session is unavailable.");
 		if (deathCommands === null)
 			throw new Error("Command session is unavailable.");
+		const generation = chatComposer.generation;
 		const handled =
 			(await deathCommands.run(message)) ||
 			(await runRecallCommand(message, (destination) =>
@@ -1102,7 +1163,17 @@
 				},
 				appendChatLine,
 			));
-		if (!handled) await currentSession.sendChat(message);
+		if (!handled) {
+			if (session !== currentSession || chatComposer.generation !== generation)
+				throw new Error("Chat session changed before command dispatch.");
+			if (message.startsWith("/"))
+				throw new Error(
+					`Unknown command: ${message.split(/\s/, 1)[0]}. Use /help for supported commands.`,
+				);
+			if (lifecycle.kind !== "in-world")
+				throw new Error("Chat session is not in the world.");
+			await currentSession.sendChat({ kind: "speech", message });
+		}
 	}
 
 	async function recall(destination: RecallDestination): Promise<void> {
@@ -1641,7 +1712,10 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		chatComposer.reset();
+		chatCharacterGuid = null;
 		partyHudPresent = owner.partyHudPresent();
+		chatComposer.inParty = owner.partySnapshot() !== null;
 		const inspectionOwner = new ClientObjectInspection(owner, (message) =>
 			toastCenter.publish({ message, tone: "warning" }),
 		);
@@ -1779,6 +1853,7 @@
 		unrestrictedUse = false;
 		const unsubscribeSelection = selection.subscribe((guid) => {
 			selectedEntityGuid = guid;
+			refreshSelectedChatRecipient();
 			presentationSession?.setSelectedEntityGuid(guid);
 		});
 		const unsubscribeHover = pointer.subscribeHovered((guid) => {
@@ -1866,6 +1941,8 @@
 			owner.stop();
 			enchantments = null;
 			session = null;
+			chatComposer.reset();
+			chatCharacterGuid = null;
 			housing = emptyHousing();
 			canTeleportFromMap = false;
 			recallDestinations = [];
@@ -2136,6 +2213,7 @@
 			onSelectPartyMember={(guid) => entitySelection?.selectKnownEntity(guid)}
 			onSelectEntity={(guid) => entitySelection?.select(guid)}
 			{chatMessages}
+			{chatComposer}
 			{sentChatHistory}
 			onSendChat={sendChat}
 			onSendChatError={appendChatError}

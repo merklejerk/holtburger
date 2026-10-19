@@ -4,6 +4,7 @@ import type {
 } from "./client-chat-policy";
 import type { RecallDestination } from "./client-host-contract";
 import { parseRecallCommand } from "./client-recall-command";
+import { CHAT_CHANNEL_DESTINATIONS } from "./client-chat-compose";
 
 /** One app-owned command's index entry and targeted explanation. */
 interface CommandHelp {
@@ -122,6 +123,59 @@ const LOCAL_HELP = {
 	},
 } satisfies Record<string, CommandHelp>;
 
+const CHAT_HELP = {
+	tell: {
+		syntax: "/tell <player>, <message>",
+		description: "Send a private message to a player by name.",
+		details: [
+			"Alias: /t. Example: /tell Some Player, hello. A comma ends the name; selection never changes this route.",
+		],
+	},
+	tellselected: {
+		syntax: "/tellselected <message>",
+		description: "Tell the selected player or NPC.",
+		details: [
+			"Alias: /ts. Snapshots the selected recipient. Players use long-distance tells; NPCs use nearby direct dialogue. Example: select a professor, then /ts level 1.",
+		],
+	},
+	reply: {
+		syntax: "/reply <message>",
+		description: "Reply to the last incoming addressable teller.",
+		details: [
+			"Alias: /r. An NPC tell can replace the previous player reply target. Check the destination preview before sending.",
+		],
+	},
+	retell: {
+		syntax: "/retell <message>",
+		description: "Tell your last outgoing recipient again.",
+		details: [
+			"Alias: /rt. Remembers player or NPC recipients from the picker, /tell, /ts, and /reply. A later delivery failure does not clear this recipient.",
+		],
+	},
+	say: {
+		syntax: "/say <message>",
+		description: "Send local speech for this message.",
+		details: [],
+	},
+	emote: {
+		syntax: "/emote <message>",
+		description: "Describe an action in local chat.",
+		details: [],
+	},
+} satisfies Record<string, CommandHelp>;
+
+function channelHelp(
+	entry: (typeof CHAT_CHANNEL_DESTINATIONS)[number],
+): CommandHelp {
+	return {
+		syntax: `/${entry.aliases[0]} <message>`,
+		description: `Send to ${entry.label}.`,
+		details: [
+			`Commands: ${entry.aliases.map((alias) => `/${alias}`).join(", ")}. Destination commands override only this message; the picker choice remains unchanged. ACE enforces membership and permissions.`,
+		],
+	};
+}
+
 function heading(text: string): ClientChatTextRow {
 	return { indented: false, spans: [{ kind: "emphasis", text }] };
 }
@@ -158,6 +212,11 @@ export function clientCommandHelp(
 			rows: [
 				heading("Available commands"),
 				commandRow(HELP),
+				heading("Chat and NPC dialogue"),
+				...Object.values(CHAT_HELP).map(commandRow),
+				...CHAT_CHANNEL_DESTINATIONS.map((entry) =>
+					commandRow(channelHelp(entry)),
+				),
 				heading("Death and corpses"),
 				...Object.values(DEATH_HELP).map(commandRow),
 				heading("Recalls"),
@@ -183,15 +242,34 @@ export function clientCommandHelp(
 				...Object.values(DEATH_HELP).map(commandRow),
 			],
 		};
-	const name = topic === "rip" ? "die" : topic === "wp" ? "waypoint" : topic;
-	const direct = Object.entries({ ...DEATH_HELP, ...LOCAL_HELP }).find(
-		([key]) => key === name,
-	)?.[1];
+	const aliases: Readonly<Record<string, string>> = {
+		rip: "die",
+		wp: "waypoint",
+		t: "tell",
+		ts: "tellselected",
+		r: "reply",
+		rt: "retell",
+	};
+	const name = aliases[topic] ?? topic;
+	const direct = Object.entries({
+		...DEATH_HELP,
+		...LOCAL_HELP,
+		...CHAT_HELP,
+	}).find(([key]) => key === name)?.[1];
 	const recall = parseRecallCommand(`/${topic}`);
+	const channel = CHAT_CHANNEL_DESTINATIONS.find(
+		(entry) =>
+			entry.channel === topic ||
+			entry.aliases.some((alias) => alias === topic) ||
+			(entry.channel === "allegiance-broadcast" &&
+				topic === "allegiance broadcast"),
+	);
 	const command =
 		topic === "help" || topic === "?"
 			? HELP
-			: (direct ?? (recall === null ? undefined : RECALL_HELP[recall]));
+			: (direct ??
+				(channel === undefined ? undefined : channelHelp(channel)) ??
+				(recall === null ? undefined : RECALL_HELP[recall]));
 	if (command === undefined)
 		throw new Error(
 			`No help available for '${rawTopic}'. Use /help to list commands.`,

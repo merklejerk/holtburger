@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { runClientHelpCommand } from "../../client/client-command-help";
 	import {
 		PARTY_HUD_PREVIEW,
 		PARTY_HUD_MAXIMUM_COLUMNS,
@@ -158,6 +159,7 @@
 		CLIENT_TUNING,
 	} from "../../client/client-tuning";
 	import { recordSentChat } from "../../client/client-chat-input-history";
+	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
@@ -169,12 +171,14 @@
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
 	import { createWorldMapFixture } from "./world-map-fixture";
 	import type {
-		ClientChatErrorMessage,
+		ClientChatEntry,
 		ClientChatLine,
 	} from "../../client/client-chat-policy";
 	import type {
 		ClientAttackProfile,
 		ClientChatMessage,
+		ClientChatRequest,
+		ClientChatTellTarget,
 		ClientCombatMode,
 		ClientCombatStatus,
 	} from "../../client/client-host-contract";
@@ -1045,6 +1049,30 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		/** Production composer/session boundary with controlled synthetic incoming messages and failures. */
+		readonly chat: {
+			readonly setPartyPresent: (present: boolean) => void;
+			readonly reset: () => void;
+			readonly select: (target: ClientChatTellTarget | null) => void;
+			readonly receive: (message: ClientChatMessage) => void;
+			readonly rejectNextSend: () => void;
+			readonly professorPrompt: () => void;
+			readonly clearPrompt: () => void;
+			readonly read: () => {
+				readonly requests: readonly ClientChatRequest[];
+				readonly destination: typeof chatComposer.destination;
+				readonly reply: ClientChatTellTarget | null;
+				readonly retell: ClientChatTellTarget | null;
+				readonly responses: readonly {
+					readonly command: string;
+					readonly args?: Record<string, unknown>;
+				}[];
+			};
+		};
+		/** Append synthetic lines through the production component's real props. */
+		readonly appendChatLines: (count: number) => void;
+		/** Trim oldest retained lines through the same props used by the real history buffer. */
+		readonly retainChatLines: (count: number) => void;
 		/** Prepare text-bearing production surfaces for the coordinate-link probe. */
 		readonly showWaypointContent: (
 			surface: "chat" | "book" | "item" | "creature" | "contracts",
@@ -1391,6 +1419,7 @@
 	}
 
 	let failNextBookPageRequest = false;
+	let failNextChatRequest = false;
 	const interactionLifecycle = new ClientLifecycleSession({
 		listen: async (event, handler) => {
 			interactionHandlers.set(event, handler);
@@ -1400,6 +1429,10 @@
 		},
 		invoke: async (command, args) => {
 			interactionCommands.push({ command, args });
+			if (command === "send_client_chat" && failNextChatRequest) {
+				failNextChatRequest = false;
+				throw new Error("Injected chat enqueue failure");
+			}
 			if (command === "read_client_book_page" && failNextBookPageRequest) {
 				failNextBookPageRequest = false;
 				throw new Error("Injected page request failure");
@@ -3421,6 +3454,8 @@
 
 	/** Keep the keyboard fixture's two submitted entries regardless of product tuning. */
 	const chatHistoryLimit = 2;
+	const chatComposer = new ClientChatComposer();
+	const chatRequests: ClientChatRequest[] = [];
 	let sentChatHistory = $state<readonly string[]>([]);
 	let messages = $state<readonly ClientChatLine[]>([
 		line(1, {
@@ -3430,12 +3465,14 @@
 		}),
 		line(2, {
 			kind: "speech",
+			category: "speech",
 			sender: "Ulgrim the Unpleasant",
 			speakerKind: "non-player",
 			message: "Duis aute irure dolor in reprehenderit.",
 		}),
 		line(3, {
 			kind: "channel",
+			origin: { kind: "turbine", roomId: 2, typeId: 2 },
 			channel: "general",
 			sender: "Taylor",
 			speakerKind: "player",
@@ -3449,6 +3486,8 @@
 		}),
 		line(5, {
 			kind: "tell",
+			category: "tell",
+			target: { kind: "player", name: "Jordan" },
 			sender: "Jordan",
 			speakerKind: "player",
 			message: "Consectetur adipiscing elit, sed do eiusmod.",
@@ -3461,15 +3500,18 @@
 		}),
 	]);
 
-	function line(
-		id: number,
-		message: ClientChatMessage | ClientChatErrorMessage,
-	): ClientChatLine {
+	function line(id: number, message: ClientChatEntry): ClientChatLine {
 		return {
 			...message,
 			id,
 			receivedAt: new Date(2026, 7, 27, 9, id),
 		};
+	}
+
+	function appendChat(message: ClientChatEntry): void {
+		const id =
+			messages.reduce((maximum, entry) => Math.max(maximum, entry.id), 0) + 1;
+		messages = [...messages, line(id, message)];
 	}
 
 	const waypointOwner = new ClientNavigationWaypointOwner(
@@ -4066,6 +4108,12 @@
 	}
 
 	onMount(() => {
+		const unsubscribeChat = interactionLifecycle.subscribe((event) => {
+			if (event.type === "chat") {
+				chatComposer.accept(event.message);
+				appendChat(event.message);
+			}
+		});
 		// Synthetic artwork keeps the HUD probe independent of installed DAT files.
 		const image = Uint8Array.from(
 			atob(
@@ -4274,8 +4322,9 @@
 		probeBrowserInput(keyboard, inputGate);
 		const unsubscribePanelAuthority = interactionLifecycle.subscribe(
 			(event) => {
-				if (event.type === "party-hud-presence")
-					partyHudPresent = event.present;
+				if (event.type === "party-presence") partyHudPresent = event.hudPresent;
+				if (event.type === "party-presence")
+					chatComposer.inParty = event.inParty;
 				if (event.type === "party-updates-failed")
 					throw new Error(event.message);
 				if (event.type === "housing-updated") housing = event.housing;
@@ -4338,6 +4387,63 @@
 			},
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			chat: {
+				setPartyPresent: (present) => {
+					chatComposer.inParty = present;
+				},
+				reset: () => {
+					chatComposer.reset();
+					chatRequests.length = 0;
+					failNextChatRequest = false;
+					sentChatHistory = [];
+				},
+				select: (target) =>
+					chatComposer.setSelection(
+						target === null ? { kind: "none" } : { kind: "target", target },
+					),
+				receive: (message) =>
+					emitInteractionEvent("client-chat-message", message),
+				rejectNextSend: () => {
+					failNextChatRequest = true;
+				},
+				professorPrompt: () =>
+					emitInteractionEvent("client-confirmation-updated", {
+						confirmation: {
+							requestId: "900",
+							text: "I can teach you the level one War Spells for 2 X Notes.",
+						},
+					}),
+				clearPrompt: () =>
+					emitInteractionEvent("client-confirmation-updated", {
+						confirmation: null,
+					}),
+				read: () => ({
+					requests: chatRequests.slice(),
+					destination: chatComposer.destination,
+					reply: chatComposer.reply,
+					retell: chatComposer.retell,
+					responses: interactionCommands.filter(
+						(entry) => entry.command === "respond_to_client_confirmation",
+					),
+				}),
+			},
+			retainChatLines: (count) => {
+				messages = messages.slice(Math.max(0, messages.length - count));
+			},
+			appendChatLines: (count) => {
+				const first =
+					messages.reduce((maximum, entry) => Math.max(maximum, entry.id), 0) +
+					1;
+				messages = [
+					...messages,
+					...Array.from({ length: count }, (_, index) =>
+						line(first + index, {
+							kind: "system",
+							message: `Scroll fixture line ${first + index}`,
+						}),
+					),
+				];
+			},
 			showWaypointContent: async (surface) => {
 				waypointContentProbeEnabled = true;
 				waypointControls.enable();
@@ -4733,6 +4839,7 @@
 			toggleMode,
 		};
 		return () => {
+			unsubscribeChat();
 			objectInspectionProbe.end();
 			unsubscribePanelAuthority();
 			unsubscribeObjectInspection();
@@ -5015,20 +5122,29 @@
 		readJumpExtent={() => jumpExtent}
 		{toast}
 		chatMessages={messages}
+		{chatComposer}
 		{sentChatHistory}
-		onSendChat={async (message) => {
+		onSendChat={async (message, resolution) => {
 			sentChatHistory = recordSentChat(
 				sentChatHistory,
 				message,
 				chatHistoryLimit,
 			);
-			if (waypointProbeEnabled) submitWaypointChat(message);
+			if (resolution.kind === "error") throw new Error(resolution.message);
+			if (resolution.kind === "send") {
+				await chatComposer.send(resolution.request, async (request) => {
+					await interactionLifecycle.sendChat(request);
+					chatRequests.push(request);
+				});
+			} else if (runClientHelpCommand(message, appendChat)) {
+				return;
+			} else if (waypointProbeEnabled) submitWaypointChat(message);
+			else if (message.startsWith("/"))
+				throw new Error("Unknown command. Use /help for supported commands.");
+			else await interactionLifecycle.sendChat({ kind: "speech", message });
 		}}
 		onSendChatError={(message) => {
-			messages = [
-				...messages,
-				line(messages.length + 1, { kind: "error", message }),
-			];
+			appendChat({ kind: "error", message });
 		}}
 		onCanvas={() => {}}
 	/>

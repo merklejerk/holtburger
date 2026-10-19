@@ -127,6 +127,9 @@ impl ChatState {
             | ClientViewEvent::PopupString { message } => {
                 self.log(ChatMessageTags::system(), message.clone());
             }
+            ClientViewEvent::ChatError { message } => {
+                self.log(ChatMessageTags::warning(), message.clone());
+            }
             ClientViewEvent::ServerMessage {
                 message, chat_type, ..
             } => {
@@ -159,7 +162,9 @@ impl ChatState {
                     format_fellowship_activity(activity),
                 );
             }
-            ClientViewEvent::Tell { speaker, message } => {
+            ClientViewEvent::Tell {
+                speaker, message, ..
+            } => {
                 self.last_incoming_tell_sender = Some(speaker.name().to_string());
                 self.log(
                     ChatMessageTags::tell(),
@@ -447,6 +452,11 @@ fn channel_label(channel: ChatChannelInfo) -> String {
         ChatChannelKind::Roleplay => "Roleplay".to_string(),
         ChatChannelKind::Society => "Society".to_string(),
         ChatChannelKind::Olthoi => "Olthoi".to_string(),
+        ChatChannelKind::FellowshipBroadcast => "Party Notice".to_string(),
+        ChatChannelKind::AllegianceBroadcast => "Allegiance Broadcast".to_string(),
+        ChatChannelKind::SocietyCelestialHand => "Celestial Hand".to_string(),
+        ChatChannelKind::SocietyEldrytchWeb => "Eldrytch Web".to_string(),
+        ChatChannelKind::SocietyRadiantBlood => "Radiant Blood".to_string(),
         ChatChannelKind::Unknown => match channel.source {
             ChatChannelSource::Legacy { channel } => format!("Legacy 0x{:08X}", channel.raw()),
             ChatChannelSource::Turbine { room_id, .. } => {
@@ -566,14 +576,20 @@ fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
 
 fn channel_tags(channel: ChatChannelInfo) -> ChatMessageTags {
     match channel.kind {
-        ChatChannelKind::Fellowship => ChatMessageTags::PARTY,
+        ChatChannelKind::Fellowship | ChatChannelKind::FellowshipBroadcast => {
+            ChatMessageTags::PARTY
+        }
         ChatChannelKind::Allegiance
+        | ChatChannelKind::AllegianceBroadcast
         | ChatChannelKind::Vassals
         | ChatChannelKind::Patron
         | ChatChannelKind::Monarch
         | ChatChannelKind::CoVassals => ChatMessageTags::GUILD,
         ChatChannelKind::Trade => ChatMessageTags::TRADE,
-        ChatChannelKind::Society => ChatMessageTags::SOCIETY,
+        ChatChannelKind::Society
+        | ChatChannelKind::SocietyCelestialHand
+        | ChatChannelKind::SocietyEldrytchWeb
+        | ChatChannelKind::SocietyRadiantBlood => ChatMessageTags::SOCIETY,
         ChatChannelKind::General
         | ChatChannelKind::Lfg
         | ChatChannelKind::Roleplay
@@ -761,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_message_formats_guild_sender_with_label() {
+    fn channel_message_labels_allegiance_broadcast_without_flattening_it() {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
@@ -784,7 +800,7 @@ mod tests {
         );
         assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
         assert!(message.chat_tags.contains(ChatMessageTags::GUILD));
-        assert_eq!(message.text, "[Guild] Bestie: guild check");
+        assert_eq!(message.text, "[Allegiance Broadcast] Bestie: guild check");
     }
 
     #[test]

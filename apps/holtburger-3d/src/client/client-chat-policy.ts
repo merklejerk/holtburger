@@ -60,13 +60,13 @@ export const CLIENT_CHAT_FILTER_TAGS: readonly ClientChatFilterTag[] = [
 	"combat",
 ];
 
-/** Labels preserve server meaning without adding new persisted filter groups. */
+/** Labels preserve server meaning; local chat needs no category prefix. */
 const CHAT_CATEGORY_LABELS: Readonly<
-	Record<Extract<ClientChatCategory, string>, string>
+	Record<Extract<ClientChatCategory, string>, string | null>
 > = {
 	broadcast: "Broadcast",
 	"all-channels": "All Channels",
-	speech: "Local",
+	speech: null,
 	tell: "Tell",
 	"outgoing-tell": "Tell",
 	system: "System",
@@ -144,8 +144,8 @@ function categoryTone(category: ClientChatCategory): ClientChatTone {
 	}
 }
 
-/** Every line has a readable label independently of its color. */
-export function clientChatMessageLabel(line: ClientChatLine): string {
+/** Optional buffer label; emotes read as actions and local chat omits its category. */
+export function clientChatMessageLabel(line: ClientChatLine): string | null {
 	if (line.kind === "channel") {
 		if (line.channel !== "unknown") return clientChatChannelLabel(line.channel);
 		const origin = line.origin;
@@ -158,15 +158,14 @@ export function clientChatMessageLabel(line: ClientChatLine): string {
 			typeof line.category === "string"
 				? CHAT_CATEGORY_LABELS[line.category]
 				: `Unknown type 0x${line.category.raw.toString(16).toUpperCase()}`;
-		return "speakerKind" in line && line.speakerKind === "non-player"
-			? `NPC ${label}`
-			: label;
+		if ("speakerKind" in line && line.speakerKind === "non-player")
+			return label === null ? "NPC" : `NPC ${label}`;
+		return label;
 	}
 	switch (line.kind) {
 		case "emote":
-			return "Emote";
 		case "soul-emote":
-			return "Soul Emote";
+			return null;
 		case "combat":
 			return "Combat";
 		case "error":

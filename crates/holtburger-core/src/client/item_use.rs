@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt;
 use holtburger_protocol::messages::game_action::{
     GameAction, UseActionData, UseWithTargetActionData,
 };
@@ -177,6 +178,17 @@ impl ClientRuntime {
         if let Err(error) = self.send_game_action(action).await {
             self.clear_busy_operation();
             return Err(error);
+        }
+        // ACE Player_Use.cs:60-89 turns a spell-bearing UseWithTarget into a targeted cast.
+        // Record only after dispatch succeeds, just as for an explicit spell request.
+        if let ItemUseIntent::Targeted { source, target } = intent
+            && let Some(spell) = self
+                .world
+                .entities
+                .get(*source)
+                .and_then(|item| item.spell())
+        {
+            self.record_sent_targeted_spell(*target, spell.0);
         }
         if let ItemUseIntent::Direct { source, .. } = intent
             && let Some(feedback) =

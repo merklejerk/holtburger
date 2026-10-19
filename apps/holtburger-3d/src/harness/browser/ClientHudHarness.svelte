@@ -857,13 +857,6 @@
 			})),
 			removed: [],
 		});
-		const previousDialogs = dialogOwner;
-		const owner = new ClientDialogs(interactionLifecycle);
-		dialogOwner = owner;
-		const unbind = owner.bindLocal(itemInteractions);
-		const unsubscribe = owner.subscribe((value) => {
-			dialogPresentation = value;
-		});
 		const releaseKeys = keyboard.bindGame({
 			keydown: (event) => {
 				if (clientInput.shortcut("interact", event)) {
@@ -1007,11 +1000,6 @@
 			destroy: () => {
 				itemInteractions.cancel();
 				releaseKeys();
-				unbind();
-				unsubscribe();
-				owner.destroy();
-				dialogOwner = previousDialogs;
-				dialogPresentation = previousDialogs?.snapshot() ?? null;
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
 					worldContainer: null,
@@ -4304,15 +4292,16 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		housingManagement = housingManagementOwner;
-		const housingDialogs = new ClientDialogs(interactionLifecycle);
-		dialogOwner = housingDialogs;
-		const unbindHousingDialogs = housingDialogs.bindLocal(
+		const sessionDialogs = new ClientDialogs(interactionLifecycle);
+		dialogOwner = sessionDialogs;
+		const unbindItemDialogs = sessionDialogs.bindLocal(itemInteractions);
+		const unbindHousingDialogs = sessionDialogs.bindLocal(
 			housingManagementOwner,
 		);
-		const unbindContractDialogs = housingDialogs.bindLocal(
+		const unbindContractDialogs = sessionDialogs.bindLocal(
 			interactionLifecycle.contracts,
 		);
-		const unsubscribeHousingDialogs = housingDialogs.subscribe((value) => {
+		const unsubscribeDialogs = sessionDialogs.subscribe((value) => {
 			dialogPresentation = value;
 		});
 		const tradeOwner = new ClientTradeState(
@@ -4957,10 +4946,11 @@
 			trade = null;
 			vendorOwner.destroy();
 			unbindHousingDialogs();
+			unbindItemDialogs();
 			unbindContractDialogs();
-			unsubscribeHousingDialogs();
-			housingDialogs.destroy();
-			if (dialogOwner === housingDialogs) dialogOwner = null;
+			unsubscribeDialogs();
+			sessionDialogs.destroy();
+			if (dialogOwner === sessionDialogs) dialogOwner = null;
 			housingManagementOwner.destroy();
 			housingManagement = null;
 			houseCrystalOwner.destroy();
@@ -4990,8 +4980,8 @@
 	<ClientMessageDialog
 		{presentation}
 		onDismiss={(id) => dialogOwner?.dismissPopup(id)}
-		onRespond={(id, accepted) => {
-			void dialogOwner?.respond(id, accepted);
+		onRespond={(id, accepted, suppress) => {
+			void dialogOwner?.respond(id, accepted, suppress);
 		}}
 	/>
 {/each}

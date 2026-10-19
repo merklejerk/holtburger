@@ -14,14 +14,19 @@ import type {
 	ClientItemUseResult,
 } from "./client-item-use-contract";
 
-/** Frontend-local question; its identity never crosses the host boundary. */
-interface ItemUseQuestion {
-	readonly id: string;
-	readonly text: string;
-}
+/** Suppression covers every give recipient for one hour within the character session. */
+export const GIVE_CONFIRMATION_SUPPRESSION_MS = 60 * 60 * 1_000;
+
 /** Cold state consumed by Notifications guidance and the local confirmation dialog. */
 export type ItemInteractionState =
 	| { readonly kind: "idle" }
+	| {
+			/** Giving retains identities only; core validates current facts on submission. */
+			readonly kind: "confirming-give";
+			readonly source: number;
+			readonly recipient: number;
+			readonly question: LocalConfirmationRequest;
+	  }
 	| {
 			readonly kind: "acquiring";
 			readonly source: number;
@@ -52,7 +57,7 @@ export type ItemInteractionState =
 	| {
 			readonly kind: "confirming";
 			readonly request: ClientItemUseRequest;
-			readonly question: ItemUseQuestion;
+			readonly question: LocalConfirmationRequest;
 	  };
 type Acquisition = Extract<ItemInteractionState, { kind: "acquiring" }>;
 type Session = Pick<
@@ -74,12 +79,12 @@ function allocateOperation(): number {
 	return ++nextOperation;
 }
 
-/** One frontend use flow. Rust evaluates consequences; this owner decides whether to ask. */
+/** Frontend item interactions. Rust evaluates consequences; this owner decides whether to ask. */
 export class ClientItemInteractions implements LocalDialogSource {
 	readonly #session: Session;
 	readonly #selection: Pick<
 		ClientEntitySelection,
-		"selectedGuid" | "previousGuid"
+		"selectedGuid" | "previousGuid" | "select"
 	>;
 	readonly #failure: (message: string) => void;
 	readonly #notice: (message: string) => void;
@@ -89,12 +94,14 @@ export class ClientItemInteractions implements LocalDialogSource {
 	readonly #listeners = new Set<(state: ItemInteractionState) => void>();
 	#state: ItemInteractionState = { kind: "idle" };
 	#destroyed = false;
+	/** A deadline needs no timer; each give checks expiry when it starts. */
+	#giveSuppressedUntil = 0;
 
 	constructor(options: {
 		readonly session: Session;
 		readonly selection: Pick<
 			ClientEntitySelection,
-			"selectedGuid" | "previousGuid"
+			"selectedGuid" | "previousGuid" | "select"
 		>;
 		readonly reportFailure: (message: string) => void;
 		/** Ordinary local gameplay refusal, without warning severity. */
@@ -118,11 +125,11 @@ export class ClientItemInteractions implements LocalDialogSource {
 	snapshot(): ItemInteractionState {
 		return this.#state;
 	}
-	/** Item-use confirmation policy is owned here, independently of the modal presenter. */
+	/** Item confirmation policy is owned here, independently of the modal presenter. */
 	question(): LocalConfirmationRequest | null {
 		const local = this.snapshot();
-		return local.kind === "confirming"
-			? { requestId: local.question.id, text: local.question.text }
+		return local.kind === "confirming" || local.kind === "confirming-give"
+			? local.question
 			: null;
 	}
 
@@ -158,11 +165,22 @@ export class ClientItemInteractions implements LocalDialogSource {
 		}
 	}
 
-	/** Give uses the current item and exactly one previous recipient; selection is unchanged. */
+	/** Retail uses the previous selection, then restores it after attempting the give. */
 	giveSelected(): void {
 		if (this.#destroyed) return;
 		const source = this.#selection.selectedGuid();
 		const recipient = this.#selection.previousGuid();
+		if (source === null || recipient === null) {
+			this.cancel();
+			this.#notice("Select a recipient, then select the item to give.");
+			return;
+		}
+		this.give(source, recipient);
+	}
+
+	/** Keyboard and viewport drops share the same confirmation and suppression policy. */
+	give(source: number, recipient: number): void {
+		if (this.#destroyed) return;
 		this.cancel();
 		const read = this.#session.entities.read();
 		if (
@@ -172,24 +190,45 @@ export class ClientItemInteractions implements LocalDialogSource {
 			this.#notice("Giving requires current world information.");
 			return;
 		}
-		if (source === null || recipient === null) {
-			this.#notice("Select a recipient, then select the item to give.");
-			return;
-		}
-		if (!read.level.entities.get(source)?.ownedByPlayer) {
+		const item = read.level.entities.get(source);
+		const target = read.level.entities.get(recipient);
+		if (!item?.ownedByPlayer || item.description.kind !== "known") {
 			this.#notice("Select an item you are carrying or wearing to give.");
 			return;
 		}
-		if (!read.level.entities.get(recipient)?.canReceiveGive) {
-			this.#notice("The previous selection cannot receive an item.");
+		if (!target?.canReceiveGive || target.description.kind !== "known") {
+			this.#notice("This recipient cannot receive an item.");
 			return;
 		}
+		if (Date.now() < this.#giveSuppressedUntil) {
+			this.#sendGive(source, recipient);
+			return;
+		}
+		this.#set({
+			kind: "confirming-give",
+			source,
+			recipient,
+			question: {
+				requestId: `give-${allocateOperation()}`,
+				text: `Give ${item.description.name} to ${target.description.name}?${item.description.stackCount === null ? "" : " This gives the entire stack."}`,
+				acceptLabel: "Give",
+				cancelLabel: "Cancel",
+				suppressionLabel: "Suppress confirmation for the next hour",
+			},
+		});
+	}
+
+	#sendGive(source: number, recipient: number): void {
+		this.#set({ kind: "idle" });
 		void this.#session
 			.submitInventory({
 				item: source,
 				target: { kind: "give", guid: recipient },
 			})
 			.catch((error: unknown) => this.#failure(String(error)));
+		// Retail restores the recipient after attempting Give (acclient.c:382576).
+		// The next inventory selection can then use it as the previous selection.
+		this.#selection.select(recipient);
 	}
 
 	/** Inventory supplies its clicked identity, independent of selection toggles. */
@@ -347,9 +386,18 @@ export class ClientItemInteractions implements LocalDialogSource {
 	}
 
 	/** Accept submits the displayed operation, never the current selection. */
-	respond(id: string, accepted: boolean): void {
+	respond(id: string, accepted: boolean, suppress?: boolean): void {
 		const state = this.#state;
-		if (state.kind !== "confirming" || state.question.id !== id) return;
+		if (state.kind === "confirming-give" && state.question.requestId === id) {
+			if (accepted) {
+				if (suppress === true)
+					this.#giveSuppressedUntil =
+						Date.now() + GIVE_CONFIRMATION_SUPPRESSION_MS;
+				this.#sendGive(state.source, state.recipient);
+			} else this.cancel();
+			return;
+		}
+		if (state.kind !== "confirming" || state.question.requestId !== id) return;
 		if (!accepted) {
 			this.cancel();
 			return;
@@ -451,7 +499,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 					expected: { kind: "destroy-item", target, amount },
 				},
 				question: {
-					id: "item-use-" + allocateOperation(),
+					requestId: "item-use-" + allocateOperation(),
 					text:
 						"Using this mana stone will destroy " +
 						amount +
@@ -467,6 +515,19 @@ export class ClientItemInteractions implements LocalDialogSource {
 		}
 	}
 	#receive(event: ClientLifecycleSessionEvent): void {
+		const lifecycle =
+			event.type === "current-state"
+				? event.state.lifecycle
+				: event.type === "lifecycle"
+					? event.lifecycle
+					: null;
+		// Portal travel stays within the character session and preserves the deadline.
+		if (
+			lifecycle !== null &&
+			lifecycle.kind !== "in-world" &&
+			lifecycle.kind !== "portal-space"
+		)
+			this.#giveSuppressedUntil = 0;
 		if (event.type === "item-use-target-result") {
 			const state = this.#state;
 			if (
@@ -508,6 +569,8 @@ export class ClientItemInteractions implements LocalDialogSource {
 			return;
 		}
 		if (event.type === "entities" && this.#state.kind !== "idle") {
+			// Give has no acquisition lifecycle; authoritative submission validates its identities.
+			if (this.#state.kind === "confirming-give") return;
 			const source =
 				this.#state.kind === "acquiring" || this.#state.kind === "resolving"
 					? this.#state.source

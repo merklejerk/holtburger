@@ -93,6 +93,7 @@ describe("ClientDialogs", () => {
 			requestId: "local-typed-1",
 			text: "Confirm destructive action?",
 			typedConfirmation: { requiredText: "confirm" },
+			suppressionLabel: "Suppress confirmation for the next hour",
 		};
 		const respond = vi.fn();
 		const unsubscribe = vi.fn();
@@ -115,8 +116,12 @@ describe("ClientDialogs", () => {
 		f.emit("client-confirmation-updated", { confirmation: null });
 		await f.dialogs.respond("local-typed-stale", true);
 		expect(respond).not.toHaveBeenCalled();
-		await f.dialogs.respond(question.requestId, false);
-		expect(respond).toHaveBeenCalledExactlyOnceWith(question.requestId, false);
+		await f.dialogs.respond(question.requestId, true, true);
+		expect(respond).toHaveBeenCalledExactlyOnceWith(
+			question.requestId,
+			true,
+			true,
+		);
 		release();
 		expect(f.dialogs.snapshot()).toBeNull();
 		expect(unsubscribe).toHaveBeenCalledTimes(1);

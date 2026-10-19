@@ -8,6 +8,12 @@ import type {
 export interface LocalConfirmationRequest {
 	readonly requestId: string;
 	readonly text: string;
+	/** Optional acceptance wording supplied by the feature owner. */
+	readonly acceptLabel?: string;
+	/** Optional cancellation wording supplied by the feature owner. */
+	readonly cancelLabel?: string;
+	/** The owner decides the duration and scope; the presenter only returns the choice. */
+	readonly suppressionLabel?: string;
 	readonly typedConfirmation?: {
 		/** Exact input required before the acceptance callback can run. */
 		readonly requiredText: string;
@@ -34,7 +40,11 @@ export type ClientDialogPresentation =
 export interface LocalDialogSource {
 	readonly question: () => LocalConfirmationRequest | null;
 	readonly subscribe: (listener: () => void) => () => void;
-	readonly respond: (requestId: string, accepted: boolean) => void;
+	readonly respond: (
+		requestId: string,
+		accepted: boolean,
+		suppress?: boolean,
+	) => void;
 }
 
 type DialogSession = Pick<
@@ -134,14 +144,18 @@ export class ClientDialogs {
 	}
 
 	/** Local answers return to their owner; server questions await authority acknowledgement. */
-	async respond(requestId: string, accepted: boolean): Promise<void> {
+	async respond(
+		requestId: string,
+		accepted: boolean,
+		suppress?: boolean,
+	): Promise<void> {
 		const local = this.#localQuestion();
 		if (
 			!this.#destroyed &&
 			this.#confirmation === null &&
 			local?.question.requestId === requestId
 		) {
-			local.source.respond(requestId, accepted);
+			local.source.respond(requestId, accepted, suppress);
 			return;
 		}
 		const current = this.#confirmation;

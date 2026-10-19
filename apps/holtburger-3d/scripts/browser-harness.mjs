@@ -14,6 +14,8 @@ import {
 	probeSelectPicker,
 } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
+import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
+import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { probeLoadouts } from "./client-loadout-probe.mjs";
 import { existsSync } from "node:fs";
@@ -294,6 +296,13 @@ try {
 			...result.clientPreciseJump,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientInventory) {
+		report = {
+			suite: "client-inventory",
+			passed: true,
+			...result.clientInventory,
+			browserErrors,
+		};
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
@@ -564,6 +573,7 @@ function parseArgs(args) {
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
+		clientInventory: false,
 		clientLoadouts: false,
 		clientPreciseJump: false,
 		clientSettingsTabs: false,
@@ -748,6 +758,10 @@ function parseArgs(args) {
 			case "--client-precise-jump":
 				parsed.clientHud = true;
 				parsed.clientPreciseJump = true;
+				break;
+			case "--client-inventory":
+				parsed.clientHud = true;
+				parsed.clientInventory = true;
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
@@ -2037,6 +2051,7 @@ Options:
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
+  --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
   --client-loadouts     Exercise loadout capture, exclusions, shortcut placement, and warning feedback.
   --relocate-sequence <hex,hex,...>
                          Re-issue scene interest at each landblock in turn, so sustained streaming
@@ -4528,6 +4543,21 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientInventory) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInventory",
+				[],
+			);
+			return {
+				clientInventory: {
+					drag: await probeInventoryDrag(client, evaluateExpression),
+					itemUse: await probeItemUse(client, evaluateExpression),
+				},
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientPartyScreenshotDirectory !== null) {
 			await mkdir(options.clientPartyScreenshotDirectory, { recursive: true });
 			// Isolate the real party surface for crops; its production styling remains untouched.

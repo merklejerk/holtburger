@@ -43,7 +43,15 @@ export function installKeyboardPolicyFixture(
 	const select = document.createElement("select");
 	select.id = "keyboard-select";
 	select.add(new Option("First", "first"));
+	const disabledOption = new Option("Unavailable", "unavailable");
+	disabledOption.disabled = true;
+	select.add(disabledOption);
 	select.add(new Option("Second", "second"));
+	select.add(new Option("Third", "third"));
+	// Exercise the shared in-page picker without a native-control keyboard scope.
+	const selectTheme = document.createElement("div");
+	selectTheme.className = "ui-theme";
+	selectTheme.append(select);
 	// Match the broad native-control registration used by Settings/trade/vendor panels.
 	const nativePanel = document.createElement("div");
 	nativePanel.style.cssText =
@@ -122,9 +130,14 @@ export function installKeyboardPolicyFixture(
 	const dialog = document.createElement("dialog");
 	dialog.id = "keyboard-modal";
 	dialog.tabIndex = -1;
+	dialog.className = "ui-theme";
 	const modalEditor = document.createElement("input");
 	modalEditor.id = "keyboard-modal-editor";
-	dialog.append(modalEditor);
+	const modalSelect = document.createElement("select");
+	modalSelect.id = "keyboard-modal-select";
+	modalSelect.add(new Option("First", "first"));
+	modalSelect.add(new Option("Second", "second"));
+	dialog.append(modalEditor, modalSelect);
 	// A modal inside a registered scope must not forward keys to its containing scope.
 	bar.append(dialog);
 	root.append(
@@ -134,7 +147,7 @@ export function installKeyboardPolicyFixture(
 		editor,
 		checkbox,
 		range,
-		select,
+		selectTheme,
 		nativePanel,
 		bar,
 	);

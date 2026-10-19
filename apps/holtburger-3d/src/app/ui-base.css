@@ -532,7 +532,7 @@
 		background: var(--ui-option-background, var(--ui-color-control));
 		border-color: var(--ui-option-border-color, var(--ui-color-accent));
 	}
-	.ui-theme .ui-input {
+	.ui-theme :is(.ui-input, select) {
 		width: 100%;
 		min-height: 24px;
 		padding: 2px 6px;
@@ -542,6 +542,29 @@
 		color: var(--ui-color-text);
 		box-shadow: none;
 		font: inherit;
+	}
+	/* Keep dropdowns in the browser top layer. Chromium's external picker rejects
+	   visible right-edge controls when device scale is below one (CSS/DIP clipping). */
+	.ui-theme select:not([multiple], [size]),
+	.ui-theme select:not([multiple], [size])::picker(select) {
+		appearance: base-select;
+	}
+	.ui-theme select::picker(select) {
+		border: 1px solid var(--ui-color-border);
+		border-radius: var(--ui-radius-control);
+		background: var(--ui-color-well);
+		color: var(--ui-color-text);
+		font: inherit;
+		pointer-events: auto;
+	}
+	.ui-theme select option {
+		padding: 2px 6px;
+	}
+	.ui-theme select option:where(:checked, :focus, :hover):not(:disabled) {
+		background: var(--ui-color-control);
+	}
+	.ui-theme select option:disabled {
+		color: var(--ui-color-muted);
 	}
 	.ui-theme .ui-input::placeholder {
 		color: var(--ui-color-muted);
@@ -554,7 +577,7 @@
 		background: var(--ui-input-background, transparent);
 		box-shadow: none;
 	}
-	.ui-theme .ui-input:disabled {
+	.ui-theme :is(.ui-input, select):disabled {
 		color: var(--ui-color-muted);
 		cursor: not-allowed;
 	}
@@ -567,7 +590,8 @@
 			.ui-inline-button,
 			.ui-tab,
 			.ui-option,
-			.ui-input
+			.ui-input,
+			select
 		):focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: 2px;

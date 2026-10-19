@@ -83,6 +83,17 @@
 		--ui-radius-control: 2px;
 		/* Shared easing for small interactive embellishments. */
 		--ui-easing: cubic-bezier(0.238, 0.55, 0.546, 1.361);
+		/* Notification motion: themes may replace keyframes or use animation-name none. */
+		--ui-toast-pop-animation: ui-toast-pop;
+		--ui-toast-pop-duration: 420ms;
+		--ui-toast-pop-scale: 0.65;
+		--ui-toast-pop-peak-scale: 1.15;
+		--ui-toast-pop-easing: ease-out;
+		--ui-toast-exit-duration: 120ms;
+		--ui-hud-pulse-animation: ui-hud-pulse;
+		--ui-hud-pulse-duration: 600ms;
+		--ui-hud-pulse-scale: 1.5;
+		--ui-hud-pulse-easing: ease-in-out;
 		--ui-hud-background-color: #00000044;
 		/* Spacing between independent icon actions in HUD strips. */
 		--ui-hud-icon-gap: 5px;
@@ -1193,5 +1204,41 @@
 	}
 	.ui-progress::-moz-progress-bar {
 		background: currentColor;
+	}
+}
+
+/* Animation names are global so theme stylesheets can replace either recipe. */
+@keyframes ui-toast-pop {
+	from {
+		opacity: 0;
+		transform: scale(var(--ui-toast-pop-scale));
+	}
+	60% {
+		opacity: 1;
+		transform: scale(var(--ui-toast-pop-peak-scale));
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+@keyframes ui-hud-pulse {
+	0%,
+	100% {
+		transform: scale(1);
+	}
+	50% {
+		transform: scale(var(--ui-hud-pulse-scale));
+	}
+}
+@layer components {
+	.ui-hud-attention {
+		animation: var(--ui-hud-pulse-animation) var(--ui-hud-pulse-duration)
+			var(--ui-hud-pulse-easing);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-hud-attention {
+			animation: none;
+		}
 	}
 }

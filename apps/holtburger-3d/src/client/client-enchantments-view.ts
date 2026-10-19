@@ -48,35 +48,91 @@ export function enchantmentKey(id: {
 	return `${id.spellId}:${id.layer}`;
 }
 
-/** Presence counts effective ordinary spells plus the separately applied vitae penalty. */
-export function effectiveEnchantmentKinds(
+/** Visibility and animation identity are computed together by the tray presentation owner. */
+interface EnchantmentTrayStatus {
+	/** Only effective ordinary effects and vitae make the category visible. */
+	readonly visible: boolean;
+	/** Sorted registry/contribution identity; local countdown display never changes it. */
+	readonly identity: string;
+}
+
+/** One presentation snapshot for each enchantment tray button. */
+export interface EnchantmentTrayPresentation {
+	readonly beneficial: EnchantmentTrayStatus;
+	readonly harmful: EnchantmentTrayStatus;
+}
+
+/** Keep retail visibility policy while observing changes to each category's registry. */
+export function presentEnchantmentTray(
 	resolved: ResolvedEnchantments | null,
-): { readonly beneficial: boolean; readonly harmful: boolean } {
-	if (resolved === null) return { beneficial: false, harmful: false };
+): EnchantmentTrayPresentation {
 	const instances = new Map(
-		resolved.instances.map((instance) => [
+		(resolved?.instances ?? []).map((instance) => [
 			enchantmentKey(instance.key),
 			instance,
 		]),
 	);
-	// RETAIL DIVERGENCE: acclient.c:425784-425812 counts every ordinary registry insertion.
-	// Ordinary icons show only effective contributions. This client-only presentation
-	// cannot affect game content. The local DAT census contains 4,375 enchantment
-	// definitions, but no live-registry population census was available.
-	let beneficial = false;
-	// RETAIL DIVERGENCE: acclient.c:266098-266100 uses a separate vitae indicator.
-	// Grouping it under Harmful keeps the panel reachable when vitae is the sole
-	// effect; restoring that retail icon would remove this route. The local DAT
-	// census found spell 666, but did not measure live registry populations.
-	let harmful = resolved.instances.some(
-		(instance) => instance.kind === "vitae",
-	);
-	for (const group of resolved.groups) {
-		const kind = instances.get(enchantmentKey(group.effective))?.kind;
-		if (kind === "beneficial") beneficial = true;
-		if (kind === "harmful") harmful = true;
-	}
-	return { beneficial, harmful };
+	const project = (kind: "beneficial" | "harmful"): EnchantmentTrayStatus => {
+		const belongs = (instance: Instance) =>
+			instance.kind === kind ||
+			(kind === "harmful" && instance.kind === "vitae");
+		const records = [...instances.values()].filter(belongs);
+		const contributions = (resolved?.groups ?? []).filter((group) => {
+			const instance = instances.get(enchantmentKey(group.effective));
+			if (instance === undefined)
+				throw new Error(
+					`Enchantment group references missing instance ${enchantmentKey(group.effective)}`,
+				);
+			return belongs(instance);
+		});
+		// RETAIL DIVERGENCE: acclient.c:425784-425812 counts all ordinary registry insertions.
+		// Showing effective contributions only affects client presentation, not game content.
+		// The local DAT census has 4,375 definitions; no live population census was available.
+		// RETAIL DIVERGENCE: acclient.c:266098-266100 gives vitae its own indicator.
+		// Grouping it under Harmful keeps the panel reachable for vitae alone; restoring that
+		// icon removes this route. The DAT census found spell 666, without live population data.
+		return {
+			visible:
+				contributions.length > 0 ||
+				records.some((instance) => instance.kind === "vitae"),
+			identity: JSON.stringify([
+				records
+					.map(
+						({
+							key,
+							spellCategory,
+							powerLevel,
+							kind,
+							statModType,
+							statModKey,
+							statModValue,
+						}) =>
+							JSON.stringify([
+								enchantmentKey(key),
+								spellCategory,
+								powerLevel,
+								kind,
+								statModType,
+								statModKey,
+								statModValue,
+							]),
+					)
+					.sort(),
+				contributions
+					.map((group) =>
+						JSON.stringify([
+							statId(group.affectedStat),
+							group.operation,
+							group.channel,
+							group.spellCategory,
+							enchantmentKey(group.effective),
+						]),
+					)
+					.sort(),
+			]),
+		};
+	};
+	return { beneficial: project("beneficial"), harmful: project("harmful") };
 }
 
 function statId(stat: Stat): string {

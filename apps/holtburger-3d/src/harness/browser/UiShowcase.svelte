@@ -497,7 +497,10 @@
 			{@render hud("character", character)}
 			<ClientStatusTray
 				placement={layout.statusTray}
-				kinds={{ beneficial: true, harmful: true }}
+				enchantments={{
+					beneficial: { visible: true, identity: "showcase" },
+					harmful: { visible: true, identity: "showcase" },
+				}}
 				inventory={null}
 				onOpenInventory={() => {}}
 				onOpenEnchantments={() => {}}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -152,7 +153,6 @@
 	} from "../lib/game/renderer/entity-shadow-policy";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
-	let frameHandle: number | null = null;
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
 	onMount(() => keyboard.mount(document));
 	/** Scene activation owns one blocker independently of modal/UI blockers. */
@@ -1774,11 +1774,7 @@
 		let destroyed = false;
 		let teardown: Promise<void> | undefined;
 
-		const stopFrameLoop = (): void => {
-			if (frameHandle === null) return;
-			window.cancelAnimationFrame(frameHandle);
-			frameHandle = null;
-		};
+		let stopFrameLoop: (() => void) | null = null;
 
 		const destroySystems = (): Promise<void> => {
 			if (teardown) return teardown;
@@ -1820,7 +1816,7 @@
 			cameraModePending = false;
 			physicalCameraStatus = null;
 			teardown = (async () => {
-				stopFrameLoop();
+				stopFrameLoop?.();
 				entityUnsubscribe?.();
 				fixedTickUnsubscribe?.();
 				possessionOutcomeUnsubscribe?.();
@@ -1925,7 +1921,6 @@
 				const step = (animationFrameTimeMs: number): void => {
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
-						frameHandle = window.requestAnimationFrame(step);
 						return;
 					}
 
@@ -2030,10 +2025,9 @@
 						updateFrameMs: frameFinishedAt - updateAndDrawStartedAt,
 						frameMs: frameFinishedAt - tickStartedAt,
 					};
-					frameHandle = window.requestAnimationFrame(step);
 				};
 
-				frameHandle = window.requestAnimationFrame(step);
+				stopFrameLoop = startPresentationFrameLoop(step);
 			} catch (error) {
 				startupError =
 					error instanceof Error

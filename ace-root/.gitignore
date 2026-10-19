@@ -7,3 +7,4 @@
 dats/*
 !dats/.gitkeep
 !db_tool.sh
+!ace.sh

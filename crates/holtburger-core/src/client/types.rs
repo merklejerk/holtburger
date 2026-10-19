@@ -57,7 +57,35 @@ pub enum SpellCastAim {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChatChannelKind {
     Fellowship,
+    /// Receive-only fellowship notification, distinct from ordinary party conversation.
+    FellowshipBroadcast,
     Allegiance,
+    /// Privileged legacy broadcast, distinct from the ordinary Turbine allegiance room.
+    AllegianceBroadcast,
+    Vassals,
+    Patron,
+    Monarch,
+    CoVassals,
+    General,
+    Trade,
+    Lfg,
+    Roleplay,
+    Society,
+    /// Specific society identities remain observable even when ACE sends generic Society type.
+    SocietyCelestialHand,
+    SocietyEldrytchWeb,
+    SocietyRadiantBlood,
+    Olthoi,
+    Unknown,
+}
+
+/// Sendable channel destinations; notifications and unknown receive IDs cannot be submitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChatChannelDestination {
+    Fellowship,
+    Allegiance,
+    AllegianceBroadcast,
     Vassals,
     Patron,
     Monarch,
@@ -68,7 +96,6 @@ pub enum ChatChannelKind {
     Roleplay,
     Society,
     Olthoi,
-    Unknown,
 }
 
 /// Authoritative speaker category derived from the protocol sender GUID when available.
@@ -79,33 +106,50 @@ pub enum ChatSpeakerKind {
     Unknown,
 }
 
+/// Address carried by a tell intent; NPC identity must survive selection changes and replies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ChatTellTarget {
+    /// Player names support long-distance communication through the Tell action.
+    Player { name: String },
+    /// NPC display name is retained for previews/logging; only the entity ID controls routing.
+    Npc { guid: Guid, name: String },
+}
+
+/// Producer-resolved addressability; consumers never classify raw sender IDs or strip names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChatSpeakerAddress {
+    Player(String),
+    Npc(Guid),
+    Unknown,
+}
+
 /// A chat speaker whose display name and known identity category travel together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatSpeaker {
     /// Server-authored display name, including any suffix.
     name: String,
-    /// GUID-derived speaker category; legacy packets without a sender GUID remain unknown.
-    kind: ChatSpeakerKind,
+    /// The protocol sender's address, resolved once alongside the display name.
+    address: ChatSpeakerAddress,
 }
 
 impl ChatSpeaker {
     pub fn from_guid(name: String, guid: Guid) -> Self {
-        let kind = if guid.is_null() {
-            ChatSpeakerKind::Unknown
-        } else if guid.is_player() {
-            ChatSpeakerKind::Player
+        let address = if guid.is_player() {
+            // ACE Player_Properties.cs:GetNameWithSuffix and acclient.c:395453-395489.
+            ChatSpeakerAddress::Player(name.trim_end_matches(['^', '&']).to_string())
         } else if guid.is_static_object() || guid.is_dynamic_object() {
-            ChatSpeakerKind::NonPlayer
+            ChatSpeakerAddress::Npc(guid)
         } else {
-            ChatSpeakerKind::Unknown
+            ChatSpeakerAddress::Unknown
         };
-        Self { name, kind }
+        Self { name, address }
     }
 
     pub fn unknown(name: String) -> Self {
         Self {
             name,
-            kind: ChatSpeakerKind::Unknown,
+            address: ChatSpeakerAddress::Unknown,
         }
     }
 
@@ -114,7 +158,29 @@ impl ChatSpeaker {
     }
 
     pub fn into_name_and_kind(self) -> (String, ChatSpeakerKind) {
-        (self.name, self.kind)
+        let kind = self.kind();
+        (self.name, kind)
+    }
+
+    /// Presentation classification follows the already resolved address variant.
+    pub fn kind(&self) -> ChatSpeakerKind {
+        match self.address {
+            ChatSpeakerAddress::Player(_) => ChatSpeakerKind::Player,
+            ChatSpeakerAddress::Npc(_) => ChatSpeakerKind::NonPlayer,
+            ChatSpeakerAddress::Unknown => ChatSpeakerKind::Unknown,
+        }
+    }
+
+    /// Structured reply address when the server supplied an identifiable speaker.
+    pub fn tell_target(&self) -> Option<ChatTellTarget> {
+        match &self.address {
+            ChatSpeakerAddress::Player(name) => Some(ChatTellTarget::Player { name: name.clone() }),
+            ChatSpeakerAddress::Npc(guid) => Some(ChatTellTarget::Npc {
+                guid: *guid,
+                name: self.name.clone(),
+            }),
+            ChatSpeakerAddress::Unknown => None,
+        }
     }
 }
 
@@ -125,28 +191,55 @@ mod chat_speaker_tests {
     #[test]
     fn speaker_kind_uses_authoritative_guid_ranges_without_guessing_unknown_ids() {
         assert_eq!(
-            ChatSpeaker::from_guid("Player".to_string(), Guid(0x5000_0001)).kind,
+            ChatSpeaker::from_guid("Player".to_string(), Guid(0x5000_0001)).kind(),
             ChatSpeakerKind::Player
         );
         assert_eq!(
-            ChatSpeaker::from_guid("Drudge".to_string(), Guid(0x7000_0001)).kind,
+            ChatSpeaker::from_guid("Drudge".to_string(), Guid(0x7000_0001)).kind(),
             ChatSpeakerKind::NonPlayer
         );
         assert_eq!(
-            ChatSpeaker::from_guid("Merchant".to_string(), Guid(0x8000_0001)).kind,
+            ChatSpeaker::from_guid("Merchant".to_string(), Guid(0x8000_0001)).kind(),
             ChatSpeakerKind::NonPlayer
         );
         assert_eq!(
-            ChatSpeaker::from_guid("Unknown".to_string(), Guid::NULL).kind,
+            ChatSpeaker::from_guid("Unknown".to_string(), Guid::NULL).kind(),
             ChatSpeakerKind::Unknown
         );
         assert_eq!(
-            ChatSpeaker::from_guid("Invalid".to_string(), Guid(1)).kind,
+            ChatSpeaker::from_guid("Invalid".to_string(), Guid(1)).kind(),
             ChatSpeakerKind::Unknown
         );
         assert_eq!(
-            ChatSpeaker::from_guid("Reserved".to_string(), Guid(0x5000_0000)).kind,
+            ChatSpeaker::from_guid("Reserved".to_string(), Guid(0x5000_0000)).kind(),
             ChatSpeakerKind::Unknown
+        );
+    }
+
+    #[test]
+    fn reply_addresses_preserve_npc_identity_and_normalize_only_player_speech_suffixes() {
+        for name in ["Player", "+Admin", "Olthoi^", "Olthoi&"] {
+            let speaker = ChatSpeaker::from_guid(name.to_string(), Guid(0x5000_0001));
+            assert_eq!(speaker.name(), name);
+            assert_eq!(
+                speaker.tell_target(),
+                Some(ChatTellTarget::Player {
+                    name: name.trim_end_matches(['^', '&']).to_string(),
+                })
+            );
+        }
+        let guid = Guid(0x8000_0001);
+        let npc = ChatSpeaker::from_guid("Professor".to_string(), guid);
+        assert_eq!(
+            npc.tell_target(),
+            Some(ChatTellTarget::Npc {
+                guid,
+                name: "Professor".to_string()
+            })
+        );
+        assert_eq!(
+            ChatSpeaker::unknown("Unknown".to_string()).tell_target(),
+            None
         );
     }
 }
@@ -172,9 +265,13 @@ pub struct ChatChannelInfo {
 impl ChatChannelInfo {
     pub fn legacy(channel: ChatChannelId) -> Self {
         let kind = match channel {
-            ChatChannelId::Known(ChatChannel::Fellow)
-            | ChatChannelId::Known(ChatChannel::FellowBroadcast) => ChatChannelKind::Fellowship,
-            ChatChannelId::Known(ChatChannel::AllegianceBroadcast) => ChatChannelKind::Allegiance,
+            ChatChannelId::Known(ChatChannel::Fellow) => ChatChannelKind::Fellowship,
+            ChatChannelId::Known(ChatChannel::FellowBroadcast) => {
+                ChatChannelKind::FellowshipBroadcast
+            }
+            ChatChannelId::Known(ChatChannel::AllegianceBroadcast) => {
+                ChatChannelKind::AllegianceBroadcast
+            }
             ChatChannelId::Known(ChatChannel::Vassals) => ChatChannelKind::Vassals,
             ChatChannelId::Known(ChatChannel::Patron) => ChatChannelKind::Patron,
             ChatChannelId::Known(ChatChannel::Monarch) => ChatChannelKind::Monarch,
@@ -214,10 +311,10 @@ fn chat_kind_from_turbine(
         Some(TurbineChatType::Trade) => ChatChannelKind::Trade,
         Some(TurbineChatType::Lfg) => ChatChannelKind::Lfg,
         Some(TurbineChatType::Roleplay) => ChatChannelKind::Roleplay,
-        Some(TurbineChatType::Society)
-        | Some(TurbineChatType::SocietyCelHan)
-        | Some(TurbineChatType::SocietyEldWeb)
-        | Some(TurbineChatType::SocietyRadBlo) => ChatChannelKind::Society,
+        Some(TurbineChatType::SocietyCelHan) => ChatChannelKind::SocietyCelestialHand,
+        Some(TurbineChatType::SocietyEldWeb) => ChatChannelKind::SocietyEldrytchWeb,
+        Some(TurbineChatType::SocietyRadBlo) => ChatChannelKind::SocietyRadiantBlood,
+        Some(TurbineChatType::Society) => society_kind_from_room(room_id),
         Some(TurbineChatType::Olthoi) => ChatChannelKind::Olthoi,
         Some(TurbineChatType::Undef) | None => match room_id.known() {
             Some(TurbineChatChannel::Allegiance) => ChatChannelKind::Allegiance,
@@ -228,10 +325,101 @@ fn chat_kind_from_turbine(
             Some(TurbineChatChannel::Society)
             | Some(TurbineChatChannel::SocietyCelestialHand)
             | Some(TurbineChatChannel::SocietyEldrytchWeb)
-            | Some(TurbineChatChannel::SocietyRadiantBlood) => ChatChannelKind::Society,
+            | Some(TurbineChatChannel::SocietyRadiantBlood) => society_kind_from_room(room_id),
             Some(TurbineChatChannel::Olthoi) => ChatChannelKind::Olthoi,
             None => ChatChannelKind::Unknown,
         },
+    }
+}
+
+/// Generic Society packets still disclose the actual room in ACE's negotiated assignment.
+fn society_kind_from_room(room_id: TurbineChatChannelId) -> ChatChannelKind {
+    match room_id.known() {
+        Some(TurbineChatChannel::SocietyCelestialHand) => ChatChannelKind::SocietyCelestialHand,
+        Some(TurbineChatChannel::SocietyEldrytchWeb) => ChatChannelKind::SocietyEldrytchWeb,
+        Some(TurbineChatChannel::SocietyRadiantBlood) => ChatChannelKind::SocietyRadiantBlood,
+        _ => ChatChannelKind::Society,
+    }
+}
+
+#[cfg(test)]
+mod chat_channel_tests {
+    use super::*;
+
+    #[test]
+    fn generic_society_uses_the_received_room_without_hiding_specific_types() {
+        for (room, expected) in [
+            (
+                TurbineChatChannel::SocietyCelestialHand,
+                ChatChannelKind::SocietyCelestialHand,
+            ),
+            (
+                TurbineChatChannel::SocietyEldrytchWeb,
+                ChatChannelKind::SocietyEldrytchWeb,
+            ),
+            (
+                TurbineChatChannel::SocietyRadiantBlood,
+                ChatChannelKind::SocietyRadiantBlood,
+            ),
+            (TurbineChatChannel::Society, ChatChannelKind::Society),
+        ] {
+            for chat_type in [TurbineChatType::Society, TurbineChatType::Undef] {
+                let info = ChatChannelInfo::turbine(
+                    room.into(),
+                    chat_type.into(),
+                    TurbineChatDispatchType::SendToRoomById,
+                );
+                assert_eq!(info.kind, expected);
+            }
+        }
+        assert_eq!(
+            chat_kind_from_turbine(
+                TurbineChatType::SocietyEldWeb.into(),
+                TurbineChatChannel::SocietyCelestialHand.into()
+            ),
+            ChatChannelKind::SocietyEldrytchWeb
+        );
+        assert_eq!(
+            chat_kind_from_turbine(
+                TurbineChatType::Society.into(),
+                TurbineChatChannelId::from_raw(0xCAFE)
+            ),
+            ChatChannelKind::Society
+        );
+    }
+
+    #[test]
+    fn broadcasts_and_unknown_channel_namespaces_remain_distinct() {
+        assert_eq!(
+            ChatChannelInfo::legacy(ChatChannel::FellowBroadcast.into()).kind,
+            ChatChannelKind::FellowshipBroadcast
+        );
+        assert_eq!(
+            ChatChannelInfo::legacy(ChatChannel::AllegianceBroadcast.into()).kind,
+            ChatChannelKind::AllegianceBroadcast
+        );
+        let legacy = ChatChannelInfo::legacy(ChatChannelId::from_raw(0xCAFE));
+        assert_eq!(legacy.kind, ChatChannelKind::Unknown);
+        assert_eq!(
+            legacy.source,
+            ChatChannelSource::Legacy {
+                channel: ChatChannelId::from_raw(0xCAFE)
+            }
+        );
+        let turbine = ChatChannelInfo::turbine(
+            TurbineChatChannelId::from_raw(0xCAFE),
+            TurbineChatTypeId::from_raw(0xBEEF),
+            TurbineChatDispatchType::SendToRoomById,
+        );
+        assert_eq!(turbine.kind, ChatChannelKind::Unknown);
+        assert_eq!(
+            turbine.source,
+            ChatChannelSource::Turbine {
+                room_id: TurbineChatChannelId::from_raw(0xCAFE),
+                chat_type: TurbineChatTypeId::from_raw(0xBEEF),
+                dispatch_type: TurbineChatDispatchType::SendToRoomById
+            }
+        );
     }
 }
 
@@ -1030,6 +1218,12 @@ pub enum ClientViewEvent {
     Tell {
         speaker: ChatSpeaker,
         message: String,
+        /// Server-authored tell category, including administrative or unknown types.
+        chat_type: ChatMessageTypeId,
+    },
+    /// Expected chat refusal, retained by frontends independently of display filters.
+    ChatError {
+        message: String,
     },
     WeenieError {
         error: WeenieError,
@@ -1106,11 +1300,12 @@ pub enum ClientCommand {
     /// Manage permissions received from other corpse owners.
     ManageCorpseConsent(super::corpse::CorpseConsentAction),
     Tell {
-        target: String,
+        /// Name-addressed player or entity-addressed NPC, independent of current selection.
+        target: ChatTellTarget,
         message: String,
     },
     ChannelMessage {
-        channel: ChatChannelKind,
+        channel: ChatChannelDestination,
         message: String,
     },
     Emote(String),

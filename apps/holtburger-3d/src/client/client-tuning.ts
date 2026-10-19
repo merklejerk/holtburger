@@ -89,6 +89,8 @@ export const CLIENT_TUNING = {
 	chat: {
 		/** Nonnegative maximum of locally queued chat inputs retained for recall. */
 		sentHistoryLimit: 100,
+		/** Fractional layout slack when deciding whether the reader is at the newest line. */
+		bottomToleranceCssPixels: 2,
 	},
 	/** Maximum publication cadence for asynchronously prepared spell artwork. */
 	spells: { iconDisplayIntervalMs: 100 },

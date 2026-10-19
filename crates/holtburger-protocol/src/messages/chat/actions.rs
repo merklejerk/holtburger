@@ -2,6 +2,31 @@ use crate::messages::ChatChannelId;
 use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 
+/// Direct creature dialogue: aligned String16 text followed by the target entity ID.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TalkDirectActionData {
+    /// Text consumed by the target's ReceiveTalkDirect emotes.
+    pub message: String,
+    /// Selected or remembered creature; ACE validates its current locality.
+    pub target: u32,
+}
+
+impl ProtocolUnpack for TalkDirectActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        let target = u32::unpack(data, offset)?;
+        Some(Self { message, target })
+    }
+}
+
+impl ProtocolPack for TalkDirectActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        // acclient.c:667312 and ACE GameActionTalkDirect.Handle use this field order.
+        write_string16(buf, &self.message);
+        self.target.pack(buf);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TalkActionData {
     pub message: String,
@@ -112,6 +137,23 @@ mod tests {
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn direct_talk_professor_request_matches_the_string_then_guid_wire_layout() {
+        let action = GameActionMessage {
+            sequence: 1,
+            action: GameAction::TalkDirect(Box::new(TalkDirectActionData {
+                message: "level 1".to_string(),
+                target: 0x8000_0001,
+            })),
+        };
+        // UI sequence, opcode 0x32, seven-character aligned String16, target ID.
+        let fixture = hex::decode("010000003200000007006c6576656c203100000001000080").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+        for length in 0..fixture.len() {
+            assert!(GameActionMessage::unpack(&fixture[..length], &mut 0).is_none());
+        }
+    }
 
     #[test]
     fn test_talk_parity() {

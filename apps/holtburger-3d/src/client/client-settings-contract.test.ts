@@ -25,6 +25,26 @@ import {
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("fills the missing history toggle while preserving saved alternatives and unbound choices", () => {
+		const { toggleChatHistory, ...olderClient } =
+			CLIENT_KEYBOARD_DEFAULTS.client;
+		const previous = {
+			...CLIENT_KEYBOARD_DEFAULTS,
+			client: { ...olderClient, examine: [{ key: "F9" }] },
+		};
+		expect(clientKeyboardSettingsSchema.parse(previous).client).toEqual({
+			...previous.client,
+			toggleChatHistory,
+		});
+		for (const binding of [[], [{ key: "F10", ctrl: true }]]) {
+			expect(
+				clientKeyboardSettingsSchema.parse({
+					...previous,
+					client: { ...previous.client, toggleChatHistory: binding },
+				}).client.toggleChatHistory,
+			).toEqual(binding);
+		}
+	});
 	it("adds warning thresholds to older UI profiles while preserving font choices", () => {
 		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
 		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({

@@ -3,7 +3,7 @@ use crate::pages::game::data::CuratedCharacterOption;
 use crate::scripting::{DiscoverableScriptSource, discoverable_scripts, script_directory};
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::recall::RecallDestination;
-use holtburger_core::client::types::ChatChannelKind;
+use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::context::normalize_name_for_lookup;
 use std::borrow::Cow;
@@ -640,7 +640,9 @@ impl GameState {
 
         if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
             result.commands.push(ClientCommand::Tell {
-                target: target.to_string(),
+                target: ChatTellTarget::Player {
+                    name: target.to_string(),
+                },
                 message: message.to_string(),
             });
             result.merge(self.finish_input_command_submission(submitted_command));
@@ -662,7 +664,7 @@ impl GameState {
             };
 
             result.commands.push(ClientCommand::Tell {
-                target,
+                target: ChatTellTarget::Player { name: target },
                 message: message.to_string(),
             });
             result.merge(self.finish_input_command_submission(submitted_command));
@@ -676,7 +678,7 @@ impl GameState {
 
         if let Some(message) = parse_message_only_command(command, &["/g", "/guild"]) {
             result.commands.push(ClientCommand::ChannelMessage {
-                channel: ChatChannelKind::Allegiance,
+                channel: ChatChannelDestination::Allegiance,
                 message: message.to_string(),
             });
             result.merge(self.finish_input_command_submission(submitted_command));
@@ -734,7 +736,7 @@ impl GameState {
 
         if let Some(message) = parse_message_only_command(command, &["/p", "/party"]) {
             result.commands.push(ClientCommand::ChannelMessage {
-                channel: ChatChannelKind::Fellowship,
+                channel: ChatChannelDestination::Fellowship,
                 message: message.to_string(),
             });
             result.merge(self.finish_input_command_submission(submitted_command));
@@ -957,7 +959,7 @@ mod tests {
             let submitted = format!("  {prefix}tell Bestie keep @this /payload");
             let result = state.handle_prefixed_command(&submitted);
             assert!(
-                matches!(result.commands.first(), Some(ClientCommand::Tell { target, message })
+                matches!(result.commands.first(), Some(ClientCommand::Tell { target: ChatTellTarget::Player { name: target }, message })
                 if target == "Bestie" && message == "keep @this /payload")
             );
             assert!(result.actions.iter().any(|action| matches!(action,
@@ -1405,7 +1407,7 @@ mod tests {
 
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::Tell { target, message }) if target == "Bestie" && message == "hi there"
+            Some(ClientCommand::Tell { target: ChatTellTarget::Player { name: target }, message }) if target == "Bestie" && message == "hi there"
         ));
     }
 
@@ -1422,7 +1424,7 @@ mod tests {
 
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::Tell { target, message }) if target == "Bestie" && message == "back at you"
+            Some(ClientCommand::Tell { target: ChatTellTarget::Player { name: target }, message }) if target == "Bestie" && message == "back at you"
         ));
     }
 
@@ -1462,7 +1464,7 @@ mod tests {
         assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::ChannelMessage { channel, message })
-                if *channel == ChatChannelKind::Allegiance
+                if *channel == ChatChannelDestination::Allegiance
                     && message == "assemble at the mansion"
         ));
     }
@@ -1541,7 +1543,7 @@ mod tests {
         assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::ChannelMessage { channel, message })
-                if *channel == ChatChannelKind::Fellowship && message == "buff check"
+                if *channel == ChatChannelDestination::Fellowship && message == "buff check"
         ));
     }
 

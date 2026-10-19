@@ -254,8 +254,8 @@ pub enum GameActionOpcode {
     // SetAfkMessage = 0x0010,
     /// C2S: Send chat message.
     Talk = 0x0015,
-    // /// C2S: Send direct message (similar to TELL).
-    // TalkDirect = 0x0032,
+    /// C2S: Send direct text to a creature by entity ID (including NPC dialogue).
+    TalkDirect = 0x0032,
     /// C2S: Send direct message/tell.
     Tell = 0x005D,
     // /// C2S: Add a custom chat channel.

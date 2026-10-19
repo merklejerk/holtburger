@@ -44,12 +44,13 @@ const keyboardSettingsBaseSchema = z
 			.readonly()
 			.default(INPUT_DEFAULTS.preciseJump),
 		client: z.preprocess(
-			// Preserve current bindings, fill older split-stack defaults, and retire the old step actions.
+			// Fill missing shortcut defaults without replacing saved bindings; retire old jump step actions.
 			(value) => {
 				if (typeof value !== "object" || value === null || Array.isArray(value))
 					return value;
 				const current = {
 					splitStack: INPUT_DEFAULTS.client.splitStack,
+					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
 					...value,
 				};
 				Reflect.deleteProperty(current, "preciseJumpPowerUp");

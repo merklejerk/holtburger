@@ -1445,6 +1445,7 @@ describe("ClientLifecycleSession", () => {
 		});
 		transport.emit("client-chat-message", {
 			kind: "speech",
+			category: "speech",
 			sender: "Mira",
 			speakerKind: "player",
 			message: "Hello",
@@ -1599,13 +1600,17 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
 	});
 
-	it("publishes party HUD presence only when another member appears or leaves", async () => {
+	it("publishes membership and HUD presence independently without publishing vital churn", async () => {
 		const transport = new FakeClientTransport();
 		transport.setCurrentState(currentState(1));
 		const session = new ClientLifecycleSession(transport);
 		const presence: boolean[] = [];
+		const membership: boolean[] = [];
 		session.subscribe((event) => {
-			if (event.type === "party-hud-presence") presence.push(event.present);
+			if (event.type === "party-presence") {
+				presence.push(event.hudPresent);
+				membership.push(event.inParty);
+			}
 		});
 		await session.start();
 		const members: PartySnapshot["members"] = [1, 2].map((guid) => ({
@@ -1643,12 +1648,14 @@ describe("ClientLifecycleSession", () => {
 				})),
 			},
 		});
-		expect(presence).toEqual([true]);
+		expect(presence).toEqual([false, true]);
+		expect(membership).toEqual([true, true]);
 		transport.emit("client-party-updated", { party });
-		expect(presence).toEqual([true, false]);
+		expect(presence).toEqual([false, true, false]);
 		transport.emit("client-party-updated", { party: joined });
 		session.stop();
-		expect(presence).toEqual([true, false, true, false]);
+		expect(presence).toEqual([false, true, false, true, false]);
+		expect(membership).toEqual([true, true, true, true, false]);
 	});
 
 	it("recovers party without a sibling event, preserves early hydration through revelation, and retires it on stop", async () => {
@@ -1885,9 +1892,11 @@ describe("ClientLifecycleSession", () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
 
-		await session.sendChat("Hello world");
+		await session.sendChat({ kind: "speech", message: "Hello world" });
 		expect(transport.calls).toEqual(["invoke:send_client_chat"]);
-		await expect(session.sendChat("   ")).rejects.toThrow("visible text");
+		await expect(
+			session.sendChat({ kind: "speech", message: "   " }),
+		).rejects.toThrow("visible text");
 		expect(transport.calls).toHaveLength(1);
 	});
 

@@ -100,6 +100,10 @@ export const INPUT_DEFAULTS = {
 		cancel: [{ key: "Escape" }],
 		/** Activate chat while the game owns the keyboard. */
 		chat: [{ key: "Enter", ctrl: false, alt: false, meta: false }],
+		/** Toggle history interaction outside editors; native selection copy takes precedence. */
+		toggleChatHistory: [
+			{ key: "c", ctrl: true, shift: false, alt: false, meta: false },
+		],
 		/** Scroll toward earlier messages while chat owns focus. */
 		chatPreviousPage: [{ key: "PageUp" }],
 		/** Scroll toward later messages while chat owns focus. */

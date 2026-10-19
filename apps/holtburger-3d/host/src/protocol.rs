@@ -1001,7 +1001,10 @@ mod tests {
                 panic!("original chat first");
             };
             assert!(
-                matches!(chat, crate::client_projection::ClientChatMessageWire::System { message: original } if original == message)
+                matches!(chat, crate::client_projection::ClientChatMessageWire::Server {
+                    message: original,
+                    category: crate::client_projection::ClientChatCategoryWire::Known(crate::client_projection::ClientChatKnownCategoryWire::Magic),
+                } if original == message)
             );
             let ProtocolFrame::Event {
                 event: HostEvent::ClientCombatOutcome(outcome),
@@ -1411,13 +1414,16 @@ mod tests {
             "id": 3,
             "command": {
                 "command": "send_client_chat",
-                "message": "Hello world",
+                "request": { "kind": "speech", "message": "Hello world" },
             },
         }))
         .unwrap();
         let mut reader = Cursor::new(framed_payload(chat));
         let Some(InboundFrame::Request {
-            command: HostCommand::Client(ClientHostCommand::SendClientChat { message }),
+            command:
+                HostCommand::Client(ClientHostCommand::SendClientChat {
+                    request: crate::client_runtime::ClientChatRequest::Speech { message },
+                }),
             ..
         }) = read_frame(&mut reader).unwrap()
         else {

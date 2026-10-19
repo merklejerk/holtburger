@@ -84,6 +84,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	preciseJump: "Aim precise jump",
 	cancel: "Cancel / clear selection",
 	chat: "Open chat",
+	toggleChatHistory: "Toggle chat history",
 	chatPreviousPage: "Earlier chat page",
 	chatNextPage: "Later chat page",
 };
@@ -117,14 +118,16 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 			? "Movement"
 			: action === "toggleCombat"
 				? "Combat"
-				: chatOnly || action === "chat"
+				: chatOnly || action === "chat" || action === "toggleChatHistory"
 					? "Chat"
 					: "Targeting & interaction";
 	const contexts: readonly BindingContext[] = chatOnly
 		? ["chat"]
-		: action === "cancel"
-			? [...GAME_CONTEXTS, "precise-jump", "focused-bar", "chat"]
-			: GAME_CONTEXTS;
+		: action === "toggleChatHistory"
+			? [...GAME_CONTEXTS, "chat"]
+			: action === "cancel"
+				? [...GAME_CONTEXTS, "precise-jump", "focused-bar", "chat"]
+				: GAME_CONTEXTS;
 	return {
 		reference: { kind: "client", action },
 		label: CLIENT_LABELS[action],
@@ -283,6 +286,13 @@ export function conflictingClientBindings(
 	return CLIENT_BINDING_ROWS.filter(
 		(other) =>
 			other.id !== row.id &&
+			// Chat scope activation consumes its toggle before movement can see the press.
+			!(
+				(row.id === "client.toggleChatHistory" &&
+					other.reference.kind === "character") ||
+				(other.id === "client.toggleChatHistory" &&
+					row.reference.kind === "character")
+			) &&
 			other.contexts.some((context) => row.contexts.includes(context)) &&
 			readClientBinding(settings, other.reference).some((binding) =>
 				clientBindingsOverlap(candidate, binding, witness),

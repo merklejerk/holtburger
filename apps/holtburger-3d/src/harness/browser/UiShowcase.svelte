@@ -10,6 +10,7 @@
 	import ClientStatusTray from "../../client/ClientStatusTray.svelte";
 	import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 	import ClientChat from "../../client/ClientChat.svelte";
+	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
 	import { recordSentChat } from "../../client/client-chat-input-history";
 	import { CLIENT_TUNING } from "../../client/client-tuning";
 	import ClientFpsCounter from "../../client/ClientFpsCounter.svelte";
@@ -160,6 +161,7 @@
 			{ guid: 2, name: "Lantern Keeper", slot: 1, deleteTime: 0 },
 		],
 	});
+	const chatComposer = new ClientChatComposer();
 	let messages = $state<ClientChatLine[]>([
 		{
 			id: 1,
@@ -171,6 +173,7 @@
 			id: 2,
 			receivedAt: new Date(2026, 0, 1, 20, 42),
 			kind: "speech",
+			category: "speech",
 			sender: "Traveler",
 			speakerKind: "player",
 			message: "Room by the fire?",
@@ -179,6 +182,8 @@
 			id: 3,
 			receivedAt: new Date(2026, 0, 1, 20, 42),
 			kind: "tell",
+			category: "tell",
+			target: { kind: "player", name: "Lantern Keeper" },
 			sender: "Lantern Keeper",
 			speakerKind: "player",
 			message: "Meet at the lifestone.",
@@ -187,6 +192,7 @@
 			id: 4,
 			receivedAt: new Date(2026, 0, 1, 20, 43),
 			kind: "channel",
+			origin: { kind: "turbine", roomId: 1, typeId: 1 },
 			channel: "allegiance",
 			sender: "Wayfarer",
 			speakerKind: "player",
@@ -222,6 +228,7 @@
 				id: messages.length + 1,
 				receivedAt: new Date(),
 				kind: "speech",
+				category: "speech",
 				sender: "Wayfarer",
 				speakerKind: "player",
 				message,
@@ -432,6 +439,7 @@
 					onSplit={() => {}}
 				/>{/snippet}
 			{#snippet chat()}<ClientChat
+					composer={chatComposer}
 					onSetWaypoint={(target) =>
 						(toastMessage = `Waypoint set: ${target.label}.`)}
 					{messages}

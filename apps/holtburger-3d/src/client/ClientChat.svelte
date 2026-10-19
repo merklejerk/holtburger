@@ -1,18 +1,28 @@
 <script lang="ts">
 	import ClientWaypointText from "./ClientWaypointText.svelte";
 	import ClientChatFormattedText from "./ClientChatFormattedText.svelte";
+	import ClientChatRecipientDialog from "./ClientChatRecipientDialog.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
-	import { tick } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import { tick } from "svelte";
+	import PopupMenu from "../app/PopupMenu.svelte";
+	import type { ClientChatComposer } from "./client-chat-composer.svelte";
+	import {
+		CHAT_CHANNEL_DESTINATIONS,
+		resolveChatCompose,
+		type ChatComposeResolution,
+	} from "./client-chat-compose";
+	import type { ClientChatDestination } from "./client-host-contract";
+	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		navigateSentChat,
 		type ChatInputRecall,
 	} from "./client-chat-input-history";
 	import {
 		CLIENT_CHAT_FILTER_TAGS,
-		clientChatChannelLabel,
+		clientChatMessageLabel,
 		clientChatFilterLabel,
 		clientChatFiltersAllow,
 		clientChatTone,
@@ -26,7 +36,12 @@
 		readonly messages: readonly ClientChatLine[];
 		/** App-owned locally queued input, oldest first. */
 		readonly sentHistory: readonly string[];
-		readonly onSend: (message: string) => Promise<void>;
+		readonly onSend: (
+			message: string,
+			resolution: ChatComposeResolution,
+		) => Promise<void>;
+		/** Session-owned destination and structured reply/retell addresses. */
+		readonly composer: ClientChatComposer;
 		/** Append submission failures to the app-owned durable chat buffer. */
 		readonly onSendError: (message: string) => void;
 		readonly enabledTags: readonly ClientChatFilterTag[];
@@ -40,6 +55,7 @@
 		messages,
 		sentHistory,
 		onSend,
+		composer,
 		onSendError,
 		enabledTags,
 		onEnabledTagsChange,
@@ -53,26 +69,126 @@
 	let recall = $state<ChatInputRecall | null>(null);
 	let sending = $state(false);
 	let bufferElement = $state<HTMLDivElement | null>(null);
-	/** Explicit history interaction enables selection and preserves the reader's scroll position. */
-	let historyInteractive = $state(false);
+	/** Deliberate history interaction survives editor blur and viewport clicks. */
+	let explicitHistory = $state(false);
+	/** Actual editor focus activates history without claiming a second keyboard owner. */
+	let editorFocused = $state(false);
+	/** The component-local prompt never replaces the completed destination until accepted. */
+	let recipientOpen = $state(false);
+	let menuAnchor = $state<HTMLButtonElement | null>(null);
+	let menuOpen = $state(false);
+	type DestinationAction =
+		"speech" | "tell" | "selected" | ClientChatDestination;
+	const destinationItems = $derived([
+		{ action: "speech" as const, label: "Local", disabled: false },
+		{ action: "tell" as const, label: "Tell…", disabled: false },
+		{
+			action: "selected" as const,
+			label:
+				composer.selection.kind === "target"
+					? `Tell selected → ${composer.selection.target.name}`
+					: "Tell selected",
+			disabled: composer.selection.kind !== "target",
+		},
+		...CHAT_CHANNEL_DESTINATIONS.map((entry) => ({
+			action: entry.channel,
+			label:
+				entry.channel === "fellowship" && !composer.inParty
+					? "Party (not in a party)"
+					: entry.label,
+			disabled: entry.channel === "fellowship" && !composer.inParty,
+		})),
+	]);
+	const resolution = $derived(
+		resolveChatCompose(message, {
+			destination: composer.destination,
+			reply: composer.reply,
+			retell: composer.retell,
+			selection: composer.selection,
+		}),
+	);
+	const historyInteractive = $derived(
+		explicitHistory || editorFocused || recipientOpen,
+	);
 	const visibleMessages = $derived(
 		messages.filter((line) => clientChatFiltersAllow(enabledTags, line)),
 	);
+	/** Imperative scroll intent; layout observations do not belong in the UI graph. */
+	let following = true;
+	let bufferReady = false;
+	let lastScrollTop = 0;
+
+	function atBottom(element: HTMLDivElement): boolean {
+		return (
+			element.scrollHeight - element.clientHeight - element.scrollTop <=
+			CLIENT_TUNING.chat.bottomToleranceCssPixels
+		);
+	}
+
+	function scrollToBottom(element: HTMLDivElement): void {
+		following = true;
+		element.scrollTop = element.scrollHeight;
+		lastScrollTop = element.scrollTop;
+	}
 
 	$effect(() => {
-		visibleMessages;
-		if (historyInteractive) return;
-		void tick().then(() => {
-			if (bufferElement && !historyInteractive)
-				bufferElement.scrollTop = bufferElement.scrollHeight;
-		});
+		// Ending history interaction immediately returns the HUD to live messages.
+		if (!historyInteractive && bufferElement !== null)
+			scrollToBottom(bufferElement);
 	});
+
+	$effect.pre(() => {
+		// A user can reach the bottom before the browser dispatches its queued scroll event.
+		// Capture the old DOM geometry before messages/filtering change its height.
+		void visibleMessages;
+		if (bufferReady && bufferElement !== null) {
+			following = !historyInteractive || atBottom(bufferElement);
+			// Its queued scroll notification must not recompute intent against the grown DOM.
+			lastScrollTop = bufferElement.scrollTop;
+		}
+	});
+
+	/** Native anchoring retains active reading positions; inactive history always follows. */
+	function followBuffer(element: HTMLDivElement): { destroy: () => void } {
+		const content = element.firstElementChild;
+		if (!(content instanceof HTMLElement))
+			throw new Error("Chat scroll content is missing.");
+		lastScrollTop = element.scrollTop;
+		const scroll = () => {
+			if (!historyInteractive) {
+				scrollToBottom(element);
+				return;
+			}
+			// Ignore our own scroll notification, which can arrive after another layout update.
+			if (element.scrollTop === lastScrollTop) return;
+			lastScrollTop = element.scrollTop;
+			following = atBottom(element);
+		};
+		const observer = new ResizeObserver(() => {
+			bufferReady = true;
+			// Filtering/retention can fit every line without changing scrollTop or emitting scroll.
+			following ||= !historyInteractive || atBottom(element);
+			if (!following) return;
+			scrollToBottom(element);
+		});
+		element.addEventListener("scroll", scroll);
+		observer.observe(element);
+		observer.observe(content);
+		return {
+			destroy: () => {
+				bufferReady = false;
+				observer.disconnect();
+				element.removeEventListener("scroll", scroll);
+			},
+		};
+	}
 
 	function handleKeydown(event: KeyboardEvent): void {
 		if (clientInput.shortcut("cancel", event)) {
 			event.preventDefault();
 			message = "";
 			recall = null;
+			explicitHistory = false;
 			keyboard.returnToGame();
 		} else if (
 			!event.ctrlKey &&
@@ -113,26 +229,96 @@
 	}
 
 	function toggleHistory(): void {
-		historyInteractive = !historyInteractive;
-		if (historyInteractive && bufferElement !== null)
+		explicitHistory = !explicitHistory;
+		if (explicitHistory && bufferElement !== null)
 			keyboard.activate(bufferElement);
 		else if (document.activeElement === bufferElement) keyboard.returnToGame();
+	}
+
+	function activateHistory(event: KeyboardEvent): boolean {
+		if (!clientInput.shortcut("toggleChatHistory", event)) return false;
+		if (explicitHistory) {
+			event.preventDefault();
+			explicitHistory = false;
+			return false;
+		}
+		explicitHistory = true;
+		return true;
+	}
+
+	function historyKeydown(event: KeyboardEvent): void {
+		if (
+			clientInput.shortcut("toggleChatHistory", event) ||
+			clientInput.shortcut("cancel", event)
+		) {
+			event.preventDefault();
+			if (event.repeat) return;
+			explicitHistory = false;
+			keyboard.returnToGame();
+		} else if (
+			clientInput.shortcut("chat", event) &&
+			document.activeElement === bufferElement &&
+			inputElement !== null
+		) {
+			// A focused coordinate link keeps its native Enter activation.
+			event.preventDefault();
+			keyboard.activate(inputElement);
+		} else scrollHistory(event);
 	}
 
 	async function submit(): Promise<void> {
 		const text = message.trim();
 		if (sending || text.length === 0) return;
+		const generation = composer.generation;
+		const resolved = resolution;
 		sending = true;
 		try {
-			await onSend(text);
-		} catch (error) {
-			onSendError(error instanceof Error ? error.message : String(error));
-		} finally {
-			sending = false;
+			await onSend(text, resolved);
+			if (composer.generation !== generation) return;
 			message = "";
 			recall = null;
 			if (document.activeElement === inputElement) keyboard.returnToGame();
+		} catch (error) {
+			if (composer.generation === generation)
+				onSendError(error instanceof Error ? error.message : String(error));
+		} finally {
+			if (composer.generation === generation) sending = false;
 		}
+	}
+
+	async function chooseDestination(action: DestinationAction): Promise<void> {
+		menuOpen = false;
+		const generation = composer.generation;
+		if (action === "tell") {
+			// Retire the popup's keyboard owner before the dialog focuses its recipient field.
+			await tick();
+			if (composer.generation === generation) recipientOpen = true;
+			return;
+		}
+		if (action === "speech") composer.destination = { kind: "speech" };
+		else if (action === "selected") {
+			if (composer.selection.kind !== "target") {
+				onSendError("Selected tell target is no longer available.");
+				return;
+			}
+			composer.destination = {
+				kind: "tell",
+				target: composer.selection.target,
+			};
+		} else composer.destination = { kind: "channel", channel: action };
+		await tick();
+		if (composer.generation === generation && inputElement !== null)
+			keyboard.activate(inputElement);
+	}
+
+	async function closeRecipient(name: string | null): Promise<void> {
+		if (name !== null)
+			composer.destination = { kind: "tell", target: { kind: "player", name } };
+		recipientOpen = false;
+		const generation = composer.generation;
+		await tick();
+		if (composer.generation === generation && inputElement !== null)
+			keyboard.activate(inputElement);
 	}
 
 	function toggleTag(tag: ClientChatFilterTag): void {
@@ -175,10 +361,7 @@
 			hour: "2-digit",
 			minute: "2-digit",
 		});
-		const channel =
-			line.kind === "channel"
-				? ` [${clientChatChannelLabel(line.channel)}]`
-				: "";
+		const channel = ` [${clientChatMessageLabel(line)}]`;
 		const sender = "sender" in line ? ` ${line.sender}` : "";
 		return `[${time}]${channel}${sender}`;
 	}
@@ -190,114 +373,172 @@
 	onblur={clearBufferHover}
 />
 
-<section class="chat-panel">
-	<div class="chat-history" class:interactive={historyInteractive}>
-		<div
-			bind:this={bufferElement}
-			class="chat-buffer ui-hud-surface"
-			data-pointer-hovered="false"
-			tabindex="-1"
-			role="log"
-			aria-live="polite"
-			aria-label="Chat messages"
-			use:keyboard.scope={{
-				nativeControls: true,
-				pointerActivation: true,
-				keydown: scrollHistory,
-			}}
-		>
-			{#each visibleMessages as line (line.id)}
-				{@const tone = clientChatTone(line)}
-				<p
-					class:chat-tone-tell={tone === "tell"}
-					class:chat-tone-emote={tone === "emote"}
-					class:chat-tone-npc={tone === "npc"}
-					class:chat-tone-combat={tone === "combat"}
-					class:chat-tone-system={tone === "system"}
-					class:chat-tone-error={tone === "error"}
-					class:chat-tone-party={tone === "party"}
-					class:chat-tone-guild={tone === "guild"}
-					class:chat-tone-trade={tone === "trade"}
-					class:chat-tone-society={tone === "society"}
-					class:chat-emphasized={line.kind === "combat" && line.emphasized}
-					class:chat-emote={line.kind === "emote"}
-				>
-					<strong>{linePrefix(line)}:</strong>
-					<span class="chat-message"
-						>{#if line.kind === "formatted-system"}<ClientChatFormattedText
-								rows={line.rows}
-								interactive={historyInteractive}
-								{onSetWaypoint}
-							/>{:else if historyInteractive}<ClientWaypointText
-								text={line.message}
-								{onSetWaypoint}
-							/>{:else}{line.message}{/if}</span
-					>
-				</p>
-			{/each}
-		</div>
-		<button
-			type="button"
-			class="chat-history-toggle ui-hud-button"
-			aria-label="Interact with chat history"
-			aria-pressed={historyInteractive}
-			title={historyInteractive
-				? "Disable chat history interaction"
-				: "Enable chat history interaction (select and copy)"}
-			onclick={toggleHistory}
-		>
-			<ClientHudIcon name="select-text" />
-		</button>
-	</div>
-	<div
-		class="chat-filters ui-hud-surface"
-		role="group"
-		aria-label="Message filters"
-	>
-		{#each CLIENT_CHAT_FILTER_TAGS as tag}
+<section class="chat-panel" class:interactive={historyInteractive}>
+	<div class="chat-content" inert={recipientOpen}>
+		<div class="chat-history" class:interactive={historyInteractive}>
+			<div
+				bind:this={bufferElement}
+				class="chat-buffer ui-hud-surface"
+				data-pointer-hovered="false"
+				tabindex="-1"
+				role="log"
+				aria-live="polite"
+				aria-label="Chat messages"
+				onpointerdown={() => {
+					explicitHistory = true;
+				}}
+				use:followBuffer
+				use:keyboard.scope={{
+					nativeControls: true,
+					pointerActivation: true,
+					activation: activateHistory,
+					keydown: historyKeydown,
+				}}
+			>
+				<div class="chat-lines">
+					{#each visibleMessages as line (line.id)}
+						{@const tone = clientChatTone(line)}
+						<p
+							class:chat-tone-tell={tone === "tell"}
+							class:chat-tone-emote={tone === "emote"}
+							class:chat-tone-npc={tone === "npc"}
+							class:chat-tone-combat={tone === "combat"}
+							class:chat-tone-system={tone === "system"}
+							class:chat-tone-error={tone === "error"}
+							class:chat-tone-party={tone === "party"}
+							class:chat-tone-guild={tone === "guild"}
+							class:chat-tone-trade={tone === "trade"}
+							class:chat-tone-society={tone === "society"}
+							class:chat-emphasized={line.kind === "combat" && line.emphasized}
+							class:chat-emote={line.kind === "emote" ||
+								line.kind === "soul-emote"}
+						>
+							<strong>{linePrefix(line)}:</strong>
+							<span class="chat-message"
+								>{#if line.kind === "formatted-system"}<ClientChatFormattedText
+										rows={line.rows}
+										interactive={historyInteractive}
+										{onSetWaypoint}
+									/>{:else if historyInteractive}<ClientWaypointText
+										text={line.message}
+										{onSetWaypoint}
+									/>{:else}{line.message}{/if}</span
+							>
+						</p>
+					{/each}
+				</div>
+			</div>
 			<button
 				type="button"
-				class="ui-button"
-				aria-pressed={enabledTags.includes(tag)}
-				onclick={() => toggleTag(tag)}
+				class="chat-history-toggle ui-hud-button"
+				aria-label="Interact with chat history"
+				aria-pressed={historyInteractive}
+				title={historyInteractive
+					? "Disable chat history interaction"
+					: "Enable chat history interaction (select and copy)"}
+				onclick={toggleHistory}
 			>
-				{clientChatFilterLabel(tag)}
+				<ClientHudIcon name="select-text" />
 			</button>
-		{/each}
-	</div>
-	<form
-		class="ui-hud-surface"
-		onsubmit={(event) => {
-			event.preventDefault();
-			void submit();
-		}}
-	>
-		<input
-			class="ui-input ui-hud-input"
-			bind:this={inputElement}
-			value={message}
-			oninput={(event) => {
-				message = event.currentTarget.value;
-				recall = null;
+		</div>
+		<div
+			class="chat-filters ui-hud-surface"
+			role="group"
+			aria-label="Message filters"
+		>
+			{#each CLIENT_CHAT_FILTER_TAGS as tag}
+				<button
+					type="button"
+					class="ui-filter-pill"
+					aria-pressed={enabledTags.includes(tag)}
+					onclick={() => toggleTag(tag)}
+				>
+					{clientChatFilterLabel(tag)}
+				</button>
+			{/each}
+		</div>
+		<form
+			class="ui-hud-surface"
+			onsubmit={(event) => {
+				event.preventDefault();
+				void submit();
 			}}
-			readonly={sending}
-			aria-label="Chat message"
-			autocomplete="off"
-			use:keyboard.scope={{
-				activation: (event) => clientInput.shortcut("chat", event),
-				keydown: handleKeydown,
+		>
+			<button
+				bind:this={menuAnchor}
+				type="button"
+				class="chat-channel ui-button"
+				tabindex="-1"
+				title="Choose chat destination"
+				aria-label="Chat destination"
+				aria-haspopup="menu"
+				aria-expanded={menuOpen}
+				onclick={() => {
+					menuOpen = !menuOpen;
+				}}
+			>
+				<span class="chat-channel-icon"
+					><ClientHudIcon name={resolution.buttonIcon} /></span
+				>
+				<span
+					class="chat-destination"
+					aria-live="polite"
+					title={resolution.kind === "error"
+						? resolution.message
+						: resolution.label}
+				>
+					{resolution.buttonLabel}
+				</span>
+			</button>
+
+			<input
+				class="ui-input ui-hud-input"
+				bind:this={inputElement}
+				value={message}
+				oninput={(event) => {
+					message = event.currentTarget.value;
+					recall = null;
+				}}
+				readonly={sending}
+				aria-label="Chat message"
+				placeholder="Message"
+				onfocus={() => {
+					editorFocused = true;
+				}}
+				onblur={() => {
+					editorFocused = false;
+				}}
+				autocomplete="off"
+				use:keyboard.scope={{
+					activation: (event) => clientInput.shortcut("chat", event),
+					keydown: handleKeydown,
+				}}
+			/>
+		</form>
+	</div>
+	{#if menuOpen && menuAnchor !== null}
+		<PopupMenu
+			anchor={menuAnchor}
+			label="Chat destination"
+			items={destinationItems}
+			onselect={(action) => {
+				void chooseDestination(action);
+			}}
+			onclose={() => {
+				menuOpen = false;
 			}}
 		/>
-		<button
-			type="button"
-			class="chat-channel ui-hud-button"
-			tabindex="-1"
-			title="Speech channel"
-			aria-label="Speech channel"
-		>
-			<ClientHudIcon name="speech" />
-		</button>
-	</form>
+	{/if}
+	{#if recipientOpen}
+		<ClientChatRecipientDialog
+			onSubmit={(name) => {
+				void closeRecipient(name);
+			}}
+			onCancel={() => {
+				void closeRecipient(null);
+			}}
+		/>
+	{/if}
 </section>
 
 <style>
@@ -314,6 +555,7 @@
 
 	@layer components {
 		.chat-panel {
+			position: relative;
 			display: grid;
 			box-sizing: border-box;
 			height: 100%;
@@ -325,17 +567,22 @@
 			text-shadow: 0 1px 2px var(--ui-color-shadow);
 			user-select: none;
 		}
+		.chat-content {
+			display: contents;
+		}
+		.chat-panel.interactive {
+			/* Enclose the complete HUD without reserving space between its rows. */
+			outline: 1px solid var(--ui-color-accent);
+			outline-offset: -1px;
+		}
 		.chat-filters {
 			display: flex;
-			gap: 2px;
+			flex-wrap: wrap;
+			gap: var(--ui-spell-filter-gap);
 			padding: 0 3px 3px;
 			background: var(--_ui-hud-background-color);
 			pointer-events: auto;
 			user-select: auto;
-		}
-		.chat-filters button {
-			min-height: 22px;
-			padding: 2px 8px;
 		}
 		.chat-history {
 			position: relative;
@@ -389,7 +636,7 @@
 				scrollbar-color 160ms ease-out;
 		}
 		.chat-buffer:focus {
-			/* Keyboard ownership enables copying without adding a border to the HUD. */
+			/* The complete, unmasked chat HUD owns the active border. */
 			outline: none;
 			pointer-events: auto;
 		}
@@ -476,25 +723,45 @@
 			color: var(--ui-chat-society-text);
 		}
 		form {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) 28px;
+			display: flex;
+			align-items: center;
 			gap: 3px;
 			padding: 3px;
 			background: var(--_ui-hud-background-color);
 			pointer-events: auto;
 			user-select: auto;
 		}
+		.chat-destination {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			font-size: 0.85em;
+			color: var(--ui-color-muted);
+		}
 		input {
+			flex: 1;
 			box-sizing: border-box;
+			min-width: 0;
 			width: 100%;
 			height: 25px;
 			padding: 2px 6px;
 		}
 		.chat-channel {
-			width: 28px;
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			min-width: 28px;
+			max-width: 40%;
 			height: 25px;
 			min-height: 0;
-			padding: 5px;
+			padding: 2px 5px;
+		}
+		.chat-channel-icon {
+			/* HUD SVGs fill their parent through inline styles; constrain that parent. */
+			flex: none;
+			width: 16px;
+			height: 16px;
 		}
 		@media (prefers-reduced-motion: reduce) {
 			.chat-buffer,

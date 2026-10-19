@@ -13,6 +13,7 @@
 	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
 	import DebugIcon from "../assets/icons/hud-debug.svg?component";
 	import SpeechIcon from "../assets/icons/hud-speech.svg?component";
+	import TellIcon from "../assets/icons/hud-tell.svg?component";
 	import PreciseJumpIcon from "../assets/icons/hud-precise-jump.svg?component";
 	import InteractIcon from "../assets/icons/hud-interact.svg?component";
 	import SplitIcon from "../assets/icons/hud-split.svg?component";
@@ -48,6 +49,8 @@
 		| "settings"
 		| "debug"
 		| "speech"
+		/** Envelope identifies a private tell destination. */
+		| "tell"
 		| "precise-jump"
 		| "interact"
 		| "trade"
@@ -96,6 +99,7 @@
 		settings: SettingsIcon,
 		debug: DebugIcon,
 		speech: SpeechIcon,
+		tell: TellIcon,
 		"precise-jump": PreciseJumpIcon,
 		interact: InteractIcon,
 		trade: TradeIcon,

@@ -31,6 +31,25 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("keeps chat activation ahead of movement but detects competing activations", () => {
+		const toggle = row("client.toggleChatHistory");
+		expect(
+			conflictingClientBindings(
+				CLIENT_KEYBOARD_DEFAULTS,
+				toggle,
+				{ key: "c", ctrl: true },
+				null,
+			),
+		).toEqual([]);
+		expect(
+			conflictingClientBindings(
+				CLIENT_KEYBOARD_DEFAULTS,
+				toggle,
+				{ key: "Enter" },
+				null,
+			).map((entry) => entry.id),
+		).toContain("client.chat");
+	});
 	it("covers the independent persisted keyboard address universe", () => {
 		const expected: string[] = [];
 		for (const [group, entries] of Object.entries(CLIENT_KEYBOARD_DEFAULTS)) {

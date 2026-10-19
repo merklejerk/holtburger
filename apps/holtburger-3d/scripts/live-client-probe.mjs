@@ -811,7 +811,7 @@ async function main() {
 				: [];
 		const teleportRequests = teleportCommands.map((command) => ({
 			command: "send_client_chat",
-			args: { message: command },
+			args: { request: { kind: "speech", message: command } },
 		}));
 		if (requestedMapPoint !== undefined) {
 			if (!currentState.canTeleportFromMap)

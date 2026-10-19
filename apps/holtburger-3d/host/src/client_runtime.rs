@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use holtburger_common::CharacterOption;
 use holtburger_core::ClientCommand;
+use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
 use serde::Deserialize;
 
 use crate::client_host::run_client_task;
@@ -13,6 +14,68 @@ use crate::host_event_sink::ClientEventSink;
 use crate::host_mode::ClientLaunchConfiguration;
 use crate::protocol::{HostResponse, ProtocolError, application_error};
 use crate::shared_host_content::SharedHostContent;
+
+/// Typed chat intent; command spelling and destination selection remain frontend-owned.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientChatRequest {
+    Speech {
+        message: String,
+    },
+    Tell {
+        target: ChatTellTarget,
+        message: String,
+    },
+    Channel {
+        channel: ChatChannelDestination,
+        message: String,
+    },
+    Emote {
+        message: String,
+    },
+}
+
+impl ClientChatRequest {
+    /// Validate the independently callable host boundary before enqueueing a core command.
+    fn into_command(self) -> Result<ClientCommand> {
+        let message = match &self {
+            Self::Speech { message }
+            | Self::Tell { message, .. }
+            | Self::Channel { message, .. }
+            | Self::Emote { message } => message,
+        };
+        ensure!(
+            !message.trim().is_empty(),
+            "Chat message must contain visible text."
+        );
+        Ok(match self {
+            Self::Speech { message } => ClientCommand::Talk(message),
+            Self::Tell { target, message } => {
+                match &target {
+                    ChatTellTarget::Player { name } => ensure!(
+                        !name.trim().is_empty(),
+                        "Tell recipient name must contain visible text."
+                    ),
+                    ChatTellTarget::Npc { guid, name } => {
+                        ensure!(
+                            guid.is_static_object() || guid.is_dynamic_object(),
+                            "NPC tell target must be a creature entity ID."
+                        );
+                        ensure!(
+                            !name.trim().is_empty(),
+                            "NPC tell target label must contain visible text."
+                        );
+                    }
+                }
+                ClientCommand::Tell { target, message }
+            }
+            Self::Channel { channel, message } => {
+                ClientCommand::ChannelMessage { channel, message }
+            }
+            Self::Emote { message } => ClientCommand::Emote(message),
+        })
+    }
+}
 
 /// Canonical scene map-plane coordinates (X east, Z south), without an invented height.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -442,7 +505,7 @@ pub enum ClientHostCommand {
     /// Frontend has already confirmed the user's intent.
     KillClientCharacter,
     SendClientChat {
-        message: String,
+        request: ClientChatRequest,
     },
     /// Canonical horizontal map point; ACE owns destination height.
     TeleportClientToMapPosition {
@@ -817,12 +880,9 @@ impl ClientHostRuntime {
         self.send_command(ClientCommand::Disconnect).await
     }
 
-    /// Submit ordinary chat text after app-local command handling.
-    pub async fn send_chat(&self, message: String) -> Result<()> {
-        if message.trim().is_empty() {
-            bail!("client chat message must contain visible text");
-        }
-        self.send_command(ClientCommand::Talk(message)).await
+    /// Enqueue one validated chat intent; this does not acknowledge server delivery.
+    pub async fn send_chat(&self, request: ClientChatRequest) -> Result<()> {
+        self.send_command(request.into_command()?).await
     }
 
     /// Stops command intake, asks core to disconnect, and bounds the owned task lifetime.
@@ -1158,8 +1218,8 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        SendClientChat { message } => runtime
-            .send_chat(message)
+        SendClientChat { request } => runtime
+            .send_chat(request)
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
@@ -1232,6 +1292,33 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_requests_preserve_target_kind_and_reject_invalid_payloads_before_enqueue() {
+        let request: ClientChatRequest = serde_json::from_value(serde_json::json!({
+            "kind": "tell", "target": { "kind": "npc", "guid": 0x8000_0001_u32, "name": "Professor" }, "message": "level 1"
+        })).unwrap();
+        assert!(
+            matches!(request.into_command().unwrap(), ClientCommand::Tell {
+            target: ChatTellTarget::Npc { guid: holtburger_common::Guid(0x8000_0001), .. }, message
+        } if message == "level 1")
+        );
+        for payload in [
+            serde_json::json!({ "kind": "speech", "message": "   " }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "player", "name": " " }, "message": "hello" }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "npc", "guid": 0, "name": "Professor" }, "message": "level 1" }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "npc", "guid": 0x5000_0001_u32, "name": "Player" }, "message": "hello" }),
+        ] {
+            let parsed: ClientChatRequest = serde_json::from_value(payload).unwrap();
+            assert!(parsed.into_command().is_err());
+        }
+        for payload in [
+            serde_json::json!({ "kind": "channel", "channel": "fellowship-broadcast", "message": "hello" }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "player", "name": "Player", "guid": 42 }, "message": "hello" }),
+        ] {
+            assert!(serde_json::from_value::<ClientChatRequest>(payload).is_err());
+        }
+    }
 
     #[test]
     fn recall_command_decodes_the_frontend_destination_identity() {

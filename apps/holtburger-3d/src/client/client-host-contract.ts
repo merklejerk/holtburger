@@ -182,7 +182,80 @@ const vitalSchema = z
 
 const chatChannelSchema = z.enum([
 	"fellowship",
+	"fellowship-broadcast",
 	"allegiance",
+	"allegiance-broadcast",
+	"vassals",
+	"patron",
+	"monarch",
+	"co-vassals",
+	"general",
+	"trade",
+	"lfg",
+	"roleplay",
+	"society",
+	"society-celestial-hand",
+	"society-eldrytch-web",
+	"society-radiant-blood",
+	"olthoi",
+	"unknown",
+]);
+const chatSpeakerKindSchema = z.enum(["player", "non-player", "unknown"]);
+
+/** Player names and NPC entity identities have different server routes. */
+const clientChatTellTargetSchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("player"), name: z.string().trim().min(1) })
+		.strict(),
+	z
+		.object({
+			kind: z.literal("npc"),
+			guid: guid.refine(
+				(value) => value !== 0,
+				"NPC target ID must be nonzero",
+			),
+			name: z.string().min(1),
+		})
+		.strict(),
+]);
+const chatKnownCategorySchema = z.enum([
+	"broadcast",
+	"all-channels",
+	"speech",
+	"tell",
+	"outgoing-tell",
+	"system",
+	"combat",
+	"magic",
+	"channel",
+	"channel-send",
+	"social",
+	"social-send",
+	"emote",
+	"advancement",
+	"abuse",
+	"help",
+	"appraisal",
+	"spellcasting",
+	"allegiance",
+	"fellowship",
+	"world-broadcast",
+	"combat-enemy",
+	"combat-self",
+	"recall",
+	"craft",
+	"salvaging",
+	"admin-tell",
+]);
+const chatCategorySchema = z.union([
+	chatKnownCategorySchema,
+	z.object({ raw: guid }).strict(),
+]);
+/** Sendable destinations exclude receive-only notifications, society subrooms, and unknown IDs. */
+export const clientChatDestinationSchema = z.enum([
+	"fellowship",
+	"allegiance",
+	"allegiance-broadcast",
 	"vassals",
 	"patron",
 	"monarch",
@@ -193,34 +266,78 @@ const chatChannelSchema = z.enum([
 	"roleplay",
 	"society",
 	"olthoi",
-	"unknown",
 ]);
-const chatSpeakerKindSchema = z.enum(["player", "non-player", "unknown"]);
-
-const chatMessageSchema = z.discriminatedUnion("kind", [
+const chatBodySchema = z
+	.string()
+	.refine(
+		(message) => message.trim().length > 0,
+		"Chat message must contain visible text.",
+	);
+/** One explicit submission shared by picker, command resolver, and host adapter. */
+export const clientChatRequestSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("speech"), message: chatBodySchema }).strict(),
 	z
 		.object({
-			kind: z.enum(["speech", "tell", "emote"]),
-			sender: z.string(),
-			speakerKind: chatSpeakerKindSchema,
-			message: z.string(),
+			kind: z.literal("tell"),
+			target: clientChatTellTargetSchema,
+			message: chatBodySchema,
 		})
 		.strict(),
 	z
 		.object({
 			kind: z.literal("channel"),
-			channel: chatChannelSchema,
-			sender: z.string(),
-			speakerKind: chatSpeakerKindSchema,
-			message: z.string(),
+			channel: clientChatDestinationSchema,
+			message: chatBodySchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("emote"), message: chatBodySchema }).strict(),
+]);
+const chatSpeakerFields = {
+	sender: z.string(),
+	speakerKind: chatSpeakerKindSchema,
+	message: z.string(),
+};
+const chatMessageSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("error"), message: z.string() }).strict(),
+	z
+		.object({
+			kind: z.literal("speech"),
+			category: chatCategorySchema,
+			...chatSpeakerFields,
 		})
 		.strict(),
 	z
 		.object({
-			kind: z.literal("system"),
+			kind: z.literal("tell"),
+			category: chatCategorySchema,
+			target: clientChatTellTargetSchema.nullable(),
+			...chatSpeakerFields,
+		})
+		.strict(),
+	z
+		.object({ kind: z.enum(["emote", "soul-emote"]), ...chatSpeakerFields })
+		.strict(),
+	z
+		.object({
+			kind: z.literal("channel"),
+			channel: chatChannelSchema,
+			origin: z.discriminatedUnion("kind", [
+				z.object({ kind: z.literal("legacy"), channelId: guid }).strict(),
+				z
+					.object({ kind: z.literal("turbine"), roomId: guid, typeId: guid })
+					.strict(),
+			]),
+			...chatSpeakerFields,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("server"),
+			category: chatCategorySchema,
 			message: z.string(),
 		})
 		.strict(),
+	z.object({ kind: z.literal("system"), message: z.string() }).strict(),
 	z
 		.object({
 			kind: z.literal("combat"),
@@ -909,6 +1026,10 @@ export type ClientLocalPlayerEstablished = z.infer<
 export type ClientExitRequested = z.infer<typeof exitRequestedSchema>;
 export type ClientVital = z.infer<typeof vitalSchema>;
 export type ClientChatChannel = z.infer<typeof chatChannelSchema>;
+export type ClientChatCategory = z.infer<typeof chatCategorySchema>;
+export type ClientChatTellTarget = z.infer<typeof clientChatTellTargetSchema>;
+export type ClientChatDestination = z.infer<typeof clientChatDestinationSchema>;
+export type ClientChatRequest = z.infer<typeof clientChatRequestSchema>;
 export type ClientChatMessage = z.infer<typeof chatMessageSchema>;
 export type ClientPlayerEntered = z.infer<typeof playerEnteredSchema>;
 export type ClientDynamicScriptCue = z.infer<typeof dynamicScriptCueSchema>;

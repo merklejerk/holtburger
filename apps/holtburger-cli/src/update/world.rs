@@ -147,6 +147,7 @@ impl AppState {
                 | ClientViewEvent::Chat { .. }
                 | ClientViewEvent::ChannelMessage { .. }
                 | ClientViewEvent::Tell { .. }
+                | ClientViewEvent::ChatError { .. }
                 | ClientViewEvent::Emote { .. }
                 | ClientViewEvent::SoulEmote { .. }
                 | ClientViewEvent::ItemManaResponse { .. }

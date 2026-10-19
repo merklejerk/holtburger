@@ -244,7 +244,10 @@ impl GameState {
                 commands: vec![ClientCommand::Talk(message)],
             }),
             ScriptIntent::Tell { target, message } => Ok(AppAction::SendCommands {
-                commands: vec![ClientCommand::Tell { target, message }],
+                commands: vec![ClientCommand::Tell {
+                    target: holtburger_core::client::types::ChatTellTarget::Player { name: target },
+                    message,
+                }],
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
             ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),

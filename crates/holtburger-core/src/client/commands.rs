@@ -3,7 +3,8 @@ use crate::client::progression::{
     ClientProgressionRejection,
 };
 use crate::client::types::{
-    ActionResultReason, ActionResultSource, ClientCommand, ClientExitCause, ClientViewEvent,
+    ActionResultReason, ActionResultSource, ChatTellTarget, ClientCommand, ClientExitCause,
+    ClientViewEvent,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
@@ -23,23 +24,25 @@ fn render_soul_emote_text(text: &str) -> String {
 }
 
 impl ClientRuntime {
-    fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
+    fn resolve_legacy_channel(
+        kind: crate::client::types::ChatChannelDestination,
+    ) -> Option<ChatChannel> {
         match kind {
-            crate::client::types::ChatChannelKind::Fellowship => Some(ChatChannel::Fellow),
-            crate::client::types::ChatChannelKind::Allegiance => {
+            crate::client::types::ChatChannelDestination::Fellowship => Some(ChatChannel::Fellow),
+            crate::client::types::ChatChannelDestination::AllegianceBroadcast => {
                 Some(ChatChannel::AllegianceBroadcast)
             }
-            crate::client::types::ChatChannelKind::Vassals => Some(ChatChannel::Vassals),
-            crate::client::types::ChatChannelKind::Patron => Some(ChatChannel::Patron),
-            crate::client::types::ChatChannelKind::Monarch => Some(ChatChannel::Monarch),
-            crate::client::types::ChatChannelKind::CoVassals => Some(ChatChannel::CoVassals),
+            crate::client::types::ChatChannelDestination::Vassals => Some(ChatChannel::Vassals),
+            crate::client::types::ChatChannelDestination::Patron => Some(ChatChannel::Patron),
+            crate::client::types::ChatChannelDestination::Monarch => Some(ChatChannel::Monarch),
+            crate::client::types::ChatChannelDestination::CoVassals => Some(ChatChannel::CoVassals),
             _ => None,
         }
     }
 
     fn resolve_turbine_channel(
         &self,
-        kind: crate::client::types::ChatChannelKind,
+        kind: crate::client::types::ChatChannelDestination,
     ) -> Option<(TurbineChatChannelId, TurbineChatType)> {
         if !self.turbine_chat.enabled {
             return None;
@@ -48,25 +51,25 @@ impl ClientRuntime {
         let channels = self.turbine_chat.channels.as_ref()?;
 
         match kind {
-            crate::client::types::ChatChannelKind::Allegiance => channels
+            crate::client::types::ChatChannelDestination::Allegiance => channels
                 .allegiance
                 .map(|channel| (channel, TurbineChatType::Allegiance)),
-            crate::client::types::ChatChannelKind::General => channels
+            crate::client::types::ChatChannelDestination::General => channels
                 .channel_for_type(TurbineChatType::General)
                 .map(|channel| (channel, TurbineChatType::General)),
-            crate::client::types::ChatChannelKind::Trade => channels
+            crate::client::types::ChatChannelDestination::Trade => channels
                 .channel_for_type(TurbineChatType::Trade)
                 .map(|channel| (channel, TurbineChatType::Trade)),
-            crate::client::types::ChatChannelKind::Lfg => channels
+            crate::client::types::ChatChannelDestination::Lfg => channels
                 .channel_for_type(TurbineChatType::Lfg)
                 .map(|channel| (channel, TurbineChatType::Lfg)),
-            crate::client::types::ChatChannelKind::Roleplay => channels
+            crate::client::types::ChatChannelDestination::Roleplay => channels
                 .channel_for_type(TurbineChatType::Roleplay)
                 .map(|channel| (channel, TurbineChatType::Roleplay)),
-            crate::client::types::ChatChannelKind::Society => channels
+            crate::client::types::ChatChannelDestination::Society => channels
                 .channel_for_type(TurbineChatType::Society)
                 .map(|channel| (channel, TurbineChatType::Society)),
-            crate::client::types::ChatChannelKind::Olthoi => channels
+            crate::client::types::ChatChannelDestination::Olthoi => channels
                 .channel_for_type(TurbineChatType::Olthoi)
                 .map(|channel| (channel, TurbineChatType::Olthoi)),
             _ => None,
@@ -506,12 +509,20 @@ impl ClientRuntime {
                 self.send_talk(&text).await
             }
             ClientCommand::Tell { target, message } => {
-                log::info!(">>> You tell {}, \"{}\"", target, message);
-                self.send_game_action(GameAction::Tell(Box::new(TellActionData {
-                    target,
-                    message,
-                })))
-                .await
+                log::info!(">>> Tell {:?}: {}", target, message);
+                let action = match target {
+                    ChatTellTarget::Player { name } => GameAction::Tell(Box::new(TellActionData {
+                        target: name,
+                        message,
+                    })),
+                    ChatTellTarget::Npc { guid, .. } => {
+                        GameAction::TalkDirect(Box::new(TalkDirectActionData {
+                            target: guid.0,
+                            message,
+                        }))
+                    }
+                };
+                self.send_game_action(action).await
             }
             ClientCommand::ChannelMessage { channel, message } => {
                 log::info!(">>> You send {:?}: \"{}\"", channel, message);
@@ -556,13 +567,12 @@ impl ClientRuntime {
                         .await;
                 }
 
-                self.emit_action_result(
-                    ActionResultSource::Client,
-                    ActionResultReason::General(format!(
+                let _ = self.client_view_event_tx.send(ClientViewEvent::ChatError {
+                    message: format!(
                         "No supported chat transport is available for {:?}.",
                         channel
-                    )),
-                );
+                    ),
+                });
                 Ok(())
             }
             ClientCommand::Emote(text) => {
@@ -1179,6 +1189,36 @@ mod tests {
             )]),
         });
         client
+    }
+
+    #[tokio::test]
+    async fn unavailable_allegiance_chat_never_substitutes_a_privileged_broadcast() {
+        use crate::client::types::ChatChannelDestination;
+        let mut client = build_test_client();
+        client.turbine_chat.enabled = false;
+        let mut events = client.subscribe_client_view_events();
+        let before = client.session.game_action_sequence;
+        client
+            .handle_command(ClientCommand::ChannelMessage {
+                channel: ChatChannelDestination::Allegiance,
+                message: "hello".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before);
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::ChatError { .. }
+        ));
+        assert!(matches!(client.state, ClientState::InWorld));
+        client
+            .handle_command(ClientCommand::ChannelMessage {
+                channel: ChatChannelDestination::AllegianceBroadcast,
+                message: "notice".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before + 1);
     }
 
     #[tokio::test]

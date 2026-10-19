@@ -185,6 +185,14 @@ export async function probeWaypointContent(client, evaluate) {
 	);
 	await key("Escape", "Escape", 27, 0);
 	await read("document.getSelection().removeAllRanges()");
+	assert.equal(
+		await read(
+			"document.querySelectorAll('.chat-message .waypoint-link').length",
+		),
+		0,
+		"Editor Escape ends explicit history interaction",
+	);
+	await click('[aria-label="Interact with chat history"]');
 	// Double-click-and-drag is another native selection gesture; record whether this headless browser extends it.
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mouseMoved",

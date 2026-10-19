@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeClientChat } from "./client-chat-probe.mjs";
 
 /** Drive actual browser defaults; DOM-dispatched keyboard events cannot prove focus or native control behavior. */
 export async function probeKeyboardPolicy(client, evaluateExpression) {
@@ -235,10 +236,12 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		await key("keyDown", "c", "KeyC", 67, { modifiers: 2 });
 		assert.equal(
 			(await capture()).movement.right,
-			1,
-			"Modified gameplay keys retain their configured wildcard semantics without a selection",
+			0,
+			"Chat activation consumes Ctrl+C before wildcard gameplay movement",
 		);
 		await key("keyUp", "c", "KeyC", 67);
+		assert.equal((await capture()).focusLabel, "Chat messages");
+		await press("Escape", "Escape", 27);
 		const ordinarySelectedText = await invoke("selectOrdinaryText");
 		assert.equal(
 			ordinarySelectedText,
@@ -426,6 +429,34 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 				backgroundImage: getComputedStyle(buffer).backgroundImage,
 				pressed: document.querySelector(${JSON.stringify(historyToggle)}).getAttribute('aria-pressed') };
 		})()`);
+		await click(chatInput);
+		assert.equal(
+			(await historyState()).pressed,
+			"true",
+			"Editor focus activates history",
+		);
+		await press("Escape", "Escape", 27);
+		await press("c", "KeyC", 67, { modifiers: 2 });
+		assert.equal((await capture()).focusLabel, "Chat messages");
+		assert.equal(
+			(await capture()).movement.right,
+			0,
+			"History activation consumes wildcard strafe input",
+		);
+		await key("keyDown", "c", "KeyC", 67, { modifiers: 2, autoRepeat: true });
+		assert.equal(
+			(await historyState()).pressed,
+			"true",
+			"Repeats do not toggle history",
+		);
+		await key("keyUp", "c", "KeyC", 67);
+		await press("Enter", "Enter", 13);
+		assert.equal(
+			(await capture()).focusLabel,
+			"Chat message",
+			"Enter hands history ownership to the composer",
+		);
+		await press("Escape", "Escape", 27);
 		const settleHistoryAnimations = () =>
 			evaluate(
 				`Promise.all(document.querySelector('.chat-buffer').getAnimations({ subtree: true }).map(animation => animation.finished))`,
@@ -504,7 +535,11 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			"Chat message",
 			"Disabling history interaction does not interrupt draft editing",
 		);
-		assert.equal((await historyState()).pointerEvents, "none");
+		assert.equal(
+			(await historyState()).pointerEvents,
+			"auto",
+			"Editor focus keeps history active after explicit activation ends",
+		);
 		await press("Escape", "Escape", 27);
 		await click(historyToggle);
 		await invoke("openModal");
@@ -542,6 +577,121 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		await press("Escape", "Escape", 27);
 		assert.equal((await capture()).gameActive, true);
 		assert.equal((await historyState()).pressed, "false");
+
+		const scrollState = () =>
+			evaluate(`(() => {
+			const buffer = document.querySelector('.chat-buffer');
+			return { top: buffer.scrollTop, remaining: buffer.scrollHeight - buffer.clientHeight - buffer.scrollTop };
+		})()`);
+		const appendChat = async (count) => {
+			await evaluate(`${api}.appendChatLines(${count})`);
+			await evaluate(
+				"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+			);
+		};
+		await appendChat(60);
+		assert.equal(
+			(await scrollState()).remaining,
+			0,
+			"Inactive history follows incoming lines at the bottom",
+		);
+		await evaluate("getSelection().removeAllRanges()");
+		await press("c", "KeyC", 67, { modifiers: 2 });
+		await appendChat(1);
+		assert.equal(
+			(await scrollState()).remaining,
+			0,
+			"Active history also follows incoming lines at the bottom",
+		);
+		await evaluate(`document.querySelector('.chat-buffer').scrollTop = 0`);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		const readingTop = (await scrollState()).top;
+		await appendChat(1);
+		assert.equal(
+			(await scrollState()).top,
+			readingTop,
+			"Incoming lines preserve an older reading position",
+		);
+		await evaluate(`${api}.retainChatLines(50)`);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		assert.ok(
+			(await scrollState()).remaining > 0,
+			"Retention does not force a reader to the bottom",
+		);
+		await click(".chat-filters button:first-child");
+		assert.ok(
+			(await scrollState()).remaining > 0,
+			"Filtering does not force a reader to the bottom",
+		);
+		await click(".chat-filters button:first-child");
+		const retainedTop = (await scrollState()).top;
+		await appendChat(1);
+		assert.equal(
+			(await scrollState()).top,
+			retainedTop,
+			"Following stays paused after retention/filter changes",
+		);
+		await evaluate(
+			`(() => { const buffer = document.querySelector('.chat-buffer'); buffer.scrollTop = buffer.scrollHeight; ${api}.appendChatLines(1); })()`,
+		);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		assert.equal(
+			(await scrollState()).remaining,
+			0,
+			"A message arriving before the queued bottom-scroll event must still follow",
+		);
+		await evaluate(
+			`(() => { const buffer = document.querySelector('.chat-buffer'); buffer.scrollTop = buffer.scrollHeight; })()`,
+		);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		await appendChat(1);
+		assert.equal(
+			(await scrollState()).remaining,
+			0,
+			"Returning to the bottom resumes following",
+		);
+		await evaluate(
+			`document.querySelector('.chat-buffer').style.maxHeight = '100px'`,
+		);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		assert.equal(
+			(await scrollState()).remaining,
+			0,
+			"Resize keeps a bottomed-out buffer following",
+		);
+		await evaluate(`document.querySelector('.chat-buffer').scrollTop = 0`);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		await evaluate(`${api}.retainChatLines(1)`);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		await evaluate(
+			`document.querySelector('.chat-buffer').style.maxHeight = '1px'`,
+		);
+		await evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		assert.equal(
+			(await scrollState()).remaining,
+			0,
+			"Retention that fits the whole history resumes bottom-following on later resize",
+		);
+		await evaluate(
+			`document.querySelector('.chat-buffer').style.removeProperty('max-height')`,
+		);
+		await press("Escape", "Escape", 27);
 
 		// A real HUD window and an independently active command share one recency order.
 		await click("#keyboard-viewport");
@@ -592,7 +742,10 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		assert.equal((await capture()).activityCancellations, 2);
 		await press("Escape", "Escape", 27);
 		assert.equal(await inventoryOpen(), false);
+		// Retire the overlay before exercising production chat; short histories can overlap it.
+		await invoke("dispose");
 		return {
+			chatComposer: await probeClientChat(client, evaluateExpression),
 			contextualEscape: true,
 			nativeControls: true,
 			pointerControlsPreserveGame: true,

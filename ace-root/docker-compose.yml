@@ -1,4 +1,3 @@
-#version: '3'
 services:
 
   ace-db:
@@ -13,22 +12,3 @@ services:
     restart: "no"
     healthcheck:
         test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-
-  ace-server:
-    build: ../ACE
-    depends_on:
-      ace-db:
-        condition: service_healthy
-    container_name: ace-holtburger-server
-    env_file:
-      - docker.env
-    volumes:
-      - ./config:/ace/Config
-      - ./content:/ace/Content
-      - ./dats:/ace/Dats
-      - ./logs:/ace/Logs
-      - ./mods:/ace/Mods
-    ports:
-      - "127.0.0.1:9000-9001:9000-9001/udp"
-    stdin_open: true
-    restart: "no"

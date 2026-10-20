@@ -1238,7 +1238,7 @@ fn test_empty_world_uses_synthetic_reference_data() {
     assert_eq!(state.xp_table.character_level_xp_list, vec![0]);
     assert!(state.skill_table.skill_base_hash.is_empty());
     assert!(state.spell_catalog.spells.is_empty());
-    assert!(state.soul_emote_catalog.tokens.is_empty());
+    assert!(state.soul_emote_catalog.tokens().is_empty());
 }
 
 #[test]

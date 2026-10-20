@@ -291,6 +291,9 @@ export const clientChatRequestSchema = z.discriminatedUnion("kind", [
 		})
 		.strict(),
 	z.object({ kind: z.literal("emote"), message: chatBodySchema }).strict(),
+	z
+		.object({ kind: z.literal("soul-emote"), token: z.string().trim().min(1) })
+		.strict(),
 ]);
 const chatSpeakerFields = {
 	sender: z.string(),

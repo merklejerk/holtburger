@@ -1,6 +1,5 @@
 use crate::entity::{
-    EntityManager, EntityMotionAction, EntityMotionActionRejection, EntityMotionAdmission,
-    EntityMotionSnapshot,
+    EntityManager, EntityMotionAdmission, EntityMotionSnapshot, OrderedMotionScalar,
 };
 use crate::motion::{
     CharacterMotionPresentation, LocomotionPresentationSource, MotionCommand, MotionOrder,
@@ -165,21 +164,24 @@ pub struct AuthoredBodyMotionTick {
     pub tick: SequenceTick,
 }
 
-/// Why a client-authored transient edge could not enter the local body's shared runtime.
+/// Why a client-authored command could not enter the local body's shared runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum LocalAuthoredMotionActionError {
-    /// The interpreted command or speed is not a valid action edge.
-    #[error("local authored motion action is invalid: {rejection:?}")]
-    InvalidAction {
-        /// Exact action reduction failure.
-        rejection: EntityMotionActionRejection,
+pub enum LocalAuthoredMotionCommandError {
+    /// The interpreted command has no supported authored playback class.
+    #[error("local authored motion command is unsupported: 0x{command:04X}")]
+    UnsupportedCommand {
+        /// Interpreted index absent from retail's table or outside action/substate command classes.
+        command: u16,
     },
+    /// Authored speed must be finite before it enters the body runtime.
+    #[error("local authored motion command has non-finite speed")]
+    NonFiniteSpeed,
     /// The local player has no direct or setup-default motion table.
-    #[error("local player 0x{guid:08X} has no effective motion table for authored action")]
+    #[error("local player 0x{guid:08X} has no effective motion table for authored command")]
     MotionTableSourceUnavailable { guid: u32 },
     /// The effective table identity is not present in the runtime catalog.
     #[error(
-        "local player 0x{guid:08X} resolved unavailable motion table 0x{motion_table_id:08X} for authored action"
+        "local player 0x{guid:08X} resolved unavailable motion table 0x{motion_table_id:08X} for authored command"
     )]
     MotionTableUnavailable { guid: u32, motion_table_id: u32 },
     /// Active plus pending actions already occupy retail's six slots.
@@ -531,16 +533,16 @@ impl WorldState {
             .is_some_and(|runtime| runtime.has_pending_gesture())
     }
 
-    /// Predicts one client-authored command-list edge into the local body's sole runtime.
+    /// Predicts one client-authored command-list edge; the body solver owns its playback class.
     ///
     /// The later autonomous server echo is intentionally filtered at packet admission; predicting
     /// here is therefore the only local presentation edge and cannot double-enqueue the action.
-    pub fn enqueue_local_authored_motion_action(
+    pub fn submit_local_authored_motion_command(
         &mut self,
         command: InterpretedMotionCommand,
         speed: f32,
         action_sequence: u16,
-    ) -> Result<(), LocalAuthoredMotionActionError> {
+    ) -> Result<(), LocalAuthoredMotionCommandError> {
         let action_sequence = action_sequence & 0x7FFF;
         let guid = self.player.guid;
         let admission = EntityMotionAdmission {
@@ -549,29 +551,76 @@ impl WorldState {
             server_control_sequence: self.player.server_control_sequence,
             is_autonomous: true,
         };
-        let action =
-            EntityMotionAction::from_local_command_list(command, speed, action_sequence, admission)
-                .map_err(|rejection| LocalAuthoredMotionActionError::InvalidAction { rejection })?;
+        let command = MotionCommand::from_interpreted(command).ok_or(
+            LocalAuthoredMotionCommandError::UnsupportedCommand {
+                command: command.raw(),
+            },
+        )?;
+        let speed = OrderedMotionScalar::from_f32(speed)
+            .ok_or(LocalAuthoredMotionCommandError::NonFiniteSpeed)?;
         let source = self.motion_table_source_for_guid(guid).ok_or(
-            LocalAuthoredMotionActionError::MotionTableSourceUnavailable {
+            LocalAuthoredMotionCommandError::MotionTableSourceUnavailable {
                 guid: u32::from(guid),
             },
         )?;
         let motion_table_id = motion_table_id_for_source(source);
         let table = self.motion_sequences.table(motion_table_id).ok_or(
-            LocalAuthoredMotionActionError::MotionTableUnavailable {
+            LocalAuthoredMotionCommandError::MotionTableUnavailable {
                 guid: u32::from(guid),
                 motion_table_id,
             },
         )?;
-        if self.motion_runtimes.enqueue_action(table, guid, action)
-            == crate::motion::MotionActionEnqueueOutcome::Overflow
+        match self
+            .motion_runtimes
+            .submit_local_command(table, guid, command, speed, admission)
         {
-            return Err(LocalAuthoredMotionActionError::QueueOverflow {
-                guid: u32::from(guid),
-            });
+            crate::motion::MotionCommandAdmissionOutcome::Accepted => {}
+            crate::motion::MotionCommandAdmissionOutcome::QueueFull => {
+                return Err(LocalAuthoredMotionCommandError::QueueOverflow {
+                    guid: u32::from(guid),
+                });
+            }
+            crate::motion::MotionCommandAdmissionOutcome::Unsupported => {
+                return Err(LocalAuthoredMotionCommandError::UnsupportedCommand {
+                    command: command.raw() as u16,
+                });
+            }
         }
         Ok(())
+    }
+
+    /// Whether a client-authored command still owns the local retained playback order.
+    pub fn has_local_authored_motion(&self, guid: Guid) -> bool {
+        self.motion_runtimes
+            .get(guid)
+            .is_some_and(crate::motion::BodyMotionRuntime::has_local_command)
+    }
+
+    /// Advance local playback independently of potentially stale autonomous server echoes.
+    pub fn advance_local_authored_motion_command(
+        &mut self,
+        dt: Duration,
+    ) -> Result<Option<SequenceTick>, AuthoredMotionDriveError> {
+        let guid = self.player.guid;
+        if !self.has_local_authored_motion(guid) {
+            return Ok(None);
+        }
+        let source = self.motion_table_source_for_guid(guid).ok_or(
+            AuthoredMotionDriveError::MotionTableSourceUnavailable {
+                guid: u32::from(guid),
+            },
+        )?;
+        let motion_table_id = motion_table_id_for_source(source);
+        let table = self.motion_sequences.table(motion_table_id).ok_or(
+            AuthoredMotionDriveError::MotionTableUnavailable {
+                guid: u32::from(guid),
+                motion_table_id,
+            },
+        )?;
+        Ok(self
+            .motion_runtimes
+            .advance_local_command(table, guid, dt.as_secs_f32())
+            .cloned())
     }
 
     /// Fresh accepted movement renews/cancels sticky intent even when presentation is unchanged.

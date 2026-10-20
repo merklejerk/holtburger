@@ -18,6 +18,7 @@ export const clientUserSectionSchemas = {
 	spellBarShape: userShape.spellBarShape,
 	minimapViewDiameters: userShape.minimapViewDiameters,
 	chatFilters: userShape.chatFilters,
+	recentEmotes: userShape.recentEmotes,
 	graphics: userShape.graphics,
 	audio: userShape.audio,
 	ui: userShape.ui,

@@ -42,11 +42,11 @@ pub use observed::{
     OBSERVED_WALK_SPEED_MPS, observed_locomotion_order,
 };
 pub use registry::{
-    AuthoredCollisionPose, BodyMotionRuntime, MotionActionEnqueueOutcome, MotionPlayback,
-    MotionPlaybackLayer, MotionPresentation, MotionRuntimeRegistry, OrdinaryMotionActivity,
-    PlayingMotionClip, RemoteMotionSample, SettledMotionPose,
+    AuthoredCollisionPose, BodyMotionRuntime, MAX_AUTHORED_ACTIONS, MotionActionEnqueueOutcome,
+    MotionPlayback, MotionPlaybackLayer, MotionPresentation, MotionRuntimeRegistry,
+    OrdinaryMotionActivity, PlayingMotionClip, RemoteMotionSample, SettledMotionPose,
 };
-pub(crate) use registry::{RemoteFramePolicy, RemoteMotionInput};
+pub(crate) use registry::{MotionCommandAdmissionOutcome, RemoteFramePolicy, RemoteMotionInput};
 pub use selection::{
     ActionSelectionOutcome, MotionSelectionOutcome, select_action, select_motion,
     set_default_state, stop_completely, stop_motion,

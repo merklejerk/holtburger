@@ -33,6 +33,36 @@ describe("game keyboard routing", () => {
 		scope.destroy();
 	});
 
+	it("ends a held UI lifetime after ownership cancellation without releasing a game action", () => {
+		const { keyboard, game } = fixture();
+		const press = keyEvent("KeyT");
+		keyboard.keydown(press);
+		const released = vi.fn();
+		keyboard.bindKeyRelease(press, released);
+		keyboard.cancel();
+		keyboard.keyup(keyEvent("KeyW"));
+		expect(released).not.toHaveBeenCalled();
+		keyboard.keyup(Object.assign(keyEvent("KeyT"), { shiftKey: true }));
+		keyboard.keyup(keyEvent("KeyT"));
+		expect(released).toHaveBeenCalledOnce();
+		expect(game.keyup).not.toHaveBeenCalled();
+	});
+	it("retires a release observation when selection already ended its interaction", () => {
+		const { keyboard } = fixture();
+		const press = keyEvent("KeyT");
+		keyboard.keydown(press);
+		const oldRelease = vi.fn();
+		const detach = keyboard.bindKeyRelease(press, oldRelease);
+		detach();
+		const replacement = vi.fn();
+		keyboard.bindKeyRelease(press, replacement);
+		// Retiring an earlier lifetime must not erase its replacement.
+		detach();
+		keyboard.cancel();
+		keyboard.keyup(press);
+		expect(oldRelease).not.toHaveBeenCalled();
+		expect(replacement).toHaveBeenCalledOnce();
+	});
 	it("offers Escape to the active item gesture before game commands", () => {
 		const { keyboard, game } = fixture();
 		const cancel = vi.fn(() => true);

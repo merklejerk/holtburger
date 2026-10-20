@@ -33,6 +33,10 @@ pub enum ClientChatRequest {
     Emote {
         message: String,
     },
+    /// Catalog alias; core owns motion and broadcast phrase resolution.
+    SoulEmote {
+        token: String,
+    },
 }
 
 impl ClientChatRequest {
@@ -43,6 +47,7 @@ impl ClientChatRequest {
             | Self::Tell { message, .. }
             | Self::Channel { message, .. }
             | Self::Emote { message } => message,
+            Self::SoulEmote { token } => token,
         };
         ensure!(
             !message.trim().is_empty(),
@@ -73,6 +78,7 @@ impl ClientChatRequest {
                 ClientCommand::ChannelMessage { channel, message }
             }
             Self::Emote { message } => ClientCommand::Emote(message),
+            Self::SoulEmote { token } => ClientCommand::SoulEmote(token),
         })
     }
 }
@@ -1292,6 +1298,25 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn soul_emote_request_preserves_alias_for_core_resolution() {
+        let request: ClientChatRequest = serde_json::from_value(serde_json::json!({
+            "kind": "soul-emote", "token": "Wave"
+        }))
+        .unwrap();
+        assert!(
+            matches!(request.into_command().unwrap(), ClientCommand::SoulEmote(token) if token == "Wave")
+        );
+        let empty = ClientChatRequest::SoulEmote { token: " ".into() };
+        assert!(empty.into_command().is_err());
+        assert!(
+            serde_json::from_value::<ClientChatRequest>(serde_json::json!({
+                "kind": "soul-emote", "message": "waves."
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn chat_requests_preserve_target_kind_and_reject_invalid_payloads_before_enqueue() {

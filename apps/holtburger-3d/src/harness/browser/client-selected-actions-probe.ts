@@ -260,7 +260,10 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			props: {
 				messages,
 				clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,
-				composer: new ClientChatComposer(),
+				composer: new ClientChatComposer({
+					recentEmotes: [],
+					onRecentEmotesChange: () => {},
+				}),
 				sentHistory: [],
 				enabledTags: ["chat", "combat"],
 				onEnabledTagsChange: () => {},

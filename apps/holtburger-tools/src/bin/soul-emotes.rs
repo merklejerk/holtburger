@@ -53,11 +53,11 @@ fn main() -> Result<()> {
 
     println!(
         "loaded {} soul emote tokens and {} poses",
-        catalog.tokens.len(),
-        catalog.poses.len()
+        catalog.tokens().len(),
+        catalog.poses().len()
     );
 
-    for token in catalog.tokens.values().take(cli.limit) {
+    for token in catalog.tokens().values().take(cli.limit) {
         let resolved = catalog.resolve(&token.token);
         let other_emote = resolved
             .and_then(|entry| entry.other_emote)
@@ -65,10 +65,10 @@ fn main() -> Result<()> {
         println!("{} => {} => {}", token.token, token.pose, other_emote);
     }
 
-    if catalog.tokens.len() > cli.limit {
+    if catalog.tokens().len() > cli.limit {
         println!(
             "... truncated {} additional tokens; rerun with --limit to see more",
-            catalog.tokens.len() - cli.limit
+            catalog.tokens().len() - cli.limit
         );
     }
 

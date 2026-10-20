@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { chatCompletion } from "./client-chat-completion";
+	import { ChatSubmissionError } from "./client-chat-composer.svelte";
 	import ClientWaypointText from "./ClientWaypointText.svelte";
 	import ClientChatFormattedText from "./ClientChatFormattedText.svelte";
 	import ClientChatRecipientDialog from "./ClientChatRecipientDialog.svelte";
@@ -72,11 +74,49 @@
 	/** Navigation is local to the mounted editor; the sent entries outlive it. */
 	let recall = $state<ChatInputRecall | null>(null);
 	let sending = $state(false);
+	let editorFocused = $state(false);
+	/** Editor events update completion inputs; no cursor movement is observed globally. */
+	let caret = $state(0);
+	let completionIndex = $state(0);
+	let completionDismissed = $state(false);
+	let composing = $state(false);
+	const completionId = $props.id();
+	const completion = $derived(
+		completionDismissed || !editorFocused || sending || composing
+			? null
+			: chatCompletion(
+					message,
+					caret,
+					composer.destination.kind === "speech",
+					composer.emotes,
+				),
+	);
+	const completionChoice = $derived(
+		completion?.choices[completionIndex] ?? completion?.choices[0],
+	);
+	function updateCompletion(element: HTMLInputElement): void {
+		caret = element.selectionStart ?? element.value.length;
+		completionIndex = 0;
+		completionDismissed = false;
+	}
+	async function acceptCompletion(): Promise<void> {
+		if (completion === null || completionChoice === undefined) return;
+		const inserted = completionChoice.replacement;
+		const nextCaret = completion.start + inserted.length;
+		message =
+			message.slice(0, completion.start) +
+			inserted +
+			message.slice(completion.end);
+		completionDismissed = true;
+		recall = null;
+		await tick();
+		inputElement?.setSelectionRange(nextCaret, nextCaret);
+		caret = nextCaret;
+	}
 	let bufferElement = $state<HTMLDivElement | null>(null);
 	/** Deliberate history interaction survives editor blur and viewport clicks. */
 	let explicitHistory = $state(false);
-	/** Actual editor focus activates history without claiming a second keyboard owner. */
-	let editorFocused = $state(false);
+
 	/** The component-local prompt never replaces the completed destination until accepted. */
 	let recipientOpen = $state(false);
 	let menuAnchor = $state<HTMLButtonElement | null>(null);
@@ -109,8 +149,19 @@
 			reply: composer.reply,
 			retell: composer.retell,
 			selection: composer.selection,
+			emotes: composer.emotes,
 		}),
 	);
+	$effect(() => {
+		const choice = completionChoice;
+		const index = completionIndex;
+		if (choice !== undefined)
+			void tick().then(() =>
+				document
+					.getElementById(`${completionId}-${index}`)
+					?.scrollIntoView({ block: "nearest" }),
+			);
+	});
 	const historyInteractive = $derived(
 		explicitHistory || editorFocused || recipientOpen,
 	);
@@ -188,6 +239,34 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
+		if (event.isComposing || composing) return;
+		if (
+			completion !== null &&
+			completionChoice !== undefined &&
+			!event.ctrlKey &&
+			!event.altKey &&
+			!event.metaKey
+		) {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				completionDismissed = true;
+				return;
+			}
+			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+				event.preventDefault();
+				completionIndex =
+					(completionIndex +
+						(event.key === "ArrowDown" ? 1 : -1) +
+						completion.choices.length) %
+					completion.choices.length;
+				return;
+			}
+			if (event.key === "Tab" || event.key === "Enter") {
+				event.preventDefault();
+				if (!event.repeat) void acceptCompletion();
+				return;
+			}
+		}
 		if (clientInput.shortcut("cancel", event)) {
 			event.preventDefault();
 			message = "";
@@ -272,7 +351,7 @@
 
 	async function submit(): Promise<void> {
 		const text = message.trim();
-		if (sending || text.length === 0) return;
+		if (sending || composing || text.length === 0) return;
 		const generation = composer.generation;
 		const resolved = resolution;
 		sending = true;
@@ -283,8 +362,22 @@
 			recall = null;
 			if (document.activeElement === inputElement) keyboard.returnToGame();
 		} catch (error) {
-			if (composer.generation === generation)
-				onSendError(error instanceof Error ? error.message : String(error));
+			if (
+				composer.generation === generation &&
+				error instanceof ChatSubmissionError &&
+				error.queued > 0
+			) {
+				message = "";
+				recall = null;
+			}
+			if (composer.generation === generation) {
+				const detail = error instanceof Error ? error.message : String(error);
+				onSendError(
+					error instanceof ChatSubmissionError && error.queued > 0
+						? `${detail} The draft was cleared to avoid repeating queued actions.`
+						: detail,
+				);
+			}
 		} finally {
 			if (composer.generation === generation) sending = false;
 		}
@@ -466,6 +559,7 @@
 			{/each}
 		</div>
 		<form
+			style="position: relative"
 			class="ui-hud-surface"
 			onsubmit={(event) => {
 				event.preventDefault();
@@ -506,7 +600,27 @@
 				oninput={(event) => {
 					message = event.currentTarget.value;
 					recall = null;
+					updateCompletion(event.currentTarget);
 				}}
+				onselect={(event) => updateCompletion(event.currentTarget)}
+				onclick={(event) => updateCompletion(event.currentTarget)}
+				onkeyup={(event) => {
+					if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+						updateCompletion(event.currentTarget);
+				}}
+				oncompositionstart={() => {
+					composing = true;
+				}}
+				oncompositionend={(event) => {
+					composing = false;
+					updateCompletion(event.currentTarget);
+				}}
+				aria-autocomplete="list"
+				aria-controls={completion === null ? undefined : completionId}
+				aria-expanded={completion !== null}
+				aria-activedescendant={completion === null
+					? undefined
+					: `${completionId}-${completionIndex}`}
 				readonly={sending}
 				aria-label="Chat message"
 				placeholder="Message"
@@ -522,6 +636,38 @@
 					keydown: handleKeydown,
 				}}
 			/>
+			{#if completion !== null}
+				<div
+					id={completionId}
+					class="chat-completions ui-overlay-surface"
+					role="listbox"
+					aria-label="Chat completions"
+				>
+					{#each completion.choices as choice, index (choice.id)}
+						<button
+							type="button"
+							role="option"
+							aria-selected={completionChoice === choice}
+							id={`${completionId}-${index}`}
+							class="ui-menu-item"
+							onpointerenter={() => (completionIndex = index)}
+							onpointerdown={(event) => {
+								// Keep editor focus until the suggestion click commits its replacement.
+								event.preventDefault();
+							}}
+							onclick={() => {
+								completionIndex = index;
+								void acceptCompletion();
+							}}
+						>
+							<span>{choice.label}</span>
+							<span class="chat-completion-detail ui-muted"
+								>{choice.detail}</span
+							>
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</form>
 	</div>
 	{#if menuOpen && menuAnchor !== null}
@@ -550,6 +696,27 @@
 </section>
 
 <style>
+	.chat-completions {
+		box-sizing: border-box;
+		padding: var(--ui-menu-padding);
+		position: absolute;
+		bottom: 100%;
+		left: 0;
+		right: 0;
+		max-height: min(18rem, 50vh);
+		overflow: auto;
+		display: flex;
+		flex-direction: column;
+		pointer-events: auto;
+	}
+	.chat-completions .ui-menu-item {
+		display: grid;
+		gap: 0;
+	}
+	.chat-completion-detail {
+		font-size: 0.9em;
+	}
+
 	@property --chat-buffer-focus {
 		syntax: "<percentage>";
 		inherits: false;

@@ -298,7 +298,7 @@
 					: `${item.label}, not selected`
 				: undefined}
 			tabindex="-1"
-			class="popup-menu-item"
+			class="popup-menu-item ui-menu-item"
 			class:highlighted={active?.action === item.action}
 			id={itemId(item.action)}
 			disabled={item.disabled}
@@ -344,7 +344,7 @@
 					aria-checked={item.selection.checked}
 					tabindex="-1"
 					id={itemId(item.action)}
-					class="popup-menu-item"
+					class="popup-menu-item ui-menu-item"
 					class:highlighted={childActive?.action === item.action}
 					disabled={item.disabled}
 					onpointermove={() => {
@@ -409,35 +409,10 @@
 			line-height: 1;
 			aspect-ratio: 1;
 		}
-		.popup-menu-item {
-			display: flex;
-			align-items: center;
-			gap: var(--ui-overlay-gap);
-			width: 100%;
-			flex: none;
-			margin: 0;
-			padding: var(--ui-menu-item-padding);
-			border: 0;
-			border-radius: 0;
-			background: transparent;
-			color: inherit;
-			font: inherit;
-			text-align: start;
-			cursor: pointer;
-		}
 		.popup-menu-icon {
 			width: var(--ui-overlay-icon-size);
 			height: var(--ui-overlay-icon-size);
 			flex: none;
-		}
-		.popup-menu-item.highlighted {
-			background: var(--ui-menu-highlight-background, var(--ui-color-control));
-			color: var(--ui-menu-highlight-color, var(--ui-color-highlight));
-		}
-		.popup-menu-item:disabled {
-			cursor: default;
-			color: var(--ui-menu-disabled-color, var(--ui-color-muted));
-			opacity: var(--ui-menu-disabled-opacity);
 		}
 	}
 </style>

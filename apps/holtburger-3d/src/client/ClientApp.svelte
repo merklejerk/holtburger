@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { loadSoulEmotes } from "./client-soul-emotes";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
@@ -432,7 +433,10 @@
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
 	/** Sent input survives world-view remounts until this app closes. */
 	let sentChatHistory = $state<readonly string[]>([]);
-	const chatComposer = new ClientChatComposer();
+	const chatComposer = new ClientChatComposer({
+		recentEmotes: startupUserSettings.recentEmotes,
+		onRecentEmotesChange: (ids) => changeUserSection("recentEmotes", ids),
+	});
 	let chatCharacterGuid: number | null = null;
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
@@ -1135,12 +1139,13 @@
 			CLIENT_TUNING.chat.sentHistoryLimit,
 		);
 		if (resolution.kind === "error") throw new Error(resolution.message);
-		if (resolution.kind === "send") {
+		if (resolution.kind === "send" || resolution.kind === "sequence") {
 			const currentSession = session;
 			if (currentSession === null || lifecycle.kind !== "in-world")
 				throw new Error("Chat session is not in the world.");
-			await chatComposer.send(resolution.request, (request) =>
-				currentSession.sendChat(request),
+			await chatComposer.sendAll(
+				resolution.kind === "send" ? [resolution.request] : resolution.requests,
+				(request) => currentSession.sendChat(request),
 			);
 			return;
 		}
@@ -1715,6 +1720,14 @@
 		const unsubscribeToast = toastCenter.subscribe((next) => (toast = next));
 		const transport = createElectronHostTransport();
 		hostTransport = transport;
+		void loadSoulEmotes(transport)
+			.then((catalog) => {
+				if (!disposed) chatComposer.setEmotes(catalog);
+			})
+			.catch((error: unknown) => {
+				if (!disposed)
+					commandFailure = `Soul-emote catalog could not be loaded: ${diagnostic(error)}`;
+			});
 		void transport
 			.invoke("host_status")
 			.then((value) => {
@@ -2074,6 +2087,7 @@
 			{combatProfileSelectionRevision}
 			onCombatProfileSelect={selectCombatProfile}
 			combatEnabled={lifecycle.kind === "in-world"}
+			emotesEnabled={worldInputEnabled}
 			onToggleCombat={() => void toggleCombatMode()}
 			onCastSpell={(spellId) => void castSpell(spellId)}
 			{entityMetadata}

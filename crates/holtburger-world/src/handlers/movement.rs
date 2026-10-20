@@ -53,12 +53,12 @@ fn report_unsupported_interpreted_commands(
     }
 }
 
-fn report_rejected_motion_actions(
+fn report_rejected_motion_commands(
     guid: Guid,
-    rejected: impl IntoIterator<Item = crate::entity::EntityMotionActionRejection>,
+    rejected: impl IntoIterator<Item = crate::entity::EntityMotionCommandRejection>,
 ) {
     for rejection in rejected {
-        log::warn!("entity 0x{guid:08X} rejected transient motion action: {rejection:?}");
+        log::warn!("entity 0x{guid:08X} rejected motion command: {rejection:?}");
     }
 }
 
@@ -122,16 +122,16 @@ pub(crate) fn handle_message(
                 Some(entity) => entity.admit_movement_with_action_policy(data, true),
                 None => return false,
             };
-            let (snapshot, motion_changed, actions, rejected_actions) = match admission {
+            let (snapshot, motion_changed, actions, rejected_commands) = match admission {
                 EntityMovementAdmission::Rejected
                 | EntityMovementAdmission::MovementSequenceAdvanced => return true,
                 EntityMovementAdmission::Applied {
                     snapshot,
                     motion_changed,
                     actions,
-                    rejected_actions,
+                    rejected_commands,
                     ..
-                } => (snapshot, motion_changed, actions, rejected_actions),
+                } => (snapshot, motion_changed, actions, rejected_commands),
             };
 
             let sticky_target = match &data.data {
@@ -141,7 +141,7 @@ pub(crate) fn handle_message(
                 _ => None,
             };
             report_unsupported_interpreted_commands(state, guid, snapshot);
-            report_rejected_motion_actions(guid, rejected_actions);
+            report_rejected_motion_commands(guid, rejected_commands);
             let playback_changed =
                 state.accept_entity_motion(guid, snapshot, actions, sticky_target);
 

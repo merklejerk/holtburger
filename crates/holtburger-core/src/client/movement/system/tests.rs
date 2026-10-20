@@ -1559,7 +1559,7 @@ async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
 }
 
 #[tokio::test]
-async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
+async fn authored_motion_reasserts_autonomous_locomotion_on_next_tick() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -1599,14 +1599,14 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(autonomous_intent)),
         start + Duration::from_millis(30),
     );
-    movement.enqueue_transient_motion(
+    movement.enqueue_authored_motion(
         holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087),
         MotionStyle::Explicit(MotionStance::NonCombat),
     );
     movement
         .tick(start + Duration::from_millis(30), &mut world, &mut session)
         .await
-        .expect("transient motion should replace the locomotion pulse for this tick");
+        .expect("authored motion command should replace the locomotion pulse for this tick");
 
     assert_eq!(
         movement.current_local_drive_control(&world, Duration::from_millis(33)),
@@ -1619,7 +1619,7 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
             force_grounded: true,
         })
     );
-    assert_eq!(movement.published_motion, Some(PublishedMotion::Transient));
+    assert_eq!(movement.published_motion, Some(PublishedMotion::Authored));
 
     assert_eq!(session.game_action_sequence, 2);
 
@@ -1630,7 +1630,7 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
     movement
         .tick(start + Duration::from_millis(60), &mut world, &mut session)
         .await
-        .expect("locomotion should be reasserted after the transient motion clears");
+        .expect("locomotion should be reasserted after the authored motion command clears");
 
     assert_eq!(
         movement.published_motion,

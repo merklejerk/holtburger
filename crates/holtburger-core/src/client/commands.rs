@@ -606,7 +606,7 @@ impl ClientRuntime {
                         .player
                         .last_server_motion_style
                         .unwrap_or(MotionStance::NonCombat);
-                    self.movement.enqueue_transient_motion(
+                    self.movement.enqueue_authored_motion(
                         command,
                         crate::client::movement_types::MotionStyle::Explicit(motion_style),
                     );
@@ -1151,7 +1151,8 @@ mod tests {
         WorldObjectPropertyAccessorsMut as _,
     };
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
-    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
+    use holtburger_content::SoulEmoteCatalog;
+    use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::combat::CombatMode;
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
@@ -1171,23 +1172,23 @@ mod tests {
 
     fn build_test_client() -> ClientRuntime {
         let mut client = builder::build_test_client(ClientState::InWorld);
-        client.world.soul_emote_catalog = Arc::new(SoulEmoteCatalog {
-            tokens: std::collections::BTreeMap::from([(
-                "wave".to_string(),
-                SoulEmoteToken {
-                    token: "wave".to_string(),
-                    pose: "Wave".to_string(),
-                },
-            )]),
-            poses: std::collections::BTreeMap::from([(
-                "Wave".to_string(),
-                SoulEmotePose {
-                    pose: "Wave".to_string(),
-                    my_emote: "wave.".to_string(),
-                    other_emote: "waves.".to_string(),
-                },
-            )]),
-        });
+        client.world.soul_emote_catalog = Arc::new(
+            SoulEmoteCatalog::from_asset(&holtburger_dat::file_type::ChatPoseTable {
+                id: holtburger_dat::file_type::ChatPoseTable::FILE_ID,
+                chat_pose_hash: std::collections::HashMap::from([
+                    ("wave".into(), "Wave".into()),
+                    ("bow".into(), "BowDeepState".into()),
+                ]),
+                chat_emote_hash: std::collections::HashMap::from([(
+                    "Wave".into(),
+                    holtburger_dat::file_type::ChatEmoteData {
+                        my_emote: "wave.".into(),
+                        other_emote: "waves.".into(),
+                    },
+                )]),
+            })
+            .unwrap(),
+        );
         client
     }
 
@@ -1310,7 +1311,13 @@ mod tests {
         client.world.set_motion_sequences(explicit_motion_catalog(
             MOTION_TABLE_ID,
             holtburger_protocol::messages::movement::MotionStance::NonCombat as u32,
-            [],
+            [
+                holtburger_world::state::motion_resolution::test_support::FixtureCycle {
+                    command: 0x4300_00ec,
+                    velocity: None,
+                    omega: None,
+                },
+            ],
             [],
         ));
         client
@@ -1901,6 +1908,98 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.session.bytes_out > 0);
         assert!(client.world.has_authored_motion_actions(guid));
+    }
+
+    #[tokio::test]
+    async fn soul_emote_pose_uses_shared_command_admission_and_preserves_multiple_requests() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        seed_action_capable_player(&mut client, guid);
+        for token in ["wave", "bow", "wave"] {
+            client
+                .handle_command(ClientCommand::SoulEmote(token.into()))
+                .await
+                .unwrap();
+        }
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.session.game_action_sequence, 6,
+            "each request sends its chat action and motion edge"
+        );
+        let runtime = client.world.motion_runtimes.get(guid).unwrap();
+        assert_eq!(runtime.state().substate.raw(), 0x4300_00ec);
+        assert_eq!(
+            runtime.action_count(),
+            2,
+            "neither one-shot edge is overwritten by its neighbor"
+        );
+        assert!(runtime.has_local_command());
+    }
+
+    #[tokio::test]
+    async fn soul_emote_queue_overflow_reports_a_refusal_without_terminating_movement() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(0x5000_0001));
+        for _ in 0..=holtburger_world::motion::MAX_AUTHORED_ACTIONS {
+            client
+                .handle_command(ClientCommand::SoulEmote("wave".into()))
+                .await
+                .unwrap();
+        }
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.movement.take_authored_motion_rejections(),
+            [WeenieError::TooManyActions]
+        );
+        assert!(client.movement.take_authored_motion_rejections().is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_replaces_a_local_pose_without_needing_a_server_snapshot() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        seed_action_capable_player(&mut client, guid);
+        let now = Instant::now();
+        client
+            .handle_command(ClientCommand::SoulEmote("bow".into()))
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .enqueue_drive_intent(crate::client::movement_types::PlayerDriveIntent::Stop, now);
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .advance_local_authored_motion(&mut client.world, std::time::Duration::from_millis(30))
+            .unwrap();
+        assert!(!client.world.has_local_authored_motion(guid));
+        assert_ne!(
+            client
+                .world
+                .motion_runtimes
+                .state(guid)
+                .unwrap()
+                .substate
+                .raw(),
+            0x4300_00ec
+        );
     }
 
     #[tokio::test]

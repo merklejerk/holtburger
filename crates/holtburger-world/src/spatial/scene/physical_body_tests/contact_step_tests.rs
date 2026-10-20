@@ -5162,7 +5162,7 @@ fn blocked_sticky_pursuit_keeps_reference_at_moving_target_clearance() {
 #[test]
 fn sticky_attack_keeps_its_hook_and_replaces_root_travel_in_collection() {
     use crate::entity::{
-        EntityMotionAction, EntityMotionActionSource, EntityMotionAdmission, EntityMotionSnapshot,
+        EntityMotionAction, EntityMotionAdmission, EntityMotionCommandSource, EntityMotionSnapshot,
         OrderedMotionScalar,
     };
     use crate::motion::{
@@ -5277,7 +5277,7 @@ fn sticky_attack_keeps_its_hook_and_replaces_root_travel_in_collection() {
                 server_control_sequence: 1,
                 is_autonomous: false,
             },
-            source: EntityMotionActionSource::CommandList,
+            source: EntityMotionCommandSource::CommandList,
         },
     );
     registry.admit_sticky_target(table, guid, Some(Guid(2)), now);

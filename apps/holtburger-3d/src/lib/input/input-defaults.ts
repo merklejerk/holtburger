@@ -100,6 +100,10 @@ export const INPUT_DEFAULTS = {
 		cancel: [{ key: "Escape" }],
 		/** Activate chat while the game owns the keyboard. */
 		chat: [{ key: "Enter", ctrl: false, alt: false, meta: false }],
+		/** Hold to browse curated social emotes while gameplay owns input. */
+		openEmotes: [
+			{ key: "t", shift: false, ctrl: false, alt: false, meta: false },
+		],
 		/** Toggle history interaction outside editors; native selection copy takes precedence. */
 		toggleChatHistory: [
 			{ key: "c", ctrl: true, shift: false, alt: false, meta: false },

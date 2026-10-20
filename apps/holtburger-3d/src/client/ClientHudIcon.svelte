@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmotesIcon from "../assets/icons/hud-emotes.svg?component";
 	import BuffedIcon from "../assets/icons/hud-buffed.svg?component";
 	import DebuffedIcon from "../assets/icons/hud-debuffed.svg?component";
 	import EncumberedIcon from "../assets/icons/hud-encumbered.svg?component";
@@ -39,6 +40,7 @@
 	import OnlineIcon from "../assets/icons/hud-online.svg?component";
 	import OfflineIcon from "../assets/icons/hud-offline.svg?component";
 	export type ClientHudIconName =
+		| "emotes"
 		| "buffed"
 		| "debuffed"
 		| "encumbered"
@@ -97,6 +99,7 @@
 
 	const { name }: Props = $props();
 	const icons = {
+		emotes: EmotesIcon,
 		buffed: BuffedIcon,
 		debuffed: DebuffedIcon,
 		encumbered: EncumberedIcon,

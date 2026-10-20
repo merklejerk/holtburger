@@ -84,6 +84,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	preciseJump: "Aim precise jump",
 	cancel: "Cancel / clear selection",
 	chat: "Open chat",
+	openEmotes: "Open emotes",
 	toggleChatHistory: "Toggle chat history",
 	chatPreviousPage: "Earlier chat page",
 	chatNextPage: "Later chat page",

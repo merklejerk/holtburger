@@ -148,16 +148,18 @@ pub(super) fn tick_with_precise_jump(
     let excluded = (!local_dead
         && (movement.drives_local_authored_playback_this_tick()
             || world.has_authored_motion_actions(local_guid)
+            || world.has_local_authored_motion(local_guid)
             || world.has_manual_locomotion(local_guid)
             || world.has_pending_motion_gesture(local_guid)))
     .then_some(local_guid)
     .filter(|guid| !guid.is_null());
     let mut authored_ticks = world.advance_authored_motion_except(dt, excluded);
-    let authored_tick = if collision.is_some() && !local_dead {
-        movement.advance_local_authored_motion(world, dt)?
-    } else {
-        None
-    };
+    let authored_tick =
+        if !local_dead && (collision.is_some() || world.has_local_authored_motion(local_guid)) {
+            movement.advance_local_authored_motion(world, dt)?
+        } else {
+            None
+        };
     let authored_offset = authored_tick.as_ref().map(|tick| tick.offset);
     if let Some(tick) = authored_tick {
         authored_ticks.push(AuthoredBodyMotionTick {

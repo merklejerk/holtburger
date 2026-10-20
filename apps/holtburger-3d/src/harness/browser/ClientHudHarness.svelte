@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
 	import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 	import { runClientHelpCommand } from "../../client/client-command-help";
@@ -1048,14 +1049,21 @@
 		readonly chat: {
 			readonly setPartyPresent: (present: boolean) => void;
 			readonly reset: () => void;
+			/** Recreate the composer from synthetic saved user settings. */
+			readonly restart: () => Promise<void>;
 			readonly select: (target: ClientChatTellTarget | null) => void;
 			readonly receive: (message: ClientChatMessage) => void;
 			readonly rejectNextSend: () => void;
+			readonly rejectAfter: (successes: number) => void;
+			readonly setEmotesEnabled: (enabled: boolean) => void;
 			readonly professorPrompt: () => void;
 			readonly clearPrompt: () => void;
 			readonly read: () => {
 				readonly requests: readonly ClientChatRequest[];
 				readonly destination: typeof chatComposer.destination;
+				readonly recentEmotes: readonly string[];
+				readonly inputAllowed: boolean;
+				readonly gameActive: boolean;
 				readonly reply: ClientChatTellTarget | null;
 				readonly retell: ClientChatTellTarget | null;
 				readonly responses: readonly {
@@ -1422,7 +1430,7 @@
 	}
 
 	let failNextBookPageRequest = false;
-	let failNextChatRequest = false;
+	let chatSuccessesBeforeFailure: number | null = null;
 	const interactionLifecycle = new ClientLifecycleSession({
 		listen: async (event, handler) => {
 			interactionHandlers.set(event, handler);
@@ -1432,9 +1440,15 @@
 		},
 		invoke: async (command, args) => {
 			interactionCommands.push({ command, args });
-			if (command === "send_client_chat" && failNextChatRequest) {
-				failNextChatRequest = false;
-				throw new Error("Injected chat enqueue failure");
+			if (
+				command === "send_client_chat" &&
+				chatSuccessesBeforeFailure !== null
+			) {
+				if (chatSuccessesBeforeFailure === 0) {
+					chatSuccessesBeforeFailure = null;
+					throw new Error("Injected chat enqueue failure");
+				}
+				chatSuccessesBeforeFailure--;
 			}
 			if (command === "read_client_book_page" && failNextBookPageRequest) {
 				failNextBookPageRequest = false;
@@ -3624,7 +3638,18 @@
 
 	/** Keep the keyboard fixture's two submitted entries regardless of product tuning. */
 	const chatHistoryLimit = 2;
-	const chatComposer = new ClientChatComposer();
+	let emotesEnabled = $state(true);
+	/** Synthetic user settings survive session resets and composer recreation. */
+	let savedRecentEmotes: readonly string[] = [];
+	function createChatComposer(): ClientChatComposer {
+		const composer = new ClientChatComposer({
+			recentEmotes: savedRecentEmotes,
+			onRecentEmotesChange: (ids) => (savedRecentEmotes = ids),
+		});
+		composer.setEmotes(soulEmoteFixture());
+		return composer;
+	}
+	let chatComposer = $state.raw(createChatComposer());
 	const chatRequests: ClientChatRequest[] = [];
 	let sentChatHistory = $state<readonly string[]>([]);
 	let messages = $state<readonly ClientChatLine[]>([
@@ -4596,10 +4621,16 @@
 				setPartyPresent: (present) => {
 					chatComposer.inParty = present;
 				},
+				restart: async () => {
+					chatComposer.reset();
+					// Retire the previous session's keyed editor before starting a new owner.
+					await tick();
+					chatComposer = createChatComposer();
+				},
 				reset: () => {
 					chatComposer.reset();
 					chatRequests.length = 0;
-					failNextChatRequest = false;
+					chatSuccessesBeforeFailure = null;
 					sentChatHistory = [];
 				},
 				select: (target) =>
@@ -4608,8 +4639,14 @@
 					),
 				receive: (message) =>
 					emitInteractionEvent("client-chat-message", message),
+				rejectAfter: (successes) => {
+					chatSuccessesBeforeFailure = successes;
+				},
+				setEmotesEnabled: (enabled) => {
+					emotesEnabled = enabled;
+				},
 				rejectNextSend: () => {
-					failNextChatRequest = true;
+					chatSuccessesBeforeFailure = 0;
 				},
 				professorPrompt: () =>
 					emitInteractionEvent("client-confirmation-updated", {
@@ -4625,6 +4662,9 @@
 				read: () => ({
 					requests: chatRequests.slice(),
 					destination: chatComposer.destination,
+					recentEmotes: [...chatComposer.recentEmotes],
+					inputAllowed: inputGate.allowed,
+					gameActive: keyboard.gameActive,
 					reply: chatComposer.reply,
 					retell: chatComposer.retell,
 					responses: interactionCommands.filter(
@@ -5118,6 +5158,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		{emotesEnabled}
 		nearby={nearbyOwner}
 		onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
 		onClearWaypoint={() => waypointOwner.clear()}
@@ -5354,11 +5395,16 @@
 				chatHistoryLimit,
 			);
 			if (resolution.kind === "error") throw new Error(resolution.message);
-			if (resolution.kind === "send") {
-				await chatComposer.send(resolution.request, async (request) => {
-					await interactionLifecycle.sendChat(request);
-					chatRequests.push(request);
-				});
+			if (resolution.kind === "send" || resolution.kind === "sequence") {
+				await chatComposer.sendAll(
+					resolution.kind === "send"
+						? [resolution.request]
+						: resolution.requests,
+					async (request) => {
+						await interactionLifecycle.sendChat(request);
+						chatRequests.push(request);
+					},
+				);
 			} else if (runClientHelpCommand(message, appendChat)) {
 				return;
 			} else if (waypointProbeEnabled) submitWaypointChat(message);

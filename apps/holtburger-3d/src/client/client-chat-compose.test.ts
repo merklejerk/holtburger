@@ -19,6 +19,7 @@ const professor = {
 } as const;
 const player = { kind: "player", name: "Some Player" } as const;
 const context: ChatComposeContext = {
+	emotes: null,
 	destination: { kind: "channel", channel: "fellowship" },
 	reply: player,
 	retell: professor,
@@ -227,7 +228,10 @@ describe("chat composition", () => {
 
 describe("character-session chat convenience state", () => {
 	it("tracks addressable incoming tellers before display filtering and leaves retell independent", async () => {
-		const composer = new ClientChatComposer();
+		const composer = new ClientChatComposer({
+			recentEmotes: [],
+			onRecentEmotesChange: () => {},
+		});
 		for (const target of [player, professor]) {
 			composer.accept({
 				kind: "tell",
@@ -248,16 +252,16 @@ describe("character-session chat convenience state", () => {
 			message: "unknown",
 		});
 		expect(composer.reply).toEqual(professor);
-		await composer.send(
-			{ kind: "tell", target: player, message: "hello" },
+		await composer.sendAll(
+			[{ kind: "tell", target: player, message: "hello" }],
 			async () => {},
 		);
 		expect(composer.retell).toEqual(player);
 		expect(composer.reply).toEqual(professor);
 		const reject = vi.fn().mockRejectedValue(new Error("enqueue failed"));
 		await expect(
-			composer.send(
-				{ kind: "tell", target: professor, message: "hello" },
+			composer.sendAll(
+				[{ kind: "tell", target: professor, message: "hello" }],
 				reject,
 			),
 		).rejects.toThrow("enqueue failed");
@@ -265,7 +269,10 @@ describe("character-session chat convenience state", () => {
 	});
 
 	it("freezes a resolved reply and discards stale completion across a character-session reset", async () => {
-		const composer = new ClientChatComposer();
+		const composer = new ClientChatComposer({
+			recentEmotes: [],
+			onRecentEmotesChange: () => {},
+		});
 		composer.reply = professor;
 		composer.destination = { kind: "channel", channel: "fellowship" };
 		const resolved = resolveChatCompose("/r level 1", {
@@ -277,8 +284,8 @@ describe("character-session chat convenience state", () => {
 		let release: () => void = () => {
 			throw new Error("Enqueue fixture was not started.");
 		};
-		const pending = composer.send(
-			resolved.request,
+		const pending = composer.sendAll(
+			[resolved.request],
 			() =>
 				new Promise<void>((resolve) => {
 					release = resolve;
@@ -288,7 +295,9 @@ describe("character-session chat convenience state", () => {
 		expect(resolved.request).toMatchObject({ target: professor });
 		composer.reset();
 		release();
-		await pending;
+		await expect(pending).rejects.toThrow(
+			"Chat session changed during dispatch.",
+		);
 		expect(composer.reply).toBeNull();
 		expect(composer.retell).toBeNull();
 		expect(composer.destination).toEqual({ kind: "speech" });

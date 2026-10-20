@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ClientEmoteWheel from "./ClientEmoteWheel.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import ClientLoadoutBuilder from "./ClientLoadoutBuilder.svelte";
 	import {
@@ -237,6 +238,8 @@
 		readonly onCastSpell: (spellId: number) => void;
 		/** Gameplay lifecycle admits stance commands. */
 		readonly combatEnabled: boolean;
+		/** Lifecycle and reveal admission, independent of modal ownership. */
+		readonly emotesEnabled: boolean;
 		/** Same stance action used by the keyboard binding. */
 		readonly onToggleCombat: () => void;
 		/** Resolve world inventory destinations without changing selection. */
@@ -432,6 +435,7 @@
 		onCombatProfileSelect,
 		onCastSpell,
 		combatEnabled,
+		emotesEnabled,
 		onToggleCombat,
 		entityMetadata,
 		cameraController,
@@ -522,6 +526,50 @@
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const displayPlatform = inputDisplayPlatform(navigator.userAgent);
+	/** Click-open is latched; keyboard-open owns a disposable physical-key lifetime. */
+	let emoteWheel = $state<
+		| null
+		| { readonly kind: "pointer" }
+		| { readonly kind: "held"; readonly release: () => void }
+	>(null);
+	function closeEmotes(): void {
+		const activation = emoteWheel;
+		emoteWheel = null;
+		if (activation?.kind === "held") activation.release();
+	}
+	onDestroy(closeEmotes);
+	$effect(() => {
+		// Lifecycle/configuration edges retire the transient interaction; opening itself is untracked.
+		chatComposer.generation;
+		emotesEnabled;
+		hudMode;
+		untrack(() => {
+			closeEmotes();
+		});
+	});
+	function openEmotes(press: KeyboardEvent | null): void {
+		if (!emotesEnabled || hudMode !== "runtime" || chatComposer.emotes === null)
+			return;
+		closeEmotes();
+		emoteWheel =
+			press === null
+				? { kind: "pointer" }
+				: {
+						kind: "held",
+						release: keyboard.bindKeyRelease(press, closeEmotes),
+					};
+	}
+	function executeEmote(token: string): void {
+		void onSendChat(`*${token}*`, {
+			kind: "send",
+			label: "Emote · Local",
+			buttonLabel: "Emote",
+			buttonIcon: "speech",
+			request: { kind: "soul-emote", token },
+		}).catch((error) =>
+			onSendChatError(error instanceof Error ? error.message : String(error)),
+		);
+	}
 	/** Pointer surface changes are cold; world geometry still uses the existing hover picker. */
 	let combineSurface = $state<number | "world" | null>(null);
 	function considerPointer(event: PointerEvent): void {
@@ -1308,6 +1356,37 @@
 			/>
 		</ClientHudPanel>
 	{/if}
+	<div
+		class="emote-activation"
+		tabindex="-1"
+		use:keyboard.scope={{
+			transient: true,
+			activation: (event) => {
+				if (
+					event.repeat ||
+					!emotesEnabled ||
+					hudMode !== "runtime" ||
+					chatComposer.emotes === null ||
+					!clientInput.shortcut("openEmotes", event)
+				)
+					return false;
+				openEmotes(event);
+				return true;
+			},
+			keydown: () => {},
+		}}
+	></div>
+	{#if emoteWheel !== null && chatComposer.emotes !== null}
+		<ClientEmoteWheel
+			catalog={chatComposer.emotes}
+			recent={chatComposer.recentEmotes}
+			onClose={() => {
+				closeEmotes();
+			}}
+			onExecute={executeEmote}
+		/>
+	{/if}
+
 	<ClientShortcutDock
 		placement={hudLayout.shortcuts}
 		editable={hudMode === "layout"}
@@ -1318,6 +1397,10 @@
 		{displayPlatform}
 		{combatMode}
 		{combatEnabled}
+		emotesEnabled={emotesEnabled &&
+			hudMode === "runtime" &&
+			chatComposer.emotes !== null}
+		onOpenEmotes={() => openEmotes(null)}
 		{onToggleCombat}
 		{shortcuts}
 		{activePanel}

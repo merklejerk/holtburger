@@ -44,6 +44,7 @@ export function createDefaultClientUserSettings(
 		),
 		spellBarShape: "single",
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
+		recentEmotes: [],
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },

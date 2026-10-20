@@ -92,6 +92,7 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 	"preciseJump",
 	"cancel",
 	"chat",
+	"openEmotes",
 	"toggleChatHistory",
 	"chatPreviousPage",
 	"chatNextPage",

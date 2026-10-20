@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { probeLiveSoulEmotes } from "./live-soul-emote-probe.mjs";
 import { spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
@@ -80,9 +81,14 @@ function optionalPlanarOffset(value) {
 
 function probeMode(value) {
 	const mode = value ?? "drive";
-	if (mode !== "drive" && mode !== "passive" && mode !== "teleport") {
+	if (
+		mode !== "drive" &&
+		mode !== "passive" &&
+		mode !== "teleport" &&
+		mode !== "emotes"
+	) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be drive, passive, or teleport.",
+			"HOLTBURGER_PROBE_MODE must be drive, passive, teleport, or emotes.",
 		);
 	}
 	return mode;
@@ -558,6 +564,7 @@ async function main() {
 	// Keep attempted-jump footing even when release is rejected before a trajectory exists.
 	const jumpObservations = [];
 	let preciseJump = null;
+	let soulEmotes = null;
 	const terminalEvents = [];
 	const latestEntities = new Map();
 	let teleport = null;
@@ -971,7 +978,20 @@ async function main() {
 				);
 			lastCompletedPhase = "map-water-rejected";
 		}
+		if (mode === "emotes") {
+			soulEmotes = await probeLiveSoulEmotes(
+				client,
+				waiter,
+				latestEntities,
+				playerGuid,
+				selected.name,
+				timeoutMs,
+			);
+			lastCompletedPhase = "soul-emotes-verified";
+		}
+
 		if (
+			mode === "emotes" ||
 			mode === "passive" ||
 			mode === "teleport" ||
 			requestedMapPoint !== undefined ||
@@ -1431,6 +1451,7 @@ async function main() {
 		lastCompletedPhase = "complete";
 		return {
 			ok: true,
+			soulEmotes,
 			mode,
 			server: { host: serverHost, port: serverPort },
 			selectedCharacter: {

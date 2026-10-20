@@ -93,6 +93,10 @@ export const CLIENT_TUNING = {
 	},
 	/** Marker clustering stays in CSS pixels independently of render density. */
 	housingSearch: { clusterSpacingCssPixels: 28 },
+	emotes: {
+		/** Maximum distinct queued poses retained on this local user profile. */
+		recentLimit: 6,
+	},
 	chat: {
 		/** Nonnegative maximum of locally queued chat inputs retained for recall. */
 		sentHistoryLimit: 100,

@@ -299,6 +299,9 @@ impl ClientRuntime {
                         for event in movement_events {
                             self.handle_runtime_world_event(&event);
                         }
+                        for error in self.movement.take_authored_motion_rejections() {
+                            self.emit_action_result(super::types::ActionResultSource::Client, super::types::ActionResultReason::Weenie(error, None));
+                        }
                         for feedback in self.movement.take_character_motion_feedback() {
                             if matches!(
                                 feedback.outcome,

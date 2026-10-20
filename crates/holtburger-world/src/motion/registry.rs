@@ -13,7 +13,9 @@ pub(crate) use remote::{RemoteFramePolicy, RemoteMotionInput};
 use std::time::Instant;
 use sticky::StickyMotion;
 
-use crate::entity::EntityMotionAction;
+use crate::entity::{
+    EntityMotionAction, EntityMotionAdmission, EntityMotionCommandSource, OrderedMotionScalar,
+};
 use holtburger_common::{Guid, RigidTransform};
 use holtburger_content::MotionSequenceTable;
 use std::collections::HashMap;
@@ -25,6 +27,9 @@ use super::selection::{
 use super::sequence::{CurrentSequenceClip, MotionClipCompletion};
 use super::sequence::{MotionSequenceRuntime, SequenceTick};
 use super::state::{MotionCommand, MotionOrder, MotionState};
+
+/// Retail bounds active plus pending authored actions to six (acclient.c:330865).
+pub const MAX_AUTHORED_ACTIONS: usize = 6;
 
 /// Retail `RunForward` state velocity used by `CMotionInterp::get_adjusted_max_speed`
 /// (`acclient.c:329811-329837,329866-329872`).
@@ -65,6 +70,8 @@ pub struct BodyMotionRuntime {
     unmodelled: UnmodelledMotionChannels,
     /// Latest steady destination retained while a transient action owns playback.
     steady_order: MotionOrder,
+    /// Local command admission owns this retained order until completion or a new movement source.
+    local_command_owned: bool,
     /// Accepted substate gesture retained through its authored return transition.
     pending_gesture: Option<MotionCommand>,
     /// FIFO transient edges awaiting installation after the active action.
@@ -129,6 +136,17 @@ pub enum MotionActionEnqueueOutcome {
     Queued,
     /// Active plus pending actions already reached retail's bound of six.
     Overflow,
+}
+
+/// Result of admitting a locally authored command, independent of its playback class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MotionCommandAdmissionOutcome {
+    /// Command was accepted by its action or retained-state owner.
+    Accepted,
+    /// Retail's active-plus-pending action bound rejected the command.
+    QueueFull,
+    /// This local command boundary accepts action and substate commands, not styles or modifiers.
+    Unsupported,
 }
 
 /// Explicit order channels rejected by motion-table selection on the latest drive.
@@ -272,6 +290,63 @@ impl PlayingMotionClip {
 }
 
 impl BodyMotionRuntime {
+    /// Admit an authored command using the same class bits as retail DoInterpretedMotion
+    /// (acclient.c:330233). Command-list transport does not imply action-class playback:
+    /// ACE Player_Networking.cs promotes substate entries to retained forward motion.
+    fn submit_local_command(
+        &mut self,
+        table: &MotionSequenceTable,
+        command: MotionCommand,
+        speed: OrderedMotionScalar,
+        admission: EntityMotionAdmission,
+    ) -> MotionCommandAdmissionOutcome {
+        self.bind_table(table);
+        let outcome = if command.is_action() {
+            let outcome = self.enqueue_action(EntityMotionAction {
+                command,
+                speed,
+                action_sequence: admission.movement_sequence,
+                is_autonomous: true,
+                admission,
+                source: EntityMotionCommandSource::CommandList,
+            });
+            match outcome {
+                MotionActionEnqueueOutcome::Queued => MotionCommandAdmissionOutcome::Accepted,
+                MotionActionEnqueueOutcome::Overflow => MotionCommandAdmissionOutcome::QueueFull,
+            }
+        } else if command.is_substate() {
+            let mut order = self.steady_order;
+            order.forward = Some((command, speed.to_f32()));
+            self.locomotion = None;
+            self.accept_order(table, order);
+            MotionCommandAdmissionOutcome::Accepted
+        } else {
+            MotionCommandAdmissionOutcome::Unsupported
+        };
+        if outcome == MotionCommandAdmissionOutcome::Accepted {
+            self.local_command_owned = true;
+            self.remote_motion = None;
+        }
+        outcome
+    }
+
+    /// Whether accepted local playback owns the retained order rather than the last server snapshot.
+    pub fn has_local_command(&self) -> bool {
+        self.local_command_owned
+    }
+
+    fn advance_local_command(
+        &mut self,
+        table: &MotionSequenceTable,
+        quantum: f32,
+    ) -> &SequenceTick {
+        self.advance_authored(table, self.steady_order, quantum);
+        if self.action_count() == 0 && self.ordinary_is_locomotion && self.sequence.is_cyclic() {
+            self.local_command_owned = false;
+        }
+        &self.tick
+    }
+
     /// Establishes an already-existing state without playing its entry transitions.
     pub fn establish(table: &MotionSequenceTable, order: MotionOrder) -> Self {
         let mut runtime = Self::new(table);
@@ -363,6 +438,7 @@ impl BodyMotionRuntime {
             retained_run_rate_multiplier: None,
             unmodelled: UnmodelledMotionChannels::default(),
             steady_order: MotionOrder::default(),
+            local_command_owned: false,
             pending_gesture: None,
             action_queue: VecDeque::new(),
             active_action: None,
@@ -542,8 +618,7 @@ impl BodyMotionRuntime {
 
     /// Offers one edge to retail's bounded FIFO without selecting content yet.
     pub fn enqueue_action(&mut self, action: EntityMotionAction) -> MotionActionEnqueueOutcome {
-        const MAX_ACTIONS: usize = 6;
-        if self.action_count() >= MAX_ACTIONS {
+        if self.action_count() >= MAX_AUTHORED_ACTIONS {
             return MotionActionEnqueueOutcome::Overflow;
         }
         self.action_queue.push_back(action);
@@ -651,6 +726,10 @@ impl BodyMotionRuntime {
         );
         let moving = order.forward.is_some() || order.sidestep.is_some() || order.turn.is_some();
         let order = order.with_character_presentation(presentation);
+        if self.local_command_owned && !moving && grounded {
+            return self.advance_local_command(table, quantum);
+        }
+        self.local_command_owned = false;
         if !grounded {
             // RETAIL DIVERGENCE: retail contact arbitration replaces unsupported forward
             // motion (acclient.c:330148-330178,330390-330453). Preserve already accepted
@@ -743,6 +822,7 @@ impl BodyMotionRuntime {
         order: MotionOrder,
         quantum: f32,
     ) -> &SequenceTick {
+        self.local_command_owned = false;
         if self.has_manual_locomotion() {
             self.locomotion = None;
         }
@@ -951,6 +1031,41 @@ impl MotionRuntimeRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.bodies.is_empty()
+    }
+
+    /// Submit one validated command; the body runtime owns action versus retained-state selection.
+    pub(crate) fn submit_local_command(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        command: MotionCommand,
+        speed: OrderedMotionScalar,
+        admission: EntityMotionAdmission,
+    ) -> MotionCommandAdmissionOutcome {
+        self.bodies
+            .entry(guid)
+            .or_insert_with(|| BodyMotionRuntime::new(table))
+            .submit_local_command(table, command, speed, admission)
+    }
+
+    /// Advance the retained order only while it is still owned by local command admission.
+    pub(crate) fn advance_local_command(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        quantum: f32,
+    ) -> Option<&SequenceTick> {
+        let runtime = self.bodies.get_mut(&guid)?;
+        runtime
+            .local_command_owned
+            .then(|| runtime.advance_local_command(table, quantum))
+    }
+
+    /// A fresh source supersedes the local order while preserving its cursor for normal transition selection.
+    pub fn release_local_command(&mut self, guid: Guid) {
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            runtime.local_command_owned = false;
+        }
     }
 
     /// Enqueues one transient action on the body runtime selected by its effective table.

@@ -25,7 +25,7 @@ pub use fellowship::{
 };
 pub use motion_resolution::{
     AuthoredBodyMotionTick, AuthoredMotionDriveError, BodyProjectionResolver,
-    LocalAuthoredMotionActionError, MotionCommandKinematics, MotionTableMovementProfile,
+    LocalAuthoredMotionCommandError, MotionCommandKinematics, MotionTableMovementProfile,
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
 };
 pub use scene_placement::{ResolvedScenePlacement, ScenePlacementError, UnresolvedScenePlacement};

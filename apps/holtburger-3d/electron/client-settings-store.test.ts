@@ -45,6 +45,38 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("persists recent emotes on the user profile independently of character and server settings", async () => {
+		const path = await temporarySettingsPath();
+		try {
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			expect(store.readUser("persisted").sections.recentEmotes).toBeUndefined();
+			const recentEmotes = ["wave", "bowdeepstate"];
+			await store.saveUserPatch({ sections: { recentEmotes } });
+			await store.saveCharacterPatch("first:9000/0x50000001", {
+				lastKnownName: "First",
+			});
+			await store.saveCharacterPatch("second:9000/0x50000002", {
+				lastKnownName: "Second",
+			});
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(reloaded.readUser("persisted").sections.recentEmotes).toEqual(
+				recentEmotes,
+			);
+			expect(reloaded.readUser("persisted").unavailable).toEqual([]);
+			const saved = await readCollection(path);
+			expect(saved.user.recentEmotes).toEqual({
+				version: 1,
+				value: recentEmotes,
+			});
+			for (const character of Object.values(saved.characters))
+				expect(character).not.toHaveProperty("recentEmotes");
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it("persists entity alerts per character and leaves missing or malformed older sections explicit", async () => {
 		const path = await temporarySettingsPath();
 		const first = "fixture:9000/0x50000001";

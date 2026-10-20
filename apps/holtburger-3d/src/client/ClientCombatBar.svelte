@@ -544,8 +544,8 @@
 	.gauge-background {
 		position: absolute;
 		border-radius: 50% 50% 0 0 / 100% 100% 0 0;
-		background: var(--ui-combat-backdrop-color);
-		filter: var(--ui-combat-backdrop-filter);
+		background: var(--ui-hud-glass-color);
+		filter: var(--ui-hud-glass-filter);
 		pointer-events: none;
 	}
 	.gauge {

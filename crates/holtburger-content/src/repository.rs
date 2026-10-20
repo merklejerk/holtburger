@@ -324,7 +324,7 @@ impl ContentRepository {
         let chat_pose_table = self
             .read_asset::<ChatPoseTable>("chat pose table")
             .context("failed to load chat pose table for soul emote catalog")?;
-        Ok(SoulEmoteCatalog::from_asset(&chat_pose_table))
+        SoulEmoteCatalog::from_asset(&chat_pose_table)
     }
 
     /// Parses static contract definitions once for shared runtime interpretation.

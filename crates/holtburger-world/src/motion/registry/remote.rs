@@ -163,6 +163,7 @@ impl MotionRuntimeRegistry {
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
         runtime.bind_table(table);
+        runtime.local_command_owned = false;
         let actions: Vec<_> = actions.into_iter().collect();
         let incoming_windups = !actions.is_empty()
             && actions.iter().all(|action| {
@@ -203,6 +204,9 @@ impl MotionRuntimeRegistry {
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
         runtime.bind_table(table);
+        if runtime.local_command_owned {
+            return runtime.advance_local_command(table, quantum);
+        }
         let order = runtime.remote_order(table, guid, input, false);
         runtime.drive_for_guid(table, guid, order, quantum)
     }

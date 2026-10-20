@@ -173,7 +173,9 @@ pub(crate) struct MovementSystem {
     character_motion: CharacterMotionController,
     pending_jump_attempt: Option<PendingJumpAttempt>,
     character_motion_feedback: Vec<ClientCharacterMotionFeedback>,
-    pending_transient_motion: Option<TransientMotionIntent>,
+    /// Expected local queue refusals published by ClientRuntime through ordinary action feedback.
+    authored_motion_rejections: Vec<holtburger_protocol::errors::WeenieError>,
+    pending_authored_commands: Vec<AuthoredMotionIntent>,
     pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
     pending_snap_facing: Option<f32>,
     /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
@@ -201,8 +203,8 @@ pub(crate) struct PendingJumpAttempt {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum QueuedControlCommand {
     Drive(PlayerDriveIntent),
-    /// Non-locomotion animation action admitted in the same input order.
-    Transient(TransientMotionIntent),
+    /// Authored command admitted in the same input order; world owns its playback class.
+    Authored(AuthoredMotionIntent),
     CharacterMotion(SequencedCharacterMotionEvent),
     /// Server admission carries target facts captured before later world mutations.
     ServerDirective(Option<ServerDirectedMotionState>),
@@ -227,11 +229,11 @@ enum ManualInputLifetime {
     Pulse { until: Instant },
 }
 
-/// A transient publication invalidates drive deduplication without inventing a drive snapshot.
+/// An authored-command publication invalidates drive deduplication without inventing a drive snapshot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PublishedMotion {
     Drive(PublishedDrive),
-    Transient,
+    Authored,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -241,7 +243,7 @@ struct PublishedDrive {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TransientMotionIntent {
+struct AuthoredMotionIntent {
     command: InterpretedMotionCommand,
     motion_style: MotionStyle,
 }
@@ -261,7 +263,8 @@ impl MovementSystem {
             character_motion: CharacterMotionController::new(),
             pending_jump_attempt: None,
             character_motion_feedback: Vec::new(),
-            pending_transient_motion: None,
+            authored_motion_rejections: Vec::new(),
+            pending_authored_commands: Vec::new(),
             pending_arrival_pose: None,
             pending_snap_facing: None,
             active_movement: None,
@@ -305,7 +308,7 @@ impl MovementSystem {
         self.movement_publication_required |= self.has_active_manual_drive();
         self.pending_arrival_pose = None;
         self.pending_snap_facing = None;
-        self.pending_transient_motion = None;
+        self.pending_authored_commands.clear();
     }
 
     fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
@@ -313,7 +316,7 @@ impl MovementSystem {
         self.movement_publication_required = false;
         self.character_motion.cancel_charge();
         self.pending_jump_attempt = None;
-        self.pending_transient_motion = None;
+        self.pending_authored_commands.clear();
         self.pending_arrival_pose = None;
         self.pending_snap_facing = None;
         self.pending_manual_playback_stop = false;
@@ -337,7 +340,8 @@ impl MovementSystem {
         self.manual_input = ManualInputLifetime::None;
         self.pending_jump_attempt = None;
         self.character_motion_feedback.clear();
-        self.pending_transient_motion = None;
+        self.authored_motion_rejections.clear();
+        self.pending_authored_commands.clear();
         self.pending_arrival_pose = None;
         self.pending_snap_facing = None;
         self.active_movement = None;
@@ -393,13 +397,13 @@ impl MovementSystem {
             .push(QueuedControlCommand::CharacterMotion(event));
     }
 
-    pub(crate) fn enqueue_transient_motion(
+    pub(crate) fn enqueue_authored_motion(
         &mut self,
         command: InterpretedMotionCommand,
         motion_style: MotionStyle,
     ) {
         self.queued_control_commands
-            .push(QueuedControlCommand::Transient(TransientMotionIntent {
+            .push(QueuedControlCommand::Authored(AuthoredMotionIntent {
                 command,
                 motion_style,
             }));
@@ -455,7 +459,7 @@ impl MovementSystem {
                 let had_server_directive = self.has_server_controlled_motion();
                 self.movement_publication_required |= had_server_directive;
                 self.pending_manual_playback_stop |= had_server_directive;
-                self.pending_transient_motion = None;
+                self.pending_authored_commands.clear();
                 self.character_motion.release_input();
                 self.pending_jump_attempt = None;
                 self.pending_arrival_pose = None;
@@ -473,7 +477,7 @@ impl MovementSystem {
             self.pending_jump_attempt = None;
             self.pending_arrival_pose = None;
             self.pending_snap_facing = None;
-            self.pending_transient_motion = None;
+            self.pending_authored_commands.clear();
             self.pending_manual_playback_stop = self.has_server_controlled_motion();
         } else if !matches!(
             self.active_movement,
@@ -608,15 +612,13 @@ impl MovementSystem {
             );
         }
 
-        let transient_sent = if let Some(intent) = self.pending_transient_motion.take() {
-            self.execute_transient_motion_at(intent, world, session, now)
+        let command_sent = !self.pending_authored_commands.is_empty();
+        for intent in std::mem::take(&mut self.pending_authored_commands) {
+            self.execute_authored_motion_at(intent, world, session, now)
                 .await?;
-            true
-        } else {
-            false
-        };
+        }
 
-        if !transient_sent {
+        if !command_sent {
             match self.active_movement {
                 Some(ActiveMovement::Manual) => events.extend(
                     self.execute_motion_state_at(
@@ -677,6 +679,14 @@ impl MovementSystem {
                         world.admit_entity_sticky_target(world.player.guid, None);
                     }
                     explicit_stop_requested |= matches!(command, PlayerDriveIntent::Stop);
+                    if matches!(command, PlayerDriveIntent::Stop)
+                        && world.has_local_authored_motion(world.player.guid)
+                    {
+                        self.pending_manual_playback_stop = true;
+                    }
+                    world
+                        .motion_runtimes
+                        .release_local_command(world.player.guid);
                     self.ingest_drive_intent(command, now);
                     // A new controller invalidates the previous presentation owner. Updates from
                     // that same controller must retain its cursor or a continuously steered body
@@ -685,9 +695,9 @@ impl MovementSystem {
                         world.motion_runtimes.clear_locomotion(world.player.guid);
                     }
                 }
-                QueuedControlCommand::Transient(intent) => {
+                QueuedControlCommand::Authored(intent) => {
                     world.admit_entity_sticky_target(world.player.guid, None);
-                    self.pending_transient_motion = Some(intent);
+                    self.pending_authored_commands.push(intent);
                 }
                 QueuedControlCommand::CharacterMotion(input) => {
                     self.process_character_motion_event(input, world);
@@ -770,6 +780,13 @@ impl MovementSystem {
 
     pub(crate) fn take_pending_jump_attempt(&mut self) -> Option<PendingJumpAttempt> {
         self.pending_jump_attempt.take()
+    }
+
+    /// Drain expected command refusals once, preserving ClientRuntime's client-versus-wire attribution.
+    pub(crate) fn take_authored_motion_rejections(
+        &mut self,
+    ) -> Vec<holtburger_protocol::errors::WeenieError> {
+        std::mem::take(&mut self.authored_motion_rejections)
     }
 
     pub(crate) fn take_character_motion_feedback(&mut self) -> Vec<ClientCharacterMotionFeedback> {
@@ -918,6 +935,14 @@ impl MovementSystem {
         }
         if !self.has_active_manual_drive()
             && !self.pending_manual_playback_stop
+            && world.has_local_authored_motion(guid)
+        {
+            return world
+                .advance_local_authored_motion_command(dt)
+                .map_err(Into::into);
+        }
+        if !self.has_active_manual_drive()
+            && !self.pending_manual_playback_stop
             && !world.has_manual_locomotion(guid)
             && (world.has_authored_motion_actions(guid) || world.has_pending_motion_gesture(guid))
         {
@@ -1022,8 +1047,8 @@ impl MovementSystem {
         self.movement_publication_required = false;
     }
 
-    fn note_transient_motion_sent(&mut self) {
-        self.published_motion = Some(PublishedMotion::Transient);
+    fn note_authored_motion_sent(&mut self) {
+        self.published_motion = Some(PublishedMotion::Authored);
     }
 
     fn note_stop_published(&mut self) {
@@ -1096,17 +1121,29 @@ impl MovementSystem {
         Ok(state_events)
     }
 
-    async fn execute_transient_motion_at(
+    async fn execute_authored_motion_at(
         &mut self,
-        intent: TransientMotionIntent,
+        intent: AuthoredMotionIntent,
         world: &mut WorldState,
         session: &mut Session,
         now: Instant,
     ) -> Result<()> {
         let movement_sequence = world.player.next_move_seq();
-        world
-            .enqueue_local_authored_motion_action(intent.command, 1.0, movement_sequence)
-            .context("local transient motion could not enter authored playback")?;
+        match world.submit_local_authored_motion_command(intent.command, 1.0, movement_sequence) {
+            Ok(()) => {}
+            Err(holtburger_world::state::LocalAuthoredMotionCommandError::QueueOverflow {
+                ..
+            }) => {
+                self.authored_motion_rejections
+                    .push(holtburger_protocol::errors::WeenieError::TooManyActions);
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "local authored motion command failed: {error}"
+                ));
+            }
+        }
         let raw_motion_state = raw_motion_state_with_motion_style(
             world,
             RawMotionState {
@@ -1128,7 +1165,7 @@ impl MovementSystem {
             now,
         )
         .await?;
-        self.note_transient_motion_sent();
+        self.note_authored_motion_sent();
         Ok(())
     }
 
@@ -1288,7 +1325,7 @@ impl MovementSystem {
         self.published_motion != Some(PublishedMotion::Drive(published_drive(state, motion_style)))
     }
 
-    /// Movement, transient, and stop packets carry the same position/contact contract.
+    /// Movement, authored-command, and stop packets carry the same position/contact contract.
     async fn send_motion_packet(
         &mut self,
         world: &WorldState,

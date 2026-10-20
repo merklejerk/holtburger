@@ -1,3 +1,5 @@
+#[path = "tests/local_commands.rs"]
+mod local_commands;
 use super::registry::RETAIL_RUN_FORWARD_BASE_SPEED_MPS;
 use super::*;
 #[path = "tests/contact_eligibility.rs"]
@@ -9,7 +11,7 @@ mod death_lifecycle;
 #[path = "tests/manual_gestures.rs"]
 mod manual_gestures;
 use crate::entity::{
-    EntityMotionAction, EntityMotionActionSource, EntityMotionAdmission, EntityMotionSnapshot,
+    EntityMotionAction, EntityMotionAdmission, EntityMotionCommandSource, EntityMotionSnapshot,
     OrderedMotionScalar,
 };
 use crate::spatial::ContactState;
@@ -396,7 +398,7 @@ fn action(sequence: u16) -> EntityMotionAction {
             server_control_sequence: 2,
             is_autonomous: false,
         },
-        source: EntityMotionActionSource::CommandList,
+        source: EntityMotionCommandSource::CommandList,
     }
 }
 

@@ -169,9 +169,9 @@ pub struct EntityMotionAdmission {
     pub is_autonomous: bool,
 }
 
-/// Wire path that produced one transient authored action edge.
+/// Wire path that produced an interpreted motion command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityMotionActionSource {
+pub enum EntityMotionCommandSource {
     /// Retail command-list item with its own wrapping 15-bit sequence.
     CommandList,
     /// ACE action-class forward command keyed by the fresh outer movement event.
@@ -192,45 +192,26 @@ pub struct EntityMotionAction {
     /// Fresh outer event identity that admitted this edge.
     pub admission: EntityMotionAdmission,
     /// Wire path used to distinguish command-list freshness from ACE forward admission.
-    pub source: EntityMotionActionSource,
+    pub source: EntityMotionCommandSource,
 }
 
-impl EntityMotionAction {
-    /// Builds the exact command-list edge predicted by the local client before its autonomous echo.
-    pub(crate) fn from_local_command_list(
-        command: InterpretedMotionCommand,
-        speed: f32,
-        action_sequence: u16,
-        admission: EntityMotionAdmission,
-    ) -> Result<Self, EntityMotionActionRejection> {
-        reduce_motion_action(
-            command,
-            speed,
-            action_sequence,
-            true,
-            admission,
-            EntityMotionActionSource::CommandList,
-        )
-    }
-}
-
-/// Fresh action-shaped wire fact that could not enter the runtime queue.
+/// Fresh wire command that could not enter retained state or the action queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityMotionActionRejection {
+pub enum EntityMotionCommandRejection {
     /// The interpreted index has no retail command expansion.
     UnknownCommand {
         command: InterpretedMotionCommand,
-        source: EntityMotionActionSource,
+        source: EntityMotionCommandSource,
     },
     /// The expanded command is not action-class and cannot enter the transient queue.
     NotAnAction {
         command: MotionCommand,
-        source: EntityMotionActionSource,
+        source: EntityMotionCommandSource,
     },
-    /// The action's authored speed was non-finite.
+    /// The command's authored speed was non-finite.
     NonFiniteSpeed {
         command: InterpretedMotionCommand,
-        source: EntityMotionActionSource,
+        source: EntityMotionCommandSource,
     },
 }
 
@@ -240,14 +221,14 @@ fn reduce_motion_action(
     action_sequence: u16,
     is_autonomous: bool,
     admission: EntityMotionAdmission,
-    source: EntityMotionActionSource,
-) -> Result<EntityMotionAction, EntityMotionActionRejection> {
+    source: EntityMotionCommandSource,
+) -> Result<EntityMotionAction, EntityMotionCommandRejection> {
     let speed = OrderedMotionScalar::from_f32(speed)
-        .ok_or(EntityMotionActionRejection::NonFiniteSpeed { command, source })?;
+        .ok_or(EntityMotionCommandRejection::NonFiniteSpeed { command, source })?;
     let command = MotionCommand::from_interpreted(command)
-        .ok_or(EntityMotionActionRejection::UnknownCommand { command, source })?;
+        .ok_or(EntityMotionCommandRejection::UnknownCommand { command, source })?;
     if !command.is_action() {
-        return Err(EntityMotionActionRejection::NotAnAction { command, source });
+        return Err(EntityMotionCommandRejection::NotAnAction { command, source });
     }
     Ok(EntityMotionAction {
         command,
@@ -522,7 +503,7 @@ impl EntityMotionSnapshot {
 #[cfg(test)]
 mod tests {
     use super::{
-        Entity, EntityMotionActionRejection, EntityMotionActionSource, EntityMotionDirective,
+        Entity, EntityMotionCommandRejection, EntityMotionCommandSource, EntityMotionDirective,
         EntityMotionSnapshot, EntityMovementAdmission, MotionStance, MovementEventData,
         MovementTypeData,
     };
@@ -804,7 +785,7 @@ mod tests {
         assert_eq!(actions[0].command.raw(), 0x1000_004A);
         assert_eq!(actions[0].speed.to_f32(), 1.25);
         assert_eq!(actions[0].action_sequence, 1);
-        assert_eq!(actions[0].source, EntityMotionActionSource::CommandList);
+        assert_eq!(actions[0].source, EntityMotionCommandSource::CommandList);
         assert_eq!(next_action_sequence, 1);
 
         let EntityMovementAdmission::Applied { actions, .. } = entity.admit_remote_movement(
@@ -899,10 +880,74 @@ mod tests {
             };
             assert_eq!(snapshot.forward_command, None);
             assert_eq!(actions.len(), 1);
-            assert_eq!(actions[0].source, EntityMotionActionSource::ForwardCommand);
+            assert_eq!(actions[0].source, EntityMotionCommandSource::ForwardCommand);
             assert_eq!(actions[0].speed.to_f32(), 1.0);
             assert_eq!(actions[0].action_sequence, movement);
         }
+    }
+
+    #[test]
+    fn fresh_pose_command_list_entries_become_retained_state_without_action_rejection() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        let bow = InterpretedMotionCommand(0x00ec);
+        let EntityMovementAdmission::Applied {
+            snapshot,
+            actions,
+            rejected_commands,
+            next_action_sequence,
+            motion_changed,
+            ..
+        } = entity.admit_remote_movement(&action_event(
+            guid,
+            1,
+            true,
+            vec![MotionItem::new(bow, 1, true, 1.0)],
+        ))
+        else {
+            panic!("fresh remote pose should be admitted");
+        };
+        assert_eq!(snapshot.forward_command, Some(bow));
+        assert_eq!(snapshot.forward_speed.unwrap().to_f32(), 1.0);
+        assert!(actions.is_empty());
+        assert!(rejected_commands.is_empty());
+        assert!(motion_changed);
+        assert_eq!(next_action_sequence, 1);
+    }
+
+    #[test]
+    fn locally_authored_pose_echo_is_filtered_and_nonfinite_remote_pose_reports_its_speed() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Local".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        let bow = InterpretedMotionCommand(0x00ec);
+        let event = action_event(guid, 1, true, vec![MotionItem::new(bow, 1, true, 1.0)]);
+        let EntityMovementAdmission::Applied {
+            snapshot,
+            next_action_sequence,
+            ..
+        } = entity.admit_movement_with_action_policy(&event, false)
+        else {
+            panic!("outer movement may still be admitted");
+        };
+        assert_eq!(snapshot.forward_command, None);
+        assert_eq!(next_action_sequence, 0);
+        let EntityMovementAdmission::Applied {
+            rejected_commands, ..
+        } = entity.admit_remote_movement(&action_event(
+            guid,
+            2,
+            false,
+            vec![MotionItem::new(bow, 2, false, f32::NAN)],
+        ))
+        else {
+            panic!("outer movement may still be admitted");
+        };
+        assert!(matches!(
+            rejected_commands.as_slice(),
+            [EntityMotionCommandRejection::NonFiniteSpeed { .. }]
+        ));
     }
 
     #[test]
@@ -913,7 +958,7 @@ mod tests {
 
         let EntityMovementAdmission::Applied {
             actions,
-            rejected_actions,
+            rejected_commands,
             next_action_sequence,
             ..
         } = entity.admit_remote_movement(&action_event(
@@ -922,7 +967,12 @@ mod tests {
             false,
             vec![
                 MotionItem::new(u16::MAX, 1, false, 1.0),
-                MotionItem::new(InterpretedMotionCommand::RUN_FORWARD, 2, false, 1.0),
+                MotionItem::new(
+                    holtburger_protocol::messages::movement::MotionStance::NonCombat.interpreted(),
+                    2,
+                    false,
+                    1.0,
+                ),
                 MotionItem::new(74, 3, false, f32::NAN),
             ],
         ))
@@ -932,11 +982,11 @@ mod tests {
         assert!(actions.is_empty());
         assert_eq!(next_action_sequence, 3);
         assert!(matches!(
-            rejected_actions.as_slice(),
+            rejected_commands.as_slice(),
             [
-                EntityMotionActionRejection::UnknownCommand { .. },
-                EntityMotionActionRejection::NotAnAction { .. },
-                EntityMotionActionRejection::NonFiniteSpeed { .. },
+                EntityMotionCommandRejection::UnknownCommand { .. },
+                EntityMotionCommandRejection::NotAnAction { .. },
+                EntityMotionCommandRejection::NonFiniteSpeed { .. },
             ]
         ));
     }
@@ -1228,7 +1278,7 @@ pub(crate) enum EntityMovementAdmission {
         snapshot: EntityMotionSnapshot,
         motion_changed: bool,
         actions: Vec<EntityMotionAction>,
-        rejected_actions: Vec<EntityMotionActionRejection>,
+        rejected_commands: Vec<EntityMotionCommandRejection>,
         next_action_sequence: u16,
     },
 }
@@ -1397,28 +1447,28 @@ impl Entity {
         data: &MovementEventData,
         accept_autonomous_actions: bool,
     ) -> EntityMovementAdmission {
-        let snapshot =
+        let mut snapshot =
             EntityMotionSnapshot::from_movement_event(data, self.network_motion.snapshot());
-        let successor = EntityNetworkMotion::Initialized(snapshot);
-        let motion_changed = self.network_motion != successor;
-        let (actions, rejected_actions, next_action_sequence) =
-            self.reduce_motion_actions(data, accept_autonomous_actions);
+        let (actions, rejected_commands, next_action_sequence) =
+            self.reduce_motion_commands(data, accept_autonomous_actions, &mut snapshot);
+        let motion_changed = self.network_motion != EntityNetworkMotion::Initialized(snapshot);
         EntityMovementAdmission::Applied {
             snapshot,
             motion_changed,
             actions,
-            rejected_actions,
+            rejected_commands,
             next_action_sequence,
         }
     }
 
-    fn reduce_motion_actions(
+    fn reduce_motion_commands(
         &self,
         data: &MovementEventData,
         accept_autonomous_actions: bool,
+        snapshot: &mut EntityMotionSnapshot,
     ) -> (
         Vec<EntityMotionAction>,
-        Vec<EntityMotionActionRejection>,
+        Vec<EntityMotionCommandRejection>,
         u16,
     ) {
         let admission = EntityMotionAdmission::from_movement_event(data);
@@ -1437,13 +1487,30 @@ impl Entity {
                 continue;
             }
             action_sequence = sequence;
+            // Command lists carry fresh interpreted commands, not only one-shot actions.
+            // Retail DoInterpretedMotion applies substate entries to retained movement
+            // (acclient.c:330648,330233-330273); ACE MovementData retains the raw list.
+            if MotionCommand::from_interpreted(item.command).is_some_and(MotionCommand::is_substate)
+            {
+                match OrderedMotionScalar::from_f32(item.speed) {
+                    Some(speed) => {
+                        snapshot.forward_command = Some(item.command);
+                        snapshot.forward_speed = Some(speed);
+                    }
+                    None => rejected.push(EntityMotionCommandRejection::NonFiniteSpeed {
+                        command: item.command,
+                        source: EntityMotionCommandSource::CommandList,
+                    }),
+                }
+                continue;
+            }
             match reduce_motion_action(
                 item.command,
                 item.speed,
                 sequence,
                 item.is_autonomous(),
                 admission,
-                EntityMotionActionSource::CommandList,
+                EntityMotionCommandSource::CommandList,
             ) {
                 Ok(action) => accepted.push(action),
                 Err(rejection) => rejected.push(rejection),
@@ -1463,7 +1530,7 @@ impl Entity {
                 data.movement_sequence & 0x7FFF,
                 data.is_autonomous,
                 admission,
-                EntityMotionActionSource::ForwardCommand,
+                EntityMotionCommandSource::ForwardCommand,
             ) {
                 Ok(action) => accepted.push(action),
                 Err(rejection) => rejected.push(rejection),

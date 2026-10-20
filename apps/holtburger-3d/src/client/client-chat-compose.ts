@@ -1,3 +1,4 @@
+import type { ClientSoulEmotes } from "./client-soul-emotes";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import type {
 	ClientChatDestination,
@@ -30,6 +31,10 @@ interface ChatComposeLabels {
 export type ChatComposeResolution = ChatComposeLabels &
 	(
 		| { readonly kind: "send"; readonly request: ClientChatRequest }
+		| {
+				readonly kind: "sequence";
+				readonly requests: readonly [ClientChatRequest, ...ClientChatRequest[]];
+		  }
 		| { readonly kind: "app-command" }
 		| { readonly kind: "error"; readonly message: string }
 	);
@@ -41,6 +46,8 @@ export interface ChatComposeContext {
 	readonly reply: ClientChatTellTarget | null;
 	readonly retell: ClientChatTellTarget | null;
 	readonly selection: ChatSelection;
+	/** Static alias resolver; unavailable content leaves ordinary speech literal. */
+	readonly emotes: ClientSoulEmotes | null;
 }
 
 /** Shared picker/help/command vocabulary. Retail channel aliases: acclient.c:405475-406080, 408170-408800. */
@@ -216,7 +223,15 @@ export function resolveChatCompose(
 				buttonLabel: "Cmd",
 				buttonIcon: "speech",
 			};
-		return send(context.destination, trimmed);
+		const standalone = /^\*([^*]+)\*$/.exec(trimmed);
+		if (
+			standalone !== null &&
+			context.emotes?.resolve(standalone[1]) !== undefined
+		)
+			return localEmoteSpeech(trimmed, context.emotes);
+		return context.destination.kind === "speech" && context.emotes !== null
+			? localEmoteSpeech(trimmed, context.emotes)
+			: send(context.destination, trimmed);
 	}
 	const verb = command[1].toLowerCase();
 	const body = (command[2] ?? "").trim();
@@ -283,7 +298,10 @@ export function resolveChatCompose(
 				)
 			: send({ kind: "tell", target }, body);
 	}
-	if (verb === "say") return send({ kind: "speech" }, body);
+	if (verb === "say")
+		return context.emotes === null
+			? send({ kind: "speech" }, body)
+			: localEmoteSpeech(body, context.emotes);
 	if (verb === "emote")
 		return body.length === 0
 			? error(
@@ -313,6 +331,35 @@ export function resolveChatCompose(
 		kind: "app-command",
 		label: "Command",
 		buttonLabel: "Cmd",
+		buttonIcon: "speech",
+	};
+}
+
+/** Retail PublicChat removes recognized paired spans before sending remaining local speech. */
+function localEmoteSpeech(
+	text: string,
+	emotes: ClientSoulEmotes,
+): ChatComposeResolution {
+	const requests: ClientChatRequest[] = [];
+	const remaining = text
+		.replace(/\*([^*]*)\*/g, (span, alias: string) => {
+			const reference = emotes.resolve(alias);
+			if (reference === undefined) return span;
+			requests.push({ kind: "soul-emote", token: alias });
+			return "";
+		})
+		.trim();
+	if (requests.length === 0) return send({ kind: "speech" }, text);
+	if (remaining.length > 0)
+		requests.push({ kind: "speech", message: remaining });
+	const [first, ...rest] = requests;
+	if (first === undefined)
+		throw new Error("Resolved emote composition is empty.");
+	return {
+		kind: "sequence",
+		requests: [first, ...rest],
+		label: remaining.length === 0 ? "Emote · Local" : "Local · Emotes",
+		buttonLabel: remaining.length === 0 ? "Emote" : "Say + Em",
 		buttonIcon: "speech",
 	};
 }

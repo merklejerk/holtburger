@@ -163,7 +163,10 @@
 			{ guid: 2, name: "Lantern Keeper", slot: 1, deleteTime: 0 },
 		],
 	});
-	const chatComposer = new ClientChatComposer();
+	const chatComposer = new ClientChatComposer({
+		recentEmotes: [],
+		onRecentEmotesChange: () => {},
+	});
 	let messages = $state<ClientChatLine[]>([
 		{
 			id: 1,
@@ -478,6 +481,8 @@
 					persistentMessage={{ kind: "preview", message: toastMessage }}
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
+					onOpenEmotes={() => {}}
+					emotesEnabled={false}
 					placement={layout.shortcuts}
 					{editable}
 					{viewport}

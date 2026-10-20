@@ -166,7 +166,7 @@ The portal DAT also contains `ChatPoseTable`, which is the retail string-lookup 
 
 What it contains:
 
-- a command-token map from soul-emote input such as `*wave*` to a pose identifier such as `Wave`
+- a command-token map from the inner token such as `wave` (entered as `*wave*`) to a pose identifier such as `Wave`
 - a pose metadata map from pose identifier to two display strings:
   - `my_emote` for the local-player phrasing such as `You wave.`
   - `other_emote` for remote-player phrasing such as `waves.`
@@ -177,11 +177,9 @@ What it does not contain:
 - animation timing
 - stance or persistent-state classification
 
-That means the grounded first-pass contract is string-first:
+The catalog resolves token -> pose -> authored self/broadcast templates. Token lookup and motion-name lookup are case-insensitive; original authored spelling is retained. Multiple aliases resolve to one canonical pose identity for frontend discovery and history.
 
-- wire transport carries the raw soul-emote token
-- `ChatPoseTable` resolves token -> pose -> display strings
-- higher layers may classify or play motions later, but that behavior is not proven by this table alone
+Execution uses two independent protocol operations: the dedicated soul-emote action sends the broadcast phrase, while movement publishes the resolved motion command. The shared motion runtime interprets that command's class to select one-shot action or retained substate playback. Those classes come from the retail command mapping, not from this string table. The mounted catalog currently has 309 aliases across 74 poses; wheel categories are app-local presentation policy.
 
 Parsing notes proven in holtburger and ACE-aligned tests:
 

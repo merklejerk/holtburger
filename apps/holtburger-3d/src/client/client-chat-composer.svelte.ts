@@ -5,7 +5,25 @@ import type {
 } from "./client-host-contract";
 import type { ChatSelection, ChatSendDestination } from "./client-chat-compose";
 
-/** Character-session chat choices survive editor remounts but never cross character sessions. */
+import { clientChatRequestSchema } from "./client-host-contract";
+import type { ClientSoulEmotes } from "./client-soul-emotes";
+import { CLIENT_TUNING } from "./client-tuning";
+
+/** Partial queueing must not leave a draft that silently replays completed actions. */
+export class ChatSubmissionError extends Error {
+	constructor(
+		readonly queued: number,
+		total: number,
+		cause: unknown,
+	) {
+		super(
+			`${queued > 0 ? `Queued ${queued} of ${total} actions. ` : ""}${cause instanceof Error ? cause.message : String(cause)}`,
+			{ cause },
+		);
+	}
+}
+
+/** Session chat choices and user-scoped emote history survive editor remounts. */
 export class ClientChatComposer {
 	/** Monotonic counter is imperative so reset does not subscribe resource-owning effects. */
 	#nextGeneration = 0;
@@ -21,6 +39,51 @@ export class ClientChatComposer {
 	inParty = $state(false);
 	/** Editor reset and asynchronous completion identity; portals do not increment this. */
 	generation = $state(0);
+	/** Static vocabulary shared by editor and wheel; loaded once per app mount. */
+	#emotes = $state<ClientSoulEmotes | null>(null);
+	/** User-scoped queue-acknowledged pose identities, pruned when content loads. */
+	#recentEmotes = $state<readonly string[]>([]);
+	/** Settings publication is injected; the composer owns no storage or save timing. */
+	readonly #onRecentEmotesChange: (ids: readonly string[]) => void;
+
+	constructor(options: {
+		/** Saved user history, independent of character/server identity. */
+		readonly recentEmotes: readonly string[];
+		/** Publish changed history through the frontend's existing settings owner. */
+		readonly onRecentEmotesChange: (ids: readonly string[]) => void;
+	}) {
+		this.#recentEmotes = options.recentEmotes;
+		this.#onRecentEmotesChange = options.onRecentEmotesChange;
+	}
+
+	get emotes(): ClientSoulEmotes | null {
+		return this.#emotes;
+	}
+
+	get recentEmotes(): readonly string[] {
+		return this.#recentEmotes;
+	}
+
+	/** Content owns valid identities; keep order while retiring stale and duplicate saved entries. */
+	setEmotes(catalog: ClientSoulEmotes): void {
+		this.#emotes = catalog;
+		this.#changeRecentEmotes(
+			[...new Set(this.#recentEmotes)].filter(
+				(id) => catalog.pose(id) !== undefined,
+			),
+		);
+	}
+
+	#changeRecentEmotes(ids: readonly string[]): void {
+		const next = ids.slice(0, CLIENT_TUNING.emotes.recentLimit);
+		if (
+			next.length === this.#recentEmotes.length &&
+			next.every((id, index) => id === this.#recentEmotes[index])
+		)
+			return;
+		this.#recentEmotes = next;
+		this.#onRecentEmotesChange(next);
+	}
 
 	reset(): void {
 		this.generation = ++this.#nextGeneration;
@@ -57,14 +120,38 @@ export class ClientChatComposer {
 		this.selection = selection;
 	}
 
-	/** A successful return acknowledges enqueue only. Stale completions cannot mutate a new session. */
-	async send(
-		request: ClientChatRequest,
+	/** Validate before side effects; successful returns acknowledge enqueue, never server acceptance. */
+	async sendAll(
+		requests: readonly [ClientChatRequest, ...ClientChatRequest[]],
 		enqueue: (request: ClientChatRequest) => Promise<void>,
 	): Promise<void> {
 		const generation = this.generation;
-		await enqueue(request);
-		if (this.generation === generation && request.kind === "tell")
-			this.retell = request.target;
+		const resolved = requests.map((request) => {
+			clientChatRequestSchema.parse(request);
+			if (request.kind !== "soul-emote") return { request, emote: null };
+			const emote = this.emotes?.resolve(request.token);
+			if (emote === undefined)
+				throw new Error(`Unknown soul emote: ${request.token}`);
+			return { request, emote };
+		});
+		let queued = 0;
+		try {
+			for (const { request, emote } of resolved) {
+				if (this.generation !== generation)
+					throw new Error("Chat session changed before dispatch.");
+				await enqueue(request);
+				queued++;
+				if (this.generation !== generation)
+					throw new Error("Chat session changed during dispatch.");
+				if (request.kind === "tell") this.retell = request.target;
+				if (emote !== null)
+					this.#changeRecentEmotes([
+						emote.id,
+						...this.#recentEmotes.filter((id) => id !== emote.id),
+					]);
+			}
+		} catch (cause) {
+			throw new ChatSubmissionError(queued, requests.length, cause);
+		}
 	}
 }

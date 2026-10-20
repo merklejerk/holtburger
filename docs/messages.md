@@ -28,7 +28,7 @@ A player soul-emote broadcast on the dedicated soul-emote wire lane.
 Important notes:
 
 - ACE accepts player soul emotes on client action `0x01E1`, not the plain emote action opcode.
-- The rebroadcast payload is still string-first. Holtburger emits the catalog's broadcast phrase when it knows one, and it still resolves either the retail trigger token or the broadcast phrase against the mounted `ChatPoseTable` catalog at runtime.
+- The payload is authored chat text. Holtburger resolves the input alias through `ChatPoseTable` before sending the broadcast phrase; incoming broadcasts preserve the received text. Animation is conveyed separately by movement commands.
 - Plain chat emotes and soul emotes are distinct transports and should not be collapsed back into one semantic lane.
 
 | Type | Name | Description |

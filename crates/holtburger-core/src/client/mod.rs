@@ -1939,7 +1939,7 @@ mod tests {
         let command = InterpretedMotionCommand(JUMP_FIXTURE_ACTION_COMMAND as u16);
         client
             .world
-            .enqueue_local_authored_motion_action(command, 1.0, 1)
+            .submit_local_authored_motion_command(command, 1.0, 1)
             .unwrap();
         client.world.advance_authored_motion(Duration::ZERO);
         let predicted = client.world.motion_runtimes.motion_playback(guid).unwrap();
@@ -2112,7 +2112,7 @@ mod tests {
             .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
 
         let mut movement = MovementSystem::new();
-        movement.enqueue_transient_motion(
+        movement.enqueue_authored_motion(
             InterpretedMotionCommand(74),
             crate::client::movement_types::MotionStyle::Explicit(MotionStance::NonCombat),
         );

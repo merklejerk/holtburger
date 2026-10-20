@@ -1,6 +1,18 @@
 @layer base {
 	:root {
 		/* Palette-dependent component defaults resolve at the consumer. */
+		/* Frosted HUD backings shared by the combat gauge and social wheel. */
+		--ui-hud-glass-color: color-mix(
+			in srgb,
+			var(--ui-color-shadow) 62%,
+			transparent
+		);
+		--ui-hud-glass-filter: blur(18px);
+		/* Emote wheel appearance; ring geometry remains owned by the component. */
+		--ui-emote-wheel-size: 24rem;
+		--ui-emote-wheel-highlight-scale: 1.025;
+		--ui-emote-wheel-transition-duration: 160ms;
+		/* Optional --ui-emote-wheel-highlight-background resolves from local HUD glass at use. */
 		--ui-backdrop-filter: none;
 		/* Tint opacity for default panel/HUD backgrounds; explicit backgrounds bypass it. */
 		--ui-surface-opacity: 1;
@@ -144,12 +156,6 @@
 			var(--ui-color-accent) 45%,
 			var(--ui-color-control)
 		);
-		--ui-combat-backdrop-color: color-mix(
-			in srgb,
-			var(--ui-color-shadow) 62%,
-			transparent
-		);
-		--ui-combat-backdrop-filter: blur(18px);
 		--ui-combat-handle-filter: drop-shadow(
 			0 2px 2px color-mix(in srgb, var(--ui-color-shadow) 80%, transparent)
 		);
@@ -565,6 +571,32 @@
 		);
 		cursor: not-allowed;
 		opacity: 1;
+	}
+	/* Flat dropdown rows shared by command menus and editor completions. */
+	.ui-theme .ui-menu-item {
+		display: flex;
+		align-items: center;
+		gap: var(--ui-overlay-gap);
+		width: 100%;
+		flex: none;
+		margin: 0;
+		padding: var(--ui-menu-item-padding);
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: start;
+		cursor: pointer;
+	}
+	.ui-theme .ui-menu-item:where(.highlighted, [aria-selected="true"]) {
+		background: var(--ui-menu-highlight-background, var(--ui-color-control));
+		color: var(--ui-menu-highlight-color, var(--ui-color-highlight));
+	}
+	.ui-theme .ui-menu-item:disabled {
+		cursor: default;
+		color: var(--ui-menu-disabled-color, var(--ui-color-muted));
+		opacity: var(--ui-menu-disabled-opacity);
 	}
 	.ui-theme .ui-option {
 		color: var(--ui-color-text);

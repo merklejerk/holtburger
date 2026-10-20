@@ -90,6 +90,7 @@ import type {
 /** Content/status commands implemented by the shared host-content capability. */
 const SHARED_HOST_COMMAND_NAMES = [
 	"host_status",
+	"load_soul_emotes",
 	"open_world_map",
 	"read_world_map_tiles",
 	"load_active_region_data",

@@ -178,9 +178,11 @@ the separate absolute heading carried before those parameters becomes a TurnToHe
 ## 6. Steady Motion, Transient Actions, and Authored Playback
 
 After packet admission, movement has two different lifetimes. Style, forward, sidestep, and turn
-channels form the retained steady order. Command-list entries are transient action edges: each
-carries its exact speed, an independent wrapping 15-bit action sequence, and an autonomous bit.
-Retail admits a fresh action immediately and does not retain it as the forward level
+channels form the retained steady order. Command-list entries carry interpreted motion commands,
+their exact speed, an independent wrapping 15-bit sequence, and an autonomous bit. The command's
+expanded class determines its lifetime: action-class entries enter the transient queue, while
+substate entries replace retained forward state. The transport list does not imply action-class
+playback. Retail admits a fresh action immediately and does not retain it as the forward level
 (`CMotionInterp::move_to_interpreted_state`, `acclient.c:319656-319750`,
 `330607-330677`).
 
@@ -189,6 +191,12 @@ a steady locomotion or pose command, a receiver must classify an action-class co
 outer movement-event boundary, emit one transient edge, and remove it from the retained forward
 state. Retaining it would restart the action every tick and leave attacks, gestures, or transitions
 playing forever.
+
+Local soul emotes enter the same class-aware world motion boundary. The body runtime retains a
+local command's order while autonomous echoes are suppressed, advances its authored cursor once,
+and relinquishes that order on new manual or server-directed movement. Chat and frontend handlers
+resolve the requested command; they do not decide whether it is an action or pose. The local
+movement adapter preserves consecutive command edges before publishing their movement packets.
 
 Playback uses one body runtime for local players, remote players, and creatures:
 

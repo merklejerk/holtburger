@@ -34,6 +34,8 @@ pub struct SharedHostContent {
     pub world_map: Arc<crate::world_map::WorldMapService>,
     /// Lazily parsed client bootstrap, cached at the content owner rather than in either mode.
     client_bootstrap: Arc<Mutex<Option<Arc<WorldBootstrap>>>>,
+    /// One parsed emote catalog shared by bootstrap assembly and static discovery queries.
+    soul_emotes: Arc<Mutex<Option<Arc<holtburger_content::SoulEmoteCatalog>>>>,
     /// One decoded spell table shared by bootstrap assembly and static queries.
     spell_table: Arc<Mutex<Option<Arc<SpellTable>>>>,
 }
@@ -80,6 +82,7 @@ impl SharedHostContent {
             motion_catalog: Arc::new(motion_catalog),
             client_bootstrap: Arc::new(Mutex::new(None)),
             spell_table: Arc::new(Mutex::new(None)),
+            soul_emotes: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -95,6 +98,20 @@ impl SharedHostContent {
         let table = Arc::new(self.repository.read_asset::<SpellTable>("spell table")?);
         *cached = Some(Arc::clone(&table));
         Ok(table)
+    }
+
+    /// Static emote queries do not require unrelated XP, skill, or character bootstrap tables.
+    pub fn soul_emotes(&self) -> Result<Arc<holtburger_content::SoulEmoteCatalog>> {
+        let mut cached = self
+            .soul_emotes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("soul-emote catalog cache lock poisoned"))?;
+        if let Some(catalog) = cached.as_ref() {
+            return Ok(Arc::clone(catalog));
+        }
+        let catalog = Arc::new(self.repository.read_soul_emote_catalog()?);
+        *cached = Some(Arc::clone(&catalog));
+        Ok(catalog)
     }
 
     /// Loads the client bootstrap once while keeping DAT policy out of the core client runtime.
@@ -130,8 +147,7 @@ impl SharedHostContent {
             .read_contract_catalog()
             .context("failed to load contract catalog for client bootstrap")?;
         let soul_emote_catalog = self
-            .repository
-            .read_soul_emote_catalog()
+            .soul_emotes()
             .context("failed to load soul emote catalog for client bootstrap")?;
         let bootstrap = WorldBootstrap {
             weenie_types: self.weenie_catalog.types(),
@@ -142,7 +158,7 @@ impl SharedHostContent {
             character_titles: Arc::new(character_titles),
             contracts: Arc::new(contracts),
             motion_sequences: Arc::new(motion_catalog),
-            soul_emote_catalog: Arc::new(soul_emote_catalog),
+            soul_emote_catalog,
         };
         let bootstrap = Arc::new(bootstrap);
         *cached = Some(Arc::clone(&bootstrap));
@@ -155,6 +171,8 @@ impl SharedHostContent {
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum SharedContentCommand {
     HostStatus,
+    /// Pose-grouped static chat vocabulary; no world state or UI categories.
+    LoadSoulEmotes,
     OpenWorldMap {
         request: crate::world_map::OpenWorldMapRequest,
     },
@@ -212,6 +230,7 @@ pub enum SharedContentCommand {
 /// Exact wire names owned by the shared-content dispatcher.
 pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "host_status",
+    "load_soul_emotes",
     "open_world_map",
     "read_world_map_tiles",
     "load_active_region_data",
@@ -335,6 +354,16 @@ pub async fn dispatch_shared_content(
                 .await
                 .map_err(application_error)?,
         )),
+        LoadSoulEmotes => {
+            let content = runtime.content().clone();
+            let references = tokio::task::spawn_blocking(move || {
+                Ok::<_, anyhow::Error>(content.soul_emotes()?.references())
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(references)
+        }
         LoadSpellComponents => {
             let content = runtime.content().clone();
             let results = tokio::task::spawn_blocking(move || {

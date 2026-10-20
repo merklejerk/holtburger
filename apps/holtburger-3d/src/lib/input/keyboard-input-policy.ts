@@ -114,6 +114,8 @@ export class KeyboardInputPolicy {
 		string,
 		"active" | "game" | "native" | "cancelled"
 	>();
+	/** Explicit held UI lifetimes survive an ownership transfer until their physical key is released. */
+	readonly #keyReleases = new Map<string, () => void>();
 	/** Focused editor or intentional UI surface; null selects the game. */
 	#owner: HTMLElement | null = null;
 	/** Native focus caused by this pointer control must not activate a non-editor UI scope. */
@@ -180,6 +182,7 @@ export class KeyboardInputPolicy {
 			this.#owner = null;
 			this.#pointerControl = null;
 			this.#presses.clear();
+			this.#keyReleases.clear();
 			observer.disconnect();
 			this.#document = null;
 		};
@@ -315,6 +318,25 @@ export class KeyboardInputPolicy {
 			if (focused !== undefined && focused instanceof HTMLElement)
 				focused.blur();
 		}
+	}
+
+	/** Observe just this press's physical release across modal focus changes; never routes a game action.
+	 * The feature must dispose the registration when its interaction ends before keyup.
+	 */
+	bindKeyRelease(
+		event: Pick<KeyboardEvent, "code" | "key">,
+		onRelease: () => void,
+	): () => void {
+		const key = event.code || event.key;
+		if (!this.#presses.has(key))
+			throw new Error("Release observation requires a held key.");
+		if (this.#keyReleases.has(key))
+			throw new Error("Physical key release already has an owner.");
+		this.#keyReleases.set(key, onRelease);
+		return () => {
+			if (this.#keyReleases.get(key) === onRelease)
+				this.#keyReleases.delete(key);
+		};
 	}
 
 	/** Cancel without release edges, and quarantine physical presses until they are released. */
@@ -462,13 +484,16 @@ export class KeyboardInputPolicy {
 		}
 	}
 
-	/** A release belonging to an outgoing owner never reaches the replacement owner. */
+	/** Retire explicit held UI lifetimes first; ordinary outgoing releases never reach a replacement owner. */
 	readonly keyup = (event: KeyboardEvent): void => {
 		if (this.#owner !== null)
 			this.#scopeFor(this.#owner)?.modifiersChanged?.(event);
 		const key = event.code || event.key;
 		const press = this.#presses.get(key);
 		this.#presses.delete(key);
+		const release = this.#keyReleases.get(key);
+		this.#keyReleases.delete(key);
+		release?.();
 		if (press === undefined || press === "cancelled" || press === "native")
 			return;
 		if (press === "game") this.#game?.keyup(event);
@@ -476,17 +501,25 @@ export class KeyboardInputPolicy {
 		if (event.defaultPrevented) event.stopImmediatePropagation();
 	};
 
-	#scopeFor(element: HTMLElement): KeyboardScope | undefined {
+	#registeredScopeFor(
+		element: HTMLElement,
+	):
+		| { readonly element: HTMLElement; readonly scope: KeyboardScope }
+		| undefined {
 		for (
 			let current: HTMLElement | null = element;
 			current !== null;
 			current = current.parentElement
 		) {
 			const scope = this.#scopes.get(current);
-			if (scope !== undefined) return scope;
+			if (scope !== undefined) return { element: current, scope };
 			if (current === this.#modals.at(-1)?.element) break;
 		}
 		return undefined;
+	}
+
+	#scopeFor(element: HTMLElement): KeyboardScope | undefined {
+		return this.#registeredScopeFor(element)?.scope;
 	}
 
 	#nativeControlsFor(element: HTMLElement): boolean {
@@ -522,6 +555,21 @@ export class KeyboardInputPolicy {
 			this.#owner = owner;
 			return;
 		}
+		const scope =
+			this.#owner === null ? undefined : this.#scopeFor(this.#owner);
+		// Native modal buttons may move DOM focus inside one exclusive interaction.
+		// Editors still acquire/cancel independently, including inside pass-through scopes.
+		if (
+			this.#owner !== null &&
+			owner !== null &&
+			scope !== undefined &&
+			!isEditor(this.#owner) &&
+			!isEditor(owner) &&
+			this.#scopeFor(owner) === scope
+		) {
+			this.#owner = owner;
+			return;
+		}
 		if (this.#allowsGame(this.#owner) && this.#allowsGame(owner)) {
 			// Selecting or completing a command surface must not interrupt movement.
 			for (const key of this.#presses.keys()) {
@@ -541,6 +589,18 @@ export class KeyboardInputPolicy {
 	readonly #focusIn = (event: FocusEvent): void => {
 		const target = event.target;
 		if (!(target instanceof HTMLElement)) return;
+		const registered = this.#registeredScopeFor(target);
+		// Native dialogs can focus child buttons. Exclusive custom interactions retain their
+		// registered surface as keyboard owner, so replacing a child does not orphan the scope.
+		if (
+			!isEditor(target) &&
+			this.#modals.at(-1)?.element.contains(target) &&
+			registered !== undefined &&
+			registered.scope.nativeControls !== true
+		) {
+			this.#setOwner(registered.element);
+			return;
+		}
 		if (
 			isEditor(target) ||
 			this.#scopes.get(target)?.pointerActivation === true ||

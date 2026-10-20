@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeClientEmotes } from "./client-emote-probe.mjs";
 import { probeClientChat } from "./client-chat-probe.mjs";
 
 /** Shared real-browser input operations for keyboard and focused select regressions. */
@@ -745,6 +746,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		await invoke("dispose");
 		return {
 			chatComposer: await probeClientChat(client, evaluateExpression),
+			soulEmotes: await probeClientEmotes(client, evaluateExpression),
 			contextualEscape: true,
 			nativeControls: true,
 			pointerControlsPreserveGame: true,

@@ -19,6 +19,7 @@ export function entityFacts(
 ): ClientEntityFacts {
 	return {
 		guid,
+		nearby: null,
 		canPickUp: false,
 		worldContainerContent: false,
 		canReceiveGive: false,

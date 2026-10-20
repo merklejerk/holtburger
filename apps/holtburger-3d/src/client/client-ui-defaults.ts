@@ -98,6 +98,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 350, height: 310 },
 		minSize: { width: 350, height: 220 },
 	},
+	nearby: {
+		anchor: "top-right",
+		offset: { x: 16, y: 260 },
+		size: { width: 420, height: 460 },
+		minSize: { width: 320, height: 260 },
+	},
 	spells: {
 		anchor: "top-right",
 		offset: { x: 16, y: 260 },

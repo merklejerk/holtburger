@@ -45,6 +45,66 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("persists entity alerts per character and leaves missing or malformed older sections explicit", async () => {
+		const path = await temporarySettingsPath();
+		const first = "fixture:9000/0x50000001";
+		const second = "fixture:9000/0x50000002";
+		const rules = [
+			{
+				id: "golems",
+				enabled: true,
+				match: { mode: "glob" as const, pattern: "*Golem*" },
+			},
+		];
+		try {
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			expect(
+				store.readCharacter(first, "persisted").sections.entityAlerts,
+			).toBeUndefined();
+			await store.saveCharacterPatch(first, { entityAlerts: rules });
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(
+				reloaded.readCharacter(first, "persisted").sections.entityAlerts,
+			).toEqual(rules);
+			expect(
+				reloaded.readCharacter(second, "persisted").sections.entityAlerts,
+			).toBeUndefined();
+			const saved = await readCollection(path);
+			const malformed = {
+				version: 1,
+				value: [
+					{
+						id: "broken",
+						enabled: true,
+						match: { mode: "glob", pattern: "bad\\" },
+					},
+				],
+			};
+			await writeFile(
+				path,
+				JSON.stringify({
+					...saved,
+					characters: {
+						...saved.characters,
+						[first]: { ...saved.characters[first], entityAlerts: malformed },
+					},
+				}),
+			);
+			const invalid = new ClientSettingsStore(path, initialWindow);
+			await invalid.load();
+			const read = invalid.readCharacter(first, "persisted");
+			expect(read.unavailable).toHaveLength(1);
+			expect(read.sections.entityAlerts).toBeUndefined();
+			await invalid.saveCharacterPatch(first, { lastKnownName: "Wayfarer" });
+			expect(
+				(await readCollection(path)).characters[first].entityAlerts,
+			).toEqual(malformed);
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
 	it("loads older keyboard maps with the chat toggle while preserving remaps, unbound actions and filters", async () => {
 		const path = await temporarySettingsPath();
 		try {

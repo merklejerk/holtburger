@@ -426,13 +426,13 @@
 		.controls {
 			flex-shrink: 0;
 			border-bottom: 1px solid var(--ui-color-border);
-			padding-bottom: var(--ui-spell-filter-gap);
+			padding-bottom: var(--ui-filter-gap);
 		}
 		.search-line,
 		.sort-line {
 			display: flex;
 			align-items: center;
-			gap: var(--ui-spell-filter-gap);
+			gap: var(--ui-filter-gap);
 		}
 		.search-line input {
 			flex: 1;
@@ -455,8 +455,8 @@
 		.filter-pills {
 			display: flex;
 			flex-wrap: wrap;
-			gap: var(--ui-spell-filter-gap);
-			padding-block: var(--ui-spell-filter-gap);
+			gap: var(--ui-filter-gap);
+			padding-block: var(--ui-filter-gap);
 		}
 		[data-filter-category="disposition"] {
 			--filter-color: var(--ui-spell-filter-disposition-color);
@@ -499,7 +499,7 @@
 			border-bottom: 1px solid
 				color-mix(
 					in srgb,
-					var(--ui-color-border) var(--ui-spell-row-divider-tint),
+					var(--ui-color-border) var(--ui-catalog-row-divider-tint),
 					transparent
 				);
 		}
@@ -544,8 +544,8 @@
 			cursor: pointer;
 			display: flex;
 			align-items: center;
-			gap: var(--ui-spell-row-gap);
-			padding: var(--ui-spell-row-padding);
+			gap: var(--ui-catalog-row-gap);
+			padding: var(--ui-catalog-row-padding);
 		}
 		.spell-entry.expanded .spell-header,
 		.spell-header:hover {
@@ -579,11 +579,11 @@
 			border-top: 1px solid
 				color-mix(
 					in srgb,
-					var(--ui-color-border) var(--ui-spell-details-divider-tint),
+					var(--ui-color-border) var(--ui-catalog-details-divider-tint),
 					transparent
 				);
-			padding: var(--ui-spell-details-padding);
-			line-height: var(--ui-spell-details-line-height);
+			padding: var(--ui-catalog-details-padding);
+			line-height: var(--ui-catalog-details-line-height);
 		}
 		.spell-details p {
 			margin: 0;

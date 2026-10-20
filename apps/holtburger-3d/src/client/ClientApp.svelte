@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientLocationCommand } from "./client-location-command";
@@ -93,6 +94,7 @@
 	} from "../lib/game/controls/character-input-controller";
 	import {
 		CLIENT_TUNING,
+		CLIENT_NEARBY_TUNING,
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
 	} from "./client-tuning";
 	import { recordSentChat } from "./client-chat-input-history";
@@ -192,6 +194,7 @@
 	} from "./client-lifecycle-state";
 	import { ClientInputArbiter } from "./client-input-arbiter";
 	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
+	import { ClientNearby } from "./client-nearby";
 	import { ClientEntitySelection } from "./client-entity-selection";
 	import { ClientPointerSelectionController } from "./client-pointer-selection-controller";
 	import { resolveClientSpellCastAim } from "./client-spell-casting";
@@ -509,6 +512,7 @@
 		transport: startupSettingsTransport,
 		publish: (state) => {
 			characterSettings = state;
+			nearby?.acceptSettings(state);
 			if (state.kind !== "ready") selectedSpellTab = 0;
 		},
 		loadFailed: (error) =>
@@ -728,6 +732,9 @@
 		if (!worldInputEnabled) return untrack(() => inputGate.block());
 	});
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
+	let nearby = $state.raw<ClientNearby | null>(null);
+	/** Presentation-owned demand, retained across ordinary Nearby window changes. */
+	let nearbySceneMembership: SceneInterestMembership | null = null;
 	let entitySelection: ClientEntitySelection | null = null;
 	let pointerSelection: ClientPointerSelectionController | null = null;
 	let selectionInput: ClientSelectionInput | null = null;
@@ -1357,6 +1364,7 @@
 		}
 	}
 
+	const EMPTY_TRACKED_GUIDS: ReadonlySet<number> = new Set();
 	function readMinimapFrame(): MinimapFrame {
 		const frame = presentationSession?.readMinimapFrame() ?? {
 			waypoint: null,
@@ -1369,6 +1377,7 @@
 		};
 		return {
 			...frame,
+			trackedGuids: nearby?.trackedGuids() ?? EMPTY_TRACKED_GUIDS,
 			waypoint: navigationWaypoint.read(
 				frame.subject,
 				lifecycle.kind === "in-world" &&
@@ -1477,6 +1486,11 @@
 			hostTransport: currentTransport,
 			session: currentSession,
 			onError: reportPresentationError,
+			onSceneMembership: (source) => {
+				if (cancelled) return;
+				nearbySceneMembership = source;
+				nearby?.setSceneMembership(source);
+			},
 			onWeatherPresets: (presets) => {
 				if (!cancelled) weatherPresets = presets;
 			},
@@ -1598,7 +1612,11 @@
 				console.error(error);
 			});
 			if (cameraController === presentation.camera) cameraController = null;
-			if (presentationSession === presentation) presentationSession = null;
+			if (presentationSession === presentation) {
+				presentationSession = null;
+				nearbySceneMembership = null;
+				nearby?.setSceneMembership(null);
+			}
 			if (frameRateSampler === currentFrameRateSampler) frameRateSampler = null;
 			const performanceWindow = window as ClientPerformanceWindow;
 			if (
@@ -1731,6 +1749,17 @@
 		const icons = browserUiIconRepository((requests) =>
 			prepareUiIcons(transport, requests),
 		);
+		const nearbyOwner = new ClientNearby({
+			session: owner,
+			now: () => Date.now(),
+			timing: CLIENT_NEARBY_TUNING,
+			appendChat: appendChatLine,
+			saveRules: (rules) =>
+				characterSettingsOwner.change("entityAlerts", rules),
+		});
+		nearbyOwner.setSceneMembership(nearbySceneMembership);
+		nearby = nearbyOwner;
+		nearbyOwner.acceptSettings(characterSettingsOwner.state());
 		const inventoryOwner = new ClientInventoryState(owner, icons, (message) =>
 			toastCenter.publish({ message, tone: "warning" }),
 		);
@@ -1882,6 +1911,8 @@
 			spells = null;
 			retireCharacterSettings();
 			navigationWaypoint.acceptCharacter(null);
+			nearbyOwner.destroy();
+			nearby = null;
 			inventoryOwner.destroy();
 			containerOwner.destroy();
 			tradeOwner.destroy();
@@ -2048,6 +2079,9 @@
 			{entityMetadata}
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
+			{nearby}
+			onSelectNearbyEntity={(guid) =>
+				entitySelection?.selectKnownEntity(guid) === true}
 			{readMinimapFrame}
 			onClearWaypoint={() => navigationWaypoint.clear()}
 			onSetWaypoint={(target) => navigationWaypoint.set(target, notifyWaypoint)}

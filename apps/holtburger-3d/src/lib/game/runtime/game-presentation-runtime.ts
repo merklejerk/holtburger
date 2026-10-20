@@ -267,7 +267,10 @@ import {
 	type SceneInterestMap,
 	type SceneInterestRequest,
 } from "./scene-interest";
-import { RenderSceneInterestController } from "./render-scene-interest-controller";
+import {
+	type SceneInterestMembership,
+	RenderSceneInterestController,
+} from "./render-scene-interest-controller";
 import type { ResolvedSceneInterestTarget } from "./scene-target";
 import {
 	EnvCellGeometryPreparer,
@@ -2455,6 +2458,11 @@ export class GamePresentationRuntime {
 		this.#sceneActivation = null;
 	}
 
+	/** Current scene membership shared with app-local encounter consumers. */
+	sceneInterestMembership(): SceneInterestMembership {
+		return this.#renderSceneInterest;
+	}
+
 	/** A world root can install once its authoritative resident scope is available. */
 	#isDynamicScopeReady(entity: DynamicEntityView): boolean {
 		if (entity.placement.kind !== "world") return false;
@@ -2462,14 +2470,9 @@ export class GamePresentationRuntime {
 		// interest. The scene graph indexes those facts without requiring their topology; only the
 		// pose's resident scope must exist so placement and camera resolution have an authority.
 		const placement = dynamicEntityPlacement(entity);
-		const demandedLayers = this.#renderSceneInterest.layersFor(
-			placement.landblockId,
-		);
-		if (placement.envCellId === null) {
-			if (!demandedLayers?.has(LandblockLayerKind.Terrain)) return false;
+		if (this.#renderSceneInterest.contains(placement) !== true) return false;
+		if (placement.envCellId === null)
 			return this.#terrain.hasInstalledSource(placement.landblockId);
-		}
-		if (!demandedLayers?.has(LandblockLayerKind.EnvCells)) return false;
 		return this.#scene.hasEnvCellScope({
 			envCellId: placement.envCellId,
 			landblockId: placement.landblockId,

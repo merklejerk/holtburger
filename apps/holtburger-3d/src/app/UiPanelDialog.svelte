@@ -26,8 +26,13 @@
 		} else if (event.key === "Tab") {
 			event.preventDefault();
 			const controls = [
-				...dialog.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
-					"input:not(:disabled), button:not(:disabled)",
+				...dialog.querySelectorAll<
+					| HTMLInputElement
+					| HTMLSelectElement
+					| HTMLTextAreaElement
+					| HTMLButtonElement
+				>(
+					"input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)",
 				),
 			];
 			const current = controls.findIndex(

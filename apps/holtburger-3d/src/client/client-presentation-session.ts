@@ -1,3 +1,4 @@
+import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 import type {
 	CombatEffectOutcome,
 	CombatEffectsAppearance,
@@ -308,6 +309,8 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 		batch: DynamicEntityTickBatch,
 		receivedAtMs: number,
 	): void;
+	/** Scene demand source retained independently from realized entities. */
+	sceneInterestMembership(): SceneInterestMembership;
 	updateSceneInterest(request: SceneInterestRequest): unknown;
 	activateScene(
 		request: SceneActivationRequest,
@@ -408,6 +411,8 @@ export interface ClientPresentationSessionDependencies {
 	readonly canvas: HTMLCanvasElement;
 	readonly hostTransport: HostTransport;
 	readonly onError?: (error: unknown) => void;
+	/** Bind/unbind the runtime-owned scene demand source for app-local consumers. */
+	readonly onSceneMembership?: (source: SceneInterestMembership | null) => void;
 	/** Cold preset catalog published when content is installed or retired. */
 	readonly onWeatherPresets?: (presets: readonly ClientWeatherPreset[]) => void;
 	/** Saved-content mismatch is a settings issue, not a terminal rendering failure. */
@@ -467,6 +472,7 @@ export class ClientPresentationSession {
 	#environmentOverrides: ClientEnvironmentOverrides =
 		CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT;
 	#lastEnvironmentAtMs = Number.NEGATIVE_INFINITY;
+	readonly #onSceneMembership: ClientPresentationSessionDependencies["onSceneMembership"];
 	readonly #onWeatherPresets: ClientPresentationSessionDependencies["onWeatherPresets"];
 	readonly #onEnvironmentIssue: ClientPresentationSessionDependencies["onEnvironmentIssue"];
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
@@ -511,6 +517,7 @@ export class ClientPresentationSession {
 
 	constructor(dependencies: ClientPresentationSessionDependencies) {
 		this.#session = dependencies.session;
+		this.#onSceneMembership = dependencies.onSceneMembership;
 		this.#onWeatherPresets = dependencies.onWeatherPresets;
 		this.#onEnvironmentIssue = dependencies.onEnvironmentIssue;
 		this.#canvas = dependencies.canvas;
@@ -1345,6 +1352,7 @@ export class ClientPresentationSession {
 		);
 		const owner = this.#owner;
 		this.#owner = null;
+		this.#onSceneMembership?.(null);
 		this.#environmentSources = null;
 		this.#onWeatherPresets?.([]);
 		this.#onEnvironmentIssue?.(null);
@@ -1384,6 +1392,7 @@ export class ClientPresentationSession {
 			}
 			this.#applyAudioSettings(owner);
 			this.#owner = owner;
+			this.#onSceneMembership?.(owner.runtime.sceneInterestMembership());
 			const server = createClientServerEnvironmentSource(
 				owner.activeRegion,
 				(timeMs) => this.#session.readServerTime(timeMs),
@@ -1407,6 +1416,7 @@ export class ClientPresentationSession {
 				lifecycle?.kind !== "portal-space"
 			) {
 				this.#owner = null;
+				this.#onSceneMembership?.(null);
 				this.#environmentSources = null;
 				this.#onWeatherPresets?.([]);
 				this.#onEnvironmentIssue?.(null);

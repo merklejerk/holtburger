@@ -55,6 +55,8 @@ export interface ClientUiDefaults {
 	readonly combatBar: Omit<ClientUiPanel, "resizable">;
 	/** Chat history and command input. */
 	readonly chat: ClientUiPanel;
+	/** Retained nearby catalog and entity alert manager. */
+	readonly nearby: Omit<ClientUiPanel, "resizable">;
 	/** Known-spells floating window. */
 	readonly spells: Omit<ClientUiPanel, "resizable">;
 	/** Character social management window. */

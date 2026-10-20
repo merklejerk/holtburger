@@ -139,7 +139,7 @@
 		<div class="social-tab">
 			{#if view.pending}<p role="status">Waiting for party state…</p>{/if}
 			{#if view.party === null}
-				<div class="actions">
+				<div class="ui-action-row">
 					<button
 						class="ui-button"
 						type="button"
@@ -249,7 +249,7 @@
 						/>Allow members to invite</label
 					>
 				{/if}
-				<div class="actions">
+				<div class="ui-action-row">
 					<button
 						class="ui-button"
 						type="button"
@@ -364,11 +364,6 @@
 
 <style>
 	@layer components {
-		.actions {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 6px;
-		}
 		.social-tab {
 			display: grid;
 			align-content: start;

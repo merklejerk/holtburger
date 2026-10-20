@@ -2,6 +2,32 @@ import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
+/** World-owned broad groups from public descriptions, independent of appraisal. */
+export const NEARBY_ENTITY_CATEGORIES = [
+	"monster",
+	"npc",
+	"player",
+	"container",
+	"item",
+	"portal",
+	"lifestone",
+	"door-or-switch",
+] as const;
+/** Shared classification; frontend labels and filter combinations remain app policy. */
+export type NearbyEntityCategory = (typeof NEARBY_ENTITY_CATEGORIES)[number];
+const nearbyEntityFactsSchema = z
+	.object({
+		name: z.string(),
+		category: z.enum(NEARBY_ENTITY_CATEGORIES),
+		vendor: z.boolean(),
+		stackCount: guid.nullable(),
+		structure: z
+			.object({ current: guid.nullable(), max: guid.nullable() })
+			.strict()
+			.readonly(),
+	})
+	.strict()
+	.readonly();
 /** World-owned projectile supply; pending appraisal identity is consumed by core. */
 const projectileSupplySchema = z.discriminatedUnion("kind", [
 	z
@@ -68,6 +94,8 @@ const slotSchema = z.discriminatedUnion("kind", [
 const clientEntityFactsSchema = z
 	.object({
 		guid,
+		/** Public-only independent placement admission, never a merged-property fallback. */
+		nearby: nearbyEntityFactsSchema.nullable(),
 		description: z.discriminatedUnion("kind", [
 			z
 				.object({ kind: z.literal("pending") })

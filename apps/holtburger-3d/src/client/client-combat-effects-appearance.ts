@@ -1,4 +1,4 @@
-import { UI_THEME_CHANGED_EVENT } from "../app/ui-theme";
+import { observeUiTheme } from "../app/ui-theme";
 import { hexRgb, normalizedRgbColor } from "../lib/frontend-color";
 import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
 import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
@@ -82,14 +82,7 @@ export function observeCombatEffectsAppearance(
 		refresh();
 		fontsChanged();
 	};
-	// Validate and publish before registering listeners so an invalid theme cannot leak them.
-	refresh();
-	const observer = new MutationObserver(refresh);
-	observer.observe(element, {
-		attributes: true,
-		attributeFilter: ["style", "class"],
-	});
-	document.addEventListener(UI_THEME_CHANGED_EVENT, refresh);
+	const stopTheme = observeUiTheme(element, refresh);
 	document.fonts.addEventListener("loadingdone", refreshFonts);
 	return {
 		update(next: ClientCombatIndicatorSettings) {
@@ -97,8 +90,7 @@ export function observeCombatEffectsAppearance(
 			refresh();
 		},
 		destroy() {
-			observer.disconnect();
-			document.removeEventListener(UI_THEME_CHANGED_EVENT, refresh);
+			stopTheme();
 			document.fonts.removeEventListener("loadingdone", refreshFonts);
 		},
 	};

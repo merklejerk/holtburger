@@ -586,7 +586,7 @@
 		.chat-filters {
 			display: flex;
 			flex-wrap: wrap;
-			gap: var(--ui-spell-filter-gap);
+			gap: var(--ui-filter-gap);
 			padding: 0 3px 3px;
 			background: var(--_ui-hud-background-color);
 			pointer-events: auto;

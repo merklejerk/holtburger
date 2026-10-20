@@ -67,6 +67,7 @@
 		| "social"
 		| "journal"
 		| "spells"
+		| "nearby"
 		| "enchantments"
 		| "characterSheet"
 		| "spellBar"

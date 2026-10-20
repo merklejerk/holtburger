@@ -1187,6 +1187,9 @@ pub struct Entity {
     pub sequences: [u16; 9],
 
     pub properties: WorldObjectProperties,
+    /// Public-only catalog evidence; appraisal merges affect `properties` alone.
+    pub(crate) public_description:
+        Option<crate::entity_public_description::EntityPublicDescription>,
 
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
@@ -1566,6 +1569,9 @@ impl Entity {
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {
+        if let Some(public) = &mut self.public_description {
+            public.apply(&update);
+        }
         // PublicWeenieDesc::SetPlayerKillerStatus (acclient.c:449427) replaces all three
         // status flags. Apply at mutation time so a later description can supersede them.
         if let PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status) = &update {
@@ -1628,6 +1634,11 @@ impl Entity {
 
     /// Hydrate description facts and return its decoded sticky target for one-time world admission.
     pub fn apply_description(&mut self, data: &ObjectDescriptionData) -> Option<Guid> {
+        self.public_description = Some(
+            crate::entity_public_description::EntityPublicDescription::from_description(
+                &data.public_weenie_desc,
+            ),
+        );
         self.wcid = Some(data.public_weenie_desc.wcid);
         self.flags = data.public_weenie_desc.obj_desc_flags;
         self.weenie_flags = data.public_weenie_desc.weenie_flags;
@@ -1733,6 +1744,7 @@ impl Entity {
             health_fraction: None,
             sequences: [0; 9],
             properties,
+            public_description: None,
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,

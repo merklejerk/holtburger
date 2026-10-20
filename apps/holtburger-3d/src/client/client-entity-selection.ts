@@ -97,11 +97,11 @@ export class ClientEntitySelection {
 	}
 
 	/** Acquire a roster target only from known local facts, leaving unavailable targets unchanged. */
-	selectKnownEntity(guid: number): void {
-		if (this.#destroyed) return;
+	selectKnownEntity(guid: number): boolean {
+		if (this.#destroyed) return false;
 		const intent = this.beginAcquisition("external");
 		const read = this.#lifecycle.entities.read();
-		if (read.kind === "pending") return;
+		if (read.kind === "pending") return false;
 		const entity = read.level.entities.get(guid);
 		if (
 			entity?.description.kind !== "known" ||
@@ -109,8 +109,9 @@ export class ClientEntitySelection {
 				entity.scenePlacement === "unavailable") ||
 			this.#beyondRetentionDistance(guid)
 		)
-			return;
+			return false;
 		this.commitAcquisition(intent, guid);
+		return true;
 	}
 
 	/** Select the authoritative local identity, including when it is not realized. */

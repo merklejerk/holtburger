@@ -206,30 +206,42 @@
 		--ui-icon-action-size: 26px;
 		--ui-icon-action-padding: 4px;
 		--ui-icon-rendering: pixelated;
-		/* Spell panel and accordion density; icon size changes display only. */
+		/* Vector artwork and entity-category sizing remain independent of action hit targets. */
+		--ui-icon-stroke-width: 1.7;
+		--ui-entity-category-icon-size: 18px;
+		--ui-minimap-button-size: 20px;
+		--ui-minimap-button-radius: 50%;
+		/* Canvas tracking decorations resolve these CSS values on cold theme changes. */
+		--ui-minimap-tracked-color: rgba(110, 240, 255, 0.95);
+		--ui-minimap-tracked-width: 2px;
+		--ui-minimap-tracked-gap: 7px;
+		--ui-minimap-tracked-dash-length: 2px;
+		--ui-minimap-tracked-dash-gap: 2px;
+		/* Catalog row and disclosure density; spell icon size changes display only. */
 		--ui-spell-panel-padding: 8px;
-		--ui-spell-row-padding: 4px 6px;
-		--ui-spell-row-gap: 8px;
+		--ui-catalog-row-padding: 4px 6px;
+		--ui-catalog-row-gap: 8px;
 		--ui-spell-icon-size: 32px;
-		--ui-spell-details-padding: 10px 12px;
-		--ui-spell-details-line-height: 1.5;
+		--ui-catalog-details-padding: 10px 12px;
+		--ui-catalog-details-line-height: 1.5;
 		--ui-spell-expansion-indicator-gap: 8px;
 		/* Border color contributions when mixed with transparency. */
-		--ui-spell-row-divider-tint: 20%;
-		--ui-spell-details-divider-tint: 30%;
-		/* Spell filter category colors and pill geometry. */
+		--ui-catalog-row-divider-tint: 20%;
+		--ui-catalog-details-divider-tint: 30%;
+		/* Spell-specific filter category colors. */
 		--ui-spell-filter-disposition-color: #82bd91;
 		--ui-spell-filter-target-color: #79b6d6;
 		--ui-spell-filter-school-color: #b898d1;
 		--ui-spell-filter-damage-color: #d68d78;
 		--ui-spell-filter-level-color: #c6b575;
-		--ui-spell-filter-gap: 6px;
-		--ui-spell-filter-pill-radius: 12px;
-		--ui-spell-filter-pill-padding: 2px 8px;
-		--ui-spell-filter-max-height: 40vh;
+		/* Shared category/filter pill geometry and spacing. */
+		--ui-filter-gap: 6px;
+		--ui-filter-pill-radius: 12px;
+		--ui-filter-pill-padding: 2px 8px;
+		--ui-filter-max-height: 40vh;
 		/* Category color contributions over the well surface, as percentages. */
-		--ui-spell-filter-tint: 12%;
-		--ui-spell-filter-active-tint: 38%;
+		--ui-filter-tint: 12%;
+		--ui-filter-active-tint: 38%;
 		--ui-spell-control-disabled-opacity: 0.5;
 		/* Spell formula list density; prepared artwork remains native resolution. */
 		--ui-spell-component-icon-size: 20px;
@@ -495,6 +507,26 @@
 		min-height: 0;
 		padding: 0;
 	}
+	/* Presentation attributes in the SVGs remain overridable by normal theme selectors. */
+	.ui-theme .ui-vector-icon {
+		stroke-width: var(--ui-icon-stroke-width);
+	}
+	/* Minimap rim controls share the reset button's compact circular footprint. */
+	.ui-theme .ui-minimap-button {
+		width: var(--ui-minimap-button-size);
+		height: var(--ui-minimap-button-size);
+		border-radius: var(--ui-minimap-button-radius);
+	}
+	/* Panel action rows share spacing independently of inline forms and icon toolbars. */
+	.ui-theme .ui-action-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--ui-icon-action-gap);
+	}
+	/* A standalone text action fills its row; grouped and inline controls keep their size. */
+	.ui-theme .ui-action-row > .ui-button:only-child {
+		flex: 1;
+	}
 	/* Member and key-binding rows share the same compact action controls. */
 	.ui-theme .ui-icon-actions {
 		display: flex;
@@ -632,6 +664,42 @@
 	}
 	.ui-theme input[type="range"]:disabled {
 		cursor: not-allowed;
+	}
+	/* Catalog rows share quiet selection controls and expanded detail surfaces. */
+	.ui-theme .ui-catalog-row {
+		border: 1px solid transparent;
+		border-bottom-color: color-mix(
+			in srgb,
+			var(--ui-color-border) var(--ui-catalog-row-divider-tint),
+			transparent
+		);
+	}
+	.ui-theme .ui-catalog-row.expanded {
+		border-color: var(--ui-color-border);
+		background: var(--ui-color-well);
+	}
+	.ui-theme .ui-catalog-trigger {
+		text-align: left;
+		color: inherit;
+		font: inherit;
+		background: transparent;
+		border: 0;
+		cursor: pointer;
+		padding: var(--ui-catalog-row-padding);
+	}
+	.ui-theme .ui-catalog-row.expanded .ui-catalog-trigger,
+	.ui-theme .ui-catalog-trigger:hover {
+		background: var(--ui-color-control);
+	}
+	.ui-theme .ui-catalog-details {
+		border-top: 1px solid
+			color-mix(
+				in srgb,
+				var(--ui-color-border) var(--ui-catalog-details-divider-tint),
+				transparent
+			);
+		padding: var(--ui-catalog-details-padding);
+		line-height: var(--ui-catalog-details-line-height);
 	}
 	.ui-theme .ui-disclosure {
 		border-top: 1px solid var(--ui-color-border);
@@ -1127,25 +1195,26 @@
 }
 
 @layer components {
-	/* Additive filters share the spellbook's pill geometry and pressed tint. */
-	.ui-theme .ui-filter-pill {
+	/* Category labels and additive filters share the same pill surface. */
+	.ui-theme :is(.ui-pill, .ui-filter-pill) {
 		font: inherit;
 		color: inherit;
-		cursor: pointer;
 		border: 1px solid var(--filter-color, var(--ui-color-accent));
 		background: color-mix(
 			in srgb,
-			var(--filter-color, var(--ui-color-accent)) var(--ui-spell-filter-tint),
+			var(--filter-color, var(--ui-color-accent)) var(--ui-filter-tint),
 			var(--ui-color-well)
 		);
-		border-radius: var(--ui-spell-filter-pill-radius);
-		padding: var(--ui-spell-filter-pill-padding);
+		border-radius: var(--ui-filter-pill-radius);
+		padding: var(--ui-filter-pill-padding);
+	}
+	.ui-theme .ui-filter-pill {
+		cursor: pointer;
 	}
 	.ui-theme .ui-filter-pill[aria-pressed="true"] {
 		background: color-mix(
 			in srgb,
-			var(--filter-color, var(--ui-color-accent))
-				var(--ui-spell-filter-active-tint),
+			var(--filter-color, var(--ui-color-accent)) var(--ui-filter-active-tint),
 			var(--ui-color-well)
 		);
 		outline: 1px solid var(--filter-color, var(--ui-color-accent));

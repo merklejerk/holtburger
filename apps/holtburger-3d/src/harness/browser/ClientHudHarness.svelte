@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
+	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 	import { runClientHelpCommand } from "../../client/client-command-help";
 	import {
 		PARTY_HUD_PREVIEW,
@@ -135,6 +137,9 @@
 	} from "svelte";
 	import ClientHousingManagement from "../../client/ClientHousingManagement.svelte";
 	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
+	import { probeClientNearby } from "./client-nearby-probe";
+	import { ClientNearby } from "../../client/client-nearby";
+	import { CLIENT_NEARBY_TUNING } from "../../client/client-tuning";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
 	import { captureLoadout } from "../../client/client-loadout";
@@ -1073,6 +1078,8 @@
 		readonly probeWaypoint: () => ReturnType<typeof probeClientWaypoint>;
 		/** DOM/lifecycle checks for the production party HUD, without visual acceptance. */
 		readonly probePartyHud: typeof probePartyHud;
+		/** Production catalog and alerts with controlled authoritative delivery. */
+		readonly probeNearby: () => ReturnType<typeof probeClientNearby>;
 		/** Prepare the production HUD with a full synthetic roster for literal screenshots. */
 		readonly showPartyHud: typeof showPartyHud;
 		/** Runtime overlay checks using real CSS and viewport hit testing. */
@@ -1368,6 +1375,7 @@
 				worldContainer: { kind: "closed" },
 				entities: [playerGuid, 7, 8].map((guid) => ({
 					guid,
+					nearby: null,
 					description: {
 						kind: "known",
 						name: guid === playerGuid ? playerName : "Drudge",
@@ -1463,6 +1471,29 @@
 			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
+	const nearbyScene = new RenderSceneInterestController();
+	nearbyScene.replace(nearbySceneInterest("0x0001ffff", "outdoor"));
+	const nearbyOwner = new ClientNearby({
+		session: interactionLifecycle,
+		now: () => Date.now(),
+		timing: CLIENT_NEARBY_TUNING,
+		appendChat: (entry) => {
+			appendChat(entry);
+		},
+		saveRules: (rules) => {
+			if (characterSettings !== null)
+				characterSettings = { ...characterSettings, entityAlerts: rules };
+		},
+	});
+	nearbyOwner.setSceneMembership(nearbyScene);
+	nearbyOwner.acceptSettings({
+		kind: "ready",
+		characterGuid: 1,
+		generation: 1,
+		settings: createDefaultClientCharacterSettings(),
+		lastKnownName: null,
+	});
+
 	let publishLoadoutFeedback:
 		((feedback: ClientActionFeedback) => void) | null = null;
 	const loadoutProbe = {
@@ -3455,6 +3486,7 @@
 	let minimapCategory: DynamicEntityMapBlipCategory = "mob";
 	let doorAngle = 0;
 	let doorHalfWidth = 2;
+	let nearbyMapFixture = false;
 	let minimapHidden = false;
 	let minimapNoDraw = false;
 	/** Read the actual drawn door segment for browser pointer and zoom probes. */
@@ -3683,9 +3715,24 @@
 			waypoint: null,
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: waypointCameraHeading,
-			presentedEntities: () =>
-				minimapSubjectGuid === null ? [] : [minimapEntity()],
+			presentedEntities: () => {
+				if (minimapSubjectGuid === null) return [];
+				if (!nearbyMapFixture) return [minimapEntity()];
+				const second = minimapEntity();
+				second.placement.localTransform.m41 += 20;
+				return [
+					minimapEntity(),
+					{
+						...second,
+						view: {
+							...second.view,
+							identity: { ...second.view.identity, guid: 8 },
+						},
+					},
+				];
+			},
 			selectedGuid,
+			trackedGuids: nearbyOwner.trackedGuids(),
 			source: null,
 			subject: {
 				anchor: {
@@ -4526,6 +4573,25 @@
 			},
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeNearby: () => {
+				nearbyMapFixture = true;
+				waypointOwner.acceptCharacter(1);
+				minimapCategory = "mob";
+				minimapHidden = false;
+				minimapNoDraw = false;
+				minimapSubjectGuid = 1;
+				waypointProbeEnabled = true;
+				return probeClientNearby({
+					owner: nearbyOwner,
+					scene: nearbyScene,
+					baseline: emitInteractionBaseline,
+					emit: emitInteractionEvent,
+					selected: () => selection.selectedGuid(),
+					commands: () => interactionCommands,
+					messages: () => messages,
+					waypoint: () => readMinimapFrame().waypoint?.target ?? null,
+				});
+			},
 			chat: {
 				setPartyPresent: (present) => {
 					chatComposer.inParty = present;
@@ -5030,6 +5096,7 @@
 			unsubscribeSelection();
 			selection.destroy();
 			socialParty.destroy();
+			nearbyOwner.destroy();
 			interactionLifecycle.stop();
 			overlayObservation.restore();
 			readMinimapOverlayArcCalls = () => 0;
@@ -5051,6 +5118,8 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		nearby={nearbyOwner}
+		onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
 		onClearWaypoint={() => waypointOwner.clear()}
 		onSetWaypoint={(target) => waypointOwner.set(target, notifyWaypoint)}
 		{partyHudPresent}

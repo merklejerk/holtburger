@@ -1,15 +1,24 @@
+import type { SceneResidency } from "../scene";
 import type { LandblockOwnerId } from "../game-types";
 import type { TerrainFogCoverage } from "../environment/terrain-fog";
 import {
 	computeDungeonSceneInterest,
 	computeOutdoorSceneInterest,
-	type LandblockLayerKind,
+	LandblockLayerKind,
 	retainSceneInterestWithinExitMargin,
 	type SceneInterestMap,
 	type SceneInterestRequest,
 	validateSceneInterestRadiiOrThrow,
 } from "./scene-interest";
 import type { ResolvedSceneInterestTarget } from "./scene-target";
+
+/** App-local scene demand, independent of mesh and topology loading. */
+export interface SceneInterestMembership {
+	/** Null means that no scene target has been established. */
+	contains(residency: SceneResidency): boolean | null;
+	/** Explicit interest transitions; never emitted at render cadence. */
+	subscribe(listener: () => void): () => void;
+}
 
 type OutdoorSceneInterestTarget = Extract<
 	ResolvedSceneInterestTarget,
@@ -46,7 +55,8 @@ type RenderSceneInterestState =
 const EMPTY_INTEREST: SceneInterestMap = new Map();
 
 /** Owns synchronous render-interest policy while the runtime owns resource reconciliation. */
-export class RenderSceneInterestController {
+export class RenderSceneInterestController implements SceneInterestMembership {
+	readonly #listeners = new Set<() => void>();
 	#state: RenderSceneInterestState = {
 		kind: "empty",
 		interest: EMPTY_INTEREST,
@@ -78,10 +88,31 @@ export class RenderSceneInterestController {
 	/** Clear interest and all correlated target and fog context. */
 	clear(): RenderSceneInterestTransition {
 		this.#state = { kind: "empty", interest: EMPTY_INTEREST };
+		this.#notify();
 		return {
 			effectiveInterest: EMPTY_INTEREST,
 			nominalInterest: EMPTY_INTEREST,
 		};
+	}
+
+	contains(residency: SceneResidency): boolean | null {
+		if (this.#state.kind === "empty") return null;
+		const layer =
+			residency.envCellId === null
+				? LandblockLayerKind.Terrain
+				: LandblockLayerKind.EnvCells;
+		return this.#state.interest.get(residency.landblockId)?.has(layer) === true;
+	}
+
+	subscribe(listener: () => void): () => void {
+		this.#listeners.add(listener);
+		return () => {
+			this.#listeners.delete(listener);
+		};
+	}
+
+	#notify(): void {
+		for (const listener of this.#listeners) listener();
 	}
 
 	/** Layers currently authorizing one owner's render-dependent behavior. */
@@ -128,6 +159,7 @@ export class RenderSceneInterestController {
 						interest,
 						target: request.target,
 					};
+		this.#notify();
 	}
 }
 

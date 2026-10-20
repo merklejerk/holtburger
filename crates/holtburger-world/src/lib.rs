@@ -20,6 +20,7 @@ pub mod entity_appearance;
 pub mod entity_classification;
 pub mod entity_facts;
 pub mod entity_physics;
+mod entity_public_description;
 pub mod entity_scale;
 pub mod equipment;
 pub mod events;

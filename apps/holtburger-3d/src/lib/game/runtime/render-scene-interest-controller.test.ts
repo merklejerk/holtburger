@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LandblockOwnerId } from "../game-types";
 import {
 	LandblockLayerKind,
@@ -37,6 +37,32 @@ function dungeon(landblockId: LandblockOwnerId): SceneInterestRequest {
 }
 
 describe("RenderSceneInterestController", () => {
+	it("publishes committed owner/layer membership independently of resource loading", () => {
+		const controller = new RenderSceneInterestController();
+		const outside = { landblockId: "0xda55ffff", envCellId: null } as const;
+		const inside = {
+			landblockId: "0xda55ffff",
+			envCellId: "0xda550100",
+		} as const;
+		const observed: (boolean | null)[] = [];
+		const listener = vi.fn(() => {
+			observed.push(controller.contains(outside));
+		});
+		const unsubscribe = controller.subscribe(listener);
+		expect(controller.contains(outside)).toBeNull();
+		controller.replace(outdoor("0xda55ffff"));
+		expect(controller.contains(outside)).toBe(true);
+		controller.replace(dungeon("0xda55ffff"));
+		expect(controller.contains(outside)).toBe(false);
+		expect(controller.contains(inside)).toBe(true);
+		controller.replace(dungeon("0xdb55ffff"));
+		expect(controller.contains(inside)).toBe(false);
+		controller.clear();
+		expect(observed).toEqual([true, false, false, null]);
+		unsubscribe();
+		controller.follow(outdoor("0xda55ffff"));
+		expect(listener).toHaveBeenCalledTimes(4);
+	});
 	it("rejects invalid policy before changing its state", () => {
 		const controller = new RenderSceneInterestController();
 		const invalid = {

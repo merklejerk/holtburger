@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { entityAlertRulesSchema } from "./client-entity-alerts.js";
 import { loadoutActionContentSchema } from "./client-loadout.js";
 
 import {
@@ -70,6 +71,7 @@ const clientHudLayoutSchema = z
 		combatBar: hudPlacementSchema,
 		chat: hudPlacementSchema,
 		spells: hudPlacementSchema,
+		nearby: hudPlacementSchema,
 		social: hudPlacementSchema,
 		journal: hudPlacementSchema,
 		enchantments: hudPlacementSchema,
@@ -297,6 +299,8 @@ const attackHeightSchema = z.enum(["low", "medium", "high"]);
 /** Character-scoped local shortcuts and combat controls, never server authority. */
 export const clientCharacterSettingsSchema = z
 	.object({
+		/** Character-local entity name alerts, never server authority. */
+		entityAlerts: entityAlertRulesSchema,
 		actionBars: z
 			.array(actionBarSchema)
 			.min(1)

@@ -13,6 +13,13 @@ import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout";
 /** Horizontal proximity suppresses unstable compass bearings without clearing navigation intent. */
 export const CLIENT_WAYPOINT_NEAR_RADIUS_METERS = 25;
 
+/** Nearby display cadence and encounter noise suppression; no scene-rate reactive publication. */
+export const CLIENT_NEARBY_TUNING = {
+	displayIntervalMs: 250,
+	absenceGraceMs: 5_000,
+	notificationBatchMs: 150,
+} as const;
+
 /** Local builder geometry; no new persisted HUD preference section. */
 export const CLIENT_LOADOUT_BUILDER_TUNING = {
 	width: 380,

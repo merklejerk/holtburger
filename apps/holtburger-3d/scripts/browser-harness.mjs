@@ -309,6 +309,8 @@ try {
 			...result.clientInventory,
 			browserErrors,
 		};
+	} else if (options.clientNearby) {
+		report = { suite: "client-nearby", ...result.clientNearby, browserErrors };
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
@@ -579,6 +581,7 @@ function parseArgs(args) {
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
+		clientNearby: false,
 		clientInventory: false,
 		clientLoadouts: false,
 		clientPreciseJump: false,
@@ -773,6 +776,10 @@ function parseArgs(args) {
 			case "--client-inventory":
 				parsed.clientHud = true;
 				parsed.clientInventory = true;
+				break;
+			case "--client-nearby":
+				parsed.clientHud = true;
+				parsed.clientNearby = true;
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
@@ -2061,6 +2068,7 @@ Options:
   --client-bindings   Verify Settings remapping, shortcut hints, and feature dispatch.
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
+  --client-nearby       Exercise nearby catalog, name alerts, chat and minimap integration.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
@@ -4555,6 +4563,16 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientNearby)
+			return {
+				clientNearby: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeNearby",
+					[],
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientInventory) {
 			await evaluate(
 				client,

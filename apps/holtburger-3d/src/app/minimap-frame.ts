@@ -59,6 +59,8 @@ export interface MinimapFrame {
 	readonly presentedEntities: () => Iterable<MapEntity>;
 	/** Cold selected identity; the widget samples it with the rest of its bounded frame. */
 	readonly selectedGuid: number | null;
+	/** Optional app-owned tracked identities; absent in Explorer and undecorated frames. */
+	readonly trackedGuids?: ReadonlySet<number>;
 	/** Camera field of view in radians, drawn as the view cone. */
 	readonly cameraFovRadians: number;
 	/** Camera bearing, distinct from the possessed subject's bearing. */

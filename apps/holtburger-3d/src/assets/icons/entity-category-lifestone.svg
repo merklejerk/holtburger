@@ -1,0 +1,16 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 24 24"
+	aria-hidden="true"
+	class="ui-vector-icon"
+	display="block"
+	width="100%"
+	height="100%"
+	fill="none"
+	stroke="currentColor"
+	stroke-width="1.7"
+	stroke-linecap="round"
+	stroke-linejoin="round"
+>
+	<path d="m8 5 4-3 4 3 2 13H6L8 5Zm4-3v16M8 5l4 4 4-4M5 21h14M2 8l2 1m18-1-2 1" />
+</svg>

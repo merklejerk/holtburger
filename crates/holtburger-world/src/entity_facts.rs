@@ -219,12 +219,76 @@ pub enum CorpseState {
     Opened,
 }
 
+/// Broad world-object semantics; frontends choose pill labels and presentation order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NearbyEntityCategory {
+    Player,
+    Npc,
+    Monster,
+    Container,
+    Item,
+    Portal,
+    Lifestone,
+    DoorOrSwitch,
+}
+
+/// Minimal public-description projection, with no dependency on appraisal property storage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NearbyEntityFacts {
+    /// Public name used by catalog search and alert rules.
+    pub name: String,
+    /// Shared broad classification used by catalog category pills.
+    pub category: NearbyEntityCategory,
+    /// Public vendor distinction displayed inside the NPC group.
+    pub vendor: bool,
+    /// Public quantity, absent until stackability and current count are disclosed.
+    pub stack_count: Option<u32>,
+    /// Public remaining uses and capacity, both independently optional.
+    pub structure: EntityStructure,
+}
+
+fn nearby_category(
+    flags: holtburger_common::properties::ObjectDescriptionFlag,
+    item_type: holtburger_common::properties::ItemType,
+    weenie_type: Option<WeenieType>,
+) -> NearbyEntityCategory {
+    use DynamicEntityMapBlipCategory as MapCategory;
+    use NearbyEntityCategory as Category;
+    use holtburger_common::properties::{ItemType, ObjectDescriptionFlag as Flag, Usable};
+    if flags.contains(Flag::CORPSE) && !flags.intersects(Flag::PLAYER | Flag::VENDOR) {
+        return Category::Container;
+    }
+    // Catalog grouping collapses both door-usability variants. No invented useability
+    // fact escapes this classification call.
+    match semantic_dynamic_entity_map_blip_category(
+        flags,
+        Some(item_type),
+        weenie_type,
+        Usable::UNDEF,
+    ) {
+        MapCategory::Player => Category::Player,
+        MapCategory::Npc => Category::Npc,
+        MapCategory::Mob => Category::Monster,
+        MapCategory::Portal => Category::Portal,
+        MapCategory::Lifestone => Category::Lifestone,
+        MapCategory::Door | MapCategory::DoorNoDirectUse | MapCategory::Switch => {
+            Category::DoorOrSwitch
+        }
+        MapCategory::Other if item_type.contains(ItemType::CONTAINER) => Category::Container,
+        MapCategory::Other => Category::Item,
+    }
+}
+
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientEntityFacts {
     /// Stable key shared with selection and rendering.
     pub guid: Guid,
+    /// Public-only independent-world catalog facts; absent for contents and attachments.
+    pub nearby: Option<NearbyEntityFacts>,
     /// Cell/header/HUD and health subscription facts.
     pub description: EntityDescription,
     /// Direct containment/equipment relationship for inventory grouping.
@@ -419,6 +483,38 @@ impl WorldState {
         };
         Ok(Some(ClientEntityFacts {
             guid,
+            nearby: entity
+                .filter(|_| {
+                    matches!(resolved, crate::ResolvedScenePlacement::Independent)
+                        && matches!(location, EntityStorageLocation::None)
+                })
+                .and_then(|entity| {
+                    let public = entity.public_description.as_ref()?;
+                    if public.ui_hidden {
+                        return None;
+                    }
+                    Some(NearbyEntityFacts {
+                        name: public.name.clone()?,
+                        category: nearby_category(
+                            entity.flags,
+                            public.item_type,
+                            entity.wcid.and_then(|wcid| {
+                                self.weenie_types.as_ref().and_then(|types| types.get(wcid))
+                            }),
+                        ),
+                        vendor: entity
+                            .flags
+                            .contains(holtburger_common::properties::ObjectDescriptionFlag::VENDOR),
+                        stack_count: public
+                            .max_stack_count
+                            .filter(|max| *max > 1)
+                            .and(public.stack_count),
+                        structure: EntityStructure {
+                            current: public.structure,
+                            max: public.max_structure,
+                        },
+                    })
+                }),
             description,
             location,
             owned_by_player,
@@ -443,6 +539,212 @@ impl WorldState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nearby_public_facts_ignore_appraisal_and_accept_ordinary_updates() {
+        use holtburger_common::properties::PropertyUpdate;
+        use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
+        use holtburger_protocol::messages::object::messages::description::{
+            ObjectDescriptionData, PublicWeenieDescription,
+        };
+
+        let mut world = WorldState::synthetic();
+        let guid = Guid(7);
+        let mut entity = Entity::new(
+            guid,
+            "Original".into(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..Default::default()
+            },
+        );
+        entity.apply_description(&ObjectDescriptionData {
+            pos: Some(holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..Default::default()
+            }),
+            public_weenie_desc: PublicWeenieDescription {
+                guid,
+                name: Some("Public Chest".into()),
+                item_type: ItemType::CONTAINER.bits(),
+                stack_size: Some(2),
+                max_stack_size: Some(10),
+                usable: Some(Usable::REMOTE.bits()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        world.entities.insert(entity);
+        let before = world
+            .client_entity_facts(guid)
+            .unwrap()
+            .unwrap()
+            .nearby
+            .unwrap();
+        assert_eq!(before.category, NearbyEntityCategory::Container);
+        assert_eq!(before.stack_count, Some(2));
+        let mut appraisal = IdentifyObjectResponseEventData {
+            success: true,
+            ..Default::default()
+        };
+        appraisal
+            .properties
+            .set_string_prop(PropertyString::Name, "Appraised Name".into());
+        appraisal
+            .properties
+            .set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        appraisal.properties.set_int_prop(PropertyInt::StackSize, 9);
+        appraisal
+            .properties
+            .set_int_prop(PropertyInt::Structure, 99);
+        appraisal
+            .properties
+            .set_int_prop(PropertyInt::ItemUseable, Usable::NO.bits() as i32);
+        assert!(
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .apply_identify_response(&appraisal)
+        );
+        assert_eq!(
+            world.client_entity_facts(guid).unwrap().unwrap().nearby,
+            Some(before)
+        );
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_property(PropertyUpdate::Int(PropertyInt::StackSize, 4));
+        assert_eq!(
+            world
+                .client_entity_facts(guid)
+                .unwrap()
+                .unwrap()
+                .nearby
+                .unwrap()
+                .stack_count,
+            Some(4)
+        );
+
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_property(PropertyUpdate::Bool(PropertyBool::UiHidden, true));
+        assert!(
+            world
+                .client_entity_facts(guid)
+                .unwrap()
+                .unwrap()
+                .nearby
+                .is_none()
+        );
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_property(PropertyUpdate::Bool(PropertyBool::UiHidden, false));
+        assert!(
+            world
+                .client_entity_facts(guid)
+                .unwrap()
+                .unwrap()
+                .nearby
+                .is_some()
+        );
+
+        // Resolved attachment transforms do not turn equipment into independent catalog roots.
+        let parent_guid = Guid(99);
+        world.entities.insert(Entity::new(
+            parent_guid,
+            "Parent".into(),
+            world.entities.get(guid).unwrap().position,
+        ));
+        world.entities.get_mut(guid).unwrap().placement_intent =
+            crate::attachment::EntityPlacementIntent::Attached(
+                PhysicsAttachment::from_wire(parent_guid, 1, 0).unwrap(),
+            );
+        assert!(
+            matches!(world.resolve_scene_placement(guid).unwrap(), crate::ResolvedScenePlacement::Attached { root, .. } if root == parent_guid)
+        );
+        assert!(
+            world
+                .client_entity_facts(guid)
+                .unwrap()
+                .unwrap()
+                .nearby
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn nearby_categories_prioritize_identity_over_broad_item_bits() {
+        for (flags, item_type, weenie_type, expected) in [
+            (
+                ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE,
+                ItemType::CREATURE,
+                None,
+                NearbyEntityCategory::Player,
+            ),
+            (
+                ObjectDescriptionFlag::VENDOR | ObjectDescriptionFlag::ATTACKABLE,
+                ItemType::CREATURE,
+                None,
+                NearbyEntityCategory::Npc,
+            ),
+            (
+                ObjectDescriptionFlag::ATTACKABLE,
+                ItemType::CREATURE,
+                None,
+                NearbyEntityCategory::Monster,
+            ),
+            (
+                ObjectDescriptionFlag::empty(),
+                ItemType::CREATURE,
+                None,
+                NearbyEntityCategory::Npc,
+            ),
+            (
+                ObjectDescriptionFlag::CORPSE,
+                ItemType::CONTAINER,
+                None,
+                NearbyEntityCategory::Container,
+            ),
+            (
+                ObjectDescriptionFlag::PORTAL,
+                ItemType::MISC,
+                None,
+                NearbyEntityCategory::Portal,
+            ),
+            (
+                ObjectDescriptionFlag::BIND_STONE,
+                ItemType::MISC,
+                None,
+                NearbyEntityCategory::Lifestone,
+            ),
+            (
+                ObjectDescriptionFlag::DOOR,
+                ItemType::MISC,
+                None,
+                NearbyEntityCategory::DoorOrSwitch,
+            ),
+            (
+                ObjectDescriptionFlag::empty(),
+                ItemType::MISC,
+                Some(WeenieType::Switch),
+                NearbyEntityCategory::DoorOrSwitch,
+            ),
+            (
+                ObjectDescriptionFlag::empty(),
+                ItemType::MISC,
+                None,
+                NearbyEntityCategory::Item,
+            ),
+        ] {
+            assert_eq!(nearby_category(flags, item_type, weenie_type), expected);
+        }
+    }
     use crate::{PhysicsAttachment, entity::Entity};
     use holtburger_common::{
         ParentLocation, Placement,

@@ -64,6 +64,7 @@ export function createDefaultClientUserSettings(
 /** Create a genuinely absent character profile without any server-derived settings. */
 export function createDefaultClientCharacterSettings(): ClientCharacterSettings {
 	return {
+		entityAlerts: [],
 		actionBars: [initialActionBar()],
 		spellBarBindings: initialSpellBarBindings(),
 		combatControls: {

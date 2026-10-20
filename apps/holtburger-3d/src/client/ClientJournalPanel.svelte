@@ -274,12 +274,14 @@
 									</dl>
 								{/if}
 
-								<button
-									class="ui-button"
-									disabled={!view.enabled}
-									onclick={() => owner.requestRemove(row.id, onNotice)}
-									>Remove from journal</button
-								>
+								<div class="ui-action-row">
+									<button
+										class="ui-button"
+										disabled={!view.enabled}
+										onclick={() => owner.requestRemove(row.id, onNotice)}
+										>Remove from journal</button
+									>
+								</div>
 							</div>
 						</details>
 					{/each}
@@ -309,7 +311,7 @@
 	.journal-filters {
 		display: flex;
 		flex-wrap: wrap;
-		gap: var(--ui-spell-filter-gap);
+		gap: var(--ui-filter-gap);
 	}
 	.status-filter {
 		display: inline-flex;

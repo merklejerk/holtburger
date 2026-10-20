@@ -18,7 +18,11 @@ import type {
 	DynamicEntityView,
 	DynamicEntityWorldPlacement,
 } from "./dynamic-entity-feed";
-import type { SceneScope, SceneSpatialPlacement } from "../scene";
+import type {
+	SceneResidency,
+	SceneScope,
+	SceneSpatialPlacement,
+} from "../scene";
 
 /** Runtime realization state of one accepted entity level. */
 export type DynamicEntityRealizationDisposition = "installed" | "deferred";
@@ -145,19 +149,27 @@ export function dynamicEntityPlacement(
 	return dynamicEntityPlacementFromPoint(entity.placement);
 }
 
+/** Resident owner/cell identity shared by scene admission and encounter membership. */
+export function dynamicEntityResidency(
+	point: Pick<DynamicEntityWorldPlacement, "pose">,
+): SceneResidency {
+	const cellId = point.pose.landblockId >>> 0;
+	return {
+		landblockId: datAssetId(
+			(cellId & 0xffff_0000) | 0xffff,
+		) as LandblockOwnerId,
+		envCellId:
+			(cellId & 0xffff) >= 0x0100 ? (datAssetId(cellId) as EnvCellId) : null,
+	};
+}
+
 /** Convert one host-authored root point without re-deriving its plural spatial membership. */
 export function dynamicEntityPlacementFromPoint(
 	point: DynamicEntityWorldPlacement | DynamicEntityAdvance["path"]["initial"],
 ): SceneSpatialPlacement {
 	const { pose, spatialMembership } = point;
-	const cellId = pose.landblockId >>> 0;
-	const selector = cellId & 0xffff;
-	const landblockId = datAssetId(
-		(cellId & 0xffff_0000) | 0xffff,
-	) as LandblockOwnerId;
 	return {
-		envCellId: selector >= 0x0100 ? (datAssetId(cellId) as EnvCellId) : null,
-		landblockId,
+		...dynamicEntityResidency(point),
 		localTransform: acFrameTransform(
 			{
 				origin: [pose.coords.x, pose.coords.y, pose.coords.z],

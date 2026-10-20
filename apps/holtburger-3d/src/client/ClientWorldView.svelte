@@ -87,6 +87,8 @@
 	import type { ClientFriendsState } from "./client-friends-state";
 	import ClientSocialPanel from "./ClientSocialPanel.svelte";
 	import type { ClientPartyState } from "./client-party-state";
+	import ClientNearbyPanel from "./ClientNearbyPanel.svelte";
+	import type { ClientNearby } from "./client-nearby";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
@@ -254,6 +256,9 @@
 		readonly cameraController: ClientViewportCameraController | null;
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
+		/** Session-owned catalog; closed windows do not stop detection. */
+		readonly nearby: ClientNearby | null;
+		readonly onSelectNearbyEntity: (guid: number) => boolean;
 		/** Clear session-owned navigation intent without changing selection. */
 		readonly onClearWaypoint: () => void;
 		/** Static host capability, owned by the mounted transport lifetime. */
@@ -432,6 +437,8 @@
 		cameraController,
 		debugEnabled,
 		readMinimapFrame,
+		nearby,
+		onSelectNearbyEntity,
 		onClearWaypoint,
 		worldMapSource,
 		characterGuid,
@@ -619,6 +626,7 @@
 		width: window.innerWidth,
 		height: window.innerHeight,
 	};
+	let nearbyOpen = $state(false);
 	let activePanel = $state<ClientSystemPanel | null>(null);
 	let enchantmentsOpen = $state(false);
 	let enchantmentLaunch = $state<{
@@ -1026,6 +1034,18 @@
 		{onSelectEntity}
 		{onCoordinatesCopied}
 	>
+		{#snippet actions()}
+			<button
+				class="ui-button ui-icon-button ui-minimap-button"
+				type="button"
+				aria-label="Nearby entities and alerts"
+				title="Nearby entities and alerts"
+				aria-pressed={nearbyOpen}
+				disabled={nearby === null}
+				onclick={() => (nearbyOpen = !nearbyOpen)}
+				><ClientHudIcon name="nearby" /></button
+			>
+		{/snippet}
 		{#snippet coordinateDetails()}<ClientMinimapEnvironment
 				readEnvironment={readServerEnvironment}
 				{clockFormat}
@@ -1476,6 +1496,29 @@
 			</ClientHudWindow>
 		{/key}
 	{/if}
+
+	{#if nearby !== null}{#key nearby}{#key characterGuid}
+				<ClientHudWindow
+					icon="nearby"
+					title="Nearby"
+					visible={nearbyOpen}
+					placement={hudLayout.nearby}
+					minWidth={CLIENT_UI_DEFAULTS.nearby.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.nearby.minSize.height}
+					{viewport}
+					onClose={() => (nearbyOpen = false)}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("nearby", placement)}
+				>
+					<ClientNearbyPanel
+						owner={nearby}
+						visible={nearbyOpen}
+						selectedGuid={selectedEntityGuid}
+						onSelectEntity={onSelectNearbyEntity}
+						{onSetWaypoint}
+					/>
+				</ClientHudWindow>
+			{/key}{/key}{/if}
 
 	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social" && activePanel !== "journal"}
 		{@const panel = activePanel}

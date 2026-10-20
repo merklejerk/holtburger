@@ -76,3 +76,23 @@ export function createUiThemeLoader(owner: Document) {
 		},
 	};
 }
+
+/** Resolve canvas/UI appearance on stylesheet commits and local scope changes, never per frame. */
+export function observeUiTheme(
+	element: HTMLElement,
+	refresh: () => void,
+): () => void {
+	// Resolve before subscribing so invalid themes do not leak observers.
+	refresh();
+	const observer = new MutationObserver(refresh);
+	observer.observe(element, {
+		attributes: true,
+		attributeFilter: ["style", "class"],
+	});
+	const document = element.ownerDocument;
+	document.addEventListener(UI_THEME_CHANGED_EVENT, refresh);
+	return () => {
+		observer.disconnect();
+		document.removeEventListener(UI_THEME_CHANGED_EVENT, refresh);
+	};
+}

@@ -1,3 +1,4 @@
+import { RenderSceneInterestController } from "../lib/game/runtime/render-scene-interest-controller";
 import {
 	resolvedJumpFixture,
 	predictedJumpFixture,
@@ -72,6 +73,28 @@ import previewFixture from "./fixtures/object-preview-wire.json";
 import { decodeObjectPreviewResult } from "./client-object-preview-contract";
 
 describe("ClientPresentationSession", () => {
+	it("binds scene demand when the runtime starts and unbinds it on teardown", async () => {
+		const transport = new FakeClientTransport(currentState(0x0101_0001));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const bindMembership = vi.fn();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			onSceneMembership: bindMembership,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			expect(bindMembership).toHaveBeenLastCalledWith(runtime.sceneMembership);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+		expect(bindMembership).toHaveBeenLastCalledWith(null);
+	});
 	it("keeps the server readout true while applying pending and live overrides without replacing the owner", async () => {
 		const now = vi.spyOn(performance, "now").mockReturnValue(0);
 		const transport = new FakeClientTransport({
@@ -1627,6 +1650,10 @@ function fallbackCameraTick(identity: {
 }
 
 class FakePresentationRuntime implements ClientPresentationRuntime {
+	readonly sceneMembership = new RenderSceneInterestController();
+	sceneInterestMembership() {
+		return this.sceneMembership;
+	}
 	audioSettings: Parameters<
 		ClientPresentationRuntime["setAudioSettings"]
 	>[0][] = [];
@@ -1779,12 +1806,14 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	updateSceneInterest(request: SceneInterestRequest): void {
 		this.sceneRequests.push(request);
+		this.sceneMembership.follow(request);
 	}
 
 	async activateScene(
 		request: SceneActivationRequest,
 	): Promise<SceneActivationReceipt> {
 		this.sceneRequests.push(request.target);
+		this.sceneMembership.replace(request.target);
 		const completion = this.#nextSceneActivationCompletion;
 		this.#nextSceneActivationCompletion = null;
 		if (completion !== null) await completion;
@@ -1815,6 +1844,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	clearSceneInterest(): void {
 		this.clearCount += 1;
+		this.sceneMembership.clear();
 	}
 
 	resolveViewportExtent(): { width: number; height: number } {

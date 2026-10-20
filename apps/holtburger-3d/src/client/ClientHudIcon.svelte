@@ -23,7 +23,11 @@
 	import SaveLoadoutIcon from "../assets/icons/hud-save-loadout.svg?component";
 	import SelectTextIcon from "../assets/icons/hud-select-text.svg?component";
 	import AddIcon from "../assets/icons/hud-add.svg?component";
+	import EditIcon from "../assets/icons/hud-edit.svg?component";
 	import EyeIcon from "../assets/icons/hud-eye.svg?component";
+	import NearbyIcon from "../assets/icons/hud-nearby.svg?component";
+	import BellIcon from "../assets/icons/hud-bell.svg?component";
+	import BellActiveIcon from "../assets/icons/hud-bell-active.svg?component";
 	import TeleportIcon from "../assets/icons/hud-teleport.svg?component";
 	import ResetIcon from "../assets/icons/hud-reset.svg?component";
 	import LockedIcon from "../assets/icons/hud-locked.svg?component";
@@ -67,8 +71,16 @@
 		/** Pointer over text for enabling chat-history selection. */
 		| "select-text"
 		| "add"
+		/** Pencil for editing an existing entry. */
+		| "edit"
 		/** Eye for opening map visibility controls. */
 		| "eye"
+		/** Radar sweep and blips for the nearby entity catalog. */
+		| "nearby"
+		/** Outlined bell for an inactive exact-name alert. */
+		| "bell"
+		/** Filled bell for an enabled exact-name alert. */
+		| "bell-active"
 		/** Portal and arrow for standard recall actions. */
 		| "teleport"
 		| "reset"
@@ -113,7 +125,11 @@
 		"save-loadout": SaveLoadoutIcon,
 		"select-text": SelectTextIcon,
 		add: AddIcon,
+		edit: EditIcon,
 		eye: EyeIcon,
+		nearby: NearbyIcon,
+		bell: BellIcon,
+		"bell-active": BellActiveIcon,
 		reset: ResetIcon,
 		teleport: TeleportIcon,
 		locked: LockedIcon,

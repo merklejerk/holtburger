@@ -39,6 +39,11 @@
 </script>
 
 <script lang="ts">
+	import { observeUiTheme } from "./ui-theme";
+	import {
+		readMinimapTrackingAppearance,
+		type MinimapTrackingAppearance,
+	} from "./minimap-tracking-appearance";
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
 	import MapWaypointDirectionIcon from "../assets/icons/map-waypoint-direction.svg?component";
 	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
@@ -164,6 +169,8 @@
 		readonly onCoordinatesCopied?: () => void;
 		/** Mode-owned information alongside the shared coordinate readout. */
 		readonly coordinateDetails?: Snippet;
+		/** App-owned launcher controls; minimap owns only layout. */
+		readonly actions?: Snippet;
 		/** Complete below-disc footprint, consumed by client placement and anchoring. */
 		readonly onFooterExtentChange?: (extent: MinimapFooterExtent) => void;
 	}
@@ -179,8 +186,11 @@
 		onSelectEntity,
 		onCoordinatesCopied,
 		coordinateDetails,
+		actions,
 		onFooterExtentChange,
 	}: Props = $props();
+	let minimapElement: HTMLElement;
+	let trackingAppearance: MinimapTrackingAppearance | null = null;
 	let waypointMarker: SVGGElement;
 	let waypointPointer: SVGGElement;
 	let waypointRow: HTMLButtonElement;
@@ -273,6 +283,9 @@
 	});
 
 	onMount(() => {
+		const stopTheme = observeUiTheme(minimapElement, () => {
+			trackingAppearance = readMinimapTrackingAppearance(minimapElement);
+		});
 		const element = footerElement;
 		const observer = new ResizeObserver(() => {
 			if (element !== null) {
@@ -315,6 +328,7 @@
 		frameHandle = window.requestAnimationFrame(step);
 		return () => {
 			observer.disconnect();
+			stopTheme();
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			renderer?.destroy();
 			renderer = null;
@@ -433,6 +447,7 @@
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
+			drawTrackedBlipRing(context, frame, blip.guid, x, y);
 			if (blip.span !== null && blip.appearance.category !== "controlled") {
 				const startX = ((blip.span.startX + 1) * size) / 2;
 				const startY = ((1 - blip.span.startY) * size) / 2;
@@ -499,6 +514,32 @@
 		}
 		blipHitTargets = hitTargets;
 		reconcileBlipHover();
+	}
+
+	/** Tracking adds an outer decoration without changing the existing selection primitives. */
+	function drawTrackedBlipRing(
+		context: CanvasRenderingContext2D,
+		frame: MinimapFrame,
+		guid: number,
+		x: number,
+		y: number,
+	): void {
+		if (frame.trackedGuids?.has(guid) && trackingAppearance !== null) {
+			context.save();
+			context.beginPath();
+			context.arc(
+				x,
+				y,
+				MAP_BLIP_RADIUS_PIXELS + trackingAppearance.gap,
+				0,
+				Math.PI * 2,
+			);
+			context.setLineDash(trackingAppearance.dash);
+			context.lineWidth = trackingAppearance.width;
+			context.strokeStyle = trackingAppearance.color;
+			context.stroke();
+			context.restore();
+		}
 	}
 
 	function drawSelectedBlipRing(
@@ -882,6 +923,7 @@
 <svelte:window onblur={cancelMinimapPan} />
 
 <section
+	bind:this={minimapElement}
 	class="minimap ui-theme"
 	class:ui-layout-editable={editable}
 	style:left={`${viewState.left}px`}
@@ -967,7 +1009,7 @@
 		{#if minimapDetached}
 			<button
 				type="button"
-				class="minimap-reset ui-button ui-icon-button"
+				class="minimap-reset ui-button ui-icon-button ui-minimap-button"
 				onclick={resetMinimapPan}
 				aria-label="Re-anchor minimap"
 				title="Re-anchor minimap"
@@ -975,6 +1017,7 @@
 				<MinimapResetIcon />
 			</button>
 		{/if}
+		{#if actions}<div class="minimap-actions">{@render actions()}</div>{/if}
 		{#if tooltip}
 			<div
 				class="minimap-tooltip ui-tooltip"
@@ -1126,9 +1169,6 @@
 
 		.minimap-reset {
 			position: absolute;
-			width: 20px;
-			height: 20px;
-			border-radius: 50%;
 			transform: translate(-50%, -50%);
 			/* Top-right diagonal rim position, clear of the cardinal labels. */
 			top: 14.645%;
@@ -1152,6 +1192,14 @@
 			display: flex;
 			align-items: center;
 			white-space: nowrap;
+		}
+		.minimap-actions {
+			/* Bottom-right rim mirrors reset's top-right position, clear of cardinals. */
+			position: absolute;
+			top: 85.355%;
+			left: 85.355%;
+			transform: translate(-50%, -50%);
+			pointer-events: auto;
 		}
 		.minimap-coordinates {
 			pointer-events: auto;

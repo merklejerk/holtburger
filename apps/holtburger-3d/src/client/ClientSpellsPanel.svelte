@@ -225,12 +225,13 @@
 			<ul>
 				{#each rows as row (row.id)}
 					<li
+						class="ui-catalog-row"
 						data-spell-id={row.id}
 						hidden={!visibleIds.has(row.id)}
 						class:expanded={expandedId === row.id}
 					>
 						<button
-							class="spell-header"
+							class="spell-header ui-catalog-trigger"
 							data-spell-drag-source={row.id}
 							type="button"
 							aria-expanded={expandedId === row.id}
@@ -270,7 +271,7 @@
 							onclick={() => onCastSpell(row.id)}>Cast</button
 						>
 						{#if expandedId === row.id}
-							<div class="spell-details">
+							<div class="spell-details ui-catalog-details">
 								{#if row.details !== null}
 									{#if inspection.kind === "ready"}
 										{#if inspection.rangeMetres !== 0}<div>
@@ -354,11 +355,11 @@
 		.spell-controls {
 			flex-shrink: 0;
 			border-bottom: 1px solid var(--ui-color-border);
-			padding-bottom: var(--ui-spell-filter-gap);
+			padding-bottom: var(--ui-filter-gap);
 		}
 		.search-line {
 			display: flex;
-			gap: var(--ui-spell-filter-gap);
+			gap: var(--ui-filter-gap);
 		}
 		.search-line input {
 			min-width: 0;
@@ -379,23 +380,23 @@
 			cursor: default;
 		}
 		.spell-filters {
-			max-height: var(--ui-spell-filter-max-height);
+			max-height: var(--ui-filter-max-height);
 			overflow: auto;
 		}
 		.spell-count {
 			text-align: right;
 		}
 		.spell-filters[open] {
-			margin-bottom: var(--ui-spell-filter-gap);
+			margin-bottom: var(--ui-filter-gap);
 		}
 		.spell-filters summary {
 			cursor: pointer;
-			padding-block: var(--ui-spell-filter-gap);
+			padding-block: var(--ui-filter-gap);
 		}
 		.filter-pills {
 			display: flex;
 			flex-wrap: wrap;
-			gap: var(--ui-spell-filter-gap);
+			gap: var(--ui-filter-gap);
 		}
 		[data-filter-category="disposition"] {
 			--filter-color: var(--ui-spell-filter-disposition-color);
@@ -423,35 +424,14 @@
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
 			align-items: center;
-			border: 1px solid transparent;
-			border-bottom-color: color-mix(
-				in srgb,
-				var(--ui-color-border) var(--ui-spell-row-divider-tint),
-				transparent
-			);
 		}
 		li[hidden] {
 			display: none;
 		}
-		li.expanded {
-			border-color: var(--ui-color-border);
-			background: var(--ui-color-well);
-		}
 		.spell-details {
 			grid-column: 1 / -1;
-			border-top: 1px solid
-				color-mix(
-					in srgb,
-					var(--ui-color-border) var(--ui-spell-details-divider-tint),
-					transparent
-				);
-			padding: var(--ui-spell-details-padding);
-			line-height: var(--ui-spell-details-line-height);
 		}
-		.expanded .spell-header,
-		.spell-header:hover {
-			background: var(--ui-color-control);
-		}
+
 		.expansion-indicator {
 			margin-left: auto;
 			padding-left: var(--ui-spell-expansion-indicator-gap);
@@ -464,7 +444,7 @@
 			color: inherit;
 			background: var(--ui-color-control);
 			border: 1px solid var(--ui-color-border);
-			margin: var(--ui-spell-row-padding);
+			margin: var(--ui-catalog-row-padding);
 			cursor: pointer;
 		}
 		.cast-spell:disabled {
@@ -473,16 +453,9 @@
 		}
 		.spell-header {
 			width: 100%;
-			text-align: left;
-			color: inherit;
-			font: inherit;
-			background: transparent;
-			border: 0;
-			cursor: pointer;
 			display: flex;
 			align-items: center;
-			gap: var(--ui-spell-row-gap);
-			padding: var(--ui-spell-row-padding);
+			gap: var(--ui-catalog-row-gap);
 		}
 		.spell-icon {
 			width: var(--ui-spell-icon-size);

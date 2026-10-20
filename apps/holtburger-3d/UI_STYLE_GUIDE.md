@@ -126,7 +126,7 @@ and `--ui-enchantments-heading-text-transform`. The overridden-spell tree uses
 `--ui-enchantments-tree-gutter` for both disclosure width and branch indentation;
 `--ui-enchantments-child-indent` offsets the child rows within that branch.
 The inline More.../Less... school-filter toggle uses the shared `ui-inline-button`
-style. Its pills retain the shared spell-filter color, radius, and spacing tokens.
+style. Its pills retain the shared filter color, radius, and spacing tokens.
 
 Spell shortcuts use the same transparent cell face and feathered `ui-hud-button`
 backing as action cells. Their blue palette is independent of the mana meter:
@@ -238,6 +238,44 @@ Recipes consume the same component
 properties in every state and supply palette-based defaults when those properties
 are unset. The theme chooses state colors through CSS selectors.
 
+### Catalog and Nearby styling
+
+Catalog rows share `--ui-catalog-row-padding`, `--ui-catalog-row-gap`,
+`--ui-catalog-details-padding`, `--ui-catalog-details-line-height`,
+`--ui-catalog-row-divider-tint`, and `--ui-catalog-details-divider-tint`.
+Shared filters and category labels use `--ui-filter-gap`, `--ui-filter-max-height`,
+`--ui-filter-pill-radius`, `--ui-filter-pill-padding`, `--ui-filter-tint`, and
+`--ui-filter-active-tint`. These replace the former `--ui-spell-filter-*` geometry
+and tint names; spell-specific category color tokens keep their existing names.
+
+Entity category icons use `--ui-entity-category-icon-size`. New vector artwork has
+`ui-vector-icon` on its SVG root and uses `--ui-icon-stroke-width`; authored fills
+and strokes are presentation attributes, so normal CSS rules can override them.
+The category icon, label pill, and filter button expose `data-entity-category`
+with the stable category key, such as `monster` or `door-or-switch`. For example:
+
+```css
+@layer overrides {
+	.ui-theme [data-entity-category="monster"] {
+		color: #d68d78;
+		--filter-color: #d68d78;
+	}
+}
+```
+
+Minimap rim controls share `--ui-minimap-button-size` and
+`--ui-minimap-button-radius`. Tracked rings use `--ui-minimap-tracked-color`,
+`--ui-minimap-tracked-width`, `--ui-minimap-tracked-gap`,
+`--ui-minimap-tracked-dash-length`, and `--ui-minimap-tracked-dash-gap`.
+Color values can reference palette variables; lengths support CSS units and
+`calc()`. Width must be positive; spacing and dash lengths may be zero.
+The existing theme loader's change notification resolves these values for
+Canvas2D without recreating the minimap or reading CSS each frame.
+
+`ui-action-row` fills the row when it contains one text button; grouped text
+actions keep their natural widths. Inline forms and icon toolbars use their own
+layout classes.
+
 ## Ownership and theme behavior
 
 Components retain grids, positioning, scrolling, clipping, pointer routing, and
@@ -245,7 +283,8 @@ purpose-specific visualization. Inline panel rectangles belong to layout state.
 Themes can change appearance and control spacing, but arbitrary CSS can disrupt
 layout; cascade layers are an authoring convention, not isolation or enforcement.
 
-Map terrain/blips, texture checkerboards, grading plots, world nameplates, selection
+Tracked minimap rings use the theme hooks above. Other map terrain/blips, texture
+checkerboards, grading plots, world nameplates, selection
 outlines, lighting, and scene colors remain visualization-owned. Chat classification
 remains in client policy; CSS consumes its semantic roles.
 

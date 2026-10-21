@@ -89,8 +89,8 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison is valid with 23.09% median combined-work reduction, below 25%. Live stress mode added for qualification. Representative coverage remains open. |
 | 2. Define behavior and ownership | Complete for the defined architecture/correctness deliverables | Ordinary/reset/correction contracts and retained/unified/removed mechanisms audited below. Asset-free controlled drive, wall, return, support, reset, publication and handoff cases satisfy the scenario requirement. Representative live stress and rollout acceptance remain separate open gates. |
-| 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
-| 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; original-baseline five-pair verification remains pending. |
+| 3. Simplify core orchestration/publication | In progress | Control handoff fixed; metadata reuse and structural simplifications retained. Latest valid all-unoptimized five-pair comparison gives 23.46% less combined work, every candidate p95 below every baseline p95. Work target remains unmet. |
+| 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; full all-unoptimized result is 23.46%, below the unchanged target. |
 | 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. Attack owner still never activates and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
@@ -110,15 +110,14 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** run the original five-pair performance gate against preserved `9cb7ba24e`
-plus matched diagnostics. Fresh candidate `114754c4f` explicitly builds Parry and Glam at level 0
-to match the original all-unoptimized baseline; all 682 core tests also pass in that configuration.
-The normal dependency-optimized development binary has been restored. This comparison excludes
-the separate compiler-setting benefit. The live handoff fix is verified: desired engagements now
-survive until manual takeover, and alternate-scene admission is **99.95%** over **64.98 s**.
-Attack activation still fails, workload is smaller than the original fight, and representative
-combat/cadence, final architecture/quality review and user movement acceptance remain open.
-The fixture and numeric gates are unchanged.
+**Next action:** diagnose the remaining attack-readiness failure from accepted live facts and
+complete non-fixture host checks. The completed all-unoptimized five-pair gate is valid but fails:
+**36,614.27 → 28,023.24 ms**, **23.46%** lower, below 25%; every candidate p95 is below every
+baseline p95. Preserve all ten samples and the original statistic. The delivered development
+profile already retains optimized dependencies, so it also needs an original-source baseline built
+with those same settings; do not compare an optimized candidate with an unoptimized baseline or
+count the separate 6.13% build benefit as a source gain. Representative combat/cadence and user
+acceptance remain open. The fixture, original source baseline and numeric gates are unchanged.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -144,7 +143,7 @@ Keep feasible independent work moving when a live workload or final human accept
 
 | Milestone | Git reference | Evidence / outcome |
 | --- | --- | --- |
-| Current same-build acceptance | Candidate `114754c4f` vs original `9cb7ba24e` plus matched diagnostics | Five alternating pairs running with both versions fully unoptimized, explicit warmups and frozen trace. Candidate's normal dependency-optimized binary was separately preserved/restored. No compiler-setting benefit can pass this gate. |
+| Current same-build acceptance | Candidate `114754c4f` vs original `9cb7ba24e` plus matched diagnostics | Valid ten-report all-unoptimized comparison: 23.46% combined-work reduction, below 25%. Every candidate p95 is below every baseline p95. Preserve all reports; source gate remains open. |
 | Input/combat handoff | `114754c4f` | Unit regression failed before the fix and all 682 core tests pass after it, including held/released/expired/reacquired input. Live desired targets now survive to manual takeover; 99.95% admission in the smaller alternate scene. Attack readiness remains unresolved. |
 | Development collision/math dependencies | `bbc9d4b6d`, retained at `d29dbef8b` | Two alternating configuration pairs, identical game source: 6.13% less median work, lower p95s in both pairs. Retain Parry/Glam level 3 with workspace debugging. This intentionally different-build comparison is excluded from source acceptance. |
 | Borrowed static selections | `02cde557e`, retained at `04ef2e3e9` | Remove the second selection vector and duplicate geometry lookup across six query consumers. Two marginal pairs reduce combined work 2.29%; no consistent marginal p95 claim. 996 world / 681 core tests and Clippy pass. |
@@ -191,7 +190,7 @@ shows that the broader runtime pipeline still exceeds its available budget under
 **Verdict:** the architecture trace and controlled-scenario deliverables are complete for the
 retained implementation at `114754c4f`. The reviewed optimizations and control handoff are ready
 within that source scope. This does not approve heavy-fight behavior, performance acceptance or
-rollout: the five-pair comparison is running, live attacks remain inactive, and final host checks
+rollout: the all-unoptimized five-pair comparison misses 25%, live attacks remain inactive, and final host checks
 and user movement acceptance are pending. No general rigid-body solver replacement is justified
 by the current measurements.
 
@@ -1147,7 +1146,18 @@ Keep all individual reports and the unchanged combined-work/p95 criteria. No com
 live diagnostic or other benchmark runs during measurement. Private runner, copied executable and
 build-command/source provenance are in
 `caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-control-handoff-114754c4f-all-unoptimized/`.
-The original baseline is unchanged; do not add the preceding marginal or compiler percentages.
+The completed comparison is valid: baseline combined-work median **36,614.27 ms**, candidate
+**28,023.24 ms**, a **23.46%** reduction. The work criterion **fails**; p95 **passes**, with every
+candidate p95 (**18.151–20.280 ms**) below every baseline p95 (**22.478–25.724 ms**). All ten reports
+preserve full messages/physics/activation/population checks, content and existing placement checks.
+Paired reductions range **21.98–27.58%**; do not substitute their median or select passing pairs to
+replace the predeclared ratio of combined-work medians.
+
+[Full all-unoptimized acceptance evidence](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-control-handoff-114754c4f-all-unoptimized.json)
+contains all ten samples, build attribution and independent median/p95 audit. The original source
+baseline is unchanged. Do not add marginal or compiler percentages. A further comparison of the
+actual delivered development profile must build the same original source with matching Parry/Glam
+settings on both sides; the compiler speedup itself cannot count toward the source criterion.
 
 ### Combat handoff: accept queued movement before pursuit policy
 

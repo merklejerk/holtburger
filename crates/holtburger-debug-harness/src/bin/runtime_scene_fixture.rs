@@ -6,10 +6,12 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::client::runtime_fixture::RuntimeFixture;
+use holtburger_core::client::runtime_fixture::RuntimeFixtureReport;
 use holtburger_core::{
     ClientCommand, ClientLifecycleState, ClientRuntimeBuilder, ClientViewEvent,
     ContentAssetService, ContentClientCollisionSource, ContentClientDynamicScaleSource,
 };
+use serde::Serialize;
 use std::{fs::OpenOptions, io::Write, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, timeout, timeout_at};
@@ -46,10 +48,22 @@ enum Operation {
         /// Previously captured private MessagePack file.
         #[arg(long)]
         input: PathBuf,
-        /// Independent paced replays, each starting with a fresh core client.
-        #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u64).range(1..=10))]
+        /// Untimed full replays that warm the shared content decode cache.
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(0..=10))]
+        warmups: u64,
+        /// Measured paced replays, each starting with a fresh core client.
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=10))]
         repeats: u64,
     },
+}
+
+/// One structured benchmark sample; stdout contains only these records during replay.
+#[derive(Serialize)]
+struct MeasuredReplay {
+    /// One-based measured iteration after explicit warmup.
+    run: u64,
+    /// Costs and workload audits produced by the production replay path.
+    report: RuntimeFixtureReport,
 }
 
 #[tokio::main]
@@ -127,16 +141,27 @@ async fn main() -> Result<()> {
             file.sync_all()?;
             println!("Saved private fixture to {}", output.display());
         }
-        Operation::Replay { input, repeats } => {
+        Operation::Replay {
+            input,
+            warmups,
+            repeats,
+        } => {
             ensure!(
                 input.metadata()?.len() <= 64 * 1024 * 1024,
                 "fixture exceeds 64 MiB"
             );
             let fixture: RuntimeFixture = rmp_serde::from_slice(&std::fs::read(input)?)?;
             fixture.validate()?;
+            for warmup in 1..=warmups {
+                fixture.replay(builder("offline-fixture".into())?).await?;
+                eprintln!("Completed untimed content warmup {warmup}/{warmups}");
+            }
             for run in 1..=repeats {
                 let report = fixture.replay(builder("offline-fixture".into())?).await?;
-                println!("run={run} {report:?}");
+                println!(
+                    "{}",
+                    serde_json::to_string(&MeasuredReplay { run, report })?
+                );
             }
         }
     }

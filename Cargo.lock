@@ -1726,6 +1726,7 @@ dependencies = [
  "log",
  "rmp-serde",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

@@ -90,8 +90,8 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 2. Define behavior and ownership | Complete for the defined architecture/correctness deliverables | Ordinary/reset/correction contracts and retained/unified/removed mechanisms audited below. Asset-free controlled drive, wall, return, support, reset, publication and handoff cases satisfy the scenario requirement. Representative live stress and rollout acceptance remain separate open gates. |
 | 3. Simplify core orchestration/publication | In progress | Control handoff fixed; metadata reuse and structural simplifications retained. Latest valid all-unoptimized five-pair comparison gives 23.46% less combined work, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; full all-unoptimized result is 23.46%, below the unchanged target. |
-| 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. Attack owner still never activates and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
-| 6. Clean up and hand off | In progress | Architecture/controlled-correctness review and host/TUI Clippy, 375 host tests, debug build and sidecar smoke pass. Remaining readiness diagnostic, delivered-profile performance verification and user acceptance remain explicit. |
+| 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. The melee stimulus is incompatible with the equipped wand and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
+| 6. Clean up and hand off | In progress | Architecture/controlled-correctness review and host/TUI Clippy, 375 host tests, debug build and sidecar smoke pass. Invalid melee stimulus is diagnosed; delivered-profile performance verification, representative combat and user acceptance remain explicit. |
 
 Completed foundations:
 
@@ -109,8 +109,9 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** measure streaming BSP support footprints, removing their temporary
-transformed-vertex vector. The core-publication ownership experiment was rejected and reverted. Do not expand the fixture or pursue melee readiness.
+**Next action:** run the unchanged five-pair original-source gate in the delivered development
+profile. Provisionally retain streaming BSP support footprints after the valid marginal comparison;
+the core-publication ownership experiment was rejected and reverted. Do not expand the fixture or pursue melee readiness.
 The read-only equipment inspector proves the supplied character has a wand equipped; ACE rejects
 melee with a caster equipped (`Player_Combat.cs:811–819`). Thus the seven `NonCombat` responses in
 the latest 65-second probe are an invalid combat stimulus, not evidence that the solver needs a
@@ -131,7 +132,7 @@ both core files exactly to `4261f574d`; retain every report in
 [the rejection evidence](evidence/h3d-combat-physics-2026-10-20/publication-owned-metadata-rejected.json).
 Do not spend further effort on this publication branch.
 
-**Solver experiment in progress:** support queries already defer footprint work until plane
+**Solver support ownership — provisionally retained for final comparison:** support queries already defer footprint work until plane
 admission. Consume transformed BSP vertices directly during the single edge walk, replacing the
 intermediate vector. Preserve authored edge order, closing edge, degenerate-edge handling and
 nearest-feature ties. Terrain and existing controlled footing tests use the same iterator contract.
@@ -139,7 +140,13 @@ No contact/support threshold, BSP traversal, geometry residency or replay input 
 All 996 world and 682 core tests pass, including face/slope/edge/corner footing, triangle seams,
 stair entry, low ceilings, hard-body support, corrected travel and lifecycle cases. Existing tests
 were retained; only the test helper adapts to the iterator contract. World/core/harness all-target
-Clippy passes with warnings denied. Performance remains unmeasured.
+Clippy passes with warnings denied. Two alternating pairs reduce median combined work
+**27,006.67 → 26,553.23 ms (1.68%)**; paired gains are **3.31% / 0.05%**. Every workload/content
+check passes. Candidate p95s **18.645 / 18.764 ms** are slightly higher than baseline
+**18.439 / 18.573 ms**; no marginal tail improvement is claimed. This removes one allocation and
+intermediate storage per admitted BSP support face, with no retained bookkeeping. The unchanged
+overall original-source work/p95 gate still decides final performance acceptance.
+[All four reports and independent audit](evidence/h3d-combat-physics-2026-10-20/streamed-support-footprint-a52fbe29d.json).
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -165,6 +172,7 @@ Keep feasible independent work moving when a live workload or final human accept
 
 | Milestone | Git reference | Evidence / outcome |
 | --- | --- | --- |
+| Streamed support footprint | `a52fbe29d` | Provisionally retained: two alternating marginal pairs reduce work 1.68%, both paired directions lower; p95s slightly higher. 996 world / 682 core tests and Clippy pass. Overall work/p95 gate still required. |
 | Current same-build acceptance | Candidate `114754c4f` vs original `9cb7ba24e` plus matched diagnostics | Valid ten-report all-unoptimized comparison: 23.46% combined-work reduction, below 25%. Every candidate p95 is below every baseline p95. Preserve all reports; source gate remains open. |
 | Input/combat handoff | `114754c4f` | Unit regression failed before the fix and all 682 core tests pass after it, including held/released/expired/reacquired input. Live desired targets now survive to manual takeover; 99.95% admission in the smaller alternate scene. Attack readiness remains unresolved. |
 | Development collision/math dependencies | `bbc9d4b6d`, retained at `d29dbef8b` | Two alternating configuration pairs, identical game source: 6.13% less median work, lower p95s in both pairs. Retain Parry/Glam level 3 with workspace debugging. This intentionally different-build comparison is excluded from source acceptance. |
@@ -1743,10 +1751,10 @@ they do not establish a 1/30 s elapsed-time discard policy. Our 1/30 s maximum i
 stability contract, not a retail requirement. Retain the bounded solver contract while evaluating
 host catch-up; retail's larger maximum does not prove our crowd/force solver can take larger steps.
 
-### Remaining readiness question: observe accepted mode and target layout
+### Readiness diagnosis: incompatible melee stimulus with equipped caster
 
-The fixed handoff leaves a concrete acceptance failure: desired melee survives, but no attack
-becomes active. Narrowly extend the existing live diagnostic records with the accepted combat
+The fixed handoff left a concrete acceptance failure: desired melee survived, but no attack
+became active. Checkpoint `4261f574d` extended the existing live diagnostic records with accepted combat
 mode (including mode-only updates), actual control state and current published target root pose.
 This separates charging/waiting from activation and permits inspection of mode acknowledgement
 and target height/layout. No guessed cylinder admission or frontend-derived permission is added.
@@ -1757,9 +1765,14 @@ This does not reopen fixture development: stationary replay inputs/format, boots
 control stimuli, target selection and acceptance criteria are unchanged. The additional records
 answer the specific unresolved readiness question exposed by the corrected handoff. Existing
 probe behavior tests (**2**), Clippy with warnings denied, normal build and formatting pass.
-The next live window remains a diagnostic; lack of active combat must still fail qualification.
+The resulting window correctly failed qualification: all seven accepted modes were `NonCombat`.
+The existing read-only equipment inspector then found an equipped caster. ACE explicitly rejects
+melee with a caster (`Player_Combat.cs:811–819`), so this stimulus cannot qualify combat for the
+supplied character. Stop pursuing melee readiness; use its supported combat setup when final live
+qualification is performed. This is not evidence of a solver or combat-mode decoding defect.
+[Sanitized mode/equipment evidence](evidence/h3d-combat-physics-2026-10-20/live-readiness-equipped-caster-4261f574d.json).
 
-### Live handoff validation: desired combat survives, readiness remains unresolved
+### Live handoff validation: desired combat survives; later equipment inspection explains rejection
 
 Ran the unchanged live stimulus against fresh `114754c4f`, with retained optimization and new
 `MovementSystem::prepare_tick` symbols verified. This development build includes optimized Parry
@@ -1961,6 +1974,6 @@ interest and presentation settings; differences between fights are not controlle
 
 Acceptance remains open: sustain simulation cadence under the heavy combat workload and remove
 the reported slow motion. If time admission recovers but movement still slows, measure requested
-versus accepted displacement and correction/contact causes. The holistic optimization targets above
-remain unimplemented; the subsequent fixture work extracted the existing physics update for reuse
-and added opt-in diagnostics, without changing scheduling, publication, or solver policy.
+versus accepted displacement and correction/contact causes. The retained orchestration, placement,
+query-preparation and ownership changes are recorded in the progress ledger. Scheduling and the elapsed-time discard policy remain unchanged; representative
+heavy-fight cadence and user movement-feel acceptance remain pending.

@@ -1,13 +1,14 @@
 # Holtburger 3D Combat Physics Performance Investigation
 
 Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21 UTC.
-Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
+Updated: 2026-10-21, including manual feedback, deferral, and diagnostic cleanup.
 
-Status: **The matched delivered-development five-pair performance gate passes: 28.81% less
-combined message/physics work, with every candidate physics p95 below every baseline p95.
-Architecture, controlled correctness and final host quality checks pass. Combat diagnostics are
-complete; engineering handoff is ready. Representative original-fight coverage, live cadence under
-that load, and the user's movement-feel acceptance remain open. Fixture development remains frozen.**
+Status: **Deferred with partial improvement. The user reports noticeably better movement in manual
+tests, but the improvement is not sufficient to consider the slowdown resolved. The matched
+delivered-development five-pair performance gate passes: 28.81% less combined message/physics
+work, with every candidate physics p95 below every baseline p95. Architecture, controlled
+correctness and final host quality checks pass. Representative original-fight cadence and full
+movement-feel acceptance remain open. Further performance investigation is deferred.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
 second scene. It provides a repeatable input workload; deterministic movement equivalence remains
@@ -15,9 +16,9 @@ outside its present guarantees.
 
 ## Execution contract and progress
 
-This section is the working contract for the continuing performance effort. Update it after every
-milestone with the change, evidence, result, remaining uncertainty, and next action. The historical
-captures below remain evidence; completed checkboxes require the stated verification.
+This section preserves the execution contract for a future continuation. The investigation is
+inactive; historical captures below remain evidence, and completed checkboxes require the stated
+verification. Resume only when the user chooses to reopen the effort.
 
 **Objective:** remove workload-induced movement slowdown by simplifying the complete client update
 pipeline while preserving proven Asheron's Call movement and collision behavior. Engineering
@@ -81,6 +82,64 @@ claims. If evidence shows a target cannot be reached or verified within the avai
 record the precise constraint and remaining options. Complete independent work and leave the
 criterion open; do not silently lower targets or mark partial improvement as completion.
 
+### Deferral and diagnostic cleanup
+
+The user authorized housekeeping after reporting partial improvement in manual tests. This is a
+stopping point, not acceptance of the remaining movement slowdown. The current single-step time
+admission/discard policy remains unchanged; scheduling and overload behavior are future work.
+
+- Retained production changes, asset-free regression tests, and opt-in runtime/contact/host timing
+  probes. Disabled phase probes do not allocate or read clocks. Capture/replay remains behind the
+  `runtime-fixture` feature and is excluded from normal builds.
+- Removed the diagnostic-only `runtime_scene_fixture stress` command and its 597-line live combat
+  driver. Capture and replay remain. Historical stress measurements below describe the old
+  checkpoint; they are not instructions for the current CLI. No production movement code changed
+  during cleanup.
+- Preserved the canonical private `scene.msgpack`, all historical reports and profiles, final
+  baseline/candidate executables, reconstruction patches, and final five-pair comparison under
+  ignored `caps/runtime-fixtures/2026-10-21-4ae1/`. The private `cleanup-archive/SHA256SUMS` inventories
+  the canonical capture, final comparison, baseline reconstruction, and cleanup records. Check it
+  from that scene directory with `sha256sum --check cleanup-archive/SHA256SUMS`.
+- Removed 27 superseded experiment executables (6,002,602,696 logical bytes). Their paths, sizes,
+  and hashes remain in private `cleanup-archive/removed-executables.json`. Historical comparison
+  binaries other than the final pair must now be rebuilt from their recorded checkpoints.
+- Saved the temporary baseline checkout's complete diff and tooling patches before removing its
+  worktree/registration and isolated build directory (4,832,992,054 logical build bytes). Other
+  worktrees and existing ACE/ACViewer changes were left untouched. Private fixture storage fell
+  from about 6.1 GiB to 517 MiB; older unrelated `/tmp/h3d-*` artifacts were not broadly deleted.
+- Before pruning, the final auditor's read-only report, median, workload, content, lockfile,
+  fixture, patch and executable hash assertions passed. Its original source-equality assertion
+  intentionally refers to `a52fbe29d`: current diagnostic cleanup differs from that measured tree.
+  The historical auditor is preserved unchanged; do not rerun its evidence-writing tail against
+  the current source or claim the cleanup itself was performance-benchmarked.
+
+Cleanup validation: workspace formatting, harness Clippy with `runtime-fixture` and warnings
+denied, retained capture/replay CLI help, private archive checksums, and whitespace checks.
+No live game session or visual acceptance was performed for housekeeping.
+
+### Code-quality follow-up: capture artifact publication
+
+The accumulated review covered `e74faf3bd` (the parent of the first investigation checkpoint)
+through the deferred worktree, excluding unrelated ACE/ACViewer changes. It found no production
+architecture blocker in the reviewed paths and two bounded capture-tool defects, now addressed:
+
+- Capture publication and replay reads enforce the same harness-owned 64 MiB encoded-file limit.
+  Replay bounds the actual read rather than relying on an earlier metadata snapshot. Core's
+  semantic fixture validation remains separate from the harness's file-storage policy.
+- Capture holds a private temporary sibling until encoding, size validation, writing and syncing
+  succeed. Publication refuses overwrites, including a destination created during capture. Failed
+  capture, encoding or publication drops the temporary file without leaving an invalid final file.
+  The existing `tempfile` workspace dependency is enabled only for the harness's `runtime-fixture`
+  feature; production movement code is unchanged.
+
+Five asset-free harness tests cover round-trip reading and Unix permissions, abandoned partial
+output, encoding failure, existing/concurrently created destinations, and oversized writer/reader
+agreement. Harness all-target Clippy with warnings denied, workspace formatting and whitespace
+checks pass. The preceding read-only review also reran 996 world tests, 682 fixture-enabled core
+tests (with loopback access for socket cases), and the changed content-index test successfully.
+These checks do not reopen live performance investigation or change its deferred status. The
+harness dependency/lockfile change belongs to this follow-up, not the historical benchmark build.
+
 ### Final engineering handoff audit
 
 The authorized independently verifiable engineering work is complete at game/manifest source
@@ -132,13 +191,16 @@ Completed foundations:
   recorded intervals that cannot demonstrate restored live cadence.
 
 **Fixture freeze / action threshold:** the existing replay and asset-free correctness suites are
-sufficient to judge bounded code changes. Keep the fixture and combat drivers frozen. Add diagnostic
+sufficient to judge bounded code changes. Keep the fixture frozen; the closed combat driver has
+been removed. Add diagnostic
 code only to explain a reproduced production movement defect or measured CPU bottleneck. Judge
 progress by production movement and CPU cost; attack acceptance is supporting evidence. Heavy
 combat qualification and movement-feel checks remain final acceptance requirements; they do not
 block independent engineering work.
 
-**Next action:** hand off the current build for movement verification in the original heavy scene.
+**Next action:** none while deferred. If reopened, use a focused reproduction of the remaining
+slowdown to compare elapsed/admitted time, requested/accepted movement and current CPU costs.
+Prioritize review of core elapsed-time ownership and world bounded stepping if time is still lost.
 Reopen implementation only from a reproduced movement problem or measured production cost.
 Combat-stimulus/readiness investigation is closed. The original objective is movement slowdown
 under load; successful melee or magic attacks are not solver-design milestones. Fixture or driver

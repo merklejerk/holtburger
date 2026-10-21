@@ -85,7 +85,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete with this checkpoint | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Headless capture and three paced replays work; establish the quiet-machine paired baseline, workload audit, and representative stress coverage. |
-| 2. Define behavior and ownership | Pending | Controlled-time movement oracle, complete pipeline/reset trace, and bounded redesign with compatibility evidence. |
+| 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced below; controlled-time movement oracle and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
 | 4. Simplify world movement preparation | Pending | Share valid query preparation and avoid unnecessary body work while preserving accepted-path coverage, support, and obstacle participation. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
@@ -101,9 +101,10 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** establish the controlled checkpoint baseline and movement/workload checks before
-using replay timings to accept a structural optimization. Core message/publication work is the
-first implementation hypothesis, subject to the complete pipeline review.
+**Next action:** finish the controlled checkpoint baseline and movement/workload checks before
+accepting an optimization. The first bounded experiment removes repeated inventory membership
+traversals from the world-owned burden query used by movement and publication; measure its actual
+contribution before choosing the next core/publication or collision change.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -130,6 +131,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Milestone | Git reference | Evidence / outcome |
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
+| Controlled replay measurement tooling | Reporting-only successor to `5ba500669`; source patch and binary hashes retained | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 
 Future ledger rows must name the hypothesis, measured outcome, validation, and whether the change
 was retained or reverted. Failed experiments remain useful evidence and should not disappear from
@@ -410,6 +412,59 @@ collected. The time-admission measurements do establish continued simulation slo
 not exclude additional movement rejection from contacts or corrections; displacement and accepted
 movement still need separate attribution if symptoms remain after restoring cadence.
 
+## Pipeline contract review: 2026-10-21
+
+The ordinary path crosses several layers before and after collision integration:
+
+| Boundary | Owner and contract | Review finding |
+| --- | --- | --- |
+| Receive and sequence | Session reassembles transport messages; core additionally orders character GameEvents before mutation. | Preserve both ordering domains. The 8 ms network batch budget is checked after complete received event lists. |
+| Apply server facts | World handlers update entity/storage/placement authority and return typed world events. | `WorldState::handle_message` seeds and reconciles scene placements around every message, including messages unrelated to attachment topology. |
+| Project message effects | Core consumes world events, reconciles client behaviors, and publishes entity/dynamic changes. | Semantic publication runs after ordinary messages; some world events also trigger full dynamic upserts or snapshots. |
+| Prepare authority step | Core samples elapsed time, applies queued controls, advances movement commands, runs world maintenance, and installs matching content completions. | World maintenance scans placement/visibility state; collision preparation remains generation-gated. Content loading cannot be replaced with guessed availability. |
+| Admit and advance motion | Core admits a bounded interval before world-authored cursors and physical inputs advance. | Lost time affects motion as well as collision integration. A larger cap alone changes this contract. |
+| Solve physical bodies | World prepares bodies/targets, refreshes support, advances hard targets, samples yielding intent, performs movement sweeps, bounded crowd response, correction sweeps, and support confirmation. | This is a character-controller/contact pipeline with projectile handling. Hard geometry has final authority; residual crowd overlap is deliberately allowed after clipped separation. |
+| Commit accepted state | World publishes accepted body states, paths, report lifetimes, and checked recovery dispositions. | A recovery replaces the ordinary movement outcome. Attempted topology and accepted path coverage remain different facts. |
+| Publish/present | Core projects dynamic state before/after, pairs accepted paths with changes, solves camera, and emits one presentation update; host serializes; frontend presents. | Full before/after view projection rediscovering changes is outside the solver and independently measurable. |
+
+Source seams inspected: [world message entry](../../crates/holtburger-world/src/state/types.rs),
+[placement lifecycle](../../crates/holtburger-world/src/state/attachment_lifecycle.rs),
+[core runtime](../../crates/holtburger-core/src/client/runtime.rs),
+[core simulation](../../crates/holtburger-core/src/client/simulation.rs),
+[collision preparation](../../crates/holtburger-core/src/client/collision.rs),
+[contact collection](../../crates/holtburger-world/src/spatial/scene/contact_collection.rs), and
+[dynamic projection](../../crates/holtburger-core/src/client/dynamic_entity_view.rs).
+
+The reset/correction path has distinct contracts. A local teleport or forced-position sequence
+selects a discontinuous world pose effect; ordinary authority confirmation does not directly
+replace simulated movement. Core retires the movement epoch, invalidates collision preparation,
+resets camera state, and gates solving behind world activation and the current generation.
+Remote updates select interpolation, bounded ordinary snap, or discontinuous reset according to
+their sequence/recovery state. World contact recovery can replace an integrated outcome with a
+recovered placement. Preserve those distinctions through publication; a single endpoint is not
+an adequate replacement for their path/discontinuity contracts. See
+[world pose mutations](../../crates/holtburger-world/src/state/mutations.rs),
+[core authority handling](../../crates/holtburger-core/src/client/messages.rs), and
+[world activation](../../crates/holtburger-core/src/client/mod.rs).
+
+An additional structural cost surfaced in the cross-layer review:
+[player burden](../../crates/holtburger-world/src/context.rs) iterates the inventory and calls
+`is_in_player_inventory` for nested-item parents, which starts another complete inventory query.
+For WorldState that query also walks accepted storage ancestry. This makes repeated burden
+resolution quadratic in inventory size rather than merely a collision-population issue. Jump
+capabilities resolve burden through run rate and again through jump height; core also resolves
+jump capabilities when publishing the charge-duration UI field. Exact contribution remains to be
+measured. The narrow first experiment resolves membership once within each burden query, retaining
+iteration/summation order, unknown-description behavior, and container aggregate semantics. No
+retained cache or invalidation scheme is needed. ACE's
+[container inventory loading](../../ACE/Source/ACE.Server/WorldObjects/Container.cs) explicitly adds
+each side container's aggregate burden including its children, which explains the existing
+double-count prevention rule being preserved.
+
+This is a source-backed ownership review, not final approval of all subsystem contracts. Controlled
+movement/reset scenarios, measured acceptance, and final cleanup remain required. The next
+implementation choice follows measurements, rather than a requirement to replace geometry math.
+
 ## Next investigation targets: the complete update pipeline
 
 The evidence supports reviewing the system across layers before replacing the collision solver.
@@ -480,12 +535,14 @@ to repository evidence. A sanitized
 [runtime-fixture-4ae1-summary.json](evidence/h3d-combat-physics-2026-10-20/runtime-fixture-4ae1-summary.json)
 retains hashes, input counts, phase statistics, replay reports, and limitations.
 
-Replay needs installed content but **no server, credentials, or operator**:
+Replay needs installed content but **no server, credentials, or operator**. The harness now supports
+explicit untimed warmups and emits one JSON result per measured run, including p95 active physics
+work, dispatch lateness, and both authoritative and simulated final player positions:
 
 ```bash
 cargo run -p holtburger-debug-harness --features runtime-fixture \
   --bin runtime_scene_fixture -- replay \
-  --input caps/runtime-fixtures/2026-10-21-4ae1/scene.msgpack --repeats 3
+  --input caps/runtime-fixtures/2026-10-21-4ae1/scene.msgpack --warmups 1 --repeats 5
 ```
 
 Live capture uses `capture --output NEW_PRIVATE_FILE --seconds 45` and the existing probe environment
@@ -494,7 +551,30 @@ variables `HOLTBURGER_PROBE_ACCOUNT` and `HOLTBURGER_PROBE_PASSWORD`. The initia
 putting them in process arguments. An explicit `--character GUID` is required when multiple active
 characters exist. Existing output files are never overwritten.
 
-### Replay implementation and measured repeatability
+### Controlled checkpoint baseline
+
+The goal's first measurement pass completed one untimed full replay followed by five measured
+replays with phase profiling disabled (`RUST_LOG=warn`). No compiler or other benchmark ran in this
+agent during measurement; unrelated host activity cannot be excluded. The new reporting fields
+and explicit warmup are diagnostic changes over `5ba500669`, not production algorithm changes.
+The exact binary, reporting-only source patch, raw results, and stderr are retained privately under
+`caps/runtime-fixtures/2026-10-21-4ae1/controlled-baseline/`. Sanitized individual reports and hashes
+are retained in [controlled-baseline-4ae1.json](evidence/h3d-combat-physics-2026-10-20/controlled-baseline-4ae1.json).
+
+All five runs replayed 5,741 messages and 1,519 physics steps with 1,500 steps beginning in an
+activated world, peak population 286, and zero pre-step population mismatches. Combined message
+and physics work had a median of **36,700.96 ms** (range **36,646.16–37,224.07 ms**) per complete
+replay. Active physics p95 ranged **22.750–23.218 ms**. Work totals exclude pacing waits and bootstrap;
+they are summed non-overlapping message and physics boundaries. The 25% target corresponds to
+at most **27,525.72 ms** against this median, subject to the required paired final comparison.
+
+These runs establish baseline variability for this fixture; they are not an alternating
+before/after comparison. Startup is not included in active-step p95. Raw stderr includes existing
+dynamic-upsert warnings for pending/unregistered entities; logging settings must stay matched
+during comparisons. A simulated final player pose is now reported separately from authority, but
+final poses still do not establish full movement/contact equivalence.
+
+### Replay implementation and initial measured repeatability
 
 The opt-in core `runtime-fixture` feature records dispatch order and offsets in memory, avoiding
 synchronous fixture writes in measured updates. Physics records also retain the actual interval

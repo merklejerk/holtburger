@@ -9,6 +9,7 @@ use super::{ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState};
 use anyhow::{Result, bail, ensure};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_world::SpatialBodyId;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -133,8 +134,14 @@ pub struct RuntimeFixtureReport {
     pub physics_work_ms: f64,
     /// Longest production physics update.
     pub maximum_physics_work_ms: f64,
+    /// Nearest-rank p95 of steps that began in the activated world; excludes startup steps.
+    pub active_physics_work_p95_ms: f64,
+    /// Largest dispatch delay beyond a recorded offset, exposing playback backlog.
+    pub maximum_input_lateness_ms: f64,
     /// Final authoritative player position; this does not audit simulated displacement.
     pub final_player_position: Option<WorldPosition>,
+    /// Final simulated player pose, distinct from the last authoritative position.
+    pub final_runtime_player_position: Option<WorldPosition>,
 }
 
 impl RuntimeFixture {
@@ -217,11 +224,17 @@ impl RuntimeFixture {
             message_work_ms: 0.0,
             physics_work_ms: 0.0,
             maximum_physics_work_ms: 0.0,
+            active_physics_work_p95_ms: 0.0,
+            maximum_input_lateness_ms: 0.0,
             final_player_position: None,
+            final_runtime_player_position: None,
         };
+        let mut active_physics_work = Vec::new();
         let started = Instant::now();
         for event in &self.events {
             tokio::time::sleep_until(tokio::time::Instant::from_std(started + event.at)).await;
+            let lateness = started.elapsed().saturating_sub(event.at).as_secs_f64() * 1000.0;
+            report.maximum_input_lateness_ms = report.maximum_input_lateness_ms.max(lateness);
             match &event.input {
                 RuntimeFixtureInput::Message(data) => {
                     let begin = Instant::now();
@@ -242,9 +255,9 @@ impl RuntimeFixture {
                     report.population_mismatches += usize::from(population != *entities);
                     report.peak_entities = report.peak_entities.max(population);
                     report.physics_ticks += 1;
-                    report.active_ticks += usize::from(
-                        client.activation.is_none() && client.state == ClientState::InWorld,
-                    );
+                    let active =
+                        client.activation.is_none() && client.state == ClientState::InWorld;
+                    report.active_ticks += usize::from(active);
                     let begin = Instant::now();
                     client
                         .advance_physics_tick(
@@ -256,16 +269,26 @@ impl RuntimeFixture {
                     let work = begin.elapsed().as_secs_f64() * 1000.0;
                     report.physics_work_ms += work;
                     report.maximum_physics_work_ms = report.maximum_physics_work_ms.max(work);
+                    if active {
+                        active_physics_work.push(work);
+                    }
                 }
             }
             // Let content worker completions run even when the recorded input deadline has passed.
             tokio::task::yield_now().await;
         }
         report.final_player_position = client.world.player_position();
+        report.final_runtime_player_position = client
+            .world
+            .runtime_body_view(SpatialBodyId::LocalPlayer(client.world.player.guid))
+            .map(|body| body.runtime_pose);
         ensure!(
             report.active_ticks > 0,
             "runtime fixture never reached an activated world"
         );
+        active_physics_work.sort_unstable_by(f64::total_cmp);
+        report.active_physics_work_p95_ms =
+            active_physics_work[(95 * active_physics_work.len()).div_ceil(100) - 1];
         Ok(report)
     }
 }

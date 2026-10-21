@@ -745,6 +745,33 @@ impl MovingSphereCast {
                     .expect("placed collision cylinders have validated uniform scale");
                 let height = cylinder.height * scale;
                 let low = collider.point_to_landblock_space(cylinder.low_point);
+                let end_z = start.z + self.displacement.z;
+                if (low.z..=low.z + height).contains(&start.z)
+                    && (low.z..=low.z + height).contains(&end_z)
+                {
+                    // The center stays within the cylinder's height for the entire chord.
+                    // Initial contact was handled above, so first entry must be radial. Solve
+                    // the horizontal circle sweep through Parry's analytic ball pairing, avoiding GJK.
+                    // Keep the already-admitted radius; constructing a new cast would shrink
+                    // the contact band a second time.
+                    let displacement = Vector3::new(self.displacement.x, self.displacement.y, 0.0);
+                    let planar = Self {
+                        ball: Ball::new(self.ball.radius),
+                        pose: self.pose,
+                        velocity: parry_vector(displacement),
+                        displacement,
+                    };
+                    let center = point_between_landblocks(
+                        Vector3::new(low.x, low.y, start.z),
+                        owner.0,
+                        anchor.0,
+                    );
+                    return planar.update_shape_hit(
+                        &Ball::new(cylinder.radius * scale),
+                        Pose::from_translation(parry_vector(center)),
+                        earliest,
+                    );
+                }
                 let center = point_between_landblocks(
                     low + Vector3::new(0.0, 0.0, height * 0.5),
                     owner.0,
@@ -1564,6 +1591,45 @@ mod tests {
             .update_collider_hit(&shape, Guid(0xda55_ffff), Guid(0xda55_ffff), &mut hit)
             .unwrap();
         assert!(hit.is_none(), "projected slide was blocked: {hit:?}");
+    }
+
+    #[test]
+    fn cylinder_side_entry_keeps_radial_normal_during_vertical_travel_across_frames() {
+        let cylinder = CollisionCylinder {
+            low_point: Vector3::zero(),
+            radius: 0.5,
+            height: 2.0,
+        };
+        let scale = 2.0;
+        let origin = Vector3::new(40.0, 40.0, 0.0);
+        let shape = PlacedCollisionShape::new(
+            Arc::new(CollisionShape::Cylinder(cylinder)),
+            LandblockPlacement {
+                origin,
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(scale).unwrap(),
+        )
+        .unwrap();
+        let owner = Guid(0xda55_ffff);
+        let anchor = Guid(0xdb55_ffff);
+        let radius = 0.25;
+        let lateral = cylinder.radius * scale * 0.6;
+        let start = origin + Vector3::new(-3.0, lateral, cylinder.height * scale * 0.25);
+        let displacement = Vector3::new(6.0, 0.0, cylinder.height * scale * 0.5);
+        let anchor_start = point_between_landblocks(start, owner.0, anchor.0);
+        let mut hit = None;
+        MovingSphereCast::new(&Ball::new(radius), anchor_start, displacement)
+            .update_collider_hit(&shape, owner, anchor, &mut hit)
+            .unwrap();
+        let hit = hit.expect("diagonal travel crosses the cylinder side");
+        let reach = cylinder.radius * scale + hard_contact_radius(radius);
+        let entry_x = -(reach * reach - lateral * lateral).sqrt();
+        let expected_time = (origin.x + entry_x - start.x) / displacement.x;
+        let expected_normal = Vector3::new(entry_x, lateral, 0.0) / reach;
+        let tolerance = crate::spatial::bsp_query::CONTACT_EPSILON;
+        assert!((hit.time_of_impact - expected_time).abs() < tolerance);
+        assert!((hit.normal - expected_normal).length() < tolerance);
     }
 
     #[test]

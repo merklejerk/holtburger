@@ -4,7 +4,7 @@ Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21
 Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
 
 Status: **The initial geometry fixes improved user-reported movement. The remaining heavy-fight
-slowdown has not been retested with the follow-up changes. Follow-up debug replays show a 22.80% exploratory work
+slowdown has not been retested with the follow-up changes. Follow-up debug replays show a 25.26% exploratory work
 reduction against the controlled starting checkpoint. The final performance, stress, live-cadence,
 and user-acceptance gates remain open.**
 
@@ -102,10 +102,10 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** test deferred ancestry tracking for independent placement queries. The CPU sample
-did not support journal insertion as the dominant cost; borrowed BSP candidates now bring the
-exploratory combined reduction to **22.80%**. The 25% target, alternating comparison, representative
-stress coverage, and live acceptance remain open.
+**Next action:** run five alternating paired baseline/candidate measurements with explicit warmup.
+The exploratory combined reduction is **25.26%**, with a narrow margin that needs confirmation.
+Representative stress coverage, live cadence, final architecture/quality review, and user movement
+acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -133,7 +133,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Borrowed BSP candidates | Successor to `78cd7cd40`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
+| Deferred ancestry tracking | Successor to `72c2e844a`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
+| Borrowed BSP candidates | `72c2e844a`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
 | Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
 | Deferred support footprint | `faa72f340`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 31,024.50 ms, 15.47% below baseline; 994 world / 677 core tests and Clippy pass. |
 | Borrowed-incarnation visibility | `8bfd690ce`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 32,071.31 ms, 12.61% below baseline. 994 world / 677 core tests and Clippy pass. |
@@ -869,6 +870,30 @@ set before learning whether it has an attachment. Only a followed attachment can
 ordinary independent, missing, and deleted endpoints do not need that allocation. Deferring cycle
 tracking until following a relationship can remove work without a new state lifetime. This is a
 source-backed follow-up hypothesis, not yet an implemented result.
+
+## Deferred ancestry tracking: retained for paired verification
+
+Placement resolution now inserts into its visited set only when following an attachment link.
+Independent, missing, and deleted endpoints return before allocating ancestry storage. A repeated
+endpoint in the immutable query graph necessarily still has its attachment; attached cycles keep
+the same child/ancestor error. This moves the existing proof to the branch that needs it without
+adding state, caches, thresholds, or public API. The full **995 world tests** and **677 core tests**,
+world/core all-target Clippy with runtime-fixture and warnings as errors, formatting/whitespace
+checks, and harness build pass.
+
+One explicit warmup and two exploratory measurements produced combined work of **27,256.85 ms**
+and **27,605.40 ms**, median **27,431.13 ms**: **3.18%** below borrowed BSP candidates and **25.26%**
+below the controlled starting baseline. Active physics p95 was **18.835 / 19.217 ms**. Both retain
+5,741 messages, 1,519 physics steps, 1,500 active-start steps, peak 286 entities, and zero population
+mismatches. [Sanitized results](evidence/h3d-combat-physics-2026-10-20/deferred-ancestry-tracking-exploratory.json)
+retain reports and hashes.
+
+**Decision: retain for the required alternating comparison.** The exploratory median crosses the
+25% target by a small margin; this is not acceptance. Five alternating baseline/candidate pairs
+with explicit warmup per invocation will test whether that gain survives current machine conditions.
+The original exact baseline executable is preserved; no compiler or other benchmark will be run by
+this agent during that comparison. Representative heavy-workload, live-cadence, and user acceptance
+remain separate open gates regardless of this result.
 
 ## Next investigation targets: the complete update pipeline
 

@@ -88,7 +88,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Five alternating pairs with explicit warmup completed; 23.44% reduction misses the work target. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
-| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; frame-local metadata reuse now awaits measurement with explicit world journal/catalog validity and fresh runtime facts. |
+| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; metadata reuse retained for final comparison after 45.46% lower mean after-projection/diff in matched phase attribution. Exploratory total-work gain remains inconclusive. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
@@ -103,7 +103,9 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** measure frame-local dynamic-view metadata reuse; the ordered identity-merge
+**Next action:** run five alternating pairs for metadata-reuse candidate `e647d2437` against the
+original controlled baseline. Matched phase attribution supports this verification after inconclusive
+total-work exploration; the ordered identity-merge
 experiment did not demonstrate a benefit and was reverted. The completed alternating comparison's
 **23.44%** median reduction does not meet the **25%** target; the earlier
 **25.26%** sequential exploratory result is superseded for acceptance purposes.
@@ -138,6 +140,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
 | Ordered publication merge | Experiment `82b66cfa5`, subsequently reverted | Rejected: two alternating exploratory pairs give 27,820.23 → 27,861.62 ms median work (0.15% higher), with conflicting paired directions. All workload checks and 678 pre-rollback core tests pass; no map-removal benefit demonstrated. |
+| Frame-local metadata reuse | Experiment `e647d2437` | Exploratory combined medians improve 0.90% with conflicting pair directions; matched phase attribution reduces after-projection/diff mean 1.312 → 0.716 ms (45.46%). Retain for five-pair final verification. All workload checks, 996 world / 679 core tests, and broad Clippy pass. |
 | Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
 | Borrowed BSP candidates | `72c2e844a`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
 | Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
@@ -1008,7 +1011,7 @@ by 677 tests before this experiment; no behavior or scheduling change survives. 
 does not replace the five-pair final gate, whose 23.44% result remains the accepted measurement of
 the retained candidate. Investigate the larger full-projection cost next.
 
-### Frame-local metadata reuse: regression checks pass, measurement pending
+### Frame-local metadata reuse: retained for final verification after phase attribution
 
 The core tick now captures its full before views together with an opaque world entity-journal
 boundary and strong handles to the immutable motion/type catalogs. At the after boundary, core
@@ -1049,10 +1052,42 @@ now explicitly exercise reuse with an untouched journal, including complete inte
 publication and missing-outcome failure. The core batch API was cut over to the typed before
 boundary; no second publication implementation was retained. Broad all-target Clippy across world,
 core, CLI, 3D host and harness, formatting, and whitespace checks pass on the final implementation.
-The debug fixture executable builds successfully. Run two alternating exploratory pairs against preserved
-candidate `bc9e77f6e`, with a full warmup before every measured invocation. Retention requires
-evidence of benefit; the required five-pair comparison against the original controlled baseline
-remains a separate final gate. Heavy/live/user gates remain open.
+The debug fixture executable builds successfully. Two alternating exploratory pairs against
+preserved candidate `bc9e77f6e`, each invocation following a full warmup, completed successfully:
+
+| Pair | Previous candidate combined ms | Metadata-reuse combined ms | Reduction | Previous p95 ms | Reuse p95 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 27,555.44 | 27,696.75 | -0.51% | 19.205 | 18.997 |
+| 2 | 28,673.58 | 28,024.03 | 2.27% | 19.924 | 19.574 |
+
+All workload and content checks pass. The per-version medians are **28,114.51 ms** and
+**27,860.39 ms**: **0.90% lower**, but the conflicting paired directions do not establish a
+repeatable total-work benefit. See [individual reports and provenance](evidence/h3d-combat-physics-2026-10-20/frame-local-metadata-reuse-exploratory.json).
+Matched saved-executable runs with core runtime phase logging then separated publication work
+from the complete physics total. Each had one full warmup and one measured replay. Select physics
+records that actually emitted the nested simulation scope: **1,501** per executable, including
+the activation-completion tick. This differs deliberately from the report's **1,500** ticks that
+started already activated. Both reports retain all expected workload counts with no population
+mismatches. See [phase attribution](evidence/h3d-combat-physics-2026-10-20/frame-local-metadata-reuse-phase-attribution.json).
+
+| Mean phase per simulated tick | Previous candidate ms | Metadata reuse ms |
+| --- | ---: | ---: |
+| Before projection | 1.030 | 1.062 |
+| After projection and diff | 1.312 | 0.716 |
+| Simulation | 12.185 | 12.088 |
+| World maintenance | 1.393 | 1.381 |
+
+Mean after-projection/diff cost falls **45.46%**, approximately **895.28 ms** across the measured
+simulated ticks. The before boundary adds **48.38 ms**. This is material evidence that the intended
+publication work was removed, even though two ordinary paired runs did not establish a repeatable
+complete-work gain. Logging-enabled diagnostic totals are not acceptance timings, and one measured
+run per executable cannot establish the final gate. No compiler or other benchmark ran from this
+agent during attribution.
+
+**Decision: retain provisionally for final verification.** Run five alternating warmed pairs against
+the exact original `9cb7ba24e` baseline, using the unchanged trace/content/logging/build settings and
+all workload/outcome checks. Preserve every sample and leave the 25% gate open until that comparison
+finishes. Heavy/live validation and user acceptance remain separate open requirements.
 
 ### Heavy-workload harness gaps confirmed from source
 
@@ -1072,11 +1107,15 @@ cadence diagnostics do not require extending replay serialization.
 Workload qualification must remain separate from login success or elapsed observation time.
 Retain population, active movers, projectiles, geometry identity/readiness, requested controls,
 accepted paths/displacement and contacts, and summed admitted/elapsed time after startup.
-The scene contact profiler currently reports body/outcome/report-touch counts, while the core
-simulation profiler reports elapsed/admitted intervals and advanced bodies. Advanced bodies and
-contact outcomes are not interchangeable with requested movers or projectiles. Add any missing
-workload census at the layer owning that classification, rather than inferring it from presentation
-events. No new live workload or admission result is claimed by this source review.
+The scene `contact_collection` profile reports body/outcome/report-touch counts. Its nested
+`contact_integration` profile already reports **bodies, movers, projectiles, candidate pairs, and
+updates** using the actual `PreparedContactRole` classification in
+`spatial/mobile_contact/step.rs`. Reuse those counts; do not add a second mover/projectile classifier.
+A mover here is an admitted contact role, not proof of a nonzero requested drive or accepted travel.
+The core simulation profile supplies elapsed/admitted intervals and advanced bodies. Pair these
+records with requested controls and the existing accepted path/displacement/contact outcomes;
+advanced bodies and collection outcomes cannot stand in for that requested-versus-accepted audit.
+No new live workload or admission result is claimed by this source review.
 
 The evidence supports reviewing the system across layers before replacing the collision solver.
 The following are investigation targets, not implemented refactors.

@@ -110,17 +110,14 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** measure the static-query borrowing candidate against retained `02bdbe098` on
-the frozen trace. Shared candidate selection streams already-resolved geometry instead of
-collecting it and making each consumer repeat the lookup. All 996 world / 681 core tests,
-all-target Clippy, build and formatting checks pass; no speedup is claimed before measurement.
-Qualified live attribution remains **8.96 ms/tick** in movement sweeps versus **0.18 ms/tick**
-in semantic facts. Keep bounded solver behavior. Retained `02bdbe098` admitted **99.36%**
-over **64.98 s** of retained alternate-scene live intervals, but local combat never activated and
-mean movers were **96**, versus about **153** in the original fight. This is useful qualified
-cadence evidence, not heavy-fight acceptance. The publication shortcut is rejected and reverted
-(**0.45% more** marginal work). Prepared-body reuse remains retained; original-baseline performance,
-representative combat, final architecture/quality and user movement acceptance remain open.
+**Next action:** test optimized third-party collision/math dependencies in the development
+profile, keeping our game code unoptimized and debug checks enabled. Treat this as a separate
+build-configuration experiment, not a source speedup or replacement for the original five-pair
+acceptance comparison. Borrowed static-collider selection at `02cde557e` is retained: **2.29%**
+less marginal combined work, with positive paired directions. Prepared-body reuse also remains
+retained. Qualified alternate-scene cadence is **99.36%** over **64.98 s**, but combat activation,
+original-fight coverage, full original-baseline performance, final quality review and user movement
+acceptance remain open. The fixture and original baseline are unchanged.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1090,9 +1087,17 @@ together; the existing membership/policy test compares the same ordered identiti
 The source change removes 16 lines overall, including the smaller test representation. All
 **996 world tests** and **681 fixture-enabled core tests**, formatting/whitespace checks, and
 all-target world/core/harness Clippy with warnings denied, and the normal binary build pass.
-Frozen-trace marginal measurement remains pending. There is no performance claim yet; retain only
-if existing behavior holds and measurement shows no repeatable work regression. A speedup claim
-requires measured benefit; the original end-to-end acceptance gate remains unchanged.
+Two alternating pairs against `02bdbe098` measured **28,240.02 → 27,592.01 ms** median combined
+work: **2.29% lower**, with paired reductions of **1.51%** and **3.10%**. All workload/content
+checks passed. Candidate p95s were **19.613 / 19.394 ms**, baseline **20.086 / 19.301 ms**;
+the reverse pair is slightly worse, within the observed baseline spread, so there is no claim of
+consistent marginal p95 improvement. Retain the smaller ownership change and combined-work
+benefit. This is not the original-baseline acceptance comparison; do not add marginal percentages.
+
+All four reports and an independent median audit are in [retained borrowing evidence](evidence/h3d-combat-physics-2026-10-20/borrowed-collider-selection-02cde557e-retained.json).
+Private runner, executable, patch and raw reports remain in
+`caps/runtime-fixtures/2026-10-21-4ae1/borrowed-collider-selection-02cde557e/`. The original
+acceptance baseline, compiler configuration, input trace and solver behavior did not change.
 
 ### Unchanged semantic publication: rejected after marginal measurement
 

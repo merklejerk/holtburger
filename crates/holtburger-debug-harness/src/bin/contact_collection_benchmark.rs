@@ -59,6 +59,10 @@ struct Measurements {
 }
 
 fn main() -> Result<()> {
+    // Optional phase records use stderr so the benchmark's CSV remains machine-readable.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .target(env_logger::Target::Stderr)
+        .init();
     let args = Args::parse();
     ensure!(
         (1..=400).contains(&args.bodies),

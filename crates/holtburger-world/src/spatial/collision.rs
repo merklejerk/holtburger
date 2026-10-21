@@ -1598,7 +1598,7 @@ impl CollisionScene {
                         owner: target_owner.0,
                     },
                 )?;
-                for volume in asset.static_geometry.cell_volumes() {
+                for volume in asset.static_geometry.outdoor_entry_volumes() {
                     if volume.portals.iter().any(|portal| {
                         portal.target == CellCollisionPortalTarget::Outdoor
                             && parts.iter().any(|part| {
@@ -1755,14 +1755,9 @@ impl CollisionScene {
             let Some(asset) = self.landblocks.get(&owner) else {
                 continue;
             };
-            for volume in asset.static_geometry.cell_volumes() {
-                let is_outdoor_entry = volume
-                    .portals
-                    .iter()
-                    .any(|portal| portal.target == CellCollisionPortalTarget::Outdoor);
+            for volume in asset.static_geometry.outdoor_entry_volumes() {
                 let cell = Guid((owner.0 & 0xffff_0000) | u32::from(volume.cell_selector));
-                if is_outdoor_entry
-                    && volume_reaches(volume, local, request.radius)
+                if volume_reaches(volume, local, request.radius)
                     && !placement.reached_env_cells.contains(&cell)
                 {
                     placement.reached_env_cells.push(cell);
@@ -2268,7 +2263,7 @@ impl CollisionScene {
                 };
                 let landblock_start = anchor_to_landblock(segment.start, segment.anchor, *owner);
                 let landblock_end = anchor_to_landblock(segment.end, segment.anchor, *owner);
-                for source in asset.static_geometry.cell_volumes() {
+                for source in asset.static_geometry.outdoor_entry_volumes() {
                     let local_start = source.placement.to_local_space(landblock_start);
                     let local_end = source.placement.to_local_space(landblock_end);
                     for portal in &source.portals {

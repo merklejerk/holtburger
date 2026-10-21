@@ -1,0 +1,758 @@
+{
+  "description": "Sanitized post-optimization live host capture; milliseconds unless field names indicate counts. Phase timings are nested wall-clock measurements.",
+  "provenance": {
+    "source_sha256": "504b6733477ee12878f0e5e7c737395d27e466ecb9aa69b6a140cb4b2b46551b",
+    "source_bytes": 1763593,
+    "first_record_utc": "2026-10-21T03:41:07Z",
+    "last_record_utc": "2026-10-21T03:41:49Z",
+    "raw_log_retained_in_repository": false
+  },
+  "method": {
+    "physics_tick_filter": "Active-world records containing simulation_ms; startup/inactive physics ticks excluded.",
+    "window_definition": "Five-second buckets relative to first active physics record using logger timestamps; means per scope, not independently marked walking/combat boundaries.",
+    "sample_count_difference": "Final inner simulation record has no completed outer physics-tick record.",
+    "command_batch_caveat": "Startup outlier of 1023.105 ms dominates command-batch mean; do not treat as steady-state cost.",
+    "comparison_limit": "Live populations differ from pre-optimization capture; not a controlled speedup measurement."
+  },
+  "admitted_elapsed_ratio": 0.753242356136424,
+  "scopes": {
+    "physics_tick": {
+      "samples": 686,
+      "fields": {
+        "activation_and_equipment_ms": {
+          "mean": 0.0091,
+          "p50": 0.009,
+          "p95": 0.014,
+          "max": 0.027
+        },
+        "advanced_bodies": {
+          "mean": 139.984,
+          "p50": 153,
+          "p95": 167,
+          "max": 171
+        },
+        "after_entity_projection_and_diff_ms": {
+          "mean": 2.4721,
+          "p50": 2.586,
+          "p95": 3.359,
+          "max": 4.673
+        },
+        "before_entity_projection_ms": {
+          "mean": 1.9857,
+          "p50": 2.004,
+          "p95": 2.713,
+          "max": 4.086
+        },
+        "camera_ms": {
+          "mean": 0.6608,
+          "p50": 0.643,
+          "p95": 0.944,
+          "max": 1.721
+        },
+        "collision_content_ms": {
+          "mean": 0.8431,
+          "p50": 0.803,
+          "p95": 1.208,
+          "max": 4.985
+        },
+        "entities": {
+          "mean": 335.688,
+          "p50": 365,
+          "p95": 386,
+          "max": 390
+        },
+        "entity_facts_and_supply_ms": {
+          "mean": 1.2329,
+          "p50": 1.173,
+          "p95": 1.527,
+          "max": 2.105
+        },
+        "event_enqueue_ms": {
+          "mean": 0.0063,
+          "p50": 0.006,
+          "p95": 0.01,
+          "max": 0.023
+        },
+        "finalization_ms": {
+          "mean": 0.0012,
+          "p50": 0.001,
+          "p95": 0.002,
+          "max": 0.003
+        },
+        "interval_ms": {
+          "mean": 42.8171,
+          "p50": 38.991,
+          "p95": 70.948,
+          "max": 108.76
+        },
+        "movement_and_equipment_ms": {
+          "mean": 0.5587,
+          "p50": 0.544,
+          "p95": 0.843,
+          "max": 1.147
+        },
+        "queued_commands_ms": {
+          "mean": 0.381,
+          "p50": 0.005,
+          "p95": 2.087,
+          "max": 2.944
+        },
+        "simulation_events_and_combat_ms": {
+          "mean": 0.2927,
+          "p50": 0.29,
+          "p95": 0.407,
+          "max": 0.677
+        },
+        "simulation_ms": {
+          "mean": 22.2675,
+          "p50": 23.113,
+          "p95": 30.421,
+          "max": 34.076
+        },
+        "total_ms": {
+          "mean": 33.4318,
+          "p50": 35.017,
+          "p95": 43.567,
+          "max": 48.47
+        },
+        "world_tick_ms": {
+          "mean": 2.7206,
+          "p50": 2.652,
+          "p95": 3.599,
+          "max": 4.681
+        }
+      }
+    },
+    "simulation": {
+      "samples": 687,
+      "fields": {
+        "admitted_ms": {
+          "mean": 32.2634,
+          "p50": 33.333,
+          "p95": 33.333,
+          "max": 33.333
+        },
+        "advanced_bodies": {
+          "mean": 140.0116,
+          "p50": 153,
+          "p95": 167,
+          "max": 171
+        },
+        "authored_collision_poses_ms": {
+          "mean": 0.2653,
+          "p50": 0.25,
+          "p95": 0.385,
+          "max": 0.59
+        },
+        "authored_motion_ms": {
+          "mean": 2.3925,
+          "p50": 2.452,
+          "p95": 3.19,
+          "max": 4.05
+        },
+        "elapsed_ms": {
+          "mean": 42.8327,
+          "p50": 38.991,
+          "p95": 70.948,
+          "max": 108.76
+        },
+        "entities": {
+          "mean": 335.7525,
+          "p50": 365,
+          "p95": 386,
+          "max": 390
+        },
+        "finalization_ms": {
+          "mean": 0.0021,
+          "p50": 0.002,
+          "p95": 0.003,
+          "max": 0.011
+        },
+        "jump_preparation_ms": {
+          "mean": 0.0024,
+          "p50": 0.002,
+          "p95": 0.004,
+          "max": 0.014
+        },
+        "physical_contacts_ms": {
+          "mean": 19.0574,
+          "p50": 19.626,
+          "p95": 26.695,
+          "max": 30.354
+        },
+        "pose_only_projection_ms": {
+          "mean": 0.4921,
+          "p50": 0.517,
+          "p95": 0.667,
+          "max": 1.071
+        },
+        "total_ms": {
+          "mean": 22.2118,
+          "p50": 23.058,
+          "p95": 30.344,
+          "max": 34.019
+        }
+      }
+    },
+    "contact_scene": {
+      "samples": 687,
+      "fields": {
+        "accepted_path_preparation_ms": {
+          "mean": 1.3997,
+          "p50": 1.462,
+          "p95": 1.887,
+          "max": 2.955
+        },
+        "bodies": {
+          "mean": 140.7496,
+          "p50": 154,
+          "p95": 168,
+          "max": 172
+        },
+        "body_publication_ms": {
+          "mean": 0.2725,
+          "p50": 0.283,
+          "p95": 0.382,
+          "max": 0.647
+        },
+        "finalization_ms": {
+          "mean": 0.0011,
+          "p50": 0.001,
+          "p95": 0.002,
+          "max": 0.004
+        },
+        "input_capture_ms": {
+          "mean": 0.4155,
+          "p50": 0.417,
+          "p95": 0.596,
+          "max": 1.05
+        },
+        "integration_and_reports_ms": {
+          "mean": 14.7629,
+          "p50": 15.092,
+          "p95": 21.234,
+          "max": 25.227
+        },
+        "outcomes": {
+          "mean": 140.0116,
+          "p50": 153,
+          "p95": 167,
+          "max": 171
+        },
+        "placement_and_fixed_bodies_ms": {
+          "mean": 1.231,
+          "p50": 1.256,
+          "p95": 1.66,
+          "max": 2.449
+        },
+        "recovery_and_report_expiry_ms": {
+          "mean": 0.0422,
+          "p50": 0.02,
+          "p95": 0.031,
+          "max": 1.012
+        },
+        "report_lifetimes_ms": {
+          "mean": 0.1694,
+          "p50": 0.177,
+          "p95": 0.245,
+          "max": 0.357
+        },
+        "report_touches": {
+          "mean": 125.6885,
+          "p50": 131,
+          "p95": 161,
+          "max": 175
+        },
+        "total_ms": {
+          "mean": 18.2944,
+          "p50": 18.877,
+          "p95": 25.694,
+          "max": 29.494
+        }
+      }
+    },
+    "contact_collection": {
+      "samples": 687,
+      "fields": {
+        "bodies": {
+          "mean": 140.7496,
+          "p50": 154,
+          "p95": 168,
+          "max": 172
+        },
+        "collision_reporting_ms": {
+          "mean": 1.241,
+          "p50": 1.246,
+          "p95": 1.818,
+          "max": 2.596
+        },
+        "finalization_ms": {
+          "mean": 0.002,
+          "p50": 0.002,
+          "p95": 0.003,
+          "max": 0.008
+        },
+        "integration_ms": {
+          "mean": 13.4558,
+          "p50": 13.606,
+          "p95": 19.545,
+          "max": 23.172
+        },
+        "report_touches": {
+          "mean": 125.6885,
+          "p50": 131,
+          "p95": 161,
+          "max": 175
+        },
+        "total_ms": {
+          "mean": 14.6988,
+          "p50": 15.006,
+          "p95": 21.173,
+          "max": 25.156
+        },
+        "updates": {
+          "mean": 140.0102,
+          "p50": 153,
+          "p95": 167,
+          "max": 171
+        }
+      }
+    },
+    "contact_integration": {
+      "samples": 687,
+      "fields": {
+        "bodies": {
+          "mean": 140.7496,
+          "p50": 154,
+          "p95": 168,
+          "max": 172
+        },
+        "body_preparation_ms": {
+          "mean": 0.1816,
+          "p50": 0.187,
+          "p95": 0.254,
+          "max": 0.477
+        },
+        "candidate_pairs": {
+          "mean": 10.8544,
+          "p50": 6,
+          "p95": 28,
+          "max": 32
+        },
+        "correction_sweeps_ms": {
+          "mean": 0.5093,
+          "p50": 0.175,
+          "p95": 1.697,
+          "max": 2.892
+        },
+        "crowd_admission_ms": {
+          "mean": 0.1031,
+          "p50": 0.105,
+          "p95": 0.149,
+          "max": 0.302
+        },
+        "crowd_candidates_ms": {
+          "mean": 0.0867,
+          "p50": 0.087,
+          "p95": 0.123,
+          "max": 0.502
+        },
+        "crowd_response_ms": {
+          "mean": 0.1229,
+          "p50": 0.125,
+          "p95": 0.185,
+          "max": 0.239
+        },
+        "finalization_ms": {
+          "mean": 0.0019,
+          "p50": 0.002,
+          "p95": 0.003,
+          "max": 0.008
+        },
+        "hard_target_index_ms": {
+          "mean": 0.1077,
+          "p50": 0.107,
+          "p95": 0.15,
+          "max": 0.291
+        },
+        "mobile_movement_sweeps_ms": {
+          "mean": 6.8332,
+          "p50": 6.598,
+          "p95": 10.699,
+          "max": 13.137
+        },
+        "movers": {
+          "mean": 135.4585,
+          "p50": 149,
+          "p95": 157,
+          "max": 158
+        },
+        "projectiles": {
+          "mean": 4.5517,
+          "p50": 3,
+          "p95": 14,
+          "max": 17
+        },
+        "projectiles_and_results_ms": {
+          "mean": 0.544,
+          "p50": 0.662,
+          "p95": 0.928,
+          "max": 1.337
+        },
+        "support_and_hard_movement_ms": {
+          "mean": 4.0147,
+          "p50": 4.212,
+          "p95": 5.328,
+          "max": 6.749
+        },
+        "support_confirmation_ms": {
+          "mean": 0.8263,
+          "p50": 0.873,
+          "p95": 1.187,
+          "max": 1.572
+        },
+        "total_ms": {
+          "mean": 13.3314,
+          "p50": 13.458,
+          "p95": 19.433,
+          "max": 23.037
+        },
+        "updates": {
+          "mean": 140.0102,
+          "p50": 153,
+          "p95": 167,
+          "max": 171
+        }
+      }
+    },
+    "network_batch": {
+      "samples": 674,
+      "fields": {
+        "dispatch_ms": {
+          "mean": 8.6532,
+          "p50": 9.047,
+          "p95": 15.05,
+          "max": 21.328
+        },
+        "finalization_ms": {
+          "mean": 0.0047,
+          "p50": 0.005,
+          "p95": 0.007,
+          "max": 0.027
+        },
+        "total_ms": {
+          "mean": 8.6579,
+          "p50": 9.052,
+          "p95": 15.056,
+          "max": 21.333
+        }
+      }
+    },
+    "command_batch": {
+      "samples": 167,
+      "fields": {
+        "dispatch_ms": {
+          "mean": 7.8442,
+          "p50": 1.665,
+          "p95": 2.631,
+          "max": 1023.096
+        },
+        "finalization_ms": {
+          "mean": 0.0031,
+          "p50": 0.003,
+          "p95": 0.005,
+          "max": 0.009
+        },
+        "total_ms": {
+          "mean": 7.8473,
+          "p50": 1.667,
+          "p95": 2.636,
+          "max": 1023.105
+        }
+      }
+    }
+  },
+  "five_second_windows": [
+    {
+      "seconds": 0,
+      "scope": "contact_integration",
+      "samples": 134,
+      "mobile_movement_sweeps_ms": 3.43,
+      "support_and_hard_movement_ms": 2.821,
+      "movers": 92.746,
+      "projectiles": 0,
+      "candidate_pairs": 1.119,
+      "crowd_response_ms": 0.07,
+      "correction_sweeps_ms": 0.012
+    },
+    {
+      "seconds": 0,
+      "scope": "network_batch",
+      "samples": 114,
+      "total_ms": 3.354
+    },
+    {
+      "seconds": 0,
+      "scope": "physics_tick",
+      "samples": 134,
+      "total_ms": 21.892,
+      "interval_ms": 30.249,
+      "entities": 241.373
+    },
+    {
+      "seconds": 0,
+      "scope": "simulation",
+      "samples": 134,
+      "elapsed_ms": 30.249,
+      "admitted_ms": 29.833,
+      "physical_contacts_ms": 11.142,
+      "admitted_elapsed_ratio": 0.9862
+    },
+    {
+      "seconds": 5,
+      "scope": "contact_integration",
+      "samples": 134,
+      "mobile_movement_sweeps_ms": 5.651,
+      "support_and_hard_movement_ms": 3.625,
+      "movers": 125.03,
+      "projectiles": 0.985,
+      "candidate_pairs": 4.157,
+      "crowd_response_ms": 0.098,
+      "correction_sweeps_ms": 0.072
+    },
+    {
+      "seconds": 5,
+      "scope": "network_batch",
+      "samples": 101,
+      "total_ms": 9.011
+    },
+    {
+      "seconds": 5,
+      "scope": "physics_tick",
+      "samples": 134,
+      "total_ms": 29.467,
+      "interval_ms": 37.317,
+      "entities": 306.276,
+      "advanced_bodies": 126.022,
+      "before_entity_projection_ms": 1.818,
+      "after_entity_projection_and_diff_ms": 2.19,
+      "simulation_ms": 19.187,
+      "world_tick_ms": 2.591,
+      "camera_ms": 0.614
+    },
+    {
+      "seconds": 5,
+      "scope": "simulation",
+      "samples": 134,
+      "elapsed_ms": 37.317,
+      "admitted_ms": 31.503,
+      "physical_contacts_ms": 16.091,
+      "admitted_elapsed_ratio": 0.8442
+    },
+    {
+      "seconds": 10,
+      "scope": "contact_integration",
+      "samples": 113,
+      "mobile_movement_sweeps_ms": 6.656,
+      "support_and_hard_movement_ms": 4.566,
+      "movers": 148.071,
+      "projectiles": 3.221,
+      "candidate_pairs": 4.743,
+      "crowd_response_ms": 0.117,
+      "correction_sweeps_ms": 0.144
+    },
+    {
+      "seconds": 10,
+      "scope": "network_batch",
+      "samples": 85,
+      "total_ms": 10.646
+    },
+    {
+      "seconds": 10,
+      "scope": "physics_tick",
+      "samples": 113,
+      "total_ms": 35.345,
+      "interval_ms": 44.006,
+      "entities": 359.106,
+      "advanced_bodies": 151.292,
+      "before_entity_projection_ms": 2.103,
+      "after_entity_projection_and_diff_ms": 2.691,
+      "simulation_ms": 23.254,
+      "world_tick_ms": 2.851,
+      "camera_ms": 0.764
+    },
+    {
+      "seconds": 10,
+      "scope": "simulation",
+      "samples": 113,
+      "elapsed_ms": 44.006,
+      "admitted_ms": 33.175,
+      "physical_contacts_ms": 19.699,
+      "admitted_elapsed_ratio": 0.7539
+    },
+    {
+      "seconds": 15,
+      "scope": "contact_integration",
+      "samples": 97,
+      "mobile_movement_sweeps_ms": 7.134,
+      "support_and_hard_movement_ms": 4.511,
+      "movers": 152.381,
+      "projectiles": 8.155,
+      "candidate_pairs": 16.423,
+      "crowd_response_ms": 0.149,
+      "correction_sweeps_ms": 0.455
+    },
+    {
+      "seconds": 15,
+      "scope": "network_batch",
+      "samples": 109,
+      "total_ms": 11.601
+    },
+    {
+      "seconds": 15,
+      "scope": "physics_tick",
+      "samples": 97,
+      "total_ms": 37.505,
+      "interval_ms": 51.615,
+      "entities": 377.794,
+      "advanced_bodies": 160.536,
+      "before_entity_projection_ms": 2.261,
+      "after_entity_projection_and_diff_ms": 2.863,
+      "simulation_ms": 24.777,
+      "world_tick_ms": 2.949,
+      "camera_ms": 0.771
+    },
+    {
+      "seconds": 15,
+      "scope": "simulation",
+      "samples": 97,
+      "elapsed_ms": 51.615,
+      "admitted_ms": 33.305,
+      "physical_contacts_ms": 21.106,
+      "admitted_elapsed_ratio": 0.6452
+    },
+    {
+      "seconds": 20,
+      "scope": "contact_integration",
+      "samples": 92,
+      "mobile_movement_sweeps_ms": 10.101,
+      "support_and_hard_movement_ms": 4.522,
+      "movers": 153.413,
+      "projectiles": 12.761,
+      "candidate_pairs": 25.674,
+      "crowd_response_ms": 0.173,
+      "correction_sweeps_ms": 1.315
+    },
+    {
+      "seconds": 20,
+      "scope": "network_batch",
+      "samples": 95,
+      "total_ms": 11.193
+    },
+    {
+      "seconds": 20,
+      "scope": "physics_tick",
+      "samples": 92,
+      "total_ms": 41.815,
+      "interval_ms": 54.093,
+      "entities": 385.348,
+      "advanced_bodies": 166.174,
+      "before_entity_projection_ms": 2.284,
+      "after_entity_projection_and_diff_ms": 2.921,
+      "simulation_ms": 28.963,
+      "world_tick_ms": 3.063,
+      "camera_ms": 0.701
+    },
+    {
+      "seconds": 20,
+      "scope": "simulation",
+      "samples": 92,
+      "elapsed_ms": 54.093,
+      "admitted_ms": 33.333,
+      "physical_contacts_ms": 25.276,
+      "admitted_elapsed_ratio": 0.6162
+    },
+    {
+      "seconds": 25,
+      "scope": "contact_integration",
+      "samples": 109,
+      "mobile_movement_sweeps_ms": 9.475,
+      "support_and_hard_movement_ms": 4.489,
+      "movers": 156,
+      "projectiles": 5.853,
+      "candidate_pairs": 18.862,
+      "crowd_response_ms": 0.156,
+      "correction_sweeps_ms": 1.345
+    },
+    {
+      "seconds": 25,
+      "scope": "network_batch",
+      "samples": 55,
+      "total_ms": 12.076
+    },
+    {
+      "seconds": 25,
+      "scope": "physics_tick",
+      "samples": 108,
+      "total_ms": 39.543,
+      "interval_ms": 46.36,
+      "entities": 381.324,
+      "advanced_bodies": 161.87,
+      "before_entity_projection_ms": 2.265,
+      "after_entity_projection_and_diff_ms": 2.824,
+      "simulation_ms": 27.534,
+      "world_tick_ms": 2.962,
+      "camera_ms": 0.682
+    },
+    {
+      "seconds": 25,
+      "scope": "simulation",
+      "samples": 109,
+      "elapsed_ms": 46.277,
+      "admitted_ms": 33.333,
+      "physical_contacts_ms": 24.367,
+      "admitted_elapsed_ratio": 0.7203
+    },
+    {
+      "seconds": 30,
+      "scope": "contact_integration",
+      "samples": 8,
+      "mobile_movement_sweeps_ms": 8.918,
+      "support_and_hard_movement_ms": 4.432,
+      "movers": 155.875,
+      "projectiles": 3.5,
+      "candidate_pairs": 25.375,
+      "crowd_response_ms": 0.173,
+      "correction_sweeps_ms": 1.331
+    },
+    {
+      "seconds": 30,
+      "scope": "network_batch",
+      "samples": 6,
+      "total_ms": 11.036
+    },
+    {
+      "seconds": 30,
+      "scope": "physics_tick",
+      "samples": 8,
+      "total_ms": 37.822,
+      "interval_ms": 44.483,
+      "entities": 379.625,
+      "advanced_bodies": 159.5,
+      "before_entity_projection_ms": 2.106,
+      "after_entity_projection_and_diff_ms": 2.655,
+      "simulation_ms": 26.676,
+      "world_tick_ms": 2.783,
+      "camera_ms": 0.638
+    },
+    {
+      "seconds": 30,
+      "scope": "simulation",
+      "samples": 8,
+      "elapsed_ms": 46.507,
+      "admitted_ms": 33.333,
+      "physical_contacts_ms": 23.577,
+      "admitted_elapsed_ratio": 0.7167
+    }
+  ]
+}

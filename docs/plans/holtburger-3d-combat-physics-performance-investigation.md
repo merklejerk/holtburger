@@ -1,0 +1,578 @@
+# Holtburger 3D Combat Physics Performance Investigation
+
+Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21 UTC.
+Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
+
+Status: **Two geometry-query optimizations implemented and verified. The user reports noticeable
+improvement, but significant movement slowdown remains. A fresh combat capture confirms continued
+simulation-time loss; the next targets span core scheduling/publication and world query preparation.**
+
+A headless capture/replay fixture is now implemented and has completed three offline runs for a
+second scene. It provides a repeatable input workload; deterministic movement equivalence remains
+outside its present guarantees.
+
+## Execution contract and progress
+
+This section is the working contract for the continuing performance effort. Update it after every
+milestone with the change, evidence, result, remaining uncertainty, and next action. The historical
+captures below remain evidence; completed checkboxes require the stated verification.
+
+**Objective:** remove workload-induced movement slowdown by simplifying the complete client update
+pipeline while preserving proven Asheron's Call movement and collision behavior. Engineering
+completion and the user's final movement-feel acceptance are separate milestones.
+
+### Scope and design constraints
+
+- Review core input scheduling, derived publication, and time admission together with world scene
+  preparation, character movement, collision queries, reconciliation, and accepted-state commit.
+  Content owns immutable reference-data assembly; world owns physical meaning and accepted changes;
+  core owns orchestration/projection; frontend presentation and control policy remain app-local.
+- Prefer deleting, unifying, or avoiding repeated work before introducing caches, workers, or new
+  abstractions. Replacing the collision solver is an evidence-driven design decision, not a required
+  deliverable. Preserve the distinction between character-controller needs and general rigid-body
+  simulation.
+- Verify behavior-sensitive decisions against ACE, ACViewer, and the retail client decompile as
+  applicable. Do not edit the retail decompile. Keep deliberate retail compatibility differences
+  documented using the repository's marker convention.
+- Use the existing unattended character/scene access and diagnostic harnesses. Keep raw scene data
+  private. Existing fixture capture supports stationary observation; unsupported movement/combat
+  inputs must become explicit, validated fixture inputs before being used as replay evidence.
+- Keep debug-build performance as the primary acceptance surface. Record build flags, logging,
+  content, machine load, and workload counts; a release build is supplemental evidence.
+- Preserve unrelated work, including the existing ACE/ACViewer changes. Do not run the TUI or perform
+  visual acceptance on the user's behalf. Local checkpoint commits are authorized; publishing
+  branches or rewriting unrelated history is outside this effort.
+
+### Definition of done
+
+- [ ] **Architecture:** trace one complete ordinary update and representative reset/correction
+  paths, identify each layer's contracts, and document which mechanisms are retained, unified,
+  removed, or replaced and why. Address timestep/overload behavior explicitly.
+- [ ] **Correctness:** add controlled-time movement scenarios that compare requested and accepted
+  movement, contacts/support, corrections, and lifecycle/discontinuity outcomes. Equivalent entity
+  counts and authoritative end positions alone are insufficient. Keep retained regression tests
+  independent of uncommitted runtime assets; production-content checks remain diagnostics.
+- [ ] **Performance:** reduce combined message-handling and physics work by at least **25%** against
+  a new controlled baseline of the current checkpoint, without worsening p95 active physics work
+  beyond measured baseline variability. Compare the sum of the two non-overlapping work totals for
+  the same input trace; do not add nested phase timings or pacing waits. Use at least five paired
+  measured runs per version after explicit warmup, alternating version order, with the same fixture,
+  content, build/logging settings, and workload/outcome checks. Preserve individual runs and p95s;
+  do not select the fastest run or relabel the earlier noisy captures as this baseline.
+- [ ] **Heavy-workload coverage:** exercise the supplied second scene and a movement/combat stress
+  workload representative of the original slowdown. Record movers, projectiles, geometry, and
+  requested movement so a smaller or less active population cannot satisfy the performance target.
+  The current stationary replay is useful coverage, not proof of the original fight's resolution.
+- [ ] **Live cadence:** verify at least **99%** summed admitted/elapsed simulation time over a
+  representative **60-second** heavy live workload, with startup excluded and population/settings
+  retained. Check tick intervals and input/accepted movement alongside admission. A changed cap,
+  recorded-interval replay, or a quiet scene alone cannot satisfy this criterion.
+- [ ] **Quality and delivery:** remove superseded paths/vocabulary, review final ownership and
+  invalidation obligations, pass relevant correctness tests, Clippy with warnings treated as errors,
+  formatting/build checks, and update this document with reproducible evidence and remaining risks.
+- [ ] **User acceptance:** the user confirms normal movement in the original heavy fight and any
+  representative alternate scene. Report engineering readiness separately while this is pending;
+  do not claim the user-facing issue is closed without that confirmation.
+
+The numeric performance and cadence thresholds are acceptance targets, not established feasibility
+claims. If evidence shows a target cannot be reached or verified within the available workload,
+record the precise constraint and remaining options. Complete independent work and leave the
+criterion open; do not silently lower targets or mark partial improvement as completion.
+
+### Milestones and current progress
+
+| Phase | State | Deliverable / next verification |
+| --- | --- | --- |
+| 0. Preserve evidence and checkpoint | Complete with this checkpoint | Historical captures, geometry results, local raw fixture, and recovery references retained. |
+| 1. Establish the controlled workload | In progress | Headless capture and three paced replays work; establish the quiet-machine paired baseline, workload audit, and representative stress coverage. |
+| 2. Define behavior and ownership | Pending | Controlled-time movement oracle, complete pipeline/reset trace, and bounded redesign with compatibility evidence. |
+| 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
+| 4. Simplify world movement preparation | Pending | Share valid query preparation and avoid unnecessary body work while preserving accepted-path coverage, support, and obstacle participation. |
+| 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
+| 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
+
+Completed foundations:
+
+- [x] Localized significant slow motion to host overruns plus discarded simulation time.
+- [x] Added opt-in host/core/world phase attribution and retained sanitized capture summaries.
+- [x] Implemented and checked conservative static sweep rejection and outdoor-entry indexing;
+  measured a 37.6% median reduction on the focused geometry trajectory benchmark.
+- [x] Captured the supplied alternate scene and verified three server-free paced input replays.
+- [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
+  recorded intervals that cannot demonstrate restored live cadence.
+
+**Next action:** establish the controlled checkpoint baseline and movement/workload checks before
+using replay timings to accept a structural optimization. Core message/publication work is the
+first implementation hypothesis, subject to the complete pipeline review.
+
+At each phase boundary, reassess the remaining plan against new evidence and update ordering or
+scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
+Keep feasible independent work moving when a live workload or final human acceptance is unavailable.
+
+### Git checkpoints and rollback policy
+
+- Starting parent: `e74faf3bd3b3cb25806ef4f9be4ed15b5c336f41` on `3d-next`.
+- Working branch: `work/h3d-physics-performance`.
+- Fixed starting checkpoint: `safety/h3d-physics-start-20261021`, containing the profiling,
+  initial geometry optimizations, runtime fixture, evidence summaries, and this execution contract.
+  The reference is created at the checkpoint commit; keep it fixed during subsequent experiments.
+- Existing ACE/ACViewer working-tree changes and the ACE gitlink change are excluded from the
+  checkpoint. Raw captures and credentials remain ignored local files. Git preserves their source
+  consumers and sanitized provenance, not the private runtime assets themselves.
+- Make small, attributable commits at meaningful milestones, recording the commit and validation
+  in the progress ledger below. Preserve a working checkpoint before a risky experiment; branch
+  from it when alternative designs need independent comparison.
+- Prefer reverting the specific experiment commit(s) or returning an isolated experiment worktree
+  to its checkpoint. Inspect the current diff first. Avoid whole-tree hard resets, broad cleans,
+  and stashing unrelated changes as a shortcut. A rollback must preserve unrelated work and the
+  evidence needed to explain why the experiment was rejected.
+
+| Milestone | Git reference | Evidence / outcome |
+| --- | --- | --- |
+| Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
+
+Future ledger rows must name the hypothesis, measured outcome, validation, and whether the change
+was retained or reverted. Failed experiments remain useful evidence and should not disappear from
+the investigation narrative when their code is rolled back.
+
+The client slowed substantially at outdoor landblock `0x4ce1ffff`, especially during combat. The
+user reported 200–300 FPS in other locations, drops below 60 FPS when fighting here, and movement
+that felt like walking through molasses. Investigation separated presentation throughput from
+authoritative simulation progress: the Rust host exceeded its physics budget, while a time clamp
+discarded part of each delayed interval. The character could therefore move slowly even while the
+frontend rendered around 100 FPS.
+
+The dominant measured cost was geometry work for moving bodies. Two optimizations now reject
+unreachable static shapes before exact collision queries and precompute which interior cells have
+outdoor portals. A repeated production-content trajectory benchmark took approximately 38% less
+time with an identical landing result. That result concerns collision prediction, not measured
+combat FPS or a confirmed resolution of the movement slowdown. The subsequent live capture below
+shows that the broader runtime pipeline still exceeds its available budget under heavier load.
+
+## Scene and measurement conditions
+
+| Setting | Recorded condition |
+| --- | --- |
+| Location | Outdoor `0x4ce1ffff` |
+| CPU | AMD Ryzen 9 5900X 12-Core Processor, x86_64 Linux |
+| Client | Electron client launched with `--debug`; CDP port 9222 |
+| Rust host | `target/debug/holtburger-3d-host` |
+| Initial viewport | CSS and drawing buffer both 1845 × 1071 |
+| Operator | User controlled movement and combat; diagnostic probes did not drive the character |
+| Detailed contact capture | 624 active-world ticks; mean 282.5 known entities, 104.4 movers, 8.2 projectiles |
+
+Scene interest radii, full graphics settings, and GPU identity were not retained for this
+investigation. These timings describe this workload and machine rather than a general frame budget.
+The user's usual 200–300 FPS was a reported comparison, not a separately captured baseline here.
+
+The original measurements used uncommitted instrumentation and optimization changes above
+`e74faf3bd3b3cb25806ef4f9be4ed15b5c336f41`; that parent alone does not reproduce either measured
+binary. The starting checkpoint now retains the accumulated source and evidence; the benchmark
+artifacts retain their measured binary hashes and stage-specific differences.
+
+## Presentation measurements and initial leads
+
+The first CDP capture showed approximately 9.6 FPS because the window lacked focus. The frontend
+intentionally limits presentation to about 10 FPS in
+[presentation-frame-loop.ts](../../apps/holtburger-3d/src/app/presentation-frame-loop.ts).
+After the user focused H3D, a capture with CPU/GPU profiling disabled delivered 684 frames in
+5.51 seconds, approximately 124 FPS. Its frame interval was at most 13.9 ms for 95% of samples and
+27.8 ms at worst. Synchronous game-frame CPU work averaged approximately 5.1 ms.
+
+During the first combat investigation, a separate capture with profiling disabled delivered
+838 game frames in 8.51 seconds, approximately 98 FPS, with a worst observed animation-frame
+interval of 34.8 ms. The displayed smoothed FPS also dipped to 56 during a profiled combat capture.
+Those observations support reduced throughput and stalls; they do not establish a sustained
+sub-60 average throughout the fight.
+
+Renderer profiling measured GPU passes totaling approximately 1.1 ms. This is the sum of the
+instrumented GPU spans, not complete GPU wall time. CPU samples included entity presentation,
+spatial bounds, minimap work, nearby reconciliation, and host-message handling. Those were useful
+leads, but the later host measurements localized the dominant movement problem more directly.
+
+Several diagnostic limits mattered:
+
+- The FPS display smooths its observations and takes time to recover after refocusing. Actual frame
+  counts and focus state were checked separately. Its uncapped estimate is not delivered FPS.
+- One later unprofiled observation window lost focus; its game-frame count was not treated as a
+  focused combat measurement.
+- A suspected stale-source mismatch proved to be TypeScript versus compiled JavaScript line
+  numbering. Loaded source inspected through CDP matched the particle implementation on disk.
+- Native `perf` sampling of the Rust host was denied by OS permissions, including a retry using
+  `cpu-clock:u`. Explicit phase timings supplied the host attribution instead.
+
+## Why movement slowed in real time
+
+The core client schedules physics every 30 ms and uses Tokio's missed-tick `Skip` policy. It passes
+actual elapsed time into simulation. Simulation then calls `admit_physical_duration`, which admits
+at most `1 / 30` second, approximately 33.3 ms, and discards the rest.
+
+These are two different constants: a 30 ms scheduler period is approximately 33.3 updates per
+second, whereas the maximum admitted interval is 33.3 ms, equivalent to 30 updates per second.
+
+Relevant code:
+
+- [Core runtime scheduling and elapsed time](../../crates/holtburger-core/src/client/runtime.rs)
+- [Simulation time admission](../../crates/holtburger-core/src/client/simulation.rs)
+- [Maximum admitted physical duration](../../crates/holtburger-world/src/spatial/mobile_contact.rs)
+
+An initial direct observation received only 121 presentation ticks in approximately seven seconds,
+with a mean arrival gap of 57.9 ms and a maximum gap of 101.9 ms. The published durations also
+showed delayed host intervals, so this was more than frontend delivery jitter. With only 121
+updates, the maximum admitted simulation duration was about 4.03 seconds: at most 58% of the
+seven seconds of real time.
+
+Later host logs measured admission directly. In the detailed 624-tick capture, mean elapsed time
+was 46.177 ms and mean admitted time was 32.749 ms. The ratio of summed admitted time to summed
+elapsed time was **70.92%**. This is a simulation-time ratio, not a direct measurement of walking
+speed: collisions, control state, and corrections can also affect displacement.
+
+Sustained overload therefore creates real slow motion. Increasing the clamp would change collision
+integration behavior while leaving the expensive work in place. The optimizations retain the
+existing time-admission and overload policies.
+
+## Host and contact attribution
+
+Opt-in probes first separated input, movement, world updates, collision-content readiness,
+simulation, entity projection, camera solving, and event enqueueing. Host-adapter probes separately
+measured event projection, output-queue waits, MessagePack encoding, and pipe writes.
+
+The first active-world host capture contained 582 ticks. Mean host tick work was 38.66 ms, with
+28.19 ms attributed to simulation. Physical contacts accounted for 25.41 ms, approximately 90% of
+the inner simulation duration. Mean tick interval was 48.34 ms. Event forwarding and pipe output
+were small costs in that capture. A debug host process was also observed consuming roughly one
+CPU core; release mode was not used as a substitute for investigating the work.
+
+The next probe split contacts into scene preparation/publication, integration/reporting, and the
+integration phases. The complete sanitized summary for this pre-optimization capture is retained
+in [contact-summary.json](evidence/h3d-combat-physics-2026-10-20/contact-summary.json).
+
+| Boundary or phase | Mean ms | 95th percentile ms |
+| --- | ---: | ---: |
+| Entire host physics tick | 36.408 | 42.832 |
+| Inner simulation | 26.111 | 31.706 |
+| Physical contacts including client consequences | 23.425 | 28.559 |
+| Scene contact collection | 22.771 | 27.807 |
+| Contact integration | 18.154 | 22.721 |
+| Mobile movement sweeps | **11.515** | **15.324** |
+| Support checks and hard-body movement | **3.606** | **4.520** |
+| Correction sweeps | 1.202 | 2.587 |
+| Collision reporting | 0.937 | 1.205 |
+| Final support confirmation | 0.711 | 0.935 |
+| Projectile processing and result construction | 0.609 | 0.912 |
+| Crowd admission | 0.089 | 0.119 |
+| Crowd candidate selection | 0.079 | 0.100 |
+| Crowd separation response | 0.104 | 0.141 |
+
+The boundaries are nested; their totals must not be added together. Percentiles belong to each
+phase independently. The retained summary also includes medians, maxima, workload counts, and a
+hash of the original log. Phase clocks measure elapsed wall time, including waits and scheduling;
+enabled probes also incur formatting and logging overhead.
+
+There were only 9.1 candidate crowd pairs per tick on average. Admission, pair selection, and
+separation together averaged approximately 0.27 ms. In this scene, optimizing the pair loop would
+address much less work than the geometry-query path.
+
+The mobile movement bucket includes translation, optional stair/edge navigation, support settling,
+and orientation clearance. It should not be interpreted as triangle/BSP intersection time alone.
+
+## Implemented optimizations and ownership
+
+### Reject static shapes outside the swept volume
+
+The static collision index selects shapes through 24-metre outdoor cells and reached interior
+domains. A selected shape can share a coarse cell with the mover while remaining far outside its
+short movement path. Previously it could still enter the exact shape/BSP query.
+
+[Static sphere sweeps](../../crates/holtburger-world/src/spatial/collision/static_sphere_sweep.rs)
+now reject those shapes using their existing conservative bounds and a sphere containing the
+entire nominal swept volume. The bound uses the original displacement and full body radius. Its
+center is reanchored before adding half the displacement so distant request coordinates do not
+round away short local movement. Terrain selection reuses the query's derived radius.
+
+This belongs to the **world collision-query layer**. The exact solver, hit ordering, contact band,
+and accepted-path coverage checks remain responsible for possible collisions. This is a query
+selection optimization, not a change to authored collision behavior.
+
+### Assemble outdoor entry candidates once
+
+Outdoor traversal repeatedly scanned all interior cell volumes to discover which ones contained
+an outdoor portal. Some paths also transformed start and end points into cells that had no outdoor
+portal and therefore could not contribute an entry transition.
+
+[LandblockColliders](../../crates/holtburger-content/src/object_collision.rs) now computes an
+assembly-order index of outdoor entry volumes when collision content is constructed. Absorption
+of another assembly offsets and carries those indices together with the cell volumes. Duplicate
+selectors and assembly order are preserved.
+
+[World traversal](../../crates/holtburger-world/src/spatial/collision.rs) consumes that list for
+outdoor placement, outdoor portal crossings, and static part-box entry checks. It still applies
+the existing exact portal, containment, and reach rules. Interior traversal and recovery searches
+that require all cells retain the complete volume collection.
+
+The derived static reference data belongs to the **content layer**; query interpretation remains
+in **world**. No explorer or TUI policy moved into a shared simulation contract.
+
+## Benchmark comparison
+
+The existing `precise_jump_benchmark` exercised canonical production content from the same
+landblock. Its center asset contained 160 static colliders and 71 interior cells. The benchmark
+loaded its normal collision neighborhood, resolved the start/target surfaces, and evaluated a
+complete trajectory with a 60-tick horizon. The trajectory landed after 55 solver ticks.
+
+```bash
+cargo run -p holtburger-debug-harness --bin precise_jump_benchmark -- \
+  --landblock 0x4ce1ffff \
+  --start 118,42,100 --target 120,42,100 --resolve-ground \
+  --iterations 100 --ticks 60
+```
+
+Five separate processes per version each performed the harness warmup followed by 100 timed
+evaluations. Before/after process order alternated between repetitions. Measurements used debug
+binaries and the same content, arguments, and machine.
+
+| Version | Median ms per complete prediction | Minimum ms | Maximum ms |
+| --- | ---: | ---: | ---: |
+| Before both optimizations | 8.350 | 8.056 | 8.657 |
+| After both optimizations | 5.212 | 5.073 | 5.437 |
+
+The median reduction was **37.6%**, rounded to 38% in discussion. These are whole 55-step prediction
+evaluations, not individual host ticks. All ten runs produced the same landing point
+`(120.034004, 42.000626, 63.502235)`, normal `(-0.07179582, 0.50257075, 0.8615498)`, outdoor committed
+cell, target match, and accepted segment count.
+
+[geometry-benchmark.json](evidence/h3d-combat-physics-2026-10-20/geometry-benchmark.json) retains
+the individual results, configuration, binary hashes, and measurement-stage provenance. The paired
+optimized binary preceded the final distant-frame midpoint arithmetic hardening; this benchmark
+uses the owner as its request anchor. Final collision regression tests passed after that hardening.
+
+This benchmark proves a reduction for a focused production-content query workload. It does not
+measure the complete combat population, frontend FPS, or post-change simulation-time admission.
+
+## Verification
+
+The optimization checks passed:
+
+- 14 content collision tests, including outdoor entry ordering, duplicate selectors, assembly
+  absorption, and empty collections.
+- 90 collision tests, including a new differential comparison against exhaustive exact shape
+  queries across balls, cylinders, BSP geometry, scales, rotations, and neighboring/distant frames.
+- 166 contact-related tests covering crowd response, stair travel, slopes, portals, collision
+  reporting, and related world semantics. These filters overlap some collision coverage.
+- Clippy for content, world, core, and the 3D host, with warnings treated as errors; formatting and
+  `git diff --check`; successful debug host build.
+
+Earlier instrumentation verification also passed the existing core simulation/runtime and host
+lifecycle/protocol tests and the sidecar smoke check with logging enabled. A deterministic
+101-body synthetic workload produced identical movement, collision-work, and penetration outputs
+with phase profiling enabled and disabled. Disabled contact profiling emitted no phase records.
+
+No new retained test depends on installed client archives. The production-content benchmark is an
+explicit diagnostic run. Visual acceptance remains with the user. Those initial checks preceded the
+checkpoint commits; the existing ACE and ACViewer submodule changes were left untouched.
+
+## Post-optimization live capture
+
+After restarting with the optimized debug host, the user repeated movement and combat in the
+problem scene. The user reported noticeable improvement but still significant movement slowdown.
+The fresh log spans `2026-10-21T03:41:07Z`–`03:41:49Z`, including startup, and contains 686 completed
+active-world host ticks and 687 inner simulation samples. The final inner sample has no completed
+outer tick record. Sanitized measurements and the source-log hash are retained in
+[post-optimization-contact-summary.json](evidence/h3d-combat-physics-2026-10-20/post-optimization-contact-summary.json).
+
+Across the active simulation samples, admitted time was **75.32% of elapsed time**. Mean host tick
+work was 33.43 ms, with a mean interval of 42.82 ms; their respective 95th percentiles were 43.57 ms
+and 70.95 ms. Population increased during the capture. The following means compare the first
+five-second active window with the heaviest five-second window, starting about 20 seconds later.
+Logger timestamps define these windows; they do not independently identify walking/combat boundaries.
+
+| Measurement | Early window | Heaviest window |
+| --- | ---: | ---: |
+| Completed host ticks | 134 | 92 |
+| Known entities | 241.4 | 385.3 |
+| Movers | 92.7 | 153.4 |
+| Projectiles | 0 | 12.8 |
+| Host physics work | 21.89 ms | 41.82 ms |
+| Host physics interval | 30.25 ms | 54.09 ms |
+| Admitted / elapsed simulation time | 98.62% | **61.62%** |
+| Network batch work | 3.35 ms | 11.19 ms |
+| Mobile movement sweeps | 3.43 ms | 10.10 ms |
+| Support checks and hard-body movement | 2.82 ms | 4.52 ms |
+| Crowd separation response | 0.07 ms | 0.17 ms |
+
+In the heavy window, before/after dynamic entity projection and comparison together cost another
+5.21 ms per physics tick. Network processing ran 95 batches alongside 92 physics ticks. Network
+batch time is separate from physics work; contact phases are nested inside physics work.
+
+The fresh workload had more movers than the retained pre-optimization capture, so the live logs
+do not establish a controlled before/after speedup. No fresh delivered-FPS or GPU measurement was
+collected. The time-admission measurements do establish continued simulation slowdown. They do
+not exclude additional movement rejection from contacts or corrections; displacement and accepted
+movement still need separate attribution if symptoms remain after restoring cadence.
+
+## Next investigation targets: the complete update pipeline
+
+The evidence supports reviewing the system across layers before replacing the collision solver.
+The following are investigation targets, not implemented refactors.
+
+1. **Core orchestration: bound message work and avoid repeated derived publication.**
+   [Network batching](../../crates/holtburger-core/src/client/runtime.rs) has an 8 ms budget, but
+   checks it only after processing a packet's complete event list. A large packet can overrun it.
+   [Message handling](../../crates/holtburger-core/src/client/messages.rs) also calls
+   `publish_entity_facts` after ordinary message handling.
+   [Fact collection](../../crates/holtburger-core/src/client/entity_facts.rs) already tracks dirty
+   state, but still derives projectile supply during collection. Measure calls and invalidations
+   before choosing a batching boundary; preserve message order and intermediate semantic effects.
+   Separately, [dynamic publication](../../crates/holtburger-core/src/client/dynamic_entity_view.rs)
+   projects full before/after collections and builds a map to find differences. Investigate
+   consuming authoritative changes produced by the world update instead. This is core projection
+   work; authoritative change ownership belongs in world.
+2. **World collision queries: prepare once within an explicit movement transaction.**
+   [Static sweep preparation](../../crates/holtburger-world/src/spatial/collision/static_sphere_sweep.rs)
+   traverses attempted movement topology; accepted-path finishing performs additional traversal.
+   Investigate sharing validated query preparation across movement, support, and commit. Attempted
+   coverage and the clipped accepted path have different meanings: reusing one as the other could
+   admit invalid portal transitions or collision coverage. The measured 10.10 ms movement and
+   4.52 ms support/hard-movement buckets justify this investigation, but do not quantify how much
+   duplicate traversal can be removed.
+3. **World scene preparation: distinguish bodies that advance from bodies that remain obstacles.**
+   [Contact collection](../../crates/holtburger-world/src/spatial/scene/contact_collection.rs)
+   refreshes placement across the physical population before activity classification and prepares
+   snapshots/publication around integration. Review which work needs fresh inputs each tick and
+   which can follow explicit invalidation. Sleeping bodies still participate as obstacles, and
+   support or authored-pose changes can invalidate apparently stationary state. Removing their
+   collision participation would change behavior; removing proven redundant preparation may not.
+
+The architectural direction to evaluate is: core admits ordered input and elapsed time; world
+prepares a coherent collision view, solves movement, and commits accepted changes; core projects
+those changes; the frontend interpolates presentation. Each boundary needs a clear owner and
+contract. This may simplify the accumulated solver orchestration without replacing proven geometry
+math. Reuse and invalidation also introduce state and correctness obligations, so deletion and
+unification should precede new caches or abstractions.
+
+Review **core/world overload policy** alongside those targets. The current clamp silently loses
+simulation time under sustained overruns. Catch-up work or larger integration steps each have
+different stability and latency costs; neither is an established fix here. Keep elapsed, admitted,
+and discarded time observable, and require an explicit policy rather than changing the cap alone.
+
+## Unattended runtime fixture: second scene, 2026-10-21
+
+The user supplied the `.dev.env` account for unattended investigation. A new
+[runtime_scene_fixture harness](../../crates/holtburger-debug-harness/src/bin/runtime_scene_fixture.rs)
+logged in, selected the account's only active character, observed the activated world for 45
+seconds, and disconnected. It sent no movement or combat commands; ordinary core-generated
+protocol actions still ran. The observed player cell was **`0x4AE1003A`**, rather than the earlier
+outdoor `0x4CE1FFFF`. The user confirmed that this different scene was intended and should also
+be heavy.
+
+The fixture contains 46.689 seconds of dispatch history including entry: **5,741 incoming
+messages, 1,519 physics steps, four server-time samples, and one character-selection command**.
+Capture reached 286 known entities and 125 advancing bodies. Mean active physics work was
+22.13 ms at a 30.08 ms interval; admitted simulation time was 98.57% of elapsed time. This
+stationary workload did not reproduce the earlier fight's severe time loss. Build/test activity
+also overlapped capture, so these figures are diagnostic rather than controlled performance claims.
+
+The raw fixture and logs are private local artifacts under the already ignored
+`caps/runtime-fixtures/2026-10-21-4ae1/` directory. The fixture is `scene.msgpack`; files use owner-only
+permissions. Login commands/passwords and outbound transport packets are not recorded. Incoming
+messages can contain account, character, inventory, and chat metadata, so the fixture is not added
+to repository evidence. A sanitized
+[runtime-fixture-4ae1-summary.json](evidence/h3d-combat-physics-2026-10-20/runtime-fixture-4ae1-summary.json)
+retains hashes, input counts, phase statistics, replay reports, and limitations.
+
+Replay needs installed content but **no server, credentials, or operator**:
+
+```bash
+cargo run -p holtburger-debug-harness --features runtime-fixture \
+  --bin runtime_scene_fixture -- replay \
+  --input caps/runtime-fixtures/2026-10-21-4ae1/scene.msgpack --repeats 3
+```
+
+Live capture uses `capture --output NEW_PRIVATE_FILE --seconds 45` and the existing probe environment
+variables `HOLTBURGER_PROBE_ACCOUNT` and `HOLTBURGER_PROBE_PASSWORD`. The initial launcher read
+`ACCOUNT`/`PASSWORD` from `apps/holtburger-3d/.dev.env` into those variables without printing them or
+putting them in process arguments. An explicit `--character GUID` is required when multiple active
+characters exist. Existing output files are never overwritten.
+
+### Replay implementation and measured repeatability
+
+The opt-in core `runtime-fixture` feature records dispatch order and offsets in memory, avoiding
+synchronous fixture writes in measured updates. Physics records also retain the actual interval
+passed to time admission and the pre-step entity count. Unsupported control commands fail capture
+instead of silently producing an incomplete trace.
+
+The production physics branch was extracted into `advance_physics_tick` in
+[core runtime](../../crates/holtburger-core/src/client/runtime.rs). Live scheduling and replay both
+call that same implementation; the extracted body preserves its existing operations and ordering.
+[RuntimeFixture](../../crates/holtburger-core/src/client/runtime_fixture.rs) replays messages through
+production message handling and runs physics at the recorded input offsets with recorded intervals.
+Outgoing packets go to Session's existing in-memory transport. No new simulation algorithm,
+scheduling policy, or publication redesign was introduced. Ordinary clients do not enable the
+capture feature.
+
+Three offline replays completed, each with fresh core state. The harness shares its content decode
+cache across runs, so these are sequential runs with warming content, not independent cold starts:
+
+| Measurement | Run 1 | Run 2 | Run 3 |
+| --- | ---: | ---: | ---: |
+| Incoming messages | 5,741 | 5,741 | 5,741 |
+| Physics steps | 1,519 | 1,519 | 1,519 |
+| Steps beginning in an activated world | 1,496 | 1,500 | 1,500 |
+| Pre-step entity-count mismatches against capture | **0** | **0** | **0** |
+| Peak entity count | 286 | 286 | 286 |
+| Cumulative message handling | 5.69 s | 5.68 s | 5.99 s |
+| Cumulative physics work, including startup | 32.12 s | 32.25 s | 35.02 s |
+| Maximum physics work per step | 32.59 ms | 27.67 ms | 44.38 ms |
+
+Pacing waits are excluded from work totals. Final authoritative player position matched across all
+three runs; that is not an audit of simulated displacement or contact results. Activation differed
+by four ticks because asynchronous content preparation still uses real workers and clocks.
+
+This is a **paced workload replay**, not a deterministic state snapshot or correctness oracle.
+Renderer work, frontend camera activity, host forwarding, socket receive/reliability, and periodic
+connection/idle maintenance are outside the replay. Preserving recorded intervals also preserves
+their time-admission ratio: reduced replay work cannot itself demonstrate restored live cadence.
+Use it to compare message/physics costs and population, then validate cadence in a subsequent live
+capture. A movement regression oracle still needs requested/accepted displacement and contact
+outcomes under controlled simulation time.
+
+Verification passed three capture-contract tests, seven existing core runtime tests, five existing
+simulation tests, normal core compilation without the feature, and harness Clippy with warnings
+treated as errors. The runtime network test needed loopback socket permission after sandbox denial.
+Formatting and whitespace checks passed. Visual acceptance was not performed.
+
+## Instrumentation and follow-up validation
+
+The logging-free optional clock primitive lives in
+[common](../../crates/holtburger-common/src/time/phase_profile.rs). Core's
+[runtime profiler](../../crates/holtburger-core/src/client/runtime_profile.rs) and world's
+[contact profiler](../../crates/holtburger-world/src/spatial/contact_profile.rs) own their phase
+names and output. No timing fields were added to authoritative world state or host wire products.
+Disabled probes allocate no timing state and perform no profiling clock reads.
+
+Restart the client with the same connection arguments and these diagnostic settings. This example
+shows the profiling flags; keep the usual connection arguments after `--debug` as needed.
+
+```bash
+RUST_LOG='warn,holtburger_core::client::runtime_profile=debug,holtburger_world::spatial::contact_profile=debug' \
+HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT=9222 \
+npm run --prefix apps/holtburger-3d/ dev:client -- --debug \
+  2>/tmp/h3d-host-profile.log
+```
+
+The assignment can be inline; `export` is unnecessary. An optional
+`holtburger_3d_host::event_profile=debug` filter restores event projection, encoding, and pipe-write
+timings, but those were inexpensive in the earlier capture. Host diagnostics use stderr so stdout
+remains available for the MessagePack protocol.
+
+The requested post-optimization fight has now been captured above. For subsequent changes, compare
+against both retained captures using elapsed/admitted time, tick work and interval, geometry costs,
+network work, and mover/projectile counts. Measure delivered frame intervals with sampling profilers
+off and record movement observations separately in open space and amid enemies. Match scene
+interest and presentation settings; differences between fights are not controlled speedups.
+
+Acceptance remains open: sustain simulation cadence under the heavy combat workload and remove
+the reported slow motion. If time admission recovers but movement still slows, measure requested
+versus accepted displacement and correction/contact causes. The holistic optimization targets above
+remain unimplemented; the subsequent fixture work extracted the existing physics update for reuse
+and added opt-in diagnostics, without changing scheduling, publication, or solver policy.

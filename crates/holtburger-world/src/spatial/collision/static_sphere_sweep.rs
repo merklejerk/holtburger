@@ -447,6 +447,11 @@ impl CollisionScene {
 
         let moving_ball = Ball::new(request.radius);
         let narrow_phase = MovingSphereCast::new(&moving_ball, request.start, request.displacement);
+        // Cell shadows select whole 24m cells. Refine them with a sphere containing the entire
+        // nominal swept volume before entering exact shape/BSP queries. Use the authoritative
+        // displacement, not end-start, and the full radius rather than the shrunken contact radius.
+        let query_center = request.start + displacement * 0.5;
+        let query_radius = request.radius + displacement.length() * 0.5;
         let mut earliest = None;
 
         if swept_placement.reaches_outdoors() {
@@ -454,13 +459,8 @@ impl CollisionScene {
                 let Some(asset) = self.landblocks.get(owner) else {
                     continue;
                 };
-                let center = point_between_landblocks(
-                    request.start + request.displacement * 0.5,
-                    request.anchor.0,
-                    owner.0,
-                );
-                let reach = request.radius + displacement.length() * 0.5;
-                for cell in overlapped_terrain_cells(&asset.terrain, center, reach) {
+                let center = point_between_landblocks(query_center, request.anchor.0, owner.0);
+                for cell in overlapped_terrain_cells(&asset.terrain, center, query_radius) {
                     for triangle in &cell.triangles {
                         let vertices = triangle.vertices.map(|vertex| {
                             point_between_landblocks(vertex, owner.0, request.anchor.0)
@@ -483,6 +483,14 @@ impl CollisionScene {
             let collider = &self.landblocks[&selected.reference.owner]
                 .static_geometry
                 .colliders[selected.reference.collider_index];
+            // Reanchor before adding the half-displacement so a distant request frame cannot
+            // round away short movement when refining these landblock-local bounds.
+            let center =
+                anchor_to_landblock(request.start, request.anchor, selected.reference.owner)
+                    + displacement * 0.5;
+            if !collider.bounds.intersects_sphere(center, query_radius) {
+                continue;
+            }
             narrow_phase.update_collider_hit(
                 collider,
                 selected.reference.owner,
@@ -1078,9 +1086,124 @@ pub(super) fn world_vector(value: ParryVector) -> Vector3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::Quaternion;
-    use holtburger_content::{ColliderScale, CollisionBall, CollisionCylinder, LandblockPlacement};
+    use holtburger_common::{Quaternion, Sphere};
+    use holtburger_content::{
+        BspSolid, ColliderScale, CollisionBall, CollisionBox, CollisionCylinder,
+        LandblockColliders, LandblockCollisionAsset, LandblockPlacement, PlacedCollider,
+        StaticColliderPlacement, TerrainCollisionSurface,
+    };
+    use holtburger_dat::physics::{BspLeaf, BspNode};
+    use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[test]
+    fn static_sweep_bounds_preserve_exhaustive_hits_across_shapes_scales_and_frames() {
+        let owner = Guid(0xda55_ffff);
+        let vertices = vec![
+            Vector3::new(0.0, -2.0, -2.0),
+            Vector3::new(0.0, -2.0, 2.0),
+            Vector3::new(0.0, 2.0, 2.0),
+            Vector3::new(0.0, 2.0, -2.0),
+        ];
+        let bounds = Sphere {
+            center: Vector3::zero(),
+            radius: 3.0,
+        };
+        let shapes = [
+            CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 1.0,
+            }),
+            CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::new(0.0, 0.0, -1.0),
+                radius: 1.0,
+                height: 2.0,
+            }),
+            CollisionShape::Bsp(BspSolid {
+                bsp: BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: Some(bounds),
+                    poly_ids: vec![1],
+                }),
+                bounds,
+                box_bounds: CollisionBox::from_points(vertices.iter().copied()).unwrap(),
+                polygons: HashMap::from([(
+                    1,
+                    CollisionPolygon {
+                        vertices,
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 0.0,
+                    },
+                )]),
+            }),
+        ];
+        let mut hits = 0;
+        let mut misses = 0;
+        for shape in shapes.map(Arc::new) {
+            for scale in [0.5, 2.0] {
+                let collider = PlacedCollider::new(
+                    Arc::clone(&shape),
+                    LandblockPlacement {
+                        origin: Vector3::new(96.0, 96.0, 4.0),
+                        orientation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), 0.65)
+                            .unwrap(),
+                    },
+                    ColliderScale::uniform(scale).unwrap(),
+                    StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+                )
+                .unwrap();
+                let mut scene = CollisionScene::new();
+                scene
+                    .insert(LandblockCollisionAsset {
+                        landblock_id: owner.0,
+                        terrain: TerrainCollisionSurface::empty(),
+                        static_geometry: LandblockColliders::new(
+                            vec![collider.clone()],
+                            Vec::new(),
+                        ),
+                    })
+                    .unwrap();
+                for anchor in [owner, Guid(0xd955_ffff), Guid(0x0055_ffff)] {
+                    for y in [92.0, 94.0, 96.0, 98.0, 100.0] {
+                        for z in [2.0, 4.0, 6.0, 8.0] {
+                            let request = StaticSphereSweepRequest {
+                                anchor,
+                                start: point_between_landblocks(
+                                    Vector3::new(92.0, y, z),
+                                    owner.0,
+                                    anchor.0,
+                                ),
+                                displacement: Vector3::new(8.0, 0.0, 0.0),
+                                previous_cell: None,
+                                radius: 0.5,
+                                filter: PhysicalCollisionFilter::ALL,
+                            };
+                            let mut expected = None;
+                            MovingSphereCast::new(
+                                &Ball::new(request.radius),
+                                request.start,
+                                request.displacement,
+                            )
+                            .update_collider_hit(&collider, owner, anchor, &mut expected)
+                            .unwrap();
+                            let actual = scene
+                                .trace_static_sphere_excluding(request, &[])
+                                .unwrap()
+                                .hit;
+                            assert_eq!(
+                                actual, expected,
+                                "anchor={anchor:?} y={y} z={z} scale={scale}"
+                            );
+                            hits += usize::from(expected.is_some());
+                            misses += usize::from(expected.is_none());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(hits > 0 && misses > 0);
+    }
 
     /// Captured flared-wall face and lower-sphere position from cell 0x00a9013d.
     /// Kept as numeric geometry so regressions require no installed client archives.

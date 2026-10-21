@@ -1,6 +1,7 @@
 //! Scene-owned input capture, reference lifetime, and publication for bounded contact steps.
 
 use super::*;
+use crate::spatial::contact_profile::ContactPhaseProfile;
 use crate::spatial::{AcceptedBodyMotion, ContactBodyUpdate, advance_body_contact_collection};
 
 /// One admitted producer sample and its private reference continuation for the collection.
@@ -106,6 +107,7 @@ impl SpatialScene {
         now: Instant,
         mut input_for: impl FnMut(&SpatialBody) -> anyhow::Result<PhysicalBodyInput>,
     ) -> anyhow::Result<DynamicEntityCollectionTick> {
+        let mut profile = ContactPhaseProfile::begin("contact_scene");
         anyhow::ensure!(
             delta_seconds.is_finite() && delta_seconds > 0.0,
             "contact collection interval must be finite and positive"
@@ -215,6 +217,7 @@ impl SpatialScene {
                 ));
             }
         }
+        profile.checkpoint("placement_and_fixed_bodies");
         let mut snapshots = Vec::with_capacity(prepared.len());
         let mut actuators = BTreeMap::new();
         for (id, integrates_mobile) in prepared {
@@ -254,6 +257,7 @@ impl SpatialScene {
             }
             snapshots.push(body);
         }
+        profile.checkpoint("input_capture");
         let Some(anchor_body) = snapshots
             .iter()
             .find(|body| matches!(body.id, SpatialBodyId::LocalPlayer(_)))
@@ -283,10 +287,12 @@ impl SpatialScene {
                 Ok(input.actuation)
             },
         )?;
+        profile.checkpoint("integration_and_reports");
         collision_reports.extend(
             self.collision_reports
                 .preview_touches(&result.report_touches, now)?,
         );
+        profile.checkpoint("report_lifetimes");
         let player_before = snapshots
             .iter()
             .find(|body| matches!(body.id, SpatialBodyId::LocalPlayer(_)));
@@ -374,12 +380,14 @@ impl SpatialScene {
             ));
             publications.push(body);
         }
+        profile.checkpoint("accepted_path_preparation");
         for body in publications {
             self.update_body(body)
                 .context("contact publication replaced an absent body")?;
         }
         self.collision_reports
             .commit_touches(&result.report_touches, now);
+        profile.checkpoint("body_publication");
         let mut collection = DynamicEntityCollectionTick {
             outcomes,
             collision_reports,
@@ -389,6 +397,13 @@ impl SpatialScene {
         collection
             .collision_reports
             .extend(self.collision_reports.expire(now)?);
+        profile.checkpoint("recovery_and_report_expiry");
+        profile.finish(format_args!(
+            "bodies={} outcomes={} report_touches={}",
+            snapshots.len(),
+            collection.outcomes.len(),
+            result.report_touches.len(),
+        ));
         Ok(collection)
     }
 

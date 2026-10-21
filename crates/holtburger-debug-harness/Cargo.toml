@@ -30,3 +30,9 @@ required-features = ["physics-profiling"]
 
 [features]
 physics-profiling = ["holtburger-world/physics-profiling"]
+runtime-fixture = ["holtburger-core/runtime-fixture"]
+
+[[bin]]
+name = "runtime_scene_fixture"
+path = "src/bin/runtime_scene_fixture.rs"
+required-features = ["runtime-fixture"]

@@ -297,7 +297,7 @@ impl ClientRuntime {
                     if let Some(capture) = &mut self.runtime_fixture {
                         capture.record(super::runtime_fixture::RuntimeFixtureInput::Physics {
                             elapsed: dt_duration,
-                            entities: self.world.entities.entities.len(),
+                            entities: self.world.entities.len(),
                         });
                     }
                     self.advance_physics_tick(now, dt_duration, profile).await?;
@@ -513,7 +513,7 @@ impl ClientRuntime {
         profile.finish(format_args!(
             "interval_ms={:.3} entities={} advanced_bodies={}",
             dt_duration.as_secs_f64() * 1_000.0,
-            self.world.entities.entities.len(),
+            self.world.entities.len(),
             body_motions.len(),
         ));
         Ok(())

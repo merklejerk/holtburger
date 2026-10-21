@@ -251,7 +251,7 @@ pub(super) fn tick_with_precise_jump(
         "elapsed_ms={:.3} admitted_ms={:.3} entities={} advanced_bodies={}",
         elapsed.as_secs_f64() * 1_000.0,
         dt.as_secs_f64() * 1_000.0,
-        world.entities.entities.len(),
+        world.entities.len(),
         body_motions.len(),
     ));
     Ok(ClientSimulationTick {

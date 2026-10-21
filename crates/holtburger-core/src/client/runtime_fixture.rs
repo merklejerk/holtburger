@@ -251,7 +251,7 @@ impl RuntimeFixture {
                         .await?;
                 }
                 RuntimeFixtureInput::Physics { elapsed, entities } => {
-                    let population = client.world.entities.entities.len();
+                    let population = client.world.entities.len();
                     report.population_mismatches += usize::from(population != *entities);
                     report.peak_entities = report.peak_entities.max(population);
                     report.physics_ticks += 1;

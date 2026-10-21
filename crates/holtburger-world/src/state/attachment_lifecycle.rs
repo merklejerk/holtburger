@@ -5,7 +5,7 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, ParentLocation, Placement, Vector3};
 use holtburger_protocol::messages::object::messages::description::PhysicsChildData;
 use holtburger_protocol::messages::{ParentEventData, PickupEventData, UpdatePositionData};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
 /// A parent's announcement that some object hangs from one of its attach points.
 ///
@@ -69,6 +69,14 @@ pub(crate) struct AttachmentLifecycle {
     pending: VecDeque<DeferredPlacementEntry>,
     /// Last reconciled incarnation/placement, used only to emit placement transitions once.
     reconciled: HashMap<Guid, (u16, ResolvedScenePlacement)>,
+}
+
+/// Message commits can restrict discovery; periodic maintenance rechecks all retained bodies.
+pub(super) enum ScenePlacementScope {
+    /// Includes out-of-band body readiness and ordinary world maintenance.
+    All,
+    /// Includes entity/lifecycle mutations and every current attachment descendant.
+    ChangedEntities(BTreeSet<Guid>),
 }
 
 impl WorldState {
@@ -365,19 +373,22 @@ impl WorldState {
 
     /// Establish observation baselines for data inserted through non-network world APIs.
     pub(crate) fn seed_scene_placements(&mut self) {
-        for entity in self.entities.iter() {
-            if !self.attachments.reconciled.contains_key(&entity.guid)
-                && let Ok(placement) = self.resolve_scene_placement(entity.guid)
+        for guid in self.entities.mutation_guids() {
+            if self.attachments.reconciled.contains_key(&guid) {
+                continue;
+            }
+            if let Some(entity) = self.entities.get(guid)
+                && let Ok(placement) = self.resolve_scene_placement(guid)
             {
                 self.attachments
                     .reconciled
-                    .insert(entity.guid, (entity.instance_sequence(), placement));
+                    .insert(guid, (entity.instance_sequence(), placement));
             }
         }
     }
 
-    /// Recheck delayed transitions and resolve all dependent scene placements before publication.
-    pub(crate) fn reconcile_scene_placements(&mut self, events: &mut Vec<WorldEvent>) {
+    /// Admit delayed relationship input before selecting this boundary's placement work.
+    pub(super) fn prepare_deferred_scene_placements(&mut self, events: &mut Vec<WorldEvent>) {
         let now = self.current_server_time();
         self.attachments
             .announcements
@@ -404,10 +415,26 @@ impl WorldState {
                 }
             }
         }
-        let guids: Vec<_> = self.entities.iter().map(|entity| entity.guid).collect();
-        self.attachments
-            .reconciled
-            .retain(|guid, _| self.entities.get(*guid).is_some());
+    }
+
+    /// Resolve the supplied authority changes and their dependents before publication.
+    pub(super) fn reconcile_scene_placements(
+        &mut self,
+        events: &mut Vec<WorldEvent>,
+        scope: ScenePlacementScope,
+    ) {
+        let guids = match scope {
+            ScenePlacementScope::All => {
+                self.entities.clear_mutations();
+                self.attachments
+                    .reconciled
+                    .retain(|guid, _| self.entities.get(*guid).is_some());
+                self.entities.iter().map(|entity| entity.guid).collect()
+            }
+            ScenePlacementScope::ChangedEntities(affected) => {
+                self.message_placement_guids(affected)
+            }
+        };
         for guid in guids {
             let placement = match self.resolve_scene_placement(guid) {
                 Ok(placement) => placement,
@@ -492,6 +519,42 @@ impl WorldState {
             }
         }
     }
+
+    /// Resolve dependency closure locally instead of retaining another attachment index.
+    /// The scope owns its mutation set; there is no retained reverse index to invalidate.
+    fn message_placement_guids(&mut self, mut affected: BTreeSet<Guid>) -> Vec<Guid> {
+        if affected.is_empty() {
+            return Vec::new();
+        }
+        let mut descendants = HashMap::<Guid, Vec<Guid>>::new();
+        for entity in self.entities.iter() {
+            if let Some(attachment) = entity.attachment() {
+                descendants
+                    .entry(attachment.parent)
+                    .or_default()
+                    .push(entity.guid);
+            }
+        }
+        let mut pending = affected.iter().copied().collect::<Vec<_>>();
+        while let Some(guid) = pending.pop() {
+            if let Some(children) = descendants.get(&guid) {
+                for child in children {
+                    if affected.insert(*child) {
+                        pending.push(*child);
+                    }
+                }
+            }
+            if !self.entities.contains(guid) {
+                self.attachments.reconciled.remove(&guid);
+            }
+        }
+        // Keep the ordinary store order for effects; unrelated entities have no message work.
+        self.entities
+            .iter()
+            .map(|entity| entity.guid)
+            .filter(|guid| affected.contains(guid))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -572,6 +635,96 @@ mod tests {
     }
 
     #[test]
+    fn root_messages_update_and_withdraw_the_entire_attachment_chain_before_returning() {
+        let mut world = WorldState::synthetic();
+        let root = Guid(1);
+        let child = Guid(2);
+        let grandchild = Guid(3);
+        let replacement_root = Guid(4);
+        create(&mut world, root, None);
+        create(&mut world, child, Some(root));
+        create(&mut world, grandchild, Some(child));
+        create(&mut world, replacement_root, None);
+        let move_root = |world: &mut WorldState, guid: Guid, x: f32| {
+            let entity = world.entities.get(guid).unwrap();
+            let mut destination = entity.position;
+            destination.coords.x = x;
+            let packet = PositionPack {
+                pos: destination,
+                instance_sequence: entity.instance_sequence(),
+                position_sequence: entity.position_sequence().wrapping_add(1),
+                flags: UpdatePositionFlag::HAS_CONTACT,
+                ..Default::default()
+            };
+            world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid,
+                pos: packet,
+            })))
+        };
+        let events = move_root(&mut world, root, 20.0);
+        for guid in [child, grandchild] {
+            let expected = world.entities.get(root).unwrap().position;
+            assert_eq!(world.entities.get(guid).unwrap().position, expected);
+            assert_eq!(
+                world
+                    .runtime_body_view(SpatialBodyId::Entity(guid))
+                    .unwrap()
+                    .runtime_pose,
+                expected
+            );
+            assert!(events.iter().any(|event| matches!(event,
+                WorldEvent::EntityMoved { guid: moved, .. } if *moved == guid)));
+        }
+        move_root(&mut world, replacement_root, 40.0);
+        let instance = world
+            .entities
+            .get(replacement_root)
+            .unwrap()
+            .instance_sequence();
+        let sequence = world
+            .entities
+            .get(child)
+            .unwrap()
+            .position_sequence()
+            .wrapping_add(1);
+        let events =
+            world.handle_message(&parent_event(replacement_root, child, instance, sequence));
+        for guid in [child, grandchild] {
+            assert_eq!(
+                world.entities.get(guid).unwrap().position,
+                world.entities.get(replacement_root).unwrap().position
+            );
+            assert!(events.iter().any(|event| matches!(event,
+                WorldEvent::EntityScenePlacementChanged { guid: changed,
+                    placement: ResolvedScenePlacement::Attached { root: accepted, .. }, .. }
+                    if *changed == guid && *accepted == replacement_root)));
+        }
+        world.handle_message(&GameMessage::ObjectDelete(Box::new(
+            holtburger_protocol::messages::ObjectDeleteData {
+                guid: replacement_root,
+                instance_sequence: instance,
+            },
+        )));
+        for guid in [child, grandchild] {
+            assert_eq!(
+                world.resolve_scene_placement(guid),
+                Ok(ResolvedScenePlacement::Unresolved(
+                    crate::UnresolvedScenePlacement::DeletedEntity {
+                        guid: replacement_root
+                    }
+                ))
+            );
+            assert!(world.scene.body(SpatialBodyId::Entity(guid)).is_none());
+        }
+        // Recreating a deleted endpoint cannot revive either level of its retired subtree.
+        world.tick();
+        create(&mut world, replacement_root, None);
+        for guid in [child, grandchild] {
+            assert!(!world.is_entity_world_participant(guid));
+        }
+    }
+
+    #[test]
     fn future_parent_event_applies_when_the_named_incarnation_arrives() {
         let mut world = WorldState::synthetic();
         world.server_time = Some(ServerTimeSync {
@@ -582,6 +735,8 @@ mod tests {
         let parent = Guid(2);
         create(&mut world, child, None);
         create(&mut world, parent, None);
+        let observer = Guid(3);
+        create(&mut world, observer, None);
         let next_instance = world
             .entities
             .get(parent)
@@ -605,13 +760,27 @@ mod tests {
         let mut replacement = Entity::new(parent, "replacement".into(), position());
         replacement.apply_remote_position_sample(position(), next_instance, 0, 0);
         world.add_entity(replacement);
-        world.tick();
+        // Public world APIs can replace authority between packets. An unrelated packet must
+        // commit that change together with the deferred relationship, before periodic tick.
+        let events =
+            world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid: observer,
+                pos: PositionPack {
+                    pos: position(),
+                    position_sequence: 1,
+                    flags: UpdatePositionFlag::HAS_CONTACT,
+                    ..Default::default()
+                },
+            })));
 
         let entity = world.entities.get(child).unwrap();
         assert_eq!(entity.attachment().unwrap().parent, parent);
         assert_eq!(entity.position_sequence(), next_position);
         assert!(world.is_entity_world_participant(child));
         assert!(world.attachments.pending.is_empty());
+        assert!(events.iter().any(|event| matches!(event,
+            WorldEvent::EntityScenePlacementChanged { guid, generation, .. }
+                if *guid == parent && *generation == next_instance)));
     }
 
     #[test]

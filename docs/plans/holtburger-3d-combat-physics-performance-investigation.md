@@ -101,11 +101,12 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** evaluate repeated placement/visibility discovery at its world owner and immutable
-BSP query preparation using the CPU attribution below. Controlled wall/reset and blocked-return
+**Next action:** test plane admission before polygon-vertex materialization in BSP support queries,
+using the CPU attribution below. Repeated placement/visibility discovery now uses the borrowed
+incarnation rather than performing redundant identity lookups. Controlled wall/reset and blocked-return
 scenarios now check accepted paths before changing these contracts. Core before/after snapshots
 remain intact: they protect motion, physics flags, and simulation-emitted events as well as pose.
-The retained burden and direct storage-membership changes show a 9.63% exploratory reduction;
+The retained burden, storage-membership, and visibility changes show a 12.61% exploratory reduction;
 the 25% target, alternating comparison, representative stress coverage, and live acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
@@ -134,7 +135,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Controlled obstruction/correction and CPU attribution | Successor to `c20bc9830`; profile hashes in evidence | Strengthen wall/path/support/reset and return-after-residency tests without production changes; 994 world tests and Clippy pass. Full CPU stacks identify placement/visibility and BSP preparation targets. |
+| Borrowed-incarnation visibility | Successor to `f1c54bfef`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 32,071.31 ms, 12.61% below baseline. 994 world / 677 core tests and Clippy pass. |
+| Controlled obstruction/correction and CPU attribution | `f1c54bfef`; profile hashes in evidence | Strengthen wall/path/support/reset and return-after-residency tests without production changes; 994 world tests and Clippy pass. Full CPU stacks identify placement/visibility and BSP preparation targets. |
 | Direct storage membership | `c20bc9830`; binary/patch hashes in evidence | Retained for paired verification: exploratory combined median 33,167.17 ms, 9.63% below baseline; 994 world / 677 core tests pass. |
 | Query-local traversal reuse | Private patch based on `9111877f1`, hashes in evidence | Rejected: median 34,558.39 ms vs burden-only 34,594.76 ms; no demonstrated benefit for added contracts. 994 world / 677 core tests passed before rollback. |
 | Burden membership and controlled movement boundaries | `9111877f1`; source patch and binary hashes retained below | Remove repeated inventory traversals without retained caches; exploratory median work down 5.74%; 993 world and 677 core tests pass. Retained for further paired verification; final performance gate remains open. |
@@ -684,6 +686,42 @@ call paths rather than supplying acceptance timing or a steady-state physics-onl
 retains the source/binary/library/profile hashes, individual sampled operations, limitations, and
 next hypotheses. Raw profiles, mappings, reports, and the parser stay in the ignored private fixture
 area for reproduction.
+
+## Borrowed-incarnation visibility experiment: retained for paired verification
+
+The placement/visibility CPU stacks led to a repeated-read finding in the owning world layer.
+For each attachment-chain endpoint, `resolve_scene_placement` fetched the entity, then
+`is_entity_client_visible` fetched it again, then `current_instance_delete_requested` fetched it a
+third time to inspect its instance sequence. Visible-entity lookup repeated the same discovery;
+visible iteration also looked up records it already held.
+
+The experiment centralizes the deletion test for an already borrowed retained entity in
+`instance_delete_applies`. GUID-facing queries still fetch their requested identity once; placement
+resolution and filtered lookup/iteration use the entity already supplied by their owning store.
+The request is checked against that incarnation's actual sequence. Missing entities, unconditional
+deletes, future-instance deletes, and stale deletes keep their existing meaning. No last-published
+view, memoization, or graph-invalidation state is introduced. The core projection contract stays intact.
+
+The full **994 world tests** and **677 core tests** pass, including existing current/future/stale
+delete, visible iteration, attachment-cycle and missing-root coverage. World/core all-target Clippy
+with runtime-fixture and warnings as errors passes; the replay harness builds. One explicit warmup followed by two exploratory
+runs produced combined work of **32,124.76 ms** and **32,017.85 ms**, median **32,071.31 ms**.
+This is **3.30%** below the direct-storage experiment and **12.61%** below the controlled starting
+baseline. Active physics p95 was **20.756 ms** and **20.628 ms**. Both runs retained 5,741 messages,
+1,519 physics steps, 1,500 active-start steps, peak 286 entities, and zero population mismatches.
+
+**Decision: retain for paired verification.** The source change removes two unnecessary lookups
+from each ancestry endpoint without adding retained state, and both exploratory samples improved
+on the preceding experiment. [Sanitized results](evidence/h3d-combat-physics-2026-10-20/borrowed-visibility-exploratory.json)
+retain individual reports and source/binary hashes. Sequential two-sample comparison is still not
+final acceptance; the 25% target, alternating pairs, heavy stress coverage, and live cadence remain open.
+
+The next geometry source review also found that `placed_supports` transforms and allocates polygon
+vertices before `support_on_polygon` rejects unsuitable plane normals or unreachable plane heights.
+A possible follow-up is to admit the plane before materializing its footprint, preserving the exact
+normal/height arithmetic and performing each derived check once. This is a source-backed hypothesis,
+not an implemented or measured optimization. A more extensive compiled BSP representation must
+justify its API and memory cost before being introduced.
 
 ## Next investigation targets: the complete update pipeline
 

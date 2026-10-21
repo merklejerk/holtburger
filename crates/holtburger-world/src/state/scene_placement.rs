@@ -66,7 +66,7 @@ impl WorldState {
                     UnresolvedScenePlacement::MissingEntity { guid: current },
                 ));
             };
-            if !self.is_entity_client_visible(current) {
+            if self.instance_delete_applies(entity) {
                 return Ok(ResolvedScenePlacement::Unresolved(
                     UnresolvedScenePlacement::DeletedEntity { guid: current },
                 ));

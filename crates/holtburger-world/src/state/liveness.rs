@@ -577,17 +577,24 @@ impl WorldState {
     }
 
     pub fn is_entity_client_visible(&self, guid: Guid) -> bool {
-        self.entities.get(guid).is_some() && !self.current_instance_delete_requested(guid)
+        self.entities
+            .get(guid)
+            .is_some_and(|entity| !self.instance_delete_applies(entity))
     }
 
     pub(super) fn current_instance_delete_requested(&self, guid: Guid) -> bool {
-        let Some(instance_sequence) = self.entities.get(guid).map(Entity::instance_sequence) else {
-            return false;
-        };
-        self.entity_lifecycle.get(guid).is_some_and(|state| {
+        self.entities
+            .get(guid)
+            .is_some_and(|entity| self.instance_delete_applies(entity))
+    }
+
+    /// Test deletion against the retained incarnation already borrowed by the caller.
+    /// Placement and visible-entity queries must not repeat identity lookups to inspect its sequence.
+    pub(super) fn instance_delete_applies(&self, entity: &Entity) -> bool {
+        self.entity_lifecycle.get(entity.guid).is_some_and(|state| {
             state
                 .delete_request
-                .is_some_and(|request| request.applies_to(instance_sequence))
+                .is_some_and(|request| request.applies_to(entity.instance_sequence()))
         })
     }
 
@@ -601,12 +608,12 @@ impl WorldState {
 
     pub fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
         self.entities
-            .get_filtered(guid, |entity| self.is_entity_client_visible(entity.guid))
+            .get_filtered(guid, |entity| !self.instance_delete_applies(entity))
     }
 
     pub fn iter_visible_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
         self.entities
-            .iter_filtered(move |entity| self.is_entity_client_visible(entity.guid))
+            .iter_filtered(move |entity| !self.instance_delete_applies(entity))
     }
 
     pub fn get_nearby_world_entities(&self) -> Vec<Entity> {

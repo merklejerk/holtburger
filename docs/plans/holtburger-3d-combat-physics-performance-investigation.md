@@ -104,8 +104,8 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** finish validating the cylinder-side query reduction and compare it with the
-saved qualified `e767b02e8` executable on the unchanged frozen replay. Keep optimization moving;
+**Next action:** finish and audit the running two alternating pairs for the implemented query
+reductions (`e88219341`) against qualified `e767b02e8`, using the unchanged frozen replay. Keep optimization moving;
 combat qualification remains a final validation obligation. The initial-hit marginal comparison
 was stopped after a binary audit showed its saved `b3edc9c96` baseline lacks retained optimization
 symbols. Its speedup comparison is invalid, and the 93.30% live observation cannot be attributed
@@ -990,7 +990,12 @@ A new analytic check covers vertical travel, offset side impact, uniform scale a
 request anchor. All **997 world** and **681 core** tests, all-target world/core/harness Clippy with warnings
 denied, normal fixture build, formatting and whitespace checks pass. Fresh normal world/core
 libraries and the saved executable contain the retained mutation-journal/metadata mechanisms.
-Marginal measurement against the qualified binary is next. This adds no cache, fixture variant, solver role or timing policy.
+Two alternating marginal pairs now compare checkpoint `e88219341` (initial-hit early termination
+plus cylinder-side reduction) with qualified `e767b02e8`, preserving the same full trace, warmup,
+population/activation/outcome checks and warning logging. Private runner, patch, binaries and
+reports are in `caps/runtime-fixtures/2026-10-21-4ae1/cylinder-side-reduction/`. Both executables
+contain the retained mutation journal and metadata mechanisms. No compiler, profiler or other
+benchmark runs during measurement. Results and the retention decision remain pending. This adds no cache, fixture variant, solver role or timing policy.
 
 ### Build-artifact attribution correction
 

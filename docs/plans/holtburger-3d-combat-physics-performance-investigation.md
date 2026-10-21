@@ -3,11 +3,11 @@
 Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21 UTC.
 Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
 
-Status: **The initial geometry fixes improved user-reported movement. The latest valid
-all-unoptimized five-pair comparison shows 23.46% less combined message/physics work, below the
-25% target, with every candidate physics p95 below every baseline p95. A control-handoff bug is
-fixed. Representative heavy combat and the user's movement-feel acceptance remain open.
-Fixture development is frozen; engineering proceeds using existing replay and correctness tests.**
+Status: **The matched delivered-development five-pair performance gate passes: 28.81% less
+combined message/physics work, with every candidate physics p95 below every baseline p95.
+Architecture, controlled correctness and final host quality checks pass; supported caster
+validation is in progress. Representative original-fight coverage, live cadence under that load,
+and the user's movement-feel acceptance remain open. Fixture development remains frozen.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
 second scene. It provides a repeatable input workload; deterministic movement equivalence remains
@@ -54,7 +54,7 @@ completion and the user's final movement-feel acceptance are separate milestones
   movement, contacts/support, corrections, and lifecycle/discontinuity outcomes. Equivalent entity
   counts and authoritative end positions alone are insufficient. Keep retained regression tests
   independent of uncommitted runtime assets; production-content checks remain diagnostics.
-- [ ] **Performance:** reduce combined message-handling and physics work by at least **25%** against
+- [x] **Performance:** reduce combined message-handling and physics work by at least **25%** against
   a new controlled baseline of the current checkpoint, without worsening p95 active physics work
   beyond measured baseline variability. Compare the sum of the two non-overlapping work totals for
   the same input trace; do not add nested phase timings or pacing waits. Use at least five paired
@@ -69,7 +69,7 @@ completion and the user's final movement-feel acceptance are separate milestones
   representative **60-second** heavy live workload, with startup excluded and population/settings
   retained. Check tick intervals and input/accepted movement alongside admission. A changed cap,
   recorded-interval replay, or a quiet scene alone cannot satisfy this criterion.
-- [ ] **Quality and delivery:** remove superseded paths/vocabulary, review final ownership and
+- [x] **Quality and delivery:** remove superseded paths/vocabulary, review final ownership and
   invalidation obligations, pass relevant correctness tests, Clippy with warnings treated as errors,
   formatting/build checks, and update this document with reproducible evidence and remaining risks.
 - [ ] **User acceptance:** the user confirms normal movement in the original heavy fight and any
@@ -86,12 +86,12 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | Phase | State | Deliverable / next verification |
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
-| 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison is valid with 23.09% median combined-work reduction, below 25%. Live stress mode added for qualification. Representative coverage remains open. |
+| 1. Establish the controlled workload | Complete for the stationary replay; live qualification open | Original and candidate retain activation at input 14, 1,506 active ticks, 5,741 messages and peak population 286. The delivered-profile five-pair gate is valid and passes at 28.81%. Representative combat remains a separate open requirement. |
 | 2. Define behavior and ownership | Complete for the defined architecture/correctness deliverables | Ordinary/reset/correction contracts and retained/unified/removed mechanisms audited below. Asset-free controlled drive, wall, return, support, reset, publication and handoff cases satisfy the scenario requirement. Representative live stress and rollout acceptance remain separate open gates. |
-| 3. Simplify core orchestration/publication | In progress | Control handoff fixed; metadata reuse and structural simplifications retained. Latest valid all-unoptimized five-pair comparison gives 23.46% less combined work, every candidate p95 below every baseline p95. Work target remains unmet. |
-| 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; full all-unoptimized result is 23.46%, below the unchanged target. |
+| 3. Simplify core orchestration/publication | Retained candidate verified offline | Control handoff fixed; metadata reuse and structural simplifications retained. Delivered-profile comparison gives 28.81% less combined work, with every candidate p95 below every baseline p95. Publication ownership experiment rejected and removed. |
+| 4. Simplify world movement preparation | Retained candidate verified offline | Deferred/streamed support footprint, borrowed BSP/static selections and prepared-body ownership retained; unsuccessful traversal/query experiments removed. Full delivered-profile work/p95 gate passes. |
 | 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. The melee stimulus is incompatible with the equipped wand and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
-| 6. Clean up and hand off | In progress | Architecture/controlled-correctness review and host/TUI Clippy, 375 host tests, debug build and sidecar smoke pass. Invalid melee stimulus is diagnosed; delivered-profile performance verification, representative combat and user acceptance remain explicit. |
+| 6. Clean up and hand off | Engineering quality checks complete; live acceptance open | Source review, 996 world / 682 core / 375 host tests, fixture/default Clippy with warnings denied, formatting, normal debug host build and client/Explorer sidecar smoke pass. Supported caster observation is in progress. Representative combat, cadence and user acceptance remain open. |
 
 Completed foundations:
 
@@ -109,20 +109,23 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** run the unchanged five-pair original-source gate in the delivered development
-profile. Provisionally retain streaming BSP support footprints after the valid marginal comparison;
-the core-publication ownership experiment was rejected and reverted. Do not expand the fixture or pursue melee readiness.
-The read-only equipment inspector proves the supplied character has a wand equipped; ACE rejects
-melee with a caster equipped (`Player_Combat.cs:811–819`). Thus the seven `NonCombat` responses in
-the latest 65-second probe are an invalid combat stimulus, not evidence that the solver needs a
-melee fix. Representative live qualification must use the character's supported combat setup and
-remains a final validation task, independent of solver optimization.
+**Next action:** use the existing sidecar command API for supported caster observation.
+Normal host integration checks pass for the final source. The unchanged five-pair original-source comparison completed
+and independently audited **35,681.50 → 25,402.41 ms**, **28.81% less combined work**, in the
+matched delivered development profile. All ten workload/content checks pass. Candidate physics
+p95s span **17.478–17.805 ms**, baseline **21.229–22.107 ms**; every candidate is below every
+baseline. The offline work/p95 gate is satisfied; representative combat and movement feel are not.
+[Complete comparison and independent audit](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-delivered-profile-a52fbe29d.json).
 
-The completed all-unoptimized five-pair gate remains **36,614.27 → 28,023.24 ms**, **23.46%** lower,
-below 25%; preserve all ten samples and the original statistic. The delivered development profile
-also needs comparison against original source with the same dependency optimization settings;
-that baseline is built. Do not count the separate 6.13% compiler-profile benefit as a source gain.
-The fixture, original source baseline and numeric gates are unchanged.
+Do not expand the fixture or pursue melee readiness. The read-only inspector proves the character
+has a wand equipped; ACE rejects melee with a caster (`Player_Combat.cs:811–819`). Final live
+qualification must use that supported setup and actual server results.
+
+The earlier **all-unoptimized** comparison at `114754c4f` remains preserved: **23.46%**, below
+25%. It used a different compiler configuration and predates the support-streaming change.
+The final delivered-profile comparison uses Parry/Glam level 3 on both original and candidate,
+with workspace code at level 0. Do not add the separate 6.13% compiler experiment to source gains.
+The original code baseline, frozen input and numeric gates are unchanged.
 
 **Publication ownership experiment — rejected:** checkpoint `bca04e327` consumed before-views
 and moved metadata rather than cloning. All 682 core tests and Clippy passed, but two alternating
@@ -132,7 +135,7 @@ both core files exactly to `4261f574d`; retain every report in
 [the rejection evidence](evidence/h3d-combat-physics-2026-10-20/publication-owned-metadata-rejected.json).
 Do not spend further effort on this publication branch.
 
-**Solver support ownership — provisionally retained for final comparison:** support queries already defer footprint work until plane
+**Solver support ownership — retained after final offline comparison:** support queries already defer footprint work until plane
 admission. Consume transformed BSP vertices directly during the single edge walk, replacing the
 intermediate vector. Preserve authored edge order, closing edge, degenerate-edge handling and
 nearest-feature ties. Terrain and existing controlled footing tests use the same iterator contract.
@@ -145,7 +148,8 @@ Clippy passes with warnings denied. Two alternating pairs reduce median combined
 check passes. Candidate p95s **18.645 / 18.764 ms** are slightly higher than baseline
 **18.439 / 18.573 ms**; no marginal tail improvement is claimed. This removes one allocation and
 intermediate storage per admitted BSP support face, with no retained bookkeeping. The unchanged
-overall original-source work/p95 gate still decides final performance acceptance.
+overall original-source work/p95 gate subsequently passed at 28.81%; representative live
+coverage remains open.
 [All four reports and independent audit](evidence/h3d-combat-physics-2026-10-20/streamed-support-footprint-a52fbe29d.json).
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
@@ -172,9 +176,10 @@ Keep feasible independent work moving when a live workload or final human accept
 
 | Milestone | Git reference | Evidence / outcome |
 | --- | --- | --- |
-| Streamed support footprint | `a52fbe29d` | Provisionally retained: two alternating marginal pairs reduce work 1.68%, both paired directions lower; p95s slightly higher. 996 world / 682 core tests and Clippy pass. Overall work/p95 gate still required. |
-| Current same-build acceptance | Candidate `114754c4f` vs original `9cb7ba24e` plus matched diagnostics | Valid ten-report all-unoptimized comparison: 23.46% combined-work reduction, below 25%. Every candidate p95 is below every baseline p95. Preserve all reports; source gate remains open. |
-| Input/combat handoff | `114754c4f` | Unit regression failed before the fix and all 682 core tests pass after it, including held/released/expired/reacquired input. Live desired targets now survive to manual takeover; 99.95% admission in the smaller alternate scene. Attack readiness remains unresolved. |
+| Streamed support footprint | `a52fbe29d` | Retained: two marginal pairs reduce work 1.68%, with slightly higher marginal p95s. Full delivered-profile gate subsequently passes at 28.81% with every candidate p95 below every original baseline p95. 996 world / 682 core tests and Clippy pass. |
+| Current delivered-profile acceptance | Candidate `a52fbe29d` vs original `9cb7ba24e` plus matched diagnostics | Independently audited five-pair gate passes: 35,681.50 → 25,402.41 ms, 28.81% less combined work. All ten reports valid; every candidate p95 below every baseline p95. Compiler settings match on both sides. |
+| Historical all-unoptimized acceptance | Candidate `114754c4f` vs original `9cb7ba24e` plus matched diagnostics | Valid ten-report all-unoptimized comparison: 23.46% combined-work reduction, below 25%. Every candidate p95 is below every baseline p95. Preserve all reports; this historical configuration misses its target. |
+| Input/combat handoff | `114754c4f` | Unit regression failed before the fix and all 682 core tests pass after it, including held/released/expired/reacquired input. Live desired targets now survive to manual takeover; 99.95% admission in the smaller alternate scene. Later equipped-wand inspection explains rejection of this melee stimulus. |
 | Development collision/math dependencies | `bbc9d4b6d`, retained at `d29dbef8b` | Two alternating configuration pairs, identical game source: 6.13% less median work, lower p95s in both pairs. Retain Parry/Glam level 3 with workspace debugging. This intentionally different-build comparison is excluded from source acceptance. |
 | Borrowed static selections | `02cde557e`, retained at `04ef2e3e9` | Remove the second selection vector and duplicate geometry lookup across six query consumers. Two marginal pairs reduce combined work 2.29%; no consistent marginal p95 claim. 996 world / 681 core tests and Clippy pass. |
 | Prepared-body ownership | `02bdbe098`, retained at `86a984c4b` | Move prepared mobile bodies into publication and remove the actuator pose copy. Two marginal pairs reduce work 2.07%, lower p95 in both pairs; 996 world / 681 core tests and Clippy pass. |
@@ -220,9 +225,9 @@ shows that the broader runtime pipeline still exceeds its available budget under
 **Verdict:** the architecture trace and controlled-scenario deliverables are complete for the
 retained orchestration at `114754c4f`, extended by the bounded support-footprint change at
 `a52fbe29d`. The reviewed optimizations and control handoff are ready within that source scope.
-This does not approve heavy-fight behavior, performance acceptance or rollout: the all-unoptimized
-five-pair comparison misses 25%, and the matched delivered-profile comparison is running.
-Host tests/build/smoke passed before the support change; final integration checks, representative
+This does not approve heavy-fight behavior or rollout. The matched delivered-profile performance
+comparison passes at 28.81%; the earlier all-unoptimized comparison remains preserved separately.
+Host tests/build/smoke were repeated successfully after the support change; representative
 combat and user movement acceptance remain pending. No general rigid-body solver replacement
 is justified by the current measurements.
 
@@ -278,7 +283,7 @@ and nearest-feature ties retain edge order. Iterator state lives only for that q
 new retained representation, cache, invalidation event or world/host contract. Existing face,
 slope, seam, corner, stair, ceiling and support-lifecycle assertions pass in the 996 world / 682
 core suites. The marginal p95 increase is retained as a measured limitation; the full original-source
-p95 gate is still required. Consumed mutation journals and replaced immutable catalogs continue
+p95 gate subsequently passed. Consumed mutation journals and replaced immutable catalogs continue
 to force full metadata projection; the rejected publication-ownership path is absent.
 
 ## Scene and measurement conditions
@@ -1172,15 +1177,25 @@ gate or live movement recovery. Private runner, patch, executables and reports r
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
 
-### Delivered development configuration: matched original-source baseline prepared
+### Delivered development configuration: five-pair original-source gate passed
 
-The full five-pair comparison is now running against candidate `a52fbe29d` (support footprint
-streaming; publication ownership experiment reverted), with original source `9cb7ba24e` plus the
-matched diagnostic patch. Both use dependency level 3 and workspace level 0. Private runner,
-immutable binaries, build attribution and every report are under
-`caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-delivered-development-profile/`.
-Do not compile, profile or run another diagnostic until its live process is terminal. No gate
-result is available yet.
+The full five-pair comparison against candidate `a52fbe29d` completed at
+**2026-10-21T16:20:14Z**, process exit 0. Original source is still `9cb7ba24e` plus the matched
+diagnostic patch. Both use dependency level 3 and workspace level 0. All ten reports retain the
+same input, activation, population and content checks. Median combined work is
+**35,681.496 → 25,402.405 ms**, **28.8079% lower**. Paired reductions are
+**28.98%, 26.99%, 29.47%, 27.74%, 26.72%**; acceptance uses the ratio of combined medians,
+not a selected pair. Candidate physics p95s **17.519 / 17.526 / 17.478 / 17.805 / 17.760 ms**
+are all below every baseline p95 **22.107 / 21.229 / 21.930 / 22.081 / 21.774 ms**.
+
+An independent auditor recomputes every combined total, median and p95 gate, verifies alternating
+order and all workload checks, and rehashes both binaries, input, content, Cargo.lock and diagnostic
+patch. Current game/manifest source still matches `a52fbe29d`. The offline performance checkbox
+is satisfied. This is a stationary alternate-scene result, not proof of representative heavy live
+combat or restored movement feel. All reports, runner, immutable binaries and audit remain private
+under `caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-delivered-development-profile/`;
+[sanitized complete evidence](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-delivered-profile-a52fbe29d.json)
+retains the ten reports and attribution.
 
 The all-unoptimized result above remains a valid **23.46%** miss. The delivered development profile
 was already changed to optimized Parry/Glam before that result. To assess source changes in this
@@ -1196,10 +1211,17 @@ and **990 world** tests pass in that configuration. The preserved executable SHA
 `142dd389cf5560e81e1ba33230893e137aaab3384a3198e2e4dfb1bc56ac5ab5`; retained optimization/control
 symbols are absent, as expected for the original source. Exact patch, source/build command and
 binary attribution are private in `caps/runtime-fixtures/2026-10-21-4ae1/original-baseline-dev-physics-dependencies/`.
-The corresponding five-pair measurement has not started. The all-unoptimized failure remains
-preserved regardless of this later result.
+The five-pair measurement above uses that exact preserved executable. The earlier all-unoptimized
+failure remains preserved; no compiler-only percentage was added to source savings.
 
 ### Host integration checks after retained changes
+
+These checks were repeated successfully against final game source `a52fbe29d` after support
+streaming. [Final-source quality evidence](evidence/h3d-combat-physics-2026-10-20/final-source-quality-a52fbe29d.json)
+records commands, scope and normal-host binary identity. A read-only authenticated host session
+also completed startup using the existing collision-backed camera/world-reveal sequence, read the
+3,659 known spell IDs and their references, and disconnected cleanly. The initial temporary driver
+omitted that camera prerequisite and timed out; its failed artifacts remain preserved.
 
 All-target Clippy across world, core, the 3D host and the TUI passes with warnings denied and
 without the fixture feature. The **375 host tests** pass. The normal debug sidecar builds, and
@@ -1791,6 +1813,15 @@ melee with a caster (`Player_Combat.cs:811–819`), so this stimulus cannot qual
 supplied character. Stop pursuing melee readiness; use its supported combat setup when final live
 qualification is performed. This is not evidence of a solver or combat-mode decoding defect.
 [Sanitized mode/equipment evidence](evidence/h3d-combat-physics-2026-10-20/live-readiness-equipped-caster-4261f574d.json).
+
+For final unattended caster validation, reuse the existing `SidecarHostClient` transport and
+world-reveal acknowledgement used by `scripts/live-client-probe.mjs`. The host already publishes
+known spell IDs and `load_spell_references` metadata, accepts equipment-derived
+`toggle_client_combat_mode`, and forwards `cast_client_spell` with captured selection through
+core's normal spell route. `ClientAttackProfile` covers melee/missile; spell casts use their own
+busy-operation path. Qualify casts from observed server results and accepted movement, rather than
+requiring the physical attack owner's `active` state. Use a private temporary host driver after the
+performance run and final host build; keep the frozen capture/replay and production API unchanged.
 
 ### Live handoff validation: desired combat survives; later equipment inspection explains rejection
 

@@ -3,9 +3,10 @@
 Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21 UTC.
 Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
 
-Status: **Two geometry-query optimizations implemented and verified. The user reports noticeable
-improvement, but significant movement slowdown remains. A fresh combat capture confirms continued
-simulation-time loss; the next targets span core scheduling/publication and world query preparation.**
+Status: **The initial geometry fixes improved user-reported movement. The remaining heavy-fight
+slowdown has not been retested with the follow-up changes. Follow-up debug replays show a 22.80% exploratory work
+reduction against the controlled starting checkpoint. The final performance, stress, live-cadence,
+and user-acceptance gates remain open.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
 second scene. It provides a repeatable input workload; deterministic movement equivalence remains
@@ -87,7 +88,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 1. Establish the controlled workload | In progress | Explicit warmup and five measured baseline runs completed; alternating comparison and representative stress coverage remain open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
-| 4. Simplify world movement preparation | In progress | Query-local traversal reuse measured and rejected: no clear gain for added complexity. Active-body preparation remains under review. |
+| 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
@@ -101,11 +102,10 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** attribute per-tick journal costs and avoid repeated placement discovery that
-remains in world maintenance/core projection. The bounded message experiment roughly halves message
-work but shows higher exploratory physics work than its predecessor. Its net combined reduction is
-**18.79%** against the controlled starting baseline. The 25% target, alternating comparison,
-representative stress coverage, and live acceptance remain open.
+**Next action:** test deferred ancestry tracking for independent placement queries. The CPU sample
+did not support journal insertion as the dominant cost; borrowed BSP candidates now bring the
+exploratory combined reduction to **22.80%**. The 25% target, alternating comparison, representative
+stress coverage, and live acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -133,7 +133,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Bounded message placement | Successor to `faa72f340`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
+| Borrowed BSP candidates | Successor to `78cd7cd40`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
+| Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
 | Deferred support footprint | `faa72f340`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 31,024.50 ms, 15.47% below baseline; 994 world / 677 core tests and Clippy pass. |
 | Borrowed-incarnation visibility | `8bfd690ce`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 32,071.31 ms, 12.61% below baseline. 994 world / 677 core tests and Clippy pass. |
 | Controlled obstruction/correction and CPU attribution | `f1c54bfef`; profile hashes in evidence | Strengthen wall/path/support/reset and return-after-residency tests without production changes; 994 world tests and Clippy pass. Full CPU stacks identify placement/visibility and BSP preparation targets. |
@@ -819,6 +820,55 @@ boundary is explicit, but further per-tick attribution is justified before final
 [Sanitized evidence](evidence/h3d-combat-physics-2026-10-20/bounded-placement-reconciliation-exploratory.json)
 retains individual reports, hashes, validation, and limits. The 25% target and final alternating
 comparison remain open.
+
+## Post-journal attribution and borrowed BSP candidates: retained for paired verification
+
+A fresh userspace CPU capture of the preserved `78cd7cd40` executable completed without a compiler
+running concurrently from this agent. Its **3,598 samples** recovered a mean **42.54 frames** per
+stack. Inclusive shares were **8.95%** for full core dynamic views, **5.06%** for world placement
+resolution, **3.72%** for placement reconciliation, **1.00%** for message dependency selection,
+**8.98%** for BSP polygon traversal, and **6.23%** for placed support queries. These shares overlap.
+Direct `EntityManager::get_mut` appeared in one sample (**0.028%**); no direct `record_mutation`
+frame was sampled. All BTreeSet insertion across the program, including placement-cycle tracking,
+accounted for **0.917%**. Sampling resolution does not prove small functions free, but this evidence
+does not support journal insertion as the dominant explanation for the higher exploratory physics
+work. That timing difference remains unresolved by these sequential runs.
+
+[Sanitized attribution](evidence/h3d-combat-physics-2026-10-20/bounded-placement-cpu-attribution.json)
+records operation shares and provenance. The profile includes cold bootstrap, workers, sampler
+overhead, and wall-clock effects; it is not an acceptance timing comparison. Raw data and the
+parser remain in the private ignored fixture area.
+
+The next source-backed experiment addresses repeated polygon resolution in world sweeps. Previously,
+`visit_polygon_leaves` resolved each leaf reference through the polygon map merely to collect IDs;
+after sorting/deduplicating, the cast consumer looked up those IDs again. The new shared traversal
+primitive visits authored IDs. Sweep candidates deduplicate IDs first and lazily resolve each
+eligible polygon once, returning borrowed geometry directly to casting. No extra geometry vector,
+retained cache, content representation, or coordinate arithmetic changes. Contacts/support use a
+wrapper that preserves their original leaf order and observation multiplicity; they do not acquire
+the sweep-only deduplication policy. Stable sweep order still follows sorted authored IDs, and
+ineligible unresolved polygons remain omitted as before.
+
+The full **995 world tests** and **677 core tests** pass. World/core all-target Clippy with
+runtime-fixture and warnings as errors, formatting/whitespace checks, and harness build pass.
+The exact two-file patch and executable are preserved privately. One explicit warmup followed by
+two exploratory measurements produced combined work of **28,581.03 ms** and **28,081.77 ms**,
+median **28,331.40 ms**: **4.95%** below the bounded-placement experiment and **22.80%** below the
+controlled starting baseline. Physics work was **26,346.12 / 25,887.84 ms**; active physics p95 was
+**19.731 / 19.323 ms**. Both runs retained 5,741 messages, 1,519 physics steps, 1,500 active-start
+steps, peak 286 entities, and zero population mismatches.
+
+**Decision: retain for paired verification.** The borrowed proof removes repeated discovery without
+adding retained state. [Sanitized evidence](evidence/h3d-combat-physics-2026-10-20/borrowed-polygon-candidates-exploratory.json)
+retains reports, hashes, and limitations. This remains short of the 25% target, and two sequential
+samples do not satisfy the final alternating comparison. Lower physics work here also does not
+retroactively explain the earlier experiment's variation.
+
+The next source review found that placement resolution inserts every queried GUID into its cycle
+set before learning whether it has an attachment. Only a followed attachment can revisit an endpoint;
+ordinary independent, missing, and deleted endpoints do not need that allocation. Deferring cycle
+tracking until following a relationship can remove work without a new state lifetime. This is a
+source-backed follow-up hypothesis, not yet an implemented result.
 
 ## Next investigation targets: the complete update pipeline
 

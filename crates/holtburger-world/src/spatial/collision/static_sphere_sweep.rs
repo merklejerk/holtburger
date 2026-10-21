@@ -691,21 +691,14 @@ impl MovingSphereCast {
                     anchor.0,
                     owner.0,
                 );
-                let polygon_ids = crate::spatial::bsp_query::sphere_polygon_candidates(
+                let polygons = crate::spatial::bsp_query::sphere_polygon_candidates(
                     solid,
                     collider,
                     center,
                     self.ball.radius + self.displacement.length() * 0.5,
                 );
-                for polygon_id in polygon_ids {
-                    sweep_polygon(
-                        self,
-                        collider,
-                        owner,
-                        anchor,
-                        &solid.polygons[&polygon_id],
-                        earliest,
-                    )?;
+                for polygon in polygons {
+                    sweep_polygon(self, collider, owner, anchor, polygon, earliest)?;
                 }
             }
             CollisionShape::Ball(ball) => {

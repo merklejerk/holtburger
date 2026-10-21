@@ -155,11 +155,11 @@ pub fn placed_polygon_contacts(
     radius: f32,
 ) -> Vec<ShapeContact> {
     let mut contacts = Vec::new();
-    visit_polygon_leaves(
+    visit_polygons(
         &solid.bsp,
         solid,
         &|node| node_bounds_reach(node, collider, center, radius),
-        &mut |_, polygon| {
+        &mut |polygon| {
             let vertices = polygon
                 .vertices
                 .iter()
@@ -193,11 +193,11 @@ pub fn placed_polygon_obstructions(
     radius: f32,
 ) -> Vec<BspPolygonObstruction> {
     let mut contacts = Vec::new();
-    visit_polygon_leaves(
+    visit_polygons(
         &solid.bsp,
         solid,
         &|node| node_bounds_reach(node, collider, center, radius),
-        &mut |_, polygon| {
+        &mut |polygon| {
             let vertices = polygon
                 .vertices
                 .iter()
@@ -233,7 +233,7 @@ pub fn placed_supports(
     maximum_rise: f32,
 ) -> Vec<ShapeSupport> {
     let mut supports = Vec::new();
-    visit_polygon_leaves(
+    visit_polygons(
         &solid.bsp,
         solid,
         &|node| {
@@ -244,7 +244,7 @@ pub fn placed_supports(
                     <= (bounds.radius + radius + CONTACT_EPSILON).powi(2)
             })
         },
-        &mut |_, polygon| {
+        &mut |polygon| {
             let plane = transform_plane(
                 Plane {
                     normal: polygon.normal,
@@ -371,30 +371,44 @@ fn descend(
 }
 
 /// Stable polygon candidates for a sphere enclosing a query's complete swept volume.
-/// Shared leaf references are deduplicated before expensive shape casts.
-pub(super) fn sphere_polygon_candidates(
-    solid: &BspSolid,
+/// Deduplicate shared leaf identities before resolving geometry, then carry the borrowed proof
+/// into shape casts so consumers never repeat the polygon lookup.
+pub(super) fn sphere_polygon_candidates<'a>(
+    solid: &'a BspSolid,
     collider: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
-) -> Vec<u16> {
+) -> impl Iterator<Item = &'a CollisionPolygon> + use<'a> {
     let mut ids = Vec::new();
-    visit_polygon_leaves(
+    visit_polygon_ids(
         &solid.bsp,
-        solid,
         &|node| node_bounds_reach(node, collider, center, radius),
-        &mut |id, _| ids.push(id),
+        &mut |id| ids.push(id),
     );
     ids.sort_unstable();
     ids.dedup();
-    ids
+    ids.into_iter().filter_map(|id| solid.polygons.get(&id))
 }
 
-fn visit_polygon_leaves(
+/// Contacts preserve each reached leaf's observations; only sweep candidates deduplicate IDs.
+fn visit_polygons(
     node: &BspNode,
     solid: &BspSolid,
     intersects: &impl Fn(&BspNode) -> bool,
-    found: &mut impl FnMut(u16, &CollisionPolygon),
+    found: &mut impl FnMut(&CollisionPolygon),
+) {
+    visit_polygon_ids(node, intersects, &mut |id| {
+        if let Some(polygon) = solid.polygons.get(&id) {
+            found(polygon);
+        }
+    });
+}
+
+/// Traverse authored identity references without eagerly resolving or copying polygon geometry.
+fn visit_polygon_ids(
+    node: &BspNode,
+    intersects: &impl Fn(&BspNode) -> bool,
+    found: &mut impl FnMut(u16),
 ) {
     if !intersects(node) {
         return;
@@ -402,18 +416,16 @@ fn visit_polygon_leaves(
     match node {
         BspNode::Leaf(leaf) => {
             for id in &leaf.poly_ids {
-                if let Some(polygon) = solid.polygons.get(id) {
-                    found(*id, polygon);
-                }
+                found(*id);
             }
         }
         BspNode::Port(portal) => {
-            visit_polygon_leaves(&portal.pos, solid, intersects, found);
-            visit_polygon_leaves(&portal.neg, solid, intersects, found);
+            visit_polygon_ids(&portal.pos, intersects, found);
+            visit_polygon_ids(&portal.neg, intersects, found);
         }
         BspNode::Internal(internal) => {
             for branch in [&internal.pos, &internal.neg].into_iter().flatten() {
-                visit_polygon_leaves(branch, solid, intersects, found);
+                visit_polygon_ids(branch, intersects, found);
             }
         }
     }

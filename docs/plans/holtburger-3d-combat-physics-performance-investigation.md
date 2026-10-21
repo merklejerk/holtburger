@@ -104,15 +104,15 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** resolve live stress combat qualification using full attack-owner state/server
-feedback and a controlled queued-release/engagement regression. The first window retained 64.93 s
-of simulation intervals but admitted only **93.30%**, with about 99 movers and 15.3 projectiles;
-combat activation was never observed and the probe correctly failed. Use the retained live phase
-attribution to choose the next structural optimization, then repeat qualified cadence measurement.
-The valid matched-readiness comparison reaches **23.09%**, below the **25%** work target; preserve
-all ten reports and the original baseline. Do not repeat an unchanged comparison hoping for a
-passing median. Representative stress coverage, live cadence, final architecture/quality review,
-and user movement acceptance remain open.
+**Next action:** act on the measured movement-query hot path using the existing frozen replay
+and behavior tests. The user explicitly redirected the effort away from further fixture refinement;
+combat qualification remains a final validation obligation rather than a prerequisite to optimize.
+The first concrete experiment terminates candidate queries once an initial collision at time zero
+has won; later candidates cannot change the first blocker, while accepted-path coverage still runs.
+All 996 world and 681 core tests, broad Clippy, and the fixture build pass; paired measurement is next. Retain or
+roll back according to measured benefit. The valid end-to-end result remains **23.09%**, below
+**25%**; live admission remains **93.30%**, below **99%**. Preserve the original baseline, all samples,
+representative combat coverage, architecture/quality review and user movement acceptance gates.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -949,6 +949,27 @@ fresh baseline removes the earlier sequential exploratory margin. Do not reinter
 25.26% result as acceptance. Investigate repeated core publication work next. The stationary replay
 still cannot establish heavy live cadence, complete movement/contact equivalence, or original
 combat movement resolution.
+
+## Movement-query action: initial-hit early termination
+
+The user requested a course correction: enough fixture refinement; act on the existing evidence.
+The replay and its workload checks are frozen. The initial live profile already locates 7.433 ms
+in mobile sweeps and 2.612 ms in support/hard movement; combat qualification stays open but does
+not block source optimization or existing controlled behavior checks.
+
+The first world-query change extends an existing triangle-level rule to the whole candidate
+search: time zero is the smallest admissible collision time and equal times preserve the first
+selected blocker. After a terrain or resident collider supplies that result, skip remaining static
+candidates and water checks; after a world/hard-entity result reaches zero, skip later hard targets.
+Shared collider queries also avoid work when their caller already has an initial blocker. Candidate
+domains are resolved first and accepted-path finishing still validates coverage. There are no new
+caches, contracts, metrics, admission settings, or fixture formats. The source change adds 23 lines.
+
+Existing **996 world** and **681 core** tests, all-target world/core/harness Clippy with warnings
+denied, the fixture binary build, formatting and whitespace checks pass. Measurement against the
+frozen trace is next. This is an optimization hypothesis, not an established speedup; use the saved
+current binary for marginal comparison and preserve the original performance baseline for the
+unchanged overall acceptance gate.
 
 ## Next investigation targets: the complete update pipeline
 

@@ -87,7 +87,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 1. Establish the controlled workload | In progress | Explicit warmup and five measured baseline runs completed; alternating comparison and representative stress coverage remain open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; new asset-free collection drive/reset scenario verifies accepted movement boundaries. Obstruction/correction oracle coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
-| 4. Simplify world movement preparation | Pending | Share valid query preparation and avoid unnecessary body work while preserving accepted-path coverage, support, and obstacle participation. |
+| 4. Simplify world movement preparation | In progress | Query-local traversal reuse measured and rejected: no clear gain for added complexity. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
@@ -101,8 +101,11 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** use the preserved baseline to evaluate changes in core dynamic publication and
-world movement preparation. The burden-query experiment has directional evidence below, but the
+**Next action:** investigate repeated core publication and active-body preparation after rejecting
+the query-local traversal experiment for lack of demonstrated benefit.
+Publication review found that the before snapshot covers motion, physics flags, and events emitted
+inside simulation, so removing it requires a coherent change contract rather than a stale view cache.
+The burden-query experiment has directional evidence below, but the
 25% target, alternating comparison, broader movement oracle, and live acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
@@ -131,7 +134,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Burden membership and controlled movement boundaries | Experiment successor to `9cb7ba24e`; source patch and binary hashes retained below | Remove repeated inventory traversals without retained caches; exploratory median work down 5.74%; 993 world and 677 core tests pass. Retained for further paired verification; final performance gate remains open. |
+| Query-local traversal reuse | Private patch based on `9111877f1`, hashes in evidence | Rejected: median 34,558.39 ms vs burden-only 34,594.76 ms; no demonstrated benefit for added contracts. 994 world / 677 core tests passed before rollback. |
+| Burden membership and controlled movement boundaries | `9111877f1`; source patch and binary hashes retained below | Remove repeated inventory traversals without retained caches; exploratory median work down 5.74%; 993 world and 677 core tests pass. Retained for further paired verification; final performance gate remains open. |
 
 Future ledger rows must name the hypothesis, measured outcome, validation, and whether the change
 was retained or reverted. Failed experiments remain useful evidence and should not disappear from
@@ -511,6 +515,53 @@ new collection scenario and runtime-fixture tests. World/core Clippy across all 
 runtime-fixture feature passed with warnings treated as errors. Formatting and whitespace checks
 passed. The change is retained for subsequent comparisons; no heavy live-cadence or user-feel
 resolution is claimed.
+
+## Query-local traversal experiment: rejected after measurement
+
+The dynamic-publication seam review confirmed that full before/after comparison protects more than
+pose: animation playback, authored physics flags, contact, sampling state, and spatial membership
+can change inside simulation, and simulation consequences can themselves emit dynamic upserts.
+A persistent last-published-view cache would need explicit handling for those mid-step publications
+and lifecycle resets. No such cache was added. The next implementation hypothesis instead retains
+already-computed traversal data at the world query layer, with no cross-tick invalidation lifetime.
+
+Candidate sphere queries already infer initial placement and directed center crossings for the
+attempted segment. A new private `PreparedSphereTraversal` carries the exact request, candidate
+membership, initial placement, crossings, and terminal traversal cell into hit/acceptance finishing.
+The request and its preparation travel together, preventing callers from pairing unrelated geometry
+with a retained traversal. Attempted candidate reach still does not certify accepted placement.
+
+When the accepted fraction is exactly one and the request began from a retained EnvCell, preparation
+and ordinary path traversal have identical inputs and start semantics. That case reuses the
+computed initial placement and crossings, resolves endpoint containment/recovery afresh, appends
+the accepted endpoint, and runs the existing coverage validation. Clipped paths retain fresh
+traversal of their shorter segment. Outdoor-start queries retain their distinct acquisition path.
+Static, hard-entity, camera, and solid-recovery queries share the same finishing contract.
+
+An initial prototype treated an unfinished crossing prefix as a complete placed path; four existing
+no-crossing/recovery tests caught its nonempty-path invariant violation. The final preparation type
+stores initial placement and crossing components explicitly, with no completed-path claim. The
+prototype failure was corrected before performance measurement or checkpointing.
+
+The experimental **994-test world suite** passed, including a new **1,728-case** exact differential check
+against the public fresh path-traversal API. The corpus includes clipped and full travel, stationary
+requests, direct/coincident outdoor portals, invalid-start recovery, multiple sphere radii, and
+neighboring/distant anchor frames. World/core Clippy across all targets with runtime-fixture enabled
+also passed with warnings treated as errors; **677 core tests** passed.
+
+One warmup followed by two measured replays produced combined message/physics work of
+**34,901.54 ms** and **34,215.24 ms**, median **34,558.39 ms**. The burden-only experiment
+median was **34,594.76 ms**: the apparent **0.105%** difference is far smaller than the observed
+run-to-run spread. Active physics p95 was **21.835 ms** and **21.416 ms**; workload counts stayed
+at 5,741 messages, 1,519 physics steps, 1,500 active-start steps, peak 286 entities, and zero
+population mismatches. These sequential exploratory samples do not establish a small gain.
+
+**Decision: revert the traversal experiment and its implementation-specific differential test.**
+The extra preparation representation and retained-cell/full-fraction branch are not justified by
+the measured result. The private source patch and executable remain available for reproduction;
+[sanitized evidence](evidence/h3d-combat-physics-2026-10-20/prepared-traversal-exploratory.json)
+records hashes, individual results, and limitations. This removes the experiment only; the burden
+optimization and prior geometry optimizations remain. No final performance or cadence gate is met.
 
 ## Next investigation targets: the complete update pipeline
 

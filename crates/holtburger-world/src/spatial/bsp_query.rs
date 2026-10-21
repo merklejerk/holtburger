@@ -245,11 +245,6 @@ pub fn placed_supports(
             })
         },
         &mut |_, polygon| {
-            let vertices = polygon
-                .vertices
-                .iter()
-                .map(|vertex| collider.point_to_landblock_space(*vertex))
-                .collect::<Vec<_>>();
             let plane = transform_plane(
                 Plane {
                     normal: polygon.normal,
@@ -258,7 +253,13 @@ pub fn placed_supports(
                 collider,
             );
             if let Some(support) = support_on_polygon(
-                &vertices,
+                || {
+                    polygon
+                        .vertices
+                        .iter()
+                        .map(|vertex| collider.point_to_landblock_space(*vertex))
+                        .collect::<Vec<_>>()
+                },
                 plane.normal,
                 plane.d,
                 center,
@@ -509,8 +510,10 @@ pub(super) fn polygon_sphere_contact(
     })
 }
 
-pub(super) fn support_on_polygon(
-    vertices: &[Vector3],
+/// Materialize footprint geometry only after its plane enters the vertical search envelope.
+/// Terrain borrows existing vertices; placed BSP faces defer their transform and allocation.
+pub(super) fn support_on_polygon<V: AsRef<[Vector3]>>(
+    vertices: impl FnOnce() -> V,
     normal: Vector3,
     plane_d: f32,
     center: Vector3,
@@ -518,13 +521,18 @@ pub(super) fn support_on_polygon(
     maximum_drop: f32,
     maximum_rise: f32,
 ) -> Option<ShapeSupport> {
-    if vertices.len() < 3 || normal.z <= CONTACT_EPSILON {
+    if normal.z <= CONTACT_EPSILON {
         return None;
     }
     let height_delta = (radius - normal.dot(&center) - plane_d) / normal.z;
     if height_delta < -maximum_drop - CONTACT_EPSILON
         || height_delta > maximum_rise + CONTACT_EPSILON
     {
+        return None;
+    }
+    let vertices = vertices();
+    let vertices = vertices.as_ref();
+    if vertices.len() < 3 {
         return None;
     }
     let feature = polygon_footprint(vertices, center, radius)?;

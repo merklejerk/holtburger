@@ -101,13 +101,13 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** test plane admission before polygon-vertex materialization in BSP support queries,
-using the CPU attribution below. Repeated placement/visibility discovery now uses the borrowed
-incarnation rather than performing redundant identity lookups. Controlled wall/reset and blocked-return
-scenarios now check accepted paths before changing these contracts. Core before/after snapshots
-remain intact: they protect motion, physics flags, and simulation-emitted events as well as pose.
-The retained burden, storage-membership, and visibility changes show a 12.61% exploratory reduction;
-the 25% target, alternating comparison, representative stress coverage, and live acceptance remain open.
+**Next action:** evaluate bounded message-time placement reconciliation at its authoritative world
+mutation boundary. The current implementation still scans every entity after every message. Any
+replacement must capture every affected endpoint, include attachment descendants, preserve delayed
+relationships and deletion/instance semantics, and retain ordinary world maintenance behavior.
+Core before/after snapshots remain intact. The retained changes show a **15.47% exploratory** work
+reduction; the 25% target, alternating comparison, representative stress coverage, and live acceptance
+remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -135,7 +135,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Borrowed-incarnation visibility | Successor to `f1c54bfef`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 32,071.31 ms, 12.61% below baseline. 994 world / 677 core tests and Clippy pass. |
+| Deferred support footprint | Successor to `8bfd690ce`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 31,024.50 ms, 15.47% below baseline; 994 world / 677 core tests and Clippy pass. |
+| Borrowed-incarnation visibility | `8bfd690ce`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 32,071.31 ms, 12.61% below baseline. 994 world / 677 core tests and Clippy pass. |
 | Controlled obstruction/correction and CPU attribution | `f1c54bfef`; profile hashes in evidence | Strengthen wall/path/support/reset and return-after-residency tests without production changes; 994 world tests and Clippy pass. Full CPU stacks identify placement/visibility and BSP preparation targets. |
 | Direct storage membership | `c20bc9830`; binary/patch hashes in evidence | Retained for paired verification: exploratory combined median 33,167.17 ms, 9.63% below baseline; 994 world / 677 core tests pass. |
 | Query-local traversal reuse | Private patch based on `9111877f1`, hashes in evidence | Rejected: median 34,558.39 ms vs burden-only 34,594.76 ms; no demonstrated benefit for added contracts. 994 world / 677 core tests passed before rollback. |
@@ -722,6 +723,37 @@ A possible follow-up is to admit the plane before materializing its footprint, p
 normal/height arithmetic and performing each derived check once. This is a source-backed hypothesis,
 not an implemented or measured optimization. A more extensive compiled BSP representation must
 justify its API and memory cost before being introduced.
+
+## Deferred support footprint experiment: retained for paired verification
+
+`placed_supports` previously transformed every visited polygon vertex and allocated a vector before
+its common support predicate rejected downward/vertical normals or plane heights outside the query's
+rise/drop envelope. The world query now accepts a local `FnOnce` that supplies polygon vertices only
+after the existing plane checks pass. BSP vertices are transformed on demand; terrain returns a
+borrowed slice and adds no new allocation. The existing `ShapeSupport` result still carries the one
+computed height and footprint. No prepared-state type, cache, invalidation contract, extra threshold,
+or alternate numerical predicate is introduced.
+
+The same normal/height/footprint arithmetic and accepted outputs remain; only pure geometry
+materialization is deferred. The full **994 world tests** and **677 core tests** pass, including
+footing seams/corners/slopes, stair entry and ceiling clearance, terrain recovery, hard-entity support,
+and the controlled drive/wall/reset and blocked-return/residency scenarios. World/core all-target
+Clippy with runtime-fixture and warnings as errors, formatting/whitespace checks, and harness build
+pass. One explicit warmup and two exploratory measurements produced combined work of
+**31,257.17 ms** and **30,791.83 ms**, median **31,024.50 ms**: **3.26%** below the borrowed-visibility
+experiment and **15.47%** below the controlled starting baseline. Active physics p95 was **19.698 ms**
+and **19.804 ms**. Both runs retain 5,741 messages, 1,519 physics steps, 1,500 active-start steps,
+peak 286 entities, and zero population mismatches.
+
+**Decision: retain for paired verification.** [Sanitized evidence](evidence/h3d-combat-physics-2026-10-20/deferred-support-vertices-exploratory.json)
+retains reports and binary/patch hashes. Two sequential samples are exploratory and do not meet the
+final acceptance gate. The larger remaining message/lifecycle issue is broader than this geometry
+ordering change: full scene-placement scans run after every message. A bounded replacement would
+need an authoritative mutation record and attachment dependency closure. The raw entity map is
+currently public, so mutation capture cannot be reliable until that bypass is removed. Time-based
+pending relationships and periodic world maintenance must continue to run; a core view cache does
+not address these ownership requirements. No such mutation/reconciliation refactor is implemented
+at this checkpoint.
 
 ## Next investigation targets: the complete update pipeline
 

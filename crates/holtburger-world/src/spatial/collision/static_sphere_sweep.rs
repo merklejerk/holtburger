@@ -149,6 +149,10 @@ impl CollisionScene {
             membership,
         } in entities
         {
+            // Zero is the minimum admissible time; ties retain the already selected blocker.
+            if earliest.is_some_and(|hit| hit.contact().time_of_impact == 0.0) {
+                break;
+            }
             if !traced.membership.intersects_reached(membership) {
                 continue;
             }
@@ -470,6 +474,15 @@ impl CollisionScene {
                             triangle.normal,
                             &mut earliest,
                         )?;
+                        // All candidate domains are already resolved. No later resident collider
+                        // or water boundary can precede an initial hit; accepted coverage is still
+                        // checked by finish_sphere_path after the body chooses its stopping time.
+                        if earliest.is_some_and(|hit| hit.time_of_impact == 0.0) {
+                            return Ok(StaticSphereTrace {
+                                hit: earliest,
+                                membership: swept_placement,
+                            });
+                        }
                     }
                 }
             }
@@ -497,6 +510,12 @@ impl CollisionScene {
                 request.anchor,
                 &mut earliest,
             )?;
+            if earliest.is_some_and(|hit| hit.time_of_impact == 0.0) {
+                return Ok(StaticSphereTrace {
+                    hit: earliest,
+                    membership: swept_placement,
+                });
+            }
         }
 
         if swept_placement.reaches_outdoors()
@@ -617,6 +636,10 @@ impl MovingSphereCast {
         anchor: Guid,
         earliest: &mut Option<StaticSphereSweepHit>,
     ) -> Result<(), CollisionQueryError> {
+        // Shared callers may already have an initial blocker from an earlier target.
+        if earliest.is_some_and(|hit| hit.time_of_impact == 0.0) {
+            return Ok(());
+        }
         let start =
             point_between_landblocks(world_vector(self.pose.translation), anchor.0, owner.0);
         if let CollisionShape::Cylinder(cylinder) = &*collider.shape {

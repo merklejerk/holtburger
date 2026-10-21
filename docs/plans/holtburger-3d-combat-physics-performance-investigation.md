@@ -218,11 +218,13 @@ shows that the broader runtime pipeline still exceeds its available budget under
 ## Current architecture and controlled-correctness review
 
 **Verdict:** the architecture trace and controlled-scenario deliverables are complete for the
-retained implementation at `114754c4f`. The reviewed optimizations and control handoff are ready
-within that source scope. This does not approve heavy-fight behavior, performance acceptance or
-rollout: the all-unoptimized five-pair comparison misses 25% and live attacks remain inactive.
-Host tests/build/smoke now pass; diagnostic readiness and user movement acceptance remain pending. No general rigid-body solver replacement is justified
-by the current measurements.
+retained orchestration at `114754c4f`, extended by the bounded support-footprint change at
+`a52fbe29d`. The reviewed optimizations and control handoff are ready within that source scope.
+This does not approve heavy-fight behavior, performance acceptance or rollout: the all-unoptimized
+five-pair comparison misses 25%, and the matched delivered-profile comparison is running.
+Host tests/build/smoke passed before the support change; final integration checks, representative
+combat and user movement acceptance remain pending. No general rigid-body solver replacement
+is justified by the current measurements.
 
 The ordinary path is now explicit: session delivers ordered packets; world accepts authoritative
 entity/storage/lifecycle changes; core accepts queued movement and expiry, prepares combat policy
@@ -237,7 +239,7 @@ kinds. The detailed trace and modern-controller comparison below remain the supp
 | --- | --- |
 | World storage/burden | Retain accepted ancestry as ownership authority. Direct membership avoids enumerating unrelated items; one local membership set per burden query preserves ordered floating-point summation and pending descriptions. No retained burden cache. |
 | World placement discovery | Replace full message-wide reconciliation with manager-owned conservative mutation identities plus a locally derived descendant closure. Mutable access and lifecycle deletion record invalidation; player replacement and periodic world maintenance still reconcile all identities. The underlying entity map is private. |
-| World static query preparation | Borrow BSP polygons and selected collider geometry from their owning products; resolve geometry once at selection. Shadow IDs still own ordering/deduplication and retail building-shell policy. Transform support footprints only after plane admission. These borrow/deferral changes add no persistent cache. |
+| World static query preparation | Borrow BSP polygons and selected collider geometry from their owning products; resolve geometry once at selection. Shadow IDs still own ordering/deduplication and retail building-shell policy. Stream transformed support footprints only after plane admission, without intermediate vertex storage. These borrow/deferral changes add no persistent cache. |
 | World contact transaction | Move prepared mobile-body snapshots into final publication; preserve fixed authored hard-target placement before mobile sweeps. Mobile results publish together after acceptance, while checked recovery remains a distinct later disposition. Fixed-placement and mobile-commit stages have different boundaries. |
 | World physical response | Retain swept hard movement, support/stairs, bounded mobile separation, projectile handling and clipped residual overlap. Existing per-step bounds and sleeping-body obstacle participation remain. Rejected query branches are absent from production source. |
 | Core movement/combat orchestration | Accept external input and pulse expiry before pursuit policy. Carry prior manual ownership and explicit-stop decisions in one consumed transient product, then reduce derived pursuit and publish in the same tick. No persistent handoff flag or second command queue. |
@@ -268,6 +270,16 @@ Relevant suites passed: **996 world tests** and **682 fixture-enabled core tests
 under the explicit all-unoptimized comparison settings. These tests satisfy the controlled-scenario
 requirement. They do not replace the separately required representative fight, live cadence,
 frontend/host integration checks or user acceptance.
+
+The incremental support review at `a52fbe29d` traced both producers (placed BSP vertices and
+terrain triangles) through the shared footprint consumer. Plane and minimum-vertex admission
+remain; each authored vertex transforms once, the final edge closes to the stored first vertex,
+and nearest-feature ties retain edge order. Iterator state lives only for that query. There is no
+new retained representation, cache, invalidation event or world/host contract. Existing face,
+slope, seam, corner, stair, ceiling and support-lifecycle assertions pass in the 996 world / 682
+core suites. The marginal p95 increase is retained as a measured limitation; the full original-source
+p95 gate is still required. Consumed mutation journals and replaced immutable catalogs continue
+to force full metadata projection; the rejected publication-ownership path is absent.
 
 ## Scene and measurement conditions
 
@@ -1161,6 +1173,14 @@ gate or live movement recovery. Private runner, patch, executables and reports r
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
 
 ### Delivered development configuration: matched original-source baseline prepared
+
+The full five-pair comparison is now running against candidate `a52fbe29d` (support footprint
+streaming; publication ownership experiment reverted), with original source `9cb7ba24e` plus the
+matched diagnostic patch. Both use dependency level 3 and workspace level 0. Private runner,
+immutable binaries, build attribution and every report are under
+`caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-delivered-development-profile/`.
+Do not compile, profile or run another diagnostic until its live process is terminal. No gate
+result is available yet.
 
 The all-unoptimized result above remains a valid **23.46%** miss. The delivered development profile
 was already changed to optimized Parry/Glam before that result. To assess source changes in this

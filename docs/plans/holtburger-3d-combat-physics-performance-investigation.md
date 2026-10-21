@@ -5,8 +5,8 @@ Updated: 2026-10-21, including the unattended second-scene capture and offline r
 
 Status: **The matched delivered-development five-pair performance gate passes: 28.81% less
 combined message/physics work, with every candidate physics p95 below every baseline p95.
-Architecture, controlled correctness and final host quality checks pass; supported caster
-validation is in progress. Representative original-fight coverage, live cadence under that load,
+Architecture, controlled correctness and final host quality checks pass. Combat diagnostics are
+complete; engineering handoff is ready. Representative original-fight coverage, live cadence under that load,
 and the user's movement-feel acceptance remain open. Fixture development remains frozen.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
@@ -90,8 +90,8 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 2. Define behavior and ownership | Complete for the defined architecture/correctness deliverables | Ordinary/reset/correction contracts and retained/unified/removed mechanisms audited below. Asset-free controlled drive, wall, return, support, reset, publication and handoff cases satisfy the scenario requirement. Representative live stress and rollout acceptance remain separate open gates. |
 | 3. Simplify core orchestration/publication | Retained candidate verified offline | Control handoff fixed; metadata reuse and structural simplifications retained. Delivered-profile comparison gives 28.81% less combined work, with every candidate p95 below every baseline p95. Publication ownership experiment rejected and removed. |
 | 4. Simplify world movement preparation | Retained candidate verified offline | Deferred/streamed support footprint, borrowed BSP/static selections and prepared-body ownership retained; unsuccessful traversal/query experiments removed. Full delivered-profile work/p95 gate passes. |
-| 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. The melee stimulus is incompatible with the equipped wand and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
-| 6. Clean up and hand off | Engineering quality checks complete; live acceptance open | Source review, 996 world / 682 core / 375 host tests, fixture/default Clippy with warnings denied, formatting, normal debug host build and client/Explorer sidecar smoke pass. Supported caster observation is in progress. Representative combat, cadence and user acceptance remain open. |
+| 5. Verify overload and live movement | Available alternate observations complete; original-scene acceptance pending | Final normal-host windows admit 99.87% / 99.93% over 65 s; the latest records 444 accepted player paths. About 94 movers is below the original 153, so representative cadence and user movement acceptance remain open. Combat diagnostics are complete. |
+| 6. Clean up and hand off | Engineering quality checks complete; live acceptance open | Source review, 996 world / 682 core / 375 host tests, fixture/default Clippy with warnings denied, formatting, normal debug host build and client/Explorer sidecar smoke pass. Combat diagnostics are complete. Engineering handoff is ready; representative original-scene cadence and user acceptance remain open. |
 
 Completed foundations:
 
@@ -104,13 +104,21 @@ Completed foundations:
   recorded intervals that cannot demonstrate restored live cadence.
 
 **Fixture freeze / action threshold:** the existing replay and asset-free correctness suites are
-sufficient to begin and judge bounded code changes. Do not develop a more complete fixture before
-optimizing. Add diagnostics only when a concrete change exposes a specific unanswered correctness
-question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
-they do not block independent engineering work.
+sufficient to judge bounded code changes. Keep the fixture and combat drivers frozen. Add diagnostic
+code only to explain a reproduced production movement defect or measured CPU bottleneck. Judge
+progress by production movement and CPU cost; attack acceptance is supporting evidence. Heavy
+combat qualification and movement-feel checks remain final acceptance requirements; they do not
+block independent engineering work.
 
-**Next action:** use the existing sidecar command API for supported caster observation.
-Normal host integration checks pass for the final source. The unchanged five-pair original-source comparison completed
+**Next action:** hand off the current build for movement verification in the original heavy scene.
+Reopen implementation only from a reproduced movement problem or measured production cost.
+Combat-stimulus/readiness investigation is closed. The original objective is movement slowdown
+under load; successful melee or magic attacks are not solver-design milestones. Fixture or driver
+refinement is not a prerequisite for this handoff. Keep unavailable original-scene validation and
+user movement-feel acceptance explicitly pending.
+
+Normal host integration checks pass for the final source. The unchanged five-pair original-source
+comparison completed
 and independently audited **35,681.50 → 25,402.41 ms**, **28.81% less combined work**, in the
 matched delivered development profile. All ten workload/content checks pass. Candidate physics
 p95s span **17.478–17.805 ms**, baseline **21.229–22.107 ms**; every candidate is below every
@@ -118,8 +126,8 @@ baseline. The offline work/p95 gate is satisfied; representative combat and move
 [Complete comparison and independent audit](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-delivered-profile-a52fbe29d.json).
 
 Do not expand the fixture or pursue melee readiness. The read-only inspector proves the character
-has a wand equipped; ACE rejects melee with a caster (`Player_Combat.cs:811–819`). Final live
-qualification must use that supported setup and actual server results.
+has a wand equipped; ACE rejects melee with a caster (`Player_Combat.cs:811–819`). The rejected
+requests explain a diagnostic limitation; they do not identify a new performance bottleneck.
 
 The earlier **all-unoptimized** comparison at `114754c4f` remains preserved: **23.46%**, below
 25%. It used a different compiler configuration and predates the support-streaming change.
@@ -1814,14 +1822,15 @@ supplied character. Stop pursuing melee readiness; use its supported combat setu
 qualification is performed. This is not evidence of a solver or combat-mode decoding defect.
 [Sanitized mode/equipment evidence](evidence/h3d-combat-physics-2026-10-20/live-readiness-equipped-caster-4261f574d.json).
 
-For final unattended caster validation, reuse the existing `SidecarHostClient` transport and
-world-reveal acknowledgement used by `scripts/live-client-probe.mjs`. The host already publishes
-known spell IDs and `load_spell_references` metadata, accepts equipment-derived
-`toggle_client_combat_mode`, and forwards `cast_client_spell` with captured selection through
-core's normal spell route. `ClientAttackProfile` covers melee/missile; spell casts use their own
-busy-operation path. Qualify casts from observed server results and accepted movement, rather than
-requiring the physical attack owner's `active` state. Use a private temporary host driver after the
-performance run and final host build; keep the frozen capture/replay and production API unchanged.
+The completed temporary host observation used existing command APIs; no fixture or production
+API extension was made. Two 65-second windows report **99.87% / 99.93%** admitted/elapsed time.
+The latest observer records **444 accepted player paths**. Server outcomes confirm actual spell
+requests were processed. These observations still contain only about **94 movers**, versus about
+**153** in the original fight, and cannot establish restored original-scene movement. The first
+observer missed the combined presentation stream; its absent path records are an observation gap.
+[Both completed windows and limitations](evidence/h3d-combat-physics-2026-10-20/completed-alternate-host-observations-a52fbe29d.json)
+are retained. This diagnostic workstream is closed; further casting/readiness work is outside the
+remaining movement-performance investigation unless a reproduced production defect requires it.
 
 ### Live handoff validation: desired combat survives; later equipment inspection explains rejection
 

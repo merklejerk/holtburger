@@ -91,7 +91,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
-| 5. Verify overload and live movement | In progress | First scripted live window admits 93.30% over 64.93 s after boundary exclusion; 99% gate fails. About 99 movers / 15.3 projectiles; local combat activation never observed, so combat qualification is incomplete. Preserve explicit overload-policy and original-fight validation obligations. |
+| 5. Verify overload and live movement | In progress | First scripted window observed 93.30% admission but its saved executable lacks retained core optimizations; this is not a current-candidate cadence result. Preserve the observation and source-attribution correction. Qualified optimized live cadence, combat and original-fight validation remain open. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
 Completed foundations:
@@ -104,15 +104,15 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** act on the measured movement-query hot path using the existing frozen replay
-and behavior tests. The user explicitly redirected the effort away from further fixture refinement;
-combat qualification remains a final validation obligation rather than a prerequisite to optimize.
-The first concrete experiment terminates candidate queries once an initial collision at time zero
-has won; later candidates cannot change the first blocker, while accepted-path coverage still runs.
-All 996 world and 681 core tests, broad Clippy, and the fixture build pass; two alternating pairs are running. Retain or
-roll back according to measured benefit. The valid end-to-end result remains **23.09%**, below
-**25%**; live admission remains **93.30%**, below **99%**. Preserve the original baseline, all samples,
-representative combat coverage, architecture/quality review and user movement acceptance gates.
+**Next action:** finish validating the cylinder-side query reduction and compare it with the
+saved qualified `e767b02e8` executable on the unchanged frozen replay. Keep optimization moving;
+combat qualification remains a final validation obligation. The initial-hit marginal comparison
+was stopped after a binary audit showed its saved `b3edc9c96` baseline lacks retained optimization
+symbols. Its speedup comparison is invalid, and the 93.30% live observation cannot be attributed
+to the optimized core. Preserve all artifacts and corrections. The valid end-to-end result remains
+**23.09%**, below **25%**. Build separate checkouts into separate Cargo targets; use the preserved
+qualified executables for measurement. Overall performance, representative combat, optimized live
+cadence, architecture/quality and user acceptance gates remain unchanged.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -967,14 +967,53 @@ caches, contracts, metrics, admission settings, or fixture formats. The source c
 
 Existing **996 world** and **681 core** tests, all-target world/core/harness Clippy with warnings
 denied, the fixture binary build, formatting and whitespace checks pass. Measurement against the
-frozen trace is running at checkpoint `76095ab5b`: two alternating pairs against the saved
-`b3edc9c96` executable, one full warmup and one measurement per invocation. The latter has the same
-performance core as the qualified candidate plus only live-harness additions; no original
-acceptance rebaseline occurs. Private outputs and exact patch/binary hashes are in
+frozen trace initially ran at checkpoint `76095ab5b` against the saved `b3edc9c96` executable.
+That comparison was stopped: the saved baseline does not contain the claimed optimized core, so
+it cannot measure the marginal effect. Retain the interrupted samples without a speedup claim.
+The qualified `e767b02e8` executable remains the correct saved optimized baseline for marginal
+experiments; the original acceptance baseline is unchanged. Private outputs and exact patch/binary hashes are in
 `caps/runtime-fixtures/2026-10-21-4ae1/initial-hit-termination/`. Keep every sample and the unchanged
 full-trace, population, activation and outcome checks. This is an optimization hypothesis, not an
 established speedup; preserve original `9cb7ba24e` plus matched diagnostic tooling for the unchanged
 overall acceptance gate. No compiler, profiler, or other benchmark runs during measurement.
+
+### Cylinder-side sweeps: remove iterative geometry where a circle is sufficient
+
+The next source change handles a cylinder-side sweep as a horizontal ball/circle pairing when both
+sphere-center endpoints remain within the cylinder's height. That interval is convex, so the center
+stays within the height throughout the chord. Initial contacts have already been handled; a first
+entry is radial and cannot be a cap/rim entry. Keep the already-admitted sphere radius rather than
+shrinking the contact band twice. Paths outside that proven condition retain the existing cylinder
+solver and cap handling. Contact reporting already uses the same geometric reduction.
+
+A new analytic check covers vertical travel, offset side impact, uniform scale and a different
+request anchor. All **997 world** and **681 core** tests, all-target world/core/harness Clippy with warnings
+denied, normal fixture build, formatting and whitespace checks pass. Fresh normal world/core
+libraries and the saved executable contain the retained mutation-journal/metadata mechanisms.
+Marginal measurement against the qualified binary is next. This adds no cache, fixture variant, solver role or timing policy.
+
+### Build-artifact attribution correction
+
+A binary-symbol audit found that the saved live-harness `b3edc9c96` executable lacks
+`EntityManager::take_mutations`, `EntityManager::unchanged_since`, and dynamic metadata-reuse
+symbols. Both the preserved qualified `e767b02e8` executable and the freshly rebuilt `76095ab5b`
+query candidate contain them. Sharing one Cargo output directory across the isolated original
+baseline and main checkout allowed a stale linked artifact to be reused. Exact older linked core
+revision is not established by the symbol audit alone; its missing mechanisms are enough to
+invalidate attribution to the claimed optimized source.
+
+The interrupted marginal baseline measured 35,344.305 ms versus candidate 27,798.674 ms. **Do not
+claim that difference for early termination**: it mixes earlier retained optimizations. Its next
+offline replay child was terminated deliberately; preserve the partial samples and failure state.
+The earlier valid five-pair original-baseline comparison used the correct preserved executable
+and remains valid at 23.09%. See [artifact audit and retained interrupted samples](evidence/h3d-combat-physics-2026-10-20/build-artifact-attribution-correction.json).
+
+The 93.30% live observation and failed combat activation remain facts about the saved executable,
+not evidence of the optimized core's cadence. Its report now carries that explicit qualification.
+Future builds from another checkout must use their own Cargo target directory; main `target/`
+belongs only to the main checkout. The current geometry changes force fresh normal world/core
+library builds, and the saved benchmark executables receive the retained-symbol check before use.
+This corrects build provenance while keeping the fixture, numeric gates, and workload unchanged.
 
 ## Next investigation targets: the complete update pipeline
 
@@ -1285,6 +1324,10 @@ all-target Clippy with warnings denied, formatting, and whitespace checks pass. 
 result and its qualification failure are recorded below.
 
 #### First live stress window: admission shortfall, combat qualification failed
+
+**Source-attribution correction:** the saved harness executable lacks retained core optimization
+symbols after shared-target build reuse. The following observations are retained for that actual
+artifact; they are not an optimized-candidate cadence result. See the build-artifact audit above.
 
 Checkpoint `b3edc9c96` ran with the supplied development account, actual content and normal
 asynchronous production execution. Raw events/profiles and the exact binary/runner are private in

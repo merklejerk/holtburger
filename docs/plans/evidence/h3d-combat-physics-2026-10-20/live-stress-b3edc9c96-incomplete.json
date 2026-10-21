@@ -180,5 +180,10 @@
       "first_request_at_seconds": 62.001030366,
       "retired_after_seconds": 0.017941928999995582
     }
-  ]
+  ],
+  "source_attribution_correction": {
+    "qualified_as_optimized_candidate": false,
+    "reason": "Saved executable lacks retained metadata reuse and entity-mutation journal symbols. Harness source is b3 but linked core source claim is unqualified after cross-checkout shared-target build reuse.",
+    "consequence": "Retain observed admission and combat failure as artifact facts; do not attribute them to the current optimized core or use them as its cadence result."
+  }
 }

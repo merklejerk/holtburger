@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import {
 	buildEntryPath,
 	collapseRendererArguments,
+	extractElectronLaunchArguments,
 	extractVitePortArguments,
 	partitionClientLaunchArguments,
 	requireEntry,
@@ -17,6 +18,7 @@ const [entryName, ...allArgs] = process.argv.slice(2);
 let rawArgs;
 let requestedVitePort;
 let electronAppArgs;
+let electronSwitches;
 
 let entry;
 let entryPath;
@@ -26,7 +28,9 @@ try {
 		allowPortAlias: entryName !== "client",
 	});
 	requestedVitePort = extracted.vitePort;
-	rawArgs = extracted.args;
+	const electronLaunch = extractElectronLaunchArguments(extracted.args);
+	rawArgs = electronLaunch.args;
+	electronSwitches = electronLaunch.electronSwitches;
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
 	const partitioned =
 		entryName === "client"
@@ -57,7 +61,6 @@ const hostBinary = resolve(
 		? "holtburger-3d-host.exe"
 		: "holtburger-3d-host",
 );
-const electronSwitches = [];
 const remoteDebuggingPort =
 	process.env.HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT;
 if (remoteDebuggingPort !== undefined) {

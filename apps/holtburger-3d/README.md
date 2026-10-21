@@ -288,6 +288,17 @@ npm ci
 Use `npm run dev:explorer` for the Explorer and `npm run dev` or `npm run dev:client` for client mode.
 Development startup incrementally builds the Rust sidecar, starts Vite, launches Electron, and stops
 Vite after the application exits. Add `:release` to either named route to use an optimized host build.
+Pass `--uncapped` to either mode, with a debug or release host, to disable Chromium's foreground
+frame-rate limit and GPU vsync:
+
+```bash
+npm run dev:client -- --account YOUR_ACCOUNT --uncapped
+npm run dev:client:release -- --account YOUR_ACCOUNT --uncapped
+npm run dev:explorer:release -- --uncapped
+```
+
+Unfocused windows still use the app's 10 FPS background limit. Uncapping can increase CPU/GPU use.
+
 The app launchers choose a free loopback port at random by default. Pin one explicitly with
 `--vite-port <port>` when a deterministic URL is useful:
 

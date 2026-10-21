@@ -1818,17 +1818,16 @@ mod tests {
 
                 // The next tick starts after admission. Its unchanged clip cannot rescue a
                 // missed packet publication; only completion produces another changed level.
-                let before = client.current_dynamic_entity_views();
+                let before = client.capture_dynamic_entity_tick_baseline();
                 client
                     .world
                     .advance_authored_motion(Duration::from_millis(10));
-                assert_eq!(before, client.current_dynamic_entity_views());
+                assert_eq!(before.views, client.current_dynamic_entity_views());
                 client.world.advance_authored_motion(Duration::from_secs(1));
                 let batch = client
                     .dynamic_entity_tick_batch(
                         before,
-                        client.current_dynamic_entity_views(),
-                        DynamicEntityHostTime::new(f64::from(sequence)).unwrap(),
+                        || DynamicEntityHostTime::new(f64::from(sequence)).unwrap(),
                         1000.0,
                         &Default::default(),
                     )
@@ -1865,13 +1864,12 @@ mod tests {
                 .await
                 .is_empty()
         );
-        let before = client.current_dynamic_entity_views();
+        let before = client.capture_dynamic_entity_tick_baseline();
         client.world.advance_authored_motion(Duration::from_secs(1));
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                client.current_dynamic_entity_views(),
-                DynamicEntityHostTime::new(1.0).unwrap(),
+                || DynamicEntityHostTime::new(1.0).unwrap(),
                 1000.0,
                 &Default::default(),
             )
@@ -3551,9 +3549,9 @@ mod tests {
                 },
             ))));
         client.world.advance_authored_motion(Duration::ZERO);
-        let before = client.current_dynamic_entity_views();
+        let before = client.capture_dynamic_entity_tick_baseline();
         assert_eq!(
-            before[0]
+            before.views[0]
                 .motion
                 .as_ref()
                 .and_then(|motion| motion.ordinary.as_ref())
@@ -3578,13 +3576,12 @@ mod tests {
             ))));
         client.world.advance_authored_motion(Duration::ZERO);
         let after = client.current_dynamic_entity_views();
-        assert_eq!(before[0].placement, after[0].placement);
+        assert_eq!(before.views[0].placement, after[0].placement);
 
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                after,
-                DynamicEntityHostTime::new(1.0).unwrap(),
+                || DynamicEntityHostTime::new(1.0).unwrap(),
                 30.0,
                 &Default::default(),
             )
@@ -5003,7 +5000,7 @@ mod tests {
                 Some(pose.landblock_id),
             )
             .unwrap();
-        let before = client.current_dynamic_entity_views();
+        let before = client.capture_dynamic_entity_tick_baseline();
         let before_membership = client
             .world
             .scene
@@ -5061,8 +5058,7 @@ mod tests {
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                client.current_dynamic_entity_views(),
-                DynamicEntityHostTime::new(1.0).unwrap(),
+                || DynamicEntityHostTime::new(1.0).unwrap(),
                 30.0,
                 &tick.body_motions,
             )
@@ -5152,7 +5148,9 @@ mod tests {
             interest.clone(),
             flat_collision_scene_for_interest(&interest),
         );
-        let before = client.current_dynamic_entity_views();
+        client.world.tick();
+        let metadata_boundary = client.world.entities.mutation_boundary();
+        let before = client.capture_dynamic_entity_tick_baseline();
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         let tick = simulation::tick(
             Instant::now(),
@@ -5162,6 +5160,12 @@ mod tests {
             Some(&collision),
         )
         .unwrap();
+        assert!(
+            client
+                .world
+                .entities
+                .unchanged_since(guid, &metadata_boundary)
+        );
         let simulation::ClientBodyMotion::Physical(accepted) = &tick.body_motions[&guid] else {
             panic!("expected a physical route")
         };
@@ -5172,8 +5176,7 @@ mod tests {
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                client.current_dynamic_entity_views(),
-                DynamicEntityHostTime::new(1.0).unwrap(),
+                || DynamicEntityHostTime::new(1.0).unwrap(),
                 dt.as_secs_f64() * 1000.0,
                 &tick.body_motions,
             )

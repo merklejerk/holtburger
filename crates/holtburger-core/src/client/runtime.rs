@@ -382,11 +382,7 @@ impl ClientRuntime {
         self.advance_pack_exchange(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
         profile.checkpoint("activation_and_equipment");
-        let before_dynamic = if active_world {
-            self.current_dynamic_entity_views()
-        } else {
-            Default::default()
-        };
+        let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_baseline());
         let collision_snapshot = self
             .collision_coordinator
             .as_ref()
@@ -477,11 +473,12 @@ impl ClientRuntime {
         self.publish_character_motion_capabilities_if_changed();
 
         profile.checkpoint("entity_facts_and_supply");
-        let dynamic_batch = if !before_dynamic.is_empty() {
+        let dynamic_batch = if let Some(before_dynamic) =
+            before_dynamic.filter(|before| !before.views.is_empty())
+        {
             self.dynamic_entity_tick_batch(
                 before_dynamic,
-                self.current_dynamic_entity_views(),
-                self.dynamic_entity_host_time(),
+                || self.dynamic_entity_host_time(),
                 dt_duration.as_secs_f64() * 1_000.0,
                 &body_motions,
             )?

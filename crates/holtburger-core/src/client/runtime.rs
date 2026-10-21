@@ -300,7 +300,13 @@ impl ClientRuntime {
                             entities: self.world.entities.len(),
                         });
                     }
-                    self.advance_physics_tick(now, dt_duration, profile).await?;
+                    self.advance_physics_tick(
+                        now,
+                        dt_duration,
+                        profile,
+                        #[cfg(feature = "runtime-fixture")]
+                        None,
+                    ).await?;
                 }
             }
             // Socket/channel/timer awaits can all be immediately ready. End the executor turn
@@ -317,6 +323,7 @@ impl ClientRuntime {
         now: Instant,
         dt_duration: Duration,
         mut profile: RuntimePhaseProfile,
+        #[cfg(feature = "runtime-fixture")] fixture_content_wait: Option<&mut Duration>,
     ) -> Result<()> {
         self.advance_equipment_change(now).await?;
         self.advance_equipment_set(now).await?;
@@ -366,7 +373,18 @@ impl ClientRuntime {
         profile.checkpoint("world_tick");
         if let Some(coordinator) = self.collision_coordinator.as_mut() {
             let mut collision_events = coordinator.observe(&mut self.world);
-            collision_events.extend(coordinator.poll(&mut self.world, now));
+            #[cfg(feature = "runtime-fixture")]
+            let completions = match fixture_content_wait {
+                Some(waited) => {
+                    coordinator
+                        .poll_fixture_content(&mut self.world, now, waited)
+                        .await?
+                }
+                None => coordinator.poll(&mut self.world, now),
+            };
+            #[cfg(not(feature = "runtime-fixture"))]
+            let completions = coordinator.poll(&mut self.world, now);
+            collision_events.extend(completions);
             for event in collision_events {
                 self.handle_runtime_world_event(&event);
             }

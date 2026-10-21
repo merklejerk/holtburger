@@ -550,6 +550,40 @@ impl ClientCollisionCoordinator {
         events
     }
 
+    /// Drains content preparation at the replay publication boundary, including successor jobs.
+    /// Live execution retains nonblocking polling; only time awaiting workers is excluded from
+    /// fixture work totals. Publication still uses the normal revision and identity checks.
+    #[cfg(feature = "runtime-fixture")]
+    pub(super) async fn poll_fixture_content(
+        &mut self,
+        world: &mut WorldState,
+        now: Instant,
+        waited: &mut std::time::Duration,
+    ) -> Result<Vec<WorldEvent>> {
+        let mut events = Vec::new();
+        loop {
+            let workers = [
+                self.scene_worker.take(),
+                self.body_worker.take(),
+                self.remote_body_worker.take(),
+            ];
+            for worker in workers.into_iter().flatten() {
+                let begin = Instant::now();
+                let result = worker.await;
+                *waited += begin.elapsed();
+                result.context("Fixture collision content worker failed")?;
+            }
+            events.extend(self.poll(world, now));
+            // Publishing scene classification can start the scene's collision loading job.
+            if self.scene_worker.is_none()
+                && self.body_worker.is_none()
+                && self.remote_body_worker.is_none()
+            {
+                return Ok(events);
+            }
+        }
+    }
+
     /// Publishes only scene and body completions that still name their exact current revisions.
     pub fn poll(&mut self, world: &mut WorldState, _now: Instant) -> Vec<WorldEvent> {
         let mut events = Vec::new();
@@ -1696,6 +1730,50 @@ mod tests {
         })
         .await
         .expect("client collision worker did not install the expected physical body");
+    }
+
+    #[cfg(feature = "runtime-fixture")]
+    #[tokio::test]
+    async fn fixture_content_barrier_publishes_body_and_successor_scene_jobs() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        let destination = Guid(0x1234_0001);
+        world.seed_local_player_entity(guid, "Player", position(destination.0));
+        facts(&mut world, guid);
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+        coordinator.observe(&mut world);
+        let mut waited = std::time::Duration::ZERO;
+        coordinator
+            .poll_fixture_content(&mut world, Instant::now(), &mut waited)
+            .await
+            .unwrap();
+        assert!(matches!(
+            coordinator.body_readiness,
+            ClientBodyReadiness::Ready { .. }
+        ));
+        assert!(coordinator.destination_scene_ready(destination).unwrap());
+        let expected_owners = SimulationSceneInterest::prefetch_neighborhood(
+            position(destination.0),
+            CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .unwrap();
+        assert_eq!(
+            source.loaded.lock().unwrap().len(),
+            expected_owners.owners().len()
+        );
+        assert_eq!(source.prepared.load(Ordering::SeqCst), 1);
+        let revision = coordinator.snapshot().revision;
+        let previous_wait = waited;
+        assert!(
+            coordinator
+                .poll_fixture_content(&mut world, Instant::now(), &mut waited)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(coordinator.snapshot().revision, revision);
+        assert_eq!(waited, previous_wait);
     }
 
     #[tokio::test]

@@ -8,7 +8,7 @@ use holtburger_protocol::messages::object::types::ModelData;
 
 use super::pose_orientation::recover_pose_orientation;
 use crate::WorldEvent;
-use crate::context::WorldContextExt;
+use crate::context::{WorldContext, WorldContextExt};
 use crate::entity::Entity;
 use crate::state::WorldState;
 

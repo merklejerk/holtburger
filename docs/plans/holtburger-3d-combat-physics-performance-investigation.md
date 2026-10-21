@@ -110,13 +110,13 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** prove and correct the queued manual-release/combat handoff with an asset-free
-runtime regression. Combat preparation currently checks the old manual owner before movement
-consumes queued input; this is a concrete ordering defect to verify, not a reason to extend the
-fixture. Optimized Parry/Glam development dependencies are retained: **6.13%** less work with lower
-p95s in both compiler-configuration pairs. This is separate from source acceptance. Borrowed
-static selection and prepared-body reuse remain retained. Original same-build five-pair performance,
-representative combat/cadence, final quality review and user movement acceptance remain open.
+**Next action:** run the existing live stimulus after the proven manual-release/combat handoff
+fix. All 682 core tests, Clippy and the normal build pass. Input acceptance now precedes
+combat policy; the two-stage movement owner carries stop-notification decisions without retained
+state. Then run the original same-build five-pair comparison using an explicitly all-unoptimized
+candidate build, preserving the original baseline and excluding the **6.13%** compiler-configuration
+benefit from that gate. Representative combat/cadence, final quality review and user movement
+acceptance remain open. The fixture stays frozen.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1069,11 +1069,35 @@ gate or live movement recovery. Private runner, patch, executables and reports r
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
 
+### Combat handoff: accept queued movement before pursuit policy
+
+A concrete core ordering defect survived the performance changes: `ReleaseManual` is queued, but
+`BeginCombatEngagement` establishes desired combat immediately. The next authority tick previously
+ran `prepare_combat_movement` before reducing the queued release, so it cancelled the new melee
+engagement using the old manual owner. An asset-free runtime regression reproduced this exactly:
+with release queued, desired target became `None` instead of remaining the requested target.
+This proves the handoff defect, not every cause of the earlier live attack-activation failures.
+
+Core now accepts external movement input and expires pulses before combat preparation. A transient,
+single-use `PreparedMovementTick` retains the prior manual-owner and explicit-stop decisions until
+movement publication. Combat policy then derives pursuit, and movement reduces those controller
+commands before publishing in the same tick. Carry the stop decision through both reductions so
+an explicit stop retains its notification and a later server directive can still supersede it.
+No new retained controller fields, world-layer policy, queue, fixture format, clock or solver rule.
+Standalone movement tests use a test-only helper that runs the same two production stages.
+
+The regression now covers held input, queued release, pulse expiry and release/reacquisition:
+melee survives only after manual control actually ends. All **682 fixture-enabled core tests**,
+all-target core/harness Clippy with warnings denied, formatting/whitespace checks and normal
+binary build pass. Existing live-stimulus validation and original same-build performance comparison
+remain pending. The production change adds about 40 lines for the explicit input/policy/publication
+boundary; a transient value preserves wire-stop behavior without new state invalidation obligations.
+
 ### Development dependency compilation: separate configuration experiment
 
 Before this candidate, the workspace had no development package overrides: Parry and Glam used
-the same unoptimized profile as our game code. Both are consumed by the measured world/core collision path. The
-bounded build candidate sets `profile.dev.package.parry3d.opt-level = 3` and the same setting for
+the same unoptimized profile as our game code. Both are consumed by the measured world/core
+collision path. The bounded build candidate sets `profile.dev.package.parry3d.opt-level = 3` and the same setting for
 Glam. Workspace code remains unoptimized; development debug information, assertions and overflow
 checks retain their existing defaults. Distribution/profiling profiles are unchanged.
 

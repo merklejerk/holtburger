@@ -7,7 +7,7 @@ Status: **Two geometry-query optimizations implemented and verified. The user re
 improvement, but significant movement slowdown remains. A fresh combat capture confirms continued
 simulation-time loss; the next targets span core scheduling/publication and world query preparation.**
 
-A headless capture/replay fixture is now implemented and has completed three offline runs for a
+A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
 second scene. It provides a repeatable input workload; deterministic movement equivalence remains
 outside its present guarantees.
 
@@ -101,13 +101,11 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** evaluate bounded message-time placement reconciliation at its authoritative world
-mutation boundary. The current implementation still scans every entity after every message. Any
-replacement must capture every affected endpoint, include attachment descendants, preserve delayed
-relationships and deletion/instance semantics, and retain ordinary world maintenance behavior.
-Core before/after snapshots remain intact. The retained changes show a **15.47% exploratory** work
-reduction; the 25% target, alternating comparison, representative stress coverage, and live acceptance
-remain open.
+**Next action:** attribute per-tick journal costs and avoid repeated placement discovery that
+remains in world maintenance/core projection. The bounded message experiment roughly halves message
+work but shows higher exploratory physics work than its predecessor. Its net combined reduction is
+**18.79%** against the controlled starting baseline. The 25% target, alternating comparison,
+representative stress coverage, and live acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -135,7 +133,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Deferred support footprint | Successor to `8bfd690ce`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 31,024.50 ms, 15.47% below baseline; 994 world / 677 core tests and Clippy pass. |
+| Bounded message placement | Successor to `faa72f340`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
+| Deferred support footprint | `faa72f340`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 31,024.50 ms, 15.47% below baseline; 994 world / 677 core tests and Clippy pass. |
 | Borrowed-incarnation visibility | `8bfd690ce`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 32,071.31 ms, 12.61% below baseline. 994 world / 677 core tests and Clippy pass. |
 | Controlled obstruction/correction and CPU attribution | `f1c54bfef`; profile hashes in evidence | Strengthen wall/path/support/reset and return-after-residency tests without production changes; 994 world tests and Clippy pass. Full CPU stacks identify placement/visibility and BSP preparation targets. |
 | Direct storage membership | `c20bc9830`; binary/patch hashes in evidence | Retained for paired verification: exploratory combined median 33,167.17 ms, 9.63% below baseline; 994 world / 677 core tests pass. |
@@ -428,7 +427,7 @@ The ordinary path crosses several layers before and after collision integration:
 | Boundary | Owner and contract | Review finding |
 | --- | --- | --- |
 | Receive and sequence | Session reassembles transport messages; core additionally orders character GameEvents before mutation. | Preserve both ordering domains. The 8 ms network batch budget is checked after complete received event lists. |
-| Apply server facts | World handlers update entity/storage/placement authority and return typed world events. | `WorldState::handle_message` seeds and reconciles scene placements around every message, including messages unrelated to attachment topology. |
+| Apply server facts | World handlers update entity/storage/placement authority and return typed world events. | The original boundary seeded and reconciled all placements around every message. The current experiment seeds pending identities and reconciles changed identities plus descendants; periodic maintenance remains full. |
 | Project message effects | Core consumes world events, reconciles client behaviors, and publishes entity/dynamic changes. | Semantic publication runs after ordinary messages; some world events also trigger full dynamic upserts or snapshots. |
 | Prepare authority step | Core samples elapsed time, applies queued controls, advances movement commands, runs world maintenance, and installs matching content completions. | World maintenance scans placement/visibility state; collision preparation remains generation-gated. Content loading cannot be replaced with guessed availability. |
 | Admit and advance motion | Core admits a bounded interval before world-authored cursors and physical inputs advance. | Lost time affects motion as well as collision integration. A larger cap alone changes this contract. |
@@ -754,6 +753,72 @@ currently public, so mutation capture cannot be reliable until that bypass is re
 pending relationships and periodic world maintenance must continue to run; a core view cache does
 not address these ownership requirements. No such mutation/reconciliation refactor is implemented
 at this checkpoint.
+
+## Bounded message placement experiment: retained for paired verification
+
+The world message boundary now selects placement work from a store-owned identity journal rather
+than resolving every retained entity after every packet. EntityManager's raw map is private;
+insertions, removals, and mutable access record conservative invalidation. The existing deletion
+owner also records lifecycle-only visibility changes. Baseline seeding inspects pending identities,
+so data inserted through non-network world APIs retains the same observation baseline semantics.
+Four core population-count reads use the public `len` query instead of the former raw map.
+
+After ordinary handlers and deferred relationship input finish, the world moves the journal into
+`ScenePlacementScope::ChangedEntities`. A query-local parent-to-children graph expands that set to
+all current attachment descendants. Removed identities retire their old placement baseline. Selected
+entities retain the original store iteration order, and the same placement/body/event publication
+loop runs. A message that changes the local-player role uses `All`. Periodic world maintenance also
+uses `All`, retaining its full body-readiness, eviction, relationship, and visibility work.
+
+```mermaid
+flowchart LR
+    A[World entity and lifecycle mutations] --> J[Store identity journal]
+    D[Deferred relationship input] --> J
+    J --> C[Changed identities plus attachment descendants]
+    T[Periodic tick or local-player role change] --> F[All retained placements]
+    C --> R[World placement reconciliation]
+    F --> R
+    R --> E[World events and existing core publication]
+```
+
+The first prototype recorded changes only during message handling. Source review showed that this
+missed public world API changes between packets. Before measurement, it was replaced by the current
+always-recording journal; the typed reconciliation scope owns its set, with no active-recorder mode
+or cross-method start/finish obligation. A strengthened future-parent regression replaces a parent
+through a public world API, sends an unrelated packet, and requires the new incarnation and queued
+attachment to publish before any periodic tick. A new two-level chain regression covers root motion,
+reparenting, deletion, and prevention of stale-link revival after recreation.
+
+Tradeoffs are explicit: mutable borrows with no actual field change can schedule extra work, and
+selection still scans current attachment edges when the journal is nonempty. Rebuilding the small
+dependency map locally avoids a second retained graph and its update obligations. Reconciliation's
+own derived child-pose writes can conservatively schedule that child for the next boundary. Core's
+full before/after dynamic views remain unchanged. Standalone out-of-band body readiness continues
+through periodic maintenance; unrelated packets no longer rediscover all body work incidentally.
+No timestep, scheduling budget, physics participation policy, wire input, or content setting changes.
+
+Verification: **995 world tests** and **677 core tests** pass. Clippy across all targets for world,
+core, CLI, the 3D host, and debug harness passes with runtime-fixture enabled for core and warnings
+treated as errors; the replay executable builds. Formatting and whitespace checks pass. The exact
+binary and seven-file patch are preserved privately. One warmup and two exploratory measured
+replays produced combined work of **29,647.12 ms** and **29,965.08 ms**, median **29,806.10 ms**:
+**3.93%** below the preceding support-preparation experiment and **18.79%** below the controlled
+starting baseline. Both runs retain 5,741 messages, 1,519 physics steps, 1,500 active-start steps,
+peak 286 entities, and zero population mismatches.
+
+Message work was **2,309.71 / 2,307.56 ms**, versus **4,635.25 / 4,636.26 ms** in the preceding
+experiment. Physics work was **27,337.40 / 27,657.52 ms**, higher than that experiment's
+**26,621.91 / 26,155.57 ms**. Active physics p95 likewise rose to **20.372 / 20.823 ms** from
+**19.698 / 19.804 ms**, while remaining below the controlled starting baseline's **22.750–23.218 ms**.
+The journal adds work to mutable access; these sequential samples do not isolate its contribution
+from run-to-run variability. Record the tradeoff rather than calling the total reduction a universal
+per-tick improvement. The paired p95 gate and representative heavy-workload checks remain required.
+
+**Decision: retain for paired verification.** The message reduction is material and the mutation
+boundary is explicit, but further per-tick attribution is justified before final acceptance.
+[Sanitized evidence](evidence/h3d-combat-physics-2026-10-20/bounded-placement-reconciliation-exploratory.json)
+retains individual reports, hashes, validation, and limits. The 25% target and final alternating
+comparison remain open.
 
 ## Next investigation targets: the complete update pipeline
 

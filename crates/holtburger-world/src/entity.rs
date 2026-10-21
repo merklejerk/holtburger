@@ -31,7 +31,7 @@ use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
 use holtburger_protocol::traits::ProtocolUnpack;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EntityMotionSnapshot {
@@ -1831,7 +1831,10 @@ impl Entity {
 }
 
 pub struct EntityManager {
-    pub entities: HashMap<Guid, Entity>,
+    /// Retained descriptions; all mutable access records conservative relationship invalidation.
+    entities: HashMap<Guid, Entity>,
+    /// Identities changed since the world last selected its placement-reconciliation work.
+    mutations: BTreeSet<Guid>,
 }
 
 impl Default for EntityManager {
@@ -1844,11 +1847,44 @@ impl EntityManager {
     pub fn new() -> Self {
         Self {
             entities: HashMap::new(),
+            mutations: BTreeSet::new(),
         }
     }
 
     pub fn insert(&mut self, entity: Entity) {
+        self.record_mutation(entity.guid);
         self.entities.insert(entity.guid, entity);
+    }
+
+    /// Number of retained descriptions, independent of scene visibility.
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
+
+    /// Whether any descriptions are retained.
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+
+    /// Carry mutation identities into world reconciliation, including non-network world APIs.
+    /// Mutable access that changes no fields can produce harmless extra work.
+    pub(crate) fn take_mutations(&mut self) -> BTreeSet<Guid> {
+        std::mem::take(&mut self.mutations)
+    }
+
+    /// Inspect pending identities when establishing baselines before applying the next input.
+    pub(crate) fn mutation_guids(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.mutations.iter().copied()
+    }
+
+    /// Full periodic reconciliation already includes every retained identity and stale baseline.
+    pub(crate) fn clear_mutations(&mut self) {
+        self.mutations.clear();
+    }
+
+    /// Lifecycle metadata can change visibility without mutating the retained description.
+    pub(crate) fn record_mutation(&mut self, guid: Guid) {
+        self.mutations.insert(guid);
     }
 
     pub fn contains(&self, guid: impl Into<Guid>) -> bool {
@@ -1868,7 +1904,10 @@ impl EntityManager {
     }
 
     pub fn get_mut(&mut self, guid: impl Into<Guid>) -> Option<&mut Entity> {
-        self.entities.get_mut(&guid.into())
+        let guid = guid.into();
+        let entity = self.entities.get_mut(&guid)?;
+        self.mutations.insert(guid);
+        Some(entity)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Entity> {
@@ -1885,7 +1924,10 @@ impl EntityManager {
     }
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {
-        self.entities.remove(&guid.into())
+        let guid = guid.into();
+        let entity = self.entities.remove(&guid)?;
+        self.record_mutation(guid);
+        Some(entity)
     }
 }
 

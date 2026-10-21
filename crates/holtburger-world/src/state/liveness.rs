@@ -6,6 +6,7 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::object::messages::description::ObjDescEventData;
 use holtburger_protocol::messages::object::types::ModelData;
 
+use super::attachment_lifecycle::ScenePlacementScope;
 use super::pose_orientation::recover_pose_orientation;
 use crate::WorldEvent;
 use crate::context::{WorldContext, WorldContextExt};
@@ -308,6 +309,7 @@ impl WorldState {
         self.entity_lifecycle
             .get_or_default_mut(guid)
             .delete_request = Some(EntityDeleteRequest::Unconditional);
+        self.entities.record_mutation(guid);
     }
 
     /// Applies SmartBox's three-way instance-timestamp disposition from acclient.c:137144-137176:
@@ -349,6 +351,7 @@ impl WorldState {
         if disposition == EntityInstanceDeleteDisposition::Applied {
             self.retire_entity_storage(guid);
         }
+        self.entities.record_mutation(guid);
         disposition
     }
 
@@ -638,7 +641,8 @@ impl WorldState {
         let mut events = Vec::new();
         let now = self.current_server_time();
         self.sweep_eviction_queue(now, &mut events);
-        self.reconcile_scene_placements(&mut events);
+        self.prepare_deferred_scene_placements(&mut events);
+        self.reconcile_scene_placements(&mut events, ScenePlacementScope::All);
         self.maintain_visibility_prune_deadlines(now);
 
         events

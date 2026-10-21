@@ -109,7 +109,7 @@ and behavior tests. The user explicitly redirected the effort away from further 
 combat qualification remains a final validation obligation rather than a prerequisite to optimize.
 The first concrete experiment terminates candidate queries once an initial collision at time zero
 has won; later candidates cannot change the first blocker, while accepted-path coverage still runs.
-All 996 world and 681 core tests, broad Clippy, and the fixture build pass; paired measurement is next. Retain or
+All 996 world and 681 core tests, broad Clippy, and the fixture build pass; two alternating pairs are running. Retain or
 roll back according to measured benefit. The valid end-to-end result remains **23.09%**, below
 **25%**; live admission remains **93.30%**, below **99%**. Preserve the original baseline, all samples,
 representative combat coverage, architecture/quality review and user movement acceptance gates.
@@ -967,9 +967,14 @@ caches, contracts, metrics, admission settings, or fixture formats. The source c
 
 Existing **996 world** and **681 core** tests, all-target world/core/harness Clippy with warnings
 denied, the fixture binary build, formatting and whitespace checks pass. Measurement against the
-frozen trace is next. This is an optimization hypothesis, not an established speedup; use the saved
-current binary for marginal comparison and preserve the original performance baseline for the
-unchanged overall acceptance gate.
+frozen trace is running at checkpoint `76095ab5b`: two alternating pairs against the saved
+`b3edc9c96` executable, one full warmup and one measurement per invocation. The latter has the same
+performance core as the qualified candidate plus only live-harness additions; no original
+acceptance rebaseline occurs. Private outputs and exact patch/binary hashes are in
+`caps/runtime-fixtures/2026-10-21-4ae1/initial-hit-termination/`. Keep every sample and the unchanged
+full-trace, population, activation and outcome checks. This is an optimization hypothesis, not an
+established speedup; preserve original `9cb7ba24e` plus matched diagnostic tooling for the unchanged
+overall acceptance gate. No compiler, profiler, or other benchmark runs during measurement.
 
 ## Next investigation targets: the complete update pipeline
 

@@ -88,7 +88,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Five alternating pairs with explicit warmup completed; 23.44% reduction misses the work target. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
-| 3. Simplify core orchestration/publication | In progress | Full projection remains intact; an ordered identity merge replaces the per-tick matching hash map for exploratory measurement. Preserve all view/path semantics and compare measured work. |
+| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected after paired exploration; original matching restored. Review repeated full projection without weakening view/path semantics. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
@@ -103,8 +103,9 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** measure the ordered publication-merge experiment against preserved candidate
-`bc9e77f6e`. The completed alternating comparison's **23.44%** median reduction does not meet the **25%** target; the earlier
+**Next action:** investigate repeated full dynamic-view projection; the ordered identity-merge
+experiment did not demonstrate a benefit and was reverted. The completed alternating comparison's
+**23.44%** median reduction does not meet the **25%** target; the earlier
 **25.26%** sequential exploratory result is superseded for acceptance purposes.
 Representative stress coverage, live cadence, final architecture/quality review, and user movement
 acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
@@ -136,6 +137,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
+| Ordered publication merge | Experiment `82b66cfa5`, subsequently reverted | Rejected: two alternating exploratory pairs give 27,820.23 → 27,861.62 ms median work (0.15% higher), with conflicting paired directions. All workload checks and 678 pre-rollback core tests pass; no map-removal benefit demonstrated. |
 | Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
 | Borrowed BSP candidates | `72c2e844a`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
 | Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
@@ -966,28 +968,69 @@ attachment visibility, and full accepted paths. No persistent publication cache 
 implementation has been introduced. The completed alternating benchmark used unchanged source
 throughout all ten invocations; only investigation documentation changed during measurement.
 
-### Ordered publication merge: exploratory measurement pending
+### Ordered publication merge: rejected after exploratory measurement
 
-Before introducing metadata validity state, remove a narrower repeated preparation step in core's
-`dynamic_entity_tick_batch`: the old code allocates and populates a GUID hash map from the entire
+Before introducing metadata validity state, the experiment targeted a narrower preparation step in
+core's `dynamic_entity_tick_batch`: the retained code allocates and populates a GUID hash map from the entire
 before snapshot on every tick, then probes it for every after view. Both live collections are
-already projected in GUID order. The experiment normalizes both input vectors in place and walks
+already projected in GUID order. Experiment `82b66cfa5` normalized both input vectors in place and walked
 the two ordered populations together. Explicit normalization keeps the boundary safe for unordered
 captured inputs; sorting an already ordered live vector requires only a linear scan.
 
 Full before/after projection, complete view equality, generation guards, accepted paths, contact and
-membership updates, and batch construction remain intact. No persistent cache, mutation contract,
-time-admission change, or renderer change is added. The tradeoff is two in-place ordering passes
+membership updates, and batch construction remained intact. No persistent cache, mutation contract,
+time-admission change, or renderer change was added. The tradeoff was two in-place ordering passes
 and merge control flow in exchange for removing the per-tick map allocation and hashing. The
-benefit is unproven until measured; the larger metadata-reuse proposal remains unimplemented.
+larger metadata-reuse proposal remains unimplemented.
 
-All **678 core tests** pass, including a new asset-free population-transition scenario covering
+All **678 core tests** passed before rollback, including an asset-free population-transition scenario covering
 unordered inputs, removal, arrival, replacement generation, changed metadata, and an unchanged
-survivor. Existing motion/contact/path tests remain applicable. Core all-target Clippy with
-`runtime-fixture` and `-D warnings`, formatting, and whitespace checks pass. Compare the preserved
-pre-experiment executable with the rebuilt candidate in two alternating exploratory pairs, each
-invocation using a full warmup before its measured replay. This is a retention experiment, not a
-substitute for the required five-pair final performance gate.
+survivor. Existing motion/contact/path tests remained applicable. Core all-target Clippy with
+`runtime-fixture` and `-D warnings`, formatting, and whitespace checks passed. The preserved
+pre-experiment executable and rebuilt candidate ran two alternating exploratory pairs, each
+invocation using a full warmup before its measured replay:
+
+| Pair | Previous candidate combined ms | Merge candidate combined ms | Reduction |
+| --- | ---: | ---: | ---: |
+| 1 | 27,979.00 | 28,141.09 | -0.58% |
+| 2 | 27,661.46 | 27,582.14 | 0.29% |
+
+The medians are **27,820.23 ms** and **27,861.62 ms**, respectively: **0.15% more work**, with
+opposite paired directions. All workload checks and content provenance passed. Individual p95s
+were 19.586/19.543 ms before and 19.753/19.259 ms with the merge; these samples do not establish
+a consistent p95 improvement either. See [rejected experiment evidence](evidence/h3d-combat-physics-2026-10-20/ordered-publication-merge-rejected.json).
+
+**Decision: reject.** Removing the map did not demonstrate a repeatable benefit for the added
+sorting/merge control flow. The production file is restored byte-for-byte to `da14a4972`, including
+removal of the experiment's specific test. The commit, private executable/patch, and
+sanitized reports are retained for reproducibility. The retained core implementation remains the one verified
+by 677 tests before this experiment; no behavior or scheduling change survives. This exploration
+does not replace the five-pair final gate, whose 23.44% result remains the accepted measurement of
+the retained candidate. Investigate the larger full-projection cost next.
+
+### Heavy-workload harness gaps confirmed from source
+
+`runtime_scene_fixture` currently records only inbound messages, time samples, selection, and
+physics boundaries. `RuntimeFixtureCapture::record_command` explicitly rejects `DriveSelf`,
+engagement, and attack commands. The existing `live_player_action_probe` exercises an emote's
+return to steady playback and a combat-stance transition; it does not attack enemies or measure
+simulation admission. Neither harness currently supplies the original heavy combat workload.
+
+The public command surface already has typed `DriveSelf(PlayerDriveIntent)` and
+`BeginCombatEngagement { target, profile }` operations. A diagnostic can use those production
+controllers; it need not invent a second movement or attack implementation. Before using such
+inputs as replay evidence, explicitly encode and validate the admitted input subset, preserve
+dispatch order and held-input duration, and reject unsupported control variants. Live-only
+cadence diagnostics do not require extending replay serialization.
+
+Workload qualification must remain separate from login success or elapsed observation time.
+Retain population, active movers, projectiles, geometry identity/readiness, requested controls,
+accepted paths/displacement and contacts, and summed admitted/elapsed time after startup.
+The scene contact profiler currently reports body/outcome/report-touch counts, while the core
+simulation profiler reports elapsed/admitted intervals and advanced bodies. Advanced bodies and
+contact outcomes are not interchangeable with requested movers or projectiles. Add any missing
+workload census at the layer owning that classification, rather than inferring it from presentation
+events. No new live workload or admission result is claimed by this source review.
 
 The evidence supports reviewing the system across layers before replacing the collision solver.
 The following are investigation targets, not implemented refactors.

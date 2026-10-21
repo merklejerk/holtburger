@@ -256,9 +256,19 @@
 		--ui-spell-component-icon-size: 20px;
 		--ui-spell-component-row-gap: 2px;
 		--ui-spell-component-label-gap: 6px;
-		/* Character-sheet color overrides resolve against the palette at the consumer:
-		   --ui-character-xp-color defaults to accent; luminance, buff, and upgrade
-		   colors default to success; --ui-character-debuff-color defaults to danger. */
+		/* Shared HUD, character-sheet, and item XP bars use a saturated green. */
+		--ui-character-xp-color: #32d85b;
+		/* Character HUD spacing: identity-to-vitals gap and gaps within the identity row. */
+		--ui-character-hud-gap: 4px;
+		--ui-character-hud-inline-gap: calc(6em / 13);
+		/* HUD-only XP thickness; the track and its grid row share this value. */
+		--ui-character-hud-xp-height: 3px;
+		/* Server typography; optional --ui-character-hud-server-color defaults to the muted palette. */
+		--ui-character-hud-server-font-style: italic;
+		--ui-character-hud-server-font-weight: 500;
+		/* Other character color overrides resolve against the palette at the consumer:
+		   luminance, buff, and upgrade colors default to success;
+		   --ui-character-debuff-color defaults to danger. */
 		/* Enchantment stat headings and overridden-spell tree geometry. */
 		--ui-enchantments-heading-margin: 10px 0 4px;
 		--ui-enchantments-heading-font-size: 0.9em;
@@ -1289,7 +1299,7 @@
 		border-radius: 0.2rem;
 		overflow: hidden;
 		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);
-		color: var(--ui-character-xp-color, var(--ui-color-accent));
+		color: var(--ui-character-xp-color, var(--ui-color-success));
 	}
 	.ui-progress::-webkit-progress-bar {
 		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);

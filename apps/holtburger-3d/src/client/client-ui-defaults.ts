@@ -32,7 +32,7 @@ export const CLIENT_UI_DEFAULTS = {
 		anchor: "top-left",
 		offset: { x: 16, y: 16 },
 		size: { width: 340, height: 72 },
-		minSize: { width: 250, height: 60 },
+		minSize: { width: 250, height: 63 },
 		resizable: true,
 	},
 	partyHud: {

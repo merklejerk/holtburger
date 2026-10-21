@@ -3,12 +3,11 @@
 Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21 UTC.
 Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
 
-Status: **The initial geometry fixes improved user-reported movement. The remaining heavy-fight
-slowdown has not been retested with the follow-up changes. The metadata-reuse comparison completed
-with a raw 23.33% median work reduction, below the 25% target, and one failed active-workload check.
-It is invalid for acceptance. The last valid comparison of the preceding candidate showed 23.44%.
-The final performance, stress, live-cadence,
-and user-acceptance gates remain open.**
+Status: **The initial geometry fixes improved user-reported movement. The latest valid
+all-unoptimized five-pair comparison shows 23.46% less combined message/physics work, below the
+25% target, with every candidate physics p95 below every baseline p95. A control-handoff bug is
+fixed. Representative heavy combat and the user's movement-feel acceptance remain open.
+Fixture development is frozen; engineering proceeds using existing replay and correctness tests.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
 second scene. It provides a repeatable input workload; deterministic movement equivalence remains
@@ -110,14 +109,26 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** run the existing live stimulus with the new accepted-mode/state/target records
-to diagnose the remaining attack-readiness failure. Non-fixture host checks now pass. The completed all-unoptimized five-pair gate is valid but fails:
-**36,614.27 → 28,023.24 ms**, **23.46%** lower, below 25%; every candidate p95 is below every
-baseline p95. Preserve all ten samples and the original statistic. The delivered development
-profile already retains optimized dependencies, so it also needs an original-source baseline built
-with those same settings; do not compare an optimized candidate with an unoptimized baseline or
-count the separate 6.13% build benefit as a source gain. Representative combat/cadence and user
-acceptance remain open. The fixture, original source baseline and numeric gates are unchanged.
+**Next action:** measure the bounded core-publication ownership experiment, retain or revert it,
+then act on existing solver CPU attribution. Do not expand the fixture or pursue melee readiness.
+The read-only equipment inspector proves the supplied character has a wand equipped; ACE rejects
+melee with a caster equipped (`Player_Combat.cs:811–819`). Thus the seven `NonCombat` responses in
+the latest 65-second probe are an invalid combat stimulus, not evidence that the solver needs a
+melee fix. Representative live qualification must use the character's supported combat setup and
+remains a final validation task, independent of solver optimization.
+
+The completed all-unoptimized five-pair gate remains **36,614.27 → 28,023.24 ms**, **23.46%** lower,
+below 25%; preserve all ten samples and the original statistic. The delivered development profile
+also needs comparison against original source with the same dependency optimization settings;
+that baseline is built. Do not count the separate 6.13% compiler-profile benefit as a source gain.
+The fixture, original source baseline and numeric gates are unchanged.
+
+**Publication ownership experiment:** consume each before-view once; move unchanged presentation
+metadata into the after-view instead of cloning it, and retain only the old placement for accepted
+path construction. Change admission remains owned by the projector, eliminating a second full-view
+comparison. No persistent cache, new invalidation rule, solver policy or fixture input is added.
+All 682 core tests and core/harness all-target Clippy pass. Performance is unmeasured; retention
+is conditional on the existing alternating comparison.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.

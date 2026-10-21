@@ -110,9 +110,12 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** optimize world-owned movement sweeps using the qualified live attribution:
-**8.96 ms/tick** in mobile movement sweeps, versus **0.18 ms/tick** in semantic facts. Keep the
-fixture frozen and preserve bounded solver behavior. Retained `02bdbe098` admitted **99.36%**
+**Next action:** measure the static-query borrowing candidate against retained `02bdbe098` on
+the frozen trace. Shared candidate selection streams already-resolved geometry instead of
+collecting it and making each consumer repeat the lookup. All 996 world / 681 core tests,
+all-target Clippy, build and formatting checks pass; no speedup is claimed before measurement.
+Qualified live attribution remains **8.96 ms/tick** in movement sweeps versus **0.18 ms/tick**
+in semantic facts. Keep bounded solver behavior. Retained `02bdbe098` admitted **99.36%**
 over **64.98 s** of retained alternate-scene live intervals, but local combat never activated and
 mean movers were **96**, versus about **153** in the original fight. This is useful qualified
 cadence evidence, not heavy-fight acceptance. The publication shortcut is rejected and reverted
@@ -1069,6 +1072,27 @@ change and measured marginal benefit. These two pairs do not establish the overa
 gate or live movement recovery. Private runner, patch, executables and reports remain under
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
+
+### Static candidate selection: stream already-resolved borrowed geometry
+
+The qualified live profile directs work toward movement sweeps. Source review found a shared
+static-query duplication: shadow selection already produces ordered, deduplicated collider IDs;
+scene selection resolves their geometry to compute the building-shell leaf policy, collects a
+second vector, and every query consumer looks up the same geometry again. The candidate turns
+that second stage into a borrowing iterator and includes the already-resolved collider in its
+selection product. Grounded obstruction, support, overlap, swept movement, surface ray and solid
+recovery consumers read that borrowed geometry directly.
+
+Shadow selection still owns its original ordering/deduplication. The same source geometry and
+retail building-shell center-solid policy are used; no candidate pruning, narrow-phase math,
+coverage, path construction, clock or fixture changes. The selector and six consumers cut over
+together; the existing membership/policy test compares the same ordered identities and policy.
+The source change removes 16 lines overall, including the smaller test representation. All
+**996 world tests** and **681 fixture-enabled core tests**, formatting/whitespace checks, and
+all-target world/core/harness Clippy with warnings denied, and the normal binary build pass.
+Frozen-trace marginal measurement remains pending. There is no performance claim yet; retain only
+if existing behavior holds and measurement shows no repeatable work regression. A speedup claim
+requires measured benefit; the original end-to-end acceptance gate remains unchanged.
 
 ### Unchanged semantic publication: rejected after marginal measurement
 

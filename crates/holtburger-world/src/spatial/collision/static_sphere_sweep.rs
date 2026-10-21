@@ -480,9 +480,7 @@ impl CollisionScene {
             if excluded.contains(&selected.reference) {
                 continue;
             }
-            let collider = &self.landblocks[&selected.reference.owner]
-                .static_geometry
-                .colliders[selected.reference.collider_index];
+            let collider = selected.collider;
             // Reanchor before adding the half-displacement so a distant request frame cannot
             // round away short movement when refining these landblock-local bounds.
             let center =

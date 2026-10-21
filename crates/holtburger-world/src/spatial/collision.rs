@@ -763,10 +763,12 @@ struct ColliderReference {
 }
 
 /// One selected static collider and the retail BSP leaf policy for this spatial membership.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SelectedCollider {
+#[derive(Debug, Clone, Copy)]
+struct SelectedCollider<'a> {
     /// Stable reference to source-owned collider geometry.
     reference: ColliderReference,
+    /// Geometry resolved once by selection and borrowed for this query.
+    collider: &'a PlacedCollider,
     /// Whether a center-containing solid BSP leaf obstructs this query.
     center_solid: bool,
 }
@@ -1324,8 +1326,7 @@ impl CollisionScene {
         );
         for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
-            let collider = &self.landblocks[&reference.owner].static_geometry.colliders
-                [reference.collider_index];
+            let collider = selected.collider;
             let local_center =
                 anchor_to_landblock(request.sweep.end, request.sweep.anchor, reference.owner);
             if !collider
@@ -1524,8 +1525,7 @@ impl CollisionScene {
             GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
         for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
-            let collider = &self.landblocks[&reference.owner].static_geometry.colliders
-                [reference.collider_index];
+            let collider = selected.collider;
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
             // One contract mapping for every shape's supports.
             let mut push = |support: super::bsp_query::ShapeSupport| {
@@ -2445,8 +2445,7 @@ impl CollisionScene {
             GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
         for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
-            let collider = &self.landblocks[&reference.owner].static_geometry.colliders
-                [reference.collider_index];
+            let collider = selected.collider;
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
             if !collider
                 .bounds
@@ -2561,15 +2560,16 @@ impl CollisionScene {
         contacts
     }
 
-    fn selected_colliders(
-        &self,
+    fn selected_colliders<'a>(
+        &'a self,
         query_cells: GlobalCellRange,
-        placement: &SpatialMembership,
-    ) -> Vec<SelectedCollider> {
+        placement: &'a SpatialMembership,
+    ) -> impl Iterator<Item = SelectedCollider<'a>> + 'a {
+        // Shadow selection owns ordering/deduplication; stream geometry without another buffer.
         self.shadows
             .selected_colliders(query_cells, placement)
             .into_iter()
-            .map(|reference| {
+            .map(move |reference| {
                 let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                     [reference.collider_index];
                 // Retail keeps a reached building in the cell array but disables its BSP
@@ -2582,10 +2582,10 @@ impl CollisionScene {
                 ) || !placement.reaches_interior_in(reference.owner);
                 SelectedCollider {
                     reference,
+                    collider,
                     center_solid,
                 }
             })
-            .collect()
     }
 }
 
@@ -5711,25 +5711,14 @@ mod tests {
             references([0, 1, 2, 3])
         );
         assert_eq!(
-            scene.selected_colliders(owner_cells(owner), &straddling),
-            vec![
-                SelectedCollider {
-                    reference: references([0])[0],
-                    center_solid: true,
-                },
-                SelectedCollider {
-                    reference: references([1])[0],
-                    center_solid: false,
-                },
-                SelectedCollider {
-                    reference: references([2])[0],
-                    center_solid: true,
-                },
-                SelectedCollider {
-                    reference: references([3])[0],
-                    center_solid: true,
-                },
-            ]
+            scene
+                .selected_colliders(owner_cells(owner), &straddling)
+                .map(|selected| (selected.reference, selected.center_solid))
+                .collect::<Vec<_>>(),
+            references([0, 1, 2, 3])
+                .into_iter()
+                .zip([true, false, true, true])
+                .collect::<Vec<_>>()
         );
     }
 

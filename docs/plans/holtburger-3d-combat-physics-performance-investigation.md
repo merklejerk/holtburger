@@ -92,7 +92,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 3. Simplify core orchestration/publication | In progress | Control handoff fixed; metadata reuse and structural simplifications retained. Latest valid all-unoptimized five-pair comparison gives 23.46% less combined work, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; full all-unoptimized result is 23.46%, below the unchanged target. |
 | 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. Attack owner still never activates and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
-| 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
+| 6. Clean up and hand off | In progress | Architecture/controlled-correctness review and host/TUI Clippy, 375 host tests, debug build and sidecar smoke pass. Remaining readiness diagnostic, delivered-profile performance verification and user acceptance remain explicit. |
 
 Completed foundations:
 
@@ -110,8 +110,8 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** diagnose the remaining attack-readiness failure from accepted live facts and
-complete non-fixture host checks. The completed all-unoptimized five-pair gate is valid but fails:
+**Next action:** run the existing live stimulus with the new accepted-mode/state/target records
+to diagnose the remaining attack-readiness failure. Non-fixture host checks now pass. The completed all-unoptimized five-pair gate is valid but fails:
 **36,614.27 → 28,023.24 ms**, **23.46%** lower, below 25%; every candidate p95 is below every
 baseline p95. Preserve all ten samples and the original statistic. The delivered development
 profile already retains optimized dependencies, so it also needs an original-source baseline built
@@ -190,8 +190,8 @@ shows that the broader runtime pipeline still exceeds its available budget under
 **Verdict:** the architecture trace and controlled-scenario deliverables are complete for the
 retained implementation at `114754c4f`. The reviewed optimizations and control handoff are ready
 within that source scope. This does not approve heavy-fight behavior, performance acceptance or
-rollout: the all-unoptimized five-pair comparison misses 25%, live attacks remain inactive, and final host checks
-and user movement acceptance are pending. No general rigid-body solver replacement is justified
+rollout: the all-unoptimized five-pair comparison misses 25% and live attacks remain inactive.
+Host tests/build/smoke now pass; diagnostic readiness and user movement acceptance remain pending. No general rigid-body solver replacement is justified
 by the current measurements.
 
 The ordinary path is now explicit: session delivers ordered packets; world accepts authoritative
@@ -1130,6 +1130,35 @@ gate or live movement recovery. Private runner, patch, executables and reports r
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
 
+### Delivered development configuration: matched original-source baseline prepared
+
+The all-unoptimized result above remains a valid **23.46%** miss. The delivered development profile
+was already changed to optimized Parry/Glam before that result. To assess source changes in this
+actual configuration, preserve the same original `9cb7ba24e` source plus the byte-identical
+readiness diagnostic patch, and compile it with Parry/Glam level 3 while all workspace code stays
+at level 0. Both original and candidate must use those settings. This is a different compiler
+configuration, not a different original code baseline or a lower target; neither compare unlike
+builds nor add the 6.13% compiler speedup to source savings.
+
+Built the original in unique target directory
+`/tmp/h3d-original-baseline-fast-dependencies-target-20261021`, never the main target. Its **679 core**
+and **990 world** tests pass in that configuration. The preserved executable SHA-256 is
+`142dd389cf5560e81e1ba33230893e137aaab3384a3198e2e4dfb1bc56ac5ab5`; retained optimization/control
+symbols are absent, as expected for the original source. Exact patch, source/build command and
+binary attribution are private in `caps/runtime-fixtures/2026-10-21-4ae1/original-baseline-dev-physics-dependencies/`.
+The corresponding five-pair measurement has not started. The all-unoptimized failure remains
+preserved regardless of this later result.
+
+### Host integration checks after retained changes
+
+All-target Clippy across world, core, the 3D host and the TUI passes with warnings denied and
+without the fixture feature. The **375 host tests** pass. The normal debug sidecar builds, and
+`HOLTBURGER_HOST_BIN=/home/cluracan/code/holtburger/target/debug/holtburger-3d-host npm run --prefix apps/holtburger-3d smoke:sidecar`
+passes client and Explorer mode admission/status plus clean shutdown against an empty content
+repository. No game socket or rendered visual acceptance is involved. The TUI was compiled for
+linting, not run. These checks cover the shared API cutovers and ordinary host composition; live
+combat/readiness, representative original-fight workload and user movement acceptance remain open.
+
 ### Final-source same-build comparison: explicitly exclude dependency optimization
 
 Candidate `114754c4f` has now also passed **682 core tests** and the fixture build with explicit
@@ -1691,6 +1720,22 @@ subtraction, accumulated physics clock and repeated internal-update calls establ
 they do not establish a 1/30 s elapsed-time discard policy. Our 1/30 s maximum is our collection
 stability contract, not a retail requirement. Retain the bounded solver contract while evaluating
 host catch-up; retail's larger maximum does not prove our crowd/force solver can take larger steps.
+
+### Remaining readiness question: observe accepted mode and target layout
+
+The fixed handoff leaves a concrete acceptance failure: desired melee survives, but no attack
+becomes active. Narrowly extend the existing live diagnostic records with the accepted combat
+mode (including mode-only updates), actual control state and current published target root pose.
+This separates charging/waiting from activation and permits inspection of mode acknowledgement
+and target height/layout. No guessed cylinder admission or frontend-derived permission is added.
+The core state type is serialized by a local diagnostic adapter rather than gaining a public wire
+contract. An unobserved mode stays explicitly absent.
+
+This does not reopen fixture development: stationary replay inputs/format, bootstrap barrier,
+control stimuli, target selection and acceptance criteria are unchanged. The additional records
+answer the specific unresolved readiness question exposed by the corrected handoff. Existing
+probe behavior tests (**2**), Clippy with warnings denied, normal build and formatting pass.
+The next live window remains a diagnostic; lack of active combat must still fail qualification.
 
 ### Live handoff validation: desired combat survives, readiness remains unresolved
 

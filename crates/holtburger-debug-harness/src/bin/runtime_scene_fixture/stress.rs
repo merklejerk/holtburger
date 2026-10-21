@@ -14,7 +14,7 @@ use holtburger_core::{
     DynamicEntityPresentationClass, DynamicEntitySnapshot, DynamicEntityTickBatch,
     DynamicEntityView,
 };
-use holtburger_protocol::messages::combat::AttackHeight;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, MissedTickBehavior, timeout, timeout_at};
@@ -88,6 +88,8 @@ enum Record<'a> {
         seconds: u64,
         /// Starting geometry identity and coordinates.
         pose: WorldPosition,
+        /// Last observed authoritative mode; absence means no accepted mode was observed yet.
+        combat_mode: Option<CombatMode>,
     },
     Requested {
         /// Enqueue time relative to the observation window; not command dispatch acknowledgement.
@@ -114,8 +116,21 @@ enum Record<'a> {
         at_seconds: f64,
         /// Accepted desired target; a request alone cannot establish active engagement.
         desired_target: Option<Guid>,
+        /// Published target root pose, for separating approach/height constraints from readiness.
+        target_pose: Option<WorldPosition>,
+        /// Distinguishes charging and waiting from actual attack activation.
+        #[serde(serialize_with = "serialize_combat_state")]
+        state: ClientCombatControlState,
+        /// Last accepted mode, independent of the requested attack profile.
+        combat_mode: Option<CombatMode>,
         /// Shared attack owner actually entered its active state.
         active: bool,
+    },
+    CombatMode {
+        /// Observation time relative to the same window as control requests.
+        at_seconds: f64,
+        /// Authoritative mode update, even when the attack owner's state does not change.
+        mode: CombatMode,
     },
     Finished {
         /// Actual elapsed observation window.
@@ -127,6 +142,14 @@ enum Record<'a> {
         /// At least one accepted attack-owner active state; requests alone cannot pass this check.
         combat_active_observed: bool,
     },
+}
+
+/// Keep the diagnostic adapter local; the core control-state type needs no wire dependency.
+fn serialize_combat_state<S: serde::Serializer>(
+    state: &ClientCombatControlState,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.collect_str(&format_args!("{state:?}"))
 }
 
 /// Keep only placement and target-selection facts; animation/appearance clones would add work
@@ -162,6 +185,8 @@ struct Mirror {
     dead: BTreeSet<(Guid, u64)>,
     /// Accepted attack-owner level prevents repeatedly restarting a live engagement.
     desired_target: Option<Guid>,
+    /// Accepted world mode used only by diagnostic records, never by this probe's control policy.
+    combat_mode: Option<CombatMode>,
 }
 
 impl Mirror {
@@ -170,6 +195,7 @@ impl Mirror {
             ClientViewEvent::ApplicationSnapshot(snapshot) => {
                 self.replace(&snapshot.dynamic);
                 self.desired_target = snapshot.combat.desired.map(|desired| desired.target);
+                self.combat_mode = Some(snapshot.combat_mode);
             }
             ClientViewEvent::DynamicEntity(DynamicEntityEvent::Snapshot { snapshot }) => {
                 self.replace(snapshot);
@@ -216,6 +242,9 @@ impl Mirror {
             }
             ClientViewEvent::CombatStatusUpdated(status) => {
                 self.desired_target = status.desired.map(|desired| desired.target);
+            }
+            ClientViewEvent::CombatModeUpdated { mode } => {
+                self.combat_mode = Some(*mode);
             }
             _ => {}
         }
@@ -370,6 +399,7 @@ async fn observe(
         player,
         seconds,
         pose,
+        combat_mode: mirror.combat_mode,
     })?;
     // Same stderr stream as profiles defines the audit window; omit its boundary-straddling tick.
     eprintln!("H3D_STRESS_WINDOW start");
@@ -398,7 +428,18 @@ async fn observe(
                         ClientViewEvent::CombatStatusUpdated(status) => {
                             let active = status.state == ClientCombatControlState::Active;
                             combat_active_observed |= active;
-                            emit(Record::Combat { at_seconds: start.elapsed().as_secs_f64(), desired_target: status.desired.map(|desired| desired.target), active })?;
+                            let target_pose = status.desired.and_then(|desired| {
+                                mirror.entities.get(&desired.target).and_then(|entity| {
+                                    match entity.placement {
+                                        DynamicEntityPlacementView::World { pose, .. } => Some(pose),
+                                        _ => None,
+                                    }
+                                })
+                            });
+                            emit(Record::Combat { at_seconds: start.elapsed().as_secs_f64(), desired_target: status.desired.map(|desired| desired.target), target_pose, state: status.state, combat_mode: mirror.combat_mode, active })?;
+                        }
+                        ClientViewEvent::CombatModeUpdated { mode } => {
+                            emit(Record::CombatMode { at_seconds: start.elapsed().as_secs_f64(), mode: *mode })?;
                         }
                         ClientViewEvent::PresentationTick { dynamic: Some(batch), .. }
                         | ClientViewEvent::DynamicEntity(DynamicEntityEvent::Ticked { batch }) => {

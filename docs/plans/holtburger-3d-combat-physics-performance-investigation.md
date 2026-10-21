@@ -104,15 +104,14 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** finish and audit the running two alternating pairs for the implemented query
-reductions (`e88219341`) against qualified `e767b02e8`, using the unchanged frozen replay. Keep optimization moving;
-combat qualification remains a final validation obligation. The initial-hit marginal comparison
-was stopped after a binary audit showed its saved `b3edc9c96` baseline lacks retained optimization
-symbols. Its speedup comparison is invalid, and the 93.30% live observation cannot be attributed
-to the optimized core. Preserve all artifacts and corrections. The valid end-to-end result remains
-**23.09%**, below **25%**. Build separate checkouts into separate Cargo targets; use the preserved
-qualified executables for measurement. Overall performance, representative combat, optimized live
-cadence, architecture/quality and user acceptance gates remain unchanged.
+**Next action:** target repeated per-tick scene/body preparation and derived publication rather
+than extending the fixture or adding more unproven geometry branches. The two query reductions
+were measured on the unchanged trace and **rejected**: +1.79% and -2.02% paired directions, with
+median work 0.09% higher. Both source changes and the experiment-specific analytic test are rolled
+back; all individual results remain. Preserve original optimized code and the valid **23.09%**
+end-to-end result. The 93.30% live observation remains source-unqualified after the build-artifact
+correction; optimized live cadence is pending. Main Cargo target belongs only to the main checkout.
+Original performance, representative combat, cadence, architecture/quality and user gates remain.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -142,6 +141,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
 | Ordered publication merge | Experiment `82b66cfa5`, subsequently reverted | Rejected: two alternating exploratory pairs give 27,820.23 → 27,861.62 ms median work (0.15% higher), with conflicting paired directions. All workload checks and 678 pre-rollback core tests pass; no map-removal benefit demonstrated. |
+| Initial-hit and cylinder-side query reductions | `76095ab5b` / `e88219341`, rolled back after corrected measurement | Rejected: two alternating pairs versus qualified `e767b02e8` produce +1.79% / -2.02% work reductions and a 0.09% higher median. Every workload check passes. Preserve source/artifacts; remove both query branches and their new test. |
 | Matched replay readiness qualification | Candidate `e767b02e8`; original `9cb7ba24e` plus diagnostic-only patch | Both versions under normal/single-CPU scheduling activate at input 14 with 1,506 active ticks; messages 5,741, physics 1,519, peak 286, population mismatches zero. Candidate 681 / baseline 679 core tests and Clippy pass. Matched five-pair comparison is valid; work gate still fails at 23.09%. |
 | Frame-local metadata reuse | Experiment `e647d2437` | Exploratory combined medians improve 0.90% with conflicting pair directions; matched phase attribution reduces after-projection/diff mean 1.312 → 0.716 ms (45.46%). Retain for five-pair final verification. All workload checks, 996 world / 679 core tests, and broad Clippy pass. |
 | Metadata-reuse five-pair attempt | Source `e647d2437`; ten reports retained | Invalid for acceptance: pair 1 candidate has 1,499 activated ticks, expected 1,500. Raw combined medians 35,690.98 → 27,365.60 ms (23.33%) also miss the target. All candidate p95s are below every baseline p95; no sample was replaced or dropped. |
@@ -990,12 +990,22 @@ A new analytic check covers vertical travel, offset side impact, uniform scale a
 request anchor. All **997 world** and **681 core** tests, all-target world/core/harness Clippy with warnings
 denied, normal fixture build, formatting and whitespace checks pass. Fresh normal world/core
 libraries and the saved executable contain the retained mutation-journal/metadata mechanisms.
-Two alternating marginal pairs now compare checkpoint `e88219341` (initial-hit early termination
+Two alternating marginal pairs compared checkpoint `e88219341` (initial-hit early termination
 plus cylinder-side reduction) with qualified `e767b02e8`, preserving the same full trace, warmup,
 population/activation/outcome checks and warning logging. Private runner, patch, binaries and
-reports are in `caps/runtime-fixtures/2026-10-21-4ae1/cylinder-side-reduction/`. Both executables
+reports remain in `caps/runtime-fixtures/2026-10-21-4ae1/cylinder-side-reduction/`. Both executables
 contain the retained mutation journal and metadata mechanisms. No compiler, profiler or other
-benchmark runs during measurement. Results and the retention decision remain pending. This adds no cache, fixture variant, solver role or timing policy.
+benchmark ran during measurement.
+
+The pair work reductions are **+1.7868%** and **-2.0217%**. Combined-work medians are
+**28,251.361 → 28,277.080 ms**, or **0.0910% higher**. All four reports retain 5,741 messages,
+1,519 physics inputs, 1,506 active ticks, identical activation history, peak 286, zero population
+mismatches, and the existing outcome checks. This does not demonstrate a repeatable end-to-end
+benefit. Both source changes and their new analytic test are **rolled back**, restoring the query
+file exactly to `e767b02e8`; retain the exact patches, binary hashes and [all corrected reports](evidence/h3d-combat-physics-2026-10-20/query-reductions-e88219341-rejected.json).
+The original 25% acceptance target and baseline do not move. The restored implementation passes
+996 world tests; final core/Clippy/build checks for the rollback are in progress. Do not add these
+branches back based on the first pair alone. This adds no cache, fixture variant, solver role or timing policy.
 
 ### Build-artifact attribution correction
 

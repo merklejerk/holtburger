@@ -1,7 +1,8 @@
 //! Ordered headless-scene inputs for diagnostic replay through production core updates.
 //!
 //! This is a paced workload fixture, not deterministic simulation serialization. Content loading
-//! and code using wall clocks still run normally; population mismatches are reported explicitly.
+//! completes at each collision-publication boundary; code using wall clocks still runs normally.
+//! Population mismatches and content-readiness waits are reported explicitly.
 //! Incoming messages can contain character/chat data. Keep raw fixtures private.
 
 use super::runtime_profile::RuntimePhaseProfile;
@@ -132,7 +133,9 @@ pub struct RuntimeFixtureReport {
     pub peak_entities: usize,
     /// Cumulative elapsed time inside production message handling, excluding transport receive.
     pub message_work_ms: f64,
-    /// Cumulative elapsed time inside production physics updates, including content polling.
+    /// Replay-only time awaiting off-thread content preparation, excluded from physics work.
+    pub content_readiness_wait_ms: f64,
+    /// Cumulative physics work, including content publication but excluding worker waits.
     pub physics_work_ms: f64,
     /// Longest production physics update.
     pub maximum_physics_work_ms: f64,
@@ -274,15 +277,18 @@ impl RuntimeFixture {
                     let active =
                         client.activation.is_none() && client.state == ClientState::InWorld;
                     report.observe_activation(active);
+                    let mut waited = Duration::ZERO;
                     let begin = Instant::now();
                     client
                         .advance_physics_tick(
                             begin,
                             *elapsed,
                             RuntimePhaseProfile::begin("physics_tick"),
+                            Some(&mut waited),
                         )
                         .await?;
-                    let work = begin.elapsed().as_secs_f64() * 1000.0;
+                    let work = (begin.elapsed() - waited).as_secs_f64() * 1000.0;
+                    report.content_readiness_wait_ms += waited.as_secs_f64() * 1000.0;
                     report.physics_work_ms += work;
                     report.maximum_physics_work_ms = report.maximum_physics_work_ms.max(work);
                     if active {

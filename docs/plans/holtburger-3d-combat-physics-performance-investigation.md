@@ -104,7 +104,9 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** collect activation-boundary diagnostics and resolve replay readiness qualification
+**Next action:** validate the replay-only content-completion barrier under both scheduling conditions,
+then apply identical diagnostic tooling to the original performance baseline before any new comparison.
+Resolve replay readiness qualification
 before another acceptance claim. The `e647d2437` five-pair attempt has one workload mismatch and a
 raw **23.33%** median reduction; keep every sample. Its phase-attribution improvement remains
 separate evidence. The preceding valid **23.44%** result and earlier sequential **25.26%** exploration
@@ -1136,6 +1138,37 @@ intervals, production activation policy, workload requirements, and acceptance t
 unchanged. Diagnose the actual boundaries before choosing readiness controls. Any changed fixture
 execution contract must be applied equally to the original performance baseline and candidate;
 do not move the baseline to an optimized checkpoint or quietly exclude failing work.
+
+#### Scheduling diagnosis and replay-only completion barrier
+
+The completed `d30b198c0` diagnostic ran one full warmup and one measured replay under normal
+scheduling, then the same executable restricted to one CPU. Only the runner and its children had
+changed affinity. Normal scheduling first entered an active physics input at **20** (1,500 active
+ticks); single-CPU scheduling did so at **23** (1,497). Both had only the initial inactive-to-active
+transition, 5,741 messages, 1,519 physics inputs, peak population 286, and no population mismatches.
+These runs demonstrate startup delivery variability, not the exact cause of the historical failed
+sample. See [individual diagnostic reports](evidence/h3d-combat-physics-2026-10-20/replay-readiness-scheduling-d30b198c0.json).
+
+The fixture execution change now awaits current collision-content workers at the existing
+collision-publication stage and drains successor jobs before continuing that physics input.
+Publication uses the existing generation, revision, identity, and demand checks. This is diagnostic
+replay behavior behind `runtime-fixture`; capture and live scheduling retain nonblocking polling.
+No intervals, inputs, simulation caps, admission policy, or activation prerequisites change.
+
+`content_readiness_wait_ms` reports time spent awaiting workers separately. Physics work excludes
+that wait but includes publication; dispatch lateness still includes elapsed wall time. Worker CPU
+work remains outside the core work total, as it was in the original asynchronous replay. This is
+an explicit execution-contract change: the original performance source must receive the same
+barrier and timing/report changes before a new comparison. Do not compare its old binary against
+the new candidate or count startup removal as an optimization. Require matching activation
+histories and no reduction from the original 1,500 active ticks. The 25% target remains unchanged.
+
+An asset-free contract test verifies local-body publication, classification-to-scene successor
+loading, and an idle barrier that neither reloads content nor adds worker wait. All **681 core
+tests**, core/harness all-target Clippy with warnings denied, normal core compilation without the
+fixture feature, formatting, and whitespace checks pass. Normal/single-CPU fixture validation is
+next. Other clock use and asynchronous systems
+remain: this barrier alone does not establish deterministic simulation or live cadence.
 
 ### Heavy-workload harness gaps confirmed from source
 

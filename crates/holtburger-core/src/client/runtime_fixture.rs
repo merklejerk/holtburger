@@ -116,7 +116,7 @@ impl ClientRuntime {
 }
 
 /// Sanitized costs exclude pacing waits and content bootstrap before playback.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct RuntimeFixtureReport {
     /// Number of inbound game messages replayed in original order.
     pub messages: usize,
@@ -124,6 +124,8 @@ pub struct RuntimeFixtureReport {
     pub physics_ticks: usize,
     /// Steps that began in the fully activated world.
     pub active_ticks: usize,
+    /// First physics-entry state and subsequent transitions, distinguishing startup from resets.
+    pub activation_boundaries: Vec<RuntimeFixtureActivationBoundary>,
     /// Ticks with a different pre-step entity population than the capture.
     pub population_mismatches: usize,
     /// Largest pre-step entity population observed during replay.
@@ -142,6 +144,33 @@ pub struct RuntimeFixtureReport {
     pub final_player_position: Option<WorldPosition>,
     /// Final simulated player pose, distinct from the last authoritative position.
     pub final_runtime_player_position: Option<WorldPosition>,
+}
+
+/// One change in whether a recorded physics input begins in an activated world.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct RuntimeFixtureActivationBoundary {
+    /// One-based physics input index within this complete replay.
+    pub physics_tick: usize,
+    /// Whether that input began after world activation completed.
+    pub active: bool,
+}
+
+impl RuntimeFixtureReport {
+    /// Retain timing qualification without allocating one record for every stable tick.
+    fn observe_activation(&mut self, active: bool) {
+        self.active_ticks += usize::from(active);
+        if self
+            .activation_boundaries
+            .last()
+            .is_none_or(|previous| previous.active != active)
+        {
+            self.activation_boundaries
+                .push(RuntimeFixtureActivationBoundary {
+                    physics_tick: self.physics_ticks,
+                    active,
+                });
+        }
+    }
 }
 
 impl RuntimeFixture {
@@ -215,20 +244,7 @@ impl RuntimeFixture {
     pub async fn replay(&self, builder: ClientRuntimeBuilder) -> Result<RuntimeFixtureReport> {
         self.validate()?;
         let mut client = builder.build_fixture_client()?;
-        let mut report = RuntimeFixtureReport {
-            messages: 0,
-            physics_ticks: 0,
-            active_ticks: 0,
-            population_mismatches: 0,
-            peak_entities: 0,
-            message_work_ms: 0.0,
-            physics_work_ms: 0.0,
-            maximum_physics_work_ms: 0.0,
-            active_physics_work_p95_ms: 0.0,
-            maximum_input_lateness_ms: 0.0,
-            final_player_position: None,
-            final_runtime_player_position: None,
-        };
+        let mut report = RuntimeFixtureReport::default();
         let mut active_physics_work = Vec::new();
         let started = Instant::now();
         for event in &self.events {
@@ -257,7 +273,7 @@ impl RuntimeFixture {
                     report.physics_ticks += 1;
                     let active =
                         client.activation.is_none() && client.state == ClientState::InWorld;
-                    report.active_ticks += usize::from(active);
+                    report.observe_activation(active);
                     let begin = Instant::now();
                     client
                         .advance_physics_tick(
@@ -296,6 +312,37 @@ impl RuntimeFixture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activation_history_distinguishes_equal_totals_with_different_readiness() {
+        let observe = |states: &[bool]| {
+            let mut report = RuntimeFixtureReport::default();
+            for &active in states {
+                report.physics_ticks += 1;
+                report.observe_activation(active);
+            }
+            report
+        };
+        let late_start = observe(&[false, false, true, true]);
+        let interrupted = observe(&[false, true, false, true]);
+        assert_eq!(late_start.active_ticks, interrupted.active_ticks);
+        assert_eq!(
+            late_start.activation_boundaries,
+            vec![
+                RuntimeFixtureActivationBoundary {
+                    physics_tick: 1,
+                    active: false,
+                },
+                RuntimeFixtureActivationBoundary {
+                    physics_tick: 3,
+                    active: true,
+                },
+            ]
+        );
+        assert_eq!(interrupted.activation_boundaries.len(), 4);
+        assert!(interrupted.activation_boundaries[1].active);
+        assert!(!interrupted.activation_boundaries[2].active);
+    }
 
     #[test]
     fn credentials_never_become_recorded_inputs() {

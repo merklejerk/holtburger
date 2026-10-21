@@ -4,9 +4,10 @@ Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21
 Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
 
 Status: **The initial geometry fixes improved user-reported movement. The remaining heavy-fight
-slowdown has not been retested with the follow-up changes. Five alternating debug replay pairs show
-a 23.44% median work reduction, below the 25% target, with lower active-physics p95 in every candidate
-run. The final performance, stress, live-cadence,
+slowdown has not been retested with the follow-up changes. The metadata-reuse comparison completed
+with a raw 23.33% median work reduction, below the 25% target, and one failed active-workload check.
+It is invalid for acceptance. The last valid comparison of the preceding candidate showed 23.44%.
+The final performance, stress, live-cadence,
 and user-acceptance gates remain open.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
@@ -86,9 +87,9 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | Phase | State | Deliverable / next verification |
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
-| 1. Establish the controlled workload | In progress | Five alternating pairs with explicit warmup completed; 23.44% reduction misses the work target. Representative stress coverage remains open. |
+| 1. Establish the controlled workload | In progress | Latest five-pair attempt is invalid: one candidate begins 1,499 rather than 1,500 activated ticks. Add activation-history qualification before further acceptance claims. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
-| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; metadata reuse retained for final comparison after 45.46% lower mean after-projection/diff in matched phase attribution. Exploratory total-work gain remains inconclusive. |
+| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; metadata reuse retains a 45.46% phase-attribution improvement, but its five-pair attempt is invalid and raw total-work reduction is only 23.33%. End-to-end acceptance remains open. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
@@ -103,12 +104,11 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** finish and audit the running five alternating pairs for metadata-reuse candidate `e647d2437` against the
-original controlled baseline. Matched phase attribution supports this verification after inconclusive
-total-work exploration; the ordered identity-merge
-experiment did not demonstrate a benefit and was reverted. The completed alternating comparison's
-**23.44%** median reduction does not meet the **25%** target; the earlier
-**25.26%** sequential exploratory result is superseded for acceptance purposes.
+**Next action:** collect activation-boundary diagnostics and resolve replay readiness qualification
+before another acceptance claim. The `e647d2437` five-pair attempt has one workload mismatch and a
+raw **23.33%** median reduction; keep every sample. Its phase-attribution improvement remains
+separate evidence. The preceding valid **23.44%** result and earlier sequential **25.26%** exploration
+do not satisfy the current candidate's **25%** gate.
 Representative stress coverage, live cadence, final architecture/quality review, and user movement
 acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
 
@@ -141,6 +141,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
 | Ordered publication merge | Experiment `82b66cfa5`, subsequently reverted | Rejected: two alternating exploratory pairs give 27,820.23 → 27,861.62 ms median work (0.15% higher), with conflicting paired directions. All workload checks and 678 pre-rollback core tests pass; no map-removal benefit demonstrated. |
 | Frame-local metadata reuse | Experiment `e647d2437` | Exploratory combined medians improve 0.90% with conflicting pair directions; matched phase attribution reduces after-projection/diff mean 1.312 → 0.716 ms (45.46%). Retain for five-pair final verification. All workload checks, 996 world / 679 core tests, and broad Clippy pass. |
+| Metadata-reuse five-pair attempt | Source `e647d2437`; ten reports retained | Invalid for acceptance: pair 1 candidate has 1,499 activated ticks, expected 1,500. Raw combined medians 35,690.98 → 27,365.60 ms (23.33%) also miss the target. All candidate p95s are below every baseline p95; no sample was replaced or dropped. |
 | Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
 | Borrowed BSP candidates | `72c2e844a`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
 | Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
@@ -1011,7 +1012,7 @@ by 677 tests before this experiment; no behavior or scheduling change survives. 
 does not replace the five-pair final gate, whose 23.44% result remains the accepted measurement of
 the retained candidate. Investigate the larger full-projection cost next.
 
-### Frame-local metadata reuse: retained for final verification after phase attribution
+### Frame-local metadata reuse: phase benefit retained, acceptance pending readiness qualification
 
 The core tick now captures its full before views together with an opaque world entity-journal
 boundary and strong handles to the immutable motion/type catalogs. At the after boundary, core
@@ -1089,7 +1090,7 @@ the exact original `9cb7ba24e` baseline, using the unchanged trace/content/loggi
 all workload/outcome checks. Preserve every sample and leave the 25% gate open until that comparison
 finishes. Heavy/live validation and user acceptance remain separate open requirements.
 
-The final comparison began **2026-10-21 07:34:23 UTC**. Its private runner, provenance, progress,
+The five-pair attempt began **2026-10-21 07:34:23 UTC** and completed **07:51:05 UTC**. Its private runner, provenance, progress,
 individual reports and stderr are in
 `caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-e647d2437/`.
 The candidate binary SHA-256 is
@@ -1099,8 +1100,42 @@ starting; later changes so far are documentation/evidence only. Every invocation
 full warmup and one measured replay, with order A/B, B/A, A/B, B/A, A/B. The runner restores
 `RUST_LOG=warn`, excludes sampling-profiler variables, rechecks content provenance, retains all
 samples and validation issues, and refuses to overwrite an earlier comparison. No compiler or
-other benchmark from this agent runs during this comparison. The result remains unproven until
-all ten measured reports finish and are audited.
+other benchmark from this agent ran during this comparison.
+
+| Pair | Baseline combined ms | Candidate combined ms | Candidate activated ticks |
+| --- | ---: | ---: | ---: |
+| 1 | 35,522.06 | 26,411.50 | **1,499: failed workload check** |
+| 2 | 35,690.98 | 27,736.10 | 1,500 |
+| 3 | 36,682.54 | 26,906.86 | 1,500 |
+| 4 | 35,934.09 | 27,365.60 | 1,500 |
+| 5 | 35,126.12 | 27,388.93 | 1,500 |
+
+All ten processes exited successfully and content provenance stayed unchanged. The independently
+recomputed raw medians are **35,690.98 ms** and **27,365.60 ms**, a **23.33%** reduction that misses
+25% even before qualification. Every candidate p95 (17.9997–18.9854 ms) is below every baseline p95
+(21.6052–22.9851 ms). However, the first candidate fails the required activated-tick check, so this
+comparison is **invalid for acceptance**. Do not discard that sample, normalize it after the fact,
+or relabel the four remaining pairs as a passing comparison. See [all individual reports](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-e647d2437-invalid.json).
+
+### Replay readiness qualification: activation-history diagnostics
+
+The current fixture records ordered messages, time samples, selection, and physics intervals;
+it does not record content-worker completion boundaries. Core collision classification, scene
+loading and body preparation run on asynchronous blocking workers, and activation depends on
+their accepted results alongside containment/presentation prerequisites. Warming decoded content
+does not make worker delivery deterministic. The failed report retains only an active-tick total,
+so it cannot prove whether the lost active entry was delayed startup or a later interruption.
+Startup variability is consistent with the earlier replay limitations; the exact failed transition
+cannot be reconstructed from that aggregate alone.
+
+Future reports now include `activation_boundaries`: the first physics-entry state and subsequent
+changes, each with a one-based physics input index and active/inactive state. This distinguishes
+equal totals with different lifecycle histories without allocating a record for every stable tick.
+The structured qualification test exercises precisely that distinction. Capture inputs, recorded
+intervals, production activation policy, workload requirements, and acceptance thresholds remain
+unchanged. Diagnose the actual boundaries before choosing readiness controls. Any changed fixture
+execution contract must be applied equally to the original performance baseline and candidate;
+do not move the baseline to an optimized checkpoint or quietly exclude failing work.
 
 ### Heavy-workload harness gaps confirmed from source
 

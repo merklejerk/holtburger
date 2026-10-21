@@ -185,14 +185,6 @@ struct DynamicEntityMetadataBoundary {
     weenie_types: Option<Arc<WeenieTypeIndex>>,
 }
 
-/// A changed view paired with the placement that anchors its accepted path.
-struct DynamicEntityProjectionChange {
-    /// The previous incarnation's placement, moved out of the consumed baseline.
-    before_placement: crate::DynamicEntityPlacementView,
-    /// Complete current facts, retaining owned metadata when its boundary is valid.
-    entity: crate::DynamicEntityView,
-}
-
 impl DynamicEntityMetadataBoundary {
     fn capture(world: &WorldState) -> Self {
         Self {
@@ -215,34 +207,23 @@ impl DynamicEntityMetadataBoundary {
     fn project_after(
         &self,
         world: &WorldState,
-        mut previous: crate::DynamicEntityView,
+        previous: &crate::DynamicEntityView,
         catalogs_unchanged: bool,
         traversed: bool,
-    ) -> Result<Option<DynamicEntityProjectionChange>, ClientDynamicEntityViewError> {
+    ) -> Result<Option<crate::DynamicEntityView>, ClientDynamicEntityViewError> {
         let guid = previous.identity.guid;
         if !catalogs_unchanged || !world.entities.unchanged_since(guid, &self.entities) {
-            let Some(entity) = project_client_dynamic_entity(world, guid)? else {
-                return Ok(None);
-            };
-            if previous.generation != entity.generation || previous == entity && !traversed {
-                return Ok(None);
-            }
-            return Ok(Some(DynamicEntityProjectionChange {
-                before_placement: previous.placement,
-                entity,
-            }));
+            return project_client_dynamic_entity(world, guid);
         }
         let Some(runtime) = project_client_entity_runtime(world, guid)? else {
             return Ok(None);
         };
-        if runtime.matches_view(&previous) && !traversed {
+        if runtime.matches_view(previous) && !traversed {
             return Ok(None);
         }
-        let before_placement = runtime.apply_to(&mut previous);
-        Ok(Some(DynamicEntityProjectionChange {
-            before_placement,
-            entity: previous,
-        }))
+        let mut entity = previous.clone();
+        runtime.apply_to(&mut entity);
+        Ok(Some(entity))
     }
 }
 
@@ -338,7 +319,7 @@ impl ClientRuntime {
         body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
     ) -> anyhow::Result<Option<DynamicEntityTickBatch>> {
         let catalogs_unchanged = before.metadata.catalogs_unchanged(&self.world);
-        let mut before_by_guid = before
+        let before_by_guid = before
             .views
             .into_iter()
             .map(|entity| (entity.identity.guid, entity))
@@ -354,7 +335,7 @@ impl ClientRuntime {
             .collect::<Vec<_>>();
         guids.sort_unstable();
         for guid in guids {
-            let Some(previous) = before_by_guid.remove(&guid) else {
+            let Some(previous) = before_by_guid.get(&guid) else {
                 continue;
             };
             let motion = body_motions.get(&guid);
@@ -364,17 +345,18 @@ impl ClientRuntime {
                 before
                     .metadata
                     .project_after(&self.world, previous, catalogs_unchanged, traversed);
-            let DynamicEntityProjectionChange {
-                before_placement,
-                entity,
-            } = match projected {
-                Ok(Some(change)) => change,
+            let entity = match projected {
+                Ok(Some(entity)) => entity,
                 Ok(None) => continue,
                 Err(error) => {
                     log::warn!("client dynamic-entity projection rejected: {error}");
                     continue;
                 }
             };
+            if previous.generation != entity.generation || previous == &entity && !traversed {
+                continue;
+            }
+
             let (
                 crate::DynamicEntityPlacementView::World {
                     pose: previous_pose,
@@ -386,9 +368,9 @@ impl ClientRuntime {
                     spatial_membership: current_membership,
                     ..
                 },
-            ) = (&before_placement, &entity.placement)
+            ) = (&previous.placement, &entity.placement)
             else {
-                if before_placement == entity.placement {
+                if previous.placement == entity.placement {
                     updates.push(Box::new(entity));
                 }
                 continue;

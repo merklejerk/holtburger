@@ -88,7 +88,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Five alternating pairs with explicit warmup completed; 23.44% reduction misses the work target. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
-| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected after paired exploration; original matching restored. Review repeated full projection without weakening view/path semantics. |
+| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; frame-local metadata reuse now awaits measurement with explicit world journal/catalog validity and fresh runtime facts. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
@@ -103,7 +103,7 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** investigate repeated full dynamic-view projection; the ordered identity-merge
+**Next action:** measure frame-local dynamic-view metadata reuse; the ordered identity-merge
 experiment did not demonstrate a benefit and was reverted. The completed alternating comparison's
 **23.44%** median reduction does not meet the **25%** target; the earlier
 **25.26%** sequential exploratory result is superseded for acceptance purposes.
@@ -964,8 +964,8 @@ world boundary may have consumed that evidence.
 A possible next experiment is frame-local metadata reuse with an explicit world-owned validity
 contract, while freshly projecting runtime placement, contact, participation, and playback. Its
 proof obligations include metadata changes, journal consumption, incarnation replacement,
-attachment visibility, and full accepted paths. No persistent publication cache or snapshot-reuse
-implementation has been introduced. The completed alternating benchmark used unchanged source
+attachment visibility, and full accepted paths. The subsequent frame-local experiment below
+addresses these validity obligations without a persistent publication cache. The completed alternating benchmark used unchanged source
 throughout all ten invocations; only investigation documentation changed during measurement.
 
 ### Ordered publication merge: rejected after exploratory measurement
@@ -1007,6 +1007,52 @@ sanitized reports are retained for reproducibility. The retained core implementa
 by 677 tests before this experiment; no behavior or scheduling change survives. This exploration
 does not replace the five-pair final gate, whose 23.44% result remains the accepted measurement of
 the retained candidate. Investigate the larger full-projection cost next.
+
+### Frame-local metadata reuse: regression checks pass, measurement pending
+
+The core tick now captures its full before views together with an opaque world entity-journal
+boundary and strong handles to the immutable motion/type catalogs. At the after boundary, core
+reuses a captured entity's metadata only when both catalog identities are unchanged and the world
+store proves the entity untouched through the same unconsumed journal. Otherwise it performs the
+existing full projection. Full snapshots, message upserts, and lifecycle publications still use
+full projection. New identities have no tick history and remain the responsibility of those
+lifecycle publications, as in the previous diff.
+
+World owns the proof: its existing identity journal is now paired with a shared boundary identity.
+Taking or clearing pending identities detaches that boundary if a reader still holds it. Thus an
+empty journal after reconciliation cannot make stale metadata appear valid. The shared identity
+also distinguishes replacement stores without a counter rollover or per-entity revision map.
+Normal consumption with no outstanding reader does not allocate a new boundary. Retained catalog
+handles similarly make copy-on-write replacement observable and prevent address reuse during the
+comparison. These handles and the before views live only through one tick publication.
+
+Core still resolves attachment/visibility and reads the canonical body's placement, contact,
+sampling mode, spatial membership, physical participation, and current playback at the after
+boundary. A single runtime-projection conversion now serves both full and refreshed views.
+An unchanged runtime level needs no after-view metadata clone; a changed level clones the captured
+metadata and installs all fresh runtime fields. Complete equality, generation guards, correction
+classification, intermediate physical paths, and the original matching map remain in the batch
+stage. A path that returns to its initial pose still produces an advance when its accepted route
+traversed intermediate geometry. Publication samples its host clock after refreshing and comparing
+the after boundary; controlled-clock tests retain their explicit timestamps. No timestep,
+collision algorithm, or frontend policy changes.
+
+The cost is an explicit validity contract and per-tick shared handles in exchange for avoiding
+repeated metadata queries and unnecessary name/appearance clones. Unlike the rejected map-removal
+experiment, this targets the full-projection work identified in CPU attribution. Benefit remains
+unproven; reject or simplify the mechanism if measurements do not justify it.
+
+Verification so far: **996 world tests** and **679 core tests** pass. New asset-free cases cover
+pending and consumed mutation evidence, store identity, metadata plus authored ethereal changes,
+and motion-catalog replacement without an entity write. Existing contact and movement-route tests
+now explicitly exercise reuse with an untouched journal, including complete intermediate path
+publication and missing-outcome failure. The core batch API was cut over to the typed before
+boundary; no second publication implementation was retained. Broad all-target Clippy across world,
+core, CLI, 3D host and harness, formatting, and whitespace checks pass on the final implementation.
+The debug fixture executable builds successfully. Run two alternating exploratory pairs against preserved
+candidate `bc9e77f6e`, with a full warmup before every measured invocation. Retention requires
+evidence of benefit; the required five-pair comparison against the original controlled baseline
+remains a separate final gate. Heavy/live/user gates remain open.
 
 ### Heavy-workload harness gaps confirmed from source
 

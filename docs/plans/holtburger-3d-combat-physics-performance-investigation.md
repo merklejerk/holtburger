@@ -109,8 +109,8 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** measure the bounded core-publication ownership experiment, retain or revert it,
-then act on existing solver CPU attribution. Do not expand the fixture or pursue melee readiness.
+**Next action:** validate and measure streaming BSP support footprints, removing their temporary
+transformed-vertex vector. The core-publication ownership experiment was rejected and reverted. Do not expand the fixture or pursue melee readiness.
 The read-only equipment inspector proves the supplied character has a wand equipped; ACE rejects
 melee with a caster equipped (`Player_Combat.cs:811–819`). Thus the seven `NonCombat` responses in
 the latest 65-second probe are an invalid combat stimulus, not evidence that the solver needs a
@@ -123,12 +123,19 @@ also needs comparison against original source with the same dependency optimizat
 that baseline is built. Do not count the separate 6.13% compiler-profile benefit as a source gain.
 The fixture, original source baseline and numeric gates are unchanged.
 
-**Publication ownership experiment:** consume each before-view once; move unchanged presentation
-metadata into the after-view instead of cloning it, and retain only the old placement for accepted
-path construction. Change admission remains owned by the projector, eliminating a second full-view
-comparison. No persistent cache, new invalidation rule, solver policy or fixture input is added.
-All 682 core tests and core/harness all-target Clippy pass. Performance is unmeasured; retention
-is conditional on the existing alternating comparison.
+**Publication ownership experiment — rejected:** checkpoint `bca04e327` consumed before-views
+and moved metadata rather than cloning. All 682 core tests and Clippy passed, but two alternating
+pairs produced **26,806.51 → 26,987.89 ms** median combined work (**0.68% higher**). Paired changes
+were 1.40% worse and 0.04% better; p95s were mixed. All four workload/content checks passed. Restore
+both core files exactly to `4261f574d`; retain every report in
+[the rejection evidence](evidence/h3d-combat-physics-2026-10-20/publication-owned-metadata-rejected.json).
+Do not spend further effort on this publication branch.
+
+**Solver experiment in progress:** support queries already defer footprint work until plane
+admission. Consume transformed BSP vertices directly during the single edge walk, replacing the
+intermediate vector. Preserve authored edge order, closing edge, degenerate-edge handling and
+nearest-feature ties. Terrain and existing controlled footing tests use the same iterator contract.
+No contact/support threshold, BSP traversal, geometry residency or replay input changes.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.

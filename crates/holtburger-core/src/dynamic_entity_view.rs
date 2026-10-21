@@ -608,19 +608,18 @@ pub(crate) struct DynamicEntityRuntimeProjection {
 }
 
 impl DynamicEntityRuntimeProjection {
-    /// Compare all independently advancing fields before changing the captured view.
+    /// Compare all independently advancing fields before cloning any retained metadata.
     pub fn matches_view(&self, view: &DynamicEntityView) -> bool {
         self.placement == view.placement
             && self.participation == view.physics.participation
             && self.motion == view.motion
     }
 
-    /// Refresh runtime facts and return the placement that anchors the accepted path.
-    pub fn apply_to(self, view: &mut DynamicEntityView) -> DynamicEntityPlacementView {
-        let previous_placement = std::mem::replace(&mut view.placement, self.placement);
+    /// Refresh a captured metadata level with this boundary's complete runtime facts.
+    pub fn apply_to(self, view: &mut DynamicEntityView) {
+        view.placement = self.placement;
         view.physics.participation = self.participation;
         view.motion = self.motion;
-        previous_placement
     }
 }
 

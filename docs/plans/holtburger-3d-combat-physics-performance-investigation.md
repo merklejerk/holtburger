@@ -91,7 +91,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
-| 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
+| 5. Verify overload and live movement | In progress | First scripted live window admits 93.30% over 64.93 s after boundary exclusion; 99% gate fails. About 99 movers / 15.3 projectiles; local combat activation never observed, so combat qualification is incomplete. Preserve explicit overload-policy and original-fight validation obligations. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
 Completed foundations:
@@ -104,13 +104,15 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** qualify the new live movement/combat stress mode, measure requested controls,
-accepted paths/contact/corrections, solver census, and elapsed/admitted time after startup. The
-completed matched-readiness comparison is valid but reaches **23.09%**, below the **25%** target;
-all ten workload checks pass and every candidate p95 is below every baseline p95. Preserve all
-reports and the original baseline. Use new attribution to choose the next structural optimization;
-do not repeat an unchanged comparison hoping for a passing median. Representative stress coverage,
-live cadence, final architecture/quality review, and user movement acceptance remain open.
+**Next action:** resolve live stress combat qualification using full attack-owner state/server
+feedback and a controlled queued-release/engagement regression. The first window retained 64.93 s
+of simulation intervals but admitted only **93.30%**, with about 99 movers and 15.3 projectiles;
+combat activation was never observed and the probe correctly failed. Use the retained live phase
+attribution to choose the next structural optimization, then repeat qualified cadence measurement.
+The valid matched-readiness comparison reaches **23.09%**, below the **25%** work target; preserve
+all ten reports and the original baseline. Do not repeat an unchanged comparison hoping for a
+passing median. Representative stress coverage, live cadence, final architecture/quality review,
+and user movement acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1253,8 +1255,48 @@ requested controls and geometric accepted paths do not alone quantify lost locom
 Prepared content/hash provenance and accepted residency IDs remain necessary to qualify geometry.
 Two asset-free tests cover target eligibility/incarnation handling and delayed phase selection.
 The fixture binary builds, both harness tests pass, core/harness checks remain green, and harness
-all-target Clippy with warnings denied, formatting, and whitespace checks pass. Live execution is
-next; no new heavy-workload or cadence claim is made.
+all-target Clippy with warnings denied, formatting, and whitespace checks pass. The initial live
+result and its qualification failure are recorded below.
+
+#### First live stress window: admission shortfall, combat qualification failed
+
+Checkpoint `b3edc9c96` ran with the supplied development account, actual content and normal
+asynchronous production execution. Raw events/profiles and the exact binary/runner are private in
+`caps/runtime-fixtures/2026-10-21-4ae1/live-stress-b3edc9c96/` (credentials absent from arguments and
+metadata). Five seconds of settlement preceded a 65.000 s observation. The first boundary-straddling
+simulation record was excluded; the remaining **2,029 intervals total 64,932.443 ms elapsed and
+60,580.184 ms admitted**, or **93.2973%**. This misses the unchanged 99% target.
+
+All 2,030 player path publications were integrated, grounded, and retained cell `0x4ae10032`.
+Their geometric length sums to **20.775 m**, including support/contact adjustments; it is not pure
+requested locomotion distance. Fourteen melee engagement requests produced **no observed active
+attack-owner state**. The probe exited with an explicit failure rather than treating requests or
+observation duration as combat success. See [failed qualification and retained evidence hashes](evidence/h3d-combat-physics-2026-10-20/live-stress-b3edc9c96-incomplete.json).
+
+Existing contact-integration records report mean **115.76 bodies, 99.16 movers, 15.29 projectiles**
+and maxima **128 / 103 / 27**. These are the profiler's admitted role counts, not newly inferred
+movement categories. Preserve their individual scope/record counts; initialization can also emit
+integration records, so do not assume one-to-one identity with physics/simulation records. The
+original heavier capture averaged about 153 movers. This alternate workload is useful evidence of
+remaining time loss but does not establish representative original-fight resolution.
+
+Live phase means locate remaining work: core physics **26.468 ms**, simulation **19.029 ms**;
+world contact integration **12.901 ms**, including mobile movement sweeps **7.433 ms**, support/hard
+movement **2.612 ms**, correction sweeps **1.319 ms**, and support confirmation **0.526 ms**.
+Core before/after projection/diff average **1.309 / 1.691 ms**, world maintenance **2.030 ms**, and
+entity-facts/supply **1.155 ms**. These nested means overlap and are attribution, not additive
+end-to-end savings or a replacement for the matched benchmark.
+
+The current observer retained only a coarse active flag and desired target, so it cannot locate
+all attack-readiness failures. Add full owner state, stance and server/client action feedback
+before attributing the missing activation to equipment, range, resources, or controller behavior.
+One concrete ordering seam needs controlled verification: core calls `prepare_combat_movement`
+before `movement.tick`; `DriveSelf(ReleaseManual)` is queued, while `BeginCombatEngagement` updates
+the attack owner immediately. `prepare_combat_movement` cancels melee when the still-current
+manual owner is active. The first engagement in each scripted phase was immediately retired,
+consistent with that seam; later requests still failed to become active, so it cannot explain the
+entire result. Preserve command order and test this boundary before choosing a core fix or a
+harness handoff acknowledgement. No solver or scheduling policy changed for this run.
 
 The public command surface already has typed `DriveSelf(PlayerDriveIntent)` and
 `BeginCombatEngagement { target, profile }` operations. A diagnostic can use those production

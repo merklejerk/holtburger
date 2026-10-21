@@ -46,8 +46,7 @@ impl CollisionScene {
                 continue;
             }
             let reference = selected.reference;
-            let collider = &self.landblocks[&reference.owner].static_geometry.colliders
-                [reference.collider_index];
+            let collider = selected.collider;
             let center = anchor_to_landblock(request.center, request.anchor, reference.owner);
             if !collider.bounds.intersects_sphere(center, request.radius) {
                 continue;

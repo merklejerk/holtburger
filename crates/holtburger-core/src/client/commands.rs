@@ -94,6 +94,10 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        #[cfg(feature = "runtime-fixture")]
+        if let Some(capture) = &mut self.runtime_fixture {
+            capture.record_command(&cmd)?;
+        }
         match &cmd {
             ClientCommand::GetAndWield { item, .. }
             | ClientCommand::SplitToWield { item, .. }

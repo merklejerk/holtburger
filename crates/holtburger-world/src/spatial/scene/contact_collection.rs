@@ -1,6 +1,7 @@
 //! Scene-owned input capture, reference lifetime, and publication for bounded contact steps.
 
 use super::*;
+use crate::spatial::contact_profile::ContactPhaseProfile;
 use crate::spatial::{AcceptedBodyMotion, ContactBodyUpdate, advance_body_contact_collection};
 
 /// One admitted producer sample and its private reference continuation for the collection.
@@ -11,8 +12,6 @@ struct CollectionActuator {
     reconciliation: Option<PoseReconciliationState>,
     /// Independent final nominal continuation used to decide return completion.
     nominal_velocity: Vector3,
-    /// Collision pose already sampled on the speculative body, preserved on publication.
-    collision_poses: super::super::dynamic_body::CollisionPartPoses,
 }
 
 impl CollectionActuator {
@@ -88,7 +87,6 @@ impl CollectionActuator {
                     physical.definition,
                     PhysicalBodyDefinition::FreeSphere { .. }
                 ) && body.retained.acceleration == Vector3::zero());
-        dynamic.collision_poses = self.collision_poses;
         dynamic.activity = if quiet {
             DynamicBodyActivity::Settled
         } else {
@@ -106,6 +104,7 @@ impl SpatialScene {
         now: Instant,
         mut input_for: impl FnMut(&SpatialBody) -> anyhow::Result<PhysicalBodyInput>,
     ) -> anyhow::Result<DynamicEntityCollectionTick> {
+        let mut profile = ContactPhaseProfile::begin("contact_scene");
         anyhow::ensure!(
             delta_seconds.is_finite() && delta_seconds > 0.0,
             "contact collection interval must be finite and positive"
@@ -215,6 +214,7 @@ impl SpatialScene {
                 ));
             }
         }
+        profile.checkpoint("placement_and_fixed_bodies");
         let mut snapshots = Vec::with_capacity(prepared.len());
         let mut actuators = BTreeMap::new();
         for (id, integrates_mobile) in prepared {
@@ -235,25 +235,18 @@ impl SpatialScene {
                         .context("prepared collision pose lost its dynamic state")?
                         .placement = placement;
                 }
-                let collision_poses = body
-                    .physical
-                    .as_ref()
-                    .and_then(|p| p.dynamic.as_ref())
-                    .context("collection input lost its dynamic state")?
-                    .collision_poses
-                    .clone();
                 actuators.insert(
                     body.id,
                     CollectionActuator {
                         input,
                         reconciliation,
                         nominal_velocity: body.nominal.velocity,
-                        collision_poses,
                     },
                 );
             }
             snapshots.push(body);
         }
+        profile.checkpoint("input_capture");
         let Some(anchor_body) = snapshots
             .iter()
             .find(|body| matches!(body.id, SpatialBodyId::LocalPlayer(_)))
@@ -283,14 +276,17 @@ impl SpatialScene {
                 Ok(input.actuation)
             },
         )?;
+        profile.checkpoint("integration_and_reports");
         collision_reports.extend(
             self.collision_reports
                 .preview_touches(&result.report_touches, now)?,
         );
+        profile.checkpoint("report_lifetimes");
         let player_before = snapshots
             .iter()
-            .find(|body| matches!(body.id, SpatialBodyId::LocalPlayer(_)));
-        let mut player_after = player_before.cloned();
+            .find(|body| matches!(body.id, SpatialBodyId::LocalPlayer(_)))
+            .cloned();
+        let mut player_after = player_before.clone();
         if let Some(player) = player_after.as_mut()
             && let Some(update) = result
                 .bodies
@@ -302,12 +298,20 @@ impl SpatialScene {
         let mut recovery_requests = Vec::new();
         let mut publications = Vec::with_capacity(result.bodies.len());
         outcomes.reserve(result.bodies.len());
+        let prepared_body_count = snapshots.len();
+        let mut prepared_bodies = snapshots.into_iter();
         for update in result.bodies {
             let previous = self
                 .body_store
                 .body(update.body_id)
                 .context("contact publication body disappeared")?;
-            let mut body = previous.clone();
+            // Both collections are in stable body order and updates name a subset of snapshots.
+            // Move the prepared body forward: input preparation's collision pose already belongs
+            // to this transaction, so publication needs neither another body nor a pose clone.
+            let mut body = prepared_bodies
+                .by_ref()
+                .find(|body| body.id == update.body_id)
+                .context("contact publication lost its prepared body")?;
             let previous_contact = body.contact;
             update.apply_physical_state(&mut body)?;
             let actuator = actuators
@@ -319,7 +323,7 @@ impl SpatialScene {
             if let Some(destination) = actuator.finish(
                 &mut body,
                 &update,
-                [player_before, player_after.as_ref()],
+                [player_before.as_ref(), player_after.as_ref()],
                 delta_seconds,
                 now,
             )? {
@@ -374,12 +378,14 @@ impl SpatialScene {
             ));
             publications.push(body);
         }
+        profile.checkpoint("accepted_path_preparation");
         for body in publications {
             self.update_body(body)
                 .context("contact publication replaced an absent body")?;
         }
         self.collision_reports
             .commit_touches(&result.report_touches, now);
+        profile.checkpoint("body_publication");
         let mut collection = DynamicEntityCollectionTick {
             outcomes,
             collision_reports,
@@ -389,6 +395,13 @@ impl SpatialScene {
         collection
             .collision_reports
             .extend(self.collision_reports.expire(now)?);
+        profile.checkpoint("recovery_and_report_expiry");
+        profile.finish(format_args!(
+            "bodies={} outcomes={} report_touches={}",
+            prepared_body_count,
+            collection.outcomes.len(),
+            result.report_touches.len(),
+        ));
         Ok(collection)
     }
 

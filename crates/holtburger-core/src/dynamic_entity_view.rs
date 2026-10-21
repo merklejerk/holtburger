@@ -568,7 +568,67 @@ pub enum DynamicEntityEvent {
 /// Projects one semantic/body join without consulting either producer registry.
 pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEntityView {
     let presentation = source.physics.presentation;
-    let (placement, participation) = match source.placement {
+    let runtime = project_dynamic_entity_runtime(source.placement, source.motion);
+    DynamicEntityView {
+        generation: source.generation,
+        identity: source.identity,
+        display: source.display,
+        presentation: DynamicEntityPresentationView {
+            entity_class: source.presentation_class,
+            content: source.content,
+            appearance: source.appearance,
+            object_scale: source.object_scale,
+            placement_frame: source.placement_frame,
+            radar: source.radar,
+        },
+        physics: DynamicEntityPhysicsView {
+            semantic_mask: source.physics.semantic.bits(),
+            participation: runtime.participation,
+            no_draw: presentation.no_draw,
+            hidden: presentation.hidden,
+            cloaked: presentation.cloaked,
+            translucency: source.translucency,
+            lighting: presentation.lighting,
+            default_animation: presentation.default_animation,
+            default_script: presentation.default_script,
+        },
+        placement: runtime.placement,
+        motion: runtime.motion,
+    }
+}
+
+/// Fresh solver/playback facts, independent of retained entity presentation metadata.
+pub(crate) struct DynamicEntityRuntimeProjection {
+    /// Canonical placement, contact, sampling and accepted spatial membership.
+    pub placement: DynamicEntityPlacementView,
+    /// Current physical realization, which can change independently of entity properties.
+    pub participation: PhysicalBodyParticipationView,
+    /// Current playback level sampled from the motion runtime.
+    pub motion: Option<DynamicEntityMotion>,
+}
+
+impl DynamicEntityRuntimeProjection {
+    /// Compare all independently advancing fields before cloning any retained metadata.
+    pub fn matches_view(&self, view: &DynamicEntityView) -> bool {
+        self.placement == view.placement
+            && self.participation == view.physics.participation
+            && self.motion == view.motion
+    }
+
+    /// Refresh a captured metadata level with this boundary's complete runtime facts.
+    pub fn apply_to(self, view: &mut DynamicEntityView) {
+        view.placement = self.placement;
+        view.physics.participation = self.participation;
+        view.motion = self.motion;
+    }
+}
+
+/// Shared conversion for both full snapshots and frame-local runtime refreshes.
+pub(crate) fn project_dynamic_entity_runtime(
+    placement: EntityPlacement<DynamicEntityWorldProjection>,
+    motion: Option<MotionPlayback>,
+) -> DynamicEntityRuntimeProjection {
+    let (placement, participation) = match placement {
         EntityPlacement::World(world) => (
             DynamicEntityPlacementView::World {
                 pose: world.body.runtime_pose,
@@ -587,31 +647,10 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             PhysicalBodyParticipation::PoseOnly,
         ),
     };
-    DynamicEntityView {
-        generation: source.generation,
-        identity: source.identity,
-        display: source.display,
-        presentation: DynamicEntityPresentationView {
-            entity_class: source.presentation_class,
-            content: source.content,
-            appearance: source.appearance,
-            object_scale: source.object_scale,
-            placement_frame: source.placement_frame,
-            radar: source.radar,
-        },
-        physics: DynamicEntityPhysicsView {
-            semantic_mask: source.physics.semantic.bits(),
-            participation: participation.into(),
-            no_draw: presentation.no_draw,
-            hidden: presentation.hidden,
-            cloaked: presentation.cloaked,
-            translucency: source.translucency,
-            lighting: presentation.lighting,
-            default_animation: presentation.default_animation,
-            default_script: presentation.default_script,
-        },
+    DynamicEntityRuntimeProjection {
         placement,
-        motion: source.motion.map(DynamicEntityMotion::from),
+        participation: participation.into(),
+        motion: motion.map(DynamicEntityMotion::from),
     }
 }
 

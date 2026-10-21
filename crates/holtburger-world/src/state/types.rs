@@ -14,6 +14,7 @@ use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
 use crate::spell::{SpellCatalog, SpellInfo};
+use crate::state::attachment_lifecycle::ScenePlacementScope;
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
 use crate::state::self_movement::SelfMovementCapabilities;
@@ -321,6 +322,7 @@ impl WorldState {
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
         self.expire_missing_placement_dependencies();
         self.seed_scene_placements();
+        let previous_player = self.player.guid;
         let mut events = Vec::new();
         crate::handlers::handle_message(self, msg, &mut events);
         if self
@@ -330,7 +332,14 @@ impl WorldState {
         {
             self.close_world_container();
         }
-        self.reconcile_scene_placements(&mut events);
+        self.prepare_deferred_scene_placements(&mut events);
+        let mutations = self.entities.take_mutations();
+        let scope = if previous_player == self.player.guid {
+            ScenePlacementScope::ChangedEntities(mutations)
+        } else {
+            ScenePlacementScope::All
+        };
+        self.reconcile_scene_placements(&mut events, scope);
         events
     }
 

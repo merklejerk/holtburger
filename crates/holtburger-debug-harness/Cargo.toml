@@ -21,7 +21,9 @@ hex.workspace = true
 holtburger-protocol.workspace = true
 holtburger-weenie-catalog.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 rmp-serde = "1.3.1"
+tempfile = { workspace = true, optional = true }
 
 [[bin]]
 name = "contact_collection_benchmark"
@@ -30,3 +32,9 @@ required-features = ["physics-profiling"]
 
 [features]
 physics-profiling = ["holtburger-world/physics-profiling"]
+runtime-fixture = ["holtburger-core/runtime-fixture", "dep:tempfile"]
+
+[[bin]]
+name = "runtime_scene_fixture"
+path = "src/bin/runtime_scene_fixture.rs"
+required-features = ["runtime-fixture"]

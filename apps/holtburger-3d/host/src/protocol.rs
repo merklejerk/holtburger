@@ -3,6 +3,7 @@
 use std::io;
 use std::sync::{Arc, mpsc};
 use std::thread;
+use std::time::Instant;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,9 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 /// Bounded writer queue. Producers block at capacity; no event is silently discarded.
 pub const WRITER_QUEUE_CAPACITY: usize = 256;
+
+/// Opt-in host projection, queue backpressure, encoding, and pipe-write timing logs.
+pub(crate) const EVENT_PROFILE_TARGET: &str = "holtburger_3d_host::event_profile";
 
 /// A closed command set composed from the shared, Explorer, and client inventories.
 #[derive(Debug, Clone)]
@@ -321,8 +325,22 @@ pub fn encode_frame(frame: &ProtocolFrame) -> Result<Vec<u8>, FrameError> {
 
 /// Writes one complete frame to a synchronous stream.
 pub fn write_frame<W: io::Write>(writer: &mut W, frame: &ProtocolFrame) -> Result<(), FrameError> {
-    writer.write_all(&encode_frame(frame)?)?;
+    let started =
+        log::log_enabled!(target: EVENT_PROFILE_TARGET, log::Level::Debug).then(Instant::now);
+    let encoded = encode_frame(frame)?;
+    let encoding = started.map(|started| (started, Instant::now()));
+    writer.write_all(&encoded)?;
     writer.flush()?;
+    if let Some((started, encoded_at)) = encoding {
+        let finished = Instant::now();
+        log::debug!(
+            target: EVENT_PROFILE_TARGET,
+            "scope=frame_write bytes={} encode_ms={:.3} write_ms={:.3}",
+            encoded.len(),
+            encoded_at.duration_since(started).as_secs_f64() * 1_000.0,
+            finished.duration_since(encoded_at).as_secs_f64() * 1_000.0,
+        );
+    }
     Ok(())
 }
 

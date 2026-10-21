@@ -35,3 +35,7 @@ tempfile.workspace = true
 holtburger-dat.workspace = true
 holtburger-world = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
+
+[features]
+# Diagnostic capture/replay is excluded from ordinary clients.
+runtime-fixture = []

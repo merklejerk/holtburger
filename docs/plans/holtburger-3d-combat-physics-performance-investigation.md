@@ -103,7 +103,7 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** run five alternating pairs for metadata-reuse candidate `e647d2437` against the
+**Next action:** finish and audit the running five alternating pairs for metadata-reuse candidate `e647d2437` against the
 original controlled baseline. Matched phase attribution supports this verification after inconclusive
 total-work exploration; the ordered identity-merge
 experiment did not demonstrate a benefit and was reverted. The completed alternating comparison's
@@ -1088,6 +1088,19 @@ agent during attribution.
 the exact original `9cb7ba24e` baseline, using the unchanged trace/content/logging/build settings and
 all workload/outcome checks. Preserve every sample and leave the 25% gate open until that comparison
 finishes. Heavy/live validation and user acceptance remain separate open requirements.
+
+The final comparison began **2026-10-21 07:34:23 UTC**. Its private runner, provenance, progress,
+individual reports and stderr are in
+`caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-e647d2437/`.
+The candidate binary SHA-256 is
+`e9821e05f8206a0dff0e22a3a1a7d67bf348729eed1fe4c9b1c1be923947e840`; the exact original
+baseline binary remains unchanged. Source files were verified identical to `e647d2437` before
+starting; later changes so far are documentation/evidence only. Every invocation performs one
+full warmup and one measured replay, with order A/B, B/A, A/B, B/A, A/B. The runner restores
+`RUST_LOG=warn`, excludes sampling-profiler variables, rechecks content provenance, retains all
+samples and validation issues, and refuses to overwrite an earlier comparison. No compiler or
+other benchmark from this agent runs during this comparison. The result remains unproven until
+all ten measured reports finish and are audited.
 
 ### Heavy-workload harness gaps confirmed from source
 

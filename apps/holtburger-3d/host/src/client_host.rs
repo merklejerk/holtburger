@@ -4,6 +4,7 @@
 //! lifetime and its typed command seam; client wire projection lives in `client_projection`.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use holtburger_core::client::movement_types::{
     CharacterDrive, Gait, LateralMotion, LongitudinalMotion, PlayerDriveIntent, Turn,
@@ -16,6 +17,7 @@ use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::client_projection::{ClientHostEvent, client_exit_requested, project_client_event};
+use crate::protocol::EVENT_PROFILE_TARGET;
 
 /// Character gait accepted by the renderer's held-drive controller.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -235,8 +237,23 @@ async fn forward_client_events(
                     awaiting_snapshot = false;
                     snapshot_request_pending = false;
                 }
-                if let Some(projected) = project_client_event(event) {
+                let started = log::log_enabled!(target: EVENT_PROFILE_TARGET, log::Level::Debug)
+                    .then(Instant::now);
+                let presentation_tick = matches!(event, ClientViewEvent::PresentationTick { .. });
+                let projected = project_client_event(event);
+                let projection = started.map(|started| (started, Instant::now()));
+                if let Some(projected) = projected {
                     sink.publish_client_event(projected)?;
+                }
+                if let Some((started, projected_at)) = projection {
+                    let finished = Instant::now();
+                    log::debug!(
+                        target: EVENT_PROFILE_TARGET,
+                        "scope=event_forward presentation_tick={} projection_ms={:.3} enqueue_ms={:.3}",
+                        presentation_tick,
+                        projected_at.duration_since(started).as_secs_f64() * 1_000.0,
+                        finished.duration_since(projected_at).as_secs_f64() * 1_000.0,
+                    );
                 }
             }
             Err(broadcast::error::RecvError::Lagged(_)) => {

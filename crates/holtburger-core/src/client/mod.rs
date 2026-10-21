@@ -65,6 +65,9 @@ pub mod progression;
 pub mod recall;
 mod runtime;
 pub mod runtime_body_view_cache;
+#[cfg(feature = "runtime-fixture")]
+pub mod runtime_fixture;
+mod runtime_profile;
 pub mod selection_envelope;
 pub mod selection_query;
 mod server_combat_text;
@@ -160,6 +163,9 @@ enum PublishedCharacterMotionCapabilities {
 }
 
 pub struct ClientRuntime {
+    /// Ordered diagnostic inputs; credentials and outgoing transport packets are excluded.
+    #[cfg(feature = "runtime-fixture")]
+    runtime_fixture: Option<runtime_fixture::RuntimeFixtureCapture>,
     /// Last published cold map-teleport admission, for edge-only notification.
     published_map_teleport_capability: bool,
     /// Last published recall choices, used to suppress identical cold events.

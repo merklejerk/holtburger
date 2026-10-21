@@ -497,7 +497,7 @@ impl WorldState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::WorldContextExt;
+    use crate::context::WorldContext;
     use crate::entity::Entity;
     use crate::state::ServerTimeSync;
     use crate::{EntityPlacementIntent, SpatialBodyId};

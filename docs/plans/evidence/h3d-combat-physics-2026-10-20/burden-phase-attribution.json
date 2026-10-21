@@ -1,0 +1,60 @@
+{
+  "contact_integration": {
+    "samples": 1497,
+    "mean_ms": {
+      "total_ms": 8.000509686038745,
+      "body_preparation_ms": 0.12600801603206413,
+      "hard_target_index_ms": 0.061410821643286574,
+      "support_and_hard_movement_ms": 2.5305043420173683,
+      "crowd_admission_ms": 0.07159853039412158,
+      "mobile_movement_sweeps_ms": 3.770014696058784,
+      "crowd_candidates_ms": 0.05500801603206413,
+      "crowd_response_ms": 0.09239812959251836,
+      "correction_sweeps_ms": 0.32920774883099535,
+      "support_confirmation_ms": 0.5186913827655311,
+      "projectiles_and_results_ms": 0.4439559118236473,
+      "finalization_ms": 0.0018964595858383434
+    }
+  },
+  "contact_scene": {
+    "samples": 1497,
+    "mean_ms": {
+      "total_ms": 11.096288577154308,
+      "placement_and_fixed_bodies_ms": 0.7720574482297929,
+      "input_capture_ms": 0.2709291917167669,
+      "integration_and_reports_ms": 8.878158316633266,
+      "report_lifetimes_ms": 0.10842618570474281,
+      "accepted_path_preparation_ms": 0.8653046092184369,
+      "body_publication_ms": 0.1760133600534402,
+      "recovery_and_report_expiry_ms": 0.02473613894455578,
+      "finalization_ms": 0.0010153640614562458
+    }
+  },
+  "physics_tick": {
+    "samples": 1497,
+    "mean_ms": {
+      "total_ms": 19.33315965263861,
+      "interval_ms": 30.07761523046092,
+      "movement_and_equipment_ms": 0.3538704074816299,
+      "world_tick_ms": 2.015438877755511,
+      "collision_content_ms": 0.49366199064796257,
+      "activation_and_equipment_ms": 0.01161189044756179,
+      "before_entity_projection_ms": 1.2070835003340012,
+      "simulation_ms": 13.3572291249165,
+      "simulation_events_and_combat_ms": 0.1807054108216433,
+      "entity_facts_and_supply_ms": 0.15511623246492987,
+      "after_entity_projection_and_diff_ms": 1.5381429525718102,
+      "camera_ms": 0.002694054776219105,
+      "event_enqueue_ms": 0.01692117568470274,
+      "finalization_ms": 0.001008684034736139
+    }
+  },
+  "conditions": {
+    "source": "9111877f1",
+    "binary_sha256": "dab7f3e55b7d2bc07bc08dbed2ce68cc9044334efe29d3c4199bcc97c1ce5d8e",
+    "warmups": 0,
+    "repeats": 1,
+    "rust_log": "warn,holtburger_core::client::runtime_profile=debug,holtburger_world::spatial::contact_profile=debug",
+    "purpose": "Phase attribution only; debug logging and cold asynchronous setup make these unsuitable for controlled acceptance comparison."
+  }
+}

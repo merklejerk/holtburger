@@ -83,6 +83,11 @@ pub trait WorldContext {
         self.get_entity(guid)
     }
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
+    /// Membership in the same accepted domain as `iter_inventory`, including pending descriptions.
+    /// Storage owners can answer directly without enumerating unrelated items.
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.iter_inventory().any(|candidate| candidate == guid)
+    }
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
     fn is_open_container(&self, guid: Guid) -> bool;
@@ -135,6 +140,10 @@ impl WorldContext for WorldState {
 
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_ {
         self.storage.owned_items(self.player.guid)
+    }
+
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.storage.owned_by(guid, self.player.guid)
     }
 
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_ {
@@ -263,10 +272,6 @@ pub trait WorldContextExt: WorldContext {
         }
 
         CombatTargetStatus::Available
-    }
-
-    fn is_in_player_inventory(&self, guid: Guid) -> bool {
-        self.iter_inventory().any(|candidate| candidate == guid)
     }
 
     fn is_equipped_item(&self, guid: Guid) -> bool {

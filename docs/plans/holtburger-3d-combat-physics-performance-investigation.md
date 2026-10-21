@@ -102,7 +102,9 @@ Completed foundations:
   recorded intervals that cannot demonstrate restored live cadence.
 
 **Next action:** investigate repeated core publication and active-body preparation after rejecting
-the query-local traversal experiment for lack of demonstrated benefit.
+the query-local traversal experiment for lack of demonstrated benefit. Direct storage membership
+now has favorable exploratory evidence; broaden controlled movement/correction coverage before
+changing simulation/publication contracts.
 Publication review found that the before snapshot covers motion, physics flags, and events emitted
 inside simulation, so removing it requires a coherent change contract rather than a stale view cache.
 The burden-query experiment has directional evidence below, but the
@@ -134,6 +136,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
+| Direct storage membership | Experiment successor to `b4e74cfab`; binary/patch hashes in evidence | Retained for paired verification: exploratory combined median 33,167.17 ms, 9.63% below baseline; 994 world / 677 core tests pass. |
 | Query-local traversal reuse | Private patch based on `9111877f1`, hashes in evidence | Rejected: median 34,558.39 ms vs burden-only 34,594.76 ms; no demonstrated benefit for added contracts. 994 world / 677 core tests passed before rollback. |
 | Burden membership and controlled movement boundaries | `9111877f1`; source patch and binary hashes retained below | Remove repeated inventory traversals without retained caches; exploratory median work down 5.74%; 993 world and 677 core tests pass. Retained for further paired verification; final performance gate remains open. |
 
@@ -522,11 +525,11 @@ The dynamic-publication seam review confirmed that full before/after comparison 
 pose: animation playback, authored physics flags, contact, sampling state, and spatial membership
 can change inside simulation, and simulation consequences can themselves emit dynamic upserts.
 A persistent last-published-view cache would need explicit handling for those mid-step publications
-and lifecycle resets. No such cache was added. The next implementation hypothesis instead retains
+and lifecycle resets. No such cache was added. The rejected experiment instead retained
 already-computed traversal data at the world query layer, with no cross-tick invalidation lifetime.
 
 Candidate sphere queries already infer initial placement and directed center crossings for the
-attempted segment. A new private `PreparedSphereTraversal` carries the exact request, candidate
+attempted segment. A private `PreparedSphereTraversal` carried the exact request, candidate
 membership, initial placement, crossings, and terminal traversal cell into hit/acceptance finishing.
 The request and its preparation travel together, preventing callers from pairing unrelated geometry
 with a retained traversal. Attempted candidate reach still does not certify accepted placement.
@@ -562,6 +565,83 @@ the measured result. The private source patch and executable remain available fo
 [sanitized evidence](evidence/h3d-combat-physics-2026-10-20/prepared-traversal-exploratory.json)
 records hashes, individual results, and limitations. This removes the experiment only; the burden
 optimization and prior geometry optimizations remain. No final performance or cadence gate is met.
+
+## Character-controller architecture comparison
+
+Primary references consulted 2026-10-21: [PhysX 5.6.1 character controllers](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/CharacterControllers.html),
+[Jolt CharacterVirtual 5.3.0](https://jrouwe.github.io/JoltPhysicsDocs/5.3.0/class_character_virtual.html),
+and [Jolt's architecture documentation](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md).
+These are the specific references reviewed, not a claim that these are the newest library releases.
+
+PhysX documents a specialized kinematic collide-and-slide controller, separate overlap recovery,
+precise sweeps, slope/stair policy, and explicit update ordering. Its geometry cache has an explicit
+invalidation obligation when objects change. Jolt distinguishes a constrained rigid-body character
+from a query-driven virtual controller; the latter permits game-specific update placement but has
+ordering tradeoffs. CharacterVirtual composes ordinary update, floor attachment, and stairs, exposes
+contact refresh after teleport, and groups contact-lifetime callbacks across multiple operations.
+
+**Assessment from our source review:** the present world solver belongs to this specialized
+character-controller family. It is not obsolete merely because it does not implement a general
+rigid-body constraint solver. This comparison establishes architectural resemblance, not numerical
+parity, implementation quality, or adequate performance.
+
+| Concern | Current owning layer and evidence | Engineering decision / unresolved friction |
+| --- | --- | --- |
+| Swept travel and bounded continuation | World: `mobile_contact/step.rs` integrates prepared actuation, sweeps hard geometry, and bounds slide continuation; `step/stairs.rs` owns support/navigation alternatives. | Retain this family of mechanisms. Prove requested/accepted motion and query cost before replacing it. |
+| Ground, teleports, and contact lifetimes | World: scene collection prepares support, commits accepted paths, publishes collision reports, and retires reconciliation on discontinuities. Core supplies input and consumes outcomes. | Keep recovery, ordinary travel, and zero-time corrections distinct. Expand controlled obstruction/correction scenarios; endpoint equality alone is inadequate. |
+| Spatial preparation | Content owns immutable geometry; world owns membership, query admission, hard-target BVH, and accepted placement. | Retain these ownership boundaries. Reject unmeasured extra preparation contracts, as in the traversal experiment. A retained geometry cache would require measured need and explicit scene-revision invalidation. |
+| Update ordering and overload | Core owns scheduling, content polling, simulation consequences, dynamic publication, and camera advancement. World admits a bounded interval. | These are system-level decisions outside a standalone controller. Current overruns discard simulation time; controller resemblance cannot justify that movement slowdown. Resolve workload cost and explicit overload policy together. |
+
+The highest-confidence simplifications so far remove redundant discovery around the solver rather
+than replace its contact mathematics. Core's repeated full projection and world's repeated placement
+resolution remain open structural costs. Existing support reuse and sleeping-body contact participation
+must survive any redesign. This comparison does not establish a case for solver replacement or an additional caching layer.
+
+## Storage membership experiment: retained for paired verification
+
+A new phase-attributed replay of the retained burden checkpoint completed with 1,497 populated
+physics samples. Mean work was **19.333 ms** per populated tick: **2.015 ms** world lifecycle,
+**1.207 ms** before projection, **1.538 ms** after projection/diff, and **13.357 ms** simulation.
+Within contact integration, support/hard movement averaged **2.531 ms** and mobile movement sweeps
+**3.770 ms**. This run enabled phase logging and used no explicit warmup; it identifies where work
+occurs and is not an acceptance comparison. [Phase evidence](evidence/h3d-combat-physics-2026-10-20/burden-phase-attribution.json)
+records build provenance and sample counts. Its population filter excludes physics records with
+zero advancing bodies; this is a different sample definition from controlled active-start counts.
+
+The source review found another full-inventory enumeration in `retention_snapshot`: every queried
+item calls the blanket extension's inventory-membership predicate. Enumeration scans accepted
+storage identities and checks each ancestry until the requested item is found. Storage already owns
+an exact per-item ancestry query, `owned_by`, used by that same enumeration. For a single membership
+request, enumerating other items adds work without establishing another fact.
+
+The experiment moves `is_in_player_inventory` from the blanket extension into the existing
+`WorldContext` contract. Its default preserves enumeration-based read-model semantics; WorldState
+uses `StorageState::owned_by` directly. The owning world layer thus answers its own accepted-storage
+question in ancestry depth rather than scanning unrelated items. No persistent cache, invalidation
+state, new trait, or frontend policy is introduced. Callers import the owning trait where required.
+The earlier local burden-membership set stays because a generic read model can supply partial
+inventory membership and because burden needs a complete ordered traversal regardless.
+
+A new asset-free scenario checks membership against both explicit expected sets and enumeration
+through nested missing descriptions, equipment awaiting a mask, stale description arrival, ancestor
+transfer, direct child transfer, withdrawal, and loss of player identity. All **994 world tests** and
+**677 core tests** pass. CLI all-target compilation passes; world/core/CLI Clippy across all targets
+with runtime-fixture enabled passes with warnings treated as errors. Formatting and whitespace
+checks pass.
+
+One explicit warmup and two measured replays produced combined work of **32,988.67 ms** and
+**33,345.67 ms**, median **33,167.17 ms**. This is **4.13%** below the burden-only exploratory
+median and **9.63%** below the controlled starting baseline. Active physics p95 was **20.293 ms**
+and **20.883 ms**. Both runs retained 5,741 messages, 1,519 physics steps, 1,500 active-start steps,
+peak 286 entities, and zero population mismatches. Authoritative final poses matched; simulated
+poses still show the millimetre-scale variability already present in the baseline.
+
+**Decision: retain for paired verification.** The direct owner query removes unrelated enumeration
+without adding retained state, and both exploratory samples are below the burden-only samples.
+These sequential two-run results do not meet the five alternating-pair requirement or the 25%
+performance target. [Sanitized evidence](evidence/h3d-combat-physics-2026-10-20/storage-membership-exploratory.json)
+retains individual reports, binary/patch hashes, and limitations. No live-cadence or user-feel
+resolution is claimed.
 
 ## Next investigation targets: the complete update pipeline
 

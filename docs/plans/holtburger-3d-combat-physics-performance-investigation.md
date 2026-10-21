@@ -104,14 +104,14 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** target repeated per-tick scene/body preparation and derived publication rather
-than extending the fixture or adding more unproven geometry branches. The two query reductions
-were measured on the unchanged trace and **rejected**: +1.79% and -2.02% paired directions, with
-median work 0.09% higher. Both source changes and the experiment-specific analytic test are rolled
-back; all individual results remain. Preserve original optimized code and the valid **23.09%**
-end-to-end result. The 93.30% live observation remains source-unqualified after the build-artifact
-correction; optimized live cadence is pending. Main Cargo target belongs only to the main checkout.
-Original performance, representative combat, cadence, architecture/quality and user gates remain.
+**Next action:** verify and measure prepared-body reuse across contact input capture and atomic
+publication. The new ownership change removes the second body clone and the separate collision-pose
+copy/field; existing **996 world / 681 core** tests pass. Keep using the unchanged frozen replay.
+The prior two query reductions are rejected and rolled back: conflicting pair directions and a
+0.09% higher median did not justify them. Preserve the valid **23.09%** end-to-end result and the
+original acceptance baseline. The 93.30% live observation remains source-unqualified after the
+build-artifact correction; optimized live cadence is pending. All original performance, workload,
+cadence, architecture/quality and user acceptance requirements remain unchanged.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1029,6 +1029,28 @@ Future builds from another checkout must use their own Cargo target directory; m
 belongs only to the main checkout. The current geometry changes force fresh normal world/core
 library builds, and the saved benchmark executables receive the retained-symbol check before use.
 This corrects build provenance while keeping the fixture, numeric gates, and workload unchanged.
+
+### Prepared contact bodies: transfer ownership into publication
+
+Source review found a broader duplication at the world-owned contact transaction. Input capture
+clones each body into a private prepared snapshot. After solving, publication clones the canonical
+body a second time, then copies collision poses out of a separate `CollectionActuator` field.
+The solver had already used those exact poses from the prepared body.
+
+The new change consumes the prepared snapshots in stable body order and moves each matching body
+into accepted-state publication. Solver updates are an ordered subset of the snapshots; one
+forward iterator matches them without another map or sorting pass. The canonical body remains
+untouched and supplies the original endpoint/path provenance until the existing atomic commit.
+Keep explicit before/after player copies for recovery/contact decisions. Input preparation's
+velocity/wake changes are overwritten by accepted physical state and final settling, while its
+collision poses remain on the same body, eliminating the pose clone and actuator field.
+
+This changes ownership within the existing transaction, not solving, reporting, coverage, recovery,
+input sampling, scheduling or fixture behavior. The net source change removes two lines and one
+field. All **996 world** and **681 core** tests, broad all-target Clippy with warnings denied,
+normal fixture build, formatting and whitespace checks pass. Paired measurement is next. Retention
+requires correct behavior, simpler ownership and no repeatable work regression; a speedup claim
+requires measured benefit. The overall 25% gate remains unchanged regardless of a cleanup benefit.
 
 ## Next investigation targets: the complete update pipeline
 

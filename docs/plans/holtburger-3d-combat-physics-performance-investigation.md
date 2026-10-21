@@ -133,7 +133,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Deferred ancestry tracking | Successor to `72c2e844a`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
+| Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
 | Borrowed BSP candidates | `72c2e844a`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
 | Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
 | Deferred support footprint | `faa72f340`; exact patch/binary hashes in evidence | Retained for paired verification: exploratory median 31,024.50 ms, 15.47% below baseline; 994 world / 677 core tests and Clippy pass. |
@@ -894,6 +894,28 @@ with explicit warmup per invocation will test whether that gain survives current
 The original exact baseline executable is preserved; no compiler or other benchmark will be run by
 this agent during that comparison. Representative heavy-workload, live-cadence, and user acceptance
 remain separate open gates regardless of this result.
+
+## Alternating acceptance comparison: in progress
+
+Candidate `bc9e77f6e` is being compared with the exact preserved baseline executable from
+`9cb7ba24e`, rather than with the older sequential baseline timings alone. Each invocation performs
+one full explicit warmup followed by one measured replay. Five pairs alternate order:
+**baseline/candidate, candidate/baseline, baseline/candidate, candidate/baseline,
+baseline/candidate**. Both use `RUST_LOG=warn`, the unchanged fixture, and the same explicit content
+root. The mounted `assets.hba` is **634,425,693 bytes**, SHA-256
+`20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7`.
+
+The private `caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance/` directory retains the runner,
+metadata, individual stdout/stderr, validation issues, progress, and eventual aggregate summary.
+Metadata records both binary hashes, fixture/content hashes, toolchain, Cargo.lock hash, CPU model,
+order, and per-invocation load samples. No compiler or other benchmark from this agent runs during
+the comparison. Content provenance is checked again at completion. Workload validation retains
+all reports and flags mismatches; failed samples are not silently discarded or rerun.
+
+The first fresh baseline sample was **35,361.90 ms**, faster than the older **36,700.96 ms** median.
+The narrow exploratory threshold margin may therefore disappear. Acceptance remains unproven until
+all pairs finish and individual work/p95/outcome results are reviewed. The stationary replay still
+cannot establish heavy live cadence or original combat movement resolution.
 
 ## Next investigation targets: the complete update pipeline
 

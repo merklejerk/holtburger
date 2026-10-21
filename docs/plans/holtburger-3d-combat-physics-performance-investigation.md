@@ -48,10 +48,10 @@ completion and the user's final movement-feel acceptance are separate milestones
 
 ### Definition of done
 
-- [ ] **Architecture:** trace one complete ordinary update and representative reset/correction
+- [x] **Architecture:** trace one complete ordinary update and representative reset/correction
   paths, identify each layer's contracts, and document which mechanisms are retained, unified,
   removed, or replaced and why. Address timestep/overload behavior explicitly.
-- [ ] **Correctness:** add controlled-time movement scenarios that compare requested and accepted
+- [x] **Correctness:** add controlled-time movement scenarios that compare requested and accepted
   movement, contacts/support, corrections, and lifecycle/discontinuity outcomes. Equivalent entity
   counts and authoritative end positions alone are insufficient. Keep retained regression tests
   independent of uncommitted runtime assets; production-content checks remain diagnostics.
@@ -88,7 +88,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison is valid with 23.09% median combined-work reduction, below 25%. Live stress mode added for qualification. Representative coverage remains open. |
-| 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
+| 2. Define behavior and ownership | Complete for the defined architecture/correctness deliverables | Ordinary/reset/correction contracts and retained/unified/removed mechanisms audited below. Asset-free controlled drive, wall, return, support, reset, publication and handoff cases satisfy the scenario requirement. Representative live stress and rollout acceptance remain separate open gates. |
 | 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; original-baseline five-pair verification remains pending. |
 | 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. Attack owner still never activates and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
@@ -144,6 +144,12 @@ Keep feasible independent work moving when a live workload or final human accept
 
 | Milestone | Git reference | Evidence / outcome |
 | --- | --- | --- |
+| Current same-build acceptance | Candidate `114754c4f` vs original `9cb7ba24e` plus matched diagnostics | Five alternating pairs running with both versions fully unoptimized, explicit warmups and frozen trace. Candidate's normal dependency-optimized binary was separately preserved/restored. No compiler-setting benefit can pass this gate. |
+| Input/combat handoff | `114754c4f` | Unit regression failed before the fix and all 682 core tests pass after it, including held/released/expired/reacquired input. Live desired targets now survive to manual takeover; 99.95% admission in the smaller alternate scene. Attack readiness remains unresolved. |
+| Development collision/math dependencies | `bbc9d4b6d`, retained at `d29dbef8b` | Two alternating configuration pairs, identical game source: 6.13% less median work, lower p95s in both pairs. Retain Parry/Glam level 3 with workspace debugging. This intentionally different-build comparison is excluded from source acceptance. |
+| Borrowed static selections | `02cde557e`, retained at `04ef2e3e9` | Remove the second selection vector and duplicate geometry lookup across six query consumers. Two marginal pairs reduce combined work 2.29%; no consistent marginal p95 claim. 996 world / 681 core tests and Clippy pass. |
+| Prepared-body ownership | `02bdbe098`, retained at `86a984c4b` | Move prepared mobile bodies into publication and remove the actuator pose copy. Two marginal pairs reduce work 2.07%, lower p95 in both pairs; 996 world / 681 core tests and Clippy pass. |
+| Unchanged semantic collection | Experiment `86a984c4b`, reverted at `353f9c9df` | Reject: 0.45% higher median work with both pair directions worse. Preserve all reports; restore publisher exactly to the retained body-reuse checkpoint. |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
@@ -179,6 +185,60 @@ outdoor portals. A repeated production-content trajectory benchmark took approxi
 time with an identical landing result. That result concerns collision prediction, not measured
 combat FPS or a confirmed resolution of the movement slowdown. The subsequent live capture below
 shows that the broader runtime pipeline still exceeds its available budget under heavier load.
+
+## Current architecture and controlled-correctness review
+
+**Verdict:** the architecture trace and controlled-scenario deliverables are complete for the
+retained implementation at `114754c4f`. The reviewed optimizations and control handoff are ready
+within that source scope. This does not approve heavy-fight behavior, performance acceptance or
+rollout: the five-pair comparison is running, live attacks remain inactive, and final host checks
+and user movement acceptance are pending. No general rigid-body solver replacement is justified
+by the current measurements.
+
+The ordinary path is now explicit: session delivers ordered packets; world accepts authoritative
+entity/storage/lifecycle changes; core accepts queued movement and expiry, prepares combat policy
+and publishes movement; core/world advance authored and physical state; world commits checked
+mobile results and contact lifetimes; core emits complete accepted paths and current runtime
+levels; host/frontend present those products. Local activation retires movement/combat/camera
+state and invalidates asynchronous collision work under a new generation. Ordinary confirmation,
+correction snap, checked recovery and discontinuity retain distinct world outcomes and core path
+kinds. The detailed trace and modern-controller comparison below remain the supporting map.
+
+| Mechanism and layer | Final disposition and contract |
+| --- | --- |
+| World storage/burden | Retain accepted ancestry as ownership authority. Direct membership avoids enumerating unrelated items; one local membership set per burden query preserves ordered floating-point summation and pending descriptions. No retained burden cache. |
+| World placement discovery | Replace full message-wide reconciliation with manager-owned conservative mutation identities plus a locally derived descendant closure. Mutable access and lifecycle deletion record invalidation; player replacement and periodic world maintenance still reconcile all identities. The underlying entity map is private. |
+| World static query preparation | Borrow BSP polygons and selected collider geometry from their owning products; resolve geometry once at selection. Shadow IDs still own ordering/deduplication and retail building-shell policy. Transform support footprints only after plane admission. These borrow/deferral changes add no persistent cache. |
+| World contact transaction | Move prepared mobile-body snapshots into final publication; preserve fixed authored hard-target placement before mobile sweeps. Mobile results publish together after acceptance, while checked recovery remains a distinct later disposition. Fixed-placement and mobile-commit stages have different boundaries. |
+| World physical response | Retain swept hard movement, support/stairs, bounded mobile separation, projectile handling and clipped residual overlap. Existing per-step bounds and sleeping-body obstacle participation remain. Rejected query branches are absent from production source. |
+| Core movement/combat orchestration | Accept external input and pulse expiry before pursuit policy. Carry prior manual ownership and explicit-stop decisions in one consumed transient product, then reduce derived pursuit and publish in the same tick. No persistent handoff flag or second command queue. |
+| Core dynamic publication | Retain full before views and accepted paths. Reuse only metadata proved unchanged by the entity-journal boundary and catalog identities; runtime placement/playback are projected afresh. Mutation, consumed journals and catalog replacement force full projection. No persistent last-published-view cache. |
+| Core/content handoff | Retain immutable content products and generation/currentness checks. Replay-only waiting uses the normal publication path; live callers remain nonblocking. Diagnostic wait time is separately reported in both comparison versions. |
+| Build and diagnostics | Retain optimized development Parry/Glam with workspace debugging defaults. Record the compiler benefit separately. Capture/replay and live stimulus remain diagnostic tools; a live attack-readiness failure is not a passing combat workload. |
+
+The timestep decision is explicit: retain the 1/30 s solver-step bound and current single-step
+host admission while validating the retained workload reductions. Sustained overruns still discard
+simulation time. This remains an unresolved heavy-load/rollout risk, not evidence of normal
+movement in the original fight. Retail's elapsed-time subdivision is documented below; no cap-only
+fix, speculative catch-up state or unvalidated larger physics step has been introduced.
+
+Controlled correctness was checked against assertions, not just test totals. In
+[scene tests](../../crates/holtburger-world/src/spatial/scene.rs),
+`controlled_collection_drive_obstruction_and_reset_preserve_accepted_movement_boundaries` compares
+each requested step with committed displacement/path/contact, independently bounds wall travel by
+wall plane and body radius, and checks that teleport retires motor/correction state and changes
+path origin. `controlled_physical_return_preserves_wall_clipping_and_resumes_after_residency_change`
+keeps a pending ordinary correction hard-clipped, then resumes swept return after geometry
+replacement without a new packet or recovery teleport. Core tests separately cover return-to-origin
+routes, membership-only updates, zero-duration correction publication, attachment/incarnation
+changes, pending/consumed mutation journals and catalog replacement. The new runtime handoff case
+covers held, released, expired and reacquired control. These retained tests use numeric geometry
+and explicit clocks, not installed client archives.
+
+Relevant suites passed: **996 world tests** and **682 fixture-enabled core tests**; core also passes
+under the explicit all-unoptimized comparison settings. These tests satisfy the controlled-scenario
+requirement. They do not replace the separately required representative fight, live cadence,
+frontend/host integration checks or user acceptance.
 
 ## Scene and measurement conditions
 

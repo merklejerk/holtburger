@@ -90,7 +90,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison is valid with 23.09% median combined-work reduction, below 25%. Live stress mode added for qualification. Representative coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
-| 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
+| 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; original-baseline five-pair verification remains pending. |
 | 5. Verify overload and live movement | In progress | Qualified retained executable admits 99.36% over 64.98 s in the alternate scene. Local combat never activates and mover population is lower than the original fight, so representative combat/cadence and user movement acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
@@ -1069,6 +1069,25 @@ change and measured marginal benefit. These two pairs do not establish the overa
 gate or live movement recovery. Private runner, patch, executables and reports remain under
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
+
+### Development dependency compilation: separate configuration experiment
+
+The workspace has no development package overrides: Parry and Glam use the same unoptimized
+profile as our game code. Both are consumed by the measured world/core collision path. The
+bounded build candidate sets `profile.dev.package.parry3d.opt-level = 3` and the same setting for
+Glam. Workspace code remains unoptimized; development debug information, assertions and overflow
+checks retain their existing defaults. Distribution/profiling profiles are unchanged.
+
+This changes compilation, not solver equations or clock policy. Its tradeoffs are a longer first
+dependency build and less convenient stepping inside those optimized libraries. Validate the
+existing world/core suites and measure using the unchanged fixture. Attribute this experiment
+separately from source simplification: comparisons across different compilation settings cannot
+satisfy the original source-performance gate. Preserve the saved all-unoptimized `02cde557e`
+executable for that original five-pair comparison against `9cb7ba24e` plus matched diagnostics.
+All **996 world** and **681 fixture-enabled core** tests, formatting and whitespace checks
+pass under the new dependency settings. All-target world/core/harness Clippy with warnings denied
+and the normal fixture build also pass. Timing evidence remains pending. No speedup is claimed
+before measurement; the two compiler configurations will be explicitly distinguished.
 
 ### Static candidate selection: stream already-resolved borrowed geometry
 

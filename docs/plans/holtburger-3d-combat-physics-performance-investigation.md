@@ -110,16 +110,14 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** reduce redundant entity-fact publication in core, first proving its existing
-invalidation contract from source. Then address the host scheduling/time-admission policy that
-turns overruns into lost movement time. Keep experiments bounded: implement, run existing checks,
-measure on the frozen trace, retain or revert. Prepared-body reuse at `02bdbe098` is retained:
-two alternating marginal pairs show **2.07%** less combined work and lower p95s in both pairs.
-The prior query reductions remain rejected. The valid original-baseline **23.09%** reduction is
-unchanged until a new full acceptance comparison; marginal improvements are not added to it.
-The 93.30% live observation remains source-unqualified after the build-artifact correction.
-All original performance, workload, cadence, architecture/quality and user acceptance requirements
-remain unchanged.
+**Next action:** run the existing 65-second live stimulus with retained body-reuse executable
+`02bdbe098`, verifying its hash and retained optimization symbols first. Use the result to choose
+between remaining cost and host time-admission work. The unchanged semantic-publication shortcut
+is rejected and reverted: two alternating pairs showed **0.45% more** median combined work,
+with both paired directions worse. Prepared-body reuse remains retained (**2.07%** less marginal
+work); the valid original-baseline **23.09%** result awaits a new full acceptance comparison.
+The earlier 93.30% live observation remains source-unqualified. Fixture development is frozen;
+original performance, workload, cadence, quality and user acceptance requirements remain intact.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1072,7 +1070,7 @@ gate or live movement recovery. Private runner, patch, executables and reports r
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
 
-### Unchanged semantic publication: use the existing invalidation contract
+### Unchanged semantic publication: rejected after marginal measurement
 
 The core entity-fact publisher already retains accepted records and tracks dirty identities. It
 nevertheless resolves projectile supply and enters collection after every message and physics
@@ -1088,11 +1086,17 @@ These cover projectile supply's inputs (equipment masks/coverage, description, c
 and count) and the publisher's existing silent transitions. Existing behavior tests exercise
 appraisal, count changes, equipment removal, storage ancestry, access and session history.
 
-Both normal **676 core tests** and fixture-enabled **681 core tests** pass. Formatting and
-whitespace checks, core/harness all-target Clippy with warnings denied, and the normal fixture
-build pass. A marginal comparison against retained prepared-body checkpoint `02bdbe098` remains
-pending. The candidate has no performance claim yet. The fixture
-and original acceptance baseline are unchanged.
+Both normal **676 core tests** and fixture-enabled **681 core tests**, formatting/whitespace,
+all-target core/harness Clippy with warnings denied, and normal fixture build passed. Two
+alternating marginal pairs against retained prepared-body checkpoint `02bdbe098` then measured
+**28,348.54 → 28,476.94 ms** median combined work: **0.45% higher**. Paired regressions were
+**0.74%** and **0.17%**. Candidate p95s were lower, but there was no combined-work benefit to
+justify the added branch on every publication. Reject the candidate and restore the publisher
+exactly to `02bdbe098`. All workload/content checks passed; this was not an acceptance comparison.
+Keep all four reports and the independent audit in [rejected experiment evidence](evidence/h3d-combat-physics-2026-10-20/unchanged-publication-86a984c4b-rejected.json).
+The raw reports, runner, executable and exact patch remain private under
+`caps/runtime-fixtures/2026-10-21-4ae1/unchanged-publication-86a984c4b/`. No fixture or acceptance
+baseline changed.
 
 ## Next investigation targets: the complete update pipeline
 
@@ -1508,6 +1512,16 @@ Review **core/world overload policy** alongside those targets. The current clamp
 simulation time under sustained overruns. Catch-up work or larger integration steps each have
 different stability and latency costs; neither is an established fix here. Keep elapsed, admitted,
 and discarded time observable, and require an explicit policy rather than changing the cap alone.
+
+Retail source supplies a useful boundary check: `CPhysicsObj::update_object` at
+`acclient.c:311147-311219` consumes elapsed time up to a two-second discontinuity cutoff,
+subdividing by `MAX_QUANTUM_97`; initialization at `acclient.c:748924-748930` sets the minimum
+quantum to 1/30 s and maximum to 1/5 s. The decompile's loop condition is imperfect, but the
+subtraction, accumulated physics clock and repeated internal-update calls establish subdivision;
+they do not establish a 1/30 s elapsed-time discard policy. Our 1/30 s maximum is our collection
+stability contract, not a retail requirement. Retain the bounded solver contract while evaluating
+host catch-up; retail's larger maximum does not prove our crowd/force solver can take larger steps.
+
 
 ## Unattended runtime fixture: second scene, 2026-10-21
 

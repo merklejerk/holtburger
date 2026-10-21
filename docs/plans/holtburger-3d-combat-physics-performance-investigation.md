@@ -91,7 +91,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint, borrowed BSP candidates, prepared-body ownership and borrowed static selection retained. Latest static-selection marginal comparison reduces combined work 2.29%; original-baseline five-pair verification remains pending. |
-| 5. Verify overload and live movement | In progress | Qualified retained executable admits 99.36% over 64.98 s in the alternate scene. Local combat never activates and mover population is lower than the original fight, so representative combat/cadence and user movement acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
+| 5. Verify overload and live movement | In progress | Post-handoff live run admits 99.95% over 64.98 s; desired combat survives to manual takeover. Attack owner still never activates and population is smaller than the original fight, so representative combat/cadence and user acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
 Completed foundations:
@@ -110,13 +110,15 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** run the existing live stimulus after the proven manual-release/combat handoff
-fix. All 682 core tests, Clippy and the normal build pass. Input acceptance now precedes
-combat policy; the two-stage movement owner carries stop-notification decisions without retained
-state. Then run the original same-build five-pair comparison using an explicitly all-unoptimized
-candidate build, preserving the original baseline and excluding the **6.13%** compiler-configuration
-benefit from that gate. Representative combat/cadence, final quality review and user movement
-acceptance remain open. The fixture stays frozen.
+**Next action:** run the original five-pair performance gate against preserved `9cb7ba24e`
+plus matched diagnostics. Fresh candidate `114754c4f` explicitly builds Parry and Glam at level 0
+to match the original all-unoptimized baseline; all 682 core tests also pass in that configuration.
+The normal dependency-optimized development binary has been restored. This comparison excludes
+the separate compiler-setting benefit. The live handoff fix is verified: desired engagements now
+survive until manual takeover, and alternate-scene admission is **99.95%** over **64.98 s**.
+Attack activation still fails, workload is smaller than the original fight, and representative
+combat/cadence, final architecture/quality review and user movement acceptance remain open.
+The fixture and numeric gates are unchanged.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1069,6 +1071,24 @@ gate or live movement recovery. Private runner, patch, executables and reports r
 `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
 independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
 
+### Final-source same-build comparison: explicitly exclude dependency optimization
+
+Candidate `114754c4f` has now also passed **682 core tests** and the fixture build with explicit
+Cargo overrides `profile.dev.package.parry3d.opt-level=0` and
+`profile.dev.package.glam.opt-level=0`. This matches the original all-unoptimized baseline despite
+the new development defaults. Preserved candidate SHA-256 is
+`dc1865991e0e6df0a41445028a06ed036c134d35b5416946681e26f68dcbf642`; normal dependency-optimized
+build was restored and matches the saved live-run executable. This prevents a compiler-setting
+benefit from satisfying the source-performance target.
+
+Run the same five alternating pairs, one explicit full warmup and one measured full replay per
+invocation, warning logging, identical content, activation history and workload/outcome checks.
+Keep all individual reports and the unchanged combined-work/p95 criteria. No compiler, profiler,
+live diagnostic or other benchmark runs during measurement. Private runner, copied executable and
+build-command/source provenance are in
+`caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-control-handoff-114754c4f-all-unoptimized/`.
+The original baseline is unchanged; do not add the preceding marginal or compiler percentages.
+
 ### Combat handoff: accept queued movement before pursuit policy
 
 A concrete core ordering defect survived the performance changes: `ReleaseManual` is queued, but
@@ -1601,6 +1621,32 @@ subtraction, accumulated physics clock and repeated internal-update calls establ
 they do not establish a 1/30 s elapsed-time discard policy. Our 1/30 s maximum is our collection
 stability contract, not a retail requirement. Retain the bounded solver contract while evaluating
 host catch-up; retail's larger maximum does not prove our crowd/force solver can take larger steps.
+
+### Live handoff validation: desired combat survives, readiness remains unresolved
+
+Ran the unchanged live stimulus against fresh `114754c4f`, with retained optimization and new
+`MovementSystem::prepare_tick` symbols verified. This development build includes optimized Parry
+and Glam. All **2,167** observed player paths were integrated and grounded across outdoor land
+cells `0x4AE10031/32`. After excluding the first straddling simulation interval, **2,166** intervals
+sum to **64,979.992 ms elapsed / 64,946.363 ms admitted**, or **99.95%**.
+
+The handoff fix is corroborated in the live control stream: there are **seven engagement requests**,
+one per combat phase, and all six completed phases retain the desired target for about eight
+seconds until the next manual phase. The final phase ends with the observation window. Earlier
+first-request retirement is gone. The attack owner still never becomes active, so the probe
+correctly exits with failure and combat readiness remains unresolved; do not conflate a desired
+engagement with a sent attack.
+
+This window averaged **102.80 bodies / 93.69 movers / 8.03 projectiles**, below the original fight's
+roughly 153 movers / 13 projectiles. Mean host physics work was **17.65 ms** and interval **30.00 ms**.
+Different live populations, geometry and controls prevent treating this as a controlled speedup
+comparison or representative heavy-fight acceptance. Geometric player path length includes support
+and contact adjustments; it is not proof of requested locomotion speed. User acceptance stays open.
+
+[Post-handoff live evidence](evidence/h3d-combat-physics-2026-10-20/live-stress-control-handoff-114754c4f-incomplete.json)
+retains attribution, population, stimulus, path and request-retirement summaries, all phase means
+and raw hashes. Private artifacts and the reproducible `audit.py` are in
+`caps/runtime-fixtures/2026-10-21-4ae1/live-stress-control-handoff-114754c4f/`.
 
 ### Qualified retained-source live window: alternate-scene cadence, combat still pending
 

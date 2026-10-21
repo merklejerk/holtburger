@@ -137,22 +137,12 @@ impl EntityFactsPublication {
         opened_corpses: &BTreeSet<Guid>,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
         let revision = world.trade.as_ref().map(|trade| trade.revision);
-        let storage_changes = world.take_storage_changes();
-        // Supply depends on the same observed entity facts and accepted storage changes.
-        // Owner, trade and access transitions can invalidate records without an entity event.
-        if self.dirty.is_empty()
-            && storage_changes.is_empty()
-            && self.owner == Some(world.player.guid)
-            && self.trade_revision == revision
-            && self.container == world.world_container()
-        {
-            return Ok(ClientEntityDelta::default());
-        }
         if self.trade_revision != revision {
             self.dirty.extend(self.records.keys().copied());
             self.dirty.extend(world.client_entity_guids());
             self.trade_revision = revision;
         }
+        let storage_changes = world.take_storage_changes();
         let projectile_supply = world.projectile_supply();
         let mut delta = ClientEntityDelta {
             projectile_supply: (projectile_supply != self.projectile_supply)

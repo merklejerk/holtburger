@@ -88,7 +88,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Five alternating pairs with explicit warmup completed; 23.44% reduction misses the work target. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
-| 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
+| 3. Simplify core orchestration/publication | In progress | Full projection remains intact; an ordered identity merge replaces the per-tick matching hash map for exploratory measurement. Preserve all view/path semantics and compare measured work. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
@@ -103,8 +103,8 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** investigate repeated core dynamic-view projection against the completed alternating
-comparison. Its **23.44%** median work reduction does not meet the **25%** target; the earlier
+**Next action:** measure the ordered publication-merge experiment against preserved candidate
+`bc9e77f6e`. The completed alternating comparison's **23.44%** median reduction does not meet the **25%** target; the earlier
 **25.26%** sequential exploratory result is superseded for acceptance purposes.
 Representative stress coverage, live cadence, final architecture/quality review, and user movement
 acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
@@ -965,6 +965,29 @@ proof obligations include metadata changes, journal consumption, incarnation rep
 attachment visibility, and full accepted paths. No persistent publication cache or snapshot-reuse
 implementation has been introduced. The completed alternating benchmark used unchanged source
 throughout all ten invocations; only investigation documentation changed during measurement.
+
+### Ordered publication merge: exploratory measurement pending
+
+Before introducing metadata validity state, remove a narrower repeated preparation step in core's
+`dynamic_entity_tick_batch`: the old code allocates and populates a GUID hash map from the entire
+before snapshot on every tick, then probes it for every after view. Both live collections are
+already projected in GUID order. The experiment normalizes both input vectors in place and walks
+the two ordered populations together. Explicit normalization keeps the boundary safe for unordered
+captured inputs; sorting an already ordered live vector requires only a linear scan.
+
+Full before/after projection, complete view equality, generation guards, accepted paths, contact and
+membership updates, and batch construction remain intact. No persistent cache, mutation contract,
+time-admission change, or renderer change is added. The tradeoff is two in-place ordering passes
+and merge control flow in exchange for removing the per-tick map allocation and hashing. The
+benefit is unproven until measured; the larger metadata-reuse proposal remains unimplemented.
+
+All **678 core tests** pass, including a new asset-free population-transition scenario covering
+unordered inputs, removal, arrival, replacement generation, changed metadata, and an unchanged
+survivor. Existing motion/contact/path tests remain applicable. Core all-target Clippy with
+`runtime-fixture` and `-D warnings`, formatting, and whitespace checks pass. Compare the preserved
+pre-experiment executable with the rebuilt candidate in two alternating exploratory pairs, each
+invocation using a full warmup before its measured replay. This is a retention experiment, not a
+substitute for the required five-pair final performance gate.
 
 The evidence supports reviewing the system across layers before replacing the collision solver.
 The following are investigation targets, not implemented refactors.

@@ -217,21 +217,32 @@ impl ClientRuntime {
     /// host. The runtime owns both boundaries and publishes at most one batch for the turn.
     pub(super) fn dynamic_entity_tick_batch(
         &self,
-        before: Vec<crate::DynamicEntityView>,
-        after: Vec<crate::DynamicEntityView>,
+        mut before: Vec<crate::DynamicEntityView>,
+        mut after: Vec<crate::DynamicEntityView>,
         host_time: DynamicEntityHostTime,
         duration_ms: f64,
         body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
     ) -> anyhow::Result<Option<DynamicEntityTickBatch>> {
-        let before_by_guid = before
-            .into_iter()
-            .map(|entity| (entity.identity.guid, entity))
-            .collect::<std::collections::HashMap<_, _>>();
+        // Live projections already arrive ordered. Normalize the boundary itself so other
+        // captured inputs can use the same allocation-free identity merge safely.
+        before.sort_unstable_by_key(|entity| entity.identity.guid);
+        after.sort_unstable_by_key(|entity| entity.identity.guid);
+        let mut previous_entities = before.iter().peekable();
         let mut advances = Vec::new();
         let mut updates = Vec::new();
 
         for entity in after {
-            let Some(previous) = before_by_guid.get(&entity.identity.guid) else {
+            while previous_entities
+                .peek()
+                .is_some_and(|previous| previous.identity.guid < entity.identity.guid)
+            {
+                previous_entities.next();
+            }
+            let Some(previous) = previous_entities
+                .peek()
+                .copied()
+                .filter(|previous| previous.identity.guid == entity.identity.guid)
+            else {
                 continue;
             };
             let motion = body_motions.get(&entity.identity.guid);
@@ -1190,6 +1201,52 @@ mod tests {
         assert!(batch.advances.is_empty());
         assert_eq!(batch.updates.len(), 1);
         assert_eq!(batch.updates[0].identity.guid, guid);
+    }
+
+    #[test]
+    fn tick_publication_matches_surviving_generations_across_population_changes() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x5000_0001);
+        client.world.player.guid = guid;
+        client.world.add_entity(projectable_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        ));
+        let template = project_client_dynamic_entity(&client.world, guid)
+            .unwrap()
+            .unwrap();
+        let view = |id| {
+            let mut entity = template.clone();
+            entity.identity.guid = Guid(id);
+            entity
+        };
+        // Both populations are unordered. Removed and newly visible identities have their
+        // own lifecycle publications; only a changed surviving generation belongs here.
+        let before = vec![view(7), view(5), view(4), view(3), view(1)];
+        let mut replacement = view(3);
+        replacement.generation += 1;
+        replacement.display.level = Some(1);
+        let mut changed = view(5);
+        changed.display.level = Some(1);
+        let after = vec![view(6), changed, view(7), replacement, view(2)];
+        let batch = client
+            .dynamic_entity_tick_batch(
+                before,
+                after,
+                DynamicEntityHostTime::new(13.0).unwrap(),
+                30.0,
+                &Default::default(),
+            )
+            .unwrap()
+            .unwrap();
+
+        assert!(batch.advances.is_empty());
+        assert_eq!(batch.updates.len(), 1);
+        assert_eq!(batch.updates[0].identity.guid, Guid(5));
+        assert_eq!(batch.updates[0].display.level, Some(1));
     }
 
     #[test]

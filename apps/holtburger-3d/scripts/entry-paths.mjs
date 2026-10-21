@@ -86,6 +86,25 @@ export function collapseRendererArguments(args) {
 	return queryPath.length === 0 ? [] : [`--query=${queryPath.slice(1)}`];
 }
 
+/** Consume shell-only flags before renderer query construction and Electron startup. */
+export function extractElectronLaunchArguments(args) {
+	const remainingArgs = [];
+	const switches = new Set();
+	for (const argument of args) {
+		const parsed = parseLongArgument(argument);
+		if (parsed.name !== "uncapped") {
+			remainingArgs.push(argument);
+			continue;
+		}
+		if (parsed.value !== undefined) {
+			throw new Error("--uncapped does not accept a value.");
+		}
+		switches.add("--disable-frame-rate-limit");
+		switches.add("--disable-gpu-vsync");
+	}
+	return { args: remainingArgs, electronSwitches: [...switches] };
+}
+
 /**
  * Removes the client connection arguments before a renderer URL is assembled.
  *

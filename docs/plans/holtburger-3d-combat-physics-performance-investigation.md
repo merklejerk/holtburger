@@ -105,8 +105,9 @@ Completed foundations:
   recorded intervals that cannot demonstrate restored live cadence.
 
 **Next action:** verify and measure prepared-body reuse across contact input capture and atomic
-publication. The new ownership change removes the second body clone and the separate collision-pose
-copy/field; existing **996 world / 681 core** tests pass. Keep using the unchanged frozen replay.
+publication at checkpoint `02bdbe098`. The ownership change removes the second body clone and
+separate collision-pose copy/field; **996 world / 681 core** tests, broad Clippy and build pass.
+Two alternating marginal pairs against qualified `e767b02e8` are running on the unchanged trace.
 The prior two query reductions are rejected and rolled back: conflicting pair directions and a
 0.09% higher median did not justify them. Preserve the valid **23.09%** end-to-end result and the
 original acceptance baseline. The 93.30% live observation remains source-unqualified after the
@@ -1048,9 +1049,14 @@ collision poses remain on the same body, eliminating the pose clone and actuator
 This changes ownership within the existing transaction, not solving, reporting, coverage, recovery,
 input sampling, scheduling or fixture behavior. The net source change removes two lines and one
 field. All **996 world** and **681 core** tests, broad all-target Clippy with warnings denied,
-normal fixture build, formatting and whitespace checks pass. Paired measurement is next. Retention
-requires correct behavior, simpler ownership and no repeatable work regression; a speedup claim
-requires measured benefit. The overall 25% gate remains unchanged regardless of a cleanup benefit.
+normal fixture build, formatting and whitespace checks pass. Two alternating marginal pairs at
+checkpoint `02bdbe098` compare only this structural change against qualified `e767b02e8`; the
+query experiments have been fully removed. Private runner, patch, executables and all reports are
+in `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`. Keep all full-trace workload and
+outcome checks, explicit warmup, and warning logging. No compiler, profiler or other benchmark
+runs during measurement. Retention requires correct behavior, simpler ownership and no repeatable
+work regression; a speedup claim requires measured benefit. The overall 25% gate remains unchanged
+regardless of a cleanup benefit.
 
 ## Next investigation targets: the complete update pipeline
 

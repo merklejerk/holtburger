@@ -4,8 +4,9 @@ Date: 2026-10-20, US Eastern time. Some diagnostic timestamps fall on 2026-10-21
 Updated: 2026-10-21, including the unattended second-scene capture and offline replay fixture.
 
 Status: **The initial geometry fixes improved user-reported movement. The remaining heavy-fight
-slowdown has not been retested with the follow-up changes. Follow-up debug replays show a 25.26% exploratory work
-reduction against the controlled starting checkpoint. The final performance, stress, live-cadence,
+slowdown has not been retested with the follow-up changes. Five alternating debug replay pairs show
+a 23.44% median work reduction, below the 25% target, with lower active-physics p95 in every candidate
+run. The final performance, stress, live-cadence,
 and user-acceptance gates remain open.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
@@ -85,7 +86,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | Phase | State | Deliverable / next verification |
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
-| 1. Establish the controlled workload | In progress | Explicit warmup and five measured baseline runs completed; alternating comparison and representative stress coverage remain open. |
+| 1. Establish the controlled workload | In progress | Five alternating pairs with explicit warmup completed; 23.44% reduction misses the work target. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
@@ -102,8 +103,9 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** run five alternating paired baseline/candidate measurements with explicit warmup.
-The exploratory combined reduction is **25.26%**, with a narrow margin that needs confirmation.
+**Next action:** investigate repeated core dynamic-view projection against the completed alternating
+comparison. Its **23.44%** median work reduction does not meet the **25%** target; the earlier
+**25.26%** sequential exploratory result is superseded for acceptance purposes.
 Representative stress coverage, live cadence, final architecture/quality review, and user movement
 acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
 
@@ -133,6 +135,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
+| Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
 | Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
 | Borrowed BSP candidates | `72c2e844a`; patch/binary hashes in evidence | Retained: median 28,331.40 ms (22.80% exploratory reduction); 995 world / 677 core tests and Clippy pass. Post-journal sampling does not support insertion as the dominant physics cost. |
 | Bounded message placement | `78cd7cd40`; patch/binary hashes in evidence | Retained for paired verification: message work about halved, combined median 29,806.10 ms (18.79% below baseline). Physics work/p95 rose vs preceding exploration; 995 world / 677 core tests and broad Clippy pass. |
@@ -895,9 +898,9 @@ The original exact baseline executable is preserved; no compiler or other benchm
 this agent during that comparison. Representative heavy-workload, live-cadence, and user acceptance
 remain separate open gates regardless of this result.
 
-## Alternating acceptance comparison: in progress
+## Alternating acceptance comparison: completed, work target not met
 
-Candidate `bc9e77f6e` is being compared with the exact preserved baseline executable from
+Candidate `bc9e77f6e` was compared with the exact preserved baseline executable from
 `9cb7ba24e`, rather than with the older sequential baseline timings alone. Each invocation performs
 one full explicit warmup followed by one measured replay. Five pairs alternate order:
 **baseline/candidate, candidate/baseline, baseline/candidate, candidate/baseline,
@@ -912,12 +915,56 @@ order, and per-invocation load samples. No compiler or other benchmark from this
 the comparison. Content provenance is checked again at completion. Workload validation retains
 all reports and flags mismatches; failed samples are not silently discarded or rerun.
 
-The first fresh baseline sample was **35,361.90 ms**, faster than the older **36,700.96 ms** median.
-The narrow exploratory threshold margin may therefore disappear. Acceptance remains unproven until
-all pairs finish and individual work/p95/outcome results are reviewed. The stationary replay still
-cannot establish heavy live cadence or original combat movement resolution.
+The comparison completed at **2026-10-21 06:44:33 UTC**. All ten measured invocations completed
+successfully with the expected 5,741 messages, 1,519 physics steps, 1,500 active-start steps, peak
+population 286, zero population mismatches, and unchanged authoritative final player position.
+The content provenance check passed. Individual reports, load samples, hashes, and aggregate results
+are retained in [paired evidence](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-bc9e77f6e.json).
+
+| Pair | Baseline combined ms | Candidate combined ms | Paired reduction | Baseline active p95 ms | Candidate active p95 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 35,361.90 | 27,451.27 | 22.37% | 22.205 | 18.837 |
+| 2 | 36,339.96 | 28,561.93 | 21.40% | 22.505 | 19.976 |
+| 3 | 36,275.49 | 28,610.40 | 21.13% | 22.716 | 19.972 |
+| 4 | 35,711.98 | 27,773.18 | 22.23% | 22.752 | 19.724 |
+| 5 | 36,333.46 | 27,733.41 | 23.67% | 22.564 | 18.990 |
+
+The independently recomputed per-version medians are **36,275.49 ms** and **27,773.18 ms**:
+**23.44%** less combined message/physics work. Every candidate p95 is below the minimum baseline
+p95, so the p95 condition passes without relying on the runner's median-plus-range allowance.
+The work condition fails: the 25% threshold for this comparison is **27,206.62 ms**, approximately
+**566.56 ms** below the candidate median across the entire replay. No sample was discarded or retried.
+
+**Decision: retain the measured simplifications and keep the performance gate open.** The faster
+fresh baseline removes the earlier sequential exploratory margin. Do not reinterpret that older
+25.26% result as acceptance. Investigate repeated core publication work next. The stationary replay
+still cannot establish heavy live cadence, complete movement/contact equivalence, or original
+combat movement resolution.
 
 ## Next investigation targets: the complete update pipeline
+
+### Snapshot reuse constraints from source review
+
+The core publication boundary in `advance_physics_tick` captures full dynamic views after world
+maintenance and collision-content updates, then captures them again after simulation, event
+handling, combat, and supply hydration. The diff compares complete views, guards entity generations,
+and preserves accepted physical paths even when a path returns to its initial pose. Replacing this
+with a pose-only comparison would lose legitimate contact, sampling, membership, animation, and
+physics changes.
+
+Metadata is not immutable throughout that interval. For example,
+`WorldState::apply_authored_motion_physics` can change effective ethereal state through
+`EntityManager::get_mut` while animation advances. Separately, message handling takes the store's
+mutation journal and full placement reconciliation clears it. Therefore, absence from the pending
+journal cannot by itself prove that metadata is unchanged since an earlier snapshot: an intervening
+world boundary may have consumed that evidence.
+
+A possible next experiment is frame-local metadata reuse with an explicit world-owned validity
+contract, while freshly projecting runtime placement, contact, participation, and playback. Its
+proof obligations include metadata changes, journal consumption, incarnation replacement,
+attachment visibility, and full accepted paths. No persistent publication cache or snapshot-reuse
+implementation has been introduced. The completed alternating benchmark used unchanged source
+throughout all ten invocations; only investigation documentation changed during measurement.
 
 The evidence supports reviewing the system across layers before replacing the collision solver.
 The following are investigation targets, not implemented refactors.

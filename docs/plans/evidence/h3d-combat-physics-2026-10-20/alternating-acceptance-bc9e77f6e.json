@@ -1,0 +1,617 @@
+{
+  "description": "Five alternating baseline/candidate pairs with an explicit full warmup per invocation. Work target failed; all samples retained.",
+  "metadata": {
+    "started_at": "2026-10-21T06:27:50.884664+00:00",
+    "candidate_source_commit": "bc9e77f6ec1a9dd1021459dd40ff7acf57b49d6b",
+    "baseline_source_commit": "9cb7ba24e",
+    "rust_log": "warn",
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "binary_sha256": {
+      "baseline": "d57eb2fbcd57542dd34a6a0adb0bee67658466605f9fc218ef5c118dfdf05a76",
+      "candidate": "74857538e2528f2ab55cf44c00bb26781aea421f228f80629448e713af4a8aed"
+    },
+    "content": [
+      {
+        "name": "assets.hba",
+        "bytes": 634425693,
+        "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+      }
+    ],
+    "pairs": 5,
+    "warmups_per_invocation": 1,
+    "measured_runs_per_invocation": 1,
+    "order": [
+      "baseline,candidate",
+      "candidate,baseline",
+      "baseline,candidate",
+      "candidate,baseline",
+      "baseline,candidate"
+    ],
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "cargo_lock_sha256": "ae547307541af655f17be08ae58e0a9c3219617963e0bd1df83472b2c6be48f6",
+    "runner_sha256": "3a1dbf0134cb75e0b8f4f87e646e4d2344ee3d874f9037ad185ac8d72d313f6a",
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "build_conditions": "Preserved dev/debug executables; source optimizations only. Runtime-fixture enabled. Same explicit content and input; no compiler or other benchmark from this agent during comparison.",
+    "profile_environment_present": {}
+  },
+  "samples_sha256": "1272c52cea5fbfe1a895050e6299917236951674ea69c79da6784942bd1015ff",
+  "samples": [
+    {
+      "pair": 1,
+      "slot": 1,
+      "version": "baseline",
+      "started_at": "2026-10-21T06:27:51.744640+00:00",
+      "loadavg_before": "1.47 1.74 1.87 2/2717 22",
+      "completed_at": "2026-10-21T06:29:31.911042+00:00",
+      "wall_seconds": 100.16629705799278,
+      "exit_code": 0,
+      "loadavg_after": "2.41 1.99 1.95 2/2713 94",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5606.724989000006,
+        "physics_work_ms": 29755.172383999965,
+        "maximum_physics_work_ms": 25.583049,
+        "active_physics_work_p95_ms": 22.205327,
+        "maximum_input_lateness_ms": 20.08325,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.46153,
+            "y": 31.819912,
+            "z": 63.735115
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 35361.89737299997,
+      "validation_issues": []
+    },
+    {
+      "pair": 1,
+      "slot": 2,
+      "version": "candidate",
+      "started_at": "2026-10-21T06:29:31.912447+00:00",
+      "loadavg_before": "2.41 1.99 1.95 3/2713 94",
+      "completed_at": "2026-10-21T06:31:12.030194+00:00",
+      "wall_seconds": 100.11766134900972,
+      "exit_code": 0,
+      "loadavg_after": "2.46 2.15 2.01 1/2711 168",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2165.9571800000035,
+        "physics_work_ms": 25285.31344100005,
+        "maximum_physics_work_ms": 22.439099,
+        "active_physics_work_p95_ms": 18.836986,
+        "maximum_input_lateness_ms": 9.168831,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45604,
+            "y": 31.825668,
+            "z": 63.733253
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 27451.270621000054,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 1,
+      "version": "candidate",
+      "started_at": "2026-10-21T06:31:12.031542+00:00",
+      "loadavg_before": "2.46 2.15 2.01 4/2711 168",
+      "completed_at": "2026-10-21T06:32:52.201795+00:00",
+      "wall_seconds": 100.17015840898966,
+      "exit_code": 0,
+      "loadavg_after": "2.36 2.20 2.05 2/2715 235",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2227.706128000004,
+        "physics_work_ms": 26334.22409200002,
+        "maximum_physics_work_ms": 23.210583,
+        "active_physics_work_p95_ms": 19.97628,
+        "maximum_input_lateness_ms": 10.683333999999999,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45564,
+            "y": 31.826605,
+            "z": 63.733086
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28561.930220000024,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 2,
+      "version": "baseline",
+      "started_at": "2026-10-21T06:32:52.203235+00:00",
+      "loadavg_before": "2.36 2.20 2.05 2/2715 235",
+      "completed_at": "2026-10-21T06:34:32.315130+00:00",
+      "wall_seconds": 100.11180683999555,
+      "exit_code": 0,
+      "loadavg_after": "2.51 2.29 2.10 2/2708 305",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5606.629271999999,
+        "physics_work_ms": 30733.327271999988,
+        "maximum_physics_work_ms": 27.2438,
+        "active_physics_work_p95_ms": 22.50538,
+        "maximum_input_lateness_ms": 16.181767999999998,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45604,
+            "y": 31.825668,
+            "z": 63.733253
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 36339.956543999986,
+      "validation_issues": []
+    },
+    {
+      "pair": 3,
+      "slot": 1,
+      "version": "baseline",
+      "started_at": "2026-10-21T06:34:32.316425+00:00",
+      "loadavg_before": "2.51 2.29 2.10 4/2708 305",
+      "completed_at": "2026-10-21T06:36:12.428696+00:00",
+      "wall_seconds": 100.11218220400042,
+      "exit_code": 0,
+      "loadavg_after": "2.31 2.29 2.11 1/2715 379",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5627.566645000003,
+        "physics_work_ms": 30647.924983000034,
+        "maximum_physics_work_ms": 25.734803,
+        "active_physics_work_p95_ms": 22.716431,
+        "maximum_input_lateness_ms": 21.241469,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.4566,
+            "y": 31.826845,
+            "z": 63.733307
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 36275.49162800003,
+      "validation_issues": []
+    },
+    {
+      "pair": 3,
+      "slot": 2,
+      "version": "candidate",
+      "started_at": "2026-10-21T06:36:12.430057+00:00",
+      "loadavg_before": "2.31 2.29 2.11 2/2715 379",
+      "completed_at": "2026-10-21T06:37:52.562415+00:00",
+      "wall_seconds": 100.13227548199939,
+      "exit_code": 0,
+      "loadavg_after": "2.45 2.37 2.17 1/2714 451",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2269.6540010000026,
+        "physics_work_ms": 26340.748377999975,
+        "maximum_physics_work_ms": 25.734453000000002,
+        "active_physics_work_p95_ms": 19.97246,
+        "maximum_input_lateness_ms": 9.013969,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.4566,
+            "y": 31.826845,
+            "z": 63.733307
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28610.402378999977,
+      "validation_issues": []
+    },
+    {
+      "pair": 4,
+      "slot": 1,
+      "version": "candidate",
+      "started_at": "2026-10-21T06:37:52.563694+00:00",
+      "loadavg_before": "2.45 2.37 2.17 2/2714 451",
+      "completed_at": "2026-10-21T06:39:32.701489+00:00",
+      "wall_seconds": 100.13771415600786,
+      "exit_code": 0,
+      "loadavg_after": "2.06 2.30 2.16 3/2724 524",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2185.2814009999993,
+        "physics_work_ms": 25587.90082700003,
+        "maximum_physics_work_ms": 23.048162,
+        "active_physics_work_p95_ms": 19.723788,
+        "maximum_input_lateness_ms": 11.034742999999999,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45882,
+            "y": 31.826952,
+            "z": 63.73384
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 27773.18222800003,
+      "validation_issues": []
+    },
+    {
+      "pair": 4,
+      "slot": 2,
+      "version": "baseline",
+      "started_at": "2026-10-21T06:39:32.702761+00:00",
+      "loadavg_before": "2.06 2.30 2.16 3/2724 524",
+      "completed_at": "2026-10-21T06:41:12.892525+00:00",
+      "wall_seconds": 100.1896836879896,
+      "exit_code": 0,
+      "loadavg_after": "2.85 2.49 2.24 2/2720 592",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5611.106466000004,
+        "physics_work_ms": 30100.871339999998,
+        "maximum_physics_work_ms": 27.079588,
+        "active_physics_work_p95_ms": 22.752209999999998,
+        "maximum_input_lateness_ms": 20.644454,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.46153,
+            "y": 31.819912,
+            "z": 63.735115
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 35711.977806,
+      "validation_issues": []
+    },
+    {
+      "pair": 5,
+      "slot": 1,
+      "version": "baseline",
+      "started_at": "2026-10-21T06:41:12.894028+00:00",
+      "loadavg_before": "2.85 2.49 2.24 3/2720 592",
+      "completed_at": "2026-10-21T06:42:53.006941+00:00",
+      "wall_seconds": 100.112724548002,
+      "exit_code": 0,
+      "loadavg_after": "2.44 2.46 2.26 2/2720 660",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5563.942172999985,
+        "physics_work_ms": 30769.516241999972,
+        "maximum_physics_work_ms": 26.665566000000002,
+        "active_physics_work_p95_ms": 22.5643,
+        "maximum_input_lateness_ms": 16.418943,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45882,
+            "y": 31.826952,
+            "z": 63.73384
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 36333.45841499996,
+      "validation_issues": []
+    },
+    {
+      "pair": 5,
+      "slot": 2,
+      "version": "candidate",
+      "started_at": "2026-10-21T06:42:53.008290+00:00",
+      "loadavg_before": "2.44 2.46 2.26 3/2720 660",
+      "completed_at": "2026-10-21T06:44:33.159097+00:00",
+      "wall_seconds": 100.15068162899115,
+      "exit_code": 0,
+      "loadavg_after": "2.11 2.35 2.25 2/2724 727",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2192.072236,
+        "physics_work_ms": 25541.338480000053,
+        "maximum_physics_work_ms": 23.585214,
+        "active_physics_work_p95_ms": 18.989555000000003,
+        "maximum_input_lateness_ms": 8.847891,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45604,
+            "y": 31.825668,
+            "z": 63.733253
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 27733.410716000053,
+      "validation_issues": []
+    }
+  ],
+  "summary": {
+    "completed_at": "2026-10-21T06:44:33.471201+00:00",
+    "baseline_median_combined_ms": 36275.49162800003,
+    "candidate_median_combined_ms": 27773.18222800003,
+    "median_work_reduction": 0.23438164497369096,
+    "baseline_active_p95_ms": [
+      22.205327,
+      22.50538,
+      22.716431,
+      22.752209999999998,
+      22.5643
+    ],
+    "candidate_active_p95_ms": [
+      18.836986,
+      19.97628,
+      19.97246,
+      19.723788,
+      18.989555000000003
+    ],
+    "baseline_p95_range_ms": 0.5468829999999976,
+    "p95_median_limit_ms": 23.111182999999997,
+    "workload_and_content_valid": true,
+    "work_target_met": false,
+    "p95_gate_met": true,
+    "all_candidate_p95s_below_baseline_max": true,
+    "performance_gate_met": false,
+    "pair_work_reductions": [
+      0.22370481619122484,
+      0.21403510250713753,
+      0.21130214657335167,
+      0.222300641569792,
+      0.23669774566379975
+    ],
+    "limitations": [
+      "Recorded-interval replay cannot prove live cadence.",
+      "Stationary alternate-scene workload does not establish original combat resolution.",
+      "Entity counts and final authority do not replace controlled accepted-motion/contact checks."
+    ]
+  },
+  "independent_audit": {
+    "all_ten_samples_present": true,
+    "all_workload_checks_pass": true,
+    "median_recomputed_from_nonoverlapping_work_totals": true,
+    "all_candidate_p95s_below_baseline_min": true
+  },
+  "decision": "Retain measured simplifications. Keep the 25% performance gate open and investigate repeated core projection work."
+}

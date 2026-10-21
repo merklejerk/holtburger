@@ -83,9 +83,9 @@ criterion open; do not silently lower targets or mark partial improvement as com
 
 | Phase | State | Deliverable / next verification |
 | --- | --- | --- |
-| 0. Preserve evidence and checkpoint | Complete with this checkpoint | Historical captures, geometry results, local raw fixture, and recovery references retained. |
-| 1. Establish the controlled workload | In progress | Headless capture and three paced replays work; establish the quiet-machine paired baseline, workload audit, and representative stress coverage. |
-| 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced below; controlled-time movement oracle and final redesign decisions remain open. |
+| 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
+| 1. Establish the controlled workload | In progress | Explicit warmup and five measured baseline runs completed; alternating comparison and representative stress coverage remain open. |
+| 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; new asset-free collection drive/reset scenario verifies accepted movement boundaries. Obstruction/correction oracle coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
 | 4. Simplify world movement preparation | Pending | Share valid query preparation and avoid unnecessary body work while preserving accepted-path coverage, support, and obstacle participation. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
@@ -101,10 +101,9 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** finish the controlled checkpoint baseline and movement/workload checks before
-accepting an optimization. The first bounded experiment removes repeated inventory membership
-traversals from the world-owned burden query used by movement and publication; measure its actual
-contribution before choosing the next core/publication or collision change.
+**Next action:** use the preserved baseline to evaluate changes in core dynamic publication and
+world movement preparation. The burden-query experiment has directional evidence below, but the
+25% target, alternating comparison, broader movement oracle, and live acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -131,7 +130,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | Milestone | Git reference | Evidence / outcome |
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
-| Controlled replay measurement tooling | Reporting-only successor to `5ba500669`; source patch and binary hashes retained | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
+| Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
+| Burden membership and controlled movement boundaries | Experiment successor to `9cb7ba24e`; source patch and binary hashes retained below | Remove repeated inventory traversals without retained caches; exploratory median work down 5.74%; 993 world and 677 core tests pass. Retained for further paired verification; final performance gate remains open. |
 
 Future ledger rows must name the hypothesis, measured outcome, validation, and whether the change
 was retained or reverted. Failed experiments remain useful evidence and should not disappear from
@@ -464,6 +464,53 @@ double-count prevention rule being preserved.
 This is a source-backed ownership review, not final approval of all subsystem contracts. Controlled
 movement/reset scenarios, measured acceptance, and final cleanup remain required. The next
 implementation choice follows measurements, rather than a requirement to replace geometry math.
+
+## First goal experiment: inventory membership in burden resolution
+
+The world-owned burden query now materializes the current inventory once and builds a local
+membership set for parent checks. It preserves the original iteration/summation order, requires
+descriptions for nested items before reporting known burden, and retains aggregate-container
+double-count prevention. The set has no retained lifetime or invalidation contract. This removes
+the nested inventory traversal without changing burden values, movement equations, collision
+participation, input scheduling, or publication timing.
+
+An untimed full warmup followed by two exploratory measured runs produced:
+
+| Measurement | Controlled baseline (five runs) | Burden experiment (two runs) |
+| --- | ---: | ---: |
+| Median combined message/physics work | 36,700.96 ms | 34,594.76 ms |
+| Individual experiment work totals | See retained baseline evidence | 34,050.08 / 35,139.44 ms |
+| Active physics p95 | 22.750–23.218 ms | 21.453 / 22.080 ms |
+| Active-start steps per run | 1,500 | 1,500 |
+| Entity-count mismatches per run | 0 | 0 |
+
+The exploratory median reduction is **5.74%**. Baseline and experiment were measured sequentially,
+not as five alternating pairs; this is directional evidence and does not satisfy the 25% target
+or final measurement protocol. Raw runs, exact experiment binary, and the context source patch
+remain private under `caps/runtime-fixtures/2026-10-21-4ae1/burden-membership/`. Sanitized individual
+reports and hashes are retained in
+[burden-membership-exploratory.json](evidence/h3d-combat-physics-2026-10-20/burden-membership-exploratory.json).
+
+The new simulated-player audit confirms that paced replay is not bitwise deterministic: final
+runtime positions vary by millimetres even among baseline runs. Authoritative final positions
+remain fixed. Do not use exact equality of paced final runtime poses as a collision correctness
+oracle or explain away larger differences without controlled investigation.
+
+Two new world-context tests preserve pending nested-description and partial-view parent semantics;
+existing nested-container burden/run-rate coverage also passes. A new asset-free
+`controlled_collection_drive_and_reset_preserve_accepted_movement_boundaries` scenario in
+[scene tests](../../crates/holtburger-world/src/spatial/scene.rs) drives a grounded body with an
+explicit clock/quantum and checks requested displacement, committed displacement, published path,
+and contact state at every step. It then installs a pending ordinary correction and a discontinuous
+reset, verifying that old motor motion, correction state, and path origin do not leak into the new
+epoch. This is a bounded movement contract check; broader obstruction, portal, correction, and
+crowd scenarios remain part of the outstanding oracle work.
+
+Verification for this experiment: **993 world tests and 677 core tests passed**, including the
+new collection scenario and runtime-fixture tests. World/core Clippy across all targets with the
+runtime-fixture feature passed with warnings treated as errors. Formatting and whitespace checks
+passed. The change is retained for subsequent comparisons; no heavy live-cadence or user-feel
+resolution is claimed.
 
 ## Next investigation targets: the complete update pipeline
 

@@ -87,9 +87,9 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | Phase | State | Deliverable / next verification |
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
-| 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison running. Representative stress coverage remains open. |
+| 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison is valid with 23.09% median combined-work reduction, below 25%. Live stress mode added for qualification. Representative coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
-| 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; metadata reuse retains a 45.46% phase-attribution improvement, but its five-pair attempt is invalid and raw total-work reduction is only 23.33%. End-to-end acceptance remains open. |
+| 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
@@ -104,13 +104,13 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** complete and audit the running five alternating pairs with matched replay-only
-content completion. Both versions qualify at 1,506 active ticks with identical activation histories
-under normal and single-CPU scheduling. Keep all individual runs and await totals; apply the same
-25% work and p95 gates. Historical **23.33%** (invalid workload), **23.44%** (valid but below target),
-and **25.26%** (sequential exploration) remain separate evidence and cannot satisfy this comparison.
-Representative stress coverage, live cadence, final architecture/quality review, and user movement
-acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
+**Next action:** qualify the new live movement/combat stress mode, measure requested controls,
+accepted paths/contact/corrections, solver census, and elapsed/admitted time after startup. The
+completed matched-readiness comparison is valid but reaches **23.09%**, below the **25%** target;
+all ten workload checks pass and every candidate p95 is below every baseline p95. Preserve all
+reports and the original baseline. Use new attribution to choose the next structural optimization;
+do not repeat an unchanged comparison hoping for a passing median. Representative stress coverage,
+live cadence, final architecture/quality review, and user movement acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -140,7 +140,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
 | Ordered publication merge | Experiment `82b66cfa5`, subsequently reverted | Rejected: two alternating exploratory pairs give 27,820.23 → 27,861.62 ms median work (0.15% higher), with conflicting paired directions. All workload checks and 678 pre-rollback core tests pass; no map-removal benefit demonstrated. |
-| Matched replay readiness qualification | Candidate `e767b02e8`; original `9cb7ba24e` plus diagnostic-only patch | Both versions under normal/single-CPU scheduling activate at input 14 with 1,506 active ticks; messages 5,741, physics 1,519, peak 286, population mismatches zero. Candidate 681 / baseline 679 core tests and Clippy pass. Five-pair comparison running; no new acceptance claim. |
+| Matched replay readiness qualification | Candidate `e767b02e8`; original `9cb7ba24e` plus diagnostic-only patch | Both versions under normal/single-CPU scheduling activate at input 14 with 1,506 active ticks; messages 5,741, physics 1,519, peak 286, population mismatches zero. Candidate 681 / baseline 679 core tests and Clippy pass. Matched five-pair comparison is valid; work gate still fails at 23.09%. |
 | Frame-local metadata reuse | Experiment `e647d2437` | Exploratory combined medians improve 0.90% with conflicting pair directions; matched phase attribution reduces after-projection/diff mean 1.312 → 0.716 ms (45.46%). Retain for five-pair final verification. All workload checks, 996 world / 679 core tests, and broad Clippy pass. |
 | Metadata-reuse five-pair attempt | Source `e647d2437`; ten reports retained | Invalid for acceptance: pair 1 candidate has 1,499 activated ticks, expected 1,500. Raw combined medians 35,690.98 → 27,365.60 ms (23.33%) also miss the target. All candidate p95s are below every baseline p95; no sample was replaced or dropped. |
 | Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
@@ -1189,9 +1189,9 @@ patch provenance. Both versions must match the new full trace with at least the 
 workload. Other clock use and asynchronous systems remain: this barrier alone does not establish
 deterministic simulation or live cadence.
 
-#### Matched five-pair comparison: running
+#### Matched five-pair comparison: completed, work gate not met
 
-The running comparison uses original performance source `9cb7ba24e` plus only diagnostic tooling
+The completed comparison uses original performance source `9cb7ba24e` plus only diagnostic tooling
 against candidate `e767b02e8`. The baseline diagnostic patch SHA-256 is
 `8bd001321bf099c36702b45067fda506bfbeccfed9da68a47bd81c2b09e5cf08`; its private provenance includes
 the exact patch, normalized replay-source equivalence, toolchain, lockfile, and binary hashes.
@@ -1206,16 +1206,55 @@ population mismatches, and the exact qualified activation history. Existing auth
 position and runtime-placement checks remain; these do not replace controlled movement/contact
 oracles. Keep all individual reports, flag mismatches rather than replacing samples, retain worker
 wait separately, and audit the original 25% combined-work and p95 gates after the runner completes.
-No compiler, profiler, or other benchmark is run by this agent during the comparison. Results are
-pending; readiness qualification is not performance acceptance or evidence of restored live cadence.
+No compiler, profiler, or other benchmark was run by this agent during the comparison. Only
+harness source and documentation were edited while preserved executables ran.
+
+All ten reports pass: complete trace and identical activation history, 1,506 active ticks, zero
+population mismatches, and unchanged content. An independent audit recomputes medians directly
+from the two non-overlapping work totals in every report. Median combined work is **36,326.90 →
+27,939.80 ms**, a **23.0879% reduction**. The original 25% work gate fails. Candidate active p95s
+range **18.445–19.371 ms**, below every baseline p95 (**22.341–22.949 ms**), so the p95 gate passes.
+No sample was dropped, replaced, or selected for acceptance. The complete result and provenance
+are in [all ten reports and independent audit](evidence/h3d-combat-physics-2026-10-20/alternating-acceptance-e767b02e8-barrier.json).
+This valid comparison replaces neither the retained earlier evidence nor the still-open heavy
+combat, live cadence, controlled movement, architecture/quality and user acceptance obligations.
 
 ### Heavy-workload harness gaps confirmed from source
 
-`runtime_scene_fixture` currently records only inbound messages, time samples, selection, and
-physics boundaries. `RuntimeFixtureCapture::record_command` explicitly rejects `DriveSelf`,
+The stationary `runtime_scene_fixture` capture records only inbound messages, time samples,
+selection, and physics boundaries. `RuntimeFixtureCapture::record_command` explicitly rejects `DriveSelf`,
 engagement, and attack commands. The existing `live_player_action_probe` exercises an emote's
 return to steady playback and a combat-stance transition; it does not attack enemies or measure
-simulation admission. Neither harness currently supplies the original heavy combat workload.
+simulation admission. Neither of those existing modes supplies the original heavy combat workload.
+
+A new live-only `runtime_scene_fixture stress` mode now uses that same production client builder
+and shares the existing unambiguous character-entry path. It does not add control variants to the
+stationary fixture or change replay serialization. After five seconds of active-world settlement,
+it alternates one second of walking forward, one second of backstep, and eight seconds of melee
+engagement. A nearest visible known mob within 32 m is selected using producer classification and
+placement; the production attack owner retains final availability, stance, pursuit, and wire policy.
+Manual input cancels melee, so the phases explicitly release manual ownership before engagement.
+The controller observes current elapsed phase after delays rather than replaying missed stimuli.
+
+Newline JSON records retain exact command-enqueue edges, accepted attack-owner states, producer
+and receiver times, player pose/contact/sampling and full accepted paths with correction provenance.
+Both ordinary presentation batches and standalone correction batches are observed. A narrow mirror
+retains only placement, incarnation, producer class and visibility, avoiding animation/appearance
+clones. Zero-health targets are scoped to their observed incarnation; stale removals cannot retire
+a replacement. Stream lag, discontinuity, lifecycle exit, or observed local death fails the window.
+All error paths retire controls and disconnect, with a bounded abort if the runtime cannot stop.
+
+The default 65-second window leaves boundary margin for an audit of at least 60 seconds; argument
+duration alone is not proof. The required existing core/contact profiles supply actual admission,
+mover/projectile and contact census. `H3D_STRESS_WINDOW` stderr markers bound the audit window;
+omit boundary-straddling simulation data and require at least 60 seconds of retained elapsed time.
+Published dynamic interval duration is elapsed presentation time, not admitted simulation time;
+requested controls and geometric accepted paths do not alone quantify lost locomotion distance.
+Prepared content/hash provenance and accepted residency IDs remain necessary to qualify geometry.
+Two asset-free tests cover target eligibility/incarnation handling and delayed phase selection.
+The fixture binary builds, both harness tests pass, core/harness checks remain green, and harness
+all-target Clippy with warnings denied, formatting, and whitespace checks pass. Live execution is
+next; no new heavy-workload or cadence claim is made.
 
 The public command surface already has typed `DriveSelf(PlayerDriveIntent)` and
 `BeginCombatEngagement { target, profile }` operations. A diagnostic can use those production

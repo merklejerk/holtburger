@@ -193,9 +193,7 @@ impl CollisionScene {
         }
 
         for selected in self.selected_colliders(swept_query_cells(full_sweep), swept_placement) {
-            let collider = &self.landblocks[&selected.reference.owner]
-                .static_geometry
-                .colliders[selected.reference.collider_index];
+            let collider = selected.collider;
             if let Some(mut candidate) = cast_placed_collision_shape(
                 &ray,
                 request.maximum_distance,

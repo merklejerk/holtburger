@@ -6,14 +6,23 @@ export const BACKGROUND_FRAME_INTERVAL_MS = 1_000 / 10;
  *
  * Gate before any presentation work, preserving update/draw ordering. Keep requesting browser
  * frames so focus recovery takes effect on the next available frame without another event owner.
- * Browser visibility throttling remains in charge of hidden windows.
+ * Re-arm through an ordinary task: Chromium can continuously prioritize uncapped compositor
+ * frames during pointer drags, starving host-message delivery if we immediately request another
+ * frame. The task boundary lets world updates run without capping frames or moving drawing out of
+ * requestAnimationFrame. Browser visibility throttling still owns hidden windows.
  */
 export function startPresentationFrameLoop(
 	frame: FrameRequestCallback,
 ): () => void {
 	let stopped = false;
+	let frameHandle: number | null = null;
 	let previousFrameTimeMs: number | null = null;
+	const requestNextFrame = (): void => {
+		// Stop may run after a frame posts this task but before the task is dispatched.
+		if (!stopped) frameHandle = window.requestAnimationFrame(step);
+	};
 	const step = (timeMs: number): void => {
+		frameHandle = null;
 		if (stopped) return;
 		if (
 			document.hasFocus() ||
@@ -23,11 +32,15 @@ export function startPresentationFrameLoop(
 			previousFrameTimeMs = timeMs;
 			frame(timeMs);
 		}
-		if (!stopped) frameHandle = window.requestAnimationFrame(step);
+		if (!stopped)
+			void window.scheduler
+				.postTask(requestNextFrame, { priority: "user-visible" })
+				.catch((error: unknown) => window.reportError(error));
 	};
-	let frameHandle = window.requestAnimationFrame(step);
+	requestNextFrame();
 	return () => {
 		stopped = true;
-		window.cancelAnimationFrame(frameHandle);
+		if (frameHandle !== null) window.cancelAnimationFrame(frameHandle);
+		frameHandle = null;
 	};
 }

@@ -109,7 +109,7 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** validate and measure streaming BSP support footprints, removing their temporary
+**Next action:** measure streaming BSP support footprints, removing their temporary
 transformed-vertex vector. The core-publication ownership experiment was rejected and reverted. Do not expand the fixture or pursue melee readiness.
 The read-only equipment inspector proves the supplied character has a wand equipped; ACE rejects
 melee with a caster equipped (`Player_Combat.cs:811–819`). Thus the seven `NonCombat` responses in
@@ -136,6 +136,10 @@ admission. Consume transformed BSP vertices directly during the single edge walk
 intermediate vector. Preserve authored edge order, closing edge, degenerate-edge handling and
 nearest-feature ties. Terrain and existing controlled footing tests use the same iterator contract.
 No contact/support threshold, BSP traversal, geometry residency or replay input changes.
+All 996 world and 682 core tests pass, including face/slope/edge/corner footing, triangle seams,
+stair entry, low ceilings, hard-body support, corrected travel and lifecycle cases. Existing tests
+were retained; only the test helper adapts to the iterator contract. World/core/harness all-target
+Clippy passes with warnings denied. Performance remains unmeasured.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.

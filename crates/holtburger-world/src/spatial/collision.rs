@@ -1498,7 +1498,7 @@ impl CollisionScene {
                     for triangle in &cell.triangles {
                         let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
                         if let Some(support) = support_on_polygon(
-                            || &triangle.vertices,
+                            || triangle.vertices.iter().copied(),
                             triangle.normal,
                             plane_d,
                             local_center,

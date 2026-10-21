@@ -258,7 +258,6 @@ pub fn placed_supports(
                         .vertices
                         .iter()
                         .map(|vertex| collider.point_to_landblock_space(*vertex))
-                        .collect::<Vec<_>>()
                 },
                 plane.normal,
                 plane.d,
@@ -522,9 +521,9 @@ pub(super) fn polygon_sphere_contact(
     })
 }
 
-/// Materialize footprint geometry only after its plane enters the vertical search envelope.
-/// Terrain borrows existing vertices; placed BSP faces defer their transform and allocation.
-pub(super) fn support_on_polygon<V: AsRef<[Vector3]>>(
+/// Visit footprint geometry only after its plane enters the vertical search envelope.
+/// Terrain supplies existing vertices; placed BSP faces transform each vertex once on demand.
+pub(super) fn support_on_polygon<V: ExactSizeIterator<Item = Vector3>>(
     vertices: impl FnOnce() -> V,
     normal: Vector3,
     plane_d: f32,
@@ -543,7 +542,6 @@ pub(super) fn support_on_polygon<V: AsRef<[Vector3]>>(
         return None;
     }
     let vertices = vertices();
-    let vertices = vertices.as_ref();
     if vertices.len() < 3 {
         return None;
     }
@@ -562,14 +560,23 @@ pub(super) fn support_on_polygon<V: AsRef<[Vector3]>>(
 /// strand the first bounded stair step. The asset-free footing gate covers seams, corners,
 /// slopes and a 0.3m stair. The template/setup census covers preparation, not every authored
 /// stair or ledge; full support-geometry coverage is not claimed.
-fn polygon_footprint(vertices: &[Vector3], center: Vector3, radius: f32) -> Option<SupportFeature> {
+fn polygon_footprint(
+    mut vertices: impl Iterator<Item = Vector3>,
+    center: Vector3,
+    radius: f32,
+) -> Option<SupportFeature> {
     let horizontal = |v: Vector3| Vector3::new(v.x, v.y, 0.0);
     let point = horizontal(center);
     let mut inside = true;
     let mut nearest = None::<Vector3>;
-    for (index, start) in vertices.iter().enumerate() {
-        let start = horizontal(*start);
-        let end = horizontal(vertices[(index + 1) % vertices.len()]);
+    let first = vertices.next()?;
+    let mut previous = first;
+    // Close the authored edge loop without materializing transformed vertices or transforming
+    // the first vertex again. Keep edge order for equal-distance nearest-feature selection.
+    for vertex in vertices.chain(std::iter::once(first)) {
+        let start = horizontal(previous);
+        let end = horizontal(vertex);
+        previous = vertex;
         let edge = end - start;
         let length = edge.length();
         if length <= CONTACT_EPSILON {

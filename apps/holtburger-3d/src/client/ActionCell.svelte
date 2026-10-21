@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ClientLoadoutVisual from "./ClientLoadoutVisual.svelte";
 	import { loadoutTooltip } from "./client-loadout";
 	import ActionAlternateIcon from "../assets/icons/action-alternate.svg?component";
 	import { useClientInput } from "./client-input-context";
@@ -107,7 +108,7 @@
 	onclick={(event) => onactivate(clientInput.actionBarAlternate(event))}
 >
 	{#if content?.kind === "loadout"}
-		<span class="ui-shortcut-emoji" aria-hidden="true">{content.icon}</span>
+		<ClientLoadoutVisual icon={content.icon} />
 	{:else if content !== null}
 		<ItemCellVisual
 			{display}

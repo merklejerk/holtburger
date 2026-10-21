@@ -277,7 +277,7 @@
 					disabled={pending || view?.equipment.pending !== false}
 					onclick={onSaveLoadout}
 				>
-					<ClientHudIcon name="save-loadout" />
+					<ClientHudIcon name="loadout" />
 				</button>
 			</div>
 		</aside>

@@ -21,7 +21,7 @@
 	import ExamineIcon from "../assets/icons/hud-examine.svg?component";
 	import HelmetIcon from "../assets/icons/helmet.svg?component";
 	import CloakIcon from "../assets/icons/hud-cloak.svg?component";
-	import SaveLoadoutIcon from "../assets/icons/hud-save-loadout.svg?component";
+	import LoadoutIcon from "../assets/icons/hud-loadout.svg?component";
 	import SelectTextIcon from "../assets/icons/hud-select-text.svg?component";
 	import AddIcon from "../assets/icons/hud-add.svg?component";
 	import EditIcon from "../assets/icons/hud-edit.svg?component";
@@ -69,7 +69,7 @@
 		| "examine"
 		| "helmet"
 		| "cloak"
-		| "save-loadout"
+		| "loadout"
 		/** Pointer over text for enabling chat-history selection. */
 		| "select-text"
 		| "add"
@@ -125,7 +125,7 @@
 		examine: ExamineIcon,
 		helmet: HelmetIcon,
 		cloak: CloakIcon,
-		"save-loadout": SaveLoadoutIcon,
+		loadout: LoadoutIcon,
 		"select-text": SelectTextIcon,
 		add: AddIcon,
 		edit: EditIcon,

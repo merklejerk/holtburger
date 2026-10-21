@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ClientLoadoutVisual from "./ClientLoadoutVisual.svelte";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import DropdownChevron from "../assets/icons/dropdown-chevron.svg?component";
 	import {
@@ -63,24 +64,24 @@
 	data-loadout-result
 	bind:this={button}
 	use:register={owner}
-	aria-label="Choose loadout icon"
+	aria-label="Choose loadout badge"
 	aria-haspopup="menu"
 	aria-expanded={open}
-	title={`Click to choose an icon. ${content === null ? "Include at least one slot to drag and save." : `Drag to an action cell to save.\n${loadoutTooltip(content)}`}`}
+	title={`Click to choose a badge. ${content === null ? "Include at least one slot to drag and save." : `Drag to an action cell to save.\n${loadoutTooltip(content)}`}`}
 	onclick={() => (open = !open)}
 >
 	<span
 		class="icon-preview"
 		data-drag-preview
 		data-draggable={content !== null && owner !== null}
-		><span class="ui-shortcut-emoji" aria-hidden="true">{icon}</span></span
+		><ClientLoadoutVisual {icon} /></span
 	>
 	<span class="icon-disclosure"><DropdownChevron /></span>
 </button>
 {#if open && button}
 	<PopupMenu
 		anchor={button}
-		label="Loadout icon"
+		label="Loadout badge"
 		items={choices}
 		layout="grid"
 		onclose={() => (open = false)}

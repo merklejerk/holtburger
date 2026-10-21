@@ -16,7 +16,7 @@ fn support(
     radius: f32,
 ) -> Option<crate::spatial::bsp_query::ShapeSupport> {
     crate::spatial::bsp_query::support_on_polygon(
-        || &face.vertices,
+        || face.vertices.iter().copied(),
         face.normal,
         face.d,
         center,

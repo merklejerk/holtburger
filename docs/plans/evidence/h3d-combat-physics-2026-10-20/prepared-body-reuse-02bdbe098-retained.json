@@ -1,0 +1,289 @@
+{
+  "decision": "Retain prepared-body ownership transfer; frozen fixture, no further fixture development required for optimization.",
+  "metadata": {
+    "purpose": "Two alternating marginal pairs on frozen replay; not original-baseline performance acceptance",
+    "started_at": "2026-10-21T14:18:07.869593+00:00",
+    "baseline_source": "e767b02e8",
+    "candidate_source": "02bdbe0985e6b2ae691b3615a42247420c877ee7",
+    "binary_sha256": {
+      "baseline": "f3635e6da06321418684493fff3e08149b9c4d650f5798fdfc3b9a36bdb963f1",
+      "candidate": "621ec3b106e94bcb9dfee6aa9f1c96af7f066b751f075713465ee70d8b7746e1"
+    },
+    "candidate_patch_sha256": "2caabb3a4a34f279b5befa8ba5f810af85f5e56bdabf4cae1d253568a32b8dcd",
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "content_sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7",
+    "pairs": 2,
+    "warmups_per_invocation": 1,
+    "measurements_per_invocation": 1,
+    "rust_log": "warn",
+    "build_profile": "dev unoptimized + debuginfo, runtime-fixture feature",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo_lock_sha256": "ae547307541af655f17be08ae58e0a9c3219617963e0bd1df83472b2c6be48f6",
+    "original_acceptance_baseline_unchanged": "9cb7ba24e plus matched diagnostic tooling",
+    "activation_reference": [
+      {
+        "physics_tick": 1,
+        "active": false
+      },
+      {
+        "physics_tick": 14,
+        "active": true
+      }
+    ],
+    "runner_sha256": "747940dd2b38c1f4c655cb5bcac5895c2817dbed69ba99c79bca15db5a3cec90"
+  },
+  "samples": [
+    {
+      "pair": 1,
+      "slot": 1,
+      "version": "baseline",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2317.2596709999953,
+        "content_readiness_wait_ms": 1618.233917000001,
+        "physics_work_ms": 26419.04421199999,
+        "maximum_physics_work_ms": 26.46862,
+        "active_physics_work_p95_ms": 19.945313,
+        "maximum_input_lateness_ms": 1235.132814,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28736.303882999986,
+      "validation_issues": []
+    },
+    {
+      "pair": 1,
+      "slot": 2,
+      "version": "candidate",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2288.0010169999996,
+        "content_readiness_wait_ms": 1572.3953189999995,
+        "physics_work_ms": 25733.717839999965,
+        "maximum_physics_work_ms": 24.109261,
+        "active_physics_work_p95_ms": 19.22054,
+        "maximum_input_lateness_ms": 1169.4587709999998,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28021.718856999963,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 1,
+      "version": "candidate",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2267.8672289999963,
+        "content_readiness_wait_ms": 1583.8833269999993,
+        "physics_work_ms": 25720.575166999974,
+        "maximum_physics_work_ms": 26.317143,
+        "active_physics_work_p95_ms": 19.51364,
+        "maximum_input_lateness_ms": 1185.193172,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 27988.44239599997,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 2,
+      "version": "baseline",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2283.447263999999,
+        "content_readiness_wait_ms": 1638.046184999998,
+        "physics_work_ms": 26171.895653000065,
+        "maximum_physics_work_ms": 25.361771,
+        "active_physics_work_p95_ms": 19.700762,
+        "maximum_input_lateness_ms": 1252.991886,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28455.342917000064,
+      "validation_issues": []
+    }
+  ],
+  "runner_summary": {
+    "baseline_median_ms": 28595.823400000023,
+    "candidate_median_ms": 28005.080626499966,
+    "median_work_reduction": 0.020658358573443114,
+    "pair_work_reductions": [
+      0.02486697763600565,
+      0.01640818465488092
+    ],
+    "workload_and_content_valid": true,
+    "acceptance_comparison": false,
+    "completed_at": "2026-10-21T14:24:49.814803+00:00"
+  },
+  "independent_audit": {
+    "baseline_median_ms": 28595.823400000023,
+    "candidate_median_ms": 28005.080626499966,
+    "median_work_reduction": 0.020658358573443114,
+    "all_workload_checks_pass": true,
+    "every_candidate_p95_below_every_baseline_p95": true
+  },
+  "acceptance_limit": "Two marginal pairs do not replace the required original-baseline comparison or heavy live movement acceptance."
+}

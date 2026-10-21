@@ -104,15 +104,22 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** verify and measure prepared-body reuse across contact input capture and atomic
-publication at checkpoint `02bdbe098`. The ownership change removes the second body clone and
-separate collision-pose copy/field; **996 world / 681 core** tests, broad Clippy and build pass.
-Two alternating marginal pairs against qualified `e767b02e8` are running on the unchanged trace.
-The prior two query reductions are rejected and rolled back: conflicting pair directions and a
-0.09% higher median did not justify them. Preserve the valid **23.09%** end-to-end result and the
-original acceptance baseline. The 93.30% live observation remains source-unqualified after the
-build-artifact correction; optimized live cadence is pending. All original performance, workload,
-cadence, architecture/quality and user acceptance requirements remain unchanged.
+**Fixture freeze / action threshold:** the existing replay and asset-free correctness suites are
+sufficient to begin and judge bounded code changes. Do not develop a more complete fixture before
+optimizing. Add diagnostics only when a concrete change exposes a specific unanswered correctness
+question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
+they do not block independent engineering work.
+
+**Next action:** reduce redundant entity-fact publication in core, first proving its existing
+invalidation contract from source. Then address the host scheduling/time-admission policy that
+turns overruns into lost movement time. Keep experiments bounded: implement, run existing checks,
+measure on the frozen trace, retain or revert. Prepared-body reuse at `02bdbe098` is retained:
+two alternating marginal pairs show **2.07%** less combined work and lower p95s in both pairs.
+The prior query reductions remain rejected. The valid original-baseline **23.09%** reduction is
+unchanged until a new full acceptance comparison; marginal improvements are not added to it.
+The 93.30% live observation remains source-unqualified after the build-artifact correction.
+All original performance, workload, cadence, architecture/quality and user acceptance requirements
+remain unchanged.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1049,14 +1056,43 @@ collision poses remain on the same body, eliminating the pose clone and actuator
 This changes ownership within the existing transaction, not solving, reporting, coverage, recovery,
 input sampling, scheduling or fixture behavior. The net source change removes two lines and one
 field. All **996 world** and **681 core** tests, broad all-target Clippy with warnings denied,
-normal fixture build, formatting and whitespace checks pass. Two alternating marginal pairs at
-checkpoint `02bdbe098` compare only this structural change against qualified `e767b02e8`; the
-query experiments have been fully removed. Private runner, patch, executables and all reports are
-in `caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`. Keep all full-trace workload and
-outcome checks, explicit warmup, and warning logging. No compiler, profiler or other benchmark
-runs during measurement. Retention requires correct behavior, simpler ownership and no repeatable
-work regression; a speedup claim requires measured benefit. The overall 25% gate remains unchanged
-regardless of a cleanup benefit.
+normal fixture build, formatting and whitespace checks pass. The completed two alternating
+marginal pairs at checkpoint `02bdbe098` compare only this ownership change against qualified
+`e767b02e8`; the query experiments were fully removed. Baseline median combined work was
+**28,595.82 ms**, candidate **28,005.08 ms**: **2.07% lower**, with paired reductions of
+**2.49%** and **1.64%**. Candidate active-physics p95s were **19.221 / 19.514 ms**, baseline
+**19.945 / 19.701 ms**. Every candidate p95 was below every baseline p95.
+
+All four reports preserve 5,741 messages, 1,519 physics inputs, 1,506 active ticks, activation at
+input 14, peak population 286, zero population mismatches, content identity and existing final
+placement checks. Each invocation used one explicit warmup and one measured full replay, with
+warning logging and no concurrent compiler, profiler or benchmark. Retain the simpler ownership
+change and measured marginal benefit. These two pairs do not establish the overall 25% acceptance
+gate or live movement recovery. Private runner, patch, executables and reports remain under
+`caps/runtime-fixtures/2026-10-21-4ae1/prepared-body-reuse/`; all four sanitized reports and an
+independent median audit are in [retained experiment evidence](evidence/h3d-combat-physics-2026-10-20/prepared-body-reuse-02bdbe098-retained.json).
+
+### Unchanged semantic publication: use the existing invalidation contract
+
+The core entity-fact publisher already retains accepted records and tracks dirty identities. It
+nevertheless resolves projectile supply and enters collection after every message and physics
+input, including turns with no semantic change. The bounded candidate returns an empty delta
+when dirty identities and accepted storage changes are empty and player identity, trade revision
+and container access match their published values. It adds no state or new publication boundary.
+
+Source proof: `SetStackSize` and public/private property handlers emit `PropertiesUpdated`;
+creation, replacement and identification are also observed by `EntityFactsPublication::observe`.
+Equipment mutations, roster coverage, withdrawal and reset populate `StorageState::changed`.
+Player identity is checked directly; corpse-session history explicitly invalidates affected IDs.
+These cover projectile supply's inputs (equipment masks/coverage, description, consumption policy
+and count) and the publisher's existing silent transitions. Existing behavior tests exercise
+appraisal, count changes, equipment removal, storage ancestry, access and session history.
+
+Both normal **676 core tests** and fixture-enabled **681 core tests** pass. Formatting and
+whitespace checks, core/harness all-target Clippy with warnings denied, and the normal fixture
+build pass. A marginal comparison against retained prepared-body checkpoint `02bdbe098` remains
+pending. The candidate has no performance claim yet. The fixture
+and original acceptance baseline are unchanged.
 
 ## Next investigation targets: the complete update pipeline
 

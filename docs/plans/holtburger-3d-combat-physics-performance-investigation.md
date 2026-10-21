@@ -6,8 +6,8 @@ Updated: 2026-10-21, including the unattended second-scene capture and offline r
 Status: **The matched delivered-development five-pair performance gate passes: 28.81% less
 combined message/physics work, with every candidate physics p95 below every baseline p95.
 Architecture, controlled correctness and final host quality checks pass. Combat diagnostics are
-complete; engineering handoff is ready. Representative original-fight coverage, live cadence under that load,
-and the user's movement-feel acceptance remain open. Fixture development remains frozen.**
+complete; engineering handoff is ready. Representative original-fight coverage, live cadence under
+that load, and the user's movement-feel acceptance remain open. Fixture development remains frozen.**
 
 A headless capture/replay fixture supports warmed baseline and exploratory measurements for a
 second scene. It provides a repeatable input workload; deterministic movement equivalence remains
@@ -81,6 +81,34 @@ claims. If evidence shows a target cannot be reached or verified within the avai
 record the precise constraint and remaining options. Complete independent work and leave the
 criterion open; do not silently lower targets or mark partial improvement as completion.
 
+### Final engineering handoff audit
+
+The authorized independently verifiable engineering work is complete at game/manifest source
+`a52fbe29d`. Final audit on 2026-10-21 confirmed the current source still matches that checkpoint,
+the normal debug host matches its recorded executable hash, every local document link resolves,
+and the independent performance auditor still validates all ten reports and their provenance.
+
+| Requirement | Evidence and disposition |
+| --- | --- |
+| Architecture | Complete: ordinary/reset/correction ownership and overload behavior reviewed; retained character-controller design and removed duplication documented below. |
+| Controlled correctness | Complete: 996 world / 682 core tests, including independently bounded wall travel, support, correction, lifecycle, accepted paths and input handoff. |
+| Offline performance | Complete: matched original-source five-pair gate, 28.81% less combined work; every candidate physics p95 below every baseline p95. |
+| Quality and delivery | Complete: source review, 375 host tests, fixture/default all-target Clippy with warnings denied, formatting, normal debug build and client/Explorer sidecar smoke. |
+| Representative heavy workload | Pending: available alternate windows contain about 94 movers versus about 153 in the original capture. |
+| Cadence in that workload | Pending: alternate observations reach 99.87% / 99.93% admission over 65 s; original-workload cadence remains unverified. |
+| User movement acceptance | Pending: requires the user's experience in the original heavy scene and representative alternate scene. |
+
+The original debug endpoint at `127.0.0.1:9222` returned connection refused during the final audit.
+The original live scene is therefore unavailable through the supplied endpoint. The goal explicitly
+allows unavailable live validation and user acceptance to remain pending; the three unchecked
+acceptance items stay open. Engineering handoff is complete and the movement issue remains open.
+
+The normal development launch rebuilds the sidecar. Restart the usual `dev:client` launch before
+checking movement in the original heavy scene. If slow motion remains, use that reproduction's
+elapsed/admitted time, requested/accepted movement and CPU costs to select the next production
+change. The 1/30-second single-step admission policy is unchanged, so renewed overruns can still
+discard simulation time. Combat-driver or fixture refinement is not a prerequisite for feedback.
+
 ### Milestones and current progress
 
 | Phase | State | Deliverable / next verification |
@@ -118,8 +146,7 @@ refinement is not a prerequisite for this handoff. Keep unavailable original-sce
 user movement-feel acceptance explicitly pending.
 
 Normal host integration checks pass for the final source. The unchanged five-pair original-source
-comparison completed
-and independently audited **35,681.50 → 25,402.41 ms**, **28.81% less combined work**, in the
+comparison completed and independently audited **35,681.50 → 25,402.41 ms**, **28.81% less combined work**, in the
 matched delivered development profile. All ten workload/content checks pass. Candidate physics
 p95s span **17.478–17.805 ms**, baseline **21.229–22.107 ms**; every candidate is below every
 baseline. The offline work/p95 gate is satisfied; representative combat and movement feel are not.

@@ -1,4 +1,4 @@
-//! Capture a stationary live scene, then replay its ordered core inputs without a server.
+//! Capture/replay stationary inputs or exercise live movement and combat through core commands.
 //!
 //! Credentials use HOLTBURGER_PROBE_ACCOUNT/PASSWORD; raw fixtures contain private game messages.
 
@@ -16,7 +16,10 @@ use std::{fs::OpenOptions, io::Write, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, timeout, timeout_at};
 
-/// Content source and one explicit capture or replay operation.
+#[path = "runtime_scene_fixture/stress.rs"]
+mod stress;
+
+/// Content source and one explicit capture, replay, or live stress operation.
 #[derive(Parser)]
 struct Args {
     /// Installed content root; normal discovery is used when omitted.
@@ -26,7 +29,7 @@ struct Args {
     operation: Operation,
 }
 
-/// Live capture alone contacts ACE; replay uses an in-memory transport.
+/// Capture and stress contact ACE; replay uses an in-memory transport.
 #[derive(Subcommand)]
 enum Operation {
     Capture {
@@ -42,6 +45,18 @@ enum Operation {
         character: Option<u32>,
         /// Stationary observation duration after world activation.
         #[arg(long, default_value_t = 45, value_parser = clap::value_parser!(u64).range(1..=120))]
+        seconds: u64,
+    },
+    Stress {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value_t = 9000)]
+        port: u16,
+        /// Character GUID in decimal; required when multiple active characters exist.
+        #[arg(long)]
+        character: Option<u32>,
+        /// Observation after startup settlement; default leaves margin around a 60-second audit.
+        #[arg(long, default_value_t = 65, value_parser = clap::value_parser!(u64).range(61..=120))]
         seconds: u64,
     },
     Replay {
@@ -141,6 +156,17 @@ async fn main() -> Result<()> {
             file.sync_all()?;
             println!("Saved private fixture to {}", output.display());
         }
+        Operation::Stress {
+            host,
+            port,
+            character,
+            seconds,
+        } => {
+            let account = secret("HOLTBURGER_PROBE_ACCOUNT")?;
+            let password = secret("HOLTBURGER_PROBE_PASSWORD")?;
+            let client = builder(account)?.server(host, port).connect().await?;
+            stress::run(client, password, character, seconds).await?;
+        }
         Operation::Replay {
             input,
             warmups,
@@ -181,6 +207,25 @@ async fn observe(
     requested: Option<u32>,
     seconds: u64,
 ) -> Result<()> {
+    enter_world(commands, events, password, requested).await?;
+    println!("World active; observing for {seconds} seconds");
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    loop {
+        match timeout_at(deadline, events.recv()).await {
+            Err(_) => return Ok(()),
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => return Err(error).context("scene observation stream failed"),
+        }
+    }
+}
+
+/// Shared entry path deliberately requires an unambiguous active character.
+async fn enter_world(
+    commands: &mpsc::UnboundedSender<ClientCommand>,
+    events: &mut broadcast::Receiver<ClientViewEvent>,
+    password: String,
+    requested: Option<u32>,
+) -> Result<holtburger_common::Guid> {
     commands.send(ClientCommand::Login(password))?;
     let deadline = Instant::now() + Duration::from_secs(45);
     let characters = loop {
@@ -210,11 +255,8 @@ async fn observe(
             active[0]
         }
     };
-    println!(
-        "Selecting character 0x{:08X}; no movement or combat commands will be sent",
-        selected.guid.0
-    );
-    commands.send(ClientCommand::SelectCharacter(selected.guid))?;
+    let player = selected.guid;
+    commands.send(ClientCommand::SelectCharacter(player))?;
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if matches!(
@@ -224,15 +266,7 @@ async fn observe(
             break;
         }
     }
-    println!("World active; observing for {seconds} seconds");
-    let deadline = Instant::now() + Duration::from_secs(seconds);
-    loop {
-        match timeout_at(deadline, events.recv()).await {
-            Err(_) => return Ok(()),
-            Ok(Ok(_)) => {}
-            Ok(Err(error)) => return Err(error).context("scene observation stream failed"),
-        }
-    }
+    Ok(player)
 }
 
 async fn receive(

@@ -87,7 +87,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | Phase | State | Deliverable / next verification |
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
-| 1. Establish the controlled workload | In progress | Latest five-pair attempt is invalid: one candidate begins 1,499 rather than 1,500 activated ticks. Add activation-history qualification before further acceptance claims. Representative stress coverage remains open. |
+| 1. Establish the controlled workload | In progress | Replay-only content barrier qualifies both original baseline and candidate under normal/single-CPU scheduling: identical activation at input 14, 1,506 active ticks, full inputs/population preserved. Matched five-pair comparison running. Representative stress coverage remains open. |
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | In progress | Ordered identity merge rejected; metadata reuse retains a 45.46% phase-attribution improvement, but its five-pair attempt is invalid and raw total-work reduction is only 23.33%. End-to-end acceptance remains open. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
@@ -104,13 +104,11 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** finish qualifying the original performance baseline with the same replay-only
-content-completion barrier, then run the matched comparison. Candidate scheduling qualification
-passes with 1,506 active ticks and identical activation histories under normal and single-CPU
-scheduling. Complete baseline qualification before another acceptance claim. The `e647d2437`
-five-pair attempt has one workload mismatch and a raw **23.33%** median reduction; keep every sample.
-Its phase-attribution improvement remains separate evidence. The preceding valid **23.44%** result and earlier sequential **25.26%** exploration
-do not satisfy the current candidate's **25%** gate.
+**Next action:** complete and audit the running five alternating pairs with matched replay-only
+content completion. Both versions qualify at 1,506 active ticks with identical activation histories
+under normal and single-CPU scheduling. Keep all individual runs and await totals; apply the same
+25% work and p95 gates. Historical **23.33%** (invalid workload), **23.44%** (valid but below target),
+and **25.26%** (sequential exploration) remain separate evidence and cannot satisfy this comparison.
 Representative stress coverage, live cadence, final architecture/quality review, and user movement
 acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
 
@@ -142,6 +140,7 @@ Keep feasible independent work moving when a live workload or final human accept
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
 | Alternating acceptance comparison | Candidate `bc9e77f6e` vs baseline `9cb7ba24e` | Five pairs, explicit warmup each invocation; 36,275.49 → 27,773.18 ms median combined work (23.44%). All workload checks pass; every candidate p95 is below every baseline p95. Work target fails and remains open. |
 | Ordered publication merge | Experiment `82b66cfa5`, subsequently reverted | Rejected: two alternating exploratory pairs give 27,820.23 → 27,861.62 ms median work (0.15% higher), with conflicting paired directions. All workload checks and 678 pre-rollback core tests pass; no map-removal benefit demonstrated. |
+| Matched replay readiness qualification | Candidate `e767b02e8`; original `9cb7ba24e` plus diagnostic-only patch | Both versions under normal/single-CPU scheduling activate at input 14 with 1,506 active ticks; messages 5,741, physics 1,519, peak 286, population mismatches zero. Candidate 681 / baseline 679 core tests and Clippy pass. Five-pair comparison running; no new acceptance claim. |
 | Frame-local metadata reuse | Experiment `e647d2437` | Exploratory combined medians improve 0.90% with conflicting pair directions; matched phase attribution reduces after-projection/diff mean 1.312 → 0.716 ms (45.46%). Retain for five-pair final verification. All workload checks, 996 world / 679 core tests, and broad Clippy pass. |
 | Metadata-reuse five-pair attempt | Source `e647d2437`; ten reports retained | Invalid for acceptance: pair 1 candidate has 1,499 activated ticks, expected 1,500. Raw combined medians 35,690.98 → 27,365.60 ms (23.33%) also miss the target. All candidate p95s are below every baseline p95; no sample was replaced or dropped. |
 | Deferred ancestry tracking | `bc9e77f6e`; patch/binary hashes in evidence | Retained for alternating measurement: median 27,431.13 ms (25.26% exploratory reduction); 995 world / 677 core tests and Clippy pass. Narrow threshold margin remains unaccepted. |
@@ -1180,13 +1179,35 @@ completion barrier, feature-gated runtime argument, wait accounting, and activat
 reporting/tests. Preserve its original entity-map access spelling rather than backporting the
 later map encapsulation. The exact applied diagnostic patch and SHA-256 are retained privately
 alongside build provenance. The baseline debug build, **679 core tests**, and core/harness
-all-target Clippy with warnings denied pass. Its normal/single-CPU scheduling qualification is
-running in `caps/runtime-fixtures/2026-10-21-4ae1/original-baseline-readiness-e767b02e8/`; preserve
-that runner and its reports before further benchmarking. The replay implementations match exactly
+all-target Clippy with warnings denied pass. Both baseline scheduling conditions also activate at
+input **14** with **1,506 active ticks**, 5,741 messages, 1,519 physics inputs, peak 286, and zero
+population mismatches. Both histories match the candidate exactly; content waits are 1,566.45 ms
+normal and 1,374.24 ms single CPU. See [baseline qualification and provenance](evidence/h3d-combat-physics-2026-10-20/replay-readiness-original-baseline-e767b02e8.json).
+The replay implementations match exactly
 after normalizing only the entity-map length spelling; their normalized hash is retained with the
 patch provenance. Both versions must match the new full trace with at least the original active
 workload. Other clock use and asynchronous systems remain: this barrier alone does not establish
 deterministic simulation or live cadence.
+
+#### Matched five-pair comparison: running
+
+The running comparison uses original performance source `9cb7ba24e` plus only diagnostic tooling
+against candidate `e767b02e8`. The baseline diagnostic patch SHA-256 is
+`8bd001321bf099c36702b45067fda506bfbeccfed9da68a47bd81c2b09e5cf08`; its private provenance includes
+the exact patch, normalized replay-source equivalence, toolchain, lockfile, and binary hashes.
+Performance code was not rebaselined to an optimized checkpoint.
+
+Private runner and outputs:
+`caps/runtime-fixtures/2026-10-21-4ae1/paired-acceptance-e767b02e8-barrier/`.
+It executes five alternating pairs with one full warmup and one measured replay per invocation,
+using the same full fixture/content, dev/debug profile and warning logging. Every report must
+retain all 5,741 messages, 1,519 physics inputs, 1,506 active ticks, peak population 286, zero
+population mismatches, and the exact qualified activation history. Existing authoritative end
+position and runtime-placement checks remain; these do not replace controlled movement/contact
+oracles. Keep all individual reports, flag mismatches rather than replacing samples, retain worker
+wait separately, and audit the original 25% combined-work and p95 gates after the runner completes.
+No compiler, profiler, or other benchmark is run by this agent during the comparison. Results are
+pending; readiness qualification is not performance acceptance or evidence of restored live cadence.
 
 ### Heavy-workload harness gaps confirmed from source
 

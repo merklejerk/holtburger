@@ -120,6 +120,12 @@ export class KeyboardInputPolicy {
 	#owner: HTMLElement | null = null;
 	/** Native focus caused by this pointer control must not activate a non-editor UI scope. */
 	#pointerControl: HTMLElement | null = null;
+	/** The viewport gesture returning from an editor cannot also act on the world. */
+	#focusReturnGesture: {
+		readonly pointerId: number;
+		readonly button: number;
+		released: boolean;
+	} | null = null;
 	/** A pointer gesture must see Escape before a focused scope consumes it. */
 	#escapeCancellation: (() => boolean) | null = null;
 	/** Opt-in app contexts ordered from least to most recently engaged. */
@@ -168,6 +174,10 @@ export class KeyboardInputPolicy {
 		document.addEventListener("focusin", this.#focusIn);
 		document.addEventListener("focusout", this.#focusOut);
 		document.addEventListener("pointerdown", this.#pointerDown, true);
+		for (const type of ["pointermove", "pointerup", "pointercancel"] as const)
+			document.addEventListener(type, this.#focusReturnPointer, true);
+		for (const type of ["click", "auxclick", "contextmenu"] as const)
+			document.addEventListener(type, this.#focusReturnClick, true);
 		document.addEventListener("click", this.#click, true);
 		return () => {
 			window.removeEventListener("keydown", this.keydown, true);
@@ -177,6 +187,10 @@ export class KeyboardInputPolicy {
 			document.removeEventListener("focusin", this.#focusIn);
 			document.removeEventListener("focusout", this.#focusOut);
 			document.removeEventListener("pointerdown", this.#pointerDown, true);
+			for (const type of ["pointermove", "pointerup", "pointercancel"] as const)
+				document.removeEventListener(type, this.#focusReturnPointer, true);
+			for (const type of ["click", "auxclick", "contextmenu"] as const)
+				document.removeEventListener(type, this.#focusReturnClick, true);
 			document.removeEventListener("click", this.#click, true);
 			this.cancel();
 			this.#owner = null;
@@ -341,6 +355,7 @@ export class KeyboardInputPolicy {
 
 	/** Cancel without release edges, and quarantine physical presses until they are released. */
 	cancel(): void {
+		this.#focusReturnGesture = null;
 		for (const key of this.#presses.keys()) this.#presses.set(key, "cancelled");
 		this.#game?.cancel();
 		if (this.#owner !== null) {
@@ -644,7 +659,40 @@ export class KeyboardInputPolicy {
 		}, 0);
 	};
 
+	/** Consume the entire focus-return drag, even when its release lands outside the viewport. */
+	readonly #focusReturnPointer = (event: PointerEvent): void => {
+		const gesture = this.#focusReturnGesture;
+		if (
+			gesture === null ||
+			gesture.pointerId !== event.pointerId ||
+			gesture.released
+		)
+			return;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		if (event.type === "pointercancel") this.#focusReturnGesture = null;
+		else if (event.type === "pointerup") gesture.released = true;
+	};
+
+	/** Click and context-menu defaults survive preventing pointerdown; suppress those trailing edges too. */
+	readonly #focusReturnClick = (event: MouseEvent): void => {
+		const gesture = this.#focusReturnGesture;
+		if (
+			gesture === null ||
+			gesture.button !== event.button ||
+			!(event.target instanceof Element) ||
+			!event.target.closest("[data-game-viewport]")
+		)
+			return;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		// Auxiliary click and context-menu order can differ; keep their guard until the next press.
+		if (event.type === "click") this.#focusReturnGesture = null;
+	};
+
 	readonly #pointerDown = (event: PointerEvent): void => {
+		// A drag may end without a click. A new press always retires its trailing-click guard.
+		this.#focusReturnGesture = null;
 		const target = event.target;
 		if (!(target instanceof Element)) return;
 		// Labels focus their associated input, and icon children focus their enclosing button.
@@ -654,15 +702,26 @@ export class KeyboardInputPolicy {
 		this.#pointerControl =
 			control instanceof HTMLLabelElement ? control.control : control;
 		if (this.#modals.length !== 0) return;
-		if (target.closest("[data-game-viewport]")) this.returnToGame();
-		else if (
-			this.#pointerControl !== null &&
-			!isEditor(this.#pointerControl) &&
+		if (target.closest("[data-game-viewport]")) {
+			const wasEditing = this.#owner !== null && isEditor(this.#owner);
+			this.returnToGame();
+			if (wasEditing) {
+				this.#focusReturnGesture = {
+					pointerId: event.pointerId,
+					button: event.button,
+					released: false,
+				};
+				event.preventDefault();
+				event.stopImmediatePropagation();
+			}
+		} else if (
+			(this.#pointerControl === null || !isEditor(this.#pointerControl)) &&
 			this.#owner !== null &&
-			!isEditor(this.#owner) &&
-			this.#nativeControlsFor(this.#owner)
+			!target.closest("[data-editor-accessory]") &&
+			(isEditor(this.#owner) || this.#nativeControlsFor(this.#owner))
 		) {
-			// Mouse controls end deliberate button traversal; an active editor keeps its input.
+			// Ordinary panel actions end editing/navigation without acquiring keyboard ownership.
+			// data-editor-accessory marks controls, such as completions, that remain part of editing.
 			this.returnToGame();
 		}
 		// Prevent button focus, preserving click actions. Ranges/toggles retain their native gestures;

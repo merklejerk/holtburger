@@ -20,6 +20,20 @@ export function installKeyboardPolicyFixture(
 	canvas.width = 240;
 	canvas.height = 30;
 	canvas.style.background = "gray";
+	/** Delivered world edges expose click-through independently of camera behavior. */
+	const viewportEvents: string[] = [];
+	for (const type of [
+		"pointerdown",
+		"pointerup",
+		"click",
+		"auxclick",
+		"contextmenu",
+	]) {
+		canvas.addEventListener(type, (event) => {
+			viewportEvents.push(event.type);
+			if (event.type === "contextmenu") event.preventDefault();
+		});
+	}
 	const button = document.createElement("button");
 	button.id = "keyboard-button";
 	button.textContent = "Ordinary button";
@@ -189,6 +203,8 @@ export function installKeyboardPolicyFixture(
 		},
 		capture: () => ({
 			activityCancellations,
+			viewportEvents: [...viewportEvents],
+			camera: controller.snapshotState(),
 			gameActive: keyboard.gameActive,
 			pointerAllowed: inputGate.allowed,
 			movement: controller.physicalFlyInput().movement,

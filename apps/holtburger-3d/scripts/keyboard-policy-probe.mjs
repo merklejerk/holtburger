@@ -208,14 +208,120 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		assert.equal((await capture()).nativeChecked, false);
 		await key("keyDown", "w", "KeyW", 87);
 		await click("#keyboard-native-editor");
+		const beforeRowSelection = (await capture()).nativeClicks;
 		await click("#keyboard-native-button-icon");
+		state = await capture();
+		assert.notEqual(
+			state.focused,
+			"keyboard-native-editor",
+			"Panel actions release the search editor",
+		);
+		assert.equal(state.gameActive, true);
+		assert.equal(
+			state.nativeClicks,
+			beforeRowSelection + 1,
+			"The focus transfer preserves the same-click panel action",
+		);
+		await key("keyUp", "w", "KeyW", 87);
+
+		await click("#keyboard-editor");
+		await click("#keyboard-native-editor");
 		assert.equal(
 			(await capture()).focused,
 			"keyboard-native-editor",
-			"Nearby buttons preserve the active editor without taking its keyboard input",
+			"Clicking another editor transfers editing normally",
+		);
+		await click("#keyboard-editor");
+		const beforeFocusClick = (await capture()).viewportEvents.length;
+		await click("#keyboard-viewport");
+		state = await capture();
+		assert.equal(state.gameActive, true);
+		assert.notEqual(state.focused, "keyboard-editor");
+		assert.deepEqual(
+			state.viewportEvents.slice(beforeFocusClick),
+			[],
+			"The first viewport click only returns keyboard control",
 		);
 		await click("#keyboard-viewport");
-		await key("keyUp", "w", "KeyW", 87);
+		assert.deepEqual(
+			(await capture()).viewportEvents.slice(beforeFocusClick),
+			["pointerdown", "pointerup", "click"],
+			"The next viewport click reaches the world normally",
+		);
+
+		const dragViewport = async () => {
+			const point = await evaluate(
+				`(() => { const r = document.querySelector('#keyboard-viewport').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
+			);
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mousePressed",
+				button: "left",
+				buttons: 1,
+				clickCount: 1,
+				...point,
+			});
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				button: "left",
+				buttons: 1,
+				x: point.x + 40,
+				y: point.y + 5,
+			});
+			await client.send("Input.dispatchMouseEvent", {
+				type: "mouseReleased",
+				button: "left",
+				buttons: 0,
+				clickCount: 1,
+				x: point.x + 40,
+				y: point.y + 5,
+			});
+		};
+		await click("#keyboard-editor");
+		const beforeFocusDrag = await capture();
+		await dragViewport();
+		state = await capture();
+		assert.deepEqual(
+			state.viewportEvents,
+			beforeFocusDrag.viewportEvents,
+			"A focus-return drag cannot deliver world pointer edges",
+		);
+		assert.deepEqual(
+			state.camera,
+			beforeFocusDrag.camera,
+			"A focus-return drag cannot move the camera",
+		);
+		await dragViewport();
+		assert.notDeepEqual(
+			(await capture()).camera,
+			beforeFocusDrag.camera,
+			"The next drag controls the production Explorer camera",
+		);
+
+		await click("#keyboard-editor");
+		const beforeFocusContext = (await capture()).viewportEvents.length;
+		const contextPoint = await evaluate(
+			`(() => { const r = document.querySelector('#keyboard-viewport').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			button: "right",
+			buttons: 2,
+			clickCount: 1,
+			...contextPoint,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			button: "right",
+			buttons: 0,
+			clickCount: 1,
+			...contextPoint,
+		});
+		assert.deepEqual(
+			(await capture()).viewportEvents.slice(beforeFocusContext),
+			[],
+			"A focus-return right click cannot examine or open a context menu",
+		);
+		assert.equal((await capture()).gameActive, true);
 		await key("keyDown", "w", "KeyW", 87);
 
 		await click("#keyboard-editor");
@@ -531,16 +637,21 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		);
 		await click(historyToggle);
 		assert.equal(
-			(await capture()).focusLabel,
-			"Chat message",
-			"Disabling history interaction does not interrupt draft editing",
+			(await capture()).gameActive,
+			true,
+			"History toolbar actions end draft editing like other panel controls",
 		);
 		assert.equal(
-			(await historyState()).pointerEvents,
-			"auto",
-			"Editor focus keeps history active after explicit activation ends",
+			await chatValue(),
+			pasted,
+			"Releasing editor focus preserves the draft",
 		);
-		await press("Escape", "Escape", 27);
+		assert.equal((await historyState()).pressed, "false");
+		assert.equal(
+			(await historyState()).pointerEvents,
+			"none",
+			"Disabling history interaction ends both explicit and editor activation",
+		);
 		await click(historyToggle);
 		await invoke("openModal");
 		await press("Escape", "Escape", 27);
@@ -752,6 +863,8 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			pointerControlsPreserveGame: true,
 			nativeScopeKeyboardTraversal: true,
 			editorOwnership: true,
+			panelActionsReleaseEditor: true,
+			viewportFocusGestureConsumed: true,
 			explicitScopes: true,
 			modalRestoration: true,
 			tabSuppressed: true,

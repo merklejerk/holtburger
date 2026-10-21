@@ -1194,10 +1194,10 @@
 			white-space: nowrap;
 		}
 		.minimap-actions {
-			/* Bottom-right rim mirrors reset's top-right position, clear of cardinals. */
+			/* Bottom-left diagonal rim position, clear of the cardinal labels. */
 			position: absolute;
 			top: 85.355%;
-			left: 85.355%;
+			left: 14.645%;
 			transform: translate(-50%, -50%);
 			pointer-events: auto;
 		}

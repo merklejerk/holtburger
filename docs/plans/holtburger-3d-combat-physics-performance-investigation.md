@@ -85,7 +85,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | --- | --- | --- |
 | 0. Preserve evidence and checkpoint | Complete | Historical captures, geometry results, local raw fixture, and recovery references retained. |
 | 1. Establish the controlled workload | In progress | Explicit warmup and five measured baseline runs completed; alternating comparison and representative stress coverage remain open. |
-| 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; new asset-free collection drive/reset scenario verifies accepted movement boundaries. Obstruction/correction oracle coverage and final redesign decisions remain open. |
+| 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | Pending | Measure message/fact/publication work, remove justified repetition, preserve input/event semantics, compare with baseline. |
 | 4. Simplify world movement preparation | In progress | Query-local traversal reuse measured and rejected: no clear gain for added complexity. Active-body preparation remains under review. |
 | 5. Verify overload and live movement | Pending | Explicit overload policy, heavy live admission/cadence evidence, and requested/accepted movement attribution. |
@@ -101,14 +101,12 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** investigate repeated core publication and active-body preparation after rejecting
-the query-local traversal experiment for lack of demonstrated benefit. Direct storage membership
-now has favorable exploratory evidence; broaden controlled movement/correction coverage before
-changing simulation/publication contracts.
-Publication review found that the before snapshot covers motion, physics flags, and events emitted
-inside simulation, so removing it requires a coherent change contract rather than a stale view cache.
-The burden-query experiment has directional evidence below, but the
-25% target, alternating comparison, broader movement oracle, and live acceptance remain open.
+**Next action:** evaluate repeated placement/visibility discovery at its world owner and immutable
+BSP query preparation using the CPU attribution below. Controlled wall/reset and blocked-return
+scenarios now check accepted paths before changing these contracts. Core before/after snapshots
+remain intact: they protect motion, physics flags, and simulation-emitted events as well as pose.
+The retained burden and direct storage-membership changes show a 9.63% exploratory reduction;
+the 25% target, alternating comparison, representative stress coverage, and live acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -136,7 +134,8 @@ Keep feasible independent work moving when a live workload or final human accept
 | --- | --- | --- |
 | Initial investigation and fixture checkpoint | `safety/h3d-physics-start-20261021` | Verification and benchmark sections below; controlled optimization baseline still pending. |
 | Controlled replay measurement tooling | `9cb7ba24e` | Explicit warmup and JSON reports added; five measured baseline runs completed with zero population mismatches and 1,500 active-start steps each. |
-| Direct storage membership | Experiment successor to `b4e74cfab`; binary/patch hashes in evidence | Retained for paired verification: exploratory combined median 33,167.17 ms, 9.63% below baseline; 994 world / 677 core tests pass. |
+| Controlled obstruction/correction and CPU attribution | Successor to `c20bc9830`; profile hashes in evidence | Strengthen wall/path/support/reset and return-after-residency tests without production changes; 994 world tests and Clippy pass. Full CPU stacks identify placement/visibility and BSP preparation targets. |
+| Direct storage membership | `c20bc9830`; binary/patch hashes in evidence | Retained for paired verification: exploratory combined median 33,167.17 ms, 9.63% below baseline; 994 world / 677 core tests pass. |
 | Query-local traversal reuse | Private patch based on `9111877f1`, hashes in evidence | Rejected: median 34,558.39 ms vs burden-only 34,594.76 ms; no demonstrated benefit for added contracts. 994 world / 677 core tests passed before rollback. |
 | Burden membership and controlled movement boundaries | `9111877f1`; source patch and binary hashes retained below | Remove repeated inventory traversals without retained caches; exploratory median work down 5.74%; 993 world and 677 core tests pass. Retained for further paired verification; final performance gate remains open. |
 
@@ -642,6 +641,49 @@ These sequential two-run results do not meet the five alternating-pair requireme
 performance target. [Sanitized evidence](evidence/h3d-combat-physics-2026-10-20/storage-membership-exploratory.json)
 retains individual reports, binary/patch hashes, and limitations. No live-cadence or user-feel
 resolution is claimed.
+
+## Controlled obstruction/correction checks and CPU attribution
+
+The asset-free collection drive/reset scenario now includes a known vertical wall. Each admitted
+interval uses the same `CONTACT_INTERVAL` for integration and the supplied clock. Its independent
+position bound is the wall plane minus the actual movement-sphere radius, rather than another solver
+result. Every drive step checks requested travel against the analytically clipped endpoint,
+accepted displacement against the published root change, path endpoints against those roots, and
+continued grounded contact. The corpus must reach and stay clipped at the wall. Teleport afterward
+must clear motor continuation and pending ordinary correction and begin the next path at the new
+origin. This test passed without production behavior changes.
+
+The previous blocked-return test has been rewritten around controlled admitted intervals. A server
+reference beyond a wall remains pending while accepted path endpoints and displacement agree with
+the collision-limited body. Replacing residency with the unobstructed floor must let that same
+reference resume swept return and settle within `RETAIL_INTERPOLATION_TARGET_THRESHOLD_M`, without
+a new packet or a recovery placement. It also retains grounded support throughout. These scenarios
+extend the movement oracle; they do not establish original-scene contact equivalence or live time
+admission. The full **994 world tests**, world all-target Clippy with warnings as errors, formatting,
+and whitespace checks pass. This milestone changes retained tests only.
+
+To avoid choosing more low-contribution targets, the preserved `c20bc9830` fixture executable was
+sampled with the installed gperftools library at 100 Hz. Default stack unwinding recovered only
+1.134 frames per sample on average; selecting its `libunwind` implementation recovered **42.34**.
+The useful capture contains **4,136 CPU samples**. Kernel perf sampling was unavailable; no host
+configuration was changed. The temporary profiler is loaded into this diagnostic process only and
+introduces no repository dependency or client feature.
+
+| Inclusive operation | Share of sampled CPU | Implication |
+| --- | --- | --- |
+| World `resolve_scene_placement` | 12.19% | Review repeated graph/visibility discovery, including calls from lifecycle and core projection. |
+| Core `current_dynamic_entity_views` | 9.28% | Full projection remains substantial; preserve motion/physics semantics while looking for shared authoritative facts. |
+| World `visit_polygon_leaves` | 10.54% | Review the immutable BSP query representation and placed polygon preparation; broadphase rejection alone does not remove this work. |
+| World `placed_supports` | 8.34% | Nested within the query work above; inspect repeated ID lookups and geometry transforms, not only collision passes. |
+| World `resolve_self_jump_capabilities` | 0.53% | Further narrowing this query is not justified as the primary target in this workload. |
+
+**These inclusive percentages overlap and must not be added.** The recording includes cold bootstrap,
+worker activity, sampler overhead, and a world-test build overlapping its beginning. It identifies
+call paths rather than supplying acceptance timing or a steady-state physics-only percentage.
+[Sanitized CPU evidence](evidence/h3d-combat-physics-2026-10-20/storage-membership-cpu-attribution.json)
+retains the source/binary/library/profile hashes, individual sampled operations, limitations, and
+next hypotheses. Raw profiles, mappings, reports, and the parser stay in the ignored private fixture
+area for reproduction.
 
 ## Next investigation targets: the complete update pipeline
 

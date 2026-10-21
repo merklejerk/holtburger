@@ -91,7 +91,7 @@ criterion open; do not silently lower targets or mark partial improvement as com
 | 2. Define behavior and ownership | In progress | Ordinary/reset pipeline traced; controlled drive/wall/reset and blocked-return/residency-change scenarios verify accepted paths and support. Broader stress coverage and final redesign decisions remain open. |
 | 3. Simplify core orchestration/publication | In progress | Ordered merge rejected; metadata reuse retained with a 45.46% phase-attribution benefit. Matched readiness five-pair comparison is valid: 23.09% combined-work reduction, every candidate p95 below every baseline p95. Work target remains unmet. |
 | 4. Simplify world movement preparation | In progress | Traversal reuse rejected; deferred support footprint and borrowed BSP candidates retained for paired verification. Active-body preparation remains under review. |
-| 5. Verify overload and live movement | In progress | First scripted window observed 93.30% admission but its saved executable lacks retained core optimizations; this is not a current-candidate cadence result. Preserve the observation and source-attribution correction. Qualified optimized live cadence, combat and original-fight validation remain open. |
+| 5. Verify overload and live movement | In progress | Qualified retained executable admits 99.36% over 64.98 s in the alternate scene. Local combat never activates and mover population is lower than the original fight, so representative combat/cadence and user movement acceptance remain open. Earlier 93.30% observation remains source-unqualified. |
 | 6. Clean up and hand off | Pending | Final correctness/quality review, required checks, evidence-backed report, and user movement-feel acceptance still explicit. |
 
 Completed foundations:
@@ -110,14 +110,14 @@ optimizing. Add diagnostics only when a concrete change exposes a specific unans
 question. Heavy combat qualification and movement-feel checks remain final acceptance requirements;
 they do not block independent engineering work.
 
-**Next action:** run the existing 65-second live stimulus with retained body-reuse executable
-`02bdbe098`, verifying its hash and retained optimization symbols first. Use the result to choose
-between remaining cost and host time-admission work. The unchanged semantic-publication shortcut
-is rejected and reverted: two alternating pairs showed **0.45% more** median combined work,
-with both paired directions worse. Prepared-body reuse remains retained (**2.07%** less marginal
-work); the valid original-baseline **23.09%** result awaits a new full acceptance comparison.
-The earlier 93.30% live observation remains source-unqualified. Fixture development is frozen;
-original performance, workload, cadence, quality and user acceptance requirements remain intact.
+**Next action:** optimize world-owned movement sweeps using the qualified live attribution:
+**8.96 ms/tick** in mobile movement sweeps, versus **0.18 ms/tick** in semantic facts. Keep the
+fixture frozen and preserve bounded solver behavior. Retained `02bdbe098` admitted **99.36%**
+over **64.98 s** of retained alternate-scene live intervals, but local combat never activated and
+mean movers were **96**, versus about **153** in the original fight. This is useful qualified
+cadence evidence, not heavy-fight acceptance. The publication shortcut is rejected and reverted
+(**0.45% more** marginal work). Prepared-body reuse remains retained; original-baseline performance,
+representative combat, final architecture/quality and user movement acceptance remain open.
 
 At each phase boundary, reassess the remaining plan against new evidence and update ordering or
 scope with the reason. This is a review checkpoint, not an automatic request for user confirmation.
@@ -1522,6 +1522,38 @@ they do not establish a 1/30 s elapsed-time discard policy. Our 1/30 s maximum i
 stability contract, not a retail requirement. Retain the bounded solver contract while evaluating
 host catch-up; retail's larger maximum does not prove our crowd/force solver can take larger steps.
 
+### Qualified retained-source live window: alternate-scene cadence, combat still pending
+
+After reverting the publication shortcut, ran the existing stimulus with the saved `02bdbe098`
+executable. Its SHA-256 matched the prepared-body experiment; retained core optimization symbols
+were present, and current crates/apps source matched that checkpoint. No compiler, replay or
+profiler ran concurrently. This resolves attribution for this new run; it does not turn the older
+source-unqualified live observation into a valid comparison baseline.
+
+The 65.008 s window contained **2,162 retained simulation intervals** after excluding the first
+straddling interval: **64,980.884 ms elapsed / 64,564.894 ms admitted**, or **99.36%**. Mean host
+interval was **30.05 ms**, physics work **25.33 ms**, and network batch work **2.51 ms**.
+The contact population averaged **113.53 bodies / 96.44 movers / 15.82 projectiles**. All **2,163**
+observed player paths were integrated and grounded in outdoor land cell `0x4AE10032`; geometric
+path length includes support/contact adjustments and is not a locomotion-speed oracle.
+
+The numeric cadence threshold is met in this alternate-scene window. The probe still correctly
+exits with failure because none of its **14** engagement requests reached active combat. Together
+with the lower mover population than the original fight, this leaves representative heavy-fight
+coverage and its cadence gate open. User movement feel also remains pending. No cap or scheduling
+policy was changed to obtain this result.
+
+The fresh profile puts **8.96 ms/tick** in mobile movement sweeps, **2.20 ms** in support/hard
+movement and **1.63 ms** in correction sweeps. Semantic facts cost **0.18 ms/tick**, before projection
+**1.23 ms**, and after projection/diff **0.81 ms**. These are nested phase means, not additive
+independent savings. Prioritize world collision movement over further small semantic-publication
+branches. Keep scene geometry, requested controls and accepted-path observations with the evidence;
+do not label this stationary-replay proof or claim the original fight is resolved.
+
+[Sanitized live evidence](evidence/h3d-combat-physics-2026-10-20/live-stress-02bdbe098-qualified-cadence.json)
+retains executable/content attribution, all phase means, admission sums, stimulus and path summaries,
+and raw hashes. Private raw artifacts remain in
+`caps/runtime-fixtures/2026-10-21-4ae1/live-stress-02bdbe098-qualified/`.
 
 ## Unattended runtime fixture: second scene, 2026-10-21
 

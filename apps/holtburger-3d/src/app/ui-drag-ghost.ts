@@ -6,7 +6,7 @@ export function showUiDragGhost(
 ): void {
 	const preview = source.querySelector("[data-drag-preview]");
 	const artwork = (preview ?? source).querySelector(
-		".ui-icon, .ui-icon-fallback, .ui-shortcut-emoji, svg",
+		"[data-drag-artwork], .ui-icon, .ui-icon-fallback, svg",
 	);
 	const visual = preview ?? artwork ?? source;
 	const bounds = visual.getBoundingClientRect();

@@ -106,7 +106,7 @@
 
 <ClientHudWindow
 	title="Create loadout"
-	icon="save-loadout"
+	icon="loadout"
 	{placement}
 	{viewport}
 	visible={capture !== null}

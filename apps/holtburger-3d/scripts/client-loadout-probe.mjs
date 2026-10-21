@@ -70,7 +70,7 @@ export async function probeLoadouts(client, evaluateExpression) {
 			false,
 		);
 		const initialIcon = await read(
-			`document.querySelector(${JSON.stringify(result)}).querySelector('.ui-shortcut-emoji').textContent`,
+			`document.querySelector(${JSON.stringify(result)}).querySelector('.loadout-badge').textContent`,
 		);
 		assert.notEqual(initialIcon, "⭐", "New draft reused a saved loadout icon");
 		const originalDragGap = await read(
@@ -112,6 +112,15 @@ export async function probeLoadouts(client, evaluateExpression) {
 						Math.abs(actual.y - end.y - expected.gap) < 0.1,
 					"Drag preview ignored the shared theme cursor gap",
 				);
+				if (source === result) {
+					assert.equal(
+						await read(
+							`(() => { const artwork = document.querySelector('.item-drag-ghost [data-drag-artwork]'); return artwork?.querySelector('svg') != null && artwork?.querySelector('.loadout-badge')?.textContent === ${JSON.stringify(initialIcon)}; })()`,
+						),
+						true,
+						"Loadout drag preview must retain both the silhouette and personal badge",
+					);
+				}
 				await key("Escape", "Escape");
 				await mouse("mouseReleased", end, 0);
 			}
@@ -258,7 +267,7 @@ export async function probeLoadouts(client, evaluateExpression) {
 			true,
 			"Footer controls overlap or extend beyond the window",
 		);
-		const menu = '[role="menu"][aria-label="Loadout icon"]';
+		const menu = '[role="menu"][aria-label="Loadout badge"]';
 		assert.equal(
 			await read(`document.querySelector(${JSON.stringify(menu)}) === null`),
 			true,
@@ -299,7 +308,7 @@ export async function probeLoadouts(client, evaluateExpression) {
 		);
 		assert.equal(
 			await read(
-				`document.querySelector(${JSON.stringify(chooser)}).querySelector('.ui-shortcut-emoji').textContent`,
+				`document.querySelector(${JSON.stringify(chooser)}).querySelector('.loadout-badge').textContent`,
 			),
 			selectedIcon,
 		);
@@ -429,7 +438,7 @@ export async function probeLoadouts(client, evaluateExpression) {
 		);
 		assert.equal(
 			await read(
-				`document.querySelector(${JSON.stringify(target)}).querySelector('.ui-shortcut-emoji').textContent`,
+				`document.querySelector(${JSON.stringify(target)}).querySelector('.loadout-badge').textContent`,
 			),
 			selectedIcon,
 		);

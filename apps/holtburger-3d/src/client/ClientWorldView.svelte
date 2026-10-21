@@ -1185,7 +1185,13 @@
 		onPlacementChange={(placement) =>
 			changeHudPlacement("character", placement)}
 	>
-		<ClientCharacterHud {playerName} {worldName} {vitals} {readConnection} />
+		<ClientCharacterHud
+			{playerName}
+			{worldName}
+			{vitals}
+			{readConnection}
+			{characterSheet}
+		/>
 	</ClientHudPanel>
 	{#if partyHudPresent || hudMode === "layout"}
 		<ClientPartyHud

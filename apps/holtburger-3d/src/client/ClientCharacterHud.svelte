@@ -1,9 +1,13 @@
 <script lang="ts">
+	import { untrack } from "svelte";
 	import { CLIENT_HUD_VITALS } from "./client-hud-vitals";
+	import { CLIENT_TUNING } from "./client-tuning";
+	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
+	import type { CharacterSheet } from "./client-character-sheet-contract";
 	import ClientConnectionBadge from "./ClientConnectionBadge.svelte";
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import type { ClientVital } from "./client-host-contract";
-	import { formatQuantity } from "../app/quantity-format";
+	import { formatQuantity, progressPercent } from "../app/quantity-format";
 
 	interface Props {
 		/** Reader for the browser session-owned transport observation. */
@@ -11,10 +15,52 @@
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		readonly vitals: readonly ClientVital[];
+		/** Session-owned progression; sampled at the character sheet's display cadence. */
+		readonly characterSheet: ClientCharacterSheetState | null;
 	}
 
-	const { playerName, worldName, vitals, readConnection }: Props = $props();
+	const {
+		playerName,
+		worldName,
+		vitals,
+		readConnection,
+		characterSheet,
+	}: Props = $props();
 	let focusedKind = $state<ClientVital["kind"]>("health");
+	/** Only the level facts used by the bar enter the bounded HUD display graph. */
+	let level = $state.raw<CharacterSheet["level"] | null>(null);
+
+	$effect(() => {
+		const owner = characterSheet;
+		let revision = -1;
+		function sample(): void {
+			const next = owner?.read();
+			if (next === undefined) {
+				level = null;
+			} else if (next.revision !== revision) {
+				revision = next.revision;
+				level = next.sheet?.level ?? null;
+			}
+		}
+		// Session identity owns the timer; sampled display facts must not restart it.
+		untrack(sample);
+		if (owner === null) return;
+		const timer = window.setInterval(
+			sample,
+			CLIENT_TUNING.characterSheet.displayIntervalMs,
+		);
+		return () => window.clearInterval(timer);
+	});
+	const xpPercent = $derived(
+		level === null
+			? 0
+			: BigInt(level.xpForNextLevel) === 0n
+				? 100 // At the level cap there is no remaining level to fill.
+				: progressPercent(
+						BigInt(level.xpIntoLevel),
+						BigInt(level.xpForNextLevel),
+					),
+	);
 
 	function vital(kind: ClientVital["kind"]): ClientVital | undefined {
 		return vitals.find((candidate) => candidate.kind === kind);
@@ -33,13 +79,21 @@
 </script>
 
 <section class="character-hud">
-	<header class="ui-readout">
-		<span class="identity"
-			>{playerName ?? "Awaiting character"}
-			<span class="world-name">({worldName ?? "Unknown world"})</span></span
-		>
-		<ClientConnectionBadge {readConnection} />
-	</header>
+	<div class="identity-block">
+		<header class="ui-readout">
+			<span class="identity">{playerName ?? "Awaiting character"}</span>
+			<span class="server">
+				<span class="world-name">on {worldName ?? "Unknown world"}</span>
+				<ClientConnectionBadge {readConnection} />
+			</span>
+		</header>
+		<progress
+			class="xp-progress ui-progress"
+			aria-label="Level experience"
+			max="100"
+			value={xpPercent}
+		></progress>
+	</div>
 	<div
 		class="vitals"
 		role="group"
@@ -75,12 +129,22 @@
 			box-sizing: border-box;
 			height: 100%;
 			grid-template-rows: auto auto;
-			gap: 4px;
+			gap: var(--ui-character-hud-gap);
+		}
+		.identity-block {
+			display: grid;
+			grid-template-rows: auto var(--ui-character-hud-xp-height);
+			min-width: 0;
+		}
+		.xp-progress {
+			display: block;
+			height: var(--ui-character-hud-xp-height);
+			border-radius: 0;
 		}
 		header {
 			display: flex;
 			align-items: center;
-			gap: calc(6em / 13);
+			gap: var(--ui-character-hud-inline-gap);
 			min-width: 0;
 			font-weight: 700;
 		}
@@ -90,9 +154,21 @@
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
+		.server {
+			display: flex;
+			align-items: center;
+			gap: var(--ui-character-hud-inline-gap);
+			min-width: 0;
+			margin-inline-start: auto;
+		}
 		.world-name {
-			color: var(--ui-color-muted);
-			font-weight: 500;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			color: var(--ui-character-hud-server-color, var(--ui-color-muted));
+			font-weight: var(--ui-character-hud-server-font-weight);
+			font-style: var(--ui-character-hud-server-font-style);
 		}
 		.vitals {
 			display: flex;

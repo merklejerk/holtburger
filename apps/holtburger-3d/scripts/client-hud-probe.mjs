@@ -1954,6 +1954,7 @@ export async function probeCharacterSheet(
 		if (!panel || !panel.textContent.includes('9,007,199,254,740,993')) throw new Error('Character panel lost exact XP.');
 		if (panel.querySelector('.character-name')?.textContent !== 'Delulu' || panel.querySelector('select[aria-label="Character title"]')?.selectedOptions[0]?.textContent.trim() !== 'Adventurer') throw new Error('Character identity is missing.');
 		if (panel.querySelector('progress[aria-label="Level experience"]')?.value !== 10 || panel.querySelector('progress[aria-label="Luminance capacity"]')?.value !== 25) throw new Error('Character progress bars did not reflect authoritative balances.');
+		if (document.querySelector('.character-hud progress')?.value !== 10) throw new Error('HUD experience did not reflect authoritative level progress.');
 		const headings = [...panel.querySelectorAll(':scope > h2')].map((heading) => heading.textContent.trim());
 		if (!headings.includes('Specialized') || headings.includes('Trained') || headings.includes('Skills')) throw new Error('Specialized skills did not have their own major section.');
 		if (!panel.textContent.includes('Armor') || !panel.textContent.includes('Slash resistance') || !panel.textContent.includes('Vitae penalty')) throw new Error('Character defenses or vitae are missing.');
@@ -2031,7 +2032,8 @@ export async function probeCharacterSheet(
 			// Remove the standard theme's intentional green to verify the generic success default.
 			panel.style.setProperty('--ui-character-upgrade-color', 'initial');
 			const after = readPaint();
-			if (after.some((value, index) => value === before[index]) || after[8] !== after[2]) throw new Error('Character paint did not follow its inherited palette.');
+			if (after.some((value, index) => index !== 1 && value === before[index]) || after[8] !== after[2]) throw new Error('Character paint did not follow its inherited palette.');
+			if (after[1] !== before[1]) throw new Error('The dedicated XP color changed with the general palette.');
 			for (const token of ['xp', 'luminance', 'buff', 'debuff', 'upgrade']) panel.style.setProperty('--ui-character-' + token + '-color', '#ab12cd');
 			const overridden = readPaint();
 			if (![1, 2, 6, 7, 8].every((index) => overridden[index] === 'rgb(171, 18, 205)') || getComputedStyle(button.querySelector('.action-triangle')).color !== overridden[8]) throw new Error('Independent character color overrides were ignored.');
@@ -2182,6 +2184,7 @@ export async function probeCharacterSheet(
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel.querySelector('.character-name')?.textContent !== 'Renamed' || panel.querySelector('.character-title')) throw new Error('Character identity did not refresh.');
 		if (panel.querySelector('progress[aria-label="Level experience"]') || panel.querySelector('progress[aria-label="Luminance capacity"]')) throw new Error('Capped experience or unknown luminance capacity is misleading.');
+		if (document.querySelector('.character-hud progress')?.value !== 100) throw new Error('HUD experience did not show a completed bar at the level cap.');
 		for (const label of ['Strength', 'Max Health', 'Heavy Weapons']) {
 			const row = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes(label));
 			if (row?.querySelector('.rank-cap')?.textContent !== 'Max' || row.querySelector('.upgrade-indicator')) throw new Error(label + ' did not indicate its rank cap after an external update.');
@@ -2208,6 +2211,7 @@ export async function probeCharacterSheet(
 		`(() => {
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel && !panel.textContent.includes('Waiting for character details')) throw new Error('Retired character details remained visible in the panel.');
+		if (document.querySelector('.character-hud progress')?.value !== 0) throw new Error('Retired character experience remained visible in the HUD.');
 		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, retired: true };
 	})()`,
 	);

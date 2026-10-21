@@ -388,6 +388,7 @@
 				/>
 			{/snippet}
 			{#snippet character()}<ClientCharacterHud
+					characterSheet={null}
 					playerName="Wayfarer"
 					readConnection={() => ({
 						sample: {

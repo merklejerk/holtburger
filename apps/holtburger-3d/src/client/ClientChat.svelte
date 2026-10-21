@@ -642,6 +642,7 @@
 					class="chat-completions ui-overlay-surface"
 					role="listbox"
 					aria-label="Chat completions"
+					data-editor-accessory
 				>
 					{#each completion.choices as choice, index (choice.id)}
 						<button
@@ -651,10 +652,6 @@
 							id={`${completionId}-${index}`}
 							class="ui-menu-item"
 							onpointerenter={() => (completionIndex = index)}
-							onpointerdown={(event) => {
-								// Keep editor focus until the suggestion click commits its replacement.
-								event.preventDefault();
-							}}
 							onclick={() => {
 								completionIndex = index;
 								void acceptCompletion();

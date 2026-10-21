@@ -104,12 +104,12 @@ Completed foundations:
 - [x] Recorded the replay's limits: asynchronous startup, missing displacement oracle, and fixed
   recorded intervals that cannot demonstrate restored live cadence.
 
-**Next action:** validate the replay-only content-completion barrier under both scheduling conditions,
-then apply identical diagnostic tooling to the original performance baseline before any new comparison.
-Resolve replay readiness qualification
-before another acceptance claim. The `e647d2437` five-pair attempt has one workload mismatch and a
-raw **23.33%** median reduction; keep every sample. Its phase-attribution improvement remains
-separate evidence. The preceding valid **23.44%** result and earlier sequential **25.26%** exploration
+**Next action:** finish qualifying the original performance baseline with the same replay-only
+content-completion barrier, then run the matched comparison. Candidate scheduling qualification
+passes with 1,506 active ticks and identical activation histories under normal and single-CPU
+scheduling. Complete baseline qualification before another acceptance claim. The `e647d2437`
+five-pair attempt has one workload mismatch and a raw **23.33%** median reduction; keep every sample.
+Its phase-attribution improvement remains separate evidence. The preceding valid **23.44%** result and earlier sequential **25.26%** exploration
 do not satisfy the current candidate's **25%** gate.
 Representative stress coverage, live cadence, final architecture/quality review, and user movement
 acceptance remain open. Keep the original acceptance thresholds and workload limits explicit.
@@ -1166,9 +1166,27 @@ histories and no reduction from the original 1,500 active ticks. The 25% target 
 An asset-free contract test verifies local-body publication, classification-to-scene successor
 loading, and an idle barrier that neither reloads content nor adds worker wait. All **681 core
 tests**, core/harness all-target Clippy with warnings denied, normal core compilation without the
-fixture feature, formatting, and whitespace checks pass. Normal/single-CPU fixture validation is
-next. Other clock use and asynchronous systems
-remain: this barrier alone does not establish deterministic simulation or live cadence.
+fixture feature, formatting, and whitespace checks pass.
+
+Candidate checkpoint `e767b02e8` passed the scheduling qualification: both conditions first entered
+active physics at input **14**, with **1,506 active ticks**, the same single activation transition,
+5,741 messages, 1,519 physics inputs, peak population 286, and zero population mismatches. Reported
+content waits were 1,553.92 ms normal and 1,480.03 ms single CPU. These waits are retained explicitly;
+no performance claim compares the old asynchronous baseline against this changed execution.
+See [both barrier diagnostic reports](evidence/h3d-combat-physics-2026-10-20/replay-readiness-barrier-e767b02e8.json).
+
+The isolated baseline checkout is rooted at original source `9cb7ba24e` and receives only the
+completion barrier, feature-gated runtime argument, wait accounting, and activation-history
+reporting/tests. Preserve its original entity-map access spelling rather than backporting the
+later map encapsulation. The exact applied diagnostic patch and SHA-256 are retained privately
+alongside build provenance. The baseline debug build, **679 core tests**, and core/harness
+all-target Clippy with warnings denied pass. Its normal/single-CPU scheduling qualification is
+running in `caps/runtime-fixtures/2026-10-21-4ae1/original-baseline-readiness-e767b02e8/`; preserve
+that runner and its reports before further benchmarking. The replay implementations match exactly
+after normalizing only the entity-map length spelling; their normalized hash is retained with the
+patch provenance. Both versions must match the new full trace with at least the original active
+workload. Other clock use and asynchronous systems remain: this barrier alone does not establish
+deterministic simulation or live cadence.
 
 ### Heavy-workload harness gaps confirmed from source
 

@@ -1,0 +1,190 @@
+{
+  "purpose": "Replay-only readiness barrier scheduling qualification; not performance acceptance",
+  "source_commit": "e767b02e8",
+  "metadata": {
+    "source_commit": "e767b02e8c89faee95360fc764bf86619d963f4e",
+    "purpose": "Activation-history diagnostics under normal and single-CPU scheduling; not performance acceptance",
+    "binary_sha256": "f3635e6da06321418684493fff3e08149b9c4d650f5798fdfc3b9a36bdb963f1",
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "content_sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7",
+    "normal_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "single_cpu": 0,
+    "warmups": 1,
+    "measured_runs": 1,
+    "rust_log": "warn",
+    "started_at": "2026-10-21T13:10:39.713017+00:00"
+  },
+  "samples": [
+    {
+      "mode": "normal",
+      "affinity": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2234.057808000007,
+        "content_readiness_wait_ms": 1553.9207400000007,
+        "physics_work_ms": 25541.340859000033,
+        "maximum_physics_work_ms": 22.151853,
+        "active_physics_work_p95_ms": 19.248901,
+        "maximum_input_lateness_ms": 1143.701619,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      }
+    },
+    {
+      "mode": "single_cpu",
+      "affinity": [
+        0
+      ],
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2222.052005000002,
+        "content_readiness_wait_ms": 1480.0280870000001,
+        "physics_work_ms": 25332.900975999994,
+        "maximum_physics_work_ms": 23.861789,
+        "active_physics_work_p95_ms": 18.55742,
+        "maximum_input_lateness_ms": 1171.794255,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      }
+    }
+  ],
+  "qualification": {
+    "matching_activation_boundaries": true,
+    "no_fewer_active_ticks_than_original_reference": true,
+    "content_readiness_wait_ms": [
+      1553.9207400000007,
+      1480.0280870000001
+    ],
+    "acceptance_comparison": false
+  }
+}

@@ -166,6 +166,15 @@ impl MovementSequenceDiagnostics {
     }
 }
 
+/// Accepted input flags retained across policy preparation until this tick publishes movement.
+#[must_use]
+pub(crate) struct PreparedMovementTick {
+    /// Manual ownership before expiry or queued release, needed for its final stop notification.
+    had_active_manual_motion: bool,
+    /// Last explicit-stop decision after reducing input in producer order.
+    explicit_stop_requested: bool,
+}
+
 pub(crate) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
     /// Drive and jump lifecycle commands retain their shared admission order.
@@ -287,13 +296,13 @@ impl MovementSystem {
     ) {
         self.queued_control_commands
             .push(QueuedControlCommand::ServerDirective(motion));
-        self.process_control_commands(now, world);
+        self.process_control_commands(now, world, false);
     }
 
     /// Gesture packets retire automatic approach without discarding the latest held input or
     /// jump charge. Playback arbitration decides whether that input can move the body now.
     pub(crate) fn admit_server_gesture(&mut self, now: Instant, world: &mut WorldState) {
-        self.process_control_commands(now, world);
+        self.process_control_commands(now, world, false);
         self.expire_active_movement(now);
         if !self.has_active_manual_drive() {
             self.active_movement = None;
@@ -574,17 +583,43 @@ impl MovementSystem {
         })
     }
 
+    /// Accept external input before other controllers inspect this tick's movement ownership.
+    pub(crate) fn prepare_tick(
+        &mut self,
+        now: Instant,
+        world: &mut WorldState,
+    ) -> PreparedMovementTick {
+        let had_active_manual_motion = matches!(self.active_movement, Some(ActiveMovement::Manual));
+        self.expire_active_movement(now);
+        PreparedMovementTick {
+            had_active_manual_motion,
+            explicit_stop_requested: self.process_control_commands(now, world, false),
+        }
+    }
+
+    /// Standalone movement tests run both stages without an intervening policy owner.
+    #[cfg(test)]
     pub(crate) async fn tick(
         &mut self,
         now: Instant,
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
-        let had_active_manual_motion = matches!(self.active_movement, Some(ActiveMovement::Manual));
+        let prepared = self.prepare_tick(now, world);
+        self.advance_tick(prepared, now, world, session).await
+    }
 
-        self.expire_active_movement(now);
-
-        let explicit_stop_requested = self.process_control_commands(now, world);
+    /// Apply derived controller commands and publish the prepared movement exactly once.
+    pub(crate) async fn advance_tick(
+        &mut self,
+        prepared: PreparedMovementTick,
+        now: Instant,
+        world: &mut WorldState,
+        session: &mut Session,
+    ) -> Result<Vec<WorldEvent>> {
+        let had_active_manual_motion = prepared.had_active_manual_motion;
+        let explicit_stop_requested =
+            self.process_control_commands(now, world, prepared.explicit_stop_requested);
 
         let mut events = Vec::new();
         if let Some(pose) = self.pending_arrival_pose.take() {
@@ -658,9 +693,13 @@ impl MovementSystem {
         Ok(events)
     }
 
-    /// Reduce commands in producer order before publishing the resulting drive.
-    fn process_control_commands(&mut self, now: Instant, world: &mut WorldState) -> bool {
-        let mut explicit_stop_requested = false;
+    /// Continue producer-ordered reduction, carrying the prior stage's stop decision.
+    fn process_control_commands(
+        &mut self,
+        now: Instant,
+        world: &mut WorldState,
+        mut explicit_stop_requested: bool,
+    ) -> bool {
         for command in std::mem::take(&mut self.queued_control_commands) {
             match command {
                 QueuedControlCommand::Drive(command) => {

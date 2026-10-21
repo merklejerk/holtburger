@@ -334,10 +334,11 @@ impl ClientRuntime {
             self.poll_selection_envelopes();
         }
         if active_world {
+            let prepared_movement = self.movement.prepare_tick(now, &mut self.world);
             self.prepare_combat_movement(now, dt_duration);
             let movement_events = self
                 .movement
-                .tick(now, &mut self.world, &mut self.session)
+                .advance_tick(prepared_movement, now, &mut self.world, &mut self.session)
                 .await
                 .inspect_err(|_| {
                     self.set_exit_cause(ClientExitCause::RuntimeFailure);

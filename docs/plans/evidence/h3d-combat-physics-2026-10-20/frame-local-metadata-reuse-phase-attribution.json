@@ -1,0 +1,194 @@
+{
+  "description": "Matched warmed core-phase attribution for metadata reuse. Logging-enabled diagnostics are separate from acceptance samples.",
+  "baseline_source_commit": "bc9e77f6e",
+  "candidate_source_commit": "e647d2437",
+  "metadata": {
+    "purpose": "Phase attribution only; not acceptance timing",
+    "warmups": 1,
+    "measured_runs": 1,
+    "rust_log": "warn,holtburger_core::client::runtime_profile=debug",
+    "binary_sha256": {
+      "baseline": "74857538e2528f2ab55cf44c00bb26781aea421f228f80629448e713af4a8aed",
+      "candidate": "e9821e05f8206a0dff0e22a3a1a7d67bf348729eed1fe4c9b1c1be923947e840"
+    }
+  },
+  "summary": {
+    "baseline": {
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2176.949453000016,
+        "physics_work_ms": 25604.773237000038,
+        "maximum_physics_work_ms": 23.179109999999998,
+        "active_physics_work_p95_ms": 19.109022,
+        "maximum_input_lateness_ms": 10.479688,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.46153,
+            "y": 31.819912,
+            "z": 63.735115
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "physics_records": 1519,
+      "records_with_simulation": 1501,
+      "phases": {
+        "total_ms": {
+          "total_ms": 25478.948,
+          "mean_ms": 16.974648900732845,
+          "median_ms": 16.923,
+          "p95_ms": 19.018
+        },
+        "before_entity_projection_ms": {
+          "total_ms": 1545.686,
+          "mean_ms": 1.0297708194536974,
+          "median_ms": 0.996,
+          "p95_ms": 1.269
+        },
+        "after_entity_projection_and_diff_ms": {
+          "total_ms": 1969.461,
+          "mean_ms": 1.3120992671552298,
+          "median_ms": 1.258,
+          "p95_ms": 1.604
+        },
+        "simulation_ms": {
+          "total_ms": 18289.309,
+          "mean_ms": 12.184749500333112,
+          "median_ms": 12.246,
+          "p95_ms": 13.78
+        },
+        "world_tick_ms": {
+          "total_ms": 2091.274,
+          "mean_ms": 1.3932538307794804,
+          "median_ms": 1.392,
+          "p95_ms": 1.535
+        },
+        "entity_facts_and_supply_ms": {
+          "total_ms": 228.517,
+          "mean_ms": 0.1522431712191872,
+          "median_ms": 0.148,
+          "p95_ms": 0.174
+        }
+      }
+    },
+    "candidate": {
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1500,
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2160.5497429999987,
+        "physics_work_ms": 24604.24737000004,
+        "maximum_physics_work_ms": 23.175341,
+        "active_physics_work_p95_ms": 18.813389,
+        "maximum_input_lateness_ms": 10.003271,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45882,
+            "y": 31.826952,
+            "z": 63.73384
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "physics_records": 1519,
+      "records_with_simulation": 1501,
+      "phases": {
+        "total_ms": {
+          "total_ms": 24477.774,
+          "mean_ms": 16.307644237175218,
+          "median_ms": 16.234,
+          "p95_ms": 18.726
+        },
+        "before_entity_projection_ms": {
+          "total_ms": 1594.061,
+          "mean_ms": 1.0619993337774816,
+          "median_ms": 1.011,
+          "p95_ms": 1.323
+        },
+        "after_entity_projection_and_diff_ms": {
+          "total_ms": 1074.183,
+          "mean_ms": 0.7156449033977349,
+          "median_ms": 0.687,
+          "p95_ms": 0.854
+        },
+        "simulation_ms": {
+          "total_ms": 18143.823,
+          "mean_ms": 12.087823451032644,
+          "median_ms": 12.103,
+          "p95_ms": 13.895
+        },
+        "world_tick_ms": {
+          "total_ms": 2072.259,
+          "mean_ms": 1.3805856095936042,
+          "median_ms": 1.378,
+          "p95_ms": 1.538
+        },
+        "entity_facts_and_supply_ms": {
+          "total_ms": 227.482,
+          "mean_ms": 0.15155363091272483,
+          "median_ms": 0.146,
+          "p95_ms": 0.175
+        }
+      }
+    },
+    "limitations": [
+      "Logging-enabled diagnostic samples are not performance-gate samples.",
+      "Select ticks that actually emitted the nested simulation profile, including any activation-completion tick; do not equate that count with active-at-entry report counts.",
+      "One warmed measured replay per executable does not establish repeatable end-to-end benefit."
+    ]
+  },
+  "artifact_sha256": {
+    "baseline.log": "d3a3d6492f515384d0721d0afcc19f7aae52009a1641f1ae78fd8e7473f9af45",
+    "candidate.log": "4d327d3f45be3a8935f01e34b8e2c049852a42100565fa0a0d0c1a8bb7a7e9e0",
+    "run.py": "8e4d737e73132315175a64841d38fbaf62764e9a3142f9c0b19fd84ce74e39d8",
+    "summarize.py": "210043d5bfffc0047d0d41009e70345922fde37a5acd035c339c56de4fa5549b"
+  },
+  "after_phase_mean_reduction": 0.454580212555618,
+  "decision": "Retain provisionally for the required final five-pair comparison. After-projection/diff reduction is material, but one diagnostic run per version cannot prove repeatable total-work acceptance."
+}

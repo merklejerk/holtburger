@@ -1,0 +1,833 @@
+{
+  "description": "Original-source five-pair acceptance in delivered matched development profile; all ten samples retained",
+  "metadata": {
+    "started_at": "2026-10-21T16:03:30.967752+00:00",
+    "candidate_source_commit": "a52fbe29d3fd3d8133ab7c002108789c1d3af5c2",
+    "measurement_worktree_commit": "cdabbf4112c1461372abadc7845ef8bdf576ae41",
+    "baseline_source_commit": "9cb7ba24e",
+    "rust_log": "warn",
+    "candidate_build_provenance": {
+      "source_commit": "a52fbe29d3fd3d8133ab7c002108789c1d3af5c2",
+      "measurement_checkpoint": "cdabbf4112c1461372abadc7845ef8bdf576ae41",
+      "binary_sha256": "da6396637df8d9e42376e2ce73bf28953b801a59e908c22a3ad412f76a60b510",
+      "effective_profile": "dev: Parry/Glam opt-level 3; all workspace code opt-level 0; inherited debug info/assertions/overflow checks; runtime-fixture feature",
+      "build_command": [
+        "cargo",
+        "build",
+        "-p",
+        "holtburger-debug-harness",
+        "--bin",
+        "runtime_scene_fixture",
+        "--features",
+        "runtime-fixture"
+      ],
+      "source_tree_matches_checkpoint": true,
+      "marginal_comparison_binary_identical": true,
+      "cargo_lock_sha256": "ae547307541af655f17be08ae58e0a9c3219617963e0bd1df83472b2c6be48f6",
+      "validation": {
+        "world_tests": 996,
+        "core_tests": 682,
+        "world_core_harness_all_target_clippy_warnings_denied": true,
+        "formatting_and_build": true
+      },
+      "provenance": "Exact preserved executable from streamed-support-footprint-experiment; candidate source a52fbe29d, with core publication experiment fully reverted."
+    },
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "binary_sha256": {
+      "baseline": "142dd389cf5560e81e1ba33230893e137aaab3384a3198e2e4dfb1bc56ac5ab5",
+      "candidate": "da6396637df8d9e42376e2ce73bf28953b801a59e908c22a3ad412f76a60b510"
+    },
+    "content": [
+      {
+        "name": "assets.hba",
+        "path": "/home/cluracan/code/holtburger/dats/assets.hba",
+        "bytes": 634425693,
+        "mtime_ns": 1789745398318248665,
+        "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+      }
+    ],
+    "pairs": 5,
+    "warmups_per_invocation": 1,
+    "measured_runs_per_invocation": 1,
+    "order": [
+      "baseline,candidate",
+      "candidate,baseline",
+      "baseline,candidate",
+      "candidate,baseline",
+      "baseline,candidate"
+    ],
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "cargo_lock_sha256": "ae547307541af655f17be08ae58e0a9c3219617963e0bd1df83472b2c6be48f6",
+    "runner_sha256": "0ea83d6be0c9d005eb4a4cb7975e951d708d5838bb7fa18e2e42a274b44c0bee",
+    "baseline_diagnostic_patch_sha256": "8bd001321bf099c36702b45067fda506bfbeccfed9da68a47bd81c2b09e5cf08",
+    "baseline_build_provenance": {
+      "source_commit": "9cb7ba24ed003a6008f28d20c8cce58f6885cca4",
+      "source_worktree": "/tmp/h3d-original-baseline-readiness",
+      "target_directory": "/tmp/h3d-original-baseline-fast-dependencies-target-20261021",
+      "isolation": "Unique target; do not use main workspace target for this checkout.",
+      "diagnostic_patch_sha256": "8bd001321bf099c36702b45067fda506bfbeccfed9da68a47bd81c2b09e5cf08",
+      "compiler_overrides": [
+        "profile.dev.package.parry3d.opt-level=3",
+        "profile.dev.package.glam.opt-level=3"
+      ],
+      "effective_profile": "dev: workspace code opt-level 0, Parry/Glam opt-level 3, inherited debug defaults",
+      "reason": "Match actual delivered development configuration on both original and candidate; original source and 25% target unchanged. Fully unoptimized comparison remains preserved as failed.",
+      "binary_sha256": "142dd389cf5560e81e1ba33230893e137aaab3384a3198e2e4dfb1bc56ac5ab5",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "cargo_lock_sha256": "ae547307541af655f17be08ae58e0a9c3219617963e0bd1df83472b2c6be48f6",
+      "build_command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--target-dir",
+        "/tmp/h3d-original-baseline-fast-dependencies-target-20261021",
+        "--config",
+        "profile.dev.package.parry3d.opt-level=3",
+        "--config",
+        "profile.dev.package.glam.opt-level=3",
+        "-p",
+        "holtburger-debug-harness",
+        "--bin",
+        "runtime_scene_fixture",
+        "--features",
+        "runtime-fixture"
+      ],
+      "validation": {
+        "core_tests": 679,
+        "world_tests": 990,
+        "optimized_source_markers_absent": true
+      }
+    },
+    "activation_reference": [
+      {
+        "physics_tick": 1,
+        "active": false
+      },
+      {
+        "physics_tick": 14,
+        "active": true
+      }
+    ],
+    "timing_contract": "Both versions await collision-content completion at publication; report await wall time separately from core work. Full input trace, all startup work, and at least original 1500 active ticks retained.",
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "build_conditions": "Both preserved executables use delivered dev/debug compilation: Parry/Glam opt-level 3, all workspace code opt-level 0, inherited debug defaults. Original source has explicit matching dependency overrides and a unique target directory. Same runtime-fixture feature, content, input and logging. No compiler, profiler, live diagnostic or other benchmark from this agent during comparison. Preserve prior all-unoptimized 23.46% failed comparison separately; do not add configuration-only gains.",
+    "profile_environment_present": {}
+  },
+  "samples": [
+    {
+      "pair": 1,
+      "slot": 1,
+      "version": "baseline",
+      "started_at": "2026-10-21T16:03:31.524726+00:00",
+      "loadavg_before": "2.66 2.73 2.83 4/3021 30",
+      "completed_at": "2026-10-21T16:05:11.672122+00:00",
+      "wall_seconds": 100.14728188200388,
+      "exit_code": 0,
+      "loadavg_after": "2.88 2.77 2.84 2/3025 62",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5604.109371999988,
+        "content_readiness_wait_ms": 1601.6754520000013,
+        "physics_work_ms": 30166.179052999927,
+        "maximum_physics_work_ms": 26.449884,
+        "active_physics_work_p95_ms": 22.106884,
+        "maximum_input_lateness_ms": 1469.445739,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45648,
+            "y": 31.825537,
+            "z": 63.733376
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 35770.28842499992,
+      "validation_issues": []
+    },
+    {
+      "pair": 1,
+      "slot": 2,
+      "version": "candidate",
+      "started_at": "2026-10-21T16:05:11.673578+00:00",
+      "loadavg_before": "2.88 2.77 2.84 5/3025 62",
+      "completed_at": "2026-10-21T16:06:51.988626+00:00",
+      "wall_seconds": 100.31493573301123,
+      "exit_code": 0,
+      "loadavg_after": "2.19 2.57 2.76 3/3019 94",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2142.5076259999996,
+        "content_readiness_wait_ms": 1580.2097549999992,
+        "physics_work_ms": 23259.897821000006,
+        "maximum_physics_work_ms": 24.949734,
+        "active_physics_work_p95_ms": 17.518721,
+        "maximum_input_lateness_ms": 1168.121535,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 25402.405447000005,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 1,
+      "version": "candidate",
+      "started_at": "2026-10-21T16:06:51.989994+00:00",
+      "loadavg_before": "2.19 2.57 2.76 5/3019 94",
+      "completed_at": "2026-10-21T16:08:32.327181+00:00",
+      "wall_seconds": 100.33709430700401,
+      "exit_code": 0,
+      "loadavg_after": "2.51 2.59 2.75 1/3043 126",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2125.6491189999997,
+        "content_readiness_wait_ms": 1604.6767690000004,
+        "physics_work_ms": 23091.44812699998,
+        "maximum_physics_work_ms": 21.917688000000002,
+        "active_physics_work_p95_ms": 17.526409,
+        "maximum_input_lateness_ms": 1183.63544,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 25217.097245999983,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 2,
+      "version": "baseline",
+      "started_at": "2026-10-21T16:08:32.328010+00:00",
+      "loadavg_before": "2.51 2.59 2.75 3/3043 126",
+      "completed_at": "2026-10-21T16:10:12.583598+00:00",
+      "wall_seconds": 100.25548871498904,
+      "exit_code": 0,
+      "loadavg_after": "2.11 2.43 2.67 2/3028 158",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5627.805202000015,
+        "content_readiness_wait_ms": 1561.3827509999992,
+        "physics_work_ms": 28910.76499099998,
+        "maximum_physics_work_ms": 24.510707999999997,
+        "active_physics_work_p95_ms": 21.229003,
+        "maximum_input_lateness_ms": 1411.241979,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 34538.57019299999,
+      "validation_issues": []
+    },
+    {
+      "pair": 3,
+      "slot": 1,
+      "version": "baseline",
+      "started_at": "2026-10-21T16:10:12.584978+00:00",
+      "loadavg_before": "2.11 2.43 2.67 5/3028 158",
+      "completed_at": "2026-10-21T16:11:52.823892+00:00",
+      "wall_seconds": 100.23879099698388,
+      "exit_code": 0,
+      "loadavg_after": "3.14 2.68 2.74 2/3024 189",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5653.360711999993,
+        "content_readiness_wait_ms": 1571.3933539999996,
+        "physics_work_ms": 30028.135451999988,
+        "maximum_physics_work_ms": 27.688661,
+        "active_physics_work_p95_ms": 21.930225,
+        "maximum_input_lateness_ms": 1423.602109,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 35681.49616399998,
+      "validation_issues": []
+    },
+    {
+      "pair": 3,
+      "slot": 2,
+      "version": "candidate",
+      "started_at": "2026-10-21T16:11:52.825259+00:00",
+      "loadavg_before": "3.14 2.68 2.74 4/3024 189",
+      "completed_at": "2026-10-21T16:13:33.144023+00:00",
+      "wall_seconds": 100.31868092500372,
+      "exit_code": 0,
+      "loadavg_after": "2.73 2.69 2.73 1/3020 220",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2130.2658909999955,
+        "content_readiness_wait_ms": 1573.2897369999987,
+        "physics_work_ms": 23035.410963000002,
+        "maximum_physics_work_ms": 21.866184,
+        "active_physics_work_p95_ms": 17.478065,
+        "maximum_input_lateness_ms": 1153.077728,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 25165.676853999998,
+      "validation_issues": []
+    },
+    {
+      "pair": 4,
+      "slot": 1,
+      "version": "candidate",
+      "started_at": "2026-10-21T16:13:33.145461+00:00",
+      "loadavg_before": "2.73 2.69 2.73 1/3020 220",
+      "completed_at": "2026-10-21T16:15:13.417538+00:00",
+      "wall_seconds": 100.27182520899805,
+      "exit_code": 0,
+      "loadavg_after": "2.86 2.73 2.75 2/3025 251",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2204.361086000006,
+        "content_readiness_wait_ms": 1618.8616440000021,
+        "physics_work_ms": 23677.066154,
+        "maximum_physics_work_ms": 23.249799000000003,
+        "active_physics_work_p95_ms": 17.805105,
+        "maximum_input_lateness_ms": 1221.665808,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 25881.427240000005,
+      "validation_issues": []
+    },
+    {
+      "pair": 4,
+      "slot": 2,
+      "version": "baseline",
+      "started_at": "2026-10-21T16:15:13.418988+00:00",
+      "loadavg_before": "2.86 2.73 2.75 5/3025 251",
+      "completed_at": "2026-10-21T16:16:53.588121+00:00",
+      "wall_seconds": 100.1689832470147,
+      "exit_code": 0,
+      "loadavg_after": "3.14 2.87 2.79 1/3018 282",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5631.276465000007,
+        "content_readiness_wait_ms": 1570.5309879999998,
+        "physics_work_ms": 30184.670788000036,
+        "maximum_physics_work_ms": 24.856324,
+        "active_physics_work_p95_ms": 22.080623,
+        "maximum_input_lateness_ms": 1442.745484,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45648,
+            "y": 31.825537,
+            "z": 63.733376
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 35815.94725300004,
+      "validation_issues": []
+    },
+    {
+      "pair": 5,
+      "slot": 1,
+      "version": "baseline",
+      "started_at": "2026-10-21T16:16:53.589543+00:00",
+      "loadavg_before": "3.14 2.87 2.79 2/3018 282",
+      "completed_at": "2026-10-21T16:18:33.833728+00:00",
+      "wall_seconds": 100.24407218498527,
+      "exit_code": 0,
+      "loadavg_after": "2.40 2.70 2.74 2/3021 313",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 5618.305883000009,
+        "content_readiness_wait_ms": 1586.8414629999993,
+        "physics_work_ms": 29634.47769499999,
+        "maximum_physics_work_ms": 30.934169,
+        "active_physics_work_p95_ms": 21.773751,
+        "maximum_input_lateness_ms": 1436.186124,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 35252.783578,
+      "validation_issues": []
+    },
+    {
+      "pair": 5,
+      "slot": 2,
+      "version": "candidate",
+      "started_at": "2026-10-21T16:18:33.835564+00:00",
+      "loadavg_before": "2.40 2.70 2.74 4/3021 313",
+      "completed_at": "2026-10-21T16:20:14.110457+00:00",
+      "wall_seconds": 100.2747714970028,
+      "exit_code": 0,
+      "loadavg_after": "2.62 2.70 2.74 1/3022 345",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2184.663309999993,
+        "content_readiness_wait_ms": 1569.6534159999997,
+        "physics_work_ms": 23648.63465000001,
+        "maximum_physics_work_ms": 20.866287,
+        "active_physics_work_p95_ms": 17.760053000000003,
+        "maximum_input_lateness_ms": 1143.308883,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 25833.297960000004,
+      "validation_issues": []
+    }
+  ],
+  "summary": {
+    "completed_at": "2026-10-21T16:20:14.422161+00:00",
+    "baseline_median_combined_ms": 35681.49616399998,
+    "candidate_median_combined_ms": 25402.405447000005,
+    "median_work_reduction": 0.2880790275652967,
+    "baseline_active_p95_ms": [
+      22.106884,
+      21.229003,
+      21.930225,
+      22.080623,
+      21.773751
+    ],
+    "candidate_active_p95_ms": [
+      17.518721,
+      17.526409,
+      17.478065,
+      17.805105,
+      17.760053000000003
+    ],
+    "baseline_p95_range_ms": 0.8778810000000021,
+    "p95_median_limit_ms": 22.808106000000002,
+    "workload_and_content_valid": true,
+    "work_target_met": true,
+    "p95_gate_met": true,
+    "all_candidate_p95s_below_baseline_max": true,
+    "performance_gate_met": true,
+    "pair_work_reductions": [
+      0.2898462225077778,
+      0.26988589553395037,
+      0.2947135193453484,
+      0.2773770003295919,
+      0.26719835037022044
+    ],
+    "limitations": [
+      "Recorded-interval replay cannot prove live cadence.",
+      "Stationary alternate-scene workload does not establish original combat resolution.",
+      "Entity counts and final authority do not replace controlled accepted-motion/contact checks."
+    ]
+  },
+  "independent_audit": {
+    "ten_reports_and_alternating_order_verified": true,
+    "workloads_and_activation_verified": true,
+    "combined_totals_and_medians_recomputed": true,
+    "source_fixture_content_lock_and_binary_provenance_verified": true,
+    "baseline_median_ms": 35681.49616399998,
+    "candidate_median_ms": 25402.405447000005,
+    "work_reduction": 0.2880790275652967,
+    "baseline_p95_ms": [
+      22.106884,
+      21.229003,
+      21.930225,
+      22.080623,
+      21.773751
+    ],
+    "candidate_p95_ms": [
+      17.518721,
+      17.526409,
+      17.478065,
+      17.805105,
+      17.760053000000003
+    ],
+    "p95_median_limit_ms": 22.808106000000002,
+    "every_candidate_p95_below_every_baseline_p95": true,
+    "performance_gate_met": true,
+    "scope": "Frozen alternate-scene stationary replay, delivered matched dev compiler settings. Does not establish representative live combat or user movement feel."
+  },
+  "prior_all_unoptimized_result": {
+    "candidate": "114754c4f",
+    "work_reduction": 0.234636172,
+    "target_met": false,
+    "preserved_separately": true,
+    "limitation": "Different compiler configuration and earlier candidate; do not add build-only benefit to source gain."
+  }
+}

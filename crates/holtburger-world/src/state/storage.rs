@@ -594,7 +594,10 @@ mod tests {
 #[cfg(test)]
 mod message_tests {
     use super::*;
-    use crate::{WorldState, context::WorldContextExt};
+    use crate::{
+        WorldState,
+        context::{WorldContext, WorldContextExt},
+    };
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, InventoryPutObjInContainerEventData,
         ObjectDescriptionData, ViewContentsEventData, ViewContentsEventItem,
@@ -629,6 +632,44 @@ mod message_tests {
         description.public_weenie_desc.name = Some("Item".into());
         description.public_weenie_desc.container_id = Some(parent);
         world.handle_message(&GameMessage::ObjectCreate(Box::new(description)));
+    }
+
+    #[test]
+    fn inventory_membership_tracks_missing_nested_and_equipped_items_through_transfers() {
+        const FOREIGN: Guid = Guid(4);
+        const WEAPON: Guid = Guid(5);
+        const UNKNOWN: Guid = Guid(6);
+        let mut world = WorldState::synthetic();
+        world.player.guid = PLAYER;
+        let check = |world: &WorldState, expected: &[Guid]| {
+            let enumerated = world.iter_inventory().collect::<BTreeSet<_>>();
+            assert_eq!(enumerated, expected.iter().copied().collect());
+            for guid in [Guid::NULL, PLAYER, PACK, ITEM, FOREIGN, WEAPON, UNKNOWN] {
+                assert_eq!(
+                    world.is_in_player_inventory(guid),
+                    enumerated.contains(&guid)
+                );
+            }
+        };
+        check(&world, &[]);
+        place(&mut world, PACK, PLAYER, InventoryEntryKind::Container);
+        place(&mut world, ITEM, PACK, InventoryEntryKind::Item);
+        // Ownership is established by rosters before any entity descriptions arrive.
+        assert!(world.entities.get(ITEM).is_none());
+        check(&world, &[PACK, ITEM]);
+        world.storage.equip(WEAPON, PLAYER, None);
+        check(&world, &[PACK, ITEM, WEAPON]);
+        // A stale description cannot override accepted storage ownership.
+        describe(&mut world, ITEM, FOREIGN);
+        check(&world, &[PACK, ITEM, WEAPON]);
+        place(&mut world, PACK, FOREIGN, InventoryEntryKind::Container);
+        check(&world, &[WEAPON]);
+        place(&mut world, ITEM, PLAYER, InventoryEntryKind::Item);
+        check(&world, &[ITEM, WEAPON]);
+        world.storage.withdraw(WEAPON);
+        check(&world, &[ITEM]);
+        world.player.guid = Guid::NULL;
+        check(&world, &[]);
     }
 
     #[test]

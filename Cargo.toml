@@ -93,6 +93,13 @@ pr-run-mode = "skip"
 # Whether to install an updater program
 install-updater = false
 
+# Keep collision/math dependencies fast in development; workspace code retains normal debugging.
+[profile.dev.package.parry3d]
+opt-level = 3
+
+[profile.dev.package.glam]
+opt-level = 3
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"

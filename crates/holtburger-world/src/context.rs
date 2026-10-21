@@ -9,6 +9,7 @@ use holtburger_common::properties::{
 };
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombatTargetStatus {
@@ -82,6 +83,11 @@ pub trait WorldContext {
         self.get_entity(guid)
     }
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
+    /// Membership in the same accepted domain as `iter_inventory`, including pending descriptions.
+    /// Storage owners can answer directly without enumerating unrelated items.
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.iter_inventory().any(|candidate| candidate == guid)
+    }
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
     fn is_open_container(&self, guid: Guid) -> bool;
@@ -136,6 +142,10 @@ impl WorldContext for WorldState {
         self.storage.owned_items(self.player.guid)
     }
 
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.storage.owned_by(guid, self.player.guid)
+    }
+
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_ {
         self.storage
             .equipment(self.player.guid)
@@ -186,13 +196,17 @@ pub trait WorldContextExt: WorldContext {
 
     fn player_encumbrance(&self) -> Option<f32> {
         let player_guid = self.get_player_guid()?;
-
+        let inventory = self.iter_inventory().collect::<Vec<_>>();
+        // Container burden already includes its contents (ACE Container.cs, inventory load).
+        // Resolve membership once instead of traversing the entire inventory for each child.
+        // Keep the original iteration order for identical floating-point accumulation.
+        let inventory_membership = inventory.iter().copied().collect::<HashSet<_>>();
         let mut encumbrance = 0.0;
-        for guid in self.iter_inventory() {
+        for guid in inventory {
             let item = self.get_entity(guid)?;
 
             if let Some(container_id) = self.container_parent(guid)
-                && self.is_in_player_inventory(container_id)
+                && inventory_membership.contains(&container_id)
                 && container_id != player_guid
             {
                 continue;
@@ -258,10 +272,6 @@ pub trait WorldContextExt: WorldContext {
         }
 
         CombatTargetStatus::Available
-    }
-
-    fn is_in_player_inventory(&self, guid: Guid) -> bool {
-        self.iter_inventory().any(|candidate| candidate == guid)
     }
 
     fn is_equipped_item(&self, guid: Guid) -> bool {
@@ -887,6 +897,52 @@ mod tests {
             world.player_run_rate(),
             Some(run_rate_from_skill_and_burden(300.0, expected_burden))
         );
+    }
+
+    #[test]
+    fn inventory_burden_remains_unknown_until_nested_descriptions_arrive() {
+        let player = Guid(1);
+        let pack = Guid(2);
+        let child = Guid(3);
+        let mut world = TestWorld {
+            player_guid: Some(player),
+            inventory: HashSet::from([pack, child]),
+            ..Default::default()
+        };
+        let mut container = item_in_container(pack, player, "Pack");
+        container
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 120);
+        world.entities.insert(pack, container);
+        assert_eq!(world.player_encumbrance(), None);
+
+        let mut item = item_in_container(child, pack, "Nested item");
+        item.properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 100);
+        world.entities.insert(child, item);
+        assert_eq!(world.player_encumbrance(), Some(120.0));
+    }
+
+    #[test]
+    fn inventory_burden_counts_an_item_when_its_parent_is_outside_the_inventory_view() {
+        let player = Guid(1);
+        let foreign_parent = Guid(2);
+        let item = Guid(3);
+        let mut world = TestWorld {
+            player_guid: Some(player),
+            inventory: HashSet::from([item]),
+            ..Default::default()
+        };
+        // WorldContext also supports frontend read models whose inventory view is partial.
+        let mut entity = item_in_container(item, foreign_parent, "Item");
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 100);
+        world.entities.insert(item, entity);
+        assert_eq!(world.player_encumbrance(), Some(100.0));
     }
 
     #[test]

@@ -131,7 +131,7 @@ fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
         sequence: CharacterMotionSequence(2),
         event: CharacterMotionEvent::BeginJump { drive },
     });
-    movement.process_control_commands(Instant::now(), &mut world);
+    movement.process_control_commands(Instant::now(), &mut world, false);
     assert!(matches!(
         movement.active_movement,
         Some(ActiveMovement::Manual)
@@ -142,7 +142,7 @@ fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
         sequence: CharacterMotionSequence(1),
         event: CharacterMotionEvent::Reset,
     });
-    movement.process_control_commands(Instant::now(), &mut world);
+    movement.process_control_commands(Instant::now(), &mut world, false);
     assert!(matches!(
         movement.active_movement,
         Some(ActiveMovement::Manual)
@@ -153,7 +153,7 @@ fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
         sequence: CharacterMotionSequence(3),
         event: CharacterMotionEvent::Reset,
     });
-    movement.process_control_commands(Instant::now(), &mut world);
+    movement.process_control_commands(Instant::now(), &mut world, false);
     assert!(movement.active_movement.is_none());
     movement.take_character_motion_feedback();
 
@@ -161,7 +161,7 @@ fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
         sequence: CharacterMotionSequence(2),
         event: CharacterMotionEvent::BeginJump { drive },
     });
-    movement.process_control_commands(Instant::now(), &mut world);
+    movement.process_control_commands(Instant::now(), &mut world, false);
     assert!(movement.active_movement.is_none());
     assert!(movement.take_character_motion_feedback().is_empty());
 }
@@ -1430,7 +1430,7 @@ fn admitted_server_control_supersedes_queued_manual_work() {
         PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         now,
     );
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.has_active_manual_drive());
 }
 
@@ -2085,7 +2085,7 @@ fn reset_and_drive_preserve_admission_order() {
         } else {
             [drive, reset]
         });
-        movement.process_control_commands(now, &mut world);
+        movement.process_control_commands(now, &mut world, false);
         assert_eq!(movement.has_active_manual_drive(), reset_first);
         assert_eq!(
             movement.character_motion.effective_drive().is_stationary(),
@@ -2112,7 +2112,7 @@ fn jump_and_stop_preserve_admission_order() {
         } else {
             [jump, stop]
         });
-        movement.process_control_commands(now, &mut world);
+        movement.process_control_commands(now, &mut world, false);
         assert_eq!(movement.has_active_manual_drive(), stop_first);
         assert_eq!(
             movement.character_motion.is_standing_long_jump(),
@@ -2222,7 +2222,7 @@ fn passive_input_preserves_server_approach() {
         sequence: CharacterMotionSequence(1),
         event: CharacterMotionEvent::Reset,
     });
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.has_server_controlled_motion());
     assert!(!movement.movement_publication_required);
     assert!(!movement.pending_manual_playback_stop);
@@ -2237,11 +2237,11 @@ fn manual_release_retires_only_the_manual_owner() {
         PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         now,
     );
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.has_active_manual_drive());
 
     movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now);
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.active_movement.is_none());
     assert!(movement.pending_manual_playback_stop);
 
@@ -2251,7 +2251,7 @@ fn manual_release_retires_only_the_manual_owner() {
         &mut world,
     );
     movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now);
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.has_server_controlled_motion());
 }
 
@@ -2358,7 +2358,7 @@ fn client_directed_updates_do_not_clear_existing_locomotion() {
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(drive)),
         now,
     );
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     let order = movement
         .client_directed_locomotion_order(&world)
         .unwrap()
@@ -2382,14 +2382,14 @@ fn client_directed_updates_do_not_clear_existing_locomotion() {
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
         now,
     );
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(world.has_manual_locomotion(guid));
 
     movement.enqueue_drive_intent(
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::AcquireFacing { heading: 1.0 }),
         now,
     );
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(!world.has_manual_locomotion(guid));
 }
 
@@ -2495,7 +2495,7 @@ fn stop_preserves_jump_sequence_history_until_epoch_retirement() {
     movement.enqueue_character_motion_event(begin);
     movement.enqueue_drive_intent(PlayerDriveIntent::Stop, now);
     movement.enqueue_character_motion_event(begin);
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.active_movement.is_none());
     assert!(!movement.character_motion.is_charging());
     assert_eq!(movement.take_character_motion_feedback().len(), 1);
@@ -2504,10 +2504,10 @@ fn stop_preserves_jump_sequence_history_until_epoch_retirement() {
         now,
     );
     movement.retire_movement_epoch();
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.active_movement.is_none());
     movement.enqueue_character_motion_event(begin);
-    movement.process_control_commands(now, &mut world);
+    movement.process_control_commands(now, &mut world, false);
     assert!(movement.character_motion.is_charging());
 }
 

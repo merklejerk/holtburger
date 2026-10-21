@@ -1,0 +1,189 @@
+{
+  "purpose": "Incomplete live stress qualification; retain failed attack activation and observed admission shortfall",
+  "metadata": {
+    "started_at": "2026-10-21T13:41:17.802150+00:00",
+    "source_commit": "b3edc9c96475eeb6fd6d2c59b09dc8d5cf759b91",
+    "binary_sha256": "cc040bda92dba7319db93d49b8a971ffee827e289a31102a30dbf28720ecbe1d",
+    "content_sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7",
+    "content_bytes": 634425693,
+    "host": "127.0.0.1",
+    "port": 9000,
+    "nominal_seconds": 65,
+    "settlement_seconds": 5,
+    "rust_log": "warn,holtburger_core::client::runtime_profile=debug,holtburger_world::spatial::contact_profile=debug",
+    "credential_source": "Development environment; values omitted",
+    "purpose": "Live controls, accepted paths, combat-owner states and existing admission/solver census profiles; workload qualification required"
+  },
+  "summary": {
+    "runner": {
+      "phase": "failed",
+      "exit_code": 1,
+      "completed_at": "2026-10-21T13:42:34.960858+00:00"
+    },
+    "finished": {
+      "event": "finished",
+      "elapsed_seconds": 65.000463467,
+      "engagement_requests": 14,
+      "player_advances": 2030,
+      "combat_active_observed": false
+    },
+    "simulation_rows_after_boundary_exclusion": 2029,
+    "elapsed_ms": 64932.443,
+    "admitted_ms": 60580.184,
+    "admission_ratio": 0.9329725049772115,
+    "contact_ticks": 2031,
+    "census": {
+      "bodies": {
+        "mean": 115.75824716888232,
+        "maximum": 128.0
+      },
+      "movers": {
+        "mean": 99.1590349581487,
+        "maximum": 103.0
+      },
+      "projectiles": {
+        "mean": 15.293943870014772,
+        "maximum": 27.0
+      }
+    },
+    "requested": {
+      "forward": 7,
+      "backstep": 7,
+      "release_manual": 7,
+      "engage": 14,
+      "stop": 1
+    },
+    "error_lines": [
+      "Error: stress attack owner never entered its active state"
+    ],
+    "accepted_path_observations": {
+      "counts_by_disposition": {
+        "integrated": 2030
+      },
+      "geometric_length_m_by_disposition": {
+        "integrated": 20.775340736412577
+      },
+      "contact_observation_counts": {
+        "grounded": 2030
+      },
+      "observed_cell_ids": [
+        "0x4ae10032"
+      ],
+      "limitations": "Geometric length includes contact/support adjustments; not requested locomotion distance. Projection paths do not label every physical correction segment."
+    },
+    "cadence_target_met": false,
+    "combat_workload_qualified": false,
+    "original_fight_representativeness": "Not established; mean movers about 99 versus original heavier live capture about 153, and local attack activation failed."
+  },
+  "source_hashes": {
+    "events.jsonl": "4f7f46c9fd63428dc44f276b4d540118449d63396e031a2f8415b4cf2680166a",
+    "profile.log": "dc442c371da263fd62f0c5014ccad04570477e4d67c7630122b51565954232dd",
+    "run.py": "0320ece959f602f466e5380db6b8a8f5e01cbfc272f2ec50fd357cc33e294f88"
+  },
+  "phase_attribution": {
+    "method": "All profile records between stderr window markers; phase means overlap and cannot be summed as independent savings. Admission separately excludes first simulation row.",
+    "scopes": {
+      "physics_tick": {
+        "records": 2030,
+        "mean_ms_fields": {
+          "total_ms": 26.46754384236453,
+          "interval_ms": 32.00128669950739,
+          "queued_commands_ms": 0.002676847290640394,
+          "movement_and_equipment_ms": 0.43337635467980296,
+          "world_tick_ms": 2.0297428571428573,
+          "collision_content_ms": 0.5841995073891626,
+          "activation_and_equipment_ms": 0.00634384236453202,
+          "before_entity_projection_ms": 1.3092492610837438,
+          "simulation_ms": 19.029200492610837,
+          "simulation_events_and_combat_ms": 0.2166216748768473,
+          "entity_facts_and_supply_ms": 1.1548364532019704,
+          "after_entity_projection_and_diff_ms": 1.6907192118226602,
+          "camera_ms": 0.0032901477832512314,
+          "event_enqueue_ms": 0.006577339901477832,
+          "finalization_ms": 0.0010098522167487686
+        }
+      },
+      "simulation": {
+        "records": 2030,
+        "mean_ms_fields": {
+          "total_ms": 18.97679852216749,
+          "elapsed_ms": 32.00128669950739,
+          "admitted_ms": 29.857316748768472,
+          "authored_motion_ms": 1.4170433497536945,
+          "authored_collision_poses_ms": 0.1721960591133005,
+          "jump_preparation_ms": 0.0016852216748768473,
+          "physical_contacts_ms": 16.980477832512314,
+          "pose_only_projection_ms": 0.40375615763546796,
+          "finalization_ms": 0.0015995073891625616
+        }
+      },
+      "contact_integration": {
+        "records": 2031,
+        "mean_ms_fields": {
+          "total_ms": 12.900715411127523,
+          "body_preparation_ms": 0.1433259478089611,
+          "hard_target_index_ms": 0.0741698670605613,
+          "support_and_hard_movement_ms": 2.6120315115706547,
+          "crowd_admission_ms": 0.08145839487936977,
+          "mobile_movement_sweeps_ms": 7.433115706548498,
+          "crowd_candidates_ms": 0.06093353028064993,
+          "crowd_response_ms": 0.1122767109798129,
+          "correction_sweeps_ms": 1.3192511078286557,
+          "support_confirmation_ms": 0.5260915805022157,
+          "projectiles_and_results_ms": 0.536107336287543,
+          "finalization_ms": 0.0020901033973412114
+        }
+      },
+      "network_batch": {
+        "records": 1417,
+        "mean_ms_fields": {
+          "total_ms": 7.054955539872971,
+          "dispatch_ms": 7.052006351446718,
+          "finalization_ms": 0.0029527170077628794
+        }
+      }
+    }
+  },
+  "first_request_retirements": [
+    {
+      "cycle": 0,
+      "first_request_at_seconds": 2.000661715,
+      "retired_after_seconds": 0.015121708999999761
+    },
+    {
+      "cycle": 1,
+      "first_request_at_seconds": 12.001323002,
+      "retired_after_seconds": 0.0013044050000008411
+    },
+    {
+      "cycle": 2,
+      "first_request_at_seconds": 22.00075136,
+      "retired_after_seconds": 0.014932177000002156
+    },
+    {
+      "cycle": 3,
+      "first_request_at_seconds": 32.001403619,
+      "retired_after_seconds": 0.003604472999995778
+    },
+    {
+      "cycle": 4,
+      "first_request_at_seconds": 42.000693339,
+      "retired_after_seconds": 0.03236195499999894
+    },
+    {
+      "cycle": 5,
+      "first_request_at_seconds": 52.000906019,
+      "retired_after_seconds": 0.03012251599999871
+    },
+    {
+      "cycle": 6,
+      "first_request_at_seconds": 62.001030366,
+      "retired_after_seconds": 0.017941928999995582
+    }
+  ],
+  "source_attribution_correction": {
+    "qualified_as_optimized_candidate": false,
+    "reason": "Saved executable lacks retained metadata reuse and entity-mutation journal symbols. Harness source is b3 but linked core source claim is unqualified after cross-checkout shared-target build reuse.",
+    "consequence": "Retain observed admission and combat failure as artifact facts; do not attribute them to the current optimized core or use them as its cadence result."
+  }
+}

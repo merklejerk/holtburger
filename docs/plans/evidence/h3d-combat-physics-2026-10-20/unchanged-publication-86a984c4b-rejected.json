@@ -1,0 +1,287 @@
+{
+  "decision": "Reject and revert unchanged semantic collection shortcut: higher combined work in both pair orders does not justify added golden-path branching.",
+  "metadata": {
+    "purpose": "Two alternating marginal pairs on frozen replay; not original-baseline performance acceptance",
+    "started_at": "2026-10-21T14:31:42.644358+00:00",
+    "baseline_source": "02bdbe098",
+    "candidate_source": "86a984c4bf020067dcec26a9ecab24191e6c4349",
+    "binary_sha256": {
+      "baseline": "621ec3b106e94bcb9dfee6aa9f1c96af7f066b751f075713465ee70d8b7746e1",
+      "candidate": "46c45262227cdf5cf674919253d2e6bdc21c3f7701b7d339fdb8ebbd974cb13f"
+    },
+    "candidate_patch_sha256": "6757bd6e69a0acd379df8e429bd3467ca96cfecddd7b8ead777dcf2687be889f",
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "content_sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7",
+    "pairs": 2,
+    "warmups_per_invocation": 1,
+    "measurements_per_invocation": 1,
+    "rust_log": "warn",
+    "build_profile": "dev unoptimized + debuginfo, runtime-fixture feature",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo_lock_sha256": "ae547307541af655f17be08ae58e0a9c3219617963e0bd1df83472b2c6be48f6",
+    "original_acceptance_baseline_unchanged": "9cb7ba24e plus matched diagnostic tooling",
+    "activation_reference": [
+      {
+        "physics_tick": 1,
+        "active": false
+      },
+      {
+        "physics_tick": 14,
+        "active": true
+      }
+    ],
+    "runner_sha256": "da619746c1ca8dbfdb6676e7f9b5c2122c0d7f429743833af19ba7021aaae944"
+  },
+  "samples": [
+    {
+      "pair": 1,
+      "slot": 1,
+      "version": "baseline",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2274.887477999999,
+        "content_readiness_wait_ms": 1613.2504569999996,
+        "physics_work_ms": 25856.94225099999,
+        "maximum_physics_work_ms": 32.661328000000005,
+        "active_physics_work_p95_ms": 19.791626,
+        "maximum_input_lateness_ms": 1212.140979,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28131.82972899999,
+      "validation_issues": []
+    },
+    {
+      "pair": 1,
+      "slot": 2,
+      "version": "candidate",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2262.988674000002,
+        "content_readiness_wait_ms": 1610.4933230000013,
+        "physics_work_ms": 26078.18424300001,
+        "maximum_physics_work_ms": 25.038931,
+        "active_physics_work_p95_ms": 19.519275,
+        "maximum_input_lateness_ms": 1224.280921,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28341.17291700001,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 1,
+      "version": "candidate",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2263.2508399999924,
+        "content_readiness_wait_ms": 1619.686193,
+        "physics_work_ms": 26349.455339999997,
+        "maximum_physics_work_ms": 26.566399,
+        "active_physics_work_p95_ms": 19.703655,
+        "maximum_input_lateness_ms": 1221.223418,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28612.70617999999,
+      "validation_issues": []
+    },
+    {
+      "pair": 2,
+      "slot": 2,
+      "version": "baseline",
+      "report": {
+        "messages": 5741,
+        "physics_ticks": 1519,
+        "active_ticks": 1506,
+        "activation_boundaries": [
+          {
+            "physics_tick": 1,
+            "active": false
+          },
+          {
+            "physics_tick": 14,
+            "active": true
+          }
+        ],
+        "population_mismatches": 0,
+        "peak_entities": 286,
+        "message_work_ms": 2331.5050849999993,
+        "content_readiness_wait_ms": 1618.9806600000006,
+        "physics_work_ms": 26233.74556099998,
+        "maximum_physics_work_ms": 24.317528000000003,
+        "active_physics_work_p95_ms": 19.973337,
+        "maximum_input_lateness_ms": 1220.511407,
+        "final_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45807,
+            "y": 31.826939,
+            "z": 63.733658
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        },
+        "final_runtime_player_position": {
+          "landblockId": 1256259642,
+          "coords": {
+            "x": 185.45726,
+            "y": 31.826363,
+            "z": 63.733505
+          },
+          "rotation": {
+            "w": 0.9753553,
+            "x": 0.0,
+            "y": 0.0,
+            "z": -0.22064058
+          }
+        }
+      },
+      "combined_work_ms": 28565.250645999982,
+      "validation_issues": []
+    }
+  ],
+  "runner_summary": {
+    "baseline_median_ms": 28348.540187499988,
+    "candidate_median_ms": 28476.9395485,
+    "median_work_reduction": -0.004529311214996001,
+    "pair_work_reductions": [
+      -0.0074415062943529175,
+      -0.0016613029091923082
+    ],
+    "workload_and_content_valid": true,
+    "acceptance_comparison": false,
+    "completed_at": "2026-10-21T14:38:24.668216+00:00"
+  },
+  "independent_audit": {
+    "baseline_median_ms": 28348.540187499988,
+    "candidate_median_ms": 28476.9395485,
+    "median_work_reduction": -0.004529311214996001
+  },
+  "acceptance_comparison": false
+}

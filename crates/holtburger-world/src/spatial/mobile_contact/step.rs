@@ -23,6 +23,7 @@ use std::borrow::Cow;
 
 use super::*;
 use crate::spatial::collision::PreparedHardSphereSweep;
+use crate::spatial::contact_profile::ContactPhaseProfile;
 use crate::spatial::{
     CollisionQueryError, CollisionScene, GroundState, GroundedLaunch, GroundedSphere,
     HardEntityShape, HardSphereSweepHit, PlacedMotionPath, StaticSphereSweepRequest,
@@ -788,6 +789,7 @@ fn advance_contacts(
     mut actuation_for: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
     frozen: Option<&HardTargets>,
 ) -> Result<Vec<ContactBodyUpdate>> {
+    let mut profile = ContactPhaseProfile::begin("contact_integration");
     ensure!(
         delta_seconds.is_finite()
             && delta_seconds > 0.0
@@ -861,6 +863,7 @@ fn advance_contacts(
             }
         }
     }
+    profile.checkpoint("body_preparation");
     // Advance nonyielding bodies first, then expose their accepted authored target pose to characters.
     moving.sort_unstable_by_key(|body| {
         (
@@ -872,6 +875,9 @@ fn advance_contacts(
         Some(hard) => Cow::Borrowed(hard),
         None => Cow::Owned(HardTargets::new(hard)?),
     };
+    profile.checkpoint("hard_target_index");
+    let moving_count = moving.len();
+    let projectile_count = projectiles.len();
     // Prepare all hard targets before any body validates support or consumes its input.
     for body in &mut moving {
         if let Some(grounded) = body.grounded {
@@ -918,9 +924,11 @@ fn advance_contacts(
             })?;
         }
     }
+    profile.checkpoint("support_and_hard_movement");
     // All yielding intent is sampled before mobile admission. Hard authored targets above
     // already expose their accepted poses; no neighbor can cause another input sample.
     admission::admit_character_movement(&mut moving, delta_seconds);
+    profile.checkpoint("crowd_admission");
     for body in &mut moving {
         if body.mobile.response_mobility.is_some()
             && body.integrate_ordinary
@@ -929,6 +937,7 @@ fn advance_contacts(
             advance_ordinary_motion(collision, &hard, anchor, body, delta_seconds)?;
         }
     }
+    profile.checkpoint("mobile_movement_sweeps");
     let mut tentative = moving.iter().map(|body| body.mobile).collect::<Vec<_>>();
     let mut remaining = moving
         .iter()
@@ -939,6 +948,7 @@ fn advance_contacts(
     // Later positions plus remaining travel therefore stay inside these initial envelopes.
     // Keep pair order stable while rechecking actual overlap on every pass.
     let pairs = candidate_pairs(&tentative, &remaining);
+    profile.checkpoint("crowd_candidates");
     for _ in 0..MOBILE_CONTACT_PASSES {
         corrections.fill(Vector3::zero());
         for &(first, second) in &pairs {
@@ -965,6 +975,7 @@ fn advance_contacts(
             *remaining = (*remaining - displacement.length()).max(0.0);
         }
     }
+    profile.checkpoint("crowd_response");
     // Hard geometry has the final say. Tentative yielding may be clipped or rejected;
     // residual mobile overlap is accepted until a later tick, without a feedback solve.
     for (body, tentative) in moving.iter_mut().zip(tentative) {
@@ -982,6 +993,7 @@ fn advance_contacts(
                 body.observed_travel.supported + Vector3::new(accepted.x, accepted.y, 0.0);
         }
     }
+    profile.checkpoint("correction_sweeps");
     for body in &mut moving {
         if body.unavailable_owner.is_none() && matches!(body.ground(), GroundState::Airborne) {
             refresh_support(collision, &hard, anchor, body, SupportRefresh::Confirm)?;
@@ -989,6 +1001,7 @@ fn advance_contacts(
         // Crowd velocity can change even when its combined correction is zero.
         body.constrain_supported_velocity();
     }
+    profile.checkpoint("support_confirmation");
     let mut updates = Vec::new();
     let mut projectile_targets = hard;
     for body in moving {
@@ -1019,6 +1032,15 @@ fn advance_contacts(
         }
     }
     updates.sort_unstable_by_key(|update| update.body_id);
+    profile.checkpoint("projectiles_and_results");
+    profile.finish(format_args!(
+        "bodies={} movers={} projectiles={} candidate_pairs={} updates={}",
+        bodies.len(),
+        moving_count,
+        projectile_count,
+        pairs.len(),
+        updates.len(),
+    ));
     Ok(updates)
 }
 

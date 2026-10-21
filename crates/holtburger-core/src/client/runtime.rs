@@ -1,3 +1,4 @@
+use super::runtime_profile::RuntimePhaseProfile;
 use super::*;
 use anyhow::Result;
 use futures::FutureExt;
@@ -109,6 +110,12 @@ impl ClientRuntime {
     }
 
     pub(super) fn sync_server_time(&mut self, server_time: f64, local_time: Instant) {
+        #[cfg(feature = "runtime-fixture")]
+        if let Some(capture) = &mut self.runtime_fixture {
+            capture.record(super::runtime_fixture::RuntimeFixtureInput::TimeSync(
+                server_time,
+            ));
+        }
         let world_events = self.world.set_server_time_sync(server_time, local_time);
         for event in world_events {
             self.handle_world_event(&event);
@@ -253,7 +260,10 @@ impl ClientRuntime {
                     self.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
+                    let mut profile = RuntimePhaseProfile::begin("network_batch");
                     self.process_network_batch(res).await?;
+                    profile.checkpoint("dispatch");
+                    profile.finish(format_args!(""));
                 }
                 Some(cmd) = async {
                     if let Some(rx) = &mut self.command_rx {
@@ -262,12 +272,16 @@ impl ClientRuntime {
                         None
                     }
                 } => {
+                    let mut profile = RuntimePhaseProfile::begin("command_batch");
                     self.process_command_batch(Some(cmd)).await?;
+                    profile.checkpoint("dispatch");
+                    profile.finish(format_args!(""));
                 }
                 _ = precise_jump_notification.notified() => {
                     self.publish_precise_jump_progress();
                 }
                 _ = physics_tick.tick() => {
+                    let mut profile = RuntimePhaseProfile::begin("physics_tick");
                     // A ready physics deadline must not bypass all queued input. Preserve command
                     // order, but leave a backlog for later turns rather than starving simulation.
                     self.process_command_batch(None).await?;
@@ -277,182 +291,22 @@ impl ClientRuntime {
                     let now = Instant::now();
                     let dt_duration = now.duration_since(last_physics_time);
                     last_physics_time = now;
+                    profile.checkpoint("queued_commands");
 
-                    self.advance_equipment_change(now).await?;
-                    self.advance_equipment_set(now).await?;
-                    self.advance_pack_exchange(now).await?;
-                    let active_world = self.activation.is_none()
-                        && matches!(self.state, ClientState::InWorld);
-                    if active_world {
-                        self.advance_dynamic_scale(self.dynamic_scale_time())?;
-                        self.poll_selection_envelopes();
-                    }
-                    if active_world {
-                        self.prepare_combat_movement(now, dt_duration);
-                        let movement_events = self
-                            .movement
-                            .tick(now, &mut self.world, &mut self.session)
-                            .await
-                            .inspect_err(|_| {
-                                self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                            })?;
-                        for event in movement_events {
-                            self.handle_runtime_world_event(&event);
-                        }
-                        for error in self.movement.take_authored_motion_rejections() {
-                            self.emit_action_result(super::types::ActionResultSource::Client, super::types::ActionResultReason::Weenie(error, None));
-                        }
-                        for feedback in self.movement.take_character_motion_feedback() {
-                            if matches!(
-                                feedback.outcome,
-                                ClientCharacterMotionOutcome::ChargeAccepted
-                            ) {
-                                self.interrupt_combat_for_player_movement(now);
-                            }
-                            let _ = self
-                                .client_view_event_tx
-                                .send(ClientViewEvent::CharacterMotionFeedback(feedback));
-                        }
-                    }
-
-                    let physics_events = self.world.tick();
-                    for event in physics_events {
-                        self.handle_runtime_world_event(&event);
-                    }
-
-                    if let Some(coordinator) = self.collision_coordinator.as_mut() {
-                        let mut collision_events = coordinator.observe(&mut self.world);
-                        collision_events.extend(coordinator.poll(&mut self.world, now));
-                        for event in collision_events {
-                            self.handle_runtime_world_event(&event);
-                        }
-                    }
-
-                    self.publish_precise_jump_progress();
-
-                    self.try_complete_world_activation().await?;
-
-                    self.advance_equipment_change(now).await?;
-                    self.advance_equipment_set(now).await?;
-                    self.advance_pack_exchange(now).await?;
-                    let active_world = self.activation.is_none()
-                        && matches!(self.state, ClientState::InWorld);
-                    let before_dynamic = if active_world {
-                        self.current_dynamic_entity_views()
-                    } else {
-                        Default::default()
-                    };
-                    let collision_snapshot = self
-                        .collision_coordinator
-                        .as_ref()
-                        .map(super::collision::ClientCollisionCoordinator::snapshot);
-                    let mut body_motions = std::collections::HashMap::new();
-                    if active_world {
-                        let prepared_precise_jump = match self.precise_jump.prepare_queued_commit(
-                            self.world_generation,
-                            self.camera.identity(),
-                        ) {
-                            Some(Ok(prepared)) => Some(prepared),
-                            Some(Err(feedback)) => {
-                                let _ = self.client_view_event_tx.send(
-                                    ClientViewEvent::PreciseJumpTransactionFeedback(feedback),
-                                );
-                                None
-                            }
-                            None => None,
-                        };
-                        let simulation_tick = super::simulation::tick_with_precise_jump(
-                            now,
-                            dt_duration,
-                            &mut self.world,
-                            &mut self.movement,
-                            collision_snapshot.as_deref(),
-                            prepared_precise_jump,
-                        ).inspect_err(|_| {
-                            self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                        })?;
-                        body_motions = simulation_tick.body_motions;
-                        let mut advanced_runtime_bodies = Vec::new();
-                        for event in simulation_tick.events {
-                            if let WorldEvent::RuntimeBodyAdvanced { body_id, .. } = event
-                                && let Some(body) = self.world.runtime_body_view(body_id)
-                            {
-                                advanced_runtime_bodies.push(body);
-                            }
-                            self.handle_runtime_world_event(&event);
-                        }
-                        advanced_runtime_bodies.sort_by_key(|body| body.body_id);
-                        if !advanced_runtime_bodies.is_empty() {
-                            let _ = self.client_view_event_tx.send(
-                                ClientViewEvent::RuntimeBodiesAdvanced {
-                                    bodies: advanced_runtime_bodies.into(),
-                                },
-                            );
-                        }
-                        if let Some(jump) = simulation_tick.committed_jump {
-                            self.interrupt_combat_for_player_movement(now);
-                            self.session
-                                .send_action(GameAction::Jump(Box::new(JumpActionData {
-                                extent: jump.resolved.extent().get(),
-                                velocity: jump.resolved.local_velocity(),
-                                position: jump.position,
-                                instance_sequence: jump.instance_sequence,
-                                server_control_sequence: jump.server_control_sequence,
-                                teleport_sequence: jump.teleport_sequence,
-                                force_position_sequence: jump.force_position_sequence,
-                                })))
-                                .await?;
-                        }
-                        // Jump publishes its release origin/velocity, not the accepted contact
-                        // after this step. Keep the departure report in the routine decision.
-                        self.movement
-                            .publish_position_after_simulation(now, &self.world, &mut self.session)
-                            .await?;
-                        self.advance_combat_engagement(now).await?;
-                        if let Some(feedback) = simulation_tick.character_motion_feedback {
-                            let _ = self
-                                .client_view_event_tx
-                                .send(ClientViewEvent::CharacterMotionFeedback(feedback));
-                        }
-                        if let Some(feedback) = simulation_tick.precise_jump_feedback {
-                            let _ = self.client_view_event_tx.send(
-                                ClientViewEvent::PreciseJumpTransactionFeedback(feedback),
-                            );
-                        }
-                    }
-
-                    self.publish_entity_facts();
-                    if active_world {
-                        self.hydrate_projectile_supply().await?;
-                    }
-                    self.publish_character_motion_capabilities_if_changed();
-
-                    let dynamic_batch = if !before_dynamic.is_empty() {
-                        self.dynamic_entity_tick_batch(
-                            before_dynamic,
-                            self.current_dynamic_entity_views(),
-                            self.dynamic_entity_host_time(),
-                            dt_duration.as_secs_f64() * 1_000.0,
-                            &body_motions,
-                        )?
-                    } else {
-                        None
-                    };
-                    let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
-                        camera::ClientCameraSceneInput::capture(
-                            &self.world, collision_snapshot.as_deref(), dynamic_batch.as_ref(),
-                        )
-                    });
-                    let camera = match camera_input {
-                        Some(input) => self.camera.advance_world(&input, dt_duration)?,
-                        None => None,
-                    };
-                    if dynamic_batch.is_some() || camera.is_some() {
-                        let _ = self.client_view_event_tx.send(ClientViewEvent::PresentationTick {
-                            dynamic: dynamic_batch,
-                            camera,
+                    #[cfg(feature = "runtime-fixture")]
+                    if let Some(capture) = &mut self.runtime_fixture {
+                        capture.record(super::runtime_fixture::RuntimeFixtureInput::Physics {
+                            elapsed: dt_duration,
+                            entities: self.world.entities.len(),
                         });
                     }
+                    self.advance_physics_tick(
+                        now,
+                        dt_duration,
+                        profile,
+                        #[cfg(feature = "runtime-fixture")]
+                        None,
+                    ).await?;
                 }
             }
             // Socket/channel/timer awaits can all be immediately ready. End the executor turn
@@ -460,6 +314,224 @@ impl ClientRuntime {
             tokio::task::yield_now().await;
         }
 
+        Ok(())
+    }
+
+    /// Executes the same authority update for live scheduling and diagnostic input replay.
+    pub(super) async fn advance_physics_tick(
+        &mut self,
+        now: Instant,
+        dt_duration: Duration,
+        mut profile: RuntimePhaseProfile,
+        #[cfg(feature = "runtime-fixture")] fixture_content_wait: Option<&mut Duration>,
+    ) -> Result<()> {
+        self.advance_equipment_change(now).await?;
+        self.advance_equipment_set(now).await?;
+        self.advance_pack_exchange(now).await?;
+        let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
+        if active_world {
+            self.advance_dynamic_scale(self.dynamic_scale_time())?;
+            self.poll_selection_envelopes();
+        }
+        if active_world {
+            let prepared_movement = self.movement.prepare_tick(now, &mut self.world);
+            self.prepare_combat_movement(now, dt_duration);
+            let movement_events = self
+                .movement
+                .advance_tick(prepared_movement, now, &mut self.world, &mut self.session)
+                .await
+                .inspect_err(|_| {
+                    self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                })?;
+            for event in movement_events {
+                self.handle_runtime_world_event(&event);
+            }
+            for error in self.movement.take_authored_motion_rejections() {
+                self.emit_action_result(
+                    super::types::ActionResultSource::Client,
+                    super::types::ActionResultReason::Weenie(error, None),
+                );
+            }
+            for feedback in self.movement.take_character_motion_feedback() {
+                if matches!(
+                    feedback.outcome,
+                    ClientCharacterMotionOutcome::ChargeAccepted
+                ) {
+                    self.interrupt_combat_for_player_movement(now);
+                }
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterMotionFeedback(feedback));
+            }
+        }
+
+        profile.checkpoint("movement_and_equipment");
+        let physics_events = self.world.tick();
+        for event in physics_events {
+            self.handle_runtime_world_event(&event);
+        }
+
+        profile.checkpoint("world_tick");
+        if let Some(coordinator) = self.collision_coordinator.as_mut() {
+            let mut collision_events = coordinator.observe(&mut self.world);
+            #[cfg(feature = "runtime-fixture")]
+            let completions = match fixture_content_wait {
+                Some(waited) => {
+                    coordinator
+                        .poll_fixture_content(&mut self.world, now, waited)
+                        .await?
+                }
+                None => coordinator.poll(&mut self.world, now),
+            };
+            #[cfg(not(feature = "runtime-fixture"))]
+            let completions = coordinator.poll(&mut self.world, now);
+            collision_events.extend(completions);
+            for event in collision_events {
+                self.handle_runtime_world_event(&event);
+            }
+        }
+
+        profile.checkpoint("collision_content");
+        self.publish_precise_jump_progress();
+
+        self.try_complete_world_activation().await?;
+
+        self.advance_equipment_change(now).await?;
+        self.advance_equipment_set(now).await?;
+        self.advance_pack_exchange(now).await?;
+        let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
+        profile.checkpoint("activation_and_equipment");
+        let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_baseline());
+        let collision_snapshot = self
+            .collision_coordinator
+            .as_ref()
+            .map(super::collision::ClientCollisionCoordinator::snapshot);
+        let mut body_motions = std::collections::HashMap::new();
+        profile.checkpoint("before_entity_projection");
+        if active_world {
+            let prepared_precise_jump = match self
+                .precise_jump
+                .prepare_queued_commit(self.world_generation, self.camera.identity())
+            {
+                Some(Ok(prepared)) => Some(prepared),
+                Some(Err(feedback)) => {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PreciseJumpTransactionFeedback(feedback));
+                    None
+                }
+                None => None,
+            };
+            let simulation_tick = super::simulation::tick_with_precise_jump(
+                now,
+                dt_duration,
+                &mut self.world,
+                &mut self.movement,
+                collision_snapshot.as_deref(),
+                prepared_precise_jump,
+            )
+            .inspect_err(|_| {
+                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+            })?;
+            profile.checkpoint("simulation");
+            body_motions = simulation_tick.body_motions;
+            let mut advanced_runtime_bodies = Vec::new();
+            for event in simulation_tick.events {
+                if let WorldEvent::RuntimeBodyAdvanced { body_id, .. } = event
+                    && let Some(body) = self.world.runtime_body_view(body_id)
+                {
+                    advanced_runtime_bodies.push(body);
+                }
+                self.handle_runtime_world_event(&event);
+            }
+            advanced_runtime_bodies.sort_by_key(|body| body.body_id);
+            if !advanced_runtime_bodies.is_empty() {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::RuntimeBodiesAdvanced {
+                        bodies: advanced_runtime_bodies.into(),
+                    });
+            }
+            if let Some(jump) = simulation_tick.committed_jump {
+                self.interrupt_combat_for_player_movement(now);
+                self.session
+                    .send_action(GameAction::Jump(Box::new(JumpActionData {
+                        extent: jump.resolved.extent().get(),
+                        velocity: jump.resolved.local_velocity(),
+                        position: jump.position,
+                        instance_sequence: jump.instance_sequence,
+                        server_control_sequence: jump.server_control_sequence,
+                        teleport_sequence: jump.teleport_sequence,
+                        force_position_sequence: jump.force_position_sequence,
+                    })))
+                    .await?;
+            }
+            // Jump publishes its release origin/velocity, not the accepted contact
+            // after this step. Keep the departure report in the routine decision.
+            self.movement
+                .publish_position_after_simulation(now, &self.world, &mut self.session)
+                .await?;
+            self.advance_combat_engagement(now).await?;
+            if let Some(feedback) = simulation_tick.character_motion_feedback {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterMotionFeedback(feedback));
+            }
+            if let Some(feedback) = simulation_tick.precise_jump_feedback {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PreciseJumpTransactionFeedback(feedback));
+            }
+        }
+
+        profile.checkpoint("simulation_events_and_combat");
+        self.publish_entity_facts();
+        if active_world {
+            self.hydrate_projectile_supply().await?;
+        }
+        self.publish_character_motion_capabilities_if_changed();
+
+        profile.checkpoint("entity_facts_and_supply");
+        let dynamic_batch = if let Some(before_dynamic) =
+            before_dynamic.filter(|before| !before.views.is_empty())
+        {
+            self.dynamic_entity_tick_batch(
+                before_dynamic,
+                || self.dynamic_entity_host_time(),
+                dt_duration.as_secs_f64() * 1_000.0,
+                &body_motions,
+            )?
+        } else {
+            None
+        };
+        profile.checkpoint("after_entity_projection_and_diff");
+        let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
+            camera::ClientCameraSceneInput::capture(
+                &self.world,
+                collision_snapshot.as_deref(),
+                dynamic_batch.as_ref(),
+            )
+        });
+        let camera = match camera_input {
+            Some(input) => self.camera.advance_world(&input, dt_duration)?,
+            None => None,
+        };
+        profile.checkpoint("camera");
+        if dynamic_batch.is_some() || camera.is_some() {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::PresentationTick {
+                    dynamic: dynamic_batch,
+                    camera,
+                });
+        }
+        profile.checkpoint("event_enqueue");
+        profile.finish(format_args!(
+            "interval_ms={:.3} entities={} advanced_bodies={}",
+            dt_duration.as_secs_f64() * 1_000.0,
+            self.world.entities.len(),
+            body_motions.len(),
+        ));
         Ok(())
     }
 }

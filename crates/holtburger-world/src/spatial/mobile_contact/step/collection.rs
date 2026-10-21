@@ -6,6 +6,7 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::{Guid, Vector3};
 
 use super::{ContactBodyUpdate, ContactMotionSegment, ContactStepActuation};
+use crate::spatial::contact_profile::ContactPhaseProfile;
 use crate::spatial::{
     CollisionReportContact, CollisionReportSource, CollisionReportTouch, CollisionScene,
     ContactState, DynamicBodyActivity, GroundState, HardSphereSweepHit,
@@ -70,6 +71,7 @@ fn advance_collection(
     mut actuation_for: impl FnMut(&SpatialBody, GroundState, f32) -> Result<ContactStepActuation>,
     observe_reports: bool,
 ) -> Result<ContactCollectionUpdate> {
+    let mut profile = ContactPhaseProfile::begin("contact_collection");
     ensure!(
         delta_seconds.is_finite() && delta_seconds > 0.0,
         "contact collection duration must be finite and positive"
@@ -78,6 +80,7 @@ fn advance_collection(
     let updates = advance_body_contacts(collision, bodies, anchor, admitted, |body, ground| {
         actuation_for(body, ground, admitted)
     })?;
+    profile.checkpoint("integration");
     let mut report_touches = BTreeSet::new();
     if observe_reports && !updates.is_empty() {
         let report_bodies = bodies
@@ -105,6 +108,14 @@ fn advance_collection(
             collect_hard_report_touches(&bodies_by_id, update, &mut report_touches)?;
         }
     }
+    profile.checkpoint("collision_reporting");
+    profile.finish(format_args!(
+        "bodies={} updates={} report_touches={} reporting={}",
+        bodies.len(),
+        updates.len(),
+        report_touches.len(),
+        observe_reports,
+    ));
     Ok(ContactCollectionUpdate {
         bodies: updates,
         report_touches: report_touches.into_iter().collect(),

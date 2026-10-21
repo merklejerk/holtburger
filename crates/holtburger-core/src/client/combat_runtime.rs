@@ -1367,6 +1367,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn melee_handoff_observes_manual_release_before_preparing_pursuit() {
+        let dt = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        let held =
+            || PlayerDriveIntent::ManualHeld(CharacterDrive::builder().walk().forward().build());
+        for (case, initial, commands, retain_melee) in [
+            ("held", held(), Vec::new(), false),
+            (
+                "released",
+                held(),
+                vec![PlayerDriveIntent::ReleaseManual],
+                true,
+            ),
+            (
+                "expired",
+                PlayerDriveIntent::ManualPulse {
+                    state: CharacterDrive::builder().walk().forward().build(),
+                    duration: dt,
+                },
+                Vec::new(),
+                true,
+            ),
+            (
+                "reacquired",
+                held(),
+                vec![PlayerDriveIntent::ReleaseManual, held()],
+                false,
+            ),
+        ] {
+            let mut client = client(0);
+            let now = Instant::now();
+            let pose = WorldPosition {
+                landblock_id: Guid(0x1234_0001),
+                ..WorldPosition::default()
+            };
+            client
+                .world
+                .seed_local_player_entity(Guid(1), "Player", pose);
+            let mut target = holtburger_world::entity::Entity::new(Guid(2), "Target".into(), pose);
+            target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            client.world.add_entity(target);
+            client
+                .handle_command(ClientCommand::DriveSelf(initial))
+                .await
+                .unwrap();
+            client
+                .movement
+                .tick(now, &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            assert!(client.movement.has_active_manual_drive());
+            for command in commands {
+                client
+                    .handle_command(ClientCommand::DriveSelf(command))
+                    .await
+                    .unwrap();
+            }
+            client
+                .handle_command(ClientCommand::BeginCombatEngagement {
+                    target: Guid(2),
+                    profile: ClientAttackProfile::Melee {
+                        height: AttackHeight::Medium,
+                        power: 0.5,
+                    },
+                })
+                .await
+                .unwrap();
+            client
+                .advance_physics_tick(
+                    now + dt,
+                    dt,
+                    super::super::runtime_profile::RuntimePhaseProfile::begin("physics_tick"),
+                    #[cfg(feature = "runtime-fixture")]
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                client
+                    .combat_engagement
+                    .status()
+                    .desired
+                    .map(|engagement| engagement.target),
+                retain_melee.then_some(Guid(2)),
+                "{case}",
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn manual_movement_interrupts_melee_but_preserves_missile_combat() {
         let mut client = client(0);
         let begin = || ClientCommand::BeginCombatEngagement {

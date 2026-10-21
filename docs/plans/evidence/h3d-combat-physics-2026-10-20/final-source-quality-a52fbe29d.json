@@ -1,0 +1,63 @@
+{
+  "source_commit": "a52fbe29d",
+  "game_manifest_source_unchanged_since_checkpoint": true,
+  "host_binary_sha256": "f5d591abce6320e2d1d3b7955b97785832452e7e65df74ea8a8d023150ff84cd",
+  "normal_development_profile": "normal dev host; workspace opt-level 0, Parry/Glam 3, inherited debug defaults; no runtime-fixture feature",
+  "checks": [
+    {
+      "command": "cargo test -p holtburger-world -p holtburger-core --lib --features holtburger-core/runtime-fixture --quiet",
+      "exit_code": 0,
+      "world_tests": 996,
+      "core_tests": 682
+    },
+    {
+      "command": "cargo clippy -p holtburger-world -p holtburger-core -p holtburger-debug-harness --all-targets --features holtburger-core/runtime-fixture,holtburger-debug-harness/runtime-fixture -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p holtburger-3d-host --quiet",
+      "exit_code": 0,
+      "host_tests": 375
+    },
+    {
+      "command": "cargo clippy -p holtburger-world -p holtburger-core -p holtburger-3d-host -p holtburger-cli --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build -p holtburger-3d-host",
+      "exit_code": 0
+    },
+    {
+      "command": "HOLTBURGER_HOST_BIN=target/debug/holtburger-3d-host npm run --prefix apps/holtburger-3d smoke:sidecar",
+      "exit_code": 0,
+      "covered_modes": [
+        "client",
+        "explorer"
+      ],
+      "checks": [
+        "mode admission/rejection",
+        "host status",
+        "clean shutdown"
+      ],
+      "content": "temporary empty repository; no game socket"
+    }
+  ],
+  "source_review": "BSP support iterator preserves plane admission, each vertex once, closing edge and nearest-feature tie order. No added retained cache, invalidation lifecycle or host contract. Rejected publication experiment is absent. Prior core/world ownership review retained.",
+  "limitations": [
+    "TUI compiled for lint only; never executed.",
+    "No visual acceptance performed.",
+    "Representative original heavy-fight coverage, live-cadence criterion under that workload, and user movement-feel acceptance remain open."
+  ],
+  "normal_host_authenticated_read_only_inspection": {
+    "completed": true,
+    "clean_shutdown": true,
+    "known_spells": 3659,
+    "known_targeted_offensive_war_spells": 304,
+    "startup": "Existing portal player snapshot, collision-backed camera path, world-reveal acknowledgement and in-world current state",
+    "private_artifacts": "caps/runtime-fixtures/2026-10-21-4ae1/live-host-caster-a52fbe29d-camera/inspect-*"
+  }
+}

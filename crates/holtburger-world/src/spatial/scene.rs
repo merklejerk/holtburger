@@ -1881,6 +1881,183 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn controlled_collection_drive_obstruction_and_reset_preserve_accepted_movement_boundaries() {
+        let mut collision = flat_collision_scene();
+        let origin = Instant::now();
+        let id = SpatialBodyId::LocalPlayer(Guid(0x5000_0044));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(90.0, 96.0, 0.005)),
+            origin,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        acquire_support(&mut scene, &collision, id, origin);
+        let velocity = Vector3::new(2.0, 0.0, 0.0);
+        let interval = Duration::from_secs_f32(CONTACT_INTERVAL);
+        let tolerance = GROUNDED_CONFIG.separation_epsilon;
+        let start = scene.body(id).unwrap().pose;
+        let mut steps = 12;
+        for step in 1..=steps {
+            scene.wake_dynamic_body(id);
+            let before = scene.body(id).unwrap().pose;
+            let collection = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    origin + interval * step,
+                    |_| {
+                        Ok(PhysicalBodyInput::autonomous(
+                            PhysicalBodyActuation::grounded_drive(velocity)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert!(collection.coverage_rejections.is_empty());
+            let [DynamicEntityBodyOutcome::Integrated(accepted)] = collection.outcomes.as_slice()
+            else {
+                panic!("one driven body must publish one integrated outcome")
+            };
+            let after = scene.body(id).unwrap().pose;
+            let requested = velocity * CONTACT_INTERVAL;
+            assert!((accepted.displacement - requested).length() < tolerance);
+            assert!((after.coords - before.coords - accepted.displacement).length() < tolerance);
+            assert!(
+                (accepted.path.final_point().center()
+                    - accepted.path.initial().center()
+                    - accepted.displacement)
+                    .length()
+                    < tolerance
+            );
+            assert_eq!(accepted.previous_contact, ContactState::Grounded);
+            assert_eq!(accepted.current_contact, ContactState::Grounded);
+            assert!(!accepted.launch_admitted);
+        }
+        let moved = scene.body(id).unwrap().pose;
+        assert!(
+            (moved.coords - start.coords - velocity * (CONTACT_INTERVAL * steps as f32)).length()
+                < tolerance
+        );
+
+        // The wall's plane and the definition's movement radius independently bound root travel.
+        // An accepted-path self comparison alone would miss a solver that moves through the wall.
+        let wall_x = moved.coords.x + 1.0;
+        let radius = grounded_definition().spheres().primary().radius;
+        let limit_x = wall_x - radius;
+        let mut asset = flat_collision_asset(0);
+        asset.static_geometry = LandblockColliders::new(
+            vec![
+                PlacedCollider::new(
+                    polygon_wall_shape(),
+                    LandblockPlacement {
+                        origin: Vector3::new(wall_x, moved.coords.y, 2.0),
+                        orientation: Quaternion::identity(),
+                    },
+                    ColliderScale::uniform(1.0).unwrap(),
+                    StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+                )
+                .unwrap(),
+            ],
+            Vec::new(),
+        );
+        collision.insert(asset).unwrap();
+        let blocked_steps = 30;
+        let mut clipped_ticks = 0;
+        for wall_step in 1..=blocked_steps {
+            scene.wake_dynamic_body(id);
+            let before = scene.body(id).unwrap().pose;
+            let collection = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    origin + interval * (steps + wall_step),
+                    |_| {
+                        Ok(PhysicalBodyInput::autonomous(
+                            PhysicalBodyActuation::grounded_drive(velocity)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert!(collection.coverage_rejections.is_empty());
+            let [DynamicEntityBodyOutcome::Integrated(accepted)] = collection.outcomes.as_slice()
+            else {
+                panic!("one obstructed body must publish one integrated outcome")
+            };
+            let after = scene.body(id).unwrap().pose;
+            let expected_x =
+                (moved.coords.x + velocity.x * CONTACT_INTERVAL * wall_step as f32).min(limit_x);
+            assert!((after.coords.x - expected_x).abs() < tolerance);
+            assert!((after.coords - before.coords - accepted.displacement).length() < tolerance);
+            assert!((accepted.path.initial().center() - before.coords).length() < tolerance);
+            assert!((accepted.path.final_point().center() - after.coords).length() < tolerance);
+            assert_eq!(accepted.current_contact, ContactState::Grounded);
+            clipped_ticks +=
+                usize::from(accepted.displacement.x + tolerance < velocity.x * CONTACT_INTERVAL);
+        }
+        assert!(clipped_ticks > 0, "the drive must reach the wall");
+        assert!(scene.body(id).unwrap().retained.velocity.x.abs() < tolerance);
+        steps += blocked_steps;
+        let moved = scene.body(id).unwrap().pose;
+
+        // A discontinuity must retire both motor continuation and a pending ordinary correction.
+        let mut correction = moved;
+        correction.coords.x += 1.0;
+        assert!(scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: correction,
+                keep_heading: true,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors::default(),
+            origin + interval * steps,
+        ));
+        assert!(scene.body(id).unwrap().has_pose_reconciliation_state());
+        let mut destination = moved;
+        destination.coords.x += 10.0;
+        assert!(scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Reset {
+                pose: destination,
+                cause: AuthoritativePoseResetCause::Teleport,
+            },
+            AuthoritativeBodyVectors::default(),
+            origin + interval * (steps + 1),
+        ));
+        let reset = scene.body(id).unwrap();
+        assert_eq!(reset.pose, destination);
+        assert_eq!(reset.retained.velocity, Vector3::zero());
+        assert_eq!(reset.accepted_motion, AcceptedBodyMotion::default());
+        assert!(!reset.has_pose_reconciliation_state());
+        let collection = scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                CONTACT_INTERVAL,
+                origin + interval * (steps + 2),
+                |_| {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    ))
+                },
+            )
+            .unwrap();
+        let [DynamicEntityBodyOutcome::Integrated(accepted)] = collection.outcomes.as_slice()
+        else {
+            panic!("reset body must publish its new epoch's outcome")
+        };
+        assert!(accepted.displacement.length() < tolerance);
+        assert_eq!(accepted.current_contact, ContactState::Grounded);
+        assert!((accepted.path.initial().center() - destination.coords).length() < tolerance);
+    }
+
+    #[test]
     fn pose_only_interpolation_reaches_target_then_remains_idle_without_retained_momentum() {
         let now = Instant::now();
         let body_id = SpatialBodyId::Entity(Guid(0x5000_0045));
@@ -3328,17 +3505,20 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn physical_return_is_blocked_by_a_static_wall_without_stalled_placement() {
+    fn controlled_physical_return_preserves_wall_clipping_and_resumes_after_residency_change() {
         let now = Instant::now();
         let (mut scene, mut collision, policy) = grounded_pair_fixture(false, now);
         let target = policy.1;
+        let wall_x = scene.body(target).unwrap().pose.coords.x + 0.8;
+        let radius = grounded_definition().spheres().primary().radius;
+        let tolerance = GROUNDED_CONFIG.separation_epsilon;
         let mut asset = flat_collision_asset(0);
         asset.static_geometry = LandblockColliders::new(
             vec![
                 PlacedCollider::new(
                     polygon_wall_shape(),
                     LandblockPlacement {
-                        origin: Vector3::new(10.8, 11.0, 2.0),
+                        origin: Vector3::new(wall_x, 11.0, 2.0),
                         orientation: Quaternion::identity(),
                     },
                     ColliderScale::uniform(1.0).unwrap(),
@@ -3365,19 +3545,75 @@ mod physical_body_tests {
             },
             now,
         );
+        let interval = Duration::from_secs_f32(CONTACT_INTERVAL);
+        let mut clipped_ticks = 0;
         for tick in 1..=30 {
-            tick_collection(
-                &mut scene,
-                &collision,
-                0.1,
-                now + Duration::from_millis(tick * 100),
-            );
+            let before = scene.body(target).unwrap().pose;
+            let collection = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    now + interval * tick,
+                    collection_input,
+                )
+                .unwrap();
+            assert!(collection.coverage_rejections.is_empty());
+            let accepted = collection
+                .outcomes
+                .iter()
+                .find_map(|outcome| match outcome {
+                    DynamicEntityBodyOutcome::Integrated(accepted)
+                        if accepted.body_id == target =>
+                    {
+                        Some(accepted)
+                    }
+                    _ => None,
+                })
+                .expect("return must be swept integration, not recovery placement");
             let body = scene.body(target).unwrap();
-            assert!(body.pose.coords.x <= 10.33);
-            assert!(body.pose.coords.z >= 0.0);
+            assert!(body.pose.coords.x <= wall_x - radius + tolerance);
+            assert!((accepted.path.initial().center() - before.coords).length() < tolerance);
+            assert!((accepted.path.final_point().center() - body.pose.coords).length() < tolerance);
+            assert!(
+                (body.pose.coords - before.coords - accepted.displacement).length() < tolerance
+            );
+            assert_eq!(accepted.current_contact, ContactState::Grounded);
             assert!(body.has_pose_reconciliation_work());
+            clipped_ticks +=
+                usize::from((body.pose.coords.x - (wall_x - radius)).abs() < tolerance);
         }
-        assert!(scene.body(target).unwrap().pose.coords.x > 10.1);
+        assert!(
+            clipped_ticks > 0,
+            "the reference must drive the body into the wall"
+        );
+
+        // Removing the wall replaces the scene proof; the same pending target must resume
+        // ordinary swept return and settle without another packet or a recovery teleport.
+        collision.insert(flat_collision_asset(0)).unwrap();
+        for tick in 31..=150 {
+            let collection = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    now + interval * tick,
+                    collection_input,
+                )
+                .unwrap();
+            assert!(collection.coverage_rejections.is_empty());
+            assert!(
+                collection
+                    .outcomes
+                    .iter()
+                    .all(|outcome| { matches!(outcome, DynamicEntityBodyOutcome::Integrated(_)) })
+            );
+            assert_eq!(scene.body(target).unwrap().contact, ContactState::Grounded);
+        }
+        let body = scene.body(target).unwrap();
+        assert!(
+            (body.pose.coords.x - reference.coords.x).abs()
+                <= super::super::RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
+        );
+        assert!(!body.has_pose_reconciliation_work());
     }
 
     #[test]

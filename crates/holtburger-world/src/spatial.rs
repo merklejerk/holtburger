@@ -5,6 +5,7 @@ mod cell_index;
 mod child_body;
 mod collision;
 mod collision_report;
+mod contact_profile;
 mod dead_reckoning;
 #[cfg(test)]
 mod differential_fixtures;

@@ -31,7 +31,8 @@ use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
 use holtburger_protocol::traits::ProtocolUnpack;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EntityMotionSnapshot {
@@ -1830,8 +1831,27 @@ impl Entity {
     }
 }
 
+/// An observed entity-journal boundary; consuming the journal invalidates earlier observations.
+///
+/// The shared identity also distinguishes different stores and keeps replaced boundaries alive
+/// while readers hold them. It carries no entity data and is not a per-entity revision cache.
+#[derive(Clone)]
+pub struct EntityMutationBoundary(Arc<()>);
+
+/// Pending changes and the boundary needed to interpret their absence as evidence.
+#[derive(Default)]
+struct EntityMutationJournal {
+    /// Conservative identities changed since the last reconciliation selection.
+    pending: BTreeSet<Guid>,
+    /// Detaches on journal consumption only while an earlier reader still holds this identity.
+    boundary: Arc<()>,
+}
+
 pub struct EntityManager {
-    pub entities: HashMap<Guid, Entity>,
+    /// Retained descriptions; all mutable access records conservative relationship invalidation.
+    entities: HashMap<Guid, Entity>,
+    /// Identities changed since the world last selected its placement-reconciliation work.
+    mutations: EntityMutationJournal,
 }
 
 impl Default for EntityManager {
@@ -1844,11 +1864,59 @@ impl EntityManager {
     pub fn new() -> Self {
         Self {
             entities: HashMap::new(),
+            mutations: EntityMutationJournal::default(),
         }
     }
 
     pub fn insert(&mut self, entity: Entity) {
+        self.record_mutation(entity.guid);
         self.entities.insert(entity.guid, entity);
+    }
+
+    /// Number of retained descriptions, independent of scene visibility.
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
+
+    /// Whether any descriptions are retained.
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+
+    /// Carry mutation identities into world reconciliation, including non-network world APIs.
+    /// Mutable access that changes no fields can produce harmless extra work.
+    pub(crate) fn take_mutations(&mut self) -> BTreeSet<Guid> {
+        // A held observation keeps the old identity alive; detach before erasing its evidence.
+        Arc::make_mut(&mut self.mutations.boundary);
+        std::mem::take(&mut self.mutations.pending)
+    }
+
+    /// Inspect pending identities when establishing baselines before applying the next input.
+    pub(crate) fn mutation_guids(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.mutations.pending.iter().copied()
+    }
+
+    /// Full periodic reconciliation already includes every retained identity and stale baseline.
+    pub(crate) fn clear_mutations(&mut self) {
+        Arc::make_mut(&mut self.mutations.boundary);
+        self.mutations.pending.clear();
+    }
+
+    /// Observe the journal before deriving entity metadata that may be reused in one operation.
+    pub fn mutation_boundary(&self) -> EntityMutationBoundary {
+        EntityMutationBoundary(Arc::clone(&self.mutations.boundary))
+    }
+
+    /// Proves no mutable access/lifecycle invalidation for this identity across an intact journal.
+    /// A consumed journal or a boundary from another store conservatively returns false.
+    pub fn unchanged_since(&self, guid: Guid, boundary: &EntityMutationBoundary) -> bool {
+        Arc::ptr_eq(&self.mutations.boundary, &boundary.0)
+            && !self.mutations.pending.contains(&guid)
+    }
+
+    /// Lifecycle metadata can change visibility without mutating the retained description.
+    pub(crate) fn record_mutation(&mut self, guid: Guid) {
+        self.mutations.pending.insert(guid);
     }
 
     pub fn contains(&self, guid: impl Into<Guid>) -> bool {
@@ -1868,7 +1936,10 @@ impl EntityManager {
     }
 
     pub fn get_mut(&mut self, guid: impl Into<Guid>) -> Option<&mut Entity> {
-        self.entities.get_mut(&guid.into())
+        let guid = guid.into();
+        let entity = self.entities.get_mut(&guid)?;
+        self.mutations.pending.insert(guid);
+        Some(entity)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Entity> {
@@ -1885,7 +1956,46 @@ impl EntityManager {
     }
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {
-        self.entities.remove(&guid.into())
+        let guid = guid.into();
+        let entity = self.entities.remove(&guid)?;
+        self.record_mutation(guid);
+        Some(entity)
+    }
+}
+
+#[cfg(test)]
+mod entity_manager_tests {
+    use super::*;
+
+    #[test]
+    fn metadata_observation_requires_untouched_identity_and_unconsumed_journal() {
+        let changed = Guid(1);
+        let untouched = Guid(2);
+        let mut entities = EntityManager::new();
+        entities.insert(Entity::new(
+            changed,
+            "Player".into(),
+            WorldPosition::default(),
+        ));
+        entities.clear_mutations();
+        let boundary = entities.mutation_boundary();
+        assert!(entities.unchanged_since(changed, &boundary));
+        entities
+            .get_mut(changed)
+            .unwrap()
+            .set_string_prop(PropertyString::Name, "Changed".into());
+        assert!(!entities.unchanged_since(changed, &boundary));
+        assert!(entities.unchanged_since(untouched, &boundary));
+
+        let pending = entities.take_mutations();
+        assert_eq!(pending, BTreeSet::from([changed]));
+        assert!(!entities.unchanged_since(changed, &boundary));
+        assert!(!entities.unchanged_since(untouched, &boundary));
+        let after_take = entities.mutation_boundary();
+        assert!(entities.unchanged_since(changed, &after_take));
+        entities.clear_mutations();
+        assert!(!entities.unchanged_since(changed, &after_take));
+        assert!(!EntityManager::new().unchanged_since(changed, &entities.mutation_boundary()));
     }
 }
 

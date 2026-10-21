@@ -55,23 +55,25 @@ impl WorldState {
         let mut current = guid;
         let mut immediate = None;
         loop {
-            if !visited.insert(current) {
-                return Err(ScenePlacementError::CyclicAttachment {
-                    child: guid,
-                    ancestor: current,
-                });
-            }
             let Some(entity) = self.entities.get(current) else {
                 return Ok(ResolvedScenePlacement::Unresolved(
                     UnresolvedScenePlacement::MissingEntity { guid: current },
                 ));
             };
-            if !self.is_entity_client_visible(current) {
+            if self.instance_delete_applies(entity) {
                 return Ok(ResolvedScenePlacement::Unresolved(
                     UnresolvedScenePlacement::DeletedEntity { guid: current },
                 ));
             }
             if let Some(attachment) = entity.attachment() {
+                // Only following a link can revisit an endpoint. Independent and unavailable
+                // entities need no ancestry allocation; attached cycles retain the same error.
+                if !visited.insert(current) {
+                    return Err(ScenePlacementError::CyclicAttachment {
+                        child: guid,
+                        ancestor: current,
+                    });
+                }
                 if current == guid {
                     immediate = Some(attachment);
                 }

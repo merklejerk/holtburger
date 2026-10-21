@@ -282,6 +282,12 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
+        #[cfg(feature = "runtime-fixture")]
+        if let Some(capture) = &mut self.runtime_fixture {
+            capture.record(super::runtime_fixture::RuntimeFixtureInput::Message(
+                data.to_vec(),
+            ));
+        }
         if let Some(ref dump_dir) = self.message_dump_dir {
             let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
             std::fs::write(path, data)?;

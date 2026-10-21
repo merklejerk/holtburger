@@ -6,9 +6,10 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::object::messages::description::ObjDescEventData;
 use holtburger_protocol::messages::object::types::ModelData;
 
+use super::attachment_lifecycle::ScenePlacementScope;
 use super::pose_orientation::recover_pose_orientation;
 use crate::WorldEvent;
-use crate::context::WorldContextExt;
+use crate::context::{WorldContext, WorldContextExt};
 use crate::entity::Entity;
 use crate::state::WorldState;
 
@@ -308,6 +309,7 @@ impl WorldState {
         self.entity_lifecycle
             .get_or_default_mut(guid)
             .delete_request = Some(EntityDeleteRequest::Unconditional);
+        self.entities.record_mutation(guid);
     }
 
     /// Applies SmartBox's three-way instance-timestamp disposition from acclient.c:137144-137176:
@@ -349,6 +351,7 @@ impl WorldState {
         if disposition == EntityInstanceDeleteDisposition::Applied {
             self.retire_entity_storage(guid);
         }
+        self.entities.record_mutation(guid);
         disposition
     }
 
@@ -577,17 +580,24 @@ impl WorldState {
     }
 
     pub fn is_entity_client_visible(&self, guid: Guid) -> bool {
-        self.entities.get(guid).is_some() && !self.current_instance_delete_requested(guid)
+        self.entities
+            .get(guid)
+            .is_some_and(|entity| !self.instance_delete_applies(entity))
     }
 
     pub(super) fn current_instance_delete_requested(&self, guid: Guid) -> bool {
-        let Some(instance_sequence) = self.entities.get(guid).map(Entity::instance_sequence) else {
-            return false;
-        };
-        self.entity_lifecycle.get(guid).is_some_and(|state| {
+        self.entities
+            .get(guid)
+            .is_some_and(|entity| self.instance_delete_applies(entity))
+    }
+
+    /// Test deletion against the retained incarnation already borrowed by the caller.
+    /// Placement and visible-entity queries must not repeat identity lookups to inspect its sequence.
+    pub(super) fn instance_delete_applies(&self, entity: &Entity) -> bool {
+        self.entity_lifecycle.get(entity.guid).is_some_and(|state| {
             state
                 .delete_request
-                .is_some_and(|request| request.applies_to(instance_sequence))
+                .is_some_and(|request| request.applies_to(entity.instance_sequence()))
         })
     }
 
@@ -601,12 +611,12 @@ impl WorldState {
 
     pub fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
         self.entities
-            .get_filtered(guid, |entity| self.is_entity_client_visible(entity.guid))
+            .get_filtered(guid, |entity| !self.instance_delete_applies(entity))
     }
 
     pub fn iter_visible_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
         self.entities
-            .iter_filtered(move |entity| self.is_entity_client_visible(entity.guid))
+            .iter_filtered(move |entity| !self.instance_delete_applies(entity))
     }
 
     pub fn get_nearby_world_entities(&self) -> Vec<Entity> {
@@ -631,7 +641,8 @@ impl WorldState {
         let mut events = Vec::new();
         let now = self.current_server_time();
         self.sweep_eviction_queue(now, &mut events);
-        self.reconcile_scene_placements(&mut events);
+        self.prepare_deferred_scene_placements(&mut events);
+        self.reconcile_scene_placements(&mut events, ScenePlacementScope::All);
         self.maintain_visibility_prune_deadlines(now);
 
         events

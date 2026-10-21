@@ -193,6 +193,12 @@ impl ClientRuntimeBuilder {
         self.finish(session)
     }
 
+    /// Builds an isolated diagnostic client whose outgoing packets use an in-memory transport.
+    #[cfg(feature = "runtime-fixture")]
+    pub(super) fn build_fixture_client(self) -> Result<ClientRuntime> {
+        self.finish(Session::new_test())
+    }
+
     fn finish(self, session: Session) -> Result<ClientRuntime> {
         let world_bootstrap = self.world_bootstrap.ok_or_else(|| {
             anyhow!("ClientRuntimeBuilder requires world bootstrap before connect()")
@@ -200,6 +206,8 @@ impl ClientRuntimeBuilder {
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
         Ok(ClientRuntime {
+            #[cfg(feature = "runtime-fixture")]
+            runtime_fixture: None,
             session,
             world: WorldState::new(world_bootstrap),
             event_ordering: None,
@@ -268,6 +276,8 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
+        #[cfg(feature = "runtime-fixture")]
+        runtime_fixture: None,
         session: Session::new_test(),
         world: WorldState::synthetic(),
         event_ordering: None,

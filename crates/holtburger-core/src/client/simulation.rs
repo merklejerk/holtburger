@@ -1,4 +1,5 @@
 use super::movement::{MovementSystem, PendingJumpAttempt};
+use super::runtime_profile::RuntimePhaseProfile;
 use crate::SimulationSceneSnapshot;
 use crate::client::character_jump::{
     CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump, resolve_character_jump,
@@ -120,6 +121,8 @@ pub(super) fn tick_with_precise_jump(
     collision: Option<&SimulationSceneSnapshot>,
     precise_jump: Option<super::precise_jump_runtime::PreparedPreciseJumpCommit>,
 ) -> Result<ClientSimulationTick> {
+    let mut profile = RuntimePhaseProfile::begin("simulation");
+    let elapsed = dt;
     // Admit time before advancing authored cursors or applying their one-shot physics
     // effects. Discarded catch-up must not become input for a shorter physical solve.
     let dt = admit_physical_duration(dt);
@@ -168,9 +171,11 @@ pub(super) fn tick_with_precise_jump(
         });
     }
     let mut events = world.apply_authored_motion_physics(&authored_ticks)?;
+    profile.checkpoint("authored_motion");
     if let Some(collision) = collision {
         world.publish_authored_collision_poses(&collision.scene)?;
     }
+    profile.checkpoint("authored_collision_poses");
     let pending_jump = movement
         .take_pending_jump_attempt()
         .map(|pending| prepare_player_jump(world, pending));
@@ -197,6 +202,7 @@ pub(super) fn tick_with_precise_jump(
         });
         committed_jump = Some(jump.committed);
     }
+    profile.checkpoint("jump_preparation");
     if let Some(collision) = collision {
         let prepared_jump = pending_jump
             .as_ref()
@@ -233,12 +239,21 @@ pub(super) fn tick_with_precise_jump(
             ClientCharacterMotionRejection::CollisionUnavailable,
         ));
     }
+    profile.checkpoint("physical_contacts");
     events.extend(tick_pose_only_remote_entities(
         dt,
         world,
         collision.is_some(),
         &mut body_motions,
     )?);
+    profile.checkpoint("pose_only_projection");
+    profile.finish(format_args!(
+        "elapsed_ms={:.3} admitted_ms={:.3} entities={} advanced_bodies={}",
+        elapsed.as_secs_f64() * 1_000.0,
+        dt.as_secs_f64() * 1_000.0,
+        world.entities.len(),
+        body_motions.len(),
+    ));
     Ok(ClientSimulationTick {
         events,
         body_motions,

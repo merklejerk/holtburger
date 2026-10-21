@@ -3,6 +3,11 @@
 use super::entity_visual_facts::{EntityVisualFactsError, entity_visual_facts};
 use super::simulation::ClientBodyMotion;
 use anyhow::Context;
+use std::sync::Arc;
+
+use crate::dynamic_entity_view::{DynamicEntityRuntimeProjection, project_dynamic_entity_runtime};
+use holtburger_content::{MotionSequenceCatalog, WeenieTypeIndex};
+use holtburger_world::entity::EntityMutationBoundary;
 
 use holtburger_common::Guid;
 use holtburger_common::properties::{
@@ -75,30 +80,7 @@ pub fn project_client_dynamic_entity(
             ClientDynamicEntityViewError::InvalidTranslucency { guid: guid.0 }
         }
     })?;
-    let placement = if let ResolvedScenePlacement::Attached { attachment, .. } = scene_placement {
-        EntityPlacement::Attached(attachment)
-    } else {
-        let body_id = world
-            .runtime_body_id_for_guid(guid)
-            .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
-        let spatial_body = world
-            .scene
-            .body(body_id)
-            .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
-        let body = spatial_body.runtime_view();
-        let participation = if spatial_body.physical.is_some() {
-            PhysicalBodyParticipation::Physical
-        } else {
-            PhysicalBodyParticipation::PoseOnly
-        };
-        EntityPlacement::World(DynamicEntityWorldProjection {
-            body,
-            spatial_membership: DynamicEntitySpatialMembership::from(
-                &spatial_body.spatial_membership(),
-            ),
-            participation,
-        })
-    };
+    let placement = client_entity_placement(world, guid, scene_placement)?;
 
     Ok(Some(project_dynamic_entity_view(DynamicEntityViewSource {
         generation: u64::from(entity.instance_sequence()),
@@ -138,6 +120,113 @@ pub fn project_client_dynamic_entity(
     })))
 }
 
+/// Resolve body realization after the shared authoritative placement decision.
+fn client_entity_placement(
+    world: &WorldState,
+    guid: Guid,
+    scene_placement: ResolvedScenePlacement,
+) -> Result<EntityPlacement<DynamicEntityWorldProjection>, ClientDynamicEntityViewError> {
+    if let ResolvedScenePlacement::Attached { attachment, .. } = scene_placement {
+        return Ok(EntityPlacement::Attached(attachment));
+    }
+    let body_id = world
+        .runtime_body_id_for_guid(guid)
+        .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
+    let spatial_body = world
+        .scene
+        .body(body_id)
+        .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
+    let participation = if spatial_body.physical.is_some() {
+        PhysicalBodyParticipation::Physical
+    } else {
+        PhysicalBodyParticipation::PoseOnly
+    };
+    Ok(EntityPlacement::World(DynamicEntityWorldProjection {
+        body: spatial_body.runtime_view(),
+        spatial_membership: DynamicEntitySpatialMembership::from(
+            &spatial_body.spatial_membership(),
+        ),
+        participation,
+    }))
+}
+
+/// Facts that advance without rewriting the retained entity description.
+fn project_client_entity_runtime(
+    world: &WorldState,
+    guid: Guid,
+) -> Result<Option<DynamicEntityRuntimeProjection>, ClientDynamicEntityViewError> {
+    let scene_placement = world.resolve_scene_placement(guid)?;
+    if matches!(scene_placement, ResolvedScenePlacement::Unresolved(_)) {
+        return Ok(None);
+    }
+    Ok(Some(project_dynamic_entity_runtime(
+        client_entity_placement(world, guid, scene_placement)?,
+        world.motion_runtimes.motion_playback(guid),
+    )))
+}
+
+/// One authority-owned tick boundary, including the validity scope of its captured metadata.
+#[derive(Clone)]
+pub(super) struct DynamicEntityTickBaseline {
+    /// Full views still define the comparison boundary and accepted-path origins.
+    pub(super) views: Vec<crate::DynamicEntityView>,
+    /// Proof scope for reusing fields that do not advance in the scene or playback runtime.
+    metadata: DynamicEntityMetadataBoundary,
+}
+
+/// World-owned mutation evidence and immutable catalog identities sampled together.
+#[derive(Clone)]
+struct DynamicEntityMetadataBoundary {
+    /// Entity changes must remain observable until the after boundary.
+    entities: EntityMutationBoundary,
+    /// Held immutable handles detect both replacement and copy-on-write catalog changes.
+    motion_sequences: Arc<MotionSequenceCatalog>,
+    /// Radar classification can change when the parsed type catalog is installed or replaced.
+    weenie_types: Option<Arc<WeenieTypeIndex>>,
+}
+
+impl DynamicEntityMetadataBoundary {
+    fn capture(world: &WorldState) -> Self {
+        Self {
+            entities: world.entities.mutation_boundary(),
+            motion_sequences: Arc::clone(&world.motion_sequences),
+            weenie_types: world.weenie_types.as_ref().map(Arc::clone),
+        }
+    }
+
+    fn catalogs_unchanged(&self, world: &WorldState) -> bool {
+        Arc::ptr_eq(&self.motion_sequences, &world.motion_sequences)
+            && match (&self.weenie_types, &world.weenie_types) {
+                (None, None) => true,
+                (Some(before), Some(after)) => Arc::ptr_eq(before, after),
+                _ => false,
+            }
+    }
+
+    /// Refresh independently advancing fields, or rebuild all facts when reuse lacks proof.
+    fn project_after(
+        &self,
+        world: &WorldState,
+        previous: &crate::DynamicEntityView,
+        catalogs_unchanged: bool,
+        traversed: bool,
+    ) -> Result<Option<crate::DynamicEntityView>, ClientDynamicEntityViewError> {
+        let guid = previous.identity.guid;
+        if !catalogs_unchanged || !world.entities.unchanged_since(guid, &self.entities) {
+            return project_client_dynamic_entity(world, guid);
+        }
+        let Some(runtime) = project_client_entity_runtime(world, guid)? else {
+            return Ok(None);
+        };
+        if runtime.matches_view(previous) && !traversed {
+            return Ok(None);
+        }
+        let mut entity = previous.clone();
+        runtime.apply_to(&mut entity);
+        Ok(Some(entity))
+    }
+}
+
 /// Projects every currently representable client entity in stable GUID order.
 pub fn project_client_dynamic_entities(
     world: &WorldState,
@@ -171,6 +260,13 @@ impl ClientRuntime {
                 }
             })
             .collect()
+    }
+
+    pub(super) fn capture_dynamic_entity_tick_baseline(&self) -> DynamicEntityTickBaseline {
+        DynamicEntityTickBaseline {
+            views: self.current_dynamic_entity_views(),
+            metadata: DynamicEntityMetadataBoundary::capture(&self.world),
+        }
     }
 
     pub(super) fn emit_dynamic_entity_snapshot(&self) {
@@ -213,30 +309,50 @@ impl ClientRuntime {
 
     /// Builds one closed advance product from authority-owned tick boundaries.
     ///
-    /// This intentionally accepts captured views rather than sampling `WorldState` from an app
-    /// host. The runtime owns both boundaries and publishes at most one batch for the turn.
+    /// The runtime captures the before boundary and samples the after boundary itself. Unchanged
+    /// entity metadata may be reused only while its journal and catalog evidence remain valid.
     pub(super) fn dynamic_entity_tick_batch(
         &self,
-        before: Vec<crate::DynamicEntityView>,
-        after: Vec<crate::DynamicEntityView>,
-        host_time: DynamicEntityHostTime,
+        before: DynamicEntityTickBaseline,
+        host_time: impl FnOnce() -> DynamicEntityHostTime,
         duration_ms: f64,
         body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
     ) -> anyhow::Result<Option<DynamicEntityTickBatch>> {
+        let catalogs_unchanged = before.metadata.catalogs_unchanged(&self.world);
         let before_by_guid = before
+            .views
             .into_iter()
             .map(|entity| (entity.identity.guid, entity))
             .collect::<std::collections::HashMap<_, _>>();
         let mut advances = Vec::new();
         let mut updates = Vec::new();
 
-        for entity in after {
-            let Some(previous) = before_by_guid.get(&entity.identity.guid) else {
+        let mut guids = self
+            .world
+            .entities
+            .iter()
+            .map(|entity| entity.guid)
+            .collect::<Vec<_>>();
+        guids.sort_unstable();
+        for guid in guids {
+            let Some(previous) = before_by_guid.get(&guid) else {
                 continue;
             };
-            let motion = body_motions.get(&entity.identity.guid);
+            let motion = body_motions.get(&guid);
             let traversed = matches!(motion, Some(ClientBodyMotion::Physical(path))
                 if path.legs().iter().any(|leg| leg.end() != path.initial()));
+            let projected =
+                before
+                    .metadata
+                    .project_after(&self.world, previous, catalogs_unchanged, traversed);
+            let entity = match projected {
+                Ok(Some(entity)) => entity,
+                Ok(None) => continue,
+                Err(error) => {
+                    log::warn!("client dynamic-entity projection rejected: {error}");
+                    continue;
+                }
+            };
             if previous.generation != entity.generation || previous == &entity && !traversed {
                 continue;
             }
@@ -319,7 +435,7 @@ impl ClientRuntime {
             duration_ms
         };
         Ok(DynamicEntityTickBatch::new(
-            host_time,
+            host_time(),
             duration_ms,
             advances,
             updates,
@@ -1024,14 +1140,19 @@ mod tests {
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, start));
 
-        let before = client.current_dynamic_entity_views();
+        client.world.tick();
+        let before = client.capture_dynamic_entity_tick_baseline();
+        assert!(
+            client
+                .world
+                .entities
+                .unchanged_since(guid, &before.metadata.entities)
+        );
         let _ = client.world.set_local_player_runtime_pose(end);
-        let after = client.current_dynamic_entity_views();
         let missing = client
             .dynamic_entity_tick_batch(
                 before.clone(),
-                after.clone(),
-                DynamicEntityHostTime::new(12.5).unwrap(),
+                || DynamicEntityHostTime::new(12.5).unwrap(),
                 30.0,
                 &Default::default(),
             )
@@ -1040,8 +1161,7 @@ mod tests {
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                after,
-                DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
+                || DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
                 30.0,
                 &std::collections::HashMap::from([(guid, ClientBodyMotion::PoseOnly)]),
             )
@@ -1136,15 +1256,14 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, start));
-        let before = client.current_dynamic_entity_views();
+        let before = client.capture_dynamic_entity_tick_baseline();
         client.world.set_local_player_runtime_pose(end);
         let kinds = std::collections::HashMap::from([(guid, ClientBodyMotion::CorrectionSnap)]);
 
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                client.current_dynamic_entity_views(),
-                DynamicEntityHostTime::new(12.75).expect("test host time is valid"),
+                || DynamicEntityHostTime::new(12.75).expect("test host time is valid"),
                 30.0,
                 &kinds,
             )
@@ -1168,7 +1287,14 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, pose));
-        let before = client.current_dynamic_entity_views();
+        client.world.tick();
+        let before = client.capture_dynamic_entity_tick_baseline();
+        assert!(
+            client
+                .world
+                .entities
+                .unchanged_since(guid, &before.metadata.entities)
+        );
 
         assert!(
             client.world.scene.apply_runtime_body_contact(
@@ -1179,8 +1305,7 @@ mod tests {
         let batch = client
             .dynamic_entity_tick_batch(
                 before,
-                client.current_dynamic_entity_views(),
-                DynamicEntityHostTime::new(13.0).expect("test host time is valid"),
+                || DynamicEntityHostTime::new(13.0).expect("test host time is valid"),
                 30.0,
                 &Default::default(),
             )
@@ -1190,6 +1315,106 @@ mod tests {
         assert!(batch.advances.is_empty());
         assert_eq!(batch.updates.len(), 1);
         assert_eq!(batch.updates[0].identity.guid, guid);
+        assert_eq!(
+            batch.updates[0].as_ref(),
+            &project_client_dynamic_entity(&client.world, guid)
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn tick_metadata_refresh_survives_both_pending_and_consumed_mutations() {
+        for consume_journal in [false, true] {
+            let mut client = builder::build_test_client(ClientState::InWorld);
+            let guid = Guid(0x5000_0006);
+            client.world.player.guid = guid;
+            client.world.add_entity(projectable_entity(
+                guid,
+                WorldPosition {
+                    landblock_id: Guid(0xda55_0001),
+                    ..WorldPosition::default()
+                },
+            ));
+            client.world.tick();
+            let before = client.capture_dynamic_entity_tick_baseline();
+            assert!(
+                client
+                    .world
+                    .entities
+                    .unchanged_since(guid, &before.metadata.entities)
+            );
+            let new_level = 23;
+            let entity = client.world.entities.get_mut(guid).unwrap();
+            entity.set_int_prop(PropertyInt::Level, new_level);
+            entity.physics.apply_authored_ethereal(true);
+            if consume_journal {
+                client.world.tick();
+            }
+            assert!(
+                !client
+                    .world
+                    .entities
+                    .unchanged_since(guid, &before.metadata.entities)
+            );
+            let batch = client
+                .dynamic_entity_tick_batch(
+                    before,
+                    || DynamicEntityHostTime::new(13.0).unwrap(),
+                    30.0,
+                    &Default::default(),
+                )
+                .unwrap()
+                .unwrap();
+            assert!(batch.advances.is_empty());
+            assert_eq!(batch.updates.len(), 1);
+            assert_eq!(batch.updates[0].display.level, Some(new_level as u32));
+            assert_ne!(
+                batch.updates[0].physics.semantic_mask & PhysicsState::ETHEREAL.bits(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn tick_metadata_refresh_observes_replaced_motion_catalog_without_entity_mutation() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x5000_0007);
+        client.world.player.guid = guid;
+        client.world.add_entity(projectable_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        ));
+        client.world.tick();
+        let before = client.capture_dynamic_entity_tick_baseline();
+        let setup_did = before.views[0].presentation.content.setup_did;
+        let motion_table_did = 0x0900_0123;
+        client.world.motion_sequences = Arc::new(
+            MotionSequenceCatalog::assemble([], [], [(setup_did, motion_table_did)]).unwrap(),
+        );
+        assert!(
+            client
+                .world
+                .entities
+                .unchanged_since(guid, &before.metadata.entities)
+        );
+        let batch = client
+            .dynamic_entity_tick_batch(
+                before,
+                || DynamicEntityHostTime::new(13.0).unwrap(),
+                30.0,
+                &Default::default(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(batch.updates.len(), 1);
+        assert_eq!(
+            batch.updates[0].presentation.content.motion_table_did,
+            Some(motion_table_did)
+        );
     }
 
     #[test]
@@ -1206,14 +1431,14 @@ mod tests {
                 },
             ));
         }
-        let before = client.current_dynamic_entity_views();
+        client.world.tick();
+        let before = client.capture_dynamic_entity_tick_baseline();
 
         assert!(
             client
                 .dynamic_entity_tick_batch(
                     before.clone(),
-                    before,
-                    DynamicEntityHostTime::new(14.0).expect("test host time is valid"),
+                    || DynamicEntityHostTime::new(14.0).expect("test host time is valid"),
                     30.0,
                     &Default::default(),
                 )

@@ -20,7 +20,10 @@ export async function probeClientNearby(dependencies: {
 	readonly baseline: () => void;
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly selected: () => number | null;
-	readonly commands: () => readonly { command: string }[];
+	readonly commands: () => readonly {
+		command: string;
+		args: Record<string, unknown> | undefined;
+	}[];
 	readonly messages: () => readonly ClientChatLine[];
 	readonly waypoint: () => MapWaypointTarget | null;
 }) {
@@ -61,6 +64,8 @@ export async function probeClientNearby(dependencies: {
 		editor.dispatchEvent(new Event("input", { bubbles: true }));
 	};
 	const commandStart = dependencies.commands().length;
+	const examineRequests = () => dependencies.commands().slice(commandStart)
+		.filter(({ command }) => command === "examine_client_entity");
 	dependencies.baseline();
 	owner.changeRules(1, []);
 	const npc = nearbyFacts(9, "Town Crier");
@@ -131,6 +136,42 @@ export async function probeClientNearby(dependencies: {
 	await click('[data-entity-guid="7"] .entity-name');
 	require(dependencies.selected() ===
 		7, "row uses production selected identity");
+	require(examineRequests().length === 0, "left click only selects its entity");
+	input('[aria-label="Search entity names"]', "");
+	await tick();
+	const categoryIcon = document.querySelector('[data-entity-guid="8"] .category-icon svg');
+	require(categoryIcon !== null, "second entity has a nested right-click target");
+	const contextMenu = new MouseEvent("contextmenu", {
+		button: 2, bubbles: true, cancelable: true,
+	});
+	categoryIcon.dispatchEvent(contextMenu);
+	await tick();
+	require(contextMenu.defaultPrevented, "entity row suppresses the native context menu");
+	require(dependencies.selected() === 8 &&
+		examineRequests().length === 1 && examineRequests()[0].args?.guid === 8,
+		"right click selects and examines the clicked entity rather than the previous selection");
+	// The sampled row can outlive authoritative facts until the next display pull.
+	const staleRow = document.querySelector('[data-entity-guid="9"]');
+	require(staleRow !== null, "third entity is displayed before removal");
+	emit("client-entity-facts-changed", {
+		projectileSupply: null, worldContainer: null, upserts: [], removed: [9],
+	});
+	staleRow.dispatchEvent(new MouseEvent("contextmenu", {
+		button: 2, bubbles: true, cancelable: true,
+	}));
+	await tick();
+	require(dependencies.selected() === 8 && examineRequests().length === 1,
+		"unavailable row neither changes selection nor examines the previous target");
+	require(document.querySelector('.nearby-panel [role="alert"]')?.textContent?.includes("unavailable") === true,
+		"unavailable row reports the existing selection error");
+	emit("client-entity-facts-changed", {
+		projectileSupply: null, worldContainer: null, upserts: [facts[2]], removed: [],
+	});
+	input('[aria-label="Search entity names"]', "dmnd");
+	await tick();
+	await click('[data-entity-guid="7"] .entity-name');
+	require(document.querySelector('.nearby-panel [role="alert"]') === null,
+		"successful selection clears the stale-row error");
 	await click('[aria-label="Details for Diamond Golem"]');
 	await click('[data-entity-guid="7"] button[title="Set waypoint"]');
 	require(dependencies.waypoint() !==
@@ -496,12 +537,8 @@ export async function probeClientNearby(dependencies: {
 	);
 	require(search?.value === "dmnd", "reopening retains the search draft");
 	await click('[aria-label="Close Nearby"]');
-	require(!dependencies
-		.commands()
-		.slice(commandStart)
-		.some(
-			({ command }) => command === "examine_client_entity",
-		), "catalog never appraises entities");
+	require(examineRequests().length === 1,
+		"catalog updates do not submit additional examinations");
 	return {
 		passed: true,
 		entities: facts.length,
@@ -512,6 +549,8 @@ export async function probeClientNearby(dependencies: {
 			"pointer-hit-testing",
 			"search",
 			"selection",
+			"right-click-select-and-examine",
+			"stale-row-examination-rejected",
 			"disclosure",
 			"exact-rule",
 			"exact-name-toggle",

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
+	import BackIcon from "../assets/icons/hud-back.svg?component";
 	import { dismissDialogOnBackdrop } from "../app/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { ClientSoulEmotes } from "./client-soul-emotes";
@@ -161,15 +162,16 @@
 		}}
 	>
 		{#each entries as entry, index}
+			{@const enabled = emoteEntryEnabled(entry)}
 			<button
 				type="button"
 				role="menuitem"
 				tabindex="-1"
 				id={`${id}-${index}`}
 				class="emote-wedge emote-glass"
-				class:highlighted={selected === index}
+				class:highlighted={enabled && selected === index}
 				style={wedgeStyle(index, entries.length)}
-				disabled={!emoteEntryEnabled(entry)}
+				disabled={!enabled}
 				title={entry.kind === "missing"
 					? entry.detail
 					: entry.kind === "emote"
@@ -178,15 +180,29 @@
 							? "No recent emotes"
 							: entry.label}
 				onpointerenter={() => {
-					selected = index;
+					if (enabled) selected = index;
 				}}
 				onclick={() => choose(entry)}
 				><span class="emote-label">{entry.label}</span></button
 			>
 		{/each}
-		<span class="emote-center ui-readout"
-			>{category === null ? "Emotes" : categoryLabel}</span
-		>
+		<div class="emote-center">
+			<span class="emote-center-label ui-readout"
+				>{category === null ? "Emotes" : categoryLabel}</span
+			>
+			{#if category !== null}
+				<button
+					type="button"
+					class="emote-back ui-hud-button"
+					tabindex="-1"
+					aria-label="Back to emote categories"
+					title="Back to emote categories (Escape)"
+					onclick={back}
+				>
+					<BackIcon />
+				</button>
+			{/if}
+		</div>
 	</div>
 </dialog>
 
@@ -253,10 +269,14 @@
 	}
 	.emote-wedge:disabled {
 		color: var(--ui-color-muted);
-		cursor: not-allowed;
+		opacity: 0.4;
+		cursor: default;
 	}
 	.emote-center {
 		position: absolute;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 		left: 50%;
 		top: 50%;
 		transform: translate(-50%, -50%);
@@ -267,8 +287,17 @@
 		text-align: center;
 		line-height: 1.2;
 		white-space: nowrap;
+	}
+	.emote-center-label {
+		max-width: 100%;
+		box-sizing: border-box;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	.emote-back {
+		width: 28px;
+		height: 28px;
+		padding: 4px;
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.emote-glass {

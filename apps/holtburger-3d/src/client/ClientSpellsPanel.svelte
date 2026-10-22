@@ -22,9 +22,12 @@
 	const {
 		spells,
 		castEnabled,
+		visible,
 		onCastSpell,
 	}: {
 		readonly spells: ClientSpellServices;
+		/** Only the visible character tab samples icons and subscribes to inspection updates. */
+		readonly visible: boolean;
 		/** Confirmed magic stance in an active client session. */
 		readonly castEnabled: boolean;
 		/** Submit one normal cast without changing row expansion. */
@@ -36,7 +39,7 @@
 	let inspection = $state<SpellInspectionDisplay>({ kind: "pending" });
 	$effect(() => {
 		const id = expandedId;
-		if (id === null) return;
+		if (!visible || id === null) return;
 		// Reads inside callbacks cannot own this consumer's subscription lifetime.
 		return untrack(() =>
 			spells.inspect(id, (value) => {
@@ -84,26 +87,37 @@
 	let status = $state<"pending" | "loading" | "ready">("pending");
 	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
 
+	let iconRevision = -1;
+	function sampleIcons(): void {
+		if (iconRevision === spells.icons.revision) return;
+		iconRevision = spells.icons.revision;
+		displays = new Map(
+			rows.flatMap((row) =>
+				row.artwork.kind === "icon"
+					? [[row.artwork.key, spells.icons.read(row.artwork.key)] as const]
+					: [],
+			),
+		);
+	}
+	$effect(() => {
+		if (!visible) return;
+		// Icon snapshots must not become dependencies of this visibility-owned timer.
+		untrack(sampleIcons);
+		const timer = setInterval(
+			sampleIcons,
+			CLIENT_TUNING.spells.iconDisplayIntervalMs,
+		);
+		return () => clearInterval(timer);
+	});
+
 	onMount(() => {
 		let disposed = false;
 		let generation = 0;
 		let membership: readonly number[] | null = null;
 		const owners = new Set<UiIconOwner>();
 		let currentOwner: UiIconOwner | null = null;
-		let revision = -1;
 		const release = (owner: UiIconOwner) => {
 			if (owners.delete(owner)) spells.icons.releaseOwner(owner);
-		};
-		const sample = () => {
-			if (revision === spells.icons.revision) return;
-			revision = spells.icons.revision;
-			displays = new Map(
-				rows.flatMap((row) =>
-					row.artwork.kind === "icon"
-						? [[row.artwork.key, spells.icons.read(row.artwork.key)] as const]
-						: [],
-				),
-			);
 		};
 		const refresh = async () => {
 			const ids = spells.session.state().knownSpells;
@@ -129,8 +143,8 @@
 				.map((reference) => prepareSpellRow(reference, spells.icons, owner))
 				.sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
 			status = "ready";
-			revision = -1;
-			sample();
+			iconRevision = -1;
+			if (visible) sampleIcons();
 		};
 		const update = () => {
 			void refresh();
@@ -145,15 +159,10 @@
 				update();
 		});
 		update();
-		const timer = setInterval(
-			sample,
-			CLIENT_TUNING.spells.iconDisplayIntervalMs,
-		);
 		return () => {
 			disposed = true;
 			generation++;
 			unsubscribe();
-			clearInterval(timer);
 			void tick().then(() => {
 				for (const owner of owners) release(owner);
 			});
@@ -161,7 +170,7 @@
 	});
 </script>
 
-<section class="spells-panel ui-body" aria-label="Known spells">
+<section class="spells-panel" aria-label="Known spells">
 	<div class="spell-controls">
 		<div class="search-line">
 			<input
@@ -311,7 +320,7 @@
 										</div>
 									{/if}
 									<p>{row.details.description}</p>
-									{#if inspection.kind === "ready"}
+									{#if visible && inspection.kind === "ready"}
 										{#if inspection.formula.kind === "ready"}
 											{#key inspection.formula.components}
 												<ClientSpellFormula
@@ -344,8 +353,6 @@
 			min-height: 0;
 			display: flex;
 			flex-direction: column;
-			padding: var(--ui-spell-panel-padding);
-			box-sizing: border-box;
 		}
 		.spell-results {
 			overflow: auto;

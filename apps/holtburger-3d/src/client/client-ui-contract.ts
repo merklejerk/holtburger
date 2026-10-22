@@ -57,15 +57,13 @@ export interface ClientUiDefaults {
 	readonly chat: ClientUiPanel;
 	/** Retained nearby catalog and entity alert manager. */
 	readonly nearby: Omit<ClientUiPanel, "resizable">;
-	/** Known-spells floating window. */
-	readonly spells: Omit<ClientUiPanel, "resizable">;
 	/** Character social management window. */
 	readonly social: Omit<ClientUiPanel, "resizable">;
 	/** Retained contracts journal with independently expandable rows. */
 	readonly journal: Omit<ClientUiPanel, "resizable">;
 	/** Independent active-enchantments floating window. */
 	readonly enchantments: Omit<ClientUiPanel, "resizable">;
-	/** Character progression window, distinct from the always-visible HUD. */
+	/** Character window with progression, defenses, and spellbook tabs. */
 	readonly characterSheet: Omit<ClientUiPanel, "resizable">;
 	/** Inventory window with independently retained geometry; borders always resize. */
 	readonly inventory: Omit<ClientUiPanel, "resizable">;

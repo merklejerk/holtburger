@@ -66,7 +66,6 @@
 		| "world"
 		| "social"
 		| "journal"
-		| "spells"
 		| "nearby"
 		| "enchantments"
 		| "characterSheet"
@@ -482,8 +481,6 @@
 					persistentMessage={{ kind: "preview", message: toastMessage }}
 				/>{/snippet}
 			{#snippet dock()}<ClientShortcutDock
-					onOpenEmotes={() => {}}
-					emotesEnabled={false}
 					placement={layout.shortcuts}
 					{editable}
 					{viewport}

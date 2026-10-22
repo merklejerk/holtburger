@@ -19,11 +19,30 @@ export async function probeClientSpells(
 		if (element === null) throw new Error(`Missing ${label} button.`);
 		element.click();
 	};
+	const tab = (label: string) => {
+		const element = [
+			...document.querySelectorAll<HTMLButtonElement>(
+				'[aria-label="Character sheet tabs"] [role="tab"]',
+			),
+		].find((button) => button.textContent === label);
+		if (element === undefined)
+			throw new Error(`Missing ${label} character tab.`);
+		element.click();
+	};
+	const openSpellbook = async () => {
+		const panel = document.querySelector('[aria-label="Character sheet"]');
+		if (panel === null || panel.closest("[hidden]")) button("Character");
+		await tick();
+		tab("Spells");
+		await tick();
+	};
 	const waitFor = async (predicate: () => boolean) => {
 		const deadline = performance.now() + 5000;
 		while (!predicate()) {
 			if (performance.now() > deadline)
-				throw new Error("Spell panel integration timed out.");
+				throw new Error(
+					`Spell panel integration timed out: ${predicate.toString()}`,
+				);
 			await new Promise((resolve) => setTimeout(resolve, 25));
 		}
 		await tick();
@@ -34,10 +53,11 @@ export async function probeClientSpells(
 		.filter((id) => id !== 666)
 		.concat(count + 2);
 	emit("client-player-spells-updated", { spellIds: [...ids, 999999] });
-	button("Spells");
+	await openSpellbook();
 	await waitFor(
 		() =>
-			document.querySelectorAll("[data-spell-id] img").length === ids.length,
+			document.querySelectorAll("[data-spell-id] .spell-header img").length ===
+			ids.length,
 	);
 	if (document.querySelectorAll("[data-spell-id]").length !== ids.length + 1)
 		throw new Error("Missing definition suppressed a known spell.");
@@ -204,16 +224,16 @@ export async function probeClientSpells(
 	await searchFor("frost");
 	if (document.querySelector(".spell-details") !== null)
 		throw new Error("Hidden spell retained expanded inspection.");
-	button("Close Spells");
+	button("Close Character");
 	await tick();
-	button("Spells");
+	await openSpellbook();
 	await waitFor(
 		() =>
 			document.querySelectorAll("[data-spell-id]:not([hidden])").length ===
 			ids.length / 2,
 	);
 	if (input().value !== "frost")
-		throw new Error("Search did not survive panel remount.");
+		throw new Error("Search did not survive closing the character window.");
 	await searchFor("");
 	toggleSpell(1);
 	await tick();
@@ -275,17 +295,33 @@ export async function probeClientSpells(
 	await waitFor(
 		() => document.querySelector('[data-spell-id="1"] .spell-details') !== null,
 	);
+	const expandedRow = document.querySelector('[data-spell-id="1"]');
+	tab("Progression");
+	await tick();
+	if (!expandedRow?.closest("[hidden]"))
+		throw new Error("Spellbook did not hide with its tab.");
+	tab("Spells");
+	await tick();
+	if (
+		document.querySelector('[data-spell-id="1"]') !== expandedRow ||
+		expandedRow
+			.querySelector(".spell-header")
+			?.getAttribute("aria-expanded") !== "true"
+	)
+		throw new Error("Spellbook tab switch lost the expanded row.");
 	const originalUrl = document.querySelector<HTMLImageElement>(
 		'[data-spell-id="1"] img',
 	)?.src;
-	button("Close Spells");
+	button("Close Character");
 	await tick();
-	// Let unmount release its display lease before checking the persistent owner.
+	// Membership changes while the retained character window is hidden.
 	await new Promise((resolve) => setTimeout(resolve, 25));
 	emit("client-player-spells-updated", { spellIds: [3, 1] });
-	button("Spells");
+	await openSpellbook();
 	await waitFor(
-		() => document.querySelectorAll("[data-spell-id] img").length === 2,
+		() =>
+			document.querySelectorAll("[data-spell-id] .spell-header img").length ===
+			2,
 	);
 	if (
 		document.querySelector<HTMLImageElement>('[data-spell-id="1"] img')?.src !==
@@ -319,7 +355,9 @@ export async function probeClientSpells(
 	);
 	emit("client-player-spells-updated", { spellIds: [1] });
 	await waitFor(
-		() => document.querySelectorAll("[data-spell-id] img").length === 1,
+		() =>
+			document.querySelectorAll("[data-spell-id] .spell-header img").length ===
+			1,
 	);
 	release();
 	await loadReferences([1600, 1601]);
@@ -369,7 +407,7 @@ export async function probeClientSpells(
 				.querySelector('[aria-label="Known spells"]')
 				?.textContent?.includes("No spells known.") === true,
 	);
-	button("Close Spells");
+	button("Close Character");
 	return {
 		largeList: ids.length,
 		searchDomUpdateP95Ms: p95,
@@ -383,6 +421,7 @@ export async function probeClientSpells(
 		filteringContentRequests,
 		searchAndTagIntersections: true,
 		inlineDetails: true,
+		tabStateRetained: true,
 		formulaComponents: true,
 		contextRefresh: true,
 		reopenedArtworkReused: true,

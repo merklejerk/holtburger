@@ -70,7 +70,6 @@ const clientHudLayoutSchema = z
 		spellBar: hudPlacementSchema,
 		combatBar: hudPlacementSchema,
 		chat: hudPlacementSchema,
-		spells: hudPlacementSchema,
 		nearby: hudPlacementSchema,
 		social: hudPlacementSchema,
 		journal: hudPlacementSchema,

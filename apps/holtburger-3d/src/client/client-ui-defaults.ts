@@ -104,12 +104,6 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 420, height: 460 },
 		minSize: { width: 320, height: 260 },
 	},
-	spells: {
-		anchor: "top-right",
-		offset: { x: 16, y: 260 },
-		size: { width: 350, height: 380 },
-		minSize: { width: 280, height: 220 },
-	},
 	enchantments: {
 		anchor: "center-right",
 		offset: { x: 16, y: 0 },

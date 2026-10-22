@@ -90,7 +90,6 @@
 	import type { ClientPartyState } from "./client-party-state";
 	import ClientNearbyPanel from "./ClientNearbyPanel.svelte";
 	import type { ClientNearby } from "./client-nearby";
-	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import ClientInventoryPanel from "./ClientInventoryPanel.svelte";
 	import {
@@ -526,16 +525,12 @@
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const displayPlatform = inputDisplayPlatform(navigator.userAgent);
-	/** Click-open is latched; keyboard-open owns a disposable physical-key lifetime. */
-	let emoteWheel = $state<
-		| null
-		| { readonly kind: "pointer" }
-		| { readonly kind: "held"; readonly release: () => void }
-	>(null);
+	/** The wheel owns a disposable physical-key lifetime while its activation key is held. */
+	let emoteWheel = $state<{ readonly release: () => void } | null>(null);
 	function closeEmotes(): void {
 		const activation = emoteWheel;
 		emoteWheel = null;
-		if (activation?.kind === "held") activation.release();
+		activation?.release();
 	}
 	onDestroy(closeEmotes);
 	$effect(() => {
@@ -547,17 +542,11 @@
 			closeEmotes();
 		});
 	});
-	function openEmotes(press: KeyboardEvent | null): void {
+	function openEmotes(press: KeyboardEvent): void {
 		if (!emotesEnabled || hudMode !== "runtime" || chatComposer.emotes === null)
 			return;
 		closeEmotes();
-		emoteWheel =
-			press === null
-				? { kind: "pointer" }
-				: {
-						kind: "held",
-						release: keyboard.bindKeyRelease(press, closeEmotes),
-					};
+		emoteWheel = { release: keyboard.bindKeyRelease(press, closeEmotes) };
 	}
 	function executeEmote(token: string): void {
 		void onSendChat(`*${token}*`, {
@@ -1403,10 +1392,6 @@
 		{displayPlatform}
 		{combatMode}
 		{combatEnabled}
-		emotesEnabled={emotesEnabled &&
-			hudMode === "runtime" &&
-			chatComposer.emotes !== null}
-		onOpenEmotes={() => openEmotes(null)}
 		{onToggleCombat}
 		{shortcuts}
 		{activePanel}
@@ -1499,6 +1484,32 @@
 				onRetry={onRetryBook}
 				onPlacementChange={(placement) => changeHudPlacement("book", placement)}
 			/>
+		{/key}
+	{/if}
+
+	{#if characterSheet !== null}
+		{#key characterSheet}
+			<ClientHudWindow
+				icon="training"
+				title="Character"
+				visible={activePanel === "characterSheet"}
+				placement={hudLayout.characterSheet}
+				minWidth={CLIENT_UI_DEFAULTS.characterSheet.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.characterSheet.minSize.height}
+				{viewport}
+				onClose={() => (activePanel = null)}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("characterSheet", placement)}
+			>
+				<ClientCharacterSheetPanel
+					owner={characterSheet}
+					visible={activePanel === "characterSheet"}
+					{spells}
+					{enchantments}
+					castEnabled={combatEnabled && combatMode === "magic"}
+					{onCastSpell}
+				/>
+			</ClientHudWindow>
 		{/key}
 	{/if}
 
@@ -1609,20 +1620,16 @@
 				</ClientHudWindow>
 			{/key}{/key}{/if}
 
-	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social" && activePanel !== "journal"}
+	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social" && activePanel !== "journal" && activePanel !== "characterSheet"}
 		{@const panel = activePanel}
 		{#key panel}
 			<ClientHudWindow
-				icon={panel === "characterSheet" ? "training" : panel}
+				icon={panel}
 				title={panel === "inventory"
 					? "Inventory"
-					: panel === "spells"
-						? "Spells"
-						: panel === "characterSheet"
-							? "Character"
-							: panel === "settings"
-								? "Settings"
-								: "Client diagnostics"}
+					: panel === "settings"
+						? "Settings"
+						: "Client diagnostics"}
 				placement={hudLayout[panel]}
 				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
 				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
@@ -1630,19 +1637,7 @@
 				onClose={() => (activePanel = null)}
 				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
 			>
-				{#if panel === "spells"}
-					{#if spells !== null}{#key spells}<ClientSpellsPanel
-								{spells}
-								castEnabled={combatEnabled && combatMode === "magic"}
-								{onCastSpell}
-							/>{/key}{/if}
-				{:else if panel === "characterSheet"}
-					{#if characterSheet !== null}<ClientCharacterSheetPanel
-							owner={characterSheet}
-							{spells}
-							{enchantments}
-						/>{/if}
-				{:else if panel === "inventory"}
+				{#if panel === "inventory"}
 					{#if inventory !== null && itemInteractions !== null}
 						{#key inventory}
 							<ClientInventoryPanel

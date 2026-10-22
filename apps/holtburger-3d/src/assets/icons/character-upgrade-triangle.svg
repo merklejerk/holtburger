@@ -1,0 +1,16 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 26 22"
+	preserveAspectRatio="none"
+	style="
+		display: block;
+		width: 100%;
+		height: 100%;
+		fill: inherit;
+		stroke: currentColor;
+		stroke-width: 1;
+		stroke-linejoin: round;
+	"
+>
+	<path d="M13 1 25 21H1Z" vector-effect="non-scaling-stroke" />
+</svg>

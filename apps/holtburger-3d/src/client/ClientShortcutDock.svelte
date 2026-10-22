@@ -5,7 +5,6 @@
 	export type ClientSystemPanel =
 		| "inventory"
 		| "debug"
-		| "spells"
 		| "settings"
 		| "characterSheet"
 		| "world"
@@ -18,7 +17,6 @@
 			? "characterSheet"
 			: icon === "inventory" ||
 				  icon === "debug" ||
-				  icon === "spells" ||
 				  icon === "settings" ||
 				  icon === "world" ||
 				  icon === "journal"
@@ -38,9 +36,7 @@
 		{ icon: "combat", label: "Combat stance" },
 		{ icon: "inventory", label: "Inventory" },
 		{ icon: "training", label: "Character" },
-		{ icon: "spells", label: "Spells" },
 		{ icon: "party", label: "Social" },
-		{ icon: "emotes", label: "Emotes" },
 		{ icon: "world", label: "World" },
 		{ icon: "journal", label: "Journal" },
 		{ icon: "settings", label: "Settings" },
@@ -85,9 +81,6 @@
 		readonly combatEnabled: boolean;
 		/** Execute the stance action without changing the open panel. */
 		readonly onToggleCombat: () => void;
-		/** Transient emote interaction, separate from retained system windows. */
-		readonly onOpenEmotes: () => void;
-		readonly emotesEnabled: boolean;
 		/** The same visible list used to determine the initial dock width. */
 		readonly shortcuts: readonly ClientShortcut[];
 		readonly activePanel: ClientSystemPanel | null;
@@ -107,8 +100,6 @@
 		combatMode,
 		combatEnabled,
 		onToggleCombat,
-		onOpenEmotes,
-		emotesEnabled,
 	}: Props = $props();
 	const trayPlacement = $derived.by(() => {
 		const defaults = createClientHudPanelPlacement(
@@ -132,13 +123,6 @@
 		presentClientBinding(
 			input,
 			{ kind: "client", action: "toggleCombat" },
-			displayPlatform,
-		),
-	);
-	const emoteShortcut = $derived(
-		presentClientBinding(
-			input,
-			{ kind: "client", action: "openEmotes" },
 			displayPlatform,
 		),
 	);
@@ -167,13 +151,11 @@
 				class="ui-hud-button"
 				title={combat
 					? `Combat stance: ${combatMode}. Toggle peace/combat (${combatShortcut.description})`
-					: shortcut.icon === "emotes"
-						? `Emotes (${emoteShortcut.description})`
-						: panel === null
-							? `${shortcut.label} (stub)`
-							: panel === "debug"
-								? "Client diagnostics"
-								: shortcut.label}
+					: panel === null
+						? `${shortcut.label} (stub)`
+						: panel === "debug"
+							? "Client diagnostics"
+							: shortcut.label}
 				aria-label={combat
 					? `${shortcut.label} (${combatShortcut.description})`
 					: shortcut.label}
@@ -182,11 +164,9 @@
 					: panel === null
 						? undefined
 						: activePanel === panel}
-				disabled={(combat && (!combatEnabled || combatMode === "unknown")) ||
-					(shortcut.icon === "emotes" && !emotesEnabled)}
+				disabled={combat && (!combatEnabled || combatMode === "unknown")}
 				onclick={() => {
-					if (shortcut.icon === "emotes") onOpenEmotes();
-					else if (combat) onToggleCombat();
+					if (combat) onToggleCombat();
 					else if (panel !== null) onToggle(panel);
 				}}
 			>

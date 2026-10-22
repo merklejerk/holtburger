@@ -223,7 +223,7 @@ export async function probeClientEmotes(client, evaluateExpression) {
 		await press("t", "KeyT", 84);
 		assert.equal(await open(), false, "Editor owns activation keys");
 		await press("Escape", "Escape", 27);
-		await click('.shortcut-dock button[aria-label="Emotes"]');
+		await holdWheel();
 		assert.equal(await open(), true);
 		assert.equal((await read()).inputAllowed, false);
 		assert.equal(

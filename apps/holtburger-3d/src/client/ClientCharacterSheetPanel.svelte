@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { onMount, untrack } from "svelte";
+	import { untrack } from "svelte";
+	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
+	import UiTabs from "../app/UiTabs.svelte";
+	import UiTabPanel from "../app/UiTabPanel.svelte";
+	import UpgradeTriangle from "../assets/icons/character-upgrade-triangle.svg?component";
 	import { formatQuantity, progressPercent } from "../app/quantity-format";
 	import {
 		progressionIntentKey,
@@ -17,10 +21,48 @@
 
 	interface Props {
 		readonly owner: ClientCharacterSheetState;
+		/** Retained window visibility pauses hidden display polling. */
+		readonly visible: boolean;
+		/** Confirmed magic stance permits the spellbook's existing cast action. */
+		readonly castEnabled: boolean;
+		/** Submit a cast through the app's existing command owner. */
+		readonly onCastSpell: (spellId: number) => void;
 		readonly spells: ClientSpellServices | null;
 		readonly enchantments: ClientTimedEnchantments | null;
 	}
-	const { owner, spells, enchantments }: Props = $props();
+	const {
+		owner,
+		spells,
+		enchantments,
+		visible,
+		castEnabled,
+		onCastSpell,
+	}: Props = $props();
+	const panelId = $props.id();
+	/** App-local tab selection retains each panel's scroll and disclosure state. */
+	let activeTab = $state<"progression" | "defenses" | "spells">("progression");
+	/** Mount the resource-owning spellbook on its first selection and retain its local state. */
+	let spellbookOpened = $state(false);
+	const tabs = [
+		{
+			value: "progression",
+			label: "Progression",
+			id: `${panelId}-progression-tab`,
+			panelId: `${panelId}-progression`,
+		},
+		{
+			value: "defenses",
+			label: "Defenses",
+			id: `${panelId}-defenses-tab`,
+			panelId: `${panelId}-defenses`,
+		},
+		{
+			value: "spells",
+			label: "Spells",
+			id: `${panelId}-spells-tab`,
+			panelId: `${panelId}-spells`,
+		},
+	] as const;
 	type EffectStat =
 		| { readonly kind: "floatProperty"; readonly key: number }
 		| { readonly kind: "armor" | "vitae" };
@@ -52,14 +94,20 @@
 	// Only purchase-control hover and keyboard focus drive the shared cost readout.
 	let hoveredAction = $state<string | null>(null);
 	let focusedAction = $state<string | null>(null);
-	onMount(() => {
-		const timer = window.setInterval(() => {
-			const next = owner.read();
+	$effect(() => {
+		if (!visible) return;
+		const source = owner;
+		const refresh = () => {
+			const next = source.read();
 			if (next.revision !== display.revision) display = next;
-		}, CLIENT_TUNING.characterSheet.displayIntervalMs);
-		return () => {
-			window.clearInterval(timer);
 		};
+		// The comparison reads display; snapshots must not own this timer's lifetime.
+		untrack(refresh);
+		const timer = window.setInterval(
+			refresh,
+			CLIENT_TUNING.characterSheet.displayIntervalMs,
+		);
+		return () => window.clearInterval(timer);
 	});
 
 	const sheet = $derived(display.sheet);
@@ -195,7 +243,6 @@
 		label: string,
 	): {
 		readonly key: string;
-		readonly raisesRanks: boolean;
 		readonly label: string;
 		readonly cost: string;
 		readonly disabled: boolean;
@@ -236,7 +283,6 @@
 			"RaiseMax" in intent ? `Raise maximum (${actionLabel})` : actionLabel;
 		return {
 			key: progressionIntentKey(intent),
-			raisesRanks: !("Train" in intent),
 			label: actionLabel,
 			cost,
 			disabled: pending || quote === null,
@@ -253,10 +299,10 @@
 		};
 	}
 	function raiseActions(target: StatTarget) {
-		const fixed = [
-			action({ Raise: { target, ranks: 1 } }, target, "+1"),
-			action({ Raise: { target, ranks: 10 } }, target, "+10"),
-		].filter((button) => !button.disabled);
+		const single = action({ Raise: { target, ranks: 1 } }, target, "+1");
+		const ten = action({ Raise: { target, ranks: 10 } }, target, "+10");
+		// Keep the next-rank cost visible even when the player cannot afford it.
+		const fixed = ten.disabled ? [single] : [single, ten];
 		const max = action({ RaiseMax: { target } }, target, "+MAX");
 		// A maximum purchase needs its own control only when its quoted gain is distinct.
 		return max.disabled || fixed.some((button) => button.label === max.label)
@@ -358,13 +404,12 @@
 	statName: string,
 	buttons: ReturnType<typeof raiseActions>,
 )}
-	{#if buttons.length > 0 && buttons.every((button) => button.disabled && button.reason === buttons[0].reason)}
+	{#if buttons.length > 0 && buttons.every((button) => button.disabled && button.cost === "" && button.reason === buttons[0].reason)}
 		<span class="action-status">{buttons[0].reason}</span>
 	{:else if buttons.length > 0}
 		{@const selected =
 			buttons.find((button) => button.key === hoveredAction) ??
 			buttons.find((button) => button.key === focusedAction) ??
-			buttons.find((button) => !button.disabled) ??
 			buttons[0]}
 		<span class="actions">
 			{#each buttons as button}
@@ -380,10 +425,9 @@
 					onblur={() => (focusedAction = null)}
 					onclick={button.purchase}
 				>
-					{#if button.raisesRanks}<span
-							class="action-triangle"
-							aria-hidden="true">▲</span
-						>{/if}
+					<span class="action-shape" aria-hidden="true"
+						><UpgradeTriangle /></span
+					>
 					<span class="action-label">{button.label}</span>
 				</button>
 			{/each}
@@ -452,252 +496,334 @@
 	{/each}
 {/snippet}
 
-<section class="character-sheet ui-body" aria-label="Character sheet">
-	{#if sheet === null}
-		<p role="status">{display.feedback ?? "Waiting for character details…"}</p>
-	{:else}
-		<header class="progression-summary">
-			<div class="character-identity">
-				<div class="level-emblem" aria-label={`Level ${sheet.level.level}`}>
-					<small>Level</small><strong>{sheet.level.level}</strong>
-				</div>
-				<div class="identity-text">
-					<strong class="character-name">{sheet.name ?? "Character"}</strong
-					>{#if titleSelection === null && sheet.title}<span
-							class="character-title">{sheet.title}</span
-						>{/if}
-					<label
-						>Title
-						<select
-							class="ui-input"
-							aria-label="Character title"
-							value={titleSelection?.selectedId ?? 0}
-							disabled={titleSelection === null || titleEntries.length === 0}
-							onchange={(event) =>
-								void owner.selectTitle(Number(event.currentTarget.value))}
+<section
+	class="character-sheet ui-body ui-tabbed-panel"
+	aria-label="Character sheet"
+>
+	<UiTabs
+		label="Character sheet tabs"
+		{tabs}
+		selected={activeTab}
+		onSelect={(value) => {
+			activeTab = value;
+			if (value === "spells") spellbookOpened = true;
+		}}
+	/>
+	<UiTabPanel
+		id={`${panelId}-progression`}
+		labelledBy={`${panelId}-progression-tab`}
+		active={activeTab === "progression"}
+		scroll={false}
+	>
+		<div class="progression-page">
+			<div class="progression-scroll">
+				{#if sheet === null}
+					<p role="status">
+						{display.feedback ?? "Waiting for character details…"}
+					</p>
+				{:else}
+					<header class="progression-summary">
+						<div class="character-identity">
+							<div
+								class="level-emblem"
+								aria-label={`Level ${sheet.level.level}`}
+							>
+								<small>Level</small><strong>{sheet.level.level}</strong>
+							</div>
+							<div class="identity-text">
+								<strong class="character-name"
+									>{sheet.name ?? "Character"}</strong
+								>{#if titleSelection === null && sheet.title}<span
+										class="character-title">{sheet.title}</span
+									>{/if}
+								<label
+									>Title
+									<select
+										class="ui-input"
+										aria-label="Character title"
+										value={titleSelection?.selectedId ?? 0}
+										disabled={titleSelection === null ||
+											titleEntries.length === 0}
+										onchange={(event) =>
+											void owner.selectTitle(Number(event.currentTarget.value))}
+									>
+										{#if titleSelection === null}
+											<option value={0} disabled>Loading titles…</option>
+										{:else if !selectedTitleListed}
+											<option value={titleSelection.selectedId} disabled>
+												{titleEntries.length === 0
+													? "No earned titles"
+													: titleSelection.selectedId === 0
+														? "No title selected"
+														: `Current title (ID ${titleSelection.selectedId})`}
+											</option>
+										{/if}
+										{#each titleEntries as entry (entry.id)}
+											<option value={entry.id}>{titleLabel(entry)}</option>
+										{/each}
+									</select>
+								</label>
+							</div>
+						</div>
+						{#if BigInt(sheet.level.xpForNextLevel) > 0n}
+							<div class="progress-track">
+								<div class="track-label">
+									<span>Level {sheet.level.level + 1}</span><span
+										>{xp(sheet.level.xpIntoLevel)} / {xp(
+											sheet.level.xpForNextLevel,
+										)} XP</span
+									>
+								</div>
+								<progress
+									class="ui-progress"
+									aria-label="Level experience"
+									max="100"
+									value={progressPercent(
+										BigInt(sheet.level.xpIntoLevel),
+										BigInt(sheet.level.xpForNextLevel),
+									)}
+								></progress>
+							</div>
+						{/if}
+
+						<!-- Retail reveals luminance at level 200 with nonzero capacity (acclient.c:275180). -->
+						{#if sheet.level.level >= 200 && sheet.maximumLuminance !== null && BigInt(sheet.maximumLuminance) > 0n}
+							<div class="progress-track luminance-track">
+								<div class="track-label">
+									<span>Luminance</span><span
+										>{xp(sheet.level.availableLuminance)} / {xp(
+											sheet.maximumLuminance,
+										)}</span
+									>
+								</div>
+								<progress
+									class="ui-progress"
+									aria-label="Luminance capacity"
+									title="Available luminance versus storage capacity"
+									max="100"
+									value={progressPercent(
+										BigInt(sheet.level.availableLuminance),
+										BigInt(sheet.maximumLuminance),
+									)}
+								></progress>
+							</div>
+						{/if}
+					</header>
+					{#if display.feedback !== null}<p role="status" class="feedback">
+							{display.feedback}
+						</p>{/if}
+					{#if spellLoadError !== null}<p role="status" class="feedback">
+							{spellLoadError}
+						</p>{/if}
+					<h2>Attributes</h2>
+					{#each sheet.attributes as stat (stat.attr_type)}
+						{@const target = { Attribute: stat.attr_type } as const}
+						{@const actions = raiseActions(target)}
+						{@const details = detailLines(stat)}
+						<details
+							class="stat-row"
+							name="character-stat"
+							ontoggle={(event) => {
+								if (event.currentTarget.open) void resolveSpells(stat);
+							}}
 						>
-							{#if titleSelection === null}
-								<option value={0} disabled>Loading titles…</option>
-							{:else if !selectedTitleListed}
-								<option value={titleSelection.selectedId} disabled>
-									{titleEntries.length === 0
-										? "No earned titles"
-										: titleSelection.selectedId === 0
-											? "No title selected"
-											: `Current title (ID ${titleSelection.selectedId})`}
-								</option>
+							<summary>
+								<span
+									>{name(stat.attr_type)}{@render progressionHint(
+										stat,
+										actions,
+									)}</span
+								>
+								{@render statValue(stat.base, stat.current)}
+							</summary>
+							{@render actionButtons(name(stat.attr_type), actions)}
+							{#if details.length > 0}
+								<ul>
+									{#each details as line}<li>{line}</li>{/each}
+								</ul>
 							{/if}
-							{#each titleEntries as entry (entry.id)}
-								<option value={entry.id}>{titleLabel(entry)}</option>
-							{/each}
-						</select>
-					</label>
-				</div>
+						</details>
+					{/each}
+					<h2>Vitals</h2>
+					{#each sheet.vitals as stat (stat.vital_type)}
+						{@const target = { Vital: stat.vital_type } as const}
+						{@const actions = raiseActions(target)}
+						{@const details = detailLines(stat)}
+						<details
+							class="stat-row"
+							name="character-stat"
+							ontoggle={(event) => {
+								if (event.currentTarget.open) void resolveSpells(stat);
+							}}
+						>
+							<summary>
+								<span
+									>Max {name(stat.vital_type)}{@render progressionHint(
+										stat,
+										actions,
+									)}</span
+								>
+								{@render statValue(stat.base, stat.buffed_max)}
+							</summary>
+							{@render actionButtons(`Max ${name(stat.vital_type)}`, actions)}
+							{#if details.length > 0}
+								<ul>
+									{#each details as line}<li>{line}</li>{/each}
+								</ul>
+							{/if}
+						</details>
+					{/each}
+					{#if specializedSkills.length > 0}
+						<h2>Specialized</h2>
+						{@render skillRows(specializedSkills)}
+					{/if}
+					{#if trainedSkills.length > 0}
+						<h2>Trained</h2>
+						{@render skillRows(trainedSkills)}
+					{/if}
+					{#if untrainedSkills.length > 0}
+						<details class="skill-group">
+							<summary
+								><h2>
+									Untrained <small>({untrainedSkills.length})</small>
+								</h2></summary
+							>
+							{@render skillRows(untrainedSkills)}
+						</details>
+					{/if}
+				{/if}
 			</div>
-			{#if BigInt(sheet.level.xpForNextLevel) > 0n}
-				<div class="progress-track">
-					<div class="track-label">
-						<span>Level {sheet.level.level + 1}</span><span
-							>{xp(sheet.level.xpIntoLevel)} / {xp(sheet.level.xpForNextLevel)} XP</span
+			{#if sheet !== null}
+				<footer class="progression-balances">
+					<div>
+						<small>Available XP</small><strong
+							>{xp(sheet.level.unspentXp)}</strong
 						>
 					</div>
-					<progress
-						class="ui-progress"
-						aria-label="Level experience"
-						max="100"
-						value={progressPercent(
-							BigInt(sheet.level.xpIntoLevel),
-							BigInt(sheet.level.xpForNextLevel),
-						)}
-					></progress>
-				</div>
-			{/if}
-			<div class="progression-balances">
-				<div>
-					<small>Available XP</small><strong>{xp(sheet.level.unspentXp)}</strong
-					>
-				</div>
-				<div>
-					<small>Skill credits</small><strong
-						>{sheet.level.unspentSkillPoints}</strong
-					>
-				</div>
-			</div>
-			<!-- Retail reveals luminance at level 200 with nonzero capacity (acclient.c:275180). -->
-			{#if sheet.level.level >= 200 && sheet.maximumLuminance !== null && BigInt(sheet.maximumLuminance) > 0n}
-				<div class="progress-track luminance-track">
-					<div class="track-label">
-						<span>Luminance</span><span
-							>{xp(sheet.level.availableLuminance)} / {xp(
-								sheet.maximumLuminance,
-							)}</span
+					<div>
+						<small>Skill credits</small><strong
+							>{sheet.level.unspentSkillPoints}</strong
 						>
 					</div>
-					<progress
-						class="ui-progress"
-						aria-label="Luminance capacity"
-						title="Available luminance versus storage capacity"
-						max="100"
-						value={progressPercent(
-							BigInt(sheet.level.availableLuminance),
-							BigInt(sheet.maximumLuminance),
-						)}
-					></progress>
-				</div>
+				</footer>
 			{/if}
-		</header>
-		{#if display.feedback !== null}<p role="status" class="feedback">
-				{display.feedback}
-			</p>{/if}
-		{#if spellLoadError !== null}<p role="status" class="feedback">
-				{spellLoadError}
-			</p>{/if}
-		<h2>Attributes</h2>
-		{#each sheet.attributes as stat (stat.attr_type)}
-			{@const target = { Attribute: stat.attr_type } as const}
-			{@const actions = raiseActions(target)}
-			{@const details = detailLines(stat)}
+		</div>
+	</UiTabPanel>
+	<UiTabPanel
+		id={`${panelId}-defenses`}
+		labelledBy={`${panelId}-defenses-tab`}
+		active={activeTab === "defenses"}
+	>
+		{#if sheet === null}
+			<p role="status">
+				{display.feedback ?? "Waiting for character details…"}
+			</p>
+		{:else}
+			{#if spellLoadError !== null}<p role="status" class="feedback">
+					{spellLoadError}
+				</p>{/if}
+			<h2>Defenses</h2>
 			<details
 				class="stat-row"
-				name="character-stat"
-				ontoggle={(event) => {
-					if (event.currentTarget.open) void resolveSpells(stat);
-				}}
-			>
-				<summary>
-					<span
-						>{name(stat.attr_type)}{@render progressionHint(
-							stat,
-							actions,
-						)}</span
-					>
-					{@render statValue(stat.base, stat.current)}
-				</summary>
-				{@render actionButtons(name(stat.attr_type), actions)}
-				{#if details.length > 0}
-					<ul>
-						{#each details as line}<li>{line}</li>{/each}
-					</ul>
-				{/if}
-			</details>
-		{/each}
-		<h2>Vitals</h2>
-		{#each sheet.vitals as stat (stat.vital_type)}
-			{@const target = { Vital: stat.vital_type } as const}
-			{@const actions = raiseActions(target)}
-			{@const details = detailLines(stat)}
-			<details
-				class="stat-row"
-				name="character-stat"
-				ontoggle={(event) => {
-					if (event.currentTarget.open) void resolveSpells(stat);
-				}}
-			>
-				<summary>
-					<span
-						>Max {name(stat.vital_type)}{@render progressionHint(
-							stat,
-							actions,
-						)}</span
-					>
-					{@render statValue(stat.base, stat.buffed_max)}
-				</summary>
-				{@render actionButtons(`Max ${name(stat.vital_type)}`, actions)}
-				{#if details.length > 0}
-					<ul>
-						{#each details as line}<li>{line}</li>{/each}
-					</ul>
-				{/if}
-			</details>
-		{/each}
-		{#if specializedSkills.length > 0}
-			<h2>Specialized</h2>
-			{@render skillRows(specializedSkills)}
-		{/if}
-		{#if trainedSkills.length > 0}
-			<h2>Trained</h2>
-			{@render skillRows(trainedSkills)}
-		{/if}
-		{#if untrainedSkills.length > 0}
-			<details class="skill-group">
-				<summary
-					><h2>Untrained <small>({untrainedSkills.length})</small></h2></summary
-				>
-				{@render skillRows(untrainedSkills)}
-			</details>
-		{/if}
-		<h2>Defenses</h2>
-		<details
-			class="stat-row"
-			name="character-stat"
-			ontoggle={(event) => {
-				if (event.currentTarget.open)
-					void resolveEffectSpells({ kind: "armor" });
-			}}
-		>
-			<summary><span>Armor</span><strong>{sheet.armor}</strong></summary>
-			<ul>
-				{#each defenseEffectLines({ kind: "armor" }) as line}<li>
-						{line}
-					</li>{/each}
-			</ul>
-		</details>
-		{#each RESISTANCE_ROWS as resistance (resistance.key)}
-			{@const resistancePercent = Math.round(
-				(1 - sheet.resistances[resistance.field]) * 100,
-			)}
-			<details
-				class="stat-row"
-				name="character-stat"
+				name="character-defense"
 				ontoggle={(event) => {
 					if (event.currentTarget.open)
-						void resolveEffectSpells({
-							kind: "floatProperty",
-							key: resistance.key,
-						});
+						void resolveEffectSpells({ kind: "armor" });
 				}}
 			>
-				<summary
-					><span>{resistance.label}</span><strong
-						title="Damage reduction from this resistance. Negative values indicate vulnerability. Excludes armor and other damage modifiers; some attacks can bypass resistance."
-						>{resistancePercent}%</strong
-					></summary
-				>
+				<summary><span>Armor</span><strong>{sheet.armor}</strong></summary>
 				<ul>
-					{#each defenseEffectLines( { kind: "floatProperty", key: resistance.key } ) as line}<li
-						>
+					{#each defenseEffectLines({ kind: "armor" }) as line}<li>
 							{line}
 						</li>{/each}
 				</ul>
 			</details>
-		{/each}
-		{@const vitaePenaltyPercent = Math.round((1 - sheet.vitae) * 100)}
-		{#if vitaePenaltyPercent !== 0}<details
-				class="stat-row"
-				name="character-stat"
-				ontoggle={(event) => {
-					if (event.currentTarget.open)
-						void resolveEffectSpells({ kind: "vitae" });
-				}}
-			>
-				<summary
-					><span>Vitae penalty</span><strong>{vitaePenaltyPercent}%</strong
-					></summary
+			{#each RESISTANCE_ROWS as resistance (resistance.key)}
+				{@const resistancePercent = Math.round(
+					(1 - sheet.resistances[resistance.field]) * 100,
+				)}
+				<details
+					class="stat-row"
+					name="character-defense"
+					ontoggle={(event) => {
+						if (event.currentTarget.open)
+							void resolveEffectSpells({
+								kind: "floatProperty",
+								key: resistance.key,
+							});
+					}}
 				>
-				<ul>
-					{#each defenseEffectLines({ kind: "vitae" }) as line}<li>
-							{line}
-						</li>{/each}
-				</ul>
-			</details>{/if}
-	{/if}
+					<summary
+						><span>{resistance.label}</span><strong
+							title="Damage reduction from this resistance. Negative values indicate vulnerability. Excludes armor and other damage modifiers; some attacks can bypass resistance."
+							>{resistancePercent}%</strong
+						></summary
+					>
+					<ul>
+						{#each defenseEffectLines( { kind: "floatProperty", key: resistance.key } ) as line}<li
+							>
+								{line}
+							</li>{/each}
+					</ul>
+				</details>
+			{/each}
+			{@const vitaePenaltyPercent = Math.round((1 - sheet.vitae) * 100)}
+			{#if vitaePenaltyPercent !== 0}<details
+					class="stat-row"
+					name="character-defense"
+					ontoggle={(event) => {
+						if (event.currentTarget.open)
+							void resolveEffectSpells({ kind: "vitae" });
+					}}
+				>
+					<summary
+						><span>Vitae penalty</span><strong>{vitaePenaltyPercent}%</strong
+						></summary
+					>
+					<ul>
+						{#each defenseEffectLines({ kind: "vitae" }) as line}<li>
+								{line}
+							</li>{/each}
+					</ul>
+				</details>{/if}
+		{/if}
+	</UiTabPanel>
+	<UiTabPanel
+		id={`${panelId}-spells`}
+		labelledBy={`${panelId}-spells-tab`}
+		active={activeTab === "spells"}
+		scroll={false}
+	>
+		{#if spellbookOpened}
+			{#if spells !== null}
+				{#key spells}
+					<ClientSpellsPanel
+						{spells}
+						visible={visible && activeTab === "spells"}
+						{castEnabled}
+						{onCastSpell}
+					/>
+				{/key}
+			{:else}
+				<p role="status">Waiting for spellbook…</p>
+			{/if}
+		{/if}
+	</UiTabPanel>
 </section>
 
 <style>
 	.character-sheet {
+		overflow: hidden;
+	}
+	.progression-page {
+		display: grid;
+		grid-template-rows: minmax(0, 1fr) auto;
 		height: 100%;
+		min-height: 0;
+	}
+	.progression-scroll {
+		min-height: 0;
 		overflow: auto;
-		padding: 0.75rem;
 	}
 	.progression-summary {
 		display: grid;
@@ -740,8 +866,19 @@
 	}
 	.identity-text {
 		display: grid;
+		flex: 1;
 		gap: 0.2rem;
 		min-width: 0;
+	}
+	.identity-text label {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.identity-text select {
+		min-width: 0;
+		width: 100%;
 	}
 	.character-name {
 		font-size: 1.3rem;
@@ -770,6 +907,8 @@
 		color: var(--ui-character-luminance-color, var(--ui-color-success));
 	}
 	.progression-balances {
+		padding-top: 0.6rem;
+		border-top: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 0.6rem;
@@ -883,37 +1022,52 @@
 		opacity: 0.7;
 	}
 	.actions button {
-		display: flex;
-		min-width: 0;
+		position: relative;
 		flex-shrink: 0;
-		align-items: center;
-		gap: 0.2rem;
-		padding: 0.2rem 0.3rem;
-		border: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
-		border-radius: 0.2rem;
-		background: color-mix(in srgb, var(--ui-color-text) 8%, transparent);
+		min-width: 1.6rem;
+		height: 1.35rem;
+		padding: 0.15rem 0.2rem 0;
+		border: 0;
+		background: transparent;
 		color: inherit;
 		font: inherit;
 		font-size: 0.75rem;
-		text-align: left;
+		white-space: nowrap;
 		cursor: pointer;
 	}
-	.actions button:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--ui-color-text) 16%, transparent);
+	.action-shape {
+		position: absolute;
+		top: 0;
+		left: 50%;
+		width: 1.6rem;
+		height: 100%;
+		transform: translateX(-50%);
+		color: var(--ui-panel-border-color, var(--ui-color-border));
+		fill: none;
 	}
-	.actions button.active:not(:disabled) {
-		border-color: var(--ui-character-upgrade-color, var(--ui-color-success));
-	}
-	.action-triangle {
+	.actions button.active:not(:disabled) .action-shape {
 		color: var(--ui-character-upgrade-color, var(--ui-color-success));
-		font-size: 0.65rem;
+	}
+	.actions button:hover:not(:disabled) .action-shape {
+		fill: color-mix(in srgb, currentColor 65%, transparent);
 	}
 	.actions button:focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: 1px;
 	}
 	.action-label {
+		position: relative;
+		isolation: isolate;
 		font-weight: 600;
+	}
+	/* Blur the black backing without blurring the label or clipping its overhang. */
+	.action-label::before {
+		content: "";
+		position: absolute;
+		inset: -1px -2px;
+		z-index: -1;
+		background: rgb(0 0 0 / 40%);
+		filter: blur(2px);
 	}
 	.action-cost {
 		min-width: 0;

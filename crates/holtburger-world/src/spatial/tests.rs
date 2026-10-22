@@ -348,12 +348,6 @@ fn spatial_scene_transaction_commits_only_after_acceptance() {
                     None,
                 )
                 .expect("test sphere should be valid"),
-                FreeSphereConfig {
-                    maximum_substep_distance: 0.25,
-                    maximum_substeps: 32,
-                    maximum_contact_passes: 8,
-                    separation_epsilon: 0.0005,
-                },
             )
             .expect("test physical definition should be valid"),
             PhysicalCollisionFilter::ALL,

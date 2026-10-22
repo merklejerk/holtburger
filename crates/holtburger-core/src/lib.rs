@@ -140,9 +140,9 @@ pub use kinematic_boom::{
     standard_kinematic_boom_profile, stationary_kinematic_boom_path,
 };
 pub use physical_body_definition::{
-    FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,
-    SetupPhysicalShapeError, physical_fly_viewer_profile, resolve_setup_physical_spheres,
-    retail_grounded_body, retail_grounded_body_with_policy, retail_player_grounded_profile,
+    RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile, SetupPhysicalShapeError,
+    physical_fly_viewer_profile, resolve_setup_physical_spheres, retail_grounded_body,
+    retail_grounded_body_with_policy, retail_player_grounded_profile,
 };
 pub use simulation_scene::{
     SimulationSceneBatchCompletion, SimulationSceneInterest, SimulationSceneOwnerAvailability,

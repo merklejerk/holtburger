@@ -9,6 +9,9 @@
 //! - Delete a harness once its investigation concludes. Its findings belong in the plan or doc it
 //!   informed; the tool that produced them is not evidence and does not need to survive.
 
+pub mod movement_probe;
+pub mod retail_step_reference;
+
 pub mod prelude {
     pub use anyhow::Result;
     pub use holtburger_core;

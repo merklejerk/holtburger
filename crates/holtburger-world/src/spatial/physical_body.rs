@@ -13,9 +13,9 @@ use crate::{EffectiveEntityPhysicsState, LocalIntegrationDemand, LocalPhysicalDe
 use super::{
     CellTransitRequest, CollisionQueryError, CollisionReportOutcome, CollisionScene, ContactState,
     DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
-    DynamicPhysicalBodyDefinition, FreeSphereConfig, GroundState, GroundedBodySpheres,
-    GroundedConfig, GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest,
-    SpatialBody, SpatialMembership,
+    DynamicPhysicalBodyDefinition, GroundState, GroundedBodySpheres, GroundedConfig,
+    GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest, SpatialBody,
+    SpatialMembership,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
@@ -854,14 +854,12 @@ pub enum PhysicalBodyDefinition {
     FreeSphere {
         /// Validated body-local collision sphere.
         sphere: GroundedSphere,
-        /// Finite solver budgets and separation policy.
-        config: FreeSphereConfig,
     },
     /// Gravity, support, steps, and edge response over an asymmetric sphere set.
     Grounded {
         /// Required support sphere and optional upper constraint.
         spheres: GroundedBodySpheres,
-        /// Grounded response and finite solver policy.
+        /// Authored grounded response policy.
         config: GroundedConfig,
     },
 }
@@ -875,14 +873,9 @@ impl PhysicalBodyDefinition {
     }
 
     /// Combines a validated single-sphere shape with free three-dimensional response.
-    pub fn free_sphere(
-        spheres: PhysicalSphereSet,
-        config: FreeSphereConfig,
-    ) -> Result<Self, PhysicalBodyDefinitionError> {
-        validate_physical_fly_config(config)?;
+    pub fn free_sphere(spheres: PhysicalSphereSet) -> Result<Self, PhysicalBodyDefinitionError> {
         Ok(Self::FreeSphere {
             sphere: spheres.require_single()?,
-            config,
         })
     }
 
@@ -933,7 +926,7 @@ impl PhysicalBodyDefinition {
         };
         match self {
             Self::FixedPosition { .. } => Ok(self),
-            Self::FreeSphere { config, .. } => Self::free_sphere(scaled_spheres()?, config),
+            Self::FreeSphere { .. } => Self::free_sphere(scaled_spheres()?),
             Self::Grounded { config, .. } => Self::grounded(scaled_spheres()?, config),
         }
     }
@@ -1419,21 +1412,6 @@ pub(super) fn resolve_body_facing(
     heading.map_or(current, Quaternion::from_heading)
 }
 
-fn validate_physical_fly_config(
-    config: FreeSphereConfig,
-) -> std::result::Result<(), PhysicalBodyDefinitionError> {
-    if !config.maximum_substep_distance.is_finite()
-        || config.maximum_substep_distance <= 0.0
-        || config.maximum_substeps == 0
-        || config.maximum_contact_passes == 0
-        || !config.separation_epsilon.is_finite()
-        || config.separation_epsilon < 0.0
-    {
-        return Err(PhysicalBodyDefinitionError::InvalidResponseConfig);
-    }
-    Ok(())
-}
-
 fn validate_grounded_config(
     config: GroundedConfig,
 ) -> std::result::Result<(), PhysicalBodyDefinitionError> {
@@ -1444,12 +1422,8 @@ fn validate_grounded_config(
         || config.step_up_height < 0.0
         || !config.step_down_height.is_finite()
         || config.step_down_height < 0.0
-        || !config.maximum_substep_distance.is_finite()
-        || config.maximum_substep_distance <= 0.0
-        || config.maximum_substeps == 0
-        || config.maximum_contact_passes == 0
-        || !config.separation_epsilon.is_finite()
-        || config.separation_epsilon < 0.0
+        || !config.minimum_stair_rise.is_finite()
+        || config.minimum_stair_rise < 0.0
     {
         return Err(PhysicalBodyDefinitionError::InvalidResponseConfig);
     }
@@ -1572,17 +1546,11 @@ mod restitution_retail_differential;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EdgeProtection, FreeSphereConfig, GroundedConfig, RETAIL_WALKABLE_NORMAL_Z};
+    use crate::{EdgeProtection, GroundedConfig, RETAIL_WALKABLE_NORMAL_Z};
     use holtburger_content::{
         LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface,
     };
 
-    const FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
-        maximum_substep_distance: 0.25,
-        maximum_substeps: 8,
-        maximum_contact_passes: 4,
-        separation_epsilon: 0.001,
-    };
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
@@ -1591,10 +1559,7 @@ mod tests {
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,
-        maximum_substep_distance: 0.25,
-        maximum_substeps: 8,
-        maximum_contact_passes: 4,
-        separation_epsilon: 0.001,
+        minimum_stair_rise: 0.001,
     };
 
     fn sphere(z: f32, radius: f32) -> Sphere {
@@ -1620,13 +1585,12 @@ mod tests {
     fn definitions_preserve_parameterized_geometry_and_response_roles() {
         let single = PhysicalSphereSet::new(sphere(0.2, 0.3), None).unwrap();
         assert_eq!(
-            PhysicalBodyDefinition::free_sphere(single, FLY_CONFIG).unwrap(),
+            PhysicalBodyDefinition::free_sphere(single).unwrap(),
             PhysicalBodyDefinition::FreeSphere {
                 sphere: GroundedSphere {
                     center: Vector3::new(0.0, 0.0, 0.2),
                     radius: 0.3,
                 },
-                config: FLY_CONFIG,
             }
         );
 
@@ -1660,7 +1624,6 @@ mod tests {
         let scene = empty_collision(Guid(0x0101_FFFF));
         let definition = PhysicalBodyDefinition::free_sphere(
             PhysicalSphereSet::new(sphere(0.0, 0.3), None).unwrap(),
-            FLY_CONFIG,
         )
         .unwrap();
         let mut body = SpatialBody::new(
@@ -1738,7 +1701,7 @@ mod tests {
         );
         let pair = PhysicalSphereSet::new(sphere(0.4, 0.5), Some(sphere(1.2, 0.6))).unwrap();
         assert_eq!(
-            PhysicalBodyDefinition::free_sphere(pair, FLY_CONFIG),
+            PhysicalBodyDefinition::free_sphere(pair),
             Err(PhysicalBodyDefinitionError::FreeSphereHasUpperConstraint)
         );
     }

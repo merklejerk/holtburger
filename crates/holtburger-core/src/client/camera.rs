@@ -1264,8 +1264,8 @@ mod tests {
         LandblockCollisionAsset, LandblockPlacement, TerrainCollisionSurface,
     };
     use holtburger_world::{
-        CollisionScene, FreeSphereConfig, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
-        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        CollisionScene, PhysicalBodyResponsePolicy, PhysicalCollisionFilter, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
     };
 
     #[test]
@@ -1692,12 +1692,6 @@ mod tests {
                 None,
             )
             .expect("test sphere should be valid"),
-            FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
-            },
         )
         .expect("test physical definition should be valid");
         client
@@ -1812,12 +1806,6 @@ mod tests {
                 None,
             )
             .unwrap(),
-            FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
-            },
         )
         .unwrap();
         client

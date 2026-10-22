@@ -377,12 +377,6 @@ mod tests {
                     None,
                 )
                 .unwrap(),
-                super::super::FreeSphereConfig {
-                    maximum_substep_distance: 0.25,
-                    maximum_substeps: 8,
-                    maximum_contact_passes: 4,
-                    separation_epsilon: 0.001,
-                },
             )
             .unwrap(),
             response_policy: PhysicalBodyResponsePolicy {

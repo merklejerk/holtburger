@@ -12,7 +12,7 @@ mod differential_fixtures;
 mod dynamic_body;
 mod dynamic_index;
 mod free_sphere;
-mod grounded;
+mod grounded_types;
 mod mobile_contact;
 #[cfg(test)]
 mod motion_update_retail_differential;
@@ -93,15 +93,14 @@ pub use dynamic_body::{
 };
 pub use dynamic_index::{EntityCollisionProof, EntityCollisionSnapshot};
 pub use free_sphere::{
-    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
     FreeSphereSettleConfig, FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere,
-    settle_free_sphere_with_policy, solve_free_sphere,
+    settle_free_sphere_with_policy,
 };
-pub use grounded::{
-    EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
-    GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
-    RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
-    SettlePermission, solve_grounded,
+
+pub use grounded_types::{
+    EdgeProtection, GroundState, GroundSupport, GroundedBodySpheres, GroundedConfig,
+    GroundedSphere, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
+    RETAIL_WALKABLE_NORMAL_Z,
 };
 pub(crate) use physical_body::DynamicBodyActivity;
 pub use physical_body::{
@@ -115,3 +114,13 @@ pub use physical_body::{
     PhysicalSphereSet, PhysicalSurfaceMotion, physical_body_scene_residency,
     resolve_physical_body_cell,
 };
+
+#[cfg(test)]
+#[path = "spatial/grounded_landing_retail_differential.rs"]
+mod grounded_landing_retail_differential;
+#[cfg(test)]
+#[path = "spatial/grounded_movement_tests.rs"]
+mod grounded_movement_tests;
+#[cfg(test)]
+#[path = "spatial/grounded_retail_differential.rs"]
+mod grounded_retail_differential;

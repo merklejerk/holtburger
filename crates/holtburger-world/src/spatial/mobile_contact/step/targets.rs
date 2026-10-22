@@ -477,7 +477,13 @@ mod tests {
                         .filter(|target| {
                             target.shapes.iter().any(|shape| {
                                 !crate::spatial::volume_query::placed_shape_supports(
-                                    shape, shifted, radius, 100.0, 100.0,
+                                    shape,
+                                    shifted,
+                                    radius,
+                                    crate::spatial::bsp_query::SupportProbe::Column {
+                                        maximum_drop: 100.0,
+                                        maximum_rise: 100.0,
+                                    },
                                 )
                                 .is_empty()
                             })
@@ -595,7 +601,13 @@ mod tests {
                 let exact_supports = |target: &SweepTarget| {
                     target.shapes.iter().any(|shape| {
                         !crate::spatial::volume_query::placed_shape_supports(
-                            shape, center, radius, 100.0, 100.0,
+                            shape,
+                            center,
+                            radius,
+                            crate::spatial::bsp_query::SupportProbe::Column {
+                                maximum_drop: 100.0,
+                                maximum_rise: 100.0,
+                            },
                         )
                         .is_empty()
                     })

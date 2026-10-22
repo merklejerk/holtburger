@@ -15,14 +15,16 @@ fn support(
     center: Vector3,
     radius: f32,
 ) -> Option<crate::spatial::bsp_query::ShapeSupport> {
-    crate::spatial::bsp_query::support_on_polygon(
+    crate::spatial::bsp_query::SupportProbe::Column {
+        maximum_drop: 10.0,
+        maximum_rise: 10.0,
+    }
+    .on_polygon(
         || face.vertices.iter().copied(),
         face.normal,
         face.d,
         center,
         radius,
-        10.0,
-        10.0,
     )
 }
 

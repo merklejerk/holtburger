@@ -2370,9 +2370,9 @@ mod tests {
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityAppearance,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
-        FreeSphereConfig, PhysicalBodyDefinition, PhysicalBodyParticipation,
-        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment, PreparedEntityTargetGeometry,
+        PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyResponsePolicy,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, PhysicsAttachment, PreparedEntityTargetGeometry,
         resolve_effective_entity_physics_state,
     };
     use std::time::Instant;
@@ -2566,12 +2566,6 @@ mod tests {
                 None,
             )
             .unwrap(),
-            FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.000_5,
-            },
         )
         .unwrap();
         physical.entity_collision.reporting.enabled = true;

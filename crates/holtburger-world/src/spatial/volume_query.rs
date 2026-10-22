@@ -20,16 +20,16 @@ use holtburger_common::Vector3;
 use holtburger_content::{CollisionBall, CollisionCylinder, CollisionShape, PlacedCollisionShape};
 
 use super::bsp_query::{
-    CONTACT_EPSILON, ShapeContact, ShapeSupport, placed_polygon_contacts, placed_solid_contacts,
+    CONTACT_EPSILON, ShapeContact, ShapeSupport, SupportProbe, placed_polygon_contacts,
+    placed_solid_contacts,
 };
 
-/// Source-neutral support geometry shared by world colliders and prepared hard entities.
-pub(crate) fn placed_shape_supports(
+/// Shares dispatch and broad-phase admission between footing and finite stair probes.
+pub(super) fn placed_shape_supports(
     shape: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
+    probe: SupportProbe,
 ) -> Vec<ShapeSupport> {
     // Footing is a vertical column. The shape query owns height admission; sphere/box
     // distance would incorrectly reject sloped rims and expanded cap corners.
@@ -43,15 +43,11 @@ pub(crate) fn placed_shape_supports(
     {
         return Vec::new();
     }
+    let (maximum_drop, maximum_rise) = probe.column_limits();
     match &*shape.shape {
-        CollisionShape::Bsp(solid) => super::bsp_query::placed_supports(
-            shape,
-            solid,
-            center,
-            radius,
-            maximum_drop,
-            maximum_rise,
-        ),
+        CollisionShape::Bsp(solid) => {
+            super::bsp_query::placed_supports(shape, solid, center, radius, probe)
+        }
         CollisionShape::Cylinder(cylinder) => {
             placed_cylinder_support(shape, cylinder, center, radius, maximum_drop, maximum_rise)
                 .into_iter()

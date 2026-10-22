@@ -102,7 +102,7 @@ the canonical runtime body model for the client. Any app-facing cache in `holtbu
 frontend is derived read state only; it must not independently advance runtime bodies.
 
 `settle_free_sphere` is the generic bounded placement counterpart to movement-oriented
-`solve_free_sphere`. It consumes directionless placement contacts and either returns a separated
+the scene/contact movement pipeline. It consumes directionless placement contacts and either returns a separated
 body/cell or reports that the finite contact budget could not prove one. It never publishes its
 unconverged candidate. Camera clearance growth is one consumer, but the primitive has no camera or
 projection policy.
@@ -153,14 +153,12 @@ existing implicit `tick()` policy:
   policy radius. Render interest and registered bodies cannot alter simulation coverage semantics.
 - BSP planes and polygons transform into landblock-local query space. The body sphere remains
   spherical even for non-uniformly scaled SetupModel parts.
-- `solve_free_sphere` is an explicit bounded operation over one requested displacement. It owns no
-  gravity, support, walkability, step, slope, or ledge behavior and never runs implicitly from
-  `tick()`. Registered physical-fly bodies and unregistered kinematic controllers call it
-  explicitly; the solver neither owns their lifecycle nor distinguishes their purpose.
-- The production contact step owns gravity, walkability, grounded motion, and final support
-  classification over one lower/support sphere and one optional upper/constraint sphere.
-  `solve_grounded` remains a standalone diagnostic primitive. The upper sphere constrains
-  clearance but cannot supply support or choose the committed cell.
+- All registered grounded and free-flight movement, including diagnostic replay, uses the
+  scene/contact pipeline. Free-flight bodies provide one sphere; grounded bodies provide a
+  lower/support sphere and an optional upper/constraint sphere. The upper sphere constrains
+  clearance but cannot supply support or choose the committed cell. Grounded response owns
+  gravity, walkability, steps, slopes, and ledges. Stationary sphere settlement remains a
+  separate query operation for camera placement and solid recovery.
 - Polygon footing uses a full lower-sphere-radius horizontal disk against the finite face's XY
   footprint. The plane supplies resting height and slope classification; vertical adjustment cannot
   change footprint admission. Cylinder caps and balls retain their shape-specific resting heights.
@@ -188,8 +186,13 @@ existing implicit `tick()` policy:
   validate unchanged cached footing; entity support is re-queried against current prepared targets,
   including for sleeping bodies. This uses ordinary support queries, not a platform lifecycle or
   carrying system. Source loss can wake gravity; no platform velocity is inherited.
-- Step-up, step-down, and ordinary settling share the same support predicate. One private stair
-  alternative is hard-swept before commit; a failed alternative cannot leak pose or contact state.
+- Step-up, step-down, and ordinary settling share support geometry and source ownership. A blocked
+  stair attempt queries its uncorrected attempted lower-sphere position. BSP admission requires
+  finite sphere/face intersection and retail's initial polygon interpolation bound; ordinary
+  standing, terrain and volume queries retain their bounded column rules. The selected candidate
+  owns the required correction. A private full-body lift and forward sweep prove clearance before
+  commit; a failed alternative cannot leak pose, membership or contact state. The lift carries no
+  physical launch velocity, and ordinary uphill travel does not spend the stair correction twice.
   Creature edge protection restores prior valid footing and attempts one tangent derived from its
   retained inward footprint normal. It may hold at rounded outer corners. Grounded ordinary and
   corrective navigation share this protection; launches have already released walkable support.

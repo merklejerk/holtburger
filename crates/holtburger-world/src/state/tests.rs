@@ -3766,12 +3766,6 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
             None,
         )
         .unwrap(),
-        crate::FreeSphereConfig {
-            maximum_substep_distance: 0.25,
-            maximum_substeps: 8,
-            maximum_contact_passes: 4,
-            separation_epsilon: 0.001,
-        },
     )
     .unwrap();
     let response_policy = crate::PhysicalBodyResponsePolicy {
@@ -5475,10 +5469,7 @@ fn sticky_preparation_samples_scaled_setup_clearance_heading_and_target_loss() {
                 step_up_height: 0.6,
                 step_down_height: 1.5,
                 edge_protection: crate::EdgeProtection::Creature,
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
+                minimum_stair_rise: 0.0005,
             },
         )
         .unwrap();

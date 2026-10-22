@@ -6,8 +6,6 @@
 pub struct PhysicsWork {
     /// Physical contact preparations, including fixed peers prepared for mobile sweeps.
     pub body_preparations: u64,
-    /// Free/grounded environment steps, including optional stair candidates.
-    pub environment_steps: u64,
     /// Entity narrow-phase shape queries, including observational report tests.
     pub shape_queries: u64,
 }
@@ -15,7 +13,7 @@ pub struct PhysicsWork {
 #[cfg(feature = "physics-profiling")]
 thread_local! {
     static WORK: std::cell::Cell<PhysicsWork> = const {
-        std::cell::Cell::new(PhysicsWork { body_preparations: 0, environment_steps: 0, shape_queries: 0 })
+        std::cell::Cell::new(PhysicsWork { body_preparations: 0, shape_queries: 0 })
     };
 }
 
@@ -31,16 +29,6 @@ pub(super) fn record_body_preparation() {
     WORK.with(|work| {
         let mut value = work.get();
         value.body_preparations += 1;
-        work.set(value);
-    });
-}
-
-#[inline]
-pub(super) fn record_environment_step() {
-    #[cfg(feature = "physics-profiling")]
-    WORK.with(|work| {
-        let mut value = work.get();
-        value.environment_steps += 1;
         work.set(value);
     });
 }

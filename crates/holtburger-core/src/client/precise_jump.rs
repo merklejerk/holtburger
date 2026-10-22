@@ -243,10 +243,7 @@ mod tests {
                 step_up_height: 0.9,
                 step_down_height: 0.9,
                 edge_protection: EdgeProtection::Creature,
-                maximum_substep_distance: 0.2,
-                maximum_substeps: 64,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.000_1,
+                minimum_stair_rise: 0.000_1,
             },
         )
         .unwrap()

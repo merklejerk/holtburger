@@ -84,6 +84,9 @@ pub struct HostPhysicalFlyRuntime {
     generation: AtomicU64,
 }
 
+/// Preserve the Explorer's per-tick input envelope independently of shared solver settings.
+const MAXIMUM_INPUT_DISPLACEMENT_PER_TICK: f32 = 8.0;
+
 impl HostPhysicalFlyRuntime {
     /// Attaches the camera adapter to app-owned simulation and fixed-tick services.
     pub fn new(
@@ -117,19 +120,9 @@ impl HostPhysicalFlyRuntime {
             ),
             response_policy: profile.response_policy,
         };
-        let maximum_displacement_per_tick = match body_registration.definition {
-            holtburger_world::PhysicalBodyDefinition::FreeSphere { config, .. } => {
-                config.maximum_substep_distance * config.maximum_substeps as f32
-            }
-            holtburger_world::PhysicalBodyDefinition::FixedPosition { .. }
-            | holtburger_world::PhysicalBodyDefinition::Grounded { .. } => {
-                anyhow::bail!("physical-fly camera requires a free-sphere body response")
-            }
-        };
-        ensure!(
-            maximum_displacement_per_tick.is_finite(),
-            "physical fly displacement budget must be finite"
-        );
+        // Input admission is Explorer policy. The contact solver sweeps accepted travel
+        // directly and no longer has the legacy solver's substep-distance budget.
+        let maximum_displacement_per_tick = MAXIMUM_INPUT_DISPLACEMENT_PER_TICK;
         let body_cell = resolve_physical_body_cell(
             &scene,
             body_pose,

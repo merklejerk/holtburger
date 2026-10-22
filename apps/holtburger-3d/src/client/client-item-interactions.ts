@@ -2,9 +2,10 @@ import type {
 	LocalConfirmationRequest,
 	LocalDialogSource,
 } from "./client-dialogs";
-import { bindingAction } from "./client-action-item";
+import { bindingAction, canInteractEquipment } from "./client-action-item";
 import { wieldedCasterSpell } from "./client-inventory-equipment";
 import type { ClientEntitySelection } from "./client-entity-selection";
+import type { ClientEntityFacts } from "./client-entity-mirror";
 import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
@@ -236,17 +237,31 @@ export class ClientItemInteractions implements LocalDialogSource {
 		this.cancel();
 		const item = this.#item(source);
 		if (item === null) return;
-		// Ordinary use equips carried equipment; wielded items retain authored activation.
-		if (
-			!unrestricted &&
-			item.location.kind === "contained" &&
-			bindingAction(item)?.kind === "equipment"
-		) {
-			void this.#session
-				.equipItem(source, false)
-				.catch((error: unknown) => this.#failure(String(error)));
+		// Every ordinary equipment gesture follows confirmed storage state.
+		if (!unrestricted && canInteractEquipment(item)) {
+			this.#toggleEquipment(item, false);
 			return;
 		}
+		this.#useAuthored(source, unrestricted);
+	}
+
+	/** The alternate side matters only when equipping; worn gear always unequips. */
+	#toggleEquipment(item: ClientEntityFacts, alternate: boolean): void {
+		const operation =
+			item.location.kind === "equipped"
+				? this.#session.submitInventory({
+						item: item.guid,
+						target: { kind: "unequip" },
+					})
+				: this.#session.equipItem(item.guid, alternate);
+		void operation.catch((error: unknown) => this.#failure(String(error)));
+	}
+
+	/** Caster and targeted-action retries must bypass ordinary equipment gestures. */
+	#useAuthored(source: number, unrestricted: boolean): void {
+		this.cancel();
+		const item = this.#item(source);
+		if (item === null) return;
 		const capability = item.description.useCapability;
 		if (capability === "targeted") {
 			this.#beginAcquisition();
@@ -282,7 +297,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		this.#useTargeted(source, this.#selection.selectedGuid());
 	}
 
-	/** Bars try self/selection when compatible, otherwise enter ordinary target acquisition. */
+	/** Bars toggle equipment; targeted actions try self/selection before target acquisition. */
 	activate(
 		source: number,
 		kind: "equipment" | "direct" | "targeted",
@@ -296,9 +311,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 			return;
 		}
 		if (kind === "equipment") {
-			void this.#session
-				.equipItem(source, alternate)
-				.catch((error: unknown) => this.#failure(String(error)));
+			this.#toggleEquipment(item, alternate);
 			return;
 		}
 		if (kind === "direct")
@@ -319,7 +332,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		const item = this.#item(source);
 		if (item === null) return;
 		if (target === null) {
-			this.use(source, false);
+			this.#useAuthored(source, false);
 			return;
 		}
 		const state: ItemInteractionState = {
@@ -335,7 +348,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 			.queryItemUseTarget({ sequence: state.sequence, source, target })
 			.catch((error: unknown) => {
 				if (this.#state !== state) return;
-				this.use(source, false);
+				this.#useAuthored(source, false);
 				this.#failure(String(error));
 			});
 	}
@@ -539,7 +552,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 						{ kind: "targeted", source: state.source, target: state.target },
 						null,
 					);
-				else this.use(state.source, false);
+				else this.#useAuthored(state.source, false);
 				return;
 			}
 			if (

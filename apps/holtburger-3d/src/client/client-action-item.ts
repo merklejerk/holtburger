@@ -42,6 +42,17 @@ export function bindingAction(
 		: null;
 }
 
+/** Ordinary interaction can equip carried equipment or remove any owned worn item. */
+export function canInteractEquipment(item: ClientEntityFacts): boolean {
+	return (
+		item.ownedByPlayer &&
+		item.description.kind === "known" &&
+		(item.location.kind === "equipped" ||
+			(item.location.kind === "contained" &&
+				bindingAction(item)?.kind === "equipment"))
+	);
+}
+
 /** Sampled bound-item presentation, independent of retained binding identity. */
 export interface ActionItemDisplay {
 	/** Known item name or explicit unavailable identity. */

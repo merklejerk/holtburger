@@ -16,6 +16,7 @@ import {
 } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
+import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { probeLoadouts } from "./client-loadout-probe.mjs";
@@ -4609,6 +4610,11 @@ async function runClientHudHarness({ viteUrl }) {
 			return {
 				clientInventory: {
 					drag: await probeInventoryDrag(client, evaluateExpression),
+					actionBars: await probeActionBars(
+						client,
+						evaluateExpression,
+						options.screenshotPath,
+					),
 					itemUse: await probeItemUse(client, evaluateExpression),
 				},
 				consoleMessages,

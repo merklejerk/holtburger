@@ -226,6 +226,22 @@ export async function probeActionBars(
 		cell(1, 0),
 	);
 	await assertEquipped(true);
+	const beforeUnequip = await mutations();
+	await click(await point(cell(1, 0)));
+	assert.deepEqual((await commands()).at(-1), {
+		command: "submit_client_inventory",
+		args: { intent: { item: 95, target: { kind: "unequip" } } },
+	});
+	for (const modifiers of [0, 8]) {
+		await key("1", "Digit1", 2);
+		await key("0", "Digit0", modifiers);
+		assert.deepEqual((await commands()).at(-1), {
+			command: "submit_client_inventory",
+			args: { intent: { item: 95, target: { kind: "unequip" } } },
+		});
+	}
+	assert.equal(await mutations(), beforeUnequip + 3);
+	await assertEquipped(true);
 	await drag(source, cell(1, 0));
 	await assertEquipped(false);
 	await drag(cell(1, 0), { x: 500, y: 300 });
@@ -529,6 +545,7 @@ export async function probeActionBars(
 	assert.deepEqual(await alternateHints(), []);
 	await drag(cell(1, 3), { x: 500, y: 300 });
 	return {
+		equippedActivationUnequips: true,
 		alternateHints: true,
 		clonePlacement: true,
 		menuStrip: true,

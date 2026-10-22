@@ -338,6 +338,11 @@ export async function probeActionBars(
 		await mouse("mousePressed", handle, 1);
 		await mouse("mouseReleased", handle, 0);
 	};
+	// Both orientations use a real pointer click on the overlaid control.
+	await click(await point('button[aria-label="Rotate action bar 1"]'));
+	await assertStrip("vertical");
+	await click(await point('button[aria-label="Rotate action bar 1"]'));
+	await assertStrip("horizontal");
 	await toggleShape();
 	const positions = () =>
 		read(
@@ -358,7 +363,7 @@ export async function probeActionBars(
 	await key("ArrowUp", "ArrowUp");
 	assert.equal(await selected(), "6");
 	await key("Enter", "Enter");
-	await menu(1, "Rotate");
+	await click(await point('button[aria-label="Rotate action bar 1"]'));
 	await assertStrip("vertical");
 	await assertThemeGap("vertical");
 	grid = await positions();
@@ -543,8 +548,35 @@ export async function probeActionBars(
 	);
 	await shift(false);
 	assert.deepEqual(await alternateHints(), []);
-	await drag(cell(1, 3), { x: 500, y: 300 });
+	const beforeClear = await commands();
+	const beforeClearBounds = await bounds();
+	await menu(1, "Clear");
+	assert.equal(
+		await read(
+			`Array.from(document.querySelectorAll('.action-cell')).every(cell => cell.dataset.actionItem === undefined)`,
+		),
+		true,
+		"Clear empties every binding while the layout is locked",
+	);
+	assert.deepEqual(
+		await bounds(),
+		beforeClearBounds,
+		"Clear preserves bar geometry",
+	);
+	assert.deepEqual(
+		await commands(),
+		beforeClear,
+		"Clear sends no game commands",
+	);
+	assert.equal(
+		await read(
+			`document.querySelector('[data-action-bar-surface]').dataset.actionBarSurface`,
+		),
+		barIds[0],
+		"Clear preserves bar identity",
+	);
 	return {
+		clear: true,
 		equippedActivationUnequips: true,
 		alternateHints: true,
 		clonePlacement: true,
